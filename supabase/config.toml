@@ -58,7 +58,7 @@ max_client_conn = 100
 
 [db.migrations]
 # If disabled, migrations will be skipped during a db push or reset.
-enabled = true
+enabled = false
 # Specifies an ordered list of schema files, directories, or glob patterns that describe your database.
 # Supports paths relative to supabase directory: "./schemas/*.sql", "./database".
 schema_paths = []
@@ -85,7 +85,7 @@ allowed_cidrs_v6 = ["::/0"]
 # enabled = true
 
 [realtime]
-enabled = true
+enabled = false
 # Bind realtime via either IPv4 or IPv6. (default: IPv4)
 # ip_version = "IPv6"
 # The maximum length in bytes of HTTP request headers. (default: 4096)
@@ -113,7 +113,7 @@ port = 54324
 # sender_name = "Admin"
 
 [storage]
-enabled = true
+enabled = false
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
@@ -156,11 +156,11 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "https://aibrain-workbench-preview.vercel.app"
+site_url = "http://localhost:3000"
 # The public URL that Auth serves on. Defaults to the API external URL with `/auth/v1` appended.
 # external_url = ""
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://aibrain-workbench-preview.vercel.app/auth/confirm", "https://mac-mini-de-arnau.tailf44d1a.ts.net/auth/confirm", "http://127.0.0.1:3000/auth/confirm", "http://localhost:3000/auth/confirm"]
+additional_redirect_urls = ["http://127.0.0.1:3000/auth/recovery", "http://localhost:3000/auth/recovery"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to auth.external_url.
@@ -179,10 +179,10 @@ enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 6
+minimum_password_length = 12
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
-password_requirements = ""
+password_requirements = "letters_digits"
 
 # Configure passkey sign-ins.
 # [auth.passkey]
@@ -218,7 +218,7 @@ web3 = 30
 
 [auth.email]
 # Allow/disallow new user signups via email to your project.
-enable_signup = true
+enable_signup = false
 # If enabled, a user will be required to confirm any email change on both the old, and new email
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
@@ -243,13 +243,9 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
-[auth.email.template.invite]
-subject = "T’han convidat a AiBrain"
-content_path = "./supabase/templates/invite.html"
-
-[auth.email.template.magic_link]
-subject = "El teu accés a AiBrain"
-content_path = "./supabase/templates/magic-link.html"
+[auth.email.template.recovery]
+subject = "Recupera l’accés a AiBrain"
+content_path = "./supabase/templates/recovery.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]

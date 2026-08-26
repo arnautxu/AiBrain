@@ -26,19 +26,6 @@ vi.mock("@/workbench/demo-store", () => ({
   updateDemoThread: forbidden,
   updateDemoMessageActivity: forbidden,
 }));
-vi.mock("@/workbench/supabase-store", () => ({
-  beginSupabaseThreadTurn: forbidden,
-  createSupabaseProject: forbidden,
-  createSupabaseThread: forbidden,
-  finishSupabaseThreadTurn: forbidden,
-  getSupabaseProjectRuntimeContext: forbidden,
-  getSupabaseThreadRuntimeContext: forbidden,
-  loadSupabaseWorkbench: forbidden,
-  updateSupabaseProject: forbidden,
-  updateSupabaseThread: forbidden,
-  updateSupabaseMessageActivity: forbidden,
-}));
-
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-workbench-routing-"));
   roots.push(root);

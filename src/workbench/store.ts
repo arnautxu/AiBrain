@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AuthSession } from "@/auth/types";
-import { getAuthMode, isVercelPreviewDemoEnabled } from "@/auth/session";
+import { isVercelPreviewDemoEnabled } from "@/auth/session";
 import type { ChatMessage } from "@/lib/chat-contract";
 import {
   assertWorkbenchId,
@@ -22,32 +22,15 @@ import {
   FileWorkbenchStore,
 } from "@/workbench/filesystem-store";
 import { loadInstallationConfig } from "@/config/installation";
-import {
-  beginSupabaseThreadTurn,
-  createSupabaseProject,
-  createSupabaseThread,
-  finishSupabaseThreadTurn,
-  getSupabaseProjectRuntimeContext,
-  getSupabaseThreadRuntimeContext,
-  loadSupabaseWorkbench,
-  updateSupabaseProject,
-  updateSupabaseThread,
-  updateSupabaseMessageActivity,
-} from "@/workbench/supabase-store";
 import type {
   UpdateProjectInput,
   UpdateThreadInput,
 } from "@/workbench/types";
 
-function mode(session?: AuthSession): "filesystem" | "demo" | "supabase" {
-  // Supabase is only the identity verifier. Authenticated local sessions always
-  // use the installation's filesystem-backed workbench and never call it again.
+function mode(session: AuthSession): "filesystem" | "demo" {
   if (session?.provider === "local") return "filesystem";
-  const authMode = getAuthMode();
-  if (authMode === "unavailable") {
-    throw new WorkbenchPersistenceError("La persistència del workbench no està disponible.");
-  }
-  return authMode;
+  if (session?.provider === "demo") return "demo";
+  throw new WorkbenchPersistenceError("La sessió no té un adapter de producte autoritzat.");
 }
 
 async function filesystemStore(session: AuthSession) {
@@ -62,14 +45,13 @@ async function filesystemStore(session: AuthSession) {
 }
 
 export function isBrowserPreviewWorkbench() {
-  return mode() === "demo" && isVercelPreviewDemoEnabled();
+  return isVercelPreviewDemoEnabled();
 }
 
 export async function loadWorkbench(session: AuthSession) {
   if (mode(session) === "filesystem") {
     return (await filesystemStore(session)).load(session.user.id);
   }
-  if (mode(session) === "supabase") return loadSupabaseWorkbench(session);
   return loadDemoWorkbench(
     session,
     isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
@@ -80,7 +62,6 @@ export async function createProject(session: AuthSession, name: string) {
   if (mode(session) === "filesystem") {
     return (await filesystemStore(session)).createProject(session.user.id, name);
   }
-  if (mode(session) === "supabase") return createSupabaseProject(session, name);
   return createDemoProject(session, name);
 }
 
@@ -94,7 +75,6 @@ export async function updateProject(
     return (await filesystemStore(session)).updateProject(session.user.id, projectId, patch);
   }
   assertWorkbenchId(projectId);
-  if (mode(session) === "supabase") return updateSupabaseProject(session, projectId, patch);
   return updateDemoProject(session, projectId, patch);
 }
 
@@ -108,7 +88,6 @@ export async function createThread(
     return (await filesystemStore(session)).createThread(session.user.id, projectId, title);
   }
   assertWorkbenchId(projectId);
-  if (mode(session) === "supabase") return createSupabaseThread(session, projectId, title);
   return createDemoThread(session, projectId, title);
 }
 
@@ -122,7 +101,6 @@ export async function updateThread(
     return (await filesystemStore(session)).updateThread(session.user.id, threadId, patch);
   }
   assertWorkbenchId(threadId);
-  if (mode(session) === "supabase") return updateSupabaseThread(session, threadId, patch);
   return updateDemoThread(session, threadId, patch);
 }
 
@@ -132,7 +110,6 @@ export async function getProjectRuntimeContext(session: AuthSession, projectId: 
     return (await filesystemStore(session)).getProjectRuntimeContext(session.user.id, projectId);
   }
   assertWorkbenchId(projectId);
-  if (mode(session) === "supabase") return getSupabaseProjectRuntimeContext(session, projectId);
   return getDemoProjectRuntimeContext(session, projectId);
 }
 
@@ -142,7 +119,6 @@ export async function getThreadRuntimeContext(session: AuthSession, threadId: st
     return (await filesystemStore(session)).getThreadRuntimeContext(session.user.id, threadId);
   }
   assertWorkbenchId(threadId);
-  if (mode(session) === "supabase") return getSupabaseThreadRuntimeContext(session, threadId);
   return getDemoThreadRuntimeContext(session, threadId);
 }
 
@@ -162,9 +138,6 @@ export async function beginThreadTurn(
     );
   }
   assertWorkbenchId(threadId);
-  if (mode(session) === "supabase") {
-    return beginSupabaseThreadTurn(session, threadId, userMessage, assistantMessage);
-  }
   return beginDemoThreadTurn(session, threadId, userMessage, assistantMessage);
 }
 
@@ -184,14 +157,6 @@ export async function finishThreadTurn(
     );
   }
   assertWorkbenchId(threadId);
-  if (mode(session) === "supabase") {
-    return finishSupabaseThreadTurn(
-      session,
-      threadId,
-      assistantMessage,
-      runtimeThreadToken,
-    );
-  }
   return finishDemoThreadTurn(
     session,
     threadId,
@@ -218,8 +183,5 @@ export async function updateMessageActivity(
   }
   assertWorkbenchId(threadId);
   assertWorkbenchId(messageId);
-  if (mode(session) === "supabase") {
-    return updateSupabaseMessageActivity(session, threadId, messageId, item);
-  }
   return updateDemoMessageActivity(session, threadId, messageId, item);
 }
