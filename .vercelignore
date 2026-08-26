@@ -1,0 +1,8 @@
+.codex-context
+.next
+node_modules
+runtime/control-plane
+runtime/tenants
+*.log
+*.tsbuildinfo
+supabase/.temp

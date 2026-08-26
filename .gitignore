@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+.DS_Store
+*.log
+*.tsbuildinfo
+.env*
+!.env.example
+runtime/control-plane/
+runtime/tenants/*/workspace/*
+!runtime/tenants/*/workspace/AGENTS.md
+.vercel
+.codex-context/
+supabase/.temp/

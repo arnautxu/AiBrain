@@ -1,0 +1,22 @@
+import "server-only";
+
+import { NextResponse } from "next/server";
+import {
+  WorkbenchConflictError,
+  WorkbenchNotFoundError,
+  WorkbenchPersistenceError,
+} from "@/workbench/errors";
+
+export function workbenchErrorResponse(error: unknown, fallback: string) {
+  if (error instanceof WorkbenchNotFoundError) {
+    return NextResponse.json({ error: error.message }, { status: 404 });
+  }
+  if (error instanceof WorkbenchConflictError) {
+    return NextResponse.json({ error: error.message }, { status: 409 });
+  }
+  if (error instanceof WorkbenchPersistenceError) {
+    return NextResponse.json({ error: error.message }, { status: 503 });
+  }
+  console.error(fallback, error);
+  return NextResponse.json({ error: fallback }, { status: 503 });
+}

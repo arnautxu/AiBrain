@@ -1,0 +1,10 @@
+.git
+.next
+node_modules
+.env*
+!.env.example
+npm-debug.log*
+runtime/control-plane
+runtime/tenants/*/workspace/*
+!runtime/tenants/*/workspace/AGENTS.md
+supabase/.temp
