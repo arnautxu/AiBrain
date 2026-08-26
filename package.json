@@ -14,7 +14,8 @@
     "test:contract": "vitest run tests/contract",
     "test:e2e": "vitest run tests/e2e",
     "test:coverage": "vitest run --coverage",
-    "contracts:generate": "npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-ts --experimental --out contracts/codex/0.149.1/types && npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-json-schema --experimental --out contracts/codex/0.149.1/schema"
+    "contracts:generate": "npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-ts --experimental --out contracts/codex/0.149.1/types && npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-json-schema --experimental --out contracts/codex/0.149.1/schema",
+    "installation:new": "node scripts/create-installation.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",

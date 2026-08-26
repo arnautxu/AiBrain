@@ -1,5 +1,7 @@
 import { BrainApp } from "@/components/brain-app";
 import { getSession } from "@/auth/session";
+import { loadInstallationConfig } from "@/config/installation";
+import { applyInstallationBranding } from "@/config/installation-branding";
 import { loadTenantManifest } from "@/control-plane/manifest-store";
 import { loadMemberOnboarding } from "@/onboarding/store";
 import { loadWorkbench } from "@/workbench/store";
@@ -10,13 +12,15 @@ export const dynamic = "force-dynamic";
 export default async function Home() {
   const session = await getSession();
   if (!session) redirect("/login");
+  const installation = await loadInstallationConfig();
   let memberOnboarding = null;
   if (session.user.role === "member") {
     memberOnboarding = await loadMemberOnboarding(session);
     if (!memberOnboarding?.completedAt) redirect("/onboarding");
   }
-  const manifest = await loadTenantManifest(session.tenant.id);
-  if (!manifest) redirect("/login");
+  const storedManifest = await loadTenantManifest(session.tenant.id);
+  if (!storedManifest) redirect("/login");
+  const manifest = applyInstallationBranding(storedManifest, installation);
   const workbench = await loadWorkbench(session);
   return (
     <BrainApp
