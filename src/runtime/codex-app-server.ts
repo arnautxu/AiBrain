@@ -19,6 +19,7 @@ import type {
   RuntimeReasoningEffort,
   RuntimeSkillOption,
 } from "@/lib/runtime-status";
+import { buildWorkerEnvironment } from "@/runtime/worker-environment";
 
 type RpcId = number | string;
 
@@ -150,10 +151,7 @@ class AppServerSession {
       ["app-server", "--stdio"],
       {
         cwd: config.workspace,
-        env: {
-          ...process.env,
-          ...(config.codexHome ? { CODEX_HOME: config.codexHome } : {}),
-        },
+        env: buildWorkerEnvironment(config),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -296,10 +294,10 @@ function parseAccount(result: unknown): CodexConnection {
     };
   }
   if (account.type === "apiKey") {
-    return { connected: true, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
+    return { connected: false, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
   if (account.type === "amazonBedrock") {
-    return { connected: true, authMode: "amazonBedrock", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
+    return { connected: false, authMode: "amazonBedrock", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
 
   return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
@@ -807,12 +805,12 @@ function effectiveSandbox(config: RuntimeConfig, chatRequest: ChatRequest) {
 
 function sandboxPolicy(config: RuntimeConfig, chatRequest: ChatRequest) {
   if (effectiveSandbox(config, chatRequest) === "read-only") {
-    return { type: "readOnly" as const, networkAccess: true };
+    return { type: "readOnly" as const, networkAccess: false };
   }
   return {
     type: "workspaceWrite" as const,
     writableRoots: [config.workspace],
-    networkAccess: true,
+    networkAccess: false,
     excludeTmpdirEnvVar: false,
     excludeSlashTmp: false,
   };
@@ -868,7 +866,6 @@ export async function runCodexTurn(
 
   let turnId: string | null = null;
   let threadId: string | null = null;
-  let turnTimeout: ReturnType<typeof setTimeout> | null = null;
   let finishTurn:
     | ((status: { status: string | null; error: string | null }) => void)
     | null = null;
@@ -1016,9 +1013,18 @@ export async function runCodexTurn(
     if (threadId && turnId && activeSession) {
       void activeSession
         .request("turn/interrupt", { threadId, turnId }, 5_000)
-        .catch(() => undefined);
+        .catch((error: unknown) => {
+          pooled.close();
+          finishTurn?.({
+            status: "failed",
+            error: error instanceof Error
+              ? `No se ha podido confirmar la interrupción: ${error.message}`
+              : "No se ha podido confirmar la interrupción.",
+          });
+        });
+      return;
     }
-    finishTurn?.({ status: "interrupted", error: null });
+    finishTurn?.({ status: "failed", error: "El turno todavía no tenía un identificador interrumpible." });
   };
   signal.addEventListener("abort", interrupt, { once: true });
 
@@ -1126,12 +1132,7 @@ export async function runCodexTurn(
     turnId = extractTurnId(turnResult);
     if (!turnId) throw new Error("Codex no ha iniciat el torn.");
 
-    turnTimeout = setTimeout(() => {
-      finishTurn?.({ status: "failed", error: "El torn de Codex ha excedit cinc minuts." });
-    }, 300_000);
     const completed = await turnFinished;
-    clearTimeout(turnTimeout);
-    turnTimeout = null;
 
     if (completed.status === "failed") {
       throw new Error(completed.error ?? "El torn de Codex ha fallat.");
@@ -1149,7 +1150,6 @@ export async function runCodexTurn(
     console.info("AiBrain Codex turn metrics", { tenantId, workspace: config.workspace, firstTextMs, totalMs });
     emit({ type: "done" });
   } finally {
-    if (turnTimeout) clearTimeout(turnTimeout);
     signal.removeEventListener("abort", interrupt);
     activeSession = null;
   }
