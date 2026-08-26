@@ -1,8 +1,8 @@
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { readRuntimeConfig } from "@/runtime/config";
+import { readRegularFileWithin } from "@/security/safe-file";
 import { getProjectRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 
@@ -21,7 +21,8 @@ export async function GET(
   try {
     const project = await getProjectRuntimeContext(session, projectId);
     const config = readRuntimeConfig(session.tenant.id, project.workspaceKey);
-    const contents = await readFile(path.join(config.workspace, ".aibrain", "artifacts", `${artifactId}.png`));
+    const artifactRoot = path.join(config.workspace, ".aibrain", "artifacts");
+    const contents = await readRegularFileWithin(artifactRoot, `${artifactId}.png`, 20_000_000);
     return new Response(contents, {
       headers: {
         "Content-Type": "image/png",
