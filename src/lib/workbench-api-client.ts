@@ -1,11 +1,18 @@
 import {
+  isWorkbenchPage,
   isWorkbenchProject,
   isWorkbenchThread,
+  isWorkbenchThreadSummary,
+  type WorkbenchListQuery,
+  type WorkbenchPage,
   type UpdateProjectInput,
   type UpdateThreadInput,
   type WorkbenchProject,
   type WorkbenchThread,
+  type WorkbenchThreadSummary,
 } from "@/workbench/types";
+
+export type WorkbenchListRequest = Partial<WorkbenchListQuery>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -20,6 +27,54 @@ async function responseBody(response: Response) {
     throw new Error(message);
   }
   return body;
+}
+
+function listQuery(options: WorkbenchListRequest = {}) {
+  const params = new URLSearchParams();
+  if (options.status) params.set("status", options.status);
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  if (options.query !== undefined) params.set("q", options.query);
+  if (options.cursor !== undefined) params.set("cursor", options.cursor);
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function projectPage(body: unknown): WorkbenchPage<WorkbenchProject> {
+  if (!isRecord(body)) throw new Error("El servidor ha retornat una pàgina de projectes no vàlida.");
+  const page = { items: body.projects, nextCursor: body.nextCursor };
+  if (!isWorkbenchPage(page, isWorkbenchProject)) {
+    throw new Error("El servidor ha retornat una pàgina de projectes no vàlida.");
+  }
+  return page;
+}
+
+function threadPage(body: unknown): WorkbenchPage<WorkbenchThreadSummary> {
+  if (!isRecord(body)) throw new Error("El servidor ha retornat una pàgina de fils no vàlida.");
+  const page = { items: body.threads, nextCursor: body.nextCursor };
+  if (!isWorkbenchPage(page, isWorkbenchThreadSummary)) {
+    throw new Error("El servidor ha retornat una pàgina de fils no vàlida.");
+  }
+  return page;
+}
+
+export async function listProjectsRequest(
+  options: WorkbenchListRequest = {},
+): Promise<WorkbenchPage<WorkbenchProject>> {
+  return projectPage(await responseBody(await fetch(`/api/projects${listQuery(options)}`, {
+    method: "GET",
+    cache: "no-store",
+  })));
+}
+
+export async function getProjectRequest(projectId: string): Promise<WorkbenchProject> {
+  const body = await responseBody(await fetch(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "GET",
+    cache: "no-store",
+  }));
+  if (!isRecord(body) || !isWorkbenchProject(body.project)) {
+    throw new Error("El servidor ha retornat un projecte no vàlid.");
+  }
+  return body.project;
 }
 
 export async function createProjectRequest(name: string): Promise<WorkbenchProject> {
@@ -47,6 +102,46 @@ export async function updateProjectRequest(
     throw new Error("El servidor ha retornat un projecte no vàlid.");
   }
   return body.project;
+}
+
+export function renameProjectRequest(projectId: string, name: string) {
+  return updateProjectRequest(projectId, { name });
+}
+
+export function setProjectPinnedRequest(projectId: string, pinned: boolean) {
+  return updateProjectRequest(projectId, { pinned });
+}
+
+export function archiveProjectRequest(projectId: string) {
+  return updateProjectRequest(projectId, { status: "archived" });
+}
+
+export function restoreProjectRequest(projectId: string) {
+  return updateProjectRequest(projectId, { status: "active" });
+}
+
+export async function listThreadsRequest(
+  options: WorkbenchListRequest & { projectId?: string } = {},
+): Promise<WorkbenchPage<WorkbenchThreadSummary>> {
+  const { projectId, ...query } = options;
+  const endpoint = projectId
+    ? `/api/projects/${encodeURIComponent(projectId)}/threads`
+    : "/api/threads";
+  return threadPage(await responseBody(await fetch(`${endpoint}${listQuery(query)}`, {
+    method: "GET",
+    cache: "no-store",
+  })));
+}
+
+export async function getThreadRequest(threadId: string): Promise<WorkbenchThread> {
+  const body = await responseBody(await fetch(`/api/threads/${encodeURIComponent(threadId)}`, {
+    method: "GET",
+    cache: "no-store",
+  }));
+  if (!isRecord(body) || !isWorkbenchThread(body.thread)) {
+    throw new Error("El servidor ha retornat un fil no vàlid.");
+  }
+  return body.thread;
 }
 
 export async function createThreadRequest(
@@ -80,4 +175,20 @@ export async function updateThreadRequest(
     throw new Error("El servidor ha retornat un fil no vàlid.");
   }
   return body.thread;
+}
+
+export function renameThreadRequest(threadId: string, title: string) {
+  return updateThreadRequest(threadId, { title });
+}
+
+export function setThreadPinnedRequest(threadId: string, pinned: boolean) {
+  return updateThreadRequest(threadId, { pinned });
+}
+
+export function archiveThreadRequest(threadId: string) {
+  return updateThreadRequest(threadId, { status: "archived" });
+}
+
+export function restoreThreadRequest(threadId: string) {
+  return updateThreadRequest(threadId, { status: "active" });
 }

@@ -36,6 +36,29 @@ export type WorkbenchThread = {
   messages: ChatMessage[];
 };
 
+export type WorkbenchThreadSummary = Omit<WorkbenchThread, "messages"> & {
+  messageCount: number;
+  lastMessageAt: string | null;
+};
+
+export type WorkbenchPage<Item> = {
+  items: Item[];
+  nextCursor: string | null;
+};
+
+export type WorkbenchStatusFilter = ProjectStatus | "all";
+export type WorkbenchListQuery = {
+  status: WorkbenchStatusFilter;
+  limit: number;
+  query?: string;
+  cursor?: string;
+};
+
+export const WORKBENCH_DEFAULT_PAGE_SIZE = 20;
+export const WORKBENCH_MAX_PAGE_SIZE = 50;
+export const WORKBENCH_MAX_QUERY_LENGTH = 100;
+export const WORKBENCH_MAX_CURSOR_LENGTH = 256;
+
 export type WorkbenchSnapshot = {
   persistence: WorkbenchPersistence;
   projects: WorkbenchProject[];
@@ -69,11 +92,11 @@ function isIsoDate(value: unknown) {
 }
 
 export function isProjectName(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 80;
+  return typeof value === "string" && value.length <= 80 && value.trim().length > 0;
 }
 
 export function isThreadTitle(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0 && value.trim().length <= 120;
+  return typeof value === "string" && value.length <= 120 && value.trim().length > 0;
 }
 
 export function isWorkbenchWorkspace(value: unknown): value is WorkbenchWorkspace {
@@ -110,6 +133,77 @@ export function isWorkbenchThread(value: unknown): value is WorkbenchThread {
     value.messages.every(isChatMessage);
 }
 
+export function isWorkbenchThreadSummary(value: unknown): value is WorkbenchThreadSummary {
+  if (!isRecord(value)) return false;
+  const keys = [
+    "id", "projectId", "title", "status", "pinned", "createdAt", "updatedAt",
+    "messageCount", "lastMessageAt",
+  ];
+  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
+    return false;
+  }
+  const { messageCount, lastMessageAt, ...thread } = value;
+  return isWorkbenchThread({ ...thread, messages: [] }) &&
+    Number.isSafeInteger(messageCount) && (messageCount as number) >= 0 &&
+    (lastMessageAt === null || isIsoDate(lastMessageAt));
+}
+
+export function isWorkbenchPage<Item>(
+  value: unknown,
+  isItem: (item: unknown) => item is Item,
+): value is WorkbenchPage<Item> {
+  return isRecord(value) &&
+    Object.keys(value).length === 2 &&
+    Array.isArray(value.items) && value.items.every(isItem) &&
+    (value.nextCursor === null || (
+      typeof value.nextCursor === "string" &&
+      value.nextCursor.length > 0 &&
+      value.nextCursor.length <= WORKBENCH_MAX_CURSOR_LENGTH &&
+      /^[A-Za-z0-9_-]+$/.test(value.nextCursor)
+    ));
+}
+
+export function parseWorkbenchListQuery(searchParams: URLSearchParams): WorkbenchListQuery | null {
+  const allowed = new Set(["status", "limit", "q", "cursor"]);
+  for (const key of searchParams.keys()) {
+    if (!allowed.has(key) || searchParams.getAll(key).length !== 1) return null;
+  }
+
+  const rawStatus = searchParams.get("status");
+  const status: WorkbenchStatusFilter = rawStatus === null
+    ? "active"
+    : rawStatus === "active" || rawStatus === "archived" || rawStatus === "all"
+      ? rawStatus
+      : "all";
+  if (rawStatus !== null && status !== rawStatus) return null;
+
+  const rawLimit = searchParams.get("limit");
+  const limit = rawLimit === null ? WORKBENCH_DEFAULT_PAGE_SIZE : Number(rawLimit);
+  if (
+    !Number.isSafeInteger(limit) || limit < 1 || limit > WORKBENCH_MAX_PAGE_SIZE ||
+    (rawLimit !== null && !/^[1-9][0-9]*$/.test(rawLimit))
+  ) return null;
+
+  const rawQuery = searchParams.get("q");
+  const query = rawQuery?.trim();
+  if (rawQuery !== null && (
+    rawQuery.length > WORKBENCH_MAX_QUERY_LENGTH || !query || /\p{C}/u.test(query)
+  )) return null;
+
+  const cursor = searchParams.get("cursor") ?? undefined;
+  if (cursor !== undefined && (
+    cursor.length < 1 || cursor.length > WORKBENCH_MAX_CURSOR_LENGTH ||
+    !/^[A-Za-z0-9_-]+$/.test(cursor)
+  )) return null;
+
+  return {
+    status,
+    limit,
+    ...(query ? { query } : {}),
+    ...(cursor ? { cursor } : {}),
+  };
+}
+
 export function isWorkbenchSnapshot(value: unknown): value is WorkbenchSnapshot {
   if (!isRecord(value)) return false;
   return (value.persistence === "supabase" ||
@@ -121,7 +215,7 @@ export function isWorkbenchSnapshot(value: unknown): value is WorkbenchSnapshot 
 }
 
 export function isCreateProjectInput(value: unknown): value is CreateProjectInput {
-  return isRecord(value) && isProjectName(value.name);
+  return isRecord(value) && Object.keys(value).length === 1 && isProjectName(value.name);
 }
 
 export function isUpdateProjectInput(value: unknown): value is UpdateProjectInput {
@@ -136,7 +230,7 @@ export function isUpdateProjectInput(value: unknown): value is UpdateProjectInpu
 }
 
 export function isCreateThreadInput(value: unknown): value is CreateThreadInput {
-  return isRecord(value) && isThreadTitle(value.title);
+  return isRecord(value) && Object.keys(value).length === 1 && isThreadTitle(value.title);
 }
 
 export function isUpdateThreadInput(value: unknown): value is UpdateThreadInput {

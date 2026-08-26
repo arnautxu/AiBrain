@@ -5,6 +5,7 @@ import {
   WorkbenchConflictError,
   WorkbenchNotFoundError,
   WorkbenchPersistenceError,
+  WorkbenchValidationError,
 } from "@/workbench/errors";
 
 export function workbenchErrorResponse(error: unknown, fallback: string) {
@@ -13,6 +14,9 @@ export function workbenchErrorResponse(error: unknown, fallback: string) {
   }
   if (error instanceof WorkbenchConflictError) {
     return NextResponse.json({ error: error.message }, { status: 409 });
+  }
+  if (error instanceof WorkbenchValidationError) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
   if (error instanceof WorkbenchPersistenceError) {
     return NextResponse.json({ error: error.message }, { status: 503 });

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
@@ -26,6 +26,7 @@ import {
   WorkbenchConflictError,
   WorkbenchNotFoundError,
   WorkbenchPersistenceError,
+  WorkbenchValidationError,
 } from "@/workbench/errors";
 import {
   isUuid,
@@ -35,11 +36,17 @@ import {
   isUpdateThreadInput,
   isWorkbenchProject,
   isWorkbenchThread,
+  WORKBENCH_MAX_CURSOR_LENGTH,
+  WORKBENCH_MAX_PAGE_SIZE,
+  WORKBENCH_MAX_QUERY_LENGTH,
   type UpdateProjectInput,
   type UpdateThreadInput,
+  type WorkbenchListQuery,
+  type WorkbenchPage,
   type WorkbenchProject,
   type WorkbenchSnapshot,
   type WorkbenchThread,
+  type WorkbenchThreadSummary,
 } from "@/workbench/types";
 
 const WORKBENCH_SCHEMA_VERSION = 1 as const;
@@ -92,6 +99,14 @@ type WorkbenchState = {
   revision: number;
   projects: StoredProject[];
   threads: StoredThread[];
+};
+
+type PageCursor = {
+  schemaVersion: 1;
+  queryFingerprint: string;
+  pinned: boolean;
+  updatedAt: string;
+  id: string;
 };
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
@@ -303,6 +318,120 @@ function newProject(name: string, slug: string): StoredProject {
   };
 }
 
+function normalizeSearchText(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase("ca");
+}
+
+function compareListItems(
+  left: Pick<WorkbenchProject, "pinned" | "updatedAt" | "id">,
+  right: Pick<WorkbenchProject, "pinned" | "updatedAt" | "id">,
+) {
+  if (left.pinned !== right.pinned) return left.pinned ? -1 : 1;
+  const updated = right.updatedAt.localeCompare(left.updatedAt);
+  return updated || left.id.localeCompare(right.id);
+}
+
+function queryFingerprint(query: WorkbenchListQuery, scope: string) {
+  return createHash("sha256")
+    .update(JSON.stringify({ scope, status: query.status, query: query.query ?? null }))
+    .digest("base64url")
+    .slice(0, 16);
+}
+
+function encodePageCursor(
+  item: Pick<WorkbenchProject, "pinned" | "updatedAt" | "id">,
+  fingerprint: string,
+) {
+  const cursor: PageCursor = {
+    schemaVersion: 1,
+    queryFingerprint: fingerprint,
+    pinned: item.pinned,
+    updatedAt: item.updatedAt,
+    id: item.id,
+  };
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function decodePageCursor(value: string): PageCursor {
+  let decoded: unknown;
+  try {
+    const bytes = Buffer.from(value, "base64url");
+    if (bytes.toString("base64url") !== value || bytes.byteLength > 256) throw new Error("non-canonical cursor");
+    decoded = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch (error) {
+    throw new WorkbenchValidationError("El cursor de paginació no és vàlid.", { cause: error });
+  }
+  if (
+    !isPlainRecord(decoded) ||
+    !hasExactKeys(decoded, ["schemaVersion", "queryFingerprint", "pinned", "updatedAt", "id"]) ||
+    decoded.schemaVersion !== 1 || typeof decoded.pinned !== "boolean" ||
+    typeof decoded.queryFingerprint !== "string" || !/^[A-Za-z0-9_-]{16}$/.test(decoded.queryFingerprint) ||
+    !isCanonicalIsoDate(decoded.updatedAt) || !isUuid(decoded.id)
+  ) {
+    throw new WorkbenchValidationError("El cursor de paginació no és vàlid.");
+  }
+  return decoded as PageCursor;
+}
+
+function paginate<Item extends Pick<WorkbenchProject, "pinned" | "updatedAt" | "id">>(
+  items: Item[],
+  query: WorkbenchListQuery,
+  scope: string,
+): WorkbenchPage<Item> {
+  const sorted = [...items].sort(compareListItems);
+  const fingerprint = queryFingerprint(query, scope);
+  let start = 0;
+  if (query.cursor) {
+    const cursor = decodePageCursor(query.cursor);
+    if (cursor.queryFingerprint !== fingerprint) {
+      throw new WorkbenchValidationError("El cursor no pertany a aquesta consulta.");
+    }
+    const cursorIndex = sorted.findIndex((item) =>
+      item.id === cursor.id && item.pinned === cursor.pinned && item.updatedAt === cursor.updatedAt);
+    if (cursorIndex === -1) {
+      throw new WorkbenchValidationError("El cursor ha caducat o no pertany a aquesta consulta.");
+    }
+    start = cursorIndex + 1;
+  }
+  const pageItems = sorted.slice(start, start + query.limit);
+  return {
+    items: pageItems,
+    nextCursor: start + pageItems.length < sorted.length && pageItems.length > 0
+      ? encodePageCursor(pageItems[pageItems.length - 1], fingerprint)
+      : null,
+  };
+}
+
+function threadSummary(thread: StoredThread): WorkbenchThreadSummary {
+  const visible = publicThread(thread);
+  const { messages: _messages, ...summary } = visible;
+  return {
+    ...summary,
+    messageCount: thread.messages.length,
+    lastMessageAt: thread.messages.at(-1)?.createdAt ?? null,
+  };
+}
+
+function assertListQuery(query: WorkbenchListQuery) {
+  if (
+    !isPlainRecord(query) ||
+    !hasExactKeys(query, ["status", "limit"], ["query", "cursor"]) ||
+    !(query.status === "active" || query.status === "archived" || query.status === "all") ||
+    !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > WORKBENCH_MAX_PAGE_SIZE ||
+    (query.query !== undefined && (
+      typeof query.query !== "string" || query.query.length < 1 ||
+      query.query.length > WORKBENCH_MAX_QUERY_LENGTH || query.query !== query.query.trim() ||
+      /\p{C}/u.test(query.query)
+    )) ||
+    (query.cursor !== undefined && (
+      typeof query.cursor !== "string" || query.cursor.length < 1 ||
+      query.cursor.length > WORKBENCH_MAX_CURSOR_LENGTH || !/^[A-Za-z0-9_-]+$/.test(query.cursor)
+    ))
+  ) {
+    throw new WorkbenchValidationError("La consulta del workbench no és vàlida.");
+  }
+}
+
 function snapshot(state: WorkbenchState): WorkbenchSnapshot {
   return {
     persistence: "filesystem",
@@ -464,6 +593,56 @@ export class FileWorkbenchStore {
     return snapshot(await this.read(userId));
   }
 
+  async listProjects(
+    userId: string,
+    query: WorkbenchListQuery,
+  ): Promise<WorkbenchPage<WorkbenchProject>> {
+    assertListQuery(query);
+    const state = await this.read(userId);
+    const needle = query.query ? normalizeSearchText(query.query) : null;
+    const projects = state.projects
+      .filter((project) => query.status === "all" || project.status === query.status)
+      .filter((project) => !needle ||
+        normalizeSearchText(project.name).includes(needle) ||
+        normalizeSearchText(project.slug).includes(needle))
+      .map(publicProject);
+    return paginate(projects, query, `projects:${userId}`);
+  }
+
+  async getProject(userId: string, projectId: string): Promise<WorkbenchProject> {
+    assertFilesystemWorkbenchId(projectId);
+    const project = (await this.read(userId)).projects.find((candidate) => candidate.id === projectId);
+    if (!project) throw new WorkbenchNotFoundError("Projecte no trobat.");
+    return publicProject(project);
+  }
+
+  async listThreads(
+    userId: string,
+    projectId: string | null,
+    query: WorkbenchListQuery,
+  ): Promise<WorkbenchPage<WorkbenchThreadSummary>> {
+    if (projectId !== null) assertFilesystemWorkbenchId(projectId);
+    assertListQuery(query);
+    const state = await this.read(userId);
+    if (projectId !== null && !state.projects.some((project) => project.id === projectId)) {
+      throw new WorkbenchNotFoundError("Projecte no trobat.");
+    }
+    const needle = query.query ? normalizeSearchText(query.query) : null;
+    const threads = state.threads
+      .filter((thread) => projectId === null || thread.projectId === projectId)
+      .filter((thread) => query.status === "all" || thread.status === query.status)
+      .filter((thread) => !needle || normalizeSearchText(thread.title).includes(needle))
+      .map(threadSummary);
+    return paginate(threads, query, `threads:${userId}:${projectId ?? "all"}`);
+  }
+
+  async getThread(userId: string, threadId: string): Promise<WorkbenchThread> {
+    assertFilesystemWorkbenchId(threadId);
+    const thread = (await this.read(userId)).threads.find((candidate) => candidate.id === threadId);
+    if (!thread) throw new WorkbenchNotFoundError("Fil no trobat.");
+    return publicThread(thread);
+  }
+
   async createProject(userId: string, name: string): Promise<WorkbenchProject> {
     if (!isProjectName(name)) throw new WorkbenchPersistenceError("El nom del projecte no és vàlid.");
     return this.mutate(userId, (state) => {
@@ -486,7 +665,10 @@ export class FileWorkbenchStore {
     return this.mutate(userId, (state) => {
       const project = state.projects.find((candidate) => candidate.id === projectId);
       if (!project) throw new WorkbenchNotFoundError("Projecte no trobat.");
-      if (patch.name !== undefined) project.name = patch.name.trim();
+      if (patch.name !== undefined) {
+        project.name = patch.name.trim();
+        project.workspace.label = project.name;
+      }
       if (patch.pinned !== undefined) project.pinned = patch.pinned;
       if (patch.status !== undefined) project.status = patch.status;
       project.updatedAt = new Date().toISOString();
@@ -536,6 +718,12 @@ export class FileWorkbenchStore {
     return this.mutate(userId, (state) => {
       const thread = state.threads.find((candidate) => candidate.id === threadId);
       if (!thread) throw new WorkbenchNotFoundError("Fil no trobat.");
+      if (patch.status === "active") {
+        const project = state.projects.find((candidate) => candidate.id === thread.projectId);
+        if (!project || project.status !== "active") {
+          throw new WorkbenchConflictError("Cal restaurar el projecte abans de restaurar el fil.");
+        }
+      }
       if (patch.title !== undefined) thread.title = patch.title.trim();
       if (patch.pinned !== undefined) thread.pinned = patch.pinned;
       if (patch.status !== undefined) thread.status = patch.status;

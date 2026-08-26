@@ -2,10 +2,28 @@ import { NextResponse } from "next/server";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { getSession } from "@/auth/session";
 import { workbenchErrorResponse } from "@/workbench/http";
-import { updateProject } from "@/workbench/store";
+import { getProject, updateProject } from "@/workbench/store";
 import { isUpdateProjectInput } from "@/workbench/types";
 
 export const runtime = "nodejs";
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ projectId: string }> },
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
+  const { projectId } = await context.params;
+  try {
+    const project = await getProject(session, projectId);
+    return NextResponse.json(
+      { project },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
+  } catch (error) {
+    return workbenchErrorResponse(error, "No s’ha pogut carregar el projecte.");
+  }
+}
 
 export async function PATCH(
   request: Request,
