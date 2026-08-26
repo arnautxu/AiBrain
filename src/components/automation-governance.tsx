@@ -51,10 +51,15 @@ export function AutomationGovernance() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void load(controller.signal).catch((caught: unknown) => {
-      if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Configuració no disponible.");
+    const frame = requestAnimationFrame(() => {
+      void load(controller.signal).catch((caught: unknown) => {
+        if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "Configuració no disponible.");
+      });
     });
-    return () => controller.abort();
+    return () => {
+      cancelAnimationFrame(frame);
+      controller.abort();
+    };
   }, []);
 
   const selected = snapshot?.automations.find((item) => item.id === selectedId) ?? null;
