@@ -1,0 +1,370 @@
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
+import type { ServerNotification } from "../../contracts/codex/0.149.1/types/ServerNotification";
+import type { ServerRequest } from "../../contracts/codex/0.149.1/types/ServerRequest";
+import type {
+  ActivityItem,
+  ChatRequest,
+} from "@/lib/chat-contract";
+import type { ResolvedPermissions } from "@/permissions";
+import {
+  approvalFromRequest,
+  completedTurnStatus,
+  effectiveSandbox,
+  extractThreadId,
+  extractTurnId,
+  itemActivity,
+  notificationDelta,
+  notificationItemId,
+  planFromNotification,
+  resolvedApproval,
+  RuntimeNotReadyError,
+  sandboxPolicy,
+  type CodexTurnEvent,
+  type LegacyServerRequest,
+} from "@/runtime/codex-app-server";
+import type { RuntimeConfig } from "@/runtime/config";
+import { waitForApproval, type FileApprovalStore } from "@/runtime/approval-store";
+import {
+  assertCodexTurnPermissionBinding,
+  buildCodexDeveloperInstructions,
+} from "@/runtime/permission-turn";
+import { issueThreadToken } from "@/runtime/thread-token";
+import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
+import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
+import type { JsonValue } from "@/runtime/transport";
+import { atomicWriteFile } from "@/storage";
+
+type EmitEvent = (event: CodexTurnEvent) => void;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function legacyServerRequest(request: ServerRequest): LegacyServerRequest {
+  return {
+    kind: "serverRequest",
+    id: request.id,
+    method: request.method,
+    params: request.params,
+  };
+}
+
+async function persistGeneratedImage(
+  params: unknown,
+  projectWorkspace: string,
+  projectId: string,
+  emit: EmitEvent,
+) {
+  if (!isRecord(params) || !isRecord(params.item) || params.item.type !== "imageGeneration") return;
+  const item = params.item;
+  if (typeof item.result !== "string" || item.result.length === 0) return;
+  const encoded = item.result.includes(",") ? item.result.slice(item.result.indexOf(",") + 1) : item.result;
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length === 0 || bytes.length > 20_000_000) return;
+  const artifactId = randomUUID();
+  const artifactRoot = path.join(projectWorkspace, ".aibrain", "artifacts");
+  await atomicWriteFile(path.join(artifactRoot, `${artifactId}.png`), bytes, { mode: 0o600 });
+  emit({
+    type: "artifact",
+    item: {
+      id: artifactId,
+      type: "image",
+      name: `imatge-${artifactId.slice(0, 8)}.png`,
+      url: `/api/projects/${projectId}/artifacts/${artifactId}`,
+      prompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : null,
+    },
+  });
+}
+
+/**
+ * Runs one UI turn through the authenticated per-employee private WebSocket
+ * gateway. The router owns events by runtime thread and turn, so concurrent
+ * users and concurrent threads never share mutable handlers.
+ */
+export async function runWorkerCodexTurn(
+  chatRequest: ChatRequest,
+  installationId: string,
+  authenticatedUserId: string,
+  runtimeThreadId: string | null,
+  runtimeConfig: RuntimeConfig,
+  permissions: ResolvedPermissions,
+  approvalStore: FileApprovalStore,
+  signal: AbortSignal,
+  emit: EmitEvent,
+) {
+  if (runtimeConfig.mode !== "codex") {
+    throw new RuntimeNotReadyError("El runtime real de Codex no està activat.");
+  }
+  if (signal.aborted) throw new RuntimeNotReadyError("El torn s’ha cancel·lat abans de començar.");
+  assertCodexTurnPermissionBinding(
+    chatRequest,
+    installationId,
+    authenticatedUserId,
+    permissions,
+  );
+
+  const runtime = await workerAppServerForUser(authenticatedUserId);
+  if (runtime.config.installationId !== installationId) {
+    throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
+  }
+  const projectWorkspace = await resolveWorkerOwnedPath(
+    runtime.handle.roots.workspace,
+    path.posix.join("projects", chatRequest.projectId),
+  );
+  await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
+  const account = await runtime.client.connection(projectWorkspace);
+  if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
+
+  const activities = new Map<string, ActivityItem>();
+  const upsertActivity = (item: ActivityItem) => {
+    activities.set(item.id, item);
+    if (chatRequest.preferences.showActivity) emit({ type: "activity", item });
+  };
+  upsertActivity({
+    id: "codex-connected",
+    kind: "system",
+    label: "Codex connectat",
+    detail: account.planType ? `Pla ${account.planType}` : "Sessió dedicada verificada",
+    status: "complete",
+  });
+
+  let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
+  let selectedModelOption = selectedModel
+    ? account.models.find((model) => model.id === selectedModel) ?? null
+    : account.models.find((model) => model.isDefault) ?? account.models[0] ?? null;
+  if (chatRequest.options.model) {
+    selectedModelOption = account.models.find((model) => model.id === chatRequest.options.model) ?? null;
+    if (!selectedModelOption) throw new Error("El model seleccionat ja no està disponible.");
+  }
+  selectedModel = selectedModel ?? selectedModelOption?.id ?? null;
+  if (selectedModelOption && chatRequest.options.attachments.length > 0 &&
+      !selectedModelOption.inputModalities.includes("image")) {
+    throw new Error("El model seleccionat no admet imatges.");
+  }
+  if (selectedModelOption && chatRequest.options.effort &&
+      selectedModelOption.supportedReasoningEfforts.length > 0 &&
+      !selectedModelOption.supportedReasoningEfforts.includes(chatRequest.options.effort)) {
+    throw new Error("El nivell de raonament seleccionat no és compatible amb aquest model.");
+  }
+  if (chatRequest.options.webSearch && !account.webSearch) {
+    throw new Error("La cerca web no està disponible en aquest runtime.");
+  }
+  if (chatRequest.options.imageGeneration && !account.imageGeneration) {
+    throw new Error("La generació d’imatges no està disponible en aquest runtime.");
+  }
+  const selectedSkill = chatRequest.options.skill
+    ? (await runtime.client.resolvedSkills(projectWorkspace))
+      .find((skill) => skill.id === chatRequest.options.skill) ?? null
+    : null;
+  if (chatRequest.options.skill && !selectedSkill) {
+    throw new Error("La skill seleccionada ja no està disponible.");
+  }
+
+  const commonThreadParams = {
+    ...(selectedModel ? { model: selectedModel } : {}),
+    cwd: projectWorkspace,
+    runtimeWorkspaceRoots: [projectWorkspace],
+    approvalPolicy: runtimeConfig.approvalPolicy,
+    approvalsReviewer: "user",
+    sandbox: effectiveSandbox(runtimeConfig, chatRequest),
+    config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
+    developerInstructions: buildCodexDeveloperInstructions(chatRequest, permissions),
+  };
+  const threadResult = runtimeThreadId
+    ? await runtime.client.request("thread/resume", {
+        threadId: runtimeThreadId,
+        ...commonThreadParams,
+      }, `thread-resume:${chatRequest.threadId}`, 60_000)
+    : await runtime.client.request("thread/start", {
+        ...commonThreadParams,
+        ephemeral: false,
+        serviceName: "aibrain_workbench",
+        projectId: chatRequest.projectId,
+      }, `thread-start:${chatRequest.threadId}`, 60_000);
+  const threadId = extractThreadId(threadResult);
+  if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+  emit({
+    type: "runtimeThread",
+    threadToken: issueThreadToken(installationId, authenticatedUserId, threadId),
+  });
+
+  let runtimeTurnId: string | null = null;
+  let finishTurn!: (status: { status: string | null; error: string | null }) => void;
+  const turnFinished = new Promise<{ status: string | null; error: string | null }>((resolve) => {
+    finishTurn = resolve;
+  });
+  const runtimeStartedAt = performance.now();
+  let firstDeltaAt: number | null = null;
+
+  const registration = runtime.client.router.registerTurn(
+    threadId,
+    chatRequest.assistantMessageId,
+    {
+      onNotification: async (notification: ServerNotification) => {
+        const { method, params } = notification;
+        if (method === "item/agentMessage/delta") {
+          const delta = notificationDelta(params);
+          if (delta) {
+            firstDeltaAt ??= performance.now();
+            emit({ type: "delta", value: delta });
+          }
+          return;
+        }
+        if (method === "item/started" || method === "item/completed") {
+          if (method === "item/completed") {
+            await persistGeneratedImage(params, projectWorkspace, chatRequest.projectId, emit);
+          }
+          const activity = itemActivity(params, method === "item/completed");
+          if (activity) upsertActivity(activity);
+          return;
+        }
+        if (method === "item/commandExecution/outputDelta") {
+          const itemId = notificationItemId(params);
+          const delta = notificationDelta(params);
+          if (!itemId || !delta) return;
+          const current = activities.get(itemId) ?? {
+            id: itemId,
+            kind: "command",
+            label: "Executant una ordre",
+            status: "running",
+          } satisfies ActivityItem;
+          upsertActivity({ ...current, output: `${current.output ?? ""}${delta}` });
+          return;
+        }
+        if (method === "item/reasoning/summaryTextDelta") {
+          const itemId = notificationItemId(params);
+          const delta = notificationDelta(params);
+          if (!itemId || !delta) return;
+          const current = activities.get(itemId) ?? {
+            id: itemId,
+            kind: "reasoning",
+            label: "Raonant",
+            status: "running",
+          } satisfies ActivityItem;
+          upsertActivity({ ...current, detail: `${current.detail ?? ""}${delta}` });
+          return;
+        }
+        if (method === "turn/plan/updated") {
+          const plan = planFromNotification(params);
+          if (plan) emit({ type: "plan", ...plan });
+          return;
+        }
+        if (method === "turn/diff/updated" && isRecord(params) && typeof params.diff === "string") {
+          emit({ type: "diff", value: params.diff });
+          return;
+        }
+        if (method === "warning" || method === "error") {
+          if (!isRecord(params)) return;
+          const warning = params as unknown as Record<string, unknown>;
+          const message = typeof warning.message === "string"
+            ? warning.message
+            : typeof warning.error === "string" ? warning.error : null;
+          if (message) {
+            upsertActivity({
+              id: `runtime-${randomUUID()}`,
+              kind: "system",
+              label: method === "error" ? "Error del runtime" : "Avís del runtime",
+              detail: message,
+              status: method === "error" ? "failed" : "complete",
+            });
+          }
+          return;
+        }
+        if (method === "turn/completed") {
+          finishTurn(completedTurnStatus(params) ?? {
+            status: null,
+            error: "Resposta incompleta de Codex.",
+          });
+        }
+      },
+      onServerRequest: async (request: ServerRequest) => {
+        const approval = approvalFromRequest(legacyServerRequest(request));
+        if (!approval || approval.item.threadId !== threadId ||
+            (runtimeTurnId && approval.item.turnId !== runtimeTurnId)) {
+          throw new Error(`AiBrain encara no admet ${request.method}.`);
+        }
+        emit({ type: "approval", item: approval.item });
+        const decision = await waitForApproval(
+          approvalStore,
+          approval.item,
+          approval.requestType,
+          signal,
+        );
+        emit({ type: "approval", item: resolvedApproval(approval.item, decision) });
+        return approval.response(decision) as JsonValue;
+      },
+      onFailure: (error) => finishTurn({ status: "failed", error: error.message }),
+    },
+  );
+
+  const interrupt = () => {
+    if (!runtimeTurnId) {
+      finishTurn({ status: "failed", error: "El torn encara no tenia un identificador interrompible." });
+      return;
+    }
+    void runtime.client.request(
+      "turn/interrupt",
+      { threadId, turnId: runtimeTurnId },
+      `turn-interrupt:${chatRequest.assistantMessageId}`,
+      5_000,
+    ).catch((error: unknown) => finishTurn({
+      status: "failed",
+      error: error instanceof Error
+        ? `No s’ha pogut confirmar la interrupció: ${error.message}`
+        : "No s’ha pogut confirmar la interrupció.",
+    }));
+  };
+  signal.addEventListener("abort", interrupt, { once: true });
+  if (signal.aborted) interrupt();
+  try {
+    const turnResult = await runtime.client.request("turn/start", {
+      threadId,
+      clientUserMessageId: chatRequest.userMessageId,
+      input: [
+        { type: "text", text: chatRequest.message, text_elements: [] },
+        ...(selectedSkill ? [{ type: "skill" as const, name: selectedSkill.id, path: selectedSkill.path }] : []),
+        ...chatRequest.options.attachments.map((attachment) => ({
+          type: "image" as const,
+          url: attachment.dataUrl,
+        })),
+      ],
+      cwd: projectWorkspace,
+      runtimeWorkspaceRoots: [projectWorkspace],
+      approvalPolicy: runtimeConfig.approvalPolicy,
+      approvalsReviewer: "user",
+      sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
+      ...(selectedModel ? { model: selectedModel } : {}),
+      ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
+    }, `turn-start:${chatRequest.assistantMessageId}`, 60_000);
+    runtimeTurnId = extractTurnId(turnResult);
+    if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
+    registration.bindRuntimeTurn(runtimeTurnId);
+    const completed = await turnFinished;
+    if (completed.status === "failed") {
+      throw new Error(completed.error ?? "El torn de Codex ha fallat.");
+    }
+    if (completed.status === "interrupted" || signal.aborted) return;
+    const totalMs = Math.round(performance.now() - runtimeStartedAt);
+    const firstTextMs = firstDeltaAt === null ? null : Math.round(firstDeltaAt - runtimeStartedAt);
+    upsertActivity({
+      id: "runtime-performance",
+      kind: "system",
+      label: "Rendiment del torn",
+      detail: `${firstTextMs === null ? "Sense text incremental" : `Primer text ${firstTextMs} ms`} · Total ${totalMs} ms · Worker calent`,
+      status: "complete",
+    });
+    console.info("AiBrain Codex turn metrics", {
+      installationId,
+      userId: authenticatedUserId,
+      projectId: chatRequest.projectId,
+      firstTextMs,
+      totalMs,
+    });
+    emit({ type: "done" });
+  } finally {
+    signal.removeEventListener("abort", interrupt);
+    registration.dispose();
+  }
+}
