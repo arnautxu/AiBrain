@@ -13,7 +13,6 @@ import {
   FolderOpen,
   Globe,
   GitDiff,
-  HardDrives,
   Image as ImageIcon,
   ImagesSquare,
   List,
@@ -161,7 +160,7 @@ function AssistantMessage({
       {message.status === "error" ? (
         <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[#ead0c7] bg-[#fff8f5] px-3 py-2.5 text-[11px] text-[#884b38]">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
-          <span>El torn no s’ha pogut completar. Revisa l’estat del runtime i torna-ho a provar.</span>
+          <span>No se ha podido completar esta respuesta. Inténtalo de nuevo.</span>
         </div>
       ) : null}
 
@@ -255,16 +254,14 @@ export function ChatWorkspace({
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
-  const [manualComposerOpen, setManualComposerOpen] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [thread?.messages]);
 
   const hasMessages = Boolean(thread?.messages.length);
-  const guideVisible = guidedActionsOpen || (!hasMessages && !manualComposerOpen);
+  const guideVisible = guidedActionsOpen;
   const latestAssistantId = thread?.messages.findLast((message) => message.role === "assistant")?.id ?? null;
-  const runtimeLabel = runtimeStatus.mode === "codex" ? "Codex" : "Demo";
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canUseWeb = manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
@@ -326,22 +323,18 @@ export function ChatWorkspace({
   };
 
   return (
-    <main className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[#fbfbfa]">
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#e2e0db] px-2.5 md:px-3.5">
+    <main className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2.5 md:px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <button aria-label="Mostra o amaga la barra lateral" className={`rounded-md p-1.5 text-[#74716c] transition hover:bg-[#efeeeb] hover:text-[#312f2b] ${sidebarOpen ? "md:hidden" : "md:block"}`} onClick={onToggleSidebar}>
+          <button aria-label="Mostrar u ocultar la barra lateral" className={`rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] ${sidebarOpen ? "md:hidden" : "md:block"}`} onClick={onToggleSidebar}>
             <SidebarSimple size={17} />
           </button>
           <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1">
-            <FolderOpen size={13} className="hidden shrink-0 text-[#77736d] sm:block" weight="fill" />
-            <span className="hidden max-w-36 truncate text-[10px] font-medium text-[#66625c] sm:block">{project?.name ?? runtimeStatus.projectName}</span>
-            {thread ? <CaretRight size={10} className="hidden shrink-0 text-[#aaa69f] sm:block" /> : null}
-            <span className="max-w-[52vw] truncate text-[11px] font-semibold text-[#34312d] sm:max-w-72">{thread?.title ?? (project ? "Nou fil" : runtimeStatus.workspaceName)}</span>
+            <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" />
+            <span className="hidden max-w-36 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name ?? "Proyecto"}</span>
+            {thread ? <CaretRight size={11} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" /> : null}
+            <span className="max-w-[52vw] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread?.title ?? (project ? "Nueva conversación" : "Inicio")}</span>
           </div>
-          <span className="hidden items-center gap-1.5 text-[9px] text-[#8b8882] sm:flex">
-            <span className={`size-1.5 rounded-full ${runtimeStatus.ready ? "bg-[#4f8a5d]" : runtimeStatus.codex === "checking" ? "bg-[#d4a64c] motion-safe:animate-pulse" : "bg-[#aaa7a1]"}`} />
-            {runtimeStatus.ready ? "Connectat" : runtimeStatus.codex === "checking" ? "Comprovant" : runtimeLabel}
-          </span>
         </div>
 
         <div className="flex items-center gap-1">
@@ -353,18 +346,18 @@ export function ChatWorkspace({
                 key={window.id}
                 aria-label={`Obrir ${window.label}`}
                 aria-pressed={active}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]" : "text-[#77746f] hover:bg-[#efeeeb] hover:text-[#2f2d2a]"}`}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => onOpenWindow(windowId)}
               >
-                {windowId === "inspector" ? <GitDiff size={14} /> : <HardDrives size={14} />}
+                <GitDiff size={15} />
                 <span className="hidden xl:inline">{window.label}</span>
               </button>
             );
           })}
-          <button aria-label="Obrir cerca i ordres" className="hidden items-center gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-medium text-[#77746f] transition hover:bg-[#efeeeb] hover:text-[#2f2d2a] sm:flex" onClick={onOpenCommandPalette}>
-            <Command size={13} /><span>⌘K</span>
+          <button aria-label="Abrir búsqueda" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] sm:flex" onClick={onOpenCommandPalette}>
+            <Command size={13} /><span>K</span>
           </button>
-          <button aria-label="Personalitzar" className="rounded-md p-1.5 text-[#77746f] hover:bg-[#efeeeb] hover:text-[#2f2d2a]" onClick={onOpenCustomization}>
+          <button aria-label="Abrir preferencias" className="rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
             <SlidersHorizontal size={16} />
           </button>
         </div>
@@ -377,8 +370,8 @@ export function ChatWorkspace({
             <div className="space-y-4"><div className="h-20 rounded-xl bg-[#f1f0ed] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[#f3f2ef] motion-safe:animate-pulse" /></div>
           </div>
         ) : guideVisible ? (
-          <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? runtimeStatus.projectName} onCancel={hasMessages ? () => setGuidedActionsOpen(false) : undefined} onWriteDirectly={!hasMessages ? () => setManualComposerOpen(true) : undefined} onStart={(message, summary) => { setGuidedActionsOpen(false); setManualComposerOpen(true); onSend(message, summary); }} />
-        ) : (
+          <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? "Proyecto"} onCancel={() => setGuidedActionsOpen(false)} onStart={(message, summary) => { setGuidedActionsOpen(false); onSend(message, summary); }} />
+        ) : hasMessages ? (
           <div className={`mx-auto w-full max-w-[760px] px-5 md:px-8 ${preferences.density === "compact" ? "py-6" : "py-9"}`}>
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-9"}>
               {thread?.messages.map((message) => message.role === "user" ? (
@@ -402,12 +395,30 @@ export function ChatWorkspace({
             </div>
             <div ref={bottomRef} className="h-8" />
           </div>
+        ) : (
+          <section className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center px-5 pb-10 pt-16 text-center md:px-8">
+            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]"><MagicWand size={21} /></span>
+            <h1 className="mt-5 text-balance text-[28px] font-semibold tracking-[-.035em] text-[var(--text)] md:text-[34px]">¿En qué trabajamos?</h1>
+            <p className="mt-2 max-w-md text-[14px] leading-6 text-[var(--text-muted)]">Escribe directamente o empieza con una sugerencia. Podrás revisar el resultado antes de usarlo.</p>
+            <div className="mt-7 grid w-full max-w-[620px] gap-2 sm:grid-cols-3">
+              {[
+                ["Analizar información", "Encuentra riesgos, claves y próximos pasos"],
+                ["Crear un documento", "Prepara un primer borrador listo para revisar"],
+                ["Resumir contenido", "Quédate con decisiones, fechas y acciones"],
+              ].map(([label, detail]) => (
+                <button key={label} type="button" className="rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]" onClick={() => { onPromptChange(`${label}: `); }}>
+                  <span className="block text-[13px] font-semibold text-[var(--text)]">{label}</span>
+                  <span className="mt-1 block text-[11px] leading-4 text-[var(--text-muted)]">{detail}</span>
+                </button>
+              ))}
+            </div>
+          </section>
         )}
       </div>
 
-      {!guideVisible ? <div className="shrink-0 bg-[#fbfbfa]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
+      <div className="shrink-0 bg-[var(--surface)]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
         <div className="mx-auto max-w-[820px]">
-          <div className="composer-shadow rounded-[calc(var(--brain-radius)+4px)] border border-[#d4d2cc] bg-[#fefefd] p-2 focus-within:border-[#99958d]">
+          <div data-testid="composer" className="composer-shadow rounded-[calc(var(--brain-radius)+4px)] border border-[var(--border-strong)] bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)]">
             {attachments.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
@@ -421,8 +432,8 @@ export function ChatWorkspace({
             ) : null}
             <textarea
               aria-label="Missatge"
-              className="max-h-40 min-h-14 w-full resize-none bg-transparent px-2.5 py-2.5 text-[13px] leading-6 text-[#292725] outline-none placeholder:text-[#a19e98]"
-              placeholder={project ? `Escriu a ${preferences.assistantName}…` : "Crea un projecte per començar…"}
+              className="max-h-40 min-h-14 w-full resize-none bg-transparent px-2.5 py-2.5 text-[14px] leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+              placeholder={project ? `Escribe a ${preferences.assistantName}…` : "Crea un proyecto para empezar…"}
               rows={1}
               value={prompt}
               disabled={!project}
@@ -453,7 +464,7 @@ export function ChatWorkspace({
                     {effortOptions.map((effort) => <option key={effort} value={effort}>{effortLabels[effort]}</option>)}
                   </select>
                 ) : null}
-                <button aria-label="Obre les accions guiades" className={`composer-tool ${guidedActionsOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setGuidedActionsOpen((current) => !current)}><MagicWand size={12} /><span className="hidden lg:inline">Accions</span></button>
+                <button aria-label="Abrir acciones guiadas" aria-pressed={guidedActionsOpen} className={`composer-tool ${guidedActionsOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setGuidedActionsOpen((current) => !current)}><MagicWand size={12} /><span className="hidden lg:inline">Ayuda</span></button>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <label className="relative hidden sm:block">
                     <Wrench size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[#77736d]" />
@@ -465,10 +476,10 @@ export function ChatWorkspace({
                 ) : null}
                 {canUseWeb ? <button aria-label="Activa o desactiva la cerca web" aria-pressed={webSearch} className={`composer-tool ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={12} /><span className="hidden lg:inline">Web</span></button> : null}
                 {canGenerateImages ? <button aria-label="Activa o desactiva la generació d’imatges" aria-pressed={imageGeneration} className={`composer-tool ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={13} /><span className="hidden lg:inline">Imatge</span></button> : null}
-                {canAttachImages ? <><input ref={fileInputRef} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={(event) => void addImages(event.target.files)} /><button aria-label="Adjunta imatges" className="composer-tool" disabled={sending || attachments.length >= 3} onClick={() => fileInputRef.current?.click()}><Paperclip size={13} /></button></> : null}
+                {canAttachImages ? <><input ref={fileInputRef} aria-label="Seleccionar imágenes para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={(event) => void addImages(event.target.files)} /><button aria-label="Adjuntar imágenes" className="composer-tool" disabled={sending || attachments.length >= 3} onClick={() => fileInputRef.current?.click()}><Paperclip size={13} /></button></> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
-                <span className="hidden text-[8px] text-[#aaa69f] md:block">↵ envia · ⇧↵ línia</span>
+                <span className="hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
                   <button aria-label="Aturar resposta" className="grid size-7 place-items-center rounded-lg bg-[#292725] text-white transition active:scale-95" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
@@ -477,11 +488,11 @@ export function ChatWorkspace({
               </div>
             </div>
           </div>
-          <div className="mt-2 flex h-3 items-center justify-center gap-1.5 text-[9px] text-[#6f6c67]">
-            {sending ? <><SpinnerGap size={10} className="motion-safe:animate-spin" />{preferences.assistantName} està treballant</> : runtimeStatus.ready ? <><CheckCircle size={10} />{showAdvancedControls ? "Runtime preparat" : "Preparat per treballar"}</> : null}
+          <div className="mt-2 flex h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]">
+            {sending ? <><SpinnerGap size={11} className="motion-safe:animate-spin" />{preferences.assistantName} está trabajando</> : <span>Comprueba los datos importantes antes de usarlos.</span>}
           </div>
         </div>
-      </div> : null}
+      </div>
     </main>
   );
 }
