@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -42,6 +42,7 @@ describe("file document staging store", () => {
     expect(first).toMatchObject({ schemaVersion: 1, status: "staged", sha256: validated.sha256 });
     expect(await readFile(path.join(staging, first.relativePath), "utf8")).toBe("private notes");
     expect((await store.read(THREAD_ID, UPLOAD_ID, "notes.txt")).uploadId).toBe(UPLOAD_ID);
+    expect((await store.readById(THREAD_ID, UPLOAD_ID)).fileName).toBe("notes.txt");
   });
 
   it("rejects reuse of an upload id for different content", async () => {
@@ -73,5 +74,22 @@ describe("file document staging store", () => {
       data,
     })).rejects.toMatchObject({ code: "STORAGE_SYMLINK_REJECTED" });
     await expect(readdir(outside)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects symlinked upload metadata on id-based reads", async () => {
+    const data = Buffer.from("private notes");
+    await store.stage({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated: validateUploadedDocument({ fileName: "notes.txt", declaredMimeType: "text/plain", data }),
+      data,
+    });
+    const metadataPath = path.join(staging, "threads", THREAD_ID, "uploads", UPLOAD_ID, "upload.json");
+    const outside = path.join(root, "outside-upload.json");
+    await writeFile(outside, await readFile(metadataPath), { mode: 0o600 });
+    await unlink(metadataPath);
+    await symlink(outside, metadataPath);
+    await expect(store.readById(THREAD_ID, UPLOAD_ID))
+      .rejects.toMatchObject({ code: "STORAGE_STAGING_METADATA_UNSAFE" });
   });
 });

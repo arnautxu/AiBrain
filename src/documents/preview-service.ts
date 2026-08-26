@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { StagedDocument } from "@/documents/staging-store";
@@ -33,6 +33,7 @@ export type DocumentPreview = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_PREVIEW_METADATA_BYTES = 64 * 1024;
 
 const previewSchema = defineVersionedSchema<DocumentPreview>({
   name: "DocumentPreview",
@@ -148,12 +149,32 @@ export class DocumentPreviewService {
   private readonly runner: DocumentToolRunner;
   private readonly now: () => number;
 
+  private previewLocations(threadId: string, uploadId: string) {
+    if (!UUID.test(threadId) || !UUID.test(uploadId)) {
+      throw new StorageError("DOCUMENT_PREVIEW_ID_INVALID", "Preview thread and upload ids must be UUIDs.");
+    }
+    const relativeDirectory = path.posix.join(threadId, uploadId);
+    return {
+      relativeDirectory,
+      directory: path.join(this.previewRoot, threadId, uploadId),
+      metadataPath: path.join(this.previewRoot, threadId, uploadId, "preview.json"),
+    };
+  }
+
+  private async readMetadata(metadataPath: string) {
+    const metadata = await lstat(metadataPath);
+    if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1 ||
+        metadata.size > MAX_PREVIEW_METADATA_BYTES || (metadata.mode & 0o077) !== 0) {
+      throw new StorageError("DOCUMENT_PREVIEW_UNSAFE", "Preview metadata is not a private regular file.");
+    }
+    return readValidatedJson(metadataPath, previewSchema);
+  }
+
   async create(document: StagedDocument) {
-    const directory = path.join(this.previewRoot, document.threadId, document.uploadId);
-    const metadataPath = path.join(directory, "preview.json");
+    const { directory, metadataPath } = this.previewLocations(document.threadId, document.uploadId);
     return this.lockManager.withLock(`document-preview:${metadataPath}`, async () => {
       try {
-        const existing = await readValidatedJson(metadataPath, previewSchema);
+        const existing = await this.readMetadata(metadataPath);
         if (existing.sourceSha256 !== document.sha256) {
           throw new StorageError("DOCUMENT_PREVIEW_CONFLICT", "Preview id already belongs to different source content.");
         }
@@ -235,5 +256,26 @@ export class DocumentPreviewService {
         await rm(work, { recursive: true, force: true });
       }
     });
+  }
+
+  async read(threadId: string, uploadId: string) {
+    const locations = this.previewLocations(threadId, uploadId);
+    const preview = await this.readMetadata(locations.metadataPath);
+    if (preview.threadId !== threadId || preview.uploadId !== uploadId) {
+      throw new StorageError("DOCUMENT_PREVIEW_MISMATCH", "Preview identity does not match its path.");
+    }
+    return preview;
+  }
+
+  async readFile(threadId: string, uploadId: string, fileName: string) {
+    const preview = await this.read(threadId, uploadId);
+    if (!preview.files.includes(fileName)) {
+      throw new StorageError("DOCUMENT_PREVIEW_FILE_NOT_FOUND", "Preview file was not found.");
+    }
+    return readRegularFileWithin(
+      this.previewRoot,
+      path.posix.join(threadId, uploadId, fileName),
+      100 * 1024 * 1024,
+    );
   }
 }

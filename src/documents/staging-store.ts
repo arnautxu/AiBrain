@@ -29,6 +29,7 @@ export type StagedDocument = {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
+const MAX_METADATA_BYTES = 64 * 1024;
 
 const stagedDocumentSchema = defineVersionedSchema<StagedDocument>({
   name: "StagedDocument",
@@ -60,6 +61,15 @@ const stagedDocumentSchema = defineVersionedSchema<StagedDocument>({
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
+}
+
+async function readStagedMetadata(metadataPath: string) {
+  const metadata = await lstat(metadataPath);
+  if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1 ||
+      metadata.size > MAX_METADATA_BYTES || (metadata.mode & 0o077) !== 0) {
+    throw new StorageError("STORAGE_STAGING_METADATA_UNSAFE", "Staging metadata is not a private regular file.");
+  }
+  return readValidatedJson(metadataPath, stagedDocumentSchema);
 }
 
 export async function ensurePrivateDirectoryTree(root: string, segments: readonly string[]) {
@@ -130,7 +140,7 @@ export class FileDocumentStagingStore {
     const locations = this.paths(input.threadId, input.uploadId, input.validated.fileName);
     return this.lockManager.withLock(`document-upload:${locations.metadataPath}`, async () => {
       try {
-        const existing = await readValidatedJson(locations.metadataPath, stagedDocumentSchema);
+        const existing = await readStagedMetadata(locations.metadataPath);
         if (existing.sha256 !== input.validated.sha256 || existing.fileName !== input.validated.fileName) {
           throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Upload id already identifies different content.");
         }
@@ -163,9 +173,32 @@ export class FileDocumentStagingStore {
 
   async read(threadId: string, uploadId: string, fileName: string) {
     const locations = this.paths(threadId, uploadId, fileName);
-    const metadata = await readValidatedJson(locations.metadataPath, stagedDocumentSchema);
+    const metadata = await readStagedMetadata(locations.metadataPath);
     if (metadata.threadId !== threadId || metadata.uploadId !== uploadId || metadata.fileName !== fileName) {
       throw new StorageError("STORAGE_STAGING_METADATA_MISMATCH", "Staged document identity does not match its path.");
+    }
+    return metadata;
+  }
+
+  async readById(threadId: string, uploadId: string) {
+    if (!UUID.test(threadId) || !UUID.test(uploadId)) {
+      throw new StorageError("STORAGE_STAGING_ID_INVALID", "Thread and upload ids must be UUIDs.");
+    }
+    const metadataPath = path.join(
+      this.rootDirectory,
+      "threads",
+      threadId,
+      "uploads",
+      uploadId,
+      "upload.json",
+    );
+    const metadata = await readStagedMetadata(metadataPath);
+    if (metadata.threadId !== threadId || metadata.uploadId !== uploadId) {
+      throw new StorageError("STORAGE_STAGING_METADATA_MISMATCH", "Staged document identity does not match its path.");
+    }
+    const expected = this.paths(threadId, uploadId, metadata.fileName);
+    if (metadata.relativePath !== expected.relativePath) {
+      throw new StorageError("STORAGE_STAGING_METADATA_MISMATCH", "Staged document path does not match its identity.");
     }
     return metadata;
   }
