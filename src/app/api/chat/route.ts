@@ -21,6 +21,7 @@ import {
 } from "@/runtime/codex-app-server";
 import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
+import { FileApprovalStore } from "@/runtime/approval-store";
 import { readThreadToken } from "@/runtime/thread-token";
 import { WorkbenchNotFoundError } from "@/workbench/errors";
 import { workbenchErrorResponse } from "@/workbench/http";
@@ -121,6 +122,7 @@ export async function POST(request: Request) {
   }
 
   let turnPermissions: ResolvedPermissions | null = null;
+  let approvalStore: FileApprovalStore | null = null;
   if (config.mode === "codex") {
     try {
       const installation = await loadInstallationConfig();
@@ -129,6 +131,11 @@ export async function POST(request: Request) {
         userId: session.user.id,
         projectId: context.projectId,
         turnId: body.assistantMessageId,
+      });
+      approvalStore = new FileApprovalStore({
+        installationId: installation.installationId,
+        userId: session.user.id,
+        usersRoot: installation.paths.usersRoot,
       });
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error
@@ -183,8 +190,8 @@ export async function POST(request: Request) {
 
       try {
         if (config.mode === "codex") {
-          if (!turnPermissions) {
-            throw new Error("La política del torn no està disponible.");
+          if (!turnPermissions || !approvalStore) {
+            throw new Error("La política o les aprovacions del torn no estan disponibles.");
           }
           await runCodexTurn(
             body,
@@ -193,6 +200,7 @@ export async function POST(request: Request) {
             runtimeThreadId,
             config,
             turnPermissions,
+            approvalStore,
             request.signal,
             emitCodex,
           );

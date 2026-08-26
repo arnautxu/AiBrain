@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { accessSync, constants, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -11,7 +11,11 @@ import type {
   ChatStreamEvent,
   PlanStep,
 } from "@/lib/chat-contract";
-import { waitForApproval } from "@/runtime/approval-store";
+import {
+  waitForApproval,
+  type ApprovalRequestType,
+  type FileApprovalStore,
+} from "@/runtime/approval-store";
 import type { RuntimeConfig } from "@/runtime/config";
 import { issueThreadToken } from "@/runtime/thread-token";
 import type {
@@ -700,8 +704,34 @@ function completedTurnStatus(params: unknown) {
 
 type PendingServerApproval = {
   item: ApprovalItem;
+  requestType: ApprovalRequestType;
   response: (decision: ApprovalDecision | "cancel") => object;
 };
+
+function approvalRouting(request: ServerRequest) {
+  if (!isRecord(request.params)) return null;
+  const { threadId, turnId, itemId } = request.params;
+  const valid = (value: unknown) => typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value);
+  if (!valid(threadId) || !valid(turnId) || !valid(itemId)) return null;
+  const explicitApprovalId = request.params.approvalId;
+  if (explicitApprovalId !== undefined && explicitApprovalId !== null &&
+      !valid(explicitApprovalId)) return null;
+  const approvalId = typeof explicitApprovalId === "string"
+    ? explicitApprovalId
+    : `approval-${createHash("sha256").update(JSON.stringify([
+        request.method,
+        threadId,
+        turnId,
+        itemId,
+      ])).digest("hex")}`;
+  return {
+    id: approvalId,
+    threadId: threadId as string,
+    turnId: turnId as string,
+    itemId: itemId as string,
+  };
+}
 
 function permissionGrant(value: unknown) {
   if (!isRecord(value)) return {};
@@ -733,13 +763,15 @@ function permissionSummary(value: unknown) {
 function approvalFromRequest(request: ServerRequest): PendingServerApproval | null {
   if (!isRecord(request.params)) return null;
   const params = request.params;
+  const routing = approvalRouting(request);
+  if (!routing) return null;
   const reason = typeof params.reason === "string" ? params.reason : null;
 
   if (request.method === "item/commandExecution/requestApproval") {
     const command = typeof params.command === "string" ? params.command : null;
     return {
       item: {
-        id: randomUUID(),
+        ...routing,
         kind: "command",
         title: "Em dones permís per completar aquest pas?",
         detail: reason ?? command ?? "Revisa l’ordre abans de continuar.",
@@ -747,6 +779,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
         ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
         status: "pending",
       },
+      requestType: "command",
       response: (decision) => ({ decision }),
     };
   }
@@ -754,12 +787,13 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
   if (request.method === "item/fileChange/requestApproval") {
     return {
       item: {
-        id: randomUUID(),
+        ...routing,
         kind: "file",
         title: "Vols que apliqui aquests canvis?",
         detail: reason ?? "Revisa els canvis abans de continuar.",
         status: "pending",
       },
+      requestType: "file",
       response: (decision) => ({ decision }),
     };
   }
@@ -768,7 +802,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
     const requested = isRecord(params.permissions) ? params.permissions : {};
     return {
       item: {
-        id: randomUUID(),
+        ...routing,
         kind: "command",
         title: "Codex demana permisos addicionals",
         detail:
@@ -778,6 +812,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
         ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
         status: "pending",
       },
+      requestType: "permissions",
       response: (decision) => ({
         permissions:
           decision === "decline" || decision === "cancel"
@@ -828,6 +863,7 @@ export async function runCodexTurn(
   runtimeThreadId: string | null,
   config: RuntimeConfig,
   permissions: ResolvedPermissions,
+  approvalStore: FileApprovalStore,
   signal: AbortSignal,
   emit: EmitEvent,
 ) {
@@ -979,12 +1015,18 @@ export async function runCodexTurn(
     },
     onServerRequest: async (request) => {
       const approval = approvalFromRequest(request);
-      if (!approval) {
+      if (!approval || !threadId || !turnId ||
+          approval.item.threadId !== threadId || approval.item.turnId !== turnId) {
         throw new Error(`AiBrain encara no admet ${request.method}.`);
       }
 
       emit({ type: "approval", item: approval.item });
-      const decision = await waitForApproval(tenantId, approval.item, signal);
+      const decision = await waitForApproval(
+        approvalStore,
+        approval.item,
+        approval.requestType,
+        signal,
+      );
       emit({ type: "approval", item: resolvedApproval(approval.item, decision) });
       return approval.response(decision);
     },
