@@ -1,9 +1,11 @@
 import path from "node:path";
+import { mkdir } from "node:fs/promises";
 import { NextResponse } from "next/server";
-import { checkCodexConnection } from "@/runtime/codex-app-server";
 import { readRuntimeConfig } from "@/runtime/config";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import { getSession } from "@/auth/session";
+import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
+import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { WorkbenchNotFoundError } from "@/workbench/errors";
 import {
   getProjectRuntimeContext,
@@ -53,10 +55,17 @@ export async function GET(request: Request) {
   let skills: RuntimeStatus["skills"] = [];
   let webSearch = false;
   let imageGeneration = false;
+  let workerWorkspace = config.workspace;
 
   if (config.mode === "codex") {
     try {
-      const connection = await checkCodexConnection(config);
+      const worker = await workerAppServerForUser(session.user.id);
+      workerWorkspace = await resolveWorkerOwnedPath(
+        worker.handle.roots.workspace,
+        path.posix.join("projects", projectContext.projectId ?? "default"),
+      );
+      await mkdir(workerWorkspace, { recursive: true, mode: 0o700 });
+      const connection = await worker.client.connection(workerWorkspace);
       codex = connection.connected ? "connected" : "unavailable";
       authMode = connection.authMode;
       planType = connection.planType;
@@ -75,14 +84,14 @@ export async function GET(request: Request) {
   const status: RuntimeStatus = {
     mode: config.mode,
     codex,
-    isolated: Boolean(config.codexHome),
+    isolated: config.mode === "codex",
     ready: config.mode === "codex" && codex === "connected",
     authMode,
     planType,
     processWarm,
     rateLimit,
     usage,
-    workspaceName: `${projectContext.projectName} / ${path.basename(config.workspace)}`,
+    workspaceName: `${projectContext.projectName} / ${path.basename(workerWorkspace)}`,
     model: config.model,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,

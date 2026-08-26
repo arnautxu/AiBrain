@@ -1,5 +1,3 @@
-import "server-only";
-
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server as HttpServer } from "node:http";
@@ -238,7 +236,7 @@ export class PrivateWorkerGateway {
       this.locks,
       this.now,
     );
-    this.processFactory = options.processFactory ?? ((context) => spawn(
+    this.processFactory = options.processFactory ?? ((context) => spawn(/* turbopackIgnore: true */
       process.env.CODEX_BIN?.trim() || "codex",
       ["app-server", "--stdio"],
       {

@@ -16,9 +16,9 @@ import {
 import { readRuntimeConfig } from "@/runtime/config";
 import { loadInstallationConfig } from "@/config/installation";
 import {
-  runCodexTurn,
   type CodexTurnEvent,
 } from "@/runtime/codex-app-server";
+import { runWorkerCodexTurn } from "@/runtime/worker-codex-turn";
 import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileApprovalStore } from "@/runtime/approval-store";
@@ -112,7 +112,7 @@ export async function POST(request: Request) {
 
   const config = readRuntimeConfig(session.tenant.id, context.workspaceKey);
   const runtimeThreadId = context.runtimeThreadToken
-    ? readThreadToken(context.runtimeThreadToken, session.tenant.id)
+    ? readThreadToken(context.runtimeThreadToken, session.tenant.id, session.user.id)
     : null;
   if (context.runtimeThreadToken && !runtimeThreadId) {
     return NextResponse.json(
@@ -193,7 +193,7 @@ export async function POST(request: Request) {
           if (!turnPermissions || !approvalStore) {
             throw new Error("La política o les aprovacions del torn no estan disponibles.");
           }
-          await runCodexTurn(
+          await runWorkerCodexTurn(
             body,
             session.tenant.id,
             session.user.id,

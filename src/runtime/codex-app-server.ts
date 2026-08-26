@@ -44,7 +44,8 @@ type PendingRequest = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
-type ServerRequest = Extract<RpcMessage, { kind: "serverRequest" }>;
+export type LegacyServerRequest = Extract<RpcMessage, { kind: "serverRequest" }>;
+type ServerRequest = LegacyServerRequest;
 export type CodexTurnEvent = ChatStreamEvent | {
   type: "runtimeThread";
   threadToken: string;
@@ -278,17 +279,17 @@ class AppServerSession {
   }
 }
 
-function extractThreadId(result: unknown) {
+export function extractThreadId(result: unknown) {
   if (!isRecord(result) || !isRecord(result.thread)) return null;
   return typeof result.thread.id === "string" ? result.thread.id : null;
 }
 
-function extractTurnId(result: unknown) {
+export function extractTurnId(result: unknown) {
   if (!isRecord(result) || !isRecord(result.turn)) return null;
   return typeof result.turn.id === "string" ? result.turn.id : null;
 }
 
-function parseAccount(result: unknown): CodexConnection {
+export function parseAccount(result: unknown): CodexConnection {
   if (!isRecord(result) || !isRecord(result.account)) {
     return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
@@ -322,7 +323,7 @@ function reasoningEffort(value: unknown): RuntimeReasoningEffort | null {
     : null;
 }
 
-function parseModels(result: unknown): RuntimeModelOption[] {
+export function parseModels(result: unknown): RuntimeModelOption[] {
   if (!isRecord(result) || !Array.isArray(result.data)) return [];
   return result.data.flatMap((model) => {
     if (!isRecord(model) || typeof model.model !== "string" || model.hidden === true) return [];
@@ -348,9 +349,9 @@ function parseModels(result: unknown): RuntimeModelOption[] {
   }).slice(0, 24);
 }
 
-type ResolvedSkill = RuntimeSkillOption & { path: string };
+export type ResolvedSkill = RuntimeSkillOption & { path: string };
 
-function parseSkills(result: unknown): ResolvedSkill[] {
+export function parseSkills(result: unknown): ResolvedSkill[] {
   if (!isRecord(result) || !Array.isArray(result.data)) return [];
   const resolved: ResolvedSkill[] = [];
   for (const entry of result.data) {
@@ -368,7 +369,7 @@ function parseSkills(result: unknown): ResolvedSkill[] {
   return [...new Map(resolved.map((skill) => [skill.id, skill])).values()].slice(0, 80);
 }
 
-function parseRateLimit(result: unknown): CodexConnection["rateLimit"] {
+export function parseRateLimit(result: unknown): CodexConnection["rateLimit"] {
   if (!isRecord(result) || !isRecord(result.rateLimits) || !isRecord(result.rateLimits.primary)) return null;
   const primary = result.rateLimits.primary;
   if (typeof primary.usedPercent !== "number") return null;
@@ -379,7 +380,7 @@ function parseRateLimit(result: unknown): CodexConnection["rateLimit"] {
   };
 }
 
-function parseUsage(result: unknown): CodexConnection["usage"] {
+export function parseUsage(result: unknown): CodexConnection["usage"] {
   if (!isRecord(result) || !isRecord(result.summary)) return null;
   const summary = result.summary;
   const metric = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -563,7 +564,7 @@ function fileChangeSummary(changes: unknown) {
   return paths.length > 0 ? paths.join(", ") : null;
 }
 
-function itemActivity(params: unknown, completed: boolean): ActivityItem | null {
+export function itemActivity(params: unknown, completed: boolean): ActivityItem | null {
   if (!isRecord(params) || !isRecord(params.item)) return null;
   const item = params.item;
   if (typeof item.id !== "string" || typeof item.type !== "string") return null;
@@ -662,15 +663,15 @@ function itemActivity(params: unknown, completed: boolean): ActivityItem | null 
   return null;
 }
 
-function notificationDelta(params: unknown) {
+export function notificationDelta(params: unknown) {
   return isRecord(params) && typeof params.delta === "string" ? params.delta : null;
 }
 
-function notificationItemId(params: unknown) {
+export function notificationItemId(params: unknown) {
   return isRecord(params) && typeof params.itemId === "string" ? params.itemId : null;
 }
 
-function planFromNotification(params: unknown): {
+export function planFromNotification(params: unknown): {
   explanation: string | null;
   steps: PlanStep[];
 } | null {
@@ -692,7 +693,7 @@ function planFromNotification(params: unknown): {
   };
 }
 
-function completedTurnStatus(params: unknown) {
+export function completedTurnStatus(params: unknown) {
   if (!isRecord(params) || !isRecord(params.turn)) return null;
   const turn = params.turn;
   const error = isRecord(turn.error) ? turn.error : null;
@@ -702,7 +703,7 @@ function completedTurnStatus(params: unknown) {
   };
 }
 
-type PendingServerApproval = {
+export type PendingServerApproval = {
   item: ApprovalItem;
   requestType: ApprovalRequestType;
   response: (decision: ApprovalDecision | "cancel") => object;
@@ -760,7 +761,7 @@ function permissionSummary(value: unknown) {
   return parts.length > 0 ? parts.join(" · ") : null;
 }
 
-function approvalFromRequest(request: ServerRequest): PendingServerApproval | null {
+export function approvalFromRequest(request: ServerRequest): PendingServerApproval | null {
   if (!isRecord(request.params)) return null;
   const params = request.params;
   const routing = approvalRouting(request);
@@ -826,7 +827,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
   return null;
 }
 
-function resolvedApproval(
+export function resolvedApproval(
   approval: ApprovalItem,
   decision: ApprovalDecision | "cancel",
 ): ApprovalItem {
@@ -839,11 +840,11 @@ function resolvedApproval(
   return { ...approval, status };
 }
 
-function effectiveSandbox(config: RuntimeConfig, chatRequest: ChatRequest) {
+export function effectiveSandbox(config: RuntimeConfig, chatRequest: ChatRequest) {
   return chatRequest.options.mode === "agent" ? config.sandbox : "read-only";
 }
 
-function sandboxPolicy(config: RuntimeConfig, chatRequest: ChatRequest) {
+export function sandboxPolicy(config: RuntimeConfig, chatRequest: ChatRequest) {
   if (effectiveSandbox(config, chatRequest) === "read-only") {
     return { type: "readOnly" as const, networkAccess: false };
   }
@@ -1133,7 +1134,10 @@ export async function runCodexTurn(
 
     threadId = extractThreadId(threadResult);
     if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
-    emit({ type: "runtimeThread", threadToken: issueThreadToken(tenantId, threadId) });
+    emit({
+      type: "runtimeThread",
+      threadToken: issueThreadToken(tenantId, authenticatedUserId, threadId),
+    });
 
     const turnResult = await session.request(
       "turn/start",
