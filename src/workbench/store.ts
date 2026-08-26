@@ -25,6 +25,7 @@ import { loadInstallationConfig } from "@/config/installation";
 import type {
   UpdateProjectInput,
   UpdateThreadInput,
+  WorkbenchListQuery,
 } from "@/workbench/types";
 
 function mode(session: AuthSession): "filesystem" | "demo" {
@@ -56,6 +57,29 @@ export async function loadWorkbench(session: AuthSession) {
     session,
     isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
   );
+}
+
+export async function listProjects(session: AuthSession, query: WorkbenchListQuery) {
+  return (await filesystemStore(session)).listProjects(session.user.id, query);
+}
+
+export async function getProject(session: AuthSession, projectId: string) {
+  assertFilesystemWorkbenchId(projectId);
+  return (await filesystemStore(session)).getProject(session.user.id, projectId);
+}
+
+export async function listThreads(
+  session: AuthSession,
+  projectId: string | null,
+  query: WorkbenchListQuery,
+) {
+  if (projectId !== null) assertFilesystemWorkbenchId(projectId);
+  return (await filesystemStore(session)).listThreads(session.user.id, projectId, query);
+}
+
+export async function getThread(session: AuthSession, threadId: string) {
+  assertFilesystemWorkbenchId(threadId);
+  return (await filesystemStore(session)).getThread(session.user.id, threadId);
 }
 
 export async function createProject(session: AuthSession, name: string) {

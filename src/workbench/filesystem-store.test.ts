@@ -5,13 +5,20 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@/lib/chat-contract";
 import { StorageCorruptionError } from "@/storage";
-import { WorkbenchNotFoundError, WorkbenchPersistenceError } from "@/workbench/errors";
+import {
+  WorkbenchConflictError,
+  WorkbenchNotFoundError,
+  WorkbenchPersistenceError,
+  WorkbenchValidationError,
+} from "@/workbench/errors";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
+import { parseWorkbenchListQuery, type WorkbenchListQuery } from "@/workbench/types";
 
 const INSTALLATION_ID = "synthetic-lab";
 const USER_A = "0198b9f0-6631-7000-8000-000000000101";
 const USER_B = "0198b9f0-6631-7000-8000-000000000102";
 const roots: string[] = [];
+const ACTIVE_QUERY: WorkbenchListQuery = { status: "active", limit: 20 };
 
 vi.mock("server-only", () => ({}));
 
@@ -117,6 +124,12 @@ describe("FileWorkbenchStore", () => {
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
     await expect(store.getThreadRuntimeContext(USER_A, threadB.id))
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
+    await expect(store.getProject(USER_A, projectB.id))
+      .rejects.toBeInstanceOf(WorkbenchNotFoundError);
+    await expect(store.getThread(USER_A, threadB.id))
+      .rejects.toBeInstanceOf(WorkbenchNotFoundError);
+    await expect(store.listThreads(USER_A, projectB.id, ACTIVE_QUERY))
+      .rejects.toBeInstanceOf(WorkbenchNotFoundError);
     expect(await store.load(USER_A)).toMatchObject({
       projects: [{ id: projectA.id }],
       threads: [],
@@ -174,5 +187,93 @@ describe("FileWorkbenchStore", () => {
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
     await expect(store.load("0198b9f0-6631-7000-8000-000000000999"))
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
+  });
+
+  it("lists and searches projects with bounded opaque keyset pagination", async () => {
+    const { store } = await fixture();
+    const alpha = await store.createProject(USER_A, "Alpha Operations");
+    const beta = await store.createProject(USER_A, "Beta Finance");
+    const gamma = await store.createProject(USER_A, "Gamma Delivery");
+    await store.updateProject(USER_A, gamma.id, { pinned: true });
+    await store.updateProject(USER_A, beta.id, { status: "archived" });
+
+    const first = await store.listProjects(USER_A, { status: "active", limit: 1 });
+    expect(first.items).toEqual([expect.objectContaining({ id: gamma.id, pinned: true })]);
+    expect(first.nextCursor).toMatch(/^[A-Za-z0-9_-]+$/);
+    const second = await store.listProjects(USER_A, {
+      status: "active",
+      limit: 1,
+      cursor: first.nextCursor!,
+    });
+    expect(second.items).toEqual([expect.objectContaining({ id: alpha.id })]);
+    expect(second.nextCursor).toBeNull();
+
+    await expect(store.listProjects(USER_A, {
+      status: "archived",
+      limit: 1,
+      cursor: first.nextCursor!,
+    })).rejects.toBeInstanceOf(WorkbenchValidationError);
+    await expect(store.listProjects(USER_A, { status: "active", limit: 51 }))
+      .rejects.toBeInstanceOf(WorkbenchValidationError);
+    await expect(store.listProjects(USER_A, { status: "active", limit: 20, cursor: "not-a-cursor" }))
+      .rejects.toBeInstanceOf(WorkbenchValidationError);
+
+    expect((await store.listProjects(USER_A, {
+      status: "all",
+      limit: 20,
+      query: "FINANCE",
+    })).items).toEqual([expect.objectContaining({ id: beta.id, status: "archived" })]);
+  });
+
+  it("returns thread summaries for lists, full history only on read, and supports lifecycle transitions", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Lifecycle Project");
+    const thread = await store.createThread(USER_A, project.id, "Quarterly planning");
+    const userMessage = message("user", "complete");
+    const assistantMessage = message("assistant", "complete");
+    await store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage);
+
+    const page = await store.listThreads(USER_A, project.id, {
+      status: "active",
+      limit: 20,
+      query: "PLANNING",
+    });
+    expect(page).toEqual({
+      items: [expect.objectContaining({
+        id: thread.id,
+        messageCount: 2,
+        lastMessageAt: assistantMessage.createdAt,
+      })],
+      nextCursor: null,
+    });
+    expect(page.items[0]).not.toHaveProperty("messages");
+    expect((await store.getThread(USER_A, thread.id)).messages).toEqual([userMessage, assistantMessage]);
+
+    const renamed = await store.updateProject(USER_A, project.id, { name: "Renamed Project", pinned: true });
+    expect(renamed).toMatchObject({ name: "Renamed Project", pinned: true });
+    expect(renamed.workspace.label).toBe("Renamed Project");
+    expect(await store.updateThread(USER_A, thread.id, {
+      title: "Renamed thread",
+      pinned: true,
+      status: "archived",
+    })).toMatchObject({ title: "Renamed thread", pinned: true, status: "archived" });
+
+    await store.updateProject(USER_A, project.id, { status: "archived" });
+    await expect(store.updateThread(USER_A, thread.id, { status: "active" }))
+      .rejects.toBeInstanceOf(WorkbenchConflictError);
+    await store.updateProject(USER_A, project.id, { status: "active" });
+    await expect(store.updateThread(USER_A, thread.id, { status: "active" }))
+      .resolves.toMatchObject({ status: "active" });
+  });
+
+  it("strictly parses bounded list queries", () => {
+    expect(parseWorkbenchListQuery(new URLSearchParams())).toEqual({ status: "active", limit: 20 });
+    expect(parseWorkbenchListQuery(new URLSearchParams("status=all&limit=50&q=%20alpha%20")))
+      .toEqual({ status: "all", limit: 50, query: "alpha" });
+    expect(parseWorkbenchListQuery(new URLSearchParams("limit=51"))).toBeNull();
+    expect(parseWorkbenchListQuery(new URLSearchParams("limit=01"))).toBeNull();
+    expect(parseWorkbenchListQuery(new URLSearchParams("q="))).toBeNull();
+    expect(parseWorkbenchListQuery(new URLSearchParams("q=a&q=b"))).toBeNull();
+    expect(parseWorkbenchListQuery(new URLSearchParams("unknown=value"))).toBeNull();
   });
 });
