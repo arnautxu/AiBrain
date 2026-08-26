@@ -31,7 +31,10 @@ import {
   buildCodexDeveloperInstructions,
 } from "@/runtime/permission-turn";
 import { issueThreadToken } from "@/runtime/thread-token";
-import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
+import {
+  registerWorkerTurnCancellation,
+  workerAppServerForUser,
+} from "@/runtime/worker-runtime-service";
 import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import type { JsonValue } from "@/runtime/transport";
 import type { AppServerEvent } from "@/runtime/transport";
@@ -298,12 +301,17 @@ export async function runWorkerCodexTurn(
   if (recoveredState && recoveredState.status !== "inProgress") return;
 
   let runtimeTurnId: string | null = null;
+  let remoteInterruptConfirmed = false;
+  const turnController = new AbortController();
+  const forwardExternalAbort = () => turnController.abort();
+  const turnSignal = turnController.signal;
   let finishTurn!: (status: { status: string | null; error: string | null }) => void;
   const turnFinished = new Promise<{ status: string | null; error: string | null }>((resolve) => {
     finishTurn = resolve;
   });
   const runtimeStartedAt = performance.now();
   let firstDeltaAt: number | null = null;
+  let stoppedEmitted = false;
 
   const registration = runtime.client.router.registerTurn(
     threadId,
@@ -411,6 +419,9 @@ export async function runWorkerCodexTurn(
             );
           } else if (status.status === "completed") {
             await emit({ type: "done" }, { envelope, key: "turn:done" });
+          } else if (status.status === "interrupted") {
+            await emit({ type: "stopped" }, { envelope, key: "turn:stopped" });
+            stoppedEmitted = true;
           }
           finishTurn(status);
         }
@@ -429,7 +440,7 @@ export async function runWorkerCodexTurn(
           approvalStore,
           approval.item,
           approval.requestType,
-          signal,
+          turnSignal,
         );
         await emit(
           { type: "approval", item: resolvedApproval(approval.item, decision) },
@@ -441,7 +452,23 @@ export async function runWorkerCodexTurn(
     },
   );
 
+  signal.addEventListener("abort", forwardExternalAbort, { once: true });
+  if (signal.aborted) turnController.abort();
+  const unregisterCancellation = registerWorkerTurnCancellation(
+    authenticatedUserId,
+    threadId,
+    chatRequest.assistantMessageId,
+    () => {
+      remoteInterruptConfirmed = true;
+      turnController.abort();
+    },
+  );
+
   const interrupt = () => {
+    if (remoteInterruptConfirmed) {
+      finishTurn({ status: "interrupted", error: null });
+      return;
+    }
     if (!runtimeTurnId) {
       finishTurn({ status: "failed", error: "El torn encara no tenia un identificador interrompible." });
       return;
@@ -458,8 +485,8 @@ export async function runWorkerCodexTurn(
         : "No s’ha pogut confirmar la interrupció.",
     }));
   };
-  signal.addEventListener("abort", interrupt, { once: true });
-  if (signal.aborted) interrupt();
+  turnSignal.addEventListener("abort", interrupt, { once: true });
+  if (turnSignal.aborted) interrupt();
   try {
     if (recoveredState?.status === "inProgress") {
       runtimeTurnId = recoveredState.id;
@@ -496,7 +523,10 @@ export async function runWorkerCodexTurn(
     }
     const completed = await turnFinished;
     if (completed.status === "failed") return;
-    if (completed.status === "interrupted" || signal.aborted) return;
+    if (completed.status === "interrupted" || turnSignal.aborted) {
+      if (!stoppedEmitted) await emit({ type: "stopped" });
+      return;
+    }
     const totalMs = Math.round(performance.now() - runtimeStartedAt);
     const firstTextMs = firstDeltaAt === null ? null : Math.round(firstDeltaAt - runtimeStartedAt);
     await upsertActivity({
@@ -514,7 +544,9 @@ export async function runWorkerCodexTurn(
       totalMs,
     });
   } finally {
-    signal.removeEventListener("abort", interrupt);
+    turnSignal.removeEventListener("abort", interrupt);
+    signal.removeEventListener("abort", forwardExternalAbort);
+    unregisterCancellation();
     registration.dispose();
   }
 }

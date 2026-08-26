@@ -115,6 +115,22 @@ export type ApprovalResolutionRequest = {
   decision: ApprovalDecision;
 };
 
+export type TurnControlRequest =
+  | {
+      action: "stop";
+      threadId: string;
+      assistantMessageId: string;
+      clientRequestId: string;
+    }
+  | {
+      action: "steer";
+      threadId: string;
+      assistantMessageId: string;
+      clientRequestId: string;
+      userMessageId: string;
+      message: string;
+    };
+
 export type ChatStreamEvent =
   | { type: "snapshot"; message: ChatMessage }
   | { type: "content"; value: string }
@@ -139,6 +155,11 @@ function hasOptionalString(value: Record<string, unknown>, key: string) {
 function isOpaqueRuntimeId(value: unknown) {
   return typeof value === "string" &&
     /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value);
+}
+
+function isUuidString(value: unknown) {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -259,6 +280,27 @@ export function isApprovalResolutionRequest(
       value.decision === "acceptForSession" ||
       value.decision === "decline")
   );
+}
+
+export function isTurnControlRequest(value: unknown): value is TurnControlRequest {
+  if (!isRecord(value)) return false;
+  const common =
+    isUuidString(value.threadId) &&
+    isUuidString(value.assistantMessageId) &&
+    isUuidString(value.clientRequestId);
+  if (!common) return false;
+  if (value.action === "stop") {
+    return Object.keys(value).length === 4;
+  }
+  if (value.action === "steer") {
+    return Object.keys(value).length === 6 &&
+      isUuidString(value.userMessageId) &&
+      typeof value.message === "string" &&
+      value.message.trim().length > 0 &&
+      value.message.length <= 32_000 &&
+      !value.message.includes("\0");
+  }
+  return false;
 }
 
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {

@@ -637,6 +637,37 @@ export function BrainApp({
     return succeeded;
   }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, memberPreferences?.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
+  const stopActiveTurn = useCallback(async () => {
+    const controller = abortRef.current;
+    const activeAssistant = activeThread
+      ? [...activeThread.messages].reverse().find((message) =>
+          message.role === "assistant" && message.status === "streaming")
+      : null;
+    if (initialWorkbench.persistence !== "filesystem" || !activeThread || !activeAssistant) {
+      controller?.abort();
+      return;
+    }
+    try {
+      const response = await fetch("/api/runtime/turns/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "stop",
+          threadId: activeThread.id,
+          assistantMessageId: activeAssistant.id,
+          clientRequestId: crypto.randomUUID(),
+        }),
+      });
+      if (!response.ok && response.status !== 409) {
+        setNotice("No s’ha pogut confirmar l’aturada amb el runtime.");
+      }
+    } catch {
+      setNotice("S’ha perdut la connexió mentre s’aturava el torn.");
+    } finally {
+      controller?.abort();
+    }
+  }, [activeThread, initialWorkbench.persistence]);
+
   const persistResultAction = useCallback(async (
     message: ChatMessage,
     action: "approved" | "pending" | "undo",
@@ -990,7 +1021,7 @@ export function BrainApp({
         onAttachmentsChange={setAttachments}
         onComposerNotice={setNotice}
         onSend={sendMessage}
-        onStop={() => abortRef.current?.abort()}
+        onStop={() => void stopActiveTurn()}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
