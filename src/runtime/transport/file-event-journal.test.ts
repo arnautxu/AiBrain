@@ -50,4 +50,24 @@ describe("file transport event journal", () => {
     await journal.append(event(1, "stable-id"));
     await expect(journal.append(event(2, "stable-id"))).rejects.toThrow("different sequence");
   });
+
+  it("tracks application delivery separately from transport receipt across instances", async () => {
+    const journal = await createJournal();
+    await journal.append(event(1));
+    await journal.append(event(2));
+    expect(await journal.readUndelivered(10)).toEqual([event(1), event(2)]);
+
+    await journal.markDelivered(event(1));
+    expect(await journal.readUndelivered(10)).toEqual([event(2)]);
+    await expect(journal.markDelivered(event(1))).resolves.toBeUndefined();
+    await expect(journal.markDelivered(event(3))).rejects.toThrow("expected sequence 2");
+
+    const restarted = new FileTransportEventJournal({
+      filePath: journal.filePath,
+      lockManager: new ResourceLockManager({ rootDirectory: path.join(path.dirname(path.dirname(journal.filePath)), "locks") }),
+    });
+    expect(await restarted.readUndelivered(10)).toEqual([event(2)]);
+    await restarted.markDelivered(event(2));
+    expect(await restarted.readUndelivered(10)).toEqual([]);
+  });
 });

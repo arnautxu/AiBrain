@@ -89,6 +89,8 @@ export interface AppServerTransport {
   connect(): Promise<void>;
   send(message: AppServerRequest): Promise<void>;
   events(): AsyncIterable<AppServerEvent>;
+  /** Mark an event processed by the scoped router, after durable projection. */
+  acknowledge?(event: AppServerEvent): Promise<void>;
   health(): Promise<TransportHealth>;
   close(): Promise<void>;
 }
@@ -97,11 +99,16 @@ export interface TransportEventJournal {
   loadCursor(): Promise<ReplayCursor | null>;
   /** Must durably append before resolving. Duplicate event ids return false. */
   append(event: AppServerEvent): Promise<boolean>;
+  /** Events received durably but not yet acknowledged by the application router. */
+  readUndelivered?(limit: number): Promise<AppServerEvent[]>;
+  markDelivered?(event: AppServerEvent): Promise<void>;
 }
 
 export class InMemoryTransportEventJournal implements TransportEventJournal {
   private cursor: ReplayCursor | null = null;
+  private deliveryCursor: ReplayCursor | null = null;
   private readonly eventIds = new Set<string>();
+  private readonly stored: AppServerEvent[] = [];
 
   async loadCursor() {
     return this.cursor ? { ...this.cursor } : null;
@@ -111,6 +118,24 @@ export class InMemoryTransportEventJournal implements TransportEventJournal {
     if (this.eventIds.has(event.eventId)) return false;
     this.eventIds.add(event.eventId);
     this.cursor = { eventId: event.eventId, sequence: event.sequence };
+    this.stored.push(event);
     return true;
+  }
+
+  async readUndelivered(limit: number) {
+    const after = this.deliveryCursor?.sequence ?? 0;
+    return this.stored.filter((event) => event.sequence > after).slice(0, limit);
+  }
+
+  async markDelivered(event: AppServerEvent) {
+    if (
+      this.deliveryCursor && this.deliveryCursor.eventId === event.eventId &&
+      this.deliveryCursor.sequence === event.sequence
+    ) return;
+    const expected = (this.deliveryCursor?.sequence ?? 0) + 1;
+    if (event.sequence !== expected || this.stored.find((item) => item.sequence === event.sequence)?.eventId !== event.eventId) {
+      throw new Error("Transport delivery acknowledgements must be contiguous and durable.");
+    }
+    this.deliveryCursor = { eventId: event.eventId, sequence: event.sequence };
   }
 }

@@ -175,6 +175,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   private endpoint: string;
   private cursor: ReplayCursor | null = null;
   private cursorLoaded = false;
+  private deliveryLoaded = false;
   private reconnectAttempt = 0;
   private pendingReconnectFloorMs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -255,6 +256,19 @@ export class WebSocketAppServerTransport implements AppServerTransport {
     return this.connectWaiter.promise;
   }
 
+  private async loadDurableDeliveryBacklog() {
+    if (!this.deliveryLoaded && this.journal.readUndelivered) {
+      const pending = await this.journal.readUndelivered(this.options.maxEventBuffer + 1);
+      if (pending.length > this.options.maxEventBuffer) {
+        throw new TransportBackpressureError("Durable event backlog exceeds the in-memory delivery buffer.");
+      }
+      for (const event of pending) {
+        if (!this.eventQueue.push(event)) throw new TransportBackpressureError("Transport event buffer is full.");
+      }
+    }
+    this.deliveryLoaded = true;
+  }
+
   async send(message: AppServerRequest) {
     validateAppServerRequest(message);
     if (this.closeRequested || this.state === "closed" || this.state === "closing") {
@@ -298,6 +312,10 @@ export class WebSocketAppServerTransport implements AppServerTransport {
 
   events() {
     return this.eventQueue;
+  }
+
+  async acknowledge(event: AppServerEvent) {
+    await this.journal.markDelivered?.(event);
   }
 
   async health(): Promise<TransportHealth> {
@@ -414,6 +432,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
       }
       if (this.readyTimer) clearTimeout(this.readyTimer);
       this.readyTimer = null;
+      await this.loadDurableDeliveryBacklog();
       this.state = "connected";
       this.reconnectAttempt = 0;
       this.pendingReconnectFloorMs = 0;
