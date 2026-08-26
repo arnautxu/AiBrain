@@ -37,13 +37,13 @@
 |---|---|---|
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
-| 2. Supabase Auth-only + sesión local | Pendiente | — |
+| 2. Supabase Auth-only + sesión local | En curso | `1c0386b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; falta retirar los stores legacy de producto Supabase y validar Supabase QA real |
 | 3. Stores file-backed resilientes | En curso | `38eeaaf`: schemas estrictos, atomic write/fsync, locks, journals e índices; falta migrar stores de producto |
-| 4. Provisionamiento idempotente + 20 usuarios | Pendiente | — |
-| 5. Worker registry + WebSocket + contratos | En curso | `fc29316`: transporte WS privado durable y validado contra Codex 0.149.1; registry/gateway en integración |
+| 4. Provisionamiento idempotente + 20 usuarios | En curso | `75316e1`: veinte roots/manifest de worker provisionados de forma idempotente y aislada; falta unir `user.json`, políticas y comando operativo |
+| 5. Worker registry + WebSocket + contratos | En curso | `fc29316`, `75316e1`: transporte WS privado durable, registry por usuario y contratos Codex 0.149.1; falta factory/gateway real |
 | 6. Proyectos y threads completos | Pendiente | — |
 | 7. Streaming, steering, stop, approvals, replay | Pendiente | — |
-| 8. Uploads, Office/PDF, previews y publicación | Pendiente | — |
+| 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`: validación segura, staging privado y preview real DOCX→PDF/PNG; falta API/publicador y matriz completa |
 | 9. Browser/Computer Use aislado | Pendiente | — |
 | 10. Contratos reales para UI | Pendiente | — |
 | 11. Compose y operación | Pendiente | — |
@@ -59,6 +59,9 @@
 - Los fixtures `example-lab-dev` y `northwind-qa` son sintéticos y prueban que la misma base arranca con empresa, dominio, marca, assets y rutas distintos.
 - Los eventos del transporte se aceptan únicamente tras persistencia JSONL y se reanudan con cursor durable; no existe journal in-memory implícito en la composición WebSocket.
 - Los payloads RPC se validan en runtime con los JSON Schemas generados por Codex 0.149.1, además del tipado estático.
+- Las credenciales efímeras usadas durante el cambio inicial se cifran en disco con AES-256-GCM; la cookie de sesión contiene 256 bits aleatorios y el store conserva solo su SHA-256.
+- `PERMISSIONS.md` v1 se lee server-side con precedencia determinista, protección de symlink/hardlink y fingerprint canónico; falta conectarlo a la creación de cada turn y a un journal de auditoría durable.
+- El launch context del worker no contiene `publishWriteRoot`; la factory concreta deberá imponer esos mounts a nivel proceso/contenedor.
 
 ## Riesgos y acciones externas pendientes
 
@@ -68,7 +71,7 @@
 
 ## Siguiente acción concreta
 
-Integrar Auth local opaca, `PermissionProvider` y el provisionamiento/registry aislado por empleado; después migrar los stores de producto a los primitives durables.
+Migrar proyectos, metadatos de threads y operaciones de turn desde los stores demo/Supabase al filesystem privado por usuario, usando los primitives durables ya validados.
 
 ## Últimas validaciones
 
@@ -83,3 +86,8 @@ Integrar Auth local opaca, `PermissionProvider` y el provisionamiento/registry a
 - Transporte: 13/13 pruebas de WebSocket/journal file-backed verdes, incluyendo auth, contrato, backpressure, reconnect, heartbeat, replay, ACK, dedupe, gaps e idempotencia.
 - `npm run test:contract`: 2/2 verdes contra la versión fijada.
 - `npm run lint`, `npm run typecheck` y `npm run build`: verdes tras los commits `38eeaaf` y `fc29316`.
+- Documentos: 13 pruebas, incluida conversión real DOCX→PDF/PNG con LibreOffice y Poppler; QPDF no está instalado todavía en este Mac.
+- Permisos: 27/27 tests específicos verdes; fingerprint estable y auditoría obligatoria sin contenido sensible.
+- Workers: 7/7 tests verdes en cinco ejecuciones consecutivas; veinte usuarios, aislamiento, backpressure, restart y rechazo de symlinks.
+- Auth: 10/10 tests focalizados verdes; tokens de challenge ausentes del fichero en claro y sesión local operativa con proveedor offline.
+- Suite global posterior: 122/122 tests en 22 ficheros; lint, typecheck y build Next.js verdes.
