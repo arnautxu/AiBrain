@@ -26,4 +26,10 @@ test("the authenticated employee shell has no critical or serious axe violations
   await expect(page.getByRole("heading", { name: /Preferencias de/ })).toBeVisible();
   await page.waitForTimeout(300);
   await assertNoBlockingViolations();
+  await page.keyboard.press("Escape");
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
+  await assertNoBlockingViolations();
 });

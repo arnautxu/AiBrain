@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import NextImage from "next/image";
 import {
+  ArrowDown,
   ArrowUp,
   CaretRight,
   CheckCircle,
@@ -28,6 +29,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
+import { MarkdownMessage } from "@/components/markdown-message";
 import type { ApprovalDecision, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindow, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
@@ -151,8 +153,8 @@ function AssistantMessage({
           <div className="skeleton-line h-3.5 w-[56%]" />
         </div>
       ) : message.content ? (
-        <div className="mt-4 max-w-[76ch] whitespace-pre-wrap text-[14px] leading-7 text-[#2c2b29] md:text-[14.5px]">
-          {message.content}
+        <div className="mt-4 max-w-[76ch] text-[14px] leading-7 text-[var(--text)] md:text-[14.5px]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
+          <MarkdownMessage>{message.content}</MarkdownMessage>
           {message.status === "streaming" ? <span className="stream-caret ml-0.5 inline-block h-4 w-[2px] bg-[var(--brain-accent)] align-middle" /> : null}
         </div>
       ) : null}
@@ -164,7 +166,7 @@ function AssistantMessage({
         </div>
       ) : null}
 
-      {message.status === "stopped" ? <p className="mt-3 text-[10px] text-[#6d6a65]">Torn aturat.</p> : null}
+      {message.status === "stopped" ? <p className="mt-3 text-[10px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
 
       {message.artifacts.length ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -179,7 +181,7 @@ function AssistantMessage({
 
       {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
 
-      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[#918d86]">Què vols fer ara?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica’m aquest resultat de manera més senzilla i destaca només el que he de saber.")}>Explica-ho més fàcil</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir d’aquest resultat, dona’m els següents passos concrets i ordenats.")}>Següents passos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versió final, neta i llesta per utilitzar d’aquest resultat.")}>Prepara la versió final</button></div></div> : null}
+      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[var(--text-muted)]">Què vols fer ara?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica’m aquest resultat de manera més senzilla i destaca només el que he de saber.")}>Explica-ho més fàcil</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir d’aquest resultat, dona’m els següents passos concrets i ordenats.")}>Següents passos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versió final, neta i llesta per utilitzar d’aquest resultat.")}>Prepara la versió final</button></div></div> : null}
 
       {hasDetails && canInspect ? (
         <button className="mt-3 flex items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[#67645f] transition hover:text-[#34322f]" onClick={onInspect}>
@@ -252,12 +254,30 @@ export function ChatWorkspace({
   showAdvancedControls,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const shouldStickToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
   useEffect(() => {
+    if (!shouldStickToBottomRef.current && !sending) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [thread?.messages]);
+  }, [sending, thread?.messages]);
+
+  useEffect(() => {
+    shouldStickToBottomRef.current = true;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [thread?.id]);
+
+  useEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+  }, [prompt]);
 
   const hasMessages = Boolean(thread?.messages.length);
   const guideVisible = guidedActionsOpen;
@@ -291,19 +311,19 @@ export function ChatWorkspace({
     );
   }, [composerEffort, onComposerEffortChange, selectedModelOption]);
 
-  const addImages = async (files: FileList | null) => {
-    if (!files) return;
+  const addImages = async (files: FileList | File[] | null) => {
+    if (!files || !canAttachImages) return;
     const available = Math.max(0, 3 - attachments.length);
     const selected = Array.from(files).slice(0, available);
-    if (files.length > available) onComposerNotice("Pots adjuntar un màxim de 3 imatges per torn.");
+    if (files.length > available) onComposerNotice("Puedes adjuntar un máximo de 3 imágenes por mensaje.");
     const next: ChatInputAttachment[] = [];
     for (const file of selected) {
       if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
-        onComposerNotice(`${file.name} no és una imatge compatible.`);
+        onComposerNotice(`${file.name} no es una imagen compatible.`);
         continue;
       }
       if (file.size > 2_000_000) {
-        onComposerNotice(`${file.name} supera el límit de 2 MB.`);
+        onComposerNotice(`${file.name} supera el límite de 2 MB.`);
         continue;
       }
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -313,13 +333,27 @@ export function ChatWorkspace({
         reader.readAsDataURL(file);
       }).catch(() => "");
       if (!dataUrl) {
-        onComposerNotice(`No s’ha pogut llegir ${file.name}.`);
+        onComposerNotice(`No se ha podido leer ${file.name}.`);
         continue;
       }
       next.push({ id: crypto.randomUUID(), name: file.name, mimeType: file.type, size: file.size, dataUrl });
     }
     if (next.length) onAttachmentsChange([...attachments, ...next]);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const updateScrollState = () => {
+    const element = scrollRef.current;
+    if (!element) return;
+    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+    shouldStickToBottomRef.current = atBottom;
+    setShowJumpToBottom(!atBottom);
+  };
+
+  const jumpToBottom = () => {
+    shouldStickToBottomRef.current = true;
+    setShowJumpToBottom(false);
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
 
   return (
@@ -363,7 +397,7 @@ export function ChatWorkspace({
         </div>
       </header>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+      <div ref={scrollRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto" onScroll={updateScrollState}>
         {!hydrated ? (
           <div className="mx-auto max-w-3xl px-6 py-14">
             <div className="mb-8 h-7 w-48 rounded-md bg-[#eeedea] motion-safe:animate-pulse" />
@@ -416,23 +450,34 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className="shrink-0 bg-[var(--surface)]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
+      <div className="relative shrink-0 bg-[var(--surface)]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
+        {showJumpToBottom ? <button type="button" className="absolute left-1/2 top-0 z-20 flex -translate-x-1/2 -translate-y-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] hover:text-[var(--text)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button> : null}
         <div className="mx-auto max-w-[820px]">
-          <div data-testid="composer" className="composer-shadow rounded-[calc(var(--brain-radius)+4px)] border border-[var(--border-strong)] bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)]">
+          {runtimeStatus.codex === "checking" ? <p className="mb-2 text-center text-[10px] text-[var(--text-muted)]" role="status">Conectando con el servicio…</p> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <p className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text-muted)]" role="status">El servicio no está disponible. Puedes revisar el historial y volver a intentarlo.</p> : null}
+          <div
+            data-testid="composer"
+            className={`composer-shadow relative rounded-[calc(var(--brain-radius)+4px)] border bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-[var(--border-strong)]"}`}
+            onDragEnter={(event) => { event.preventDefault(); if (canAttachImages && !sending) setDragActive(true); }}
+            onDragOver={(event) => { event.preventDefault(); }}
+            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
+            onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending) void addImages(event.dataTransfer.files); }}
+          >
+            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta las imágenes para adjuntarlas</div> : null}
             {attachments.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
-                  <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[#e3e1dc] bg-[#f7f6f3] px-2.5 py-1.5">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-white text-[#6f6b65]"><ImageIcon size={12} /></span>
-                    <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[#4b4844]">{attachment.name}</span><span className="block text-[8px] text-[#9a968f]">{Math.ceil(attachment.size / 1024)} KB</span></span>
-                    <button aria-label={`Treu ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[#918d86] hover:bg-white hover:text-[#413e39]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
+                  <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><ImageIcon size={12} /></span>
+                    <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[8px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
+                    <button type="button" aria-label={`Quitar ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>
                 ))}
               </div>
             ) : null}
             <textarea
-              aria-label="Missatge"
-              className="max-h-40 min-h-14 w-full resize-none bg-transparent px-2.5 py-2.5 text-[14px] leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+              ref={composerRef}
+              aria-label="Mensaje"
+              className="max-h-48 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[14px] leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
               placeholder={project ? `Escribe a ${preferences.assistantName}…` : "Crea un proyecto para empezar…"}
               rows={1}
               value={prompt}
@@ -441,7 +486,10 @@ export function ChatWorkspace({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  if (!sending && prompt.trim()) onSend();
+                  if (!sending && prompt.trim()) {
+                    shouldStickToBottomRef.current = true;
+                    onSend();
+                  }
                 }
               }}
             />
@@ -481,9 +529,9 @@ export function ChatWorkspace({
               <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
-                  <button aria-label="Aturar resposta" className="grid size-7 place-items-center rounded-lg bg-[#292725] text-white transition active:scale-95" onClick={onStop}><Stop size={11} weight="fill" /></button>
+                  <button aria-label="Detener respuesta" className="grid size-7 place-items-center rounded-lg bg-[var(--text)] text-[var(--surface)] transition active:scale-95" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
-                  <button aria-label="Enviar missatge" className="grid size-7 place-items-center rounded-lg bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30" disabled={!project || !prompt.trim()} onClick={() => onSend()}><ArrowUp size={13} weight="bold" /></button>
+                  <button aria-label="Enviar mensaje" className="grid size-7 place-items-center rounded-lg bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30" disabled={!project || !prompt.trim()} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
                 )}
               </div>
             </div>

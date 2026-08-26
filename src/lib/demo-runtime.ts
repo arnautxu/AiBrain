@@ -43,16 +43,33 @@ export function buildDemoActivities(showActivity: boolean): ActivityItem[] {
 export function buildDemoAnswer(request: ChatRequest): string {
   const topic = request.message.length > 120 ? `${request.message.slice(0, 117)}…` : request.message;
   const context = [
-    request.options.mode === "plan" ? "mode Pla" : request.options.mode === "ask" ? "mode Pregunta" : "mode Agent",
-    request.options.webSearch ? "web actiu" : null,
-    request.options.imageGeneration ? "generació d’imatges sol·licitada" : null,
-    request.options.skill ? `skill ${request.options.skill}` : null,
-    request.options.attachments.length ? `${request.options.attachments.length} imatge${request.options.attachments.length === 1 ? "" : "s"}` : null,
+    request.options.mode === "plan" ? "modo Plan" : request.options.mode === "ask" ? "modo Pregunta" : "modo Agente",
+    request.options.webSearch ? "búsqueda web activa" : null,
+    request.options.imageGeneration ? "imagen solicitada" : null,
+    request.options.skill ? "herramienta especializada" : null,
+    request.options.attachments.length ? `${request.options.attachments.length} imagen${request.options.attachments.length === 1 ? "" : "es"} adjunta${request.options.attachments.length === 1 ? "" : "s"}` : null,
   ].filter(Boolean).join(" · ");
-  const core = `He preparat una previsualització per a “${topic}” amb ${context}. La interfície consumeix el mateix contracte de torn que el runtime real de Codex. `;
-  if (request.preferences.tone === "direct") return `${core}Activa CHAT_RUNTIME=codex per executar la tasca al workspace.`;
-  if (request.preferences.tone === "detailed") return `${core}Això manté el producte desacoblat: podem canviar marca, disposició, finestres, autenticació i polítiques sense tocar el protocol de Codex App Server.`;
-  return `${core}El següent pas és executar-la amb Codex al workspace configurat.`;
+  const detail = request.preferences.tone === "direct"
+    ? "La propuesta está lista para revisar."
+    : request.preferences.tone === "detailed"
+      ? "He separado el objetivo, el contexto y la revisión final para que el resultado sea fácil de comprobar antes de utilizarlo."
+      : "Puedes revisar el resultado y pedir cambios en esta misma conversación.";
+  return [
+    "## Vista previa",
+    "",
+    `He preparado una respuesta sintética para **“${topic}”** con ${context}.`,
+    "",
+    "### Resumen",
+    "",
+    "- Objetivo identificado.",
+    "- Información organizada para revisión.",
+    `- ${detail}`,
+    "",
+    "| Estado | Resultado |",
+    "| --- | --- |",
+    "| Preparación | Completada |",
+    "| Revisión | Pendiente |",
+  ].join("\n");
 }
 
 export function buildDemoDiff(): string {

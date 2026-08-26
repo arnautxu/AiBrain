@@ -187,7 +187,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       {message.diff && showDiff ? (
         <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[#dde3dd] bg-[#f5f8f5] px-3.5 py-3 text-[#516456]">
           <GitDiff size={14} className="mt-0.5 shrink-0" />
-          <div><p className="text-[10px] font-semibold">Canvis preparats</p><p className="mt-1 text-[9px] leading-4 text-[#748078]">Pots revisar què ha canviat des del botó “Obre Review”.</p></div>
+          <div><p className="text-[10px] font-semibold">Canvis preparats</p><p className="mt-1 text-[9px] leading-4 text-[#5f6d63]">Pots revisar què ha canviat des del botó “Obre Review”.</p></div>
         </section>
       ) : null}
     </div>
