@@ -29,7 +29,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
-import type { ApprovalDecision, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
+import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindow, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
@@ -73,7 +73,7 @@ type ChatWorkspaceProps = {
   onInspectMessage: (messageId: string) => void;
   onResolveApproval: (
     messageId: string,
-    approvalId: string,
+    approval: ApprovalItem,
     decision: ApprovalDecision,
   ) => Promise<void>;
   onCreateVersion: (message: ChatMessage) => void;
@@ -123,7 +123,7 @@ function AssistantMessage({
   assistantName: string;
   showActivity: boolean;
   onInspect: () => void;
-  onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
+  onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
   canInspect: boolean;
   showInlineDiff: boolean;
   isLatest: boolean;
@@ -390,7 +390,7 @@ export function ChatWorkspace({
                   assistantName={preferences.assistantName}
                   showActivity={preferences.showActivityPanel}
                   onInspect={() => onInspectMessage(message.id)}
-                  onResolveApproval={(approvalId, decision) => void onResolveApproval(message.id, approvalId, decision)}
+                  onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
                   canInspect={canInspect}
                   showInlineDiff={activeSideWindow !== "inspector"}
                   isLatest={message.id === latestAssistantId}

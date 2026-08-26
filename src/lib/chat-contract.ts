@@ -67,6 +67,9 @@ export type TurnOptions = {
 
 export type ApprovalItem = {
   id: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
   kind: "command" | "file";
   title: string;
   detail: string;
@@ -106,6 +109,9 @@ export type ChatRequest = {
 
 export type ApprovalResolutionRequest = {
   approvalId: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
   decision: ApprovalDecision;
 };
 
@@ -125,6 +131,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasOptionalString(value: Record<string, unknown>, key: string) {
   return !(key in value) || value[key] === undefined || typeof value[key] === "string";
+}
+
+function isOpaqueRuntimeId(value: unknown) {
+  return typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value);
 }
 
 export function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -216,6 +227,10 @@ export function isApprovalItem(value: unknown): value is ApprovalItem {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
+    isOpaqueRuntimeId(value.id) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
     (value.kind === "command" || value.kind === "file") &&
     typeof value.title === "string" &&
     typeof value.detail === "string" &&
@@ -233,7 +248,10 @@ export function isApprovalResolutionRequest(
 ): value is ApprovalResolutionRequest {
   if (!isRecord(value)) return false;
   return (
-    typeof value.approvalId === "string" &&
+    isOpaqueRuntimeId(value.approvalId) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
     (value.decision === "accept" ||
       value.decision === "acceptForSession" ||
       value.decision === "decline")

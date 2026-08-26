@@ -27,6 +27,7 @@ import {
   applyChatStreamEvent,
   isChatStreamEvent,
   type ApprovalDecision,
+  type ApprovalItem,
   type ChatMessage,
   type ChatInputAttachment,
   type ComposerMode,
@@ -668,14 +669,20 @@ export function BrainApp({
 
   const resolveApproval = useCallback(async (
     messageId: string,
-    approvalId: string,
+    selectedApproval: ApprovalItem,
     decision: ApprovalDecision,
   ) => {
     if (!activeThreadId) return;
     const response = await fetch("/api/runtime/approvals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approvalId, decision }),
+      body: JSON.stringify({
+        approvalId: selectedApproval.id,
+        threadId: selectedApproval.threadId,
+        turnId: selectedApproval.turnId,
+        itemId: selectedApproval.itemId,
+        decision,
+      }),
     });
     if (!response.ok) {
       setNotice("Aquesta aprovació ja no està pendent.");
@@ -691,7 +698,7 @@ export function BrainApp({
       (message) => ({
         ...message,
         approvals: message.approvals.map((approval) =>
-          approval.id === approvalId ? { ...approval, status } : approval),
+          approval.id === selectedApproval.id ? { ...approval, status } : approval),
       }),
     ));
   }, [activeThreadId]);

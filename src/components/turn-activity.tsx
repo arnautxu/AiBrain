@@ -26,7 +26,7 @@ type TurnActivityProps = {
   message: ChatMessage;
   compact?: boolean;
   showDiff?: boolean;
-  onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
+  onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
 };
 
 function ActivityIcon({ item }: { item: ActivityItem }) {
@@ -181,7 +181,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval.id, decision)} />
+        <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       {message.diff && showDiff ? (
