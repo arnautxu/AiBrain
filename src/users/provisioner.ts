@@ -7,7 +7,7 @@ import { parsePermissionMarkdown } from "@/permissions/markdown-parser";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile, atomicWriteJson } from "@/storage/atomic-file";
 import { ResourceLockManager } from "@/storage/resource-lock";
-import { WorkerProvisioner } from "@/runtime/workers";
+import { WorkerProvisioner } from "@/runtime/workers/provisioner";
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
