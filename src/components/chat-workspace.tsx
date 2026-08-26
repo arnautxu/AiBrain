@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import NextImage from "next/image";
 import {
   ArrowDown,
   ArrowUp,
@@ -35,6 +34,7 @@ import type { BrainManifest, BrainPreferences, BrainWindow, BrainWindowId } from
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
+import { TurnArtifactCard } from "@/components/turn-artifact-card";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -179,10 +179,7 @@ function AssistantMessage({
       {message.artifacts.length ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {message.artifacts.map((artifact) => (
-            <figure key={artifact.id} className="overflow-hidden rounded-[calc(var(--brain-radius)+2px)] border border-[#dedcd7] bg-[#f4f3f0]">
-              <a href={artifact.url} target="_blank" rel="noreferrer"><NextImage unoptimized width={720} height={720} src={artifact.url} alt={artifact.prompt ?? artifact.name} className="aspect-square w-full object-cover" /></a>
-              <figcaption className="flex items-center gap-2 px-3 py-2 text-[9px] text-[#716d67]"><ImagesSquare size={12} /><span className="min-w-0 flex-1 truncate">{artifact.prompt ?? artifact.name}</span><a href={artifact.url} download={artifact.name} className="font-medium text-[#403d39] hover:underline">Descargar</a></figcaption>
-            </figure>
+            <TurnArtifactCard key={artifact.id} artifact={artifact} />
           ))}
         </div>
       ) : null}

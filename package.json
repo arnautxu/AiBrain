@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:unit": "vitest run tests/unit src",
     "test:component": "vitest run tests/component",
-    "test:adapter": "vitest run tests/adapter",
+    "test:adapter": "vitest run tests/unit/app-server-ui-adapter.test.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --project=chromium-desktop",
     "test:visual": "playwright test --project=visual-desktop --project=visual-mobile",

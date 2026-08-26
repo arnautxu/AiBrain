@@ -47,13 +47,47 @@ export type ChatInputAttachment = ChatAttachment & {
   dataUrl: string;
 };
 
-export type GeneratedArtifact = {
+export type ImageArtifact = {
   id: string;
   type: "image";
   name: string;
   url: string;
   prompt: string | null;
 };
+
+export type DocumentKind = "docx" | "xlsx" | "pptx" | "pdf" | "text";
+export type PublicationStatus = "awaiting_confirmation" | "publishing" | "published" | "declined" | "conflict";
+
+export type DocumentArtifact = {
+  id: string;
+  type: "document";
+  name: string;
+  url: string;
+  kind: DocumentKind;
+  mimeType: string;
+  size: number;
+  status: "processing" | "ready" | "error";
+  pages: number | null;
+  previewUrl: string | null;
+  publicationStatus: PublicationStatus | null;
+  publicationError: string | null;
+  targetLabel: string | null;
+  error: string | null;
+};
+
+export type BrowserArtifact = {
+  id: string;
+  type: "browser";
+  name: string;
+  status: "starting" | "ready" | "active" | "reconnecting" | "disconnected" | "closed" | "error";
+  control: "agent" | "employee" | "awaiting_approval" | null;
+  viewerUrl: string | null;
+  captureUrl: string | null;
+  downloadUrl: string | null;
+  error: string | null;
+};
+
+export type GeneratedArtifact = ImageArtifact | DocumentArtifact | BrowserArtifact;
 
 export type TurnOptions = {
   mode: ComposerMode;
@@ -171,11 +205,34 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
 }
 
 export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact {
-  if (!isRecord(value)) return false;
-  return typeof value.id === "string" && /^[0-9a-f-]{36}$/i.test(value.id) &&
-    value.type === "image" && typeof value.name === "string" && value.name.length <= 120 &&
-    typeof value.url === "string" && value.url.startsWith("/api/projects/") &&
-    (value.prompt === null || typeof value.prompt === "string");
+  if (!isRecord(value) || typeof value.id !== "string" || !/^[0-9a-f-]{36}$/i.test(value.id) ||
+    typeof value.name !== "string" || !value.name.trim() || value.name.length > 120) return false;
+  if (value.type === "image") {
+    return typeof value.url === "string" && value.url.startsWith("/api/projects/") &&
+      (value.prompt === null || typeof value.prompt === "string");
+  }
+  if (value.type === "document") {
+    return typeof value.url === "string" && value.url.startsWith("/api/projects/") &&
+      (value.kind === "docx" || value.kind === "xlsx" || value.kind === "pptx" || value.kind === "pdf" || value.kind === "text") &&
+      typeof value.mimeType === "string" && value.mimeType.length <= 180 &&
+      typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size > 0 && value.size <= 50 * 1024 * 1024 &&
+      (value.status === "processing" || value.status === "ready" || value.status === "error") &&
+      (value.pages === null || (typeof value.pages === "number" && Number.isSafeInteger(value.pages) && value.pages >= 1 && value.pages <= 500)) &&
+      (value.previewUrl === null || (typeof value.previewUrl === "string" && value.previewUrl.startsWith("/api/projects/"))) &&
+      (value.publicationStatus === null || value.publicationStatus === "awaiting_confirmation" || value.publicationStatus === "publishing" || value.publicationStatus === "published" || value.publicationStatus === "declined" || value.publicationStatus === "conflict") &&
+      (value.publicationError === null || (typeof value.publicationError === "string" && value.publicationError.length <= 500)) &&
+      (value.targetLabel === null || (typeof value.targetLabel === "string" && value.targetLabel.length <= 160)) &&
+      (value.error === null || (typeof value.error === "string" && value.error.length <= 500));
+  }
+  if (value.type === "browser") {
+    return (value.status === "starting" || value.status === "ready" || value.status === "active" || value.status === "reconnecting" || value.status === "disconnected" || value.status === "closed" || value.status === "error") &&
+      (value.control === null || value.control === "agent" || value.control === "employee" || value.control === "awaiting_approval") &&
+      (value.viewerUrl === null || (typeof value.viewerUrl === "string" && value.viewerUrl.startsWith("/api/browser/sessions/"))) &&
+      (value.captureUrl === null || (typeof value.captureUrl === "string" && value.captureUrl.startsWith("/api/browser/sessions/"))) &&
+      (value.downloadUrl === null || (typeof value.downloadUrl === "string" && value.downloadUrl.startsWith("/api/browser/sessions/"))) &&
+      (value.error === null || (typeof value.error === "string" && value.error.length <= 500));
+  }
+  return false;
 }
 
 export function isActivityItem(value: unknown): value is ActivityItem {
@@ -302,7 +359,13 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
     return { ...message, approvals };
   }
   if (event.type === "diff") return { ...message, diff: event.value };
-  if (event.type === "artifact") return { ...message, artifacts: [...message.artifacts, event.item] };
+  if (event.type === "artifact") {
+    const index = message.artifacts.findIndex((artifact) => artifact.id === event.item.id);
+    if (index === -1) return { ...message, artifacts: [...message.artifacts, event.item] };
+    const artifacts = [...message.artifacts];
+    artifacts[index] = event.item;
+    return { ...message, artifacts };
+  }
   if (event.type === "done") return { ...message, status: "complete" };
   if (event.type === "error") {
     return { ...message, status: "error", content: message.content || event.message };
