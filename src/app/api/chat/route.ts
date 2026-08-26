@@ -14,10 +14,13 @@ import {
   isChatRequest,
 } from "@/lib/demo-runtime";
 import { readRuntimeConfig } from "@/runtime/config";
+import { loadInstallationConfig } from "@/config/installation";
 import {
   runCodexTurn,
   type CodexTurnEvent,
 } from "@/runtime/codex-app-server";
+import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
+import type { ResolvedPermissions } from "@/permissions";
 import { readThreadToken } from "@/runtime/thread-token";
 import { WorkbenchNotFoundError } from "@/workbench/errors";
 import { workbenchErrorResponse } from "@/workbench/http";
@@ -117,6 +120,28 @@ export async function POST(request: Request) {
     );
   }
 
+  let turnPermissions: ResolvedPermissions | null = null;
+  if (config.mode === "codex") {
+    try {
+      const installation = await loadInstallationConfig();
+      turnPermissions = await resolveServerTurnPermissions(installation, {
+        installationId: session.tenant.id,
+        userId: session.user.id,
+        projectId: context.projectId,
+        turnId: body.assistantMessageId,
+      });
+    } catch (error) {
+      const code = error && typeof error === "object" && "code" in error
+        ? String(error.code)
+        : "PERMISSION_PREFLIGHT_FAILED";
+      console.error("AiBrain permission preflight rejected", { code });
+      return NextResponse.json(
+        { error: "No s’ha pogut verificar la política d’aquest torn." },
+        { status: 503 },
+      );
+    }
+  }
+
   const startedAt = new Date();
   const userMessage = message(
     body.userMessageId,
@@ -158,11 +183,16 @@ export async function POST(request: Request) {
 
       try {
         if (config.mode === "codex") {
+          if (!turnPermissions) {
+            throw new Error("La política del torn no està disponible.");
+          }
           await runCodexTurn(
             body,
             session.tenant.id,
+            session.user.id,
             runtimeThreadId,
             config,
+            turnPermissions,
             request.signal,
             emitCodex,
           );

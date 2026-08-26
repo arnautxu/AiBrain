@@ -134,7 +134,15 @@ describe("MarkdownPermissionProvider", () => {
 
   function provider(overrides: Partial<MarkdownPermissionProviderOptions> = {}) {
     return new MarkdownPermissionProvider({
-      installations: [{ installationId: INSTALLATION_ID, permissionsRoot }],
+      installations: [{
+        installationId: INSTALLATION_ID,
+        roots: {
+          installationPolicyRoot: permissionsRoot,
+          rolesRoot: path.join(permissionsRoot, "roles"),
+          projectsRoot: path.join(permissionsRoot, "projects"),
+          usersRoot: path.join(permissionsRoot, "users"),
+        },
+      }],
       auditSink,
       now: () => Date.UTC(2026, 7, 27, 8, 0, 0),
       ...overrides,
@@ -286,8 +294,24 @@ describe("MarkdownPermissionProvider", () => {
     });
     const permissions = provider({
       installations: [
-        { installationId: INSTALLATION_ID, permissionsRoot },
-        { installationId: SECOND_INSTALLATION_ID, permissionsRoot: secondPermissionsRoot },
+        {
+          installationId: INSTALLATION_ID,
+          roots: {
+            installationPolicyRoot: permissionsRoot,
+            rolesRoot: path.join(permissionsRoot, "roles"),
+            projectsRoot: path.join(permissionsRoot, "projects"),
+            usersRoot: path.join(permissionsRoot, "users"),
+          },
+        },
+        {
+          installationId: SECOND_INSTALLATION_ID,
+          roots: {
+            installationPolicyRoot: secondPermissionsRoot,
+            rolesRoot: path.join(secondPermissionsRoot, "roles"),
+            projectsRoot: path.join(secondPermissionsRoot, "projects"),
+            usersRoot: path.join(secondPermissionsRoot, "users"),
+          },
+        },
       ],
     });
 
@@ -456,10 +480,16 @@ describe("MarkdownPermissionProvider", () => {
   });
 
   it("rejects duplicate installation mappings at construction", () => {
+    const rootsFor = (root: string) => ({
+      installationPolicyRoot: root,
+      rolesRoot: path.join(root, "roles"),
+      projectsRoot: path.join(root, "projects"),
+      usersRoot: path.join(root, "users"),
+    });
     expect(() => provider({
       installations: [
-        { installationId: INSTALLATION_ID, permissionsRoot },
-        { installationId: INSTALLATION_ID, permissionsRoot: secondPermissionsRoot },
+        { installationId: INSTALLATION_ID, roots: rootsFor(permissionsRoot) },
+        { installationId: INSTALLATION_ID, roots: rootsFor(secondPermissionsRoot) },
       ],
     })).toThrowError(expect.objectContaining({ code: "PERMISSION_AMBIGUOUS_INSTALLATION" }));
   });

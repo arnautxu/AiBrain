@@ -22,17 +22,16 @@ interface PermissionProvider {
 
 El caller debe derivar todos esos valores de la sesión autenticada y del thread/turn resuelto en servidor. No debe copiar valores enviados por el navegador sin autorización previa.
 
-Cada instalación se registra explícitamente con un `permissionsRoot` absoluto. No existe fallback a otra instalación ni búsqueda global.
+Cada instalación registra explícitamente raíces absolutas server-side para la política de instalación, usuarios, proyectos y roles. `resolveServerTurnPermissions` las deriva exclusivamente de `InstallationConfig`: la política de instalación vive en `paths.companyContextRoot`, las políticas de usuario en `paths.usersRoot` y los scopes opcionales de proyecto/rol en `paths.dataRoot/permission-scopes`. No existe fallback a otra instalación, búsqueda global ni dependencia del nombre físico de la carpeta de usuarios.
 
 ## Layout
 
 ```text
-<permissionsRoot>/
-  PERMISSIONS.md
-  roles/<role-id>/PERMISSIONS.md
-  projects/<project-uuid>/PERMISSIONS.md
-  users/<user-uuid>/PERMISSIONS.md
-  users/<user-uuid>/projects/<project-uuid>/PERMISSIONS.md
+<companyContextRoot>/PERMISSIONS.md
+<dataRoot>/permission-scopes/roles/<role-id>/PERMISSIONS.md
+<dataRoot>/permission-scopes/projects/<project-uuid>/PERMISSIONS.md
+<usersRoot>/<user-uuid>/PERMISSIONS.md
+<usersRoot>/<user-uuid>/projects/<project-uuid>/PERMISSIONS.md
 ```
 
 Las políticas de instalación y usuario son obligatorias. Rol, proyecto y usuario+proyecto son opcionales y solo se buscan cuando el contexto server-side incluye ese sujeto.
@@ -115,6 +114,32 @@ El provider exige un `PermissionResolutionAuditSink` y falla cerrado si no puede
 
 No incluyen instrucciones, contenido Markdown, paths absolutos, documentos ni secretos.
 
+El sink productivo es `FilePermissionResolutionAuditSink`. Escribe con `FileJournal`, lock y `fsync` en el espacio privado del trabajador:
+
+```text
+<usersRoot>/<user-uuid>/audit/permissions/
+  permission-resolutions.jsonl
+  locks/
+```
+
+La jerarquía del usuario debe existir, ser real (sin symlinks) y tener permisos privados. Si falta el journal, se crea; si la ruta es insegura, el disco no está disponible o el evento no corresponde exactamente a instalación/usuario del sink, la resolución falla y el turn no puede ejecutarse.
+
+## Integración por turn
+
+`POST /api/chat` obtiene instalación y usuario de la sesión local autenticada y proyecto/thread del store server-side. Para el runtime real `codex`:
+
+1. carga la `InstallationConfig` del servidor y verifica que coincide con la instalación autenticada;
+2. usa el UUID del mensaje assistant como identificador lógico del turn;
+3. resuelve las políticas con `roleId: null` —V1 no usa roles como autorización—;
+4. persiste el evento de auditoría con fingerprint y `policyVersion` de cada fuente;
+5. solo entonces persiste/inicia el turn y llama al App Server;
+6. enlaza instalación, usuario, proyecto y turn de la resolución con el request antes de enviar nada;
+7. añade `developerInstructions` efectivas, incluido el fingerprint, a `thread/start` o `thread/resume`.
+
+Un fallo de policy o auditoría devuelve un estado degradado recuperable y no crea un fallback de producción. El modo demo identificado no ejecuta Codex y no simula una resolución de permisos real.
+
+La ruta activa de chat todavía usa el adapter App Server legacy por `stdio` y su pool se identifica por instalación/workspace, no por usuario. La preflight de permisos sí queda ligada al usuario y turn, pero el aislamiento definitivo del proceso, `CODEX_HOME` y transporte WebSocket requiere reemplazar esta ruta por `WorkerRuntimeRegistry` + `AppServerTransport`; no debe considerarse resuelto por esta integración.
+
 ## Seguridad de filesystem
 
 La implementación:
@@ -145,8 +170,10 @@ No deben guardarse variantes `PERMISSIONS.*` junto al fichero activo: se rechaza
 
 ```bash
 npx vitest run src/permissions
+npx vitest run src/runtime/permission-turn.test.ts
 npx eslint src/permissions
+npx eslint src/runtime/permission-audit-sink.ts src/runtime/permission-turn.ts
 npm run typecheck
 ```
 
-Los tests usan únicamente instalaciones, usuarios, proyectos y políticas sintéticos dentro de directorios temporales. Cubren precedencia completa, fingerprint, aislamiento entre instalaciones, auditoría sin contenido, traversal, symlinks, formatos desconocidos/ambiguos, metadata incoherente, fichero escribible, ausencia, tamaño, UTF-8 y fallo del audit sink.
+Los tests usan únicamente instalaciones, usuarios, proyectos y políticas sintéticos dentro de directorios temporales. Cubren precedencia completa, fingerprint, aislamiento entre instalaciones, `usersRoot` con nombre white-label arbitrario, auditoría durable antes de ejecutar y sin contenido/paths, `policyVersion` por fuente, cambio de hash al cambiar policy, binding instalación+usuario+proyecto+turn, traversal, symlinks, formatos desconocidos/ambiguos, metadata incoherente, fichero escribible, ausencia, tamaño, UTF-8 y fallo cerrado del audit sink.
