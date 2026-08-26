@@ -3,21 +3,24 @@
 import { useState } from "react";
 import {
   ArrowRight,
-  Code,
   EnvelopeSimple,
   LockKey,
   PaperPlaneTilt,
   UsersThree,
 } from "@phosphor-icons/react";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { AuthMode, DemoAccount } from "@/auth/types";
+import type { PublicInstallationBranding } from "@/config/installation-branding";
 
 export function LoginForm({
   accounts,
+  branding,
   mode,
   remotePreview,
 }: {
   accounts: DemoAccount[];
+  branding: PublicInstallationBranding;
   mode: AuthMode;
   remotePreview: boolean;
 }) {
@@ -83,11 +86,20 @@ export function LoginForm({
         <div className="flex min-h-[320px] flex-col justify-between bg-[#20221f] p-7 text-white md:min-h-[600px] md:p-9">
           <div>
             <div className="flex items-center gap-2.5">
-              <span className="grid size-8 place-items-center rounded-[10px] bg-white text-[#20221f]"><Code size={17} weight="bold" /></span>
-              <span className="text-[13px] font-semibold tracking-[-.02em]">AiBrain</span>
+              <span className="grid size-8 place-items-center overflow-hidden rounded-[10px] bg-white text-[#20221f]">
+                <Image
+                  src={branding.logoPath}
+                  alt=""
+                  width={32}
+                  height={32}
+                  unoptimized
+                  className="size-full object-cover"
+                />
+              </span>
+              <span className="text-[13px] font-semibold tracking-[-.02em]">{branding.productName}</span>
             </div>
             <p className="mt-16 max-w-[13ch] text-[34px] font-semibold leading-[1.02] tracking-[-.055em] md:mt-24 md:text-[46px]">
-              Un sol motor. Cada producte, propi.
+              El Company Brain privat de {branding.companyName}.
             </p>
           </div>
           <div className="mt-14 border-t border-white/12 pt-5">
@@ -109,7 +121,7 @@ export function LoginForm({
         <div className="flex flex-col justify-center p-6 sm:p-10 md:p-12">
           <div className="mb-8">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[#dfdeda] bg-white px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.11em] text-[#76736d]">
-              <span className={`size-1.5 rounded-full ${isSupabase ? "bg-[#4f9563]" : "bg-[#d39b3f]"}`} />
+              <span className="size-1.5 rounded-full" style={{ backgroundColor: isSupabase ? branding.accentColor : "#d39b3f" }} />
               {isDemo ? remotePreview ? "Preview UX remota" : "Entorn demo local" : isSupabase ? "Accés privat" : "Configuració pendent"}
             </span>
             <h1 className="mt-5 text-[29px] font-semibold tracking-[-.045em] text-[#292825]">
@@ -163,7 +175,7 @@ export function LoginForm({
                   />
                 </span>
               </label>
-              <button disabled={loading !== null} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#222320] px-4 py-3 text-[10px] font-semibold text-white disabled:opacity-55">
+              <button disabled={loading !== null} style={{ backgroundColor: branding.accentColor }} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-[10px] font-semibold text-white disabled:opacity-55">
                 <PaperPlaneTilt size={14} /> {loading ? "Enviant…" : "Envia’m l’enllaç"}
               </button>
             </form>

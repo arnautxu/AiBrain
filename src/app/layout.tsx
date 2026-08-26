@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { loadInstallationConfig } from "@/config/installation";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,13 +13,22 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export const metadata: Metadata = {
-  title: {
-    default: "AiBrain Workbench",
-    template: "%s · AiBrain",
-  },
-  description: "Client propi i personalitzable construït sobre Codex App Server.",
-};
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const installation = await loadInstallationConfig();
+  return {
+    metadataBase: new URL(installation.publicUrl),
+    title: {
+      default: `${installation.branding.productName} · ${installation.companyName}`,
+      template: `%s · ${installation.branding.productName}`,
+    },
+    description: `Company Brain privado de ${installation.companyName}.`,
+    icons: {
+      icon: installation.branding.faviconPath,
+    },
+  };
+}
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (

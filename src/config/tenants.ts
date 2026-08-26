@@ -16,7 +16,7 @@ export type TenantDefinition = {
 const tenants: Record<string, TenantDefinition> = {
   studio: {
     id: "studio",
-    name: "Arnau Studio",
+    name: "Example Laboratory",
     manifest: baseBrainManifest,
   },
   operations: {
@@ -28,9 +28,9 @@ const tenants: Record<string, TenantDefinition> = {
 
 const demoAccounts: DemoAccount[] = [
   {
-    id: "arnau-owner",
-    name: "Arnau",
-    email: "arnau@studio.demo",
+    id: "example-owner",
+    name: "Alex Example",
+    email: "alex@example.invalid",
     role: "owner",
     tenantId: "studio",
     tenantName: tenants.studio.name,
