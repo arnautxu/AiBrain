@@ -6,7 +6,6 @@ import {
   ChatCircleDots,
   Command,
   Folder,
-  HardDrives,
   ListChecks,
   MagnifyingGlass,
   Plus,
@@ -16,7 +15,7 @@ import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 
 type PaletteItem = {
   id: string;
-  group: "Accions" | "Projectes" | "Fils";
+  group: "Acciones" | "Proyectos" | "Conversaciones";
   label: string;
   detail: string;
   icon: ReactNode;
@@ -32,14 +31,12 @@ type CommandPaletteProps = {
   threads: WorkbenchThread[];
   activeProjectId: string | null;
   inspectorEnabled: boolean;
-  runtimeEnabled: boolean;
   onClose: () => void;
   onNewThread: () => void;
   onNewProject: () => void;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (threadId: string) => void;
   onOpenInspector: () => void;
-  onOpenRuntime: () => void;
   onOpenCustomization: () => void;
 };
 
@@ -57,14 +54,12 @@ export function CommandPalette({
   threads,
   activeProjectId,
   inspectorEnabled,
-  runtimeEnabled,
   onClose,
   onNewThread,
   onNewProject,
   onSelectProject,
   onSelectThread,
   onOpenInspector,
-  onOpenRuntime,
   onOpenCustomization,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
@@ -77,9 +72,9 @@ export function CommandPalette({
     const actions: PaletteItem[] = [
       ...(activeProjectId ? [{
         id: "action:new-thread",
-        group: "Accions" as const,
-        label: "Nou fil",
-        detail: projectNames.get(activeProjectId) ?? "Projecte actiu",
+        group: "Acciones" as const,
+        label: "Nueva conversación",
+        detail: projectNames.get(activeProjectId) ?? "Proyecto activo",
         icon: <Plus size={16} />,
         keywords: "nou fil conversa thread",
         shortcut: "⌘N",
@@ -87,9 +82,9 @@ export function CommandPalette({
       }] : []),
       {
         id: "action:new-project",
-        group: "Accions",
-        label: "Nou projecte",
-        detail: "Crea un espai de treball",
+        group: "Acciones",
+        label: "Nuevo proyecto",
+        detail: "Organiza conversaciones y resultados",
         icon: <Folder size={16} />,
         keywords: "nou projecte carpeta workspace",
         shortcut: "⌘⇧P",
@@ -97,27 +92,18 @@ export function CommandPalette({
       },
       ...(inspectorEnabled ? [{
         id: "action:inspector",
-        group: "Accions" as const,
-        label: "Obre Review",
-        detail: "Canvis, activitat i aprovacions del torn",
+        group: "Acciones" as const,
+        label: "Abrir Review",
+        detail: "Progreso, decisiones y cambios del resultado",
         icon: <ListChecks size={16} />,
         keywords: "review inspector canvis diff activitat aprovacions",
         run: onOpenInspector,
       }] : []),
-      ...(runtimeEnabled ? [{
-        id: "action:runtime",
-        group: "Accions" as const,
-        label: "Obre Runtime",
-        detail: "Model, workspace i política d’execució",
-        icon: <HardDrives size={16} />,
-        keywords: "runtime model workspace sandbox entorn",
-        run: onOpenRuntime,
-      }] : []),
       {
         id: "action:customize",
-        group: "Accions",
-        label: "Personalitza el workbench",
-        detail: "Identitat, densitat i superfícies",
+        group: "Acciones",
+        label: "Abrir preferencias",
+        detail: "Respuesta, densidad y conversación",
         icon: <SlidersHorizontal size={16} />,
         keywords: "personalitza configuracio tema densitat interfície",
         run: onOpenCustomization,
@@ -125,9 +111,9 @@ export function CommandPalette({
     ];
     const projectItems: PaletteItem[] = activeProjects.map((project) => ({
       id: `project:${project.id}`,
-      group: "Projectes",
+      group: "Proyectos",
       label: project.name,
-      detail: project.workspace.label,
+      detail: "Proyecto",
       icon: <Folder size={16} weight={project.id === activeProjectId ? "fill" : "regular"} />,
       keywords: `projecte ${project.name} ${project.workspace.label}`,
       run: () => onSelectProject(project.id),
@@ -136,9 +122,9 @@ export function CommandPalette({
       .filter((thread) => thread.status === "active" && projectNames.has(thread.projectId))
       .map((thread) => ({
         id: `thread:${thread.id}`,
-        group: "Fils",
+        group: "Conversaciones",
         label: thread.title,
-        detail: projectNames.get(thread.projectId) ?? "Projecte",
+        detail: projectNames.get(thread.projectId) ?? "Proyecto",
         icon: <ChatCircleDots size={16} />,
         keywords: `fil conversa ${thread.title} ${projectNames.get(thread.projectId) ?? ""}`,
         run: () => onSelectThread(thread.id),
@@ -151,11 +137,9 @@ export function CommandPalette({
     onNewThread,
     onOpenCustomization,
     onOpenInspector,
-    onOpenRuntime,
     onSelectProject,
     onSelectThread,
     projects,
-    runtimeEnabled,
     threads,
   ]);
 
@@ -185,13 +169,13 @@ export function CommandPalette({
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-center bg-[#151513]/25 px-3 pt-[10vh] backdrop-blur-[3px] sm:px-6 sm:pt-[13vh]">
-      <button aria-label="Tancar ordres" className="absolute inset-0" onClick={onClose} />
+    <div className="fixed inset-0 z-[80] flex justify-center bg-[var(--overlay)] px-3 pt-[10vh] backdrop-blur-[3px] sm:px-6 sm:pt-[13vh]">
+      <button aria-label="Cerrar búsqueda" className="absolute inset-0" onClick={onClose} />
       <section
         role="dialog"
         aria-modal="true"
-        aria-label="Cerca i ordres"
-        className="palette-enter relative flex max-h-[min(620px,76vh)] w-full max-w-[640px] flex-col overflow-hidden rounded-[18px] border border-[#cfcdc7] bg-[#fbfbfa] shadow-[0_30px_90px_-28px_rgba(31,29,25,.52)]"
+        aria-label="Buscar proyectos y conversaciones"
+        className="palette-enter relative flex max-h-[min(620px,76vh)] w-full max-w-[640px] flex-col overflow-hidden rounded-[18px] border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]"
         onKeyDown={(event) => {
           if (event.key === "ArrowDown") {
             event.preventDefault();
@@ -208,23 +192,23 @@ export function CommandPalette({
           }
         }}
       >
-        <div className="command-palette-search flex h-14 shrink-0 items-center gap-3 border-b border-[#e2e0db] px-4 transition-colors">
-          <MagnifyingGlass size={18} className="shrink-0 text-[#77736d]" />
+        <div className="command-palette-search flex h-14 shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 transition-colors">
+          <MagnifyingGlass size={18} className="shrink-0 text-[var(--text-subtle)]" />
           <input
             ref={inputRef}
-            aria-label="Cerca projectes, fils i ordres"
-            className="command-palette-input min-w-0 flex-1 bg-transparent text-[14px] text-[#292724] outline-none placeholder:text-[#99958e]"
-            placeholder="Cerca projectes, fils o ordres…"
+            aria-label="Buscar proyectos, conversaciones y acciones"
+            className="command-palette-input min-w-0 flex-1 bg-transparent text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+            placeholder="Busca proyectos, conversaciones o acciones…"
             value={query}
             onChange={(event) => {
               setQuery(event.target.value);
               setActiveIndex(0);
             }}
           />
-          <span className="hidden items-center gap-1 rounded-md border border-[#d9d7d1] bg-[#f3f2ef] px-1.5 py-1 text-[9px] font-medium text-[#77736d] sm:flex">esc</span>
+          <span className="hidden items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--surface-muted)] px-1.5 py-1 text-[9px] font-medium text-[var(--text-secondary)] sm:flex">esc</span>
         </div>
 
-        <div role="listbox" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
+        <div role="listbox" aria-label="Resultados de búsqueda" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
           {visibleItems.length ? visibleItems.map((item, index) => {
             const previousGroup = visibleItems[index - 1]?.group;
             const selected = index === visibleActiveIndex;
@@ -232,38 +216,38 @@ export function CommandPalette({
             return (
               <div key={item.id}>
                 {item.group !== previousGroup ? (
-                  <p className="px-2.5 pb-1.5 pt-3 text-[9px] font-semibold tracking-[0.02em] text-[#99958e] first:pt-1.5">{item.group}</p>
+                  <p className="px-2.5 pb-1.5 pt-3 text-[10px] font-semibold tracking-[0.02em] text-[var(--text-secondary)] first:pt-1.5">{item.group}</p>
                 ) : null}
                 <button
                   role="option"
                   aria-selected={selected}
                   disabled={disabled}
-                  className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${selected ? "bg-[#e9e8e4] text-[#282623]" : "text-[#5e5a55] hover:bg-[#f0efec]"} disabled:opacity-40`}
+                  className={`group flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${selected ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"} disabled:opacity-40`}
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => run(item)}
                 >
-                  <span className={`grid size-8 shrink-0 place-items-center rounded-[9px] border ${selected ? "border-[#d2d0ca] bg-[#f8f8f6] text-[#34312d]" : "border-[#e2e0db] bg-white text-[#77736d]"}`}>{item.icon}</span>
+                  <span className={`grid size-8 shrink-0 place-items-center rounded-[9px] border ${selected ? "border-[var(--border-strong)] bg-[var(--surface-raised)] text-[var(--text)]" : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-subtle)]"}`}>{item.icon}</span>
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[11px] font-semibold">{item.label}</span>
-                    <span className="mt-0.5 block truncate text-[9px] text-[#918d86]">{item.detail}</span>
+                    <span className="mt-0.5 block truncate text-[10px] text-[var(--text-secondary)]">{item.detail}</span>
                   </span>
-                  {item.shortcut ? <span className="text-[9px] font-medium text-[#99958e]">{item.shortcut}</span> : <ArrowRight size={13} className={`text-[#a29e97] transition ${selected ? "translate-x-0 opacity-100" : "-translate-x-1 opacity-0"}`} />}
+                  {item.shortcut ? <span className="text-[9px] font-medium text-[var(--text-secondary)]">{item.shortcut}</span> : <ArrowRight size={13} className={`text-[var(--text-secondary)] transition ${selected ? "translate-x-0 opacity-100" : "-translate-x-1 opacity-0"}`} />}
                 </button>
               </div>
             );
           }) : (
             <div className="grid min-h-44 place-items-center px-6 text-center">
               <div>
-                <span className="mx-auto grid size-9 place-items-center rounded-xl bg-[#f0efec] text-[#77736d]"><Command size={17} /></span>
-                <p className="mt-3 text-[11px] font-semibold text-[#4b4843]">Cap resultat</p>
-                <p className="mt-1 text-[9px] text-[#918d86]">Prova amb el nom d’un projecte, un fil o una ordre.</p>
+                <span className="mx-auto grid size-9 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><Command size={17} /></span>
+                <p className="mt-3 text-[12px] font-semibold text-[var(--text)]">Sin resultados</p>
+                <p className="mt-1 text-[10px] text-[var(--text-subtle)]">Prueba con el nombre de un proyecto, una conversación o una acción.</p>
               </div>
             </div>
           )}
         </div>
 
-        <footer className="flex h-9 shrink-0 items-center justify-between border-t border-[#e2e0db] bg-[#f6f5f2] px-4 text-[8px] text-[#918d86]">
-          <span className="flex items-center gap-2"><span>↑↓ navega</span><span>↵ obre</span></span>
+        <footer className="flex h-9 shrink-0 items-center justify-between border-t border-[var(--border-subtle)] bg-[var(--surface-muted)] px-4 text-[9px] text-[var(--text-secondary)]">
+          <span className="flex items-center gap-2"><span>↑↓ navegar</span><span>↵ abrir</span></span>
           <span className="flex items-center gap-1"><Command size={10} /> K</span>
         </footer>
       </section>

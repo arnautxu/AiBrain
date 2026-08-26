@@ -152,9 +152,9 @@ export const operationsBrainManifest: BrainManifest = {
     modes: ["agent", "plan", "ask"],
   },
   windows: [
-    { id: "chat", label: "Operacions", enabled: true },
-    { id: "inspector", label: "Traça", enabled: true },
-    { id: "runtime", label: "Entorn", enabled: true },
+    { id: "chat", label: "Trabajo", enabled: true },
+    { id: "inspector", label: "Review", enabled: true },
+    { id: "runtime", label: "Entorno", enabled: true },
   ],
 };
 

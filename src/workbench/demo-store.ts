@@ -58,9 +58,9 @@ function statePath(tenantId: string) {
 }
 
 function seedNames(tenantId: string, tenantName: string) {
-  if (tenantId === "studio") return ["AiBrain", "Laboratori"] as const;
-  if (tenantId === "operations") return ["Operacions", "Automatitzacions"] as const;
-  return [tenantName, "Laboratori"] as const;
+  if (tenantId === "studio") return ["Trabajo interno", "Investigación"] as const;
+  if (tenantId === "operations") return ["Operaciones", "Clientes"] as const;
+  return [tenantName, "Laboratorio"] as const;
 }
 
 function seededProject(name: string, slug: string, workspaceKey: string): StoredProject {

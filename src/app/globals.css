@@ -8,12 +8,16 @@
   --surface-raised: #ffffff;
   --surface-muted: #f1f1ee;
   --surface-hover: #ebebe7;
+  --surface-selected: #e5e5e0;
   --sidebar: #f1f1ee;
+  --page: var(--canvas);
   --overlay: rgba(20, 20, 18, 0.38);
   --text: #252522;
+  --text-secondary: #5f5d58;
   --text-muted: #6f6d67;
   --text-subtle: #6f6d67;
   --border: #dfded9;
+  --border-subtle: #e7e6e1;
   --border-strong: #c8c6bf;
   --accent: var(--installation-accent);
   --accent-soft: color-mix(in srgb, var(--installation-accent) 10%, var(--surface));
@@ -27,6 +31,7 @@
   --danger-soft: #fff0eb;
   --shadow-sm: 0 1px 2px rgba(28, 27, 24, 0.06), 0 8px 24px -20px rgba(28, 27, 24, 0.28);
   --shadow-md: 0 20px 56px -34px rgba(28, 27, 24, 0.38), 0 3px 12px -8px rgba(28, 27, 24, 0.12);
+  --shadow-lg: 0 26px 70px -34px rgba(28, 27, 24, 0.48), 0 8px 24px -16px rgba(28, 27, 24, 0.2);
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -44,12 +49,15 @@
   --surface-raised: #262624;
   --surface-muted: #2b2b29;
   --surface-hover: #30302e;
+  --surface-selected: #353532;
   --sidebar: #1d1d1c;
   --overlay: rgba(0, 0, 0, 0.64);
   --text: #f1f0ec;
+  --text-secondary: #b2afa8;
   --text-muted: #b2afa8;
   --text-subtle: #85827c;
   --border: #343431;
+  --border-subtle: #2b2b29;
   --border-strong: #4a4945;
   --accent-soft: color-mix(in srgb, var(--installation-accent) 26%, var(--surface));
   --focus: color-mix(in srgb, var(--installation-accent) 64%, #ffffff);
@@ -61,6 +69,7 @@
   --danger-soft: #38231f;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px -18px rgba(0, 0, 0, 0.72);
   --shadow-md: 0 24px 64px -36px rgba(0, 0, 0, 0.82), 0 3px 14px -8px rgba(0, 0, 0, 0.64);
+  --shadow-lg: 0 30px 80px -34px rgba(0, 0, 0, 0.9), 0 10px 28px -16px rgba(0, 0, 0, 0.78);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -71,11 +80,14 @@
     --surface-raised: #262624;
     --surface-muted: #2b2b29;
     --surface-hover: #30302e;
+    --surface-selected: #353532;
     --sidebar: #1d1d1c;
     --text: #f1f0ec;
+    --text-secondary: #b2afa8;
     --text-muted: #b2afa8;
     --text-subtle: #85827c;
     --border: #343431;
+    --border-subtle: #2b2b29;
     --border-strong: #4a4945;
   }
 }

@@ -7,8 +7,6 @@ import { ChatWorkspace } from "@/components/chat-workspace";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
-import { RuntimePanel } from "@/components/runtime-panel";
-import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -16,7 +14,6 @@ import {
 } from "@/components/sidebar";
 import { ConfirmDialog, TextDialog } from "@/components/workbench-dialogs";
 import {
-  accentTokens,
   cornerTokens,
   preferencesFromManifest,
   type BrainManifest,
@@ -51,6 +48,7 @@ import {
   type WorkbenchSnapshot,
   type WorkbenchThread,
 } from "@/workbench/types";
+import type { PublicInstallationBranding } from "@/ui/installation-branding";
 
 type SideWindowId = Exclude<BrainWindowId, "chat">;
 
@@ -252,27 +250,21 @@ async function chatError(response: Response) {
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
     return body.error;
   }
-  return "Resposta del runtime no disponible.";
+  return "El servicio no está disponible en este momento.";
 }
 
 export function BrainApp({
+  branding,
   manifest,
   session,
   initialWorkbench,
-  memberPreferences,
 }: {
+  branding: Readonly<PublicInstallationBranding>;
   manifest: BrainManifest;
   session: AuthSession;
   initialWorkbench: WorkbenchSnapshot;
-  memberPreferences: {
-    language: "ca" | "es" | "en";
-    tone: "direct" | "balanced" | "detailed";
-  } | null;
 }) {
-  const defaultPreferences = useMemo(() => ({
-    ...preferencesFromManifest(manifest),
-    ...(memberPreferences ? { tone: memberPreferences.tone } : {}),
-  }), [manifest, memberPreferences]);
+  const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.workbench.preview.v1`;
   const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
@@ -298,7 +290,6 @@ export function BrainApp({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
-  const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
@@ -324,11 +315,7 @@ export function BrainApp({
     setThreads(snapshot.threads);
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
-    const completedOnboarding = new URLSearchParams(window.location.search)
-      .get("onboarding") === "complete";
-    setPreferences(completedOnboarding
-      ? defaultPreferences
-      : loadPreferences(preferencesKey, defaultPreferences));
+    setPreferences(loadPreferences(preferencesKey, defaultPreferences));
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
@@ -371,10 +358,7 @@ export function BrainApp({
     const params = new URLSearchParams(window.location.search);
     const starter = params.get("starter")?.trim();
     if (starter) setPrompt(starter.slice(0, 400));
-    if (params.get("onboarding") === "complete") {
-      setNotice("Onboarding completat. La teva primera missió ja està preparada.");
-    }
-    if (starter || params.has("onboarding")) {
+    if (starter) {
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [hydrated]);
@@ -408,18 +392,17 @@ export function BrainApp({
   }, [activeProjectId, hydrated]);
 
   const style = useMemo<BrainStyle>(() => {
-    const accent = accentTokens[preferences.accent];
     return {
-      "--brain-accent": accent.solid,
-      "--brain-accent-soft": accent.soft,
-      "--brain-contrast": accent.contrast,
+      "--brain-accent": branding.accentColor,
+      "--brain-accent-soft": `color-mix(in srgb, ${branding.accentColor} 12%, transparent)`,
+      "--brain-contrast": "#ffffff",
       "--brain-radius": cornerTokens[preferences.corners],
     };
-  }, [preferences.accent, preferences.corners]);
+  }, [branding.accentColor, preferences.corners]);
 
   const selectProject = useCallback((projectId: string) => {
     if (sending) {
-      setNotice("Atura el torn actual abans de canviar de projecte.");
+      setNotice("Detén la respuesta actual antes de cambiar de proyecto.");
       return;
     }
     const project = projects.find((candidate) => candidate.id === projectId && candidate.status === "active");
@@ -439,7 +422,7 @@ export function BrainApp({
 
   const selectThread = useCallback((threadId: string) => {
     if (sending) {
-      setNotice("Atura el torn actual abans de canviar de fil.");
+      setNotice("Detén la respuesta actual antes de cambiar de conversación.");
       return;
     }
     const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
@@ -468,7 +451,7 @@ export function BrainApp({
     if (!activeProject || sending || actionBusy || !message.content.trim()) return;
     setActionBusy(true);
     try {
-      const baseTitle = activeThread?.title ?? "Resultat";
+      const baseTitle = activeThread?.title ?? "Resultado";
       const title = `${baseTitle.replace(/ · nova versió$/, "")} · nova versió`.slice(0, 120);
       const thread = initialWorkbench.persistence === "browser-preview"
         ? localThread(activeProject.id, title)
@@ -483,9 +466,9 @@ export function BrainApp({
       setPendingRuntimeContext(`Resultat de partida que s’ha de conservar intacte:\n\n${message.content.slice(0, 12_000)}`);
       setAttachments([]);
       setActiveSideWindow(null);
-      setNotice("Nova versió preparada en un fil separat. L’original es conserva.");
+      setNotice("Nueva versión preparada en una conversación separada. El original se conserva.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No s’ha pogut preparar una nova versió.");
+      setNotice(error instanceof Error ? error.message : "No se ha podido preparar una nueva versión.");
     } finally {
       setActionBusy(false);
     }
@@ -592,7 +575,7 @@ export function BrainApp({
           ...(visibleContent !== runtimeContent ? { displayMessage: visibleContent } : {}),
           preferences: {
             tone: preferences.tone,
-            language: memberPreferences?.language ?? manifest.identity.language,
+            language: manifest.identity.language,
             showActivity: preferences.showActivityPanel,
           },
           options: {
@@ -622,19 +605,19 @@ export function BrainApp({
             ...message,
             status: stopped ? "stopped" : "error",
             ...(!stopped && !message.content
-              ? { content: error instanceof Error ? error.message : "Error desconegut" }
+              ? { content: error instanceof Error ? error.message : "Error desconocido" }
               : {}),
           }),
         ));
       } else {
-        setNotice(error instanceof Error ? error.message : "No s’ha pogut crear el fil.");
+        setNotice(error instanceof Error ? error.message : "No se ha podido crear la conversación.");
       }
     } finally {
       setSending(false);
       abortRef.current = null;
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, memberPreferences?.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
   const persistResultAction = useCallback(async (
     message: ChatMessage,
@@ -654,13 +637,13 @@ export function BrainApp({
       });
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
-        throw new Error("No s’ha pogut desar l’aprovació.");
+        throw new Error("No se ha podido guardar la revisión.");
       }
       const updated = result.message as ChatMessage;
       setThreads((current) => updateThreadMessage(current, activeThreadId, message.id, () => updated));
-      setNotice(action === "approved" ? "Resultat aprovat i desat." : "Resultat marcat com a pendent.");
+      setNotice(action === "approved" ? "Resultado aprobado y guardado." : "Resultado marcado como pendiente.");
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No s’ha pogut actualitzar el resultat.");
+      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar el resultado.");
     } finally {
       setActionBusy(false);
     }
@@ -678,7 +661,7 @@ export function BrainApp({
       body: JSON.stringify({ approvalId, decision }),
     });
     if (!response.ok) {
-      setNotice("Aquesta aprovació ja no està pendent.");
+      setNotice("Esta aprobación ya no está pendiente.");
       return;
     }
     const status = decision === "accept"
@@ -721,7 +704,7 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No s’ha pogut actualitzar el projecte.");
+      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar el proyecto.");
       return null;
     } finally {
       setActionBusy(false);
@@ -752,7 +735,7 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No s’ha pogut actualitzar el fil.");
+      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar la conversación.");
       return null;
     } finally {
       setActionBusy(false);
@@ -773,7 +756,7 @@ export function BrainApp({
         setSelectedMessageId(null);
         setTextDialog(null);
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "No s’ha pogut crear el projecte.");
+        setNotice(error instanceof Error ? error.message : "No se ha podido crear el proyecto.");
       } finally {
         setActionBusy(false);
       }
@@ -815,7 +798,7 @@ export function BrainApp({
           });
           const result: unknown = await response.json().catch(() => null);
           if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
-            throw new Error("No s’ha pogut desar l’estat de la reversió.");
+            throw new Error("No se ha podido guardar el estado de la reversión.");
           }
           const updated = result.message as ChatMessage;
           setThreads((current) => updateThreadMessage(current, activeThreadId, target.id, () => updated));
@@ -825,14 +808,14 @@ export function BrainApp({
         setActionBusy(false);
         const completed = await sendMessage(
           `Reverteix exclusivament els canvis d’aquest resultat. Abans d’acabar, comprova l’estat final i explica què s’ha restaurat.\n\nCanvis originals:\n${target.diff.slice(0, 10_000)}`,
-          "Desfés els canvis d’aquest resultat i comprova que tot queda restaurat.",
+          "Deshaz los cambios de este resultado y comprueba que todo queda restaurado.",
         );
         setActionBusy(true);
         if (!completed) throw new Error("La reversió no s’ha pogut verificar.");
         await updateState("undo_complete");
-        setNotice("Canvis revertits i verificats. L’estat ha quedat desat.");
+        setNotice("Cambios revertidos y verificados. El estado se ha guardado.");
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "No s’ha pogut completar la reversió.");
+        setNotice(error instanceof Error ? error.message : "No se ha podido completar la reversión.");
       } finally {
         setActionBusy(false);
       }
@@ -857,9 +840,8 @@ export function BrainApp({
   );
 
   const enabledWindows = manifest.windows.filter((window) =>
-    window.enabled && (session.user.role === "owner" || window.id === "chat"));
+    window.enabled && (window.id === "chat" || window.id === "inspector"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-  const runtimeEnabled = enabledWindows.some((window) => window.id === "runtime");
 
   const openSideWindow = useCallback((windowId: SideWindowId) => {
     setActiveSideWindow((current) => current === windowId ? null : windowId);
@@ -894,7 +876,6 @@ export function BrainApp({
       }
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
-      else if (automationsOpen) setAutomationsOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
@@ -907,7 +888,6 @@ export function BrainApp({
     actionBusy,
     activeProject,
     activeSideWindow,
-    automationsOpen,
     commandPaletteOpen,
     confirmDialog,
     customizationOpen,
@@ -918,20 +898,18 @@ export function BrainApp({
   ]);
 
   const textDialogCopy = textDialog?.kind === "create-project"
-    ? { title: "Nou projecte", label: "Nom del projecte", value: "", submit: "Crea projecte", maxLength: 80 }
+    ? { title: "Nuevo proyecto", label: "Nombre del proyecto", value: "", submit: "Crear proyecto", maxLength: 80 }
     : textDialog?.kind === "rename-project"
-      ? { title: "Reanomena el projecte", label: "Nom del projecte", value: textDialog.project.name, submit: "Desa", maxLength: 80 }
+      ? { title: "Renombrar proyecto", label: "Nombre del proyecto", value: textDialog.project.name, submit: "Guardar", maxLength: 80 }
       : textDialog?.kind === "rename-thread"
-        ? { title: "Reanomena el fil", label: "Títol del fil", value: textDialog.thread.title, submit: "Desa", maxLength: 120 }
+        ? { title: "Renombrar conversación", label: "Título de la conversación", value: textDialog.thread.title, submit: "Guardar", maxLength: 120 }
         : null;
 
   return (
-    <div style={style} className="flex h-[100dvh] overflow-hidden bg-[#f7f7f6] font-sans text-[#20201f]">
+    <div style={style} className="flex h-[100dvh] overflow-hidden bg-[var(--page)] font-sans text-[var(--text)]">
       <Sidebar
-        productName={manifest.identity.productName}
+        branding={branding}
         session={session}
-        runtimeStatus={runtimeStatus}
-        persistence={initialWorkbench.persistence}
         projects={projects}
         threads={threads}
         activeProjectId={activeProjectId}
@@ -949,12 +927,6 @@ export function BrainApp({
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
         onOpenCustomization={() => setCustomizationOpen(true)}
-        onOpenAutomations={() => {
-          setActiveSideWindow(null);
-          setCustomizationOpen(false);
-          setCommandPaletteOpen(false);
-          setAutomationsOpen(true);
-        }}
       />
 
       <ChatWorkspace
@@ -996,7 +968,7 @@ export function BrainApp({
         onResolveApproval={resolveApproval}
         onCreateVersion={(message) => void createVersionFromMessage(message)}
         onResultAction={persistResultAction}
-        showAdvancedControls={session.user.role === "owner"}
+        showAdvancedControls={false}
       />
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
@@ -1010,28 +982,13 @@ export function BrainApp({
         />
       ) : null}
 
-      {session.user.role === "owner" && runtimeEnabled && activeSideWindow === "runtime" ? (
-        <RuntimePanel
-          manifest={manifest}
-          session={session}
-          status={runtimeStatus}
-          onClose={() => setActiveSideWindow(null)}
-        />
-      ) : null}
-
       <CustomizationPanel
-        productName={manifest.identity.productName}
+        productName={branding.productName}
         open={customizationOpen}
         preferences={preferences}
         onChange={changePreference}
         onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}
-      />
-
-      <AutomationsPanel
-        projectId={activeProject?.id ?? null}
-        open={automationsOpen}
-        onClose={() => setAutomationsOpen(false)}
       />
 
       <CommandPalette
@@ -1041,14 +998,12 @@ export function BrainApp({
         threads={threads}
         activeProjectId={activeProjectId}
         inspectorEnabled={inspectorEnabled}
-        runtimeEnabled={runtimeEnabled}
         onClose={() => setCommandPaletteOpen(false)}
         onNewThread={startNewThread}
         onNewProject={() => setTextDialog({ kind: "create-project" })}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onOpenInspector={() => setActiveSideWindow("inspector")}
-        onOpenRuntime={() => setActiveSideWindow("runtime")}
         onOpenCustomization={() => setCustomizationOpen(true)}
       />
 
@@ -1068,20 +1023,20 @@ export function BrainApp({
 
       <ConfirmDialog
         open={Boolean(confirmDialog)}
-        title={confirmDialog?.kind === "undo-result" ? "Vols desfer aquests canvis?" : confirmDialog?.kind === "archive-project" ? "Arxivar projecte?" : "Arxivar fil?"}
+        title={confirmDialog?.kind === "undo-result" ? "¿Quieres deshacer estos cambios?" : confirmDialog?.kind === "archive-project" ? "¿Archivar proyecto?" : "¿Archivar conversación?"}
         description={confirmDialog?.kind === "archive-project"
-          ? "El projecte i els seus fils deixaran d’aparèixer a la vista activa. Els podràs restaurar des d’Arxivats."
+          ? "El proyecto y sus conversaciones dejarán de aparecer en la vista activa. Podrás restaurarlos desde Archivados."
           : confirmDialog?.kind === "undo-result"
-            ? "AiBrain revertirà només els canvis d’aquest resultat, comprovarà l’estat final i conservarà l’original a l’historial."
-            : "El fil deixarà d’aparèixer a la llista activa. El podràs restaurar més endavant."}
-        confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, desfés-los" : "Arxiva"}
+            ? "Se revertirán solo los cambios de este resultado, se comprobará el estado final y se conservará el original en el historial."
+            : "La conversación dejará de aparecer en la lista activa. Podrás restaurarla más adelante."}
+        confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, deshacer" : "Archivar"}
         busy={actionBusy}
         onClose={() => !actionBusy && setConfirmDialog(null)}
         onConfirm={() => void confirmAction()}
       />
 
       {notice ? (
-        <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border border-[#d8d6d1] bg-[#fbfbf9] px-4 py-2.5 text-[10px] font-medium text-[#57544f] shadow-[0_18px_40px_-26px_rgba(0,0,0,.55)]">
+        <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
           {notice}
         </div>
       ) : null}
