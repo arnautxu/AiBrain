@@ -149,6 +149,10 @@ type RuntimeServiceState = {
   config: Readonly<InstallationConfig>;
   registry: WorkerRuntimeRegistry;
   clients: Map<string, WorkerAppServerClient>;
+  activeTurnCancellations: Map<string, {
+    runtimeThreadId: string;
+    cancelAfterRemoteInterrupt(): void;
+  }>;
 };
 
 const runtimeGlobal = globalThis as typeof globalThis & {
@@ -182,6 +186,7 @@ async function serviceState(): Promise<RuntimeServiceState> {
         factory: new LocalGatewayWorkerRuntimeFactory(),
       }),
       clients: new Map(),
+      activeTurnCancellations: new Map(),
     };
     runtimeGlobal.__aibrainWorkerRuntimeService = state;
     return state;
@@ -237,4 +242,43 @@ export function workerTurnIsActive(
   const state = runtimeGlobal.__aibrainWorkerRuntimeService;
   const client = state?.clients.get(userId);
   return client?.router.hasActiveTurn(runtimeThreadId, localTurnId) ?? false;
+}
+
+function activeTurnKey(userId: string, localTurnId: string) {
+  return `${userId}:${localTurnId}`;
+}
+
+export function registerWorkerTurnCancellation(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+  cancelAfterRemoteInterrupt: () => void,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (!state || !state.clients.has(userId) || !runtimeThreadId || !localTurnId) {
+    throw new Error("Worker turn cancellation scope is unavailable.");
+  }
+  const key = activeTurnKey(userId, localTurnId);
+  if (state.activeTurnCancellations.has(key)) {
+    throw new Error("Worker turn cancellation scope is already registered.");
+  }
+  const registration = { runtimeThreadId, cancelAfterRemoteInterrupt };
+  state.activeTurnCancellations.set(key, registration);
+  return () => {
+    if (state.activeTurnCancellations.get(key) === registration) {
+      state.activeTurnCancellations.delete(key);
+    }
+  };
+}
+
+export function cancelWorkerTurnLocally(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  const registration = state?.activeTurnCancellations.get(activeTurnKey(userId, localTurnId));
+  if (!registration || registration.runtimeThreadId !== runtimeThreadId) return false;
+  registration.cancelAfterRemoteInterrupt();
+  return true;
 }

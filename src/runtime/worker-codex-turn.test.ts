@@ -15,6 +15,7 @@ vi.mock("@/runtime/thread-token", () => ({
 }));
 vi.mock("@/runtime/worker-runtime-service", () => ({
   workerAppServerForUser: async () => mocked.runtime,
+  registerWorkerTurnCancellation: () => () => undefined,
 }));
 
 import { runWorkerCodexTurn } from "@/runtime/worker-codex-turn";
