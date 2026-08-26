@@ -40,6 +40,10 @@ export function ControlPlaneForm({
   const [message, setMessage] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<UserRole>("member");
+  const [inviteJobTitle, setInviteJobTitle] = useState("");
+  const [inviteRoleSummary, setInviteRoleSummary] = useState("");
+  const [inviteResponsibilities, setInviteResponsibilities] = useState("");
+  const [inviteFirstMission, setInviteFirstMission] = useState("");
   const [inviteState, setInviteState] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [inviteMessage, setInviteMessage] = useState<string | null>(null);
 
@@ -73,7 +77,16 @@ export function ControlPlaneForm({
     const response = await fetch("/api/control-plane/invitations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      body: JSON.stringify({
+        email: inviteEmail,
+        role: inviteRole,
+        jobTitle: inviteRole === "member" ? inviteJobTitle : null,
+        roleSummary: inviteRole === "member" ? inviteRoleSummary : null,
+        responsibilities: inviteRole === "member"
+          ? inviteResponsibilities.split("\n").map((item) => item.trim()).filter(Boolean)
+          : [],
+        firstMission: inviteRole === "member" ? inviteFirstMission : null,
+      }),
     });
     const result: unknown = await response.json().catch(() => null);
     if (!response.ok) {
@@ -90,6 +103,10 @@ export function ControlPlaneForm({
       ? `${inviteEmail} ja tenia identitat: l’hem afegit al tenant.`
       : `Invitació enviada a ${inviteEmail}.`);
     setInviteEmail("");
+    setInviteJobTitle("");
+    setInviteRoleSummary("");
+    setInviteResponsibilities("");
+    setInviteFirstMission("");
   }
 
   return (
@@ -168,22 +185,35 @@ export function ControlPlaneForm({
               </div>
             </div>
             {session.provider === "supabase" ? (
-              <form className="mt-6 grid gap-4 sm:grid-cols-[1fr_150px_auto] sm:items-end" onSubmit={(event) => void invite(event)}>
-                <label className="block">
-                  <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Correu</span>
-                  <span className="flex items-center gap-2 rounded-lg border border-[#d9d7d2] bg-white px-3 focus-within:border-[#aaa7a1]">
-                    <EnvelopeSimple size={14} className="text-[#918e88]" />
-                    <input type="email" required maxLength={320} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2.5 text-[10px] outline-none" placeholder="persona@empresa.cat" />
-                  </span>
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Rol</span>
-                  <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as UserRole)} className="w-full rounded-lg border border-[#d9d7d2] bg-white px-3 py-2.5 text-[10px] outline-none focus:border-[#aaa7a1]">
-                    <option value="member">Member</option>
-                    <option value="owner">Owner</option>
-                  </select>
-                </label>
-                <button disabled={inviteState === "sending"} className="rounded-lg bg-[#222320] px-4 py-2.5 text-[10px] font-semibold text-white disabled:opacity-50">{inviteState === "sending" ? "Enviant…" : "Convida"}</button>
+              <form className="mt-6 space-y-5" onSubmit={(event) => void invite(event)}>
+                <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
+                  <label className="block">
+                    <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Correu</span>
+                    <span className="flex items-center gap-2 rounded-lg border border-[#d9d7d2] bg-white px-3 focus-within:border-[#aaa7a1]">
+                      <EnvelopeSimple size={14} className="text-[#918e88]" />
+                      <input type="email" required maxLength={320} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2.5 text-[10px] outline-none" placeholder="persona@empresa.cat" />
+                    </span>
+                  </label>
+                  <label className="block">
+                    <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Permís d’accés</span>
+                    <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as UserRole)} className="w-full rounded-lg border border-[#d9d7d2] bg-white px-3 py-2.5 text-[10px] outline-none focus:border-[#aaa7a1]">
+                      <option value="member">Membre</option>
+                      <option value="owner">Owner</option>
+                    </select>
+                  </label>
+                </div>
+                {inviteRole === "member" ? (
+                  <div className="rounded-xl border border-[#e1dfda] bg-[#f5f5f2] p-4 md:p-5">
+                    <div className="mb-5"><p className="text-[10px] font-semibold">Onboarding del membre</p><p className="mt-1 text-[9px] leading-4 text-[#918e88]">Defineix què s’espera d’aquesta persona. Ella podrà confirmar-ho i ajustar preferències, però no canviar permisos.</p></div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <Field label="Càrrec"><input required maxLength={80} value={inviteJobTitle} onChange={(event) => setInviteJobTitle(event.target.value)} placeholder="Responsable de màrqueting" /></Field>
+                      <div className="sm:col-span-2"><Field label="Objectiu del rol"><textarea required rows={2} maxLength={500} value={inviteRoleSummary} onChange={(event) => setInviteRoleSummary(event.target.value)} placeholder="Què coordina i quin resultat ha d’aconseguir." /></Field></div>
+                      <Field label="Responsabilitats · una per línia"><textarea required rows={5} maxLength={1288} value={inviteResponsibilities} onChange={(event) => setInviteResponsibilities(event.target.value)} placeholder={"Preparar el calendari editorial\nAnalitzar competidors\nCoordinar campanyes"} /></Field>
+                      <Field label="Primera missió"><textarea required rows={5} maxLength={400} value={inviteFirstMission} onChange={(event) => setInviteFirstMission(event.target.value)} placeholder="Prepara tres idees de contingut basades en la proposta de valor." /></Field>
+                    </div>
+                  </div>
+                ) : null}
+                <div className="flex justify-end"><button disabled={inviteState === "sending"} className="rounded-lg bg-[#222320] px-4 py-2.5 text-[10px] font-semibold text-white disabled:opacity-50">{inviteState === "sending" ? "Enviant…" : "Crea i convida"}</button></div>
               </form>
             ) : (
               <p className="mt-5 rounded-xl bg-[#f1f1ee] px-4 py-3 text-[9px] leading-4 text-[#77746e]">En mode demo les identitats continuen sent una allowlist local. Les invitacions només s’activen amb auth Supabase.</p>

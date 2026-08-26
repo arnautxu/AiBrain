@@ -94,6 +94,7 @@ export type ChatRequest = {
   message: string;
   preferences: {
     tone: "direct" | "balanced" | "detailed";
+    language: "ca" | "es" | "en";
     showActivity: boolean;
   };
   options: TurnOptions;

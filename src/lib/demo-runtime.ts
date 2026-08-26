@@ -13,6 +13,8 @@ export function isChatRequest(value: unknown): value is ChatRequest {
   return (
     "tone" in preferences &&
     (preferences.tone === "direct" || preferences.tone === "balanced" || preferences.tone === "detailed") &&
+    "language" in preferences &&
+    (preferences.language === "ca" || preferences.language === "es" || preferences.language === "en") &&
     "showActivity" in preferences &&
     typeof preferences.showActivity === "boolean" &&
     "options" in value &&

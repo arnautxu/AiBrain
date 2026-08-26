@@ -252,12 +252,20 @@ export function BrainApp({
   manifest,
   session,
   initialWorkbench,
+  memberPreferences,
 }: {
   manifest: BrainManifest;
   session: AuthSession;
   initialWorkbench: WorkbenchSnapshot;
+  memberPreferences: {
+    language: "ca" | "es" | "en";
+    tone: "direct" | "balanced" | "detailed";
+  } | null;
 }) {
-  const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
+  const defaultPreferences = useMemo(() => ({
+    ...preferencesFromManifest(manifest),
+    ...(memberPreferences ? { tone: memberPreferences.tone } : {}),
+  }), [manifest, memberPreferences]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.workbench.preview.v1`;
   const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
@@ -306,7 +314,11 @@ export function BrainApp({
     setThreads(snapshot.threads);
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
-    setPreferences(loadPreferences(preferencesKey, defaultPreferences));
+    const completedOnboarding = new URLSearchParams(window.location.search)
+      .get("onboarding") === "complete";
+    setPreferences(completedOnboarding
+      ? defaultPreferences
+      : loadPreferences(preferencesKey, defaultPreferences));
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
@@ -343,6 +355,19 @@ export function BrainApp({
     const timeout = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timeout);
   }, [notice]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const params = new URLSearchParams(window.location.search);
+    const starter = params.get("starter")?.trim();
+    if (starter) setPrompt(starter.slice(0, 400));
+    if (params.get("onboarding") === "complete") {
+      setNotice("Onboarding completat. La teva primera missió ja està preparada.");
+    }
+    if (starter || params.has("onboarding")) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, [hydrated]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -521,6 +546,7 @@ export function BrainApp({
           message: content,
           preferences: {
             tone: preferences.tone,
+            language: memberPreferences?.language ?? manifest.identity.language,
             showActivity: preferences.showActivityPanel,
           },
           options: {

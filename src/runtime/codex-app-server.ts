@@ -636,6 +636,11 @@ function developerInstructions(chatRequest: ChatRequest) {
     balanced: "Equilibra la conclusió amb el context necessari.",
     detailed: "Explica el raonament útil i els matisos de forma estructurada.",
   }[chatRequest.preferences.tone];
+  const languageInstruction = {
+    ca: "Respon en català, tret que l’usuari demani explícitament un altre idioma.",
+    es: "Responde en castellano, salvo que el usuario pida explícitamente otro idioma.",
+    en: "Respond in English unless the user explicitly requests another language.",
+  }[chatRequest.preferences.language];
 
   const modeInstruction = {
     agent: "Completa la tasca i fes canvis verificables quan siguin necessaris.",
@@ -647,7 +652,7 @@ function developerInstructions(chatRequest: ChatRequest) {
     : "No generis imatges tret que l’usuari ho demani explícitament.";
 
   return `Ets AiBrain, una interfície pròpia construïda sobre el runtime de Codex.
-Respon en l'idioma de l'usuari amb un estil clar, directe i verificable.
+${languageInstruction}
 ${toneInstruction}
 ${modeInstruction}
 ${imageInstruction}

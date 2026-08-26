@@ -14,6 +14,25 @@ function isRole(value: unknown): value is UserRole {
   return value === "owner" || value === "member";
 }
 
+function optionalText(body: Record<string, unknown>, key: string, maximum: number) {
+  const value = body[key];
+  if (value === null || value === undefined || value === "") return null;
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed && trimmed.length <= maximum ? trimmed : undefined;
+}
+
+function responsibilitiesFromBody(body: Record<string, unknown>) {
+  if (!Array.isArray(body.responsibilities)) return undefined;
+  const responsibilities = body.responsibilities
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!responsibilities.length || responsibilities.length > 8 ||
+    responsibilities.some((item) => item.length > 160)) return undefined;
+  return responsibilities;
+}
+
 export async function POST(request: Request) {
   if (!isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
@@ -34,16 +53,27 @@ export async function POST(request: Request) {
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Petició no vàlida." }, { status: 400 });
   }
-  const email = "email" in body && typeof body.email === "string"
-    ? body.email.trim().toLowerCase()
+  const parsedBody = body as Record<string, unknown>;
+  const email = typeof parsedBody.email === "string"
+    ? parsedBody.email.trim().toLowerCase()
     : "";
-  const role = "role" in body ? body.role : null;
+  const role = parsedBody.role;
   if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 320 || !isRole(role)) {
     return NextResponse.json({ error: "Correu o rol no vàlid." }, { status: 400 });
   }
+  const jobTitle = optionalText(parsedBody, "jobTitle", 80);
+  const roleSummary = optionalText(parsedBody, "roleSummary", 500);
+  const firstMission = optionalText(parsedBody, "firstMission", 400);
+  const responsibilities = responsibilitiesFromBody(parsedBody);
+  if (role === "member" && (!jobTitle || !roleSummary || !firstMission || !responsibilities)) {
+    return NextResponse.json(
+      { error: "Defineix el càrrec, les responsabilitats i la primera missió del membre." },
+      { status: 400 },
+    );
+  }
 
   const admin = createSupabaseAdminClient();
-  const redirectTo = `${getPublicOrigin(request)}/auth/confirm?next=%2F`;
+  const redirectTo = `${getPublicOrigin(request)}/auth/confirm`;
   const { data, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
   });
@@ -68,12 +98,16 @@ export async function POST(request: Request) {
     delivery = "existing_user";
   }
 
-  const { error: membershipError } = await admin.rpc("record_tenant_invitation", {
+  const { error: membershipError } = await admin.rpc("record_tenant_invitation_v2", {
     p_tenant_slug: session.tenant.id,
     p_email: email,
     p_invited_user_id: invitedUserId,
     p_role: role,
     p_actor_user_id: session.user.id,
+    p_job_title: role === "member" ? jobTitle : null,
+    p_role_summary: role === "member" ? roleSummary : null,
+    p_responsibilities: role === "member" ? responsibilities : [],
+    p_first_mission: role === "member" ? firstMission : null,
   });
   if (membershipError) {
     console.error("AiBrain invitation membership assignment failed", {
@@ -86,7 +120,16 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(
-    { invitation: { email, role, delivery } },
+    {
+      invitation: {
+        email,
+        role,
+        delivery,
+        assignment: role === "member"
+          ? { jobTitle, roleSummary, responsibilities, firstMission }
+          : null,
+      },
+    },
     { status: 201, headers: { "Cache-Control": "private, no-store" } },
   );
 }
