@@ -32,9 +32,16 @@ import type {
 const DEFAULT_MAX_POLICY_BYTES = 256 * 1024;
 const ACTION_ORDER: readonly PermissionAction[] = ["consult", "respond", "execute", "publish"];
 
+export type InstallationPermissionRoots = {
+  installationPolicyRoot: string;
+  rolesRoot: string;
+  projectsRoot: string;
+  usersRoot: string;
+};
+
 type InstallationPermissionRoot = {
   installationId: string;
-  permissionsRoot: string;
+  roots: InstallationPermissionRoots;
 };
 
 export type MarkdownPermissionProviderOptions = {
@@ -47,6 +54,7 @@ export type MarkdownPermissionProviderOptions = {
 type PolicyDescriptor = {
   scope: PermissionScope;
   precedence: number;
+  root: string;
   segments: readonly string[];
   required: boolean;
   expected: {
@@ -103,6 +111,7 @@ function assertPolicyMatches(document: PermissionPolicyDocument, descriptor: Pol
 }
 
 function descriptors(
+  roots: InstallationPermissionRoots,
   installationId: string,
   userId: string,
   roleId: string | null,
@@ -111,6 +120,7 @@ function descriptors(
   const result: PolicyDescriptor[] = [{
     scope: "installation",
     precedence: 100,
+    root: roots.installationPolicyRoot,
     segments: [],
     required: true,
     expected: { installationId },
@@ -119,7 +129,8 @@ function descriptors(
     result.push({
       scope: "role",
       precedence: 200,
-      segments: ["roles", roleId],
+      root: roots.rolesRoot,
+      segments: [roleId],
       required: false,
       expected: { installationId, roleId },
     });
@@ -128,7 +139,8 @@ function descriptors(
     result.push({
       scope: "project",
       precedence: 300,
-      segments: ["projects", projectId],
+      root: roots.projectsRoot,
+      segments: [projectId],
       required: false,
       expected: { installationId, projectId },
     });
@@ -136,7 +148,8 @@ function descriptors(
   result.push({
     scope: "user",
     precedence: 400,
-    segments: ["users", userId],
+    root: roots.usersRoot,
+    segments: [userId],
     required: true,
     expected: { installationId, userId },
   });
@@ -144,7 +157,8 @@ function descriptors(
     result.push({
       scope: "user-project",
       precedence: 500,
-      segments: ["users", userId, "projects", projectId],
+      root: roots.usersRoot,
+      segments: [userId, "projects", projectId],
       required: false,
       expected: { installationId, userId, projectId },
     });
@@ -177,7 +191,7 @@ function renderDeveloperInstructions(
 }
 
 export class MarkdownPermissionProvider implements PermissionProvider {
-  private readonly roots = new Map<string, string>();
+  private readonly roots = new Map<string, InstallationPermissionRoots>();
   private readonly auditSink: PermissionResolutionAuditSink;
   private readonly maxPolicyBytes: number;
   private readonly now: () => number;
@@ -201,8 +215,23 @@ export class MarkdownPermissionProvider implements PermissionProvider {
       if (!isCanonicalInstallationId(installation.installationId)) {
         throw requestError("Configured installationId is not canonical.");
       }
-      if (!path.isAbsolute(installation.permissionsRoot)) {
-        throw requestError("Configured permissionsRoot must be absolute.");
+      if (!installation.roots || typeof installation.roots !== "object" || Array.isArray(installation.roots)) {
+        throw requestError("Configured permission scope roots are required.");
+      }
+      const rootEntries = Object.entries(installation.roots) as [
+        keyof InstallationPermissionRoots,
+        string,
+      ][];
+      const rootKeys = rootEntries.map(([key]) => key).sort();
+      const expectedRootKeys = [
+        "installationPolicyRoot",
+        "projectsRoot",
+        "rolesRoot",
+        "usersRoot",
+      ];
+      if (rootKeys.join("\0") !== expectedRootKeys.join("\0") ||
+          rootEntries.some(([, root]) => typeof root !== "string" || !path.isAbsolute(root))) {
+        throw requestError("Every configured permission scope root must be absolute.");
       }
       if (this.roots.has(installation.installationId)) {
         throw new PermissionResolutionError(
@@ -210,7 +239,12 @@ export class MarkdownPermissionProvider implements PermissionProvider {
           "MarkdownPermissionProvider contains duplicate installation mappings.",
         );
       }
-      this.roots.set(installation.installationId, path.resolve(installation.permissionsRoot));
+      this.roots.set(installation.installationId, Object.freeze({
+        installationPolicyRoot: path.resolve(installation.roots.installationPolicyRoot),
+        rolesRoot: path.resolve(installation.roots.rolesRoot),
+        projectsRoot: path.resolve(installation.roots.projectsRoot),
+        usersRoot: path.resolve(installation.roots.usersRoot),
+      }));
     }
     if (this.roots.size === 0) throw requestError("At least one installation mapping is required.");
   }
@@ -494,20 +528,21 @@ export class MarkdownPermissionProvider implements PermissionProvider {
     const loaded: LoadedPolicy[] = [];
     try {
       this.validateRequest(installationId, userId, context);
-      const root = this.roots.get(installationId);
-      if (!root) {
+      const roots = this.roots.get(installationId);
+      if (!roots) {
         throw new PermissionResolutionError(
           "PERMISSION_INSTALLATION_NOT_CONFIGURED",
           "Permission installation is not configured on this server.",
         );
       }
       for (const descriptor of descriptors(
+        roots,
         installationId,
         userId,
         context.roleId,
         context.projectId,
       )) {
-        const policy = await this.loadPolicy(root, descriptor);
+        const policy = await this.loadPolicy(descriptor.root, descriptor);
         if (policy) loaded.push(policy);
       }
 

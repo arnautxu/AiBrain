@@ -20,6 +20,11 @@ import type {
   RuntimeSkillOption,
 } from "@/lib/runtime-status";
 import { buildWorkerEnvironment } from "@/runtime/worker-environment";
+import type { ResolvedPermissions } from "@/permissions";
+import {
+  assertCodexTurnPermissionBinding,
+  buildCodexDeveloperInstructions,
+} from "@/runtime/permission-turn";
 
 type RpcId = number | string;
 
@@ -816,42 +821,13 @@ function sandboxPolicy(config: RuntimeConfig, chatRequest: ChatRequest) {
   };
 }
 
-function developerInstructions(chatRequest: ChatRequest) {
-  const toneInstruction = {
-    direct: "Sigues breu i prioritza la conclusió.",
-    balanced: "Equilibra la conclusió amb el context necessari.",
-    detailed: "Explica el raonament útil i els matisos de forma estructurada.",
-  }[chatRequest.preferences.tone];
-  const languageInstruction = {
-    ca: "Respon en català, tret que l’usuari demani explícitament un altre idioma.",
-    es: "Responde en castellano, salvo que el usuario pida explícitamente otro idioma.",
-    en: "Respond in English unless the user explicitly requests another language.",
-  }[chatRequest.preferences.language];
-
-  const modeInstruction = {
-    agent: "Completa la tasca i fes canvis verificables quan siguin necessaris.",
-    plan: "No modifiquis fitxers. Investiga el context i lliura un pla executable amb riscos i verificació.",
-    ask: "No modifiquis fitxers. Respon la pregunta amb evidència del workspace quan sigui útil.",
-  }[chatRequest.options.mode];
-  const imageInstruction = chatRequest.options.imageGeneration
-    ? "Genera una imatge amb l’eina d’imatge del runtime i retorna-la com a resultat del torn."
-    : "No generis imatges tret que l’usuari ho demani explícitament.";
-
-  return `Ets AiBrain, una interfície pròpia construïda sobre el runtime de Codex.
-${languageInstruction}
-${toneInstruction}
-${modeInstruction}
-${imageInstruction}
-Treballa només dins del workspace configurat i utilitza les eines de Codex quan aportin evidència o siguin necessàries per completar la tasca.
-No afirmis que una acció, una font o una integració funciona si no l'has observat.
-Quan una acció necessiti aprovació, explica de forma concreta què vols fer i per què.`;
-}
-
 export async function runCodexTurn(
   chatRequest: ChatRequest,
   tenantId: string,
+  authenticatedUserId: string,
   runtimeThreadId: string | null,
   config: RuntimeConfig,
+  permissions: ResolvedPermissions,
   signal: AbortSignal,
   emit: EmitEvent,
 ) {
@@ -863,6 +839,12 @@ export async function runCodexTurn(
       "Producció requereix un CODEX_HOME aïllat i persistent.",
     );
   }
+  assertCodexTurnPermissionBinding(
+    chatRequest,
+    tenantId,
+    authenticatedUserId,
+    permissions,
+  );
 
   let turnId: string | null = null;
   let threadId: string | null = null;
@@ -1089,7 +1071,7 @@ export async function runCodexTurn(
       approvalsReviewer: "user",
       sandbox: effectiveSandbox(config, chatRequest),
       config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
-      developerInstructions: developerInstructions(chatRequest),
+      developerInstructions: buildCodexDeveloperInstructions(chatRequest, permissions),
     };
 
     const threadResult = runtimeThreadId
