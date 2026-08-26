@@ -38,13 +38,13 @@
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
 | 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
-| 3. Stores file-backed resilientes | En curso | `38eeaaf`, `9efb45a`, `facda49`: schemas estrictos, atomic write/fsync, locks, journals, índices, workbench aislado y backup/restore real; approvals y proyecciones del runtime aún deben migrarse |
+| 3. Stores file-backed resilientes | En curso | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`: schemas estrictos, atomic write/fsync, locks multi-proceso y cola local, journals, índices, workbench y approvals aislados, backup/restore real; falta la proyección durable de cada evento de streaming |
 | 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
-| 5. Worker registry + WebSocket + contratos | En curso | `fc29316`, `75316e1`: transporte WS privado durable, registry por usuario y contratos Codex 0.149.1; falta factory/gateway real |
-| 6. Proyectos y threads completos | En curso | `9efb45a`: crear/listar/renombrar/fijar/archivar/restaurar y estado durable por usuario; faltan búsqueda y autoridad final de historial App Server |
-| 7. Streaming, steering, stop, approvals, replay | Pendiente | — |
+| 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
+| 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
+| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`: streaming, stop scoped, approvals durables, clientUserMessageId, replay y routing sin handlers globales; faltan steering explícito, proyección durable incremental y recovery E2E tras crash |
 | 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`, `416d368`: validación segura, staging privado, preview real y publicador atómico/versionado/idempotente; faltan routes autorizadas y matriz completa de formatos |
-| 9. Browser/Computer Use aislado | Pendiente | — |
+| 9. Browser/Computer Use aislado | En curso | `4bed095`: roots, perfil, descargas, estado durable, fencing, heartbeat, takeover, recovery, tokens HMAC y backpressure por usuario; faltan adapter Chrome/CDP/noVNC y routes autenticadas |
 | 10. Contratos reales para UI | Pendiente | — |
 | 11. Compose y operación | Pendiente | — |
 | 12. Hardening y suite completa | Pendiente | — |
@@ -64,6 +64,10 @@
 - El launch context del worker no contiene `publishWriteRoot`; la factory concreta deberá imponer esos mounts a nivel proceso/contenedor.
 - El UUID de Supabase Auth es exactamente el UUID filesystem del empleado; no existe membership, rol, proyecto o sesión de producto remota.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
+- El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
+- Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
+- Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
+- Los locks filesystem mantienen la exclusión entre procesos y añaden una cola FIFO abortable dentro del proceso para evitar thundering herd sin ampliar timeouts.
 
 ## Riesgos y acciones externas pendientes
 
@@ -73,7 +77,7 @@
 
 ## Siguiente acción concreta
 
-Sustituir el pool `stdio` compartido por la composición real `WorkerRuntimeRegistry` + `AppServerTransport` por usuario, vinculando requests y eventos a instalación/usuario/thread/turn/item.
+Persistir cada evento de turn antes de su ACK y añadir recuperación/reanudación E2E después de refresh, pérdida de red y restart, incluyendo steering y retry idempotente de `clientUserMessageId`.
 
 ## Últimas validaciones
 
@@ -98,4 +102,9 @@ Sustituir el pool `stdio` compartido por la composición real `WorkerRuntimeRegi
 - Permisos por turn: 31 pruebas focalizadas con auditoría durable, binding de identidad y fallo cerrado.
 - Supabase Auth-only: contract test impide SDK fuera del identity provider, llamadas Data API, adapters de producto, migraciones y servicios opcionales; 5/5 contract tests verdes.
 - Publicación: 10/10 pruebas focalizadas y 21/21 documentales para freeze, preview, decline, exactly-once, conflicto, versión, recovery, symlinks y frontera de mounts.
-- Suite global más reciente: 151/151 tests en 29 ficheros; lint, typecheck y build Next.js verdes tras `323243b` y `416d368`.
+- Lifecycle workbench: 14 pruebas focalizadas para lectura, búsqueda, paginación, rename, pin, archive/restore y aislamiento cross-user.
+- Approvals: 8 pruebas focalizadas para persistencia, expiración, conflicto, cancelación, restart e identidad completa por item.
+- Browser foundation: 6 pruebas focalizadas para aislamiento de perfiles/cookies/downloads, takeover, heartbeat, recovery y tokens autenticados.
+- Gateway/router: 20 pruebas de transporte, gateway y routing, incluido replay durable, ACK posterior al handler, requests inciertos, dedupe y concurrencia por thread.
+- Camino real worker: tests de token user-bound, inicialización única y turn con `clientUserMessageId`; el pool legacy queda sin referencias desde `/api/chat` y `/api/runtime/status`.
+- Suite global más reciente: 184/184 tests en 38 ficheros; lint, typecheck y build Next.js verdes tras `ac0b62e` y `a67ecf5`.
