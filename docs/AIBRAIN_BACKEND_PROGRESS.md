@@ -1,6 +1,6 @@
 # AiBrain backend definitivo — progreso reproducible
 
-Última actualización: 2026-08-26 (Europe/Madrid)
+Última actualización: 2026-08-27 (Europe/Madrid)
 
 ## Estado de la rama
 
@@ -38,9 +38,9 @@
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
 | 2. Supabase Auth-only + sesión local | Pendiente | — |
-| 3. Stores file-backed resilientes | Pendiente | — |
+| 3. Stores file-backed resilientes | En curso | `38eeaaf`: schemas estrictos, atomic write/fsync, locks, journals e índices; falta migrar stores de producto |
 | 4. Provisionamiento idempotente + 20 usuarios | Pendiente | — |
-| 5. Worker registry + WebSocket + contratos | Pendiente | — |
+| 5. Worker registry + WebSocket + contratos | En curso | `fc29316`: transporte WS privado durable y validado contra Codex 0.149.1; registry/gateway en integración |
 | 6. Proyectos y threads completos | Pendiente | — |
 | 7. Streaming, steering, stop, approvals, replay | Pendiente | — |
 | 8. Uploads, Office/PDF, previews y publicación | Pendiente | — |
@@ -57,6 +57,8 @@
 - Los límites de archivos y backpressure serán controles de seguridad/capacidad, no cuotas comerciales.
 - `InstallationConfig` v1 separa identidad, branding, origen público y seis raíces filesystem; producción exige una ruta absoluta montada read-only y falla cerrada si falta.
 - Los fixtures `example-lab-dev` y `northwind-qa` son sintéticos y prueban que la misma base arranca con empresa, dominio, marca, assets y rutas distintos.
+- Los eventos del transporte se aceptan únicamente tras persistencia JSONL y se reanudan con cursor durable; no existe journal in-memory implícito en la composición WebSocket.
+- Los payloads RPC se validan en runtime con los JSON Schemas generados por Codex 0.149.1, además del tipado estático.
 
 ## Riesgos y acciones externas pendientes
 
@@ -66,7 +68,7 @@
 
 ## Siguiente acción concreta
 
-Integrar los primitives de almacenamiento resiliente: schemas versionados, escrituras atómicas, locks, journal, índices regenerables y recuperación comprobada.
+Integrar Auth local opaca, `PermissionProvider` y el provisionamiento/registry aislado por empleado; después migrar los stores de producto a los primitives durables.
 
 ## Últimas validaciones
 
@@ -76,3 +78,8 @@ Integrar los primitives de almacenamiento resiliente: schemas versionados, escri
 - `AIBRAIN_INSTALLATION_CONFIG=.../qa.example.json npm run build`: verde.
 - `env -u AIBRAIN_INSTALLATION_CONFIG npm run build`: verde; la imagen puede compilarse sin secretos/configuración runtime.
 - Smoke HTTP de `/login` con el fixture QA: devolvió `Northwind Brain`, `Northwind Advisory QA`, su dominio y favicon específicos.
+- `npx vitest run src/storage src/runtime/transport`: 49/49 verdes durante integración; suite completa posterior: 65/65 verdes en 12 ficheros.
+- Almacenamiento: se corrigió una carrera real con mtimes submilisegundo y se añadió regresión; 36/36 pruebas específicas verdes antes de ampliar la suite.
+- Transporte: 13/13 pruebas de WebSocket/journal file-backed verdes, incluyendo auth, contrato, backpressure, reconnect, heartbeat, replay, ACK, dedupe, gaps e idempotencia.
+- `npm run test:contract`: 2/2 verdes contra la versión fijada.
+- `npm run lint`, `npm run typecheck` y `npm run build`: verdes tras los commits `38eeaaf` y `fc29316`.
