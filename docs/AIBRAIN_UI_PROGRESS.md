@@ -88,6 +88,8 @@
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
+- `49c624a docs(ui): record checkpoint one` — evidencia y SHA del checkpoint 1.
+- `d2ad083 feat(ui): add white-label visual foundation` — checkpoint 2, tokens, marca, temas, login y regresión visual.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
