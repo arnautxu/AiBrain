@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { ServerNotification } from "../../contracts/codex/0.149.1/types/ServerNotification";
@@ -34,12 +34,61 @@ import { issueThreadToken } from "@/runtime/thread-token";
 import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
 import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import type { JsonValue } from "@/runtime/transport";
+import type { AppServerEvent } from "@/runtime/transport";
 import { atomicWriteFile } from "@/storage";
 
-type EmitEvent = (event: CodexTurnEvent) => void;
+export type WorkerTurnProjection = {
+  envelope: AppServerEvent;
+  key: string;
+};
+
+export type WorkerCodexTurnEvent = CodexTurnEvent | {
+  type: "runtimeTurn";
+  turnId: string;
+};
+
+type EmitEvent = (
+  event: WorkerCodexTurnEvent,
+  projection?: WorkerTurnProjection,
+) => Promise<void>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+type RecoveredTurn = {
+  id: string;
+  status: "completed" | "interrupted" | "failed" | "inProgress";
+  error: string | null;
+  items: Record<string, unknown>[];
+};
+
+function recoveredTurn(result: unknown, clientUserMessageId: string): RecoveredTurn | null {
+  if (!isRecord(result) || !isRecord(result.thread) || !Array.isArray(result.thread.turns)) return null;
+  for (const candidate of [...result.thread.turns].reverse()) {
+    if (!isRecord(candidate) || typeof candidate.id !== "string" ||
+        !["completed", "interrupted", "failed", "inProgress"].includes(String(candidate.status)) ||
+        !Array.isArray(candidate.items)) continue;
+    const items = candidate.items.filter(isRecord);
+    const matches = items.some((item) =>
+      item.type === "userMessage" && item.clientId === clientUserMessageId);
+    if (!matches) continue;
+    return {
+      id: candidate.id,
+      status: candidate.status as RecoveredTurn["status"],
+      error: isRecord(candidate.error) && typeof candidate.error.message === "string"
+        ? candidate.error.message
+        : null,
+      items,
+    };
+  }
+  return null;
+}
+
+function recoveredAgentText(turn: RecoveredTurn) {
+  const messages = turn.items.filter((item) => item.type === "agentMessage" && typeof item.text === "string");
+  const final = messages.filter((item) => item.phase === "final_answer").at(-1) ?? messages.at(-1);
+  return final && typeof final.text === "string" ? final.text : null;
 }
 
 function legacyServerRequest(request: ServerRequest): LegacyServerRequest {
@@ -51,10 +100,19 @@ function legacyServerRequest(request: ServerRequest): LegacyServerRequest {
   };
 }
 
+function deterministicArtifactId(eventId: string, itemId: string) {
+  const digest = createHash("sha256").update(`${eventId}\0${itemId}`).digest("hex").slice(0, 32).split("");
+  digest[12] = "4";
+  digest[16] = "8";
+  const hex = digest.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 async function persistGeneratedImage(
   params: unknown,
   projectWorkspace: string,
   projectId: string,
+  envelope: AppServerEvent,
   emit: EmitEvent,
 ) {
   if (!isRecord(params) || !isRecord(params.item) || params.item.type !== "imageGeneration") return;
@@ -63,10 +121,10 @@ async function persistGeneratedImage(
   const encoded = item.result.includes(",") ? item.result.slice(item.result.indexOf(",") + 1) : item.result;
   const bytes = Buffer.from(encoded, "base64");
   if (bytes.length === 0 || bytes.length > 20_000_000) return;
-  const artifactId = randomUUID();
+  const artifactId = deterministicArtifactId(envelope.eventId, String(item.id ?? "image"));
   const artifactRoot = path.join(projectWorkspace, ".aibrain", "artifacts");
   await atomicWriteFile(path.join(artifactRoot, `${artifactId}.png`), bytes, { mode: 0o600 });
-  emit({
+  await emit({
     type: "artifact",
     item: {
       id: artifactId,
@@ -75,7 +133,7 @@ async function persistGeneratedImage(
       url: `/api/projects/${projectId}/artifacts/${artifactId}`,
       prompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : null,
     },
-  });
+  }, { envelope, key: `artifact:${String(item.id ?? artifactId)}` });
 }
 
 /**
@@ -118,11 +176,11 @@ export async function runWorkerCodexTurn(
   if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
 
   const activities = new Map<string, ActivityItem>();
-  const upsertActivity = (item: ActivityItem) => {
+  const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
     activities.set(item.id, item);
-    if (chatRequest.preferences.showActivity) emit({ type: "activity", item });
+    if (chatRequest.preferences.showActivity) await emit({ type: "activity", item }, projection);
   };
-  upsertActivity({
+  await upsertActivity({
     id: "codex-connected",
     kind: "system",
     label: "Codex connectat",
@@ -172,23 +230,72 @@ export async function runWorkerCodexTurn(
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
     developerInstructions: buildCodexDeveloperInstructions(chatRequest, permissions),
   };
+  let recovered: RecoveredTurn | null = null;
+  const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
+    const resolvedThreadId = extractThreadId(result);
+    if (!resolvedThreadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+    await emit({
+      type: "runtimeThread",
+      threadToken: issueThreadToken(installationId, authenticatedUserId, resolvedThreadId),
+    });
+    recovered = recoveredTurn(result, chatRequest.userMessageId);
+    if (!recovered) return;
+    await emit({ type: "runtimeTurn", turnId: recovered.id });
+    const text = recoveredAgentText(recovered);
+    if (text !== null) {
+      await emit(
+        { type: "content", value: text },
+        { envelope, key: `recovery:content:${recovered.id}` },
+      );
+    }
+    for (const item of recovered.items) {
+      if (item.type === "imageGeneration") {
+        await persistGeneratedImage(
+          { item },
+          projectWorkspace,
+          chatRequest.projectId,
+          envelope,
+          emit,
+        );
+      }
+      const activity = itemActivity({ item }, true);
+      if (activity) {
+        activities.set(activity.id, activity);
+        if (chatRequest.preferences.showActivity) {
+          await emit(
+            { type: "activity", item: activity },
+            { envelope, key: `recovery:activity:${activity.id}` },
+          );
+        }
+      }
+    }
+    if (recovered.status === "completed") {
+      await emit({ type: "done" }, { envelope, key: `recovery:done:${recovered.id}` });
+    } else if (recovered.status === "failed") {
+      await emit(
+        { type: "error", message: recovered.error ?? "El torn recuperat ha fallat." },
+        { envelope, key: `recovery:error:${recovered.id}` },
+      );
+    } else if (recovered.status === "interrupted") {
+      await emit({ type: "stopped" }, { envelope, key: `recovery:stopped:${recovered.id}` });
+    }
+  };
   const threadResult = runtimeThreadId
     ? await runtime.client.request("thread/resume", {
         threadId: runtimeThreadId,
         ...commonThreadParams,
-      }, `thread-resume:${chatRequest.threadId}`, 60_000)
+      }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
     : await runtime.client.request("thread/start", {
         ...commonThreadParams,
         ephemeral: false,
         serviceName: "aibrain_workbench",
         projectId: chatRequest.projectId,
-      }, `thread-start:${chatRequest.threadId}`, 60_000);
+      }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
-  emit({
-    type: "runtimeThread",
-    threadToken: issueThreadToken(installationId, authenticatedUserId, threadId),
-  });
+  recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
+  const recoveredState = recovered as RecoveredTurn | null;
+  if (recoveredState && recoveredState.status !== "inProgress") return;
 
   let runtimeTurnId: string | null = null;
   let finishTurn!: (status: { status: string | null; error: string | null }) => void;
@@ -202,22 +309,36 @@ export async function runWorkerCodexTurn(
     threadId,
     chatRequest.assistantMessageId,
     {
-      onNotification: async (notification: ServerNotification) => {
+      onNotification: async (notification: ServerNotification, envelope: AppServerEvent) => {
         const { method, params } = notification;
         if (method === "item/agentMessage/delta") {
           const delta = notificationDelta(params);
           if (delta) {
             firstDeltaAt ??= performance.now();
-            emit({ type: "delta", value: delta });
+            await emit(
+              { type: "delta", value: delta },
+              { envelope, key: `delta:${notificationItemId(params) ?? "agent"}` },
+            );
           }
           return;
         }
         if (method === "item/started" || method === "item/completed") {
           if (method === "item/completed") {
-            await persistGeneratedImage(params, projectWorkspace, chatRequest.projectId, emit);
+            await persistGeneratedImage(
+              params,
+              projectWorkspace,
+              chatRequest.projectId,
+              envelope,
+              emit,
+            );
           }
           const activity = itemActivity(params, method === "item/completed");
-          if (activity) upsertActivity(activity);
+          if (activity) {
+            await upsertActivity(activity, {
+              envelope,
+              key: `activity:${method === "item/completed" ? "completed" : "started"}:${activity.id}`,
+            });
+          }
           return;
         }
         if (method === "item/commandExecution/outputDelta") {
@@ -230,7 +351,10 @@ export async function runWorkerCodexTurn(
             label: "Executant una ordre",
             status: "running",
           } satisfies ActivityItem;
-          upsertActivity({ ...current, output: `${current.output ?? ""}${delta}` });
+          await upsertActivity(
+            { ...current, output: `${current.output ?? ""}${delta}` },
+            { envelope, key: `command-output:${itemId}` },
+          );
           return;
         }
         if (method === "item/reasoning/summaryTextDelta") {
@@ -243,16 +367,19 @@ export async function runWorkerCodexTurn(
             label: "Raonant",
             status: "running",
           } satisfies ActivityItem;
-          upsertActivity({ ...current, detail: `${current.detail ?? ""}${delta}` });
+          await upsertActivity(
+            { ...current, detail: `${current.detail ?? ""}${delta}` },
+            { envelope, key: `reasoning-summary:${itemId}` },
+          );
           return;
         }
         if (method === "turn/plan/updated") {
           const plan = planFromNotification(params);
-          if (plan) emit({ type: "plan", ...plan });
+          if (plan) await emit({ type: "plan", ...plan }, { envelope, key: "turn:plan" });
           return;
         }
         if (method === "turn/diff/updated" && isRecord(params) && typeof params.diff === "string") {
-          emit({ type: "diff", value: params.diff });
+          await emit({ type: "diff", value: params.diff }, { envelope, key: "turn:diff" });
           return;
         }
         if (method === "warning" || method === "error") {
@@ -262,37 +389,52 @@ export async function runWorkerCodexTurn(
             ? warning.message
             : typeof warning.error === "string" ? warning.error : null;
           if (message) {
-            upsertActivity({
+            await upsertActivity({
               id: `runtime-${randomUUID()}`,
               kind: "system",
               label: method === "error" ? "Error del runtime" : "Avís del runtime",
               detail: message,
               status: method === "error" ? "failed" : "complete",
-            });
+            }, { envelope, key: `runtime:${method}` });
           }
           return;
         }
         if (method === "turn/completed") {
-          finishTurn(completedTurnStatus(params) ?? {
+          const status = completedTurnStatus(params) ?? {
             status: null,
             error: "Resposta incompleta de Codex.",
-          });
+          };
+          if (status.status === "failed") {
+            await emit(
+              { type: "error", message: status.error ?? "El torn de Codex ha fallat." },
+              { envelope, key: "turn:error" },
+            );
+          } else if (status.status === "completed") {
+            await emit({ type: "done" }, { envelope, key: "turn:done" });
+          }
+          finishTurn(status);
         }
       },
-      onServerRequest: async (request: ServerRequest) => {
+      onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
         const approval = approvalFromRequest(legacyServerRequest(request));
         if (!approval || approval.item.threadId !== threadId ||
             (runtimeTurnId && approval.item.turnId !== runtimeTurnId)) {
           throw new Error(`AiBrain encara no admet ${request.method}.`);
         }
-        emit({ type: "approval", item: approval.item });
+        await emit(
+          { type: "approval", item: approval.item },
+          { envelope, key: `approval:pending:${approval.item.id}` },
+        );
         const decision = await waitForApproval(
           approvalStore,
           approval.item,
           approval.requestType,
           signal,
         );
-        emit({ type: "approval", item: resolvedApproval(approval.item, decision) });
+        await emit(
+          { type: "approval", item: resolvedApproval(approval.item, decision) },
+          { envelope, key: `approval:resolved:${approval.item.id}` },
+        );
         return approval.response(decision) as JsonValue;
       },
       onFailure: (error) => finishTurn({ status: "failed", error: error.message }),
@@ -319,7 +461,11 @@ export async function runWorkerCodexTurn(
   signal.addEventListener("abort", interrupt, { once: true });
   if (signal.aborted) interrupt();
   try {
-    const turnResult = await runtime.client.request("turn/start", {
+    if (recoveredState?.status === "inProgress") {
+      runtimeTurnId = recoveredState.id;
+      registration.bindRuntimeTurn(recoveredState.id);
+    } else {
+      const turnResult = await runtime.client.request("turn/start", {
       threadId,
       clientUserMessageId: chatRequest.userMessageId,
       input: [
@@ -337,18 +483,23 @@ export async function runWorkerCodexTurn(
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
-    }, `turn-start:${chatRequest.assistantMessageId}`, 60_000);
-    runtimeTurnId = extractTurnId(turnResult);
-    if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
-    registration.bindRuntimeTurn(runtimeTurnId);
-    const completed = await turnFinished;
-    if (completed.status === "failed") {
-      throw new Error(completed.error ?? "El torn de Codex ha fallat.");
+      }, `turn-start:${chatRequest.assistantMessageId}`, 60_000, async (result) => {
+        const resolvedTurnId = extractTurnId(result);
+        if (!resolvedTurnId) throw new Error("Codex no ha iniciat el torn.");
+        runtimeTurnId = resolvedTurnId;
+        registration.bindRuntimeTurn(resolvedTurnId);
+        await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
+      });
+      runtimeTurnId ??= extractTurnId(turnResult);
+      if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
+      registration.bindRuntimeTurn(runtimeTurnId);
     }
+    const completed = await turnFinished;
+    if (completed.status === "failed") return;
     if (completed.status === "interrupted" || signal.aborted) return;
     const totalMs = Math.round(performance.now() - runtimeStartedAt);
     const firstTextMs = firstDeltaAt === null ? null : Math.round(firstDeltaAt - runtimeStartedAt);
-    upsertActivity({
+    await upsertActivity({
       id: "runtime-performance",
       kind: "system",
       label: "Rendiment del torn",
@@ -362,7 +513,6 @@ export async function runWorkerCodexTurn(
       firstTextMs,
       totalMs,
     });
-    emit({ type: "done" });
   } finally {
     signal.removeEventListener("abort", interrupt);
     registration.dispose();
