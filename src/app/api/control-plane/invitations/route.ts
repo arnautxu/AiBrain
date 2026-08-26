@@ -34,7 +34,7 @@ function responsibilitiesFromBody(body: Record<string, unknown>) {
 }
 
 export async function POST(request: Request) {
-  if (!isSameOriginMutation(request)) {
+  if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
   const session = await getSession();
@@ -73,7 +73,7 @@ export async function POST(request: Request) {
   }
 
   const admin = createSupabaseAdminClient();
-  const redirectTo = `${getPublicOrigin(request)}/auth/confirm`;
+  const redirectTo = `${await getPublicOrigin()}/auth/confirm`;
   const { data, error: inviteError } = await admin.auth.admin.inviteUserByEmail(email, {
     redirectTo,
   });

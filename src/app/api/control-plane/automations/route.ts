@@ -95,7 +95,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  if (!isSameOriginMutation(request)) {
+  if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
   const session = await requireOwner();
