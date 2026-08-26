@@ -34,6 +34,12 @@ export type JournalReadOptions = {
   limit?: number;
 };
 
+type AppendJob<Payload> = {
+  payload: Payload;
+  resolve: (entry: JournalEntry<Payload>) => void;
+  reject: (error: unknown) => void;
+};
+
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
     error &&
@@ -70,6 +76,9 @@ export class FileJournal<Payload> {
   private readonly payloadSchema: StorageSchema<Payload>;
   private readonly entrySchema: StorageSchema<JournalEntry<Payload>>;
   private readonly now: () => number;
+  private readonly appendQueue: AppendJob<Payload>[] = [];
+  private appendScheduled = false;
+  private appendDraining = false;
 
   constructor(options: FileJournalOptions<Payload>) {
     if (!path.isAbsolute(options.filePath)) {
@@ -204,11 +213,67 @@ export class FileJournal<Payload> {
   }
 
   async append(payload: Payload) {
-    const appended = await this.appendIf(payload, () => true);
-    if (!appended) {
-      throw new StorageError("STORAGE_JOURNAL_APPEND_REJECTED", "Journal append was rejected unexpectedly.");
+    const validatedPayload = this.payloadSchema.parse(payload, `${this.filePath}:payload`);
+    return new Promise<JournalEntry<Payload>>((resolve, reject) => {
+      this.appendQueue.push({ payload: validatedPayload, resolve, reject });
+      this.scheduleAppendDrain();
+    });
+  }
+
+  private scheduleAppendDrain() {
+    if (this.appendScheduled || this.appendDraining) return;
+    this.appendScheduled = true;
+    queueMicrotask(() => {
+      this.appendScheduled = false;
+      void this.drainAppends();
+    });
+  }
+
+  private async drainAppends() {
+    if (this.appendDraining) return;
+    this.appendDraining = true;
+    const jobs = this.appendQueue.splice(0);
+    try {
+      const appended = await this.lockManager.withLock(this.lockKey(), async () => {
+        await this.assertNotSymlink();
+        const { entries } = await this.readUnlocked(true);
+        const created = jobs.map((job, index) => this.entrySchema.parse({
+          schemaVersion: 1,
+          sequence: (entries.at(-1)?.sequence ?? 0) + index + 1,
+          eventId: randomUUID(),
+          recordedAt: new Date(this.now()).toISOString(),
+          payload: job.payload,
+        }));
+        const directory = path.dirname(this.filePath);
+        await mkdir(directory, { recursive: true, mode: 0o700 });
+        let existed = true;
+        try {
+          await lstat(this.filePath);
+        } catch (error) {
+          if (isNodeError(error, "ENOENT")) existed = false;
+          else throw error;
+        }
+        const flags = constants.O_APPEND |
+          constants.O_CREAT |
+          constants.O_WRONLY |
+          (constants.O_NOFOLLOW ?? 0);
+        const handle = await open(this.filePath, flags, 0o600);
+        try {
+          await handle.writeFile(created.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        if (!existed) await fsyncDirectory(directory);
+        return created;
+      });
+      jobs.forEach((job, index) => job.resolve(appended[index]));
+    } catch (error) {
+      jobs.forEach((job) => job.reject(error));
+    } finally {
+      this.appendDraining = false;
+      if (this.appendQueue.length > 0) this.scheduleAppendDrain();
     }
-    return appended;
   }
 
   async read(options: JournalReadOptions = {}) {
