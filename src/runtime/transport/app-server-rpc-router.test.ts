@@ -77,6 +77,30 @@ describe("AppServerRpcRouter", () => {
     await router.close();
   });
 
+  it("does not resolve or ACK an RPC response until its durable projection hook completes", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    let releaseProjection!: () => void;
+    const projectionGate = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    const projected = vi.fn(async () => projectionGate);
+    const result = router.request(
+      { method: "thread/read", id: "durable-response", params: { threadId: "thread-a", includeTurns: false } },
+      30_000,
+      projected,
+    );
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    transport.queue.push(event(1, {
+      kind: "rpc-response",
+      rpc: { id: "durable-response", result: { thread: { id: "thread-a" } } },
+    }));
+    await vi.waitFor(() => expect(projected).toHaveBeenCalledOnce());
+    expect(transport.acknowledged).toHaveLength(0);
+    releaseProjection();
+    await expect(result).resolves.toEqual({ thread: { id: "thread-a" } });
+    await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    await router.close();
+  });
+
   it("routes notifications and server approvals only to their bound thread and turn", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
@@ -162,6 +186,62 @@ describe("AppServerRpcRouter", () => {
       kind: "rpc-response",
       rpc: { id: "approval-other", error: { code: -32602 } },
     });
+    await router.close();
+  });
+
+  it("keeps another thread streaming while an approval is pending and ACKs in order", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    await router.start();
+    let releaseApproval!: () => void;
+    const approvalGate = new Promise<void>((resolve) => { releaseApproval = resolve; });
+    const otherNotification = vi.fn();
+    router.registerTurn("thread-approval", "local-approval", {
+      onNotification: vi.fn(),
+      onServerRequest: async () => {
+        await approvalGate;
+        return { decision: "accept" };
+      },
+      onFailure: vi.fn(),
+    }).bindRuntimeTurn("turn-approval");
+    router.registerTurn("thread-stream", "local-stream", {
+      onNotification: otherNotification,
+      onServerRequest: vi.fn(),
+      onFailure: vi.fn(),
+    }).bindRuntimeTurn("turn-stream");
+
+    transport.queue.push(event(1, {
+      kind: "rpc-request",
+      rpc: {
+        method: "item/commandExecution/requestApproval",
+        id: "approval-pending",
+        params: {
+          threadId: "thread-approval",
+          turnId: "turn-approval",
+          itemId: "item-approval",
+          startedAtMs: 1,
+          environmentId: null,
+          command: "pwd",
+        },
+      },
+    }));
+    transport.queue.push(event(2, {
+      kind: "rpc-notification",
+      rpc: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-stream",
+          turnId: "turn-stream",
+          itemId: "item-stream",
+          delta: "continues",
+        },
+      },
+    }));
+
+    await vi.waitFor(() => expect(otherNotification).toHaveBeenCalledOnce());
+    expect(transport.acknowledged).toHaveLength(0);
+    releaseApproval();
+    await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1, 2]));
     await router.close();
   });
 });

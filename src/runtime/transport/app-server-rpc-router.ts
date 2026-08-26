@@ -15,11 +15,12 @@ type PendingRequest = {
   resolve: (value: JsonValue) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
+  beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>;
 };
 
 export type AppServerTurnHandlers = {
-  onNotification(notification: ServerNotification): void | Promise<void>;
-  onServerRequest(request: ServerRequest): JsonValue | Promise<JsonValue>;
+  onNotification(notification: ServerNotification, event: AppServerEvent): void | Promise<void>;
+  onServerRequest(request: ServerRequest, event: AppServerEvent): JsonValue | Promise<JsonValue>;
   onFailure(error: Error): void;
 };
 
@@ -76,6 +77,11 @@ export class AppServerRpcRouter {
   private readonly turns = new Map<string, TurnRegistrationState>();
   private startPromise: Promise<void> | null = null;
   private consumePromise: Promise<void> | null = null;
+  private readonly scopeChains = new Map<string, Promise<void>>();
+  private readonly inFlightEvents = new Set<Promise<void>>();
+  private readonly readyToAcknowledge = new Map<number, AppServerEvent>();
+  private nextAcknowledgementSequence: number | null = null;
+  private acknowledgementChain = Promise.resolve();
   private closed = false;
 
   constructor(readonly transport: AppServerTransport) {}
@@ -120,7 +126,16 @@ export class AppServerRpcRouter {
     });
   }
 
-  async request(rpc: ClientRequest, timeoutMs = 30_000) {
+  hasActiveTurn(threadId: string, localTurnId?: string) {
+    const turn = this.turns.get(threadId);
+    return Boolean(turn && (localTurnId === undefined || turn.localTurnId === localTurnId));
+  }
+
+  async request(
+    rpc: ClientRequest,
+    timeoutMs = 30_000,
+    beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
+  ) {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
       throw new Error("App Server request timeout is invalid.");
     }
@@ -137,7 +152,7 @@ export class AppServerRpcRouter {
       reject(new Error(`App Server request timed out: ${rpc.method}.`));
     }, timeoutMs);
     timeout.unref?.();
-    this.pending.set(rpc.id, { resolve, reject, timeout });
+    this.pending.set(rpc.id, { resolve, reject, timeout, beforeResolve });
     try {
       await this.transport.send({
         clientRequestId: String(rpc.id),
@@ -173,13 +188,60 @@ export class AppServerRpcRouter {
   private async consume() {
     try {
       for await (const event of this.transport.events()) {
-        await this.route(event);
-        await this.transport.acknowledge?.(event);
+        if (this.closed) break;
+        const completed = this.dispatch(event);
+        if (event.message.kind === "rpc-response") await completed;
+        if (this.inFlightEvents.size >= 512) {
+          await Promise.race(this.inFlightEvents);
+        }
       }
+      await Promise.all(this.inFlightEvents);
       if (!this.closed) throw new Error("App Server transport event stream closed unexpectedly.");
     } catch (error) {
       if (!this.closed) this.fail(safeError(error));
     }
+  }
+
+  private scopeKey(event: AppServerEvent) {
+    if (event.message.kind === "rpc-response") return null;
+    const scope = eventScope(event.message.rpc);
+    return scope ? `${scope.threadId}:${scope.turnId ?? "thread"}` : null;
+  }
+
+  private dispatch(event: AppServerEvent) {
+    this.nextAcknowledgementSequence ??= event.sequence;
+    const key = this.scopeKey(event);
+    const previous = key ? this.scopeChains.get(key) ?? Promise.resolve() : Promise.resolve();
+    const routed = previous.then(() => this.route(event));
+    if (key) {
+      this.scopeChains.set(key, routed);
+      void routed.finally(() => {
+        if (this.scopeChains.get(key) === routed) this.scopeChains.delete(key);
+      }).catch(() => undefined);
+    }
+    const completed = routed
+      .then(() => this.queueAcknowledgement(event))
+      .catch((error: unknown) => {
+        if (!this.closed) this.fail(safeError(error));
+      });
+    this.inFlightEvents.add(completed);
+    void completed.finally(() => this.inFlightEvents.delete(completed));
+    return completed;
+  }
+
+  private async queueAcknowledgement(event: AppServerEvent) {
+    this.readyToAcknowledge.set(event.sequence, event);
+    const flush = this.acknowledgementChain.then(async () => {
+      while (this.nextAcknowledgementSequence !== null) {
+        const next = this.readyToAcknowledge.get(this.nextAcknowledgementSequence);
+        if (!next) break;
+        await this.transport.acknowledge?.(next);
+        this.readyToAcknowledge.delete(this.nextAcknowledgementSequence);
+        this.nextAcknowledgementSequence += 1;
+      }
+    });
+    this.acknowledgementChain = flush;
+    await flush;
   }
 
   private async route(event: AppServerEvent) {
@@ -190,7 +252,15 @@ export class AppServerRpcRouter {
       clearTimeout(pending.timeout);
       this.pending.delete(response.id);
       if ("error" in response) pending.reject(responseError(response));
-      else pending.resolve(response.result);
+      else {
+        try {
+          await pending.beforeResolve?.(response.result, event);
+          pending.resolve(response.result);
+        } catch (error) {
+          pending.reject(safeError(error));
+          throw error;
+        }
+      }
       return;
     }
 
@@ -202,7 +272,7 @@ export class AppServerRpcRouter {
         if (turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId) return;
         turn.runtimeTurnId ??= scope.turnId;
       }
-      if (turn) await turn.handlers.onNotification(notification);
+      if (turn) await turn.handlers.onNotification(notification, event);
       return;
     }
 
@@ -214,7 +284,7 @@ export class AppServerRpcRouter {
       turn.runtimeTurnId ??= scope.turnId;
     }
     const response: JsonRpcSuccess | JsonRpcFailure = turn
-      ? await Promise.resolve(turn.handlers.onServerRequest(request)).then(
+      ? await Promise.resolve(turn.handlers.onServerRequest(request, event)).then(
           (result) => ({ id: request.id, result }),
           (error: unknown) => ({ id: request.id, error: { code: -32603, message: safeError(error).message } }),
         )
