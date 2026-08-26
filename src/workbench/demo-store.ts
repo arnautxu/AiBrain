@@ -307,16 +307,32 @@ export async function beginDemoThreadTurn(
   userMessage: ChatMessage,
   assistantMessage: ChatMessage,
 ) {
-  await mutateState(session, (state) => {
+  return mutateState(session, (state) => {
     const thread = state.threads.find((candidate) => candidate.id === threadId);
     if (!thread || thread.status !== "active") {
       throw new WorkbenchNotFoundError("Fil actiu no trobat.");
     }
-    if (thread.messages.some((message) => message.id === userMessage.id || message.id === assistantMessage.id)) {
-      throw new WorkbenchConflictError("Aquest torn ja existeix.");
+    const existingUserIndex = thread.messages.findIndex((message) => message.id === userMessage.id);
+    const existingAssistantIndex = thread.messages.findIndex((message) => message.id === assistantMessage.id);
+    if (existingUserIndex !== -1 || existingAssistantIndex !== -1) {
+      const existingUser = thread.messages[existingUserIndex];
+      const existingAssistant = thread.messages[existingAssistantIndex];
+      if (
+        existingUserIndex >= 0 && existingAssistantIndex === existingUserIndex + 1 &&
+        existingUser?.role === "user" && existingAssistant?.role === "assistant" &&
+        existingUser.content === userMessage.content &&
+        JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments)
+      ) {
+        return { outcome: "existing" as const, assistantMessage: existingAssistant };
+      }
+      throw new WorkbenchConflictError("Els identificadors del torn ja existeixen amb un altre contingut.");
+    }
+    if (thread.messages.some((message) => message.role === "assistant" && message.status === "streaming")) {
+      throw new WorkbenchConflictError("Aquest fil ja té un torn actiu.");
     }
     thread.messages.push(userMessage, assistantMessage);
     thread.updatedAt = new Date().toISOString();
+    return { outcome: "created" as const, assistantMessage };
   });
 }
 

@@ -48,6 +48,7 @@ import {
   type WorkbenchThread,
   type WorkbenchThreadSummary,
 } from "@/workbench/types";
+import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
 
 const WORKBENCH_SCHEMA_VERSION = 1 as const;
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -557,6 +558,22 @@ export class FileWorkbenchStore {
     if (state.installationId !== this.installationId || state.userId !== userId) {
       throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
     }
+    const projections = new FileTurnProjectionStore({
+      installationId: this.installationId,
+      userId,
+      usersRoot: this.usersRoot,
+    });
+    for (const thread of state.threads) {
+      for (let index = 0; index < thread.messages.length; index += 1) {
+        const message = thread.messages[index];
+        if (message.role !== "assistant" || message.status !== "streaming") continue;
+        const projection = await projections.read(thread.id, message.id);
+        if (!projection) continue;
+        thread.messages[index] = projection.message;
+        if (projection.runtimeThreadToken) thread.runtimeThreadToken = projection.runtimeThreadToken;
+        if (projection.updatedAt > thread.updatedAt) thread.updatedAt = projection.updatedAt;
+      }
+    }
     return state;
   }
 
@@ -774,7 +791,7 @@ export class FileWorkbenchStore {
     assistantMessage: ChatMessage,
   ) {
     assertFilesystemWorkbenchId(threadId);
-    await this.mutate(userId, (state) => {
+    return this.mutate(userId, (state) => {
       const thread = state.threads.find((candidate) => candidate.id === threadId);
       if (!thread || thread.status !== "active") {
         throw new WorkbenchNotFoundError("Fil actiu no trobat.");
@@ -785,12 +802,27 @@ export class FileWorkbenchStore {
       if (userMessage.role !== "user" || assistantMessage.role !== "assistant") {
         throw new WorkbenchPersistenceError("Els rols del torn no són vàlids.");
       }
-      if (thread.messages.some((message) =>
-        message.id === userMessage.id || message.id === assistantMessage.id)) {
-        throw new WorkbenchConflictError("Aquest torn ja existeix.");
+      const existingUserIndex = thread.messages.findIndex((message) => message.id === userMessage.id);
+      const existingAssistantIndex = thread.messages.findIndex((message) => message.id === assistantMessage.id);
+      if (existingUserIndex !== -1 || existingAssistantIndex !== -1) {
+        const existingUser = thread.messages[existingUserIndex];
+        const existingAssistant = thread.messages[existingAssistantIndex];
+        if (
+          existingUserIndex >= 0 && existingAssistantIndex === existingUserIndex + 1 &&
+          existingUser?.role === "user" && existingAssistant?.role === "assistant" &&
+          existingUser.content === userMessage.content &&
+          JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments)
+        ) {
+          return { outcome: "existing" as const, assistantMessage: existingAssistant };
+        }
+        throw new WorkbenchConflictError("Els identificadors del torn ja existeixen amb un altre contingut.");
+      }
+      if (thread.messages.some((message) => message.role === "assistant" && message.status === "streaming")) {
+        throw new WorkbenchConflictError("Aquest fil ja té un torn actiu.");
       }
       thread.messages.push(userMessage, assistantMessage);
       thread.updatedAt = new Date().toISOString();
+      return { outcome: "created" as const, assistantMessage };
     });
   }
 

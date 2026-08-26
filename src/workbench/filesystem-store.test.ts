@@ -56,6 +56,34 @@ afterEach(async () => {
 });
 
 describe("FileWorkbenchStore", () => {
+  it("treats an identical retried turn as idempotent and rejects divergent reuse", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Retry project");
+    const thread = await store.createThread(USER_A, project.id, "Retry thread");
+    const userMessage = message("user", "complete");
+    const assistantMessage = message("assistant", "streaming");
+    await expect(store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage))
+      .resolves.toMatchObject({ outcome: "created" });
+    await expect(store.beginThreadTurn(
+      USER_A,
+      thread.id,
+      { ...userMessage, createdAt: new Date(Date.now() + 1_000).toISOString() },
+      { ...assistantMessage, createdAt: new Date(Date.now() + 1_001).toISOString() },
+    )).resolves.toMatchObject({ outcome: "existing", assistantMessage: { id: assistantMessage.id } });
+    await expect(store.beginThreadTurn(
+      USER_A,
+      thread.id,
+      { ...userMessage, content: "Different payload" },
+      assistantMessage,
+    )).rejects.toBeInstanceOf(WorkbenchConflictError);
+    await expect(store.beginThreadTurn(
+      USER_A,
+      thread.id,
+      message("user", "complete"),
+      message("assistant", "streaming"),
+    )).rejects.toBeInstanceOf(WorkbenchConflictError);
+  });
+
   it("starts empty and persists projects, threads, turns, activity and runtime token across restart", async () => {
     const { usersRoot, store } = await fixture();
     await expect(store.load(USER_A)).resolves.toEqual({

@@ -1,0 +1,418 @@
+import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
+import path from "node:path";
+import {
+  applyChatStreamEvent,
+  isChatMessage,
+  isChatStreamEvent,
+  type ChatMessage,
+  type ChatStreamEvent,
+} from "@/lib/chat-contract";
+import type { AppServerEvent } from "@/runtime/transport";
+import {
+  atomicWriteJson,
+  defineVersionedSchema,
+  expectArray,
+  expectInteger,
+  expectIsoDate,
+  expectString,
+  readValidatedJson,
+  ResourceLockManager,
+  type ValidationContext,
+} from "@/storage";
+import { WorkbenchPersistenceError } from "@/workbench/errors";
+import { isUuid } from "@/workbench/types";
+
+const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const EVENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const PROJECTION_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/;
+const MAX_PROJECTION_BYTES = 64 * 1024 * 1024;
+
+export type TurnProjection = {
+  schemaVersion: 1;
+  installationId: string;
+  userId: string;
+  threadId: string;
+  assistantMessageId: string;
+  lastTransportSequence: number;
+  lastTransportEventId: string | null;
+  appliedKeysAtLastSequence: string[];
+  localRevision: number;
+  runtimeThreadToken: string | null;
+  runtimeTurnId: string | null;
+  message: ChatMessage;
+  createdAt: string;
+  updatedAt: string;
+};
+
+function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === "object" && "code" in error &&
+    (code === undefined || (error as NodeJS.ErrnoException).code === code));
+}
+
+function inside(root: string, candidate: string) {
+  const relative = path.relative(root, candidate);
+  return relative === "" ||
+    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function nullableSafeString(
+  value: unknown,
+  context: ValidationContext,
+  maximum: number,
+  pattern?: RegExp,
+) {
+  return value === null ? null : expectString(value, context, {
+    minLength: 1,
+    maxLength: maximum,
+    ...(pattern ? { pattern } : {}),
+  });
+}
+
+function parseMessage(value: unknown, context: ValidationContext) {
+  if (!isChatMessage(value) || !isUuid(value.id) || value.role !== "assistant") {
+    context.fail("expected a valid assistant message");
+  }
+  const parsed = new Date(value.createdAt);
+  if (Number.isNaN(parsed.valueOf()) || parsed.toISOString() !== value.createdAt) {
+    context.at("createdAt").fail("expected a canonical ISO timestamp");
+  }
+  return value;
+}
+
+const turnProjectionSchema = defineVersionedSchema<TurnProjection>({
+  name: "TurnProjection",
+  schemaVersion: 1,
+  keys: [
+    "installationId",
+    "userId",
+    "threadId",
+    "assistantMessageId",
+    "lastTransportSequence",
+    "lastTransportEventId",
+    "appliedKeysAtLastSequence",
+    "localRevision",
+    "runtimeThreadToken",
+    "runtimeTurnId",
+    "message",
+    "createdAt",
+    "updatedAt",
+  ],
+  parse(record, context) {
+    const projection: TurnProjection = {
+      schemaVersion: 1,
+      installationId: expectString(record.installationId, context.at("installationId"), {
+        minLength: 2,
+        maxLength: 63,
+        pattern: INSTALLATION_ID_PATTERN,
+      }),
+      userId: expectString(record.userId, context.at("userId"), {
+        minLength: 36,
+        maxLength: 36,
+        pattern: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      }),
+      threadId: expectString(record.threadId, context.at("threadId"), {
+        minLength: 36,
+        maxLength: 36,
+        pattern: /^[0-9a-f-]{36}$/,
+      }),
+      assistantMessageId: expectString(record.assistantMessageId, context.at("assistantMessageId"), {
+        minLength: 36,
+        maxLength: 36,
+        pattern: /^[0-9a-f-]{36}$/,
+      }),
+      lastTransportSequence: expectInteger(
+        record.lastTransportSequence,
+        context.at("lastTransportSequence"),
+        { minimum: 0 },
+      ),
+      lastTransportEventId: nullableSafeString(
+        record.lastTransportEventId,
+        context.at("lastTransportEventId"),
+        256,
+        EVENT_ID_PATTERN,
+      ),
+      appliedKeysAtLastSequence: expectArray(
+        record.appliedKeysAtLastSequence,
+        context.at("appliedKeysAtLastSequence"),
+        (item, itemContext) => expectString(item, itemContext, {
+          minLength: 1,
+          maxLength: 512,
+          pattern: PROJECTION_KEY_PATTERN,
+        }),
+        { maxLength: 32 },
+      ),
+      localRevision: expectInteger(record.localRevision, context.at("localRevision"), { minimum: 0 }),
+      runtimeThreadToken: nullableSafeString(record.runtimeThreadToken, context.at("runtimeThreadToken"), 2_048),
+      runtimeTurnId: nullableSafeString(
+        record.runtimeTurnId,
+        context.at("runtimeTurnId"),
+        256,
+        EVENT_ID_PATTERN,
+      ),
+      message: parseMessage(record.message, context.at("message")),
+      createdAt: expectIsoDate(record.createdAt, context.at("createdAt")),
+      updatedAt: expectIsoDate(record.updatedAt, context.at("updatedAt")),
+    };
+    if (projection.message.id !== projection.assistantMessageId) {
+      context.at("message.id").fail("must match assistantMessageId");
+    }
+    if ((projection.lastTransportSequence === 0) !== (projection.lastTransportEventId === null)) {
+      context.at("lastTransportEventId").fail("must be null only before the first transport event");
+    }
+    if (new Set(projection.appliedKeysAtLastSequence).size !== projection.appliedKeysAtLastSequence.length) {
+      context.at("appliedKeysAtLastSequence").fail("must contain unique keys");
+    }
+    if (projection.updatedAt < projection.createdAt) {
+      context.at("updatedAt").fail("must not precede createdAt");
+    }
+    return projection;
+  },
+});
+
+export class FileTurnProjectionStore {
+  readonly installationId: string;
+  readonly userId: string;
+  readonly usersRoot: string;
+  readonly userRoot: string;
+  readonly projectionRoot: string;
+  readonly lockRoot: string;
+  private readonly locks: ResourceLockManager;
+
+  constructor(options: { installationId: string; userId: string; usersRoot: string }) {
+    if (!INSTALLATION_ID_PATTERN.test(options.installationId) || !isUuid(options.userId) ||
+        !path.isAbsolute(options.usersRoot)) {
+      throw new WorkbenchPersistenceError("La identitat del projection store no és vàlida.");
+    }
+    this.installationId = options.installationId;
+    this.userId = options.userId;
+    this.usersRoot = path.resolve(options.usersRoot);
+    this.userRoot = path.resolve(this.usersRoot, options.userId);
+    if (this.userRoot === this.usersRoot || !inside(this.usersRoot, this.userRoot)) {
+      throw new WorkbenchPersistenceError("La ruta de projeccions surt de usersRoot.");
+    }
+    this.projectionRoot = path.join(this.userRoot, "state", "turn-projections");
+    this.lockRoot = path.join(this.userRoot, "state", ".locks");
+    this.locks = new ResourceLockManager({ rootDirectory: this.lockRoot });
+  }
+
+  private identity(threadId: string, assistantMessageId: string) {
+    if (!isUuid(threadId) || !isUuid(assistantMessageId)) {
+      throw new WorkbenchPersistenceError("La identitat de projecció no és vàlida.");
+    }
+    const threadRoot = path.join(this.projectionRoot, threadId);
+    return {
+      threadId,
+      assistantMessageId,
+      threadRoot,
+      filePath: path.join(threadRoot, `${assistantMessageId}.json`),
+      lockKey: `turn-projection:${this.installationId}:${this.userId}:${threadId}:${assistantMessageId}`,
+    };
+  }
+
+  private async assertDirectory(directory: string) {
+    const metadata = await lstat(directory);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory() || (metadata.mode & 0o077) !== 0) {
+      throw new WorkbenchPersistenceError("El directori de projeccions no és segur.");
+    }
+  }
+
+  private async prepare(threadId: string, assistantMessageId: string) {
+    const identity = this.identity(threadId, assistantMessageId);
+    await this.assertDirectory(this.userRoot);
+    for (const directory of [path.join(this.userRoot, "state"), this.projectionRoot, identity.threadRoot, this.lockRoot]) {
+      try {
+        await mkdir(directory, { mode: 0o700 });
+      } catch (error) {
+        if (!isNodeError(error, "EEXIST")) throw error;
+      }
+      await this.assertDirectory(directory);
+      await chmod(directory, 0o700);
+    }
+    const [canonicalUser, canonicalProjection, canonicalThread] = await Promise.all([
+      realpath(this.userRoot),
+      realpath(this.projectionRoot),
+      realpath(identity.threadRoot),
+    ]);
+    if (!inside(canonicalUser, canonicalProjection) || !inside(canonicalProjection, canonicalThread)) {
+      throw new WorkbenchPersistenceError("La projecció resol fora de l’usuari.");
+    }
+    return identity;
+  }
+
+  private async readUnlocked(filePath: string) {
+    try {
+      const metadata = await lstat(filePath);
+      if (metadata.isSymbolicLink() || !metadata.isFile() || metadata.nlink !== 1 ||
+          metadata.size > MAX_PROJECTION_BYTES || (metadata.mode & 0o077) !== 0) {
+        throw new WorkbenchPersistenceError("El fitxer de projecció no és segur.");
+      }
+      return await readValidatedJson(filePath, turnProjectionSchema);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
+  }
+
+  private assertBinding(projection: TurnProjection, threadId: string, assistantMessageId: string) {
+    if (projection.installationId !== this.installationId || projection.userId !== this.userId ||
+        projection.threadId !== threadId || projection.assistantMessageId !== assistantMessageId) {
+      throw new WorkbenchPersistenceError("La projecció no pertany a aquest torn.");
+    }
+  }
+
+  private async write(filePath: string, projection: TurnProjection) {
+    if (Buffer.byteLength(JSON.stringify(projection), "utf8") > MAX_PROJECTION_BYTES) {
+      throw new WorkbenchPersistenceError("La projecció supera el límit operatiu segur.");
+    }
+    await atomicWriteJson(filePath, projection, turnProjectionSchema, { mode: 0o600 });
+  }
+
+  async initialize(threadId: string, message: ChatMessage) {
+    const identity = await this.prepare(threadId, message.id);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const existing = await this.readUnlocked(identity.filePath);
+      if (existing) {
+        this.assertBinding(existing, threadId, message.id);
+        return existing;
+      }
+      if (!isChatMessage(message) || message.role !== "assistant" || !isUuid(message.id)) {
+        throw new WorkbenchPersistenceError("El missatge inicial de projecció no és vàlid.");
+      }
+      const now = new Date().toISOString();
+      const projection = turnProjectionSchema.parse({
+        schemaVersion: 1,
+        installationId: this.installationId,
+        userId: this.userId,
+        threadId,
+        assistantMessageId: message.id,
+        lastTransportSequence: 0,
+        lastTransportEventId: null,
+        appliedKeysAtLastSequence: [],
+        localRevision: 0,
+        runtimeThreadToken: null,
+        runtimeTurnId: null,
+        message,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await this.write(identity.filePath, projection);
+      return projection;
+    });
+  }
+
+  async read(threadId: string, assistantMessageId: string) {
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (projection) this.assertBinding(projection, threadId, assistantMessageId);
+      return projection;
+    });
+  }
+
+  async applyTransportEvent(
+    threadId: string,
+    assistantMessageId: string,
+    envelope: AppServerEvent,
+    projectionKey: string,
+    event: ChatStreamEvent,
+  ) {
+    if (!PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event)) {
+      throw new WorkbenchPersistenceError("L’esdeveniment de projecció no és vàlid.");
+    }
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      this.assertBinding(projection, threadId, assistantMessageId);
+      if (envelope.sequence < projection.lastTransportSequence) {
+        return { projection, applied: false as const };
+      }
+      let keys = projection.appliedKeysAtLastSequence;
+      if (envelope.sequence === projection.lastTransportSequence) {
+        if (projection.lastTransportEventId !== envelope.eventId) {
+          throw new WorkbenchPersistenceError("La seqüència de transport s’ha reutilitzat.");
+        }
+        if (keys.includes(projectionKey)) return { projection, applied: false as const };
+      } else {
+        keys = [];
+      }
+      const next = turnProjectionSchema.parse({
+        ...projection,
+        lastTransportSequence: envelope.sequence,
+        lastTransportEventId: envelope.eventId,
+        appliedKeysAtLastSequence: [...keys, projectionKey],
+        message: applyChatStreamEvent(projection.message, event),
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(identity.filePath, next);
+      return { projection: next, applied: true as const };
+    });
+  }
+
+  async applyLocalEvent(
+    threadId: string,
+    assistantMessageId: string,
+    event: ChatStreamEvent,
+  ) {
+    if (!isChatStreamEvent(event)) throw new WorkbenchPersistenceError("L’esdeveniment local no és vàlid.");
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      const next = turnProjectionSchema.parse({
+        ...projection,
+        localRevision: projection.localRevision + 1,
+        message: applyChatStreamEvent(projection.message, event),
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(identity.filePath, next);
+      return next;
+    });
+  }
+
+  async setRuntimeThreadToken(threadId: string, assistantMessageId: string, token: string) {
+    if (token.length < 1 || token.length > 2_048 || /\p{C}/u.test(token)) {
+      throw new WorkbenchPersistenceError("El token de runtime no és vàlid.");
+    }
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      if (projection.runtimeThreadToken && projection.runtimeThreadToken !== token) {
+        throw new WorkbenchPersistenceError("El runtime thread del torn ha canviat de forma insegura.");
+      }
+      if (projection.runtimeThreadToken === token) return projection;
+      const next = turnProjectionSchema.parse({
+        ...projection,
+        runtimeThreadToken: token,
+        localRevision: projection.localRevision + 1,
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(identity.filePath, next);
+      return next;
+    });
+  }
+
+  async setRuntimeTurnId(threadId: string, assistantMessageId: string, runtimeTurnId: string) {
+    if (!EVENT_ID_PATTERN.test(runtimeTurnId)) {
+      throw new WorkbenchPersistenceError("L’identificador de runtime turn no és vàlid.");
+    }
+    const identity = await this.prepare(threadId, assistantMessageId);
+    return this.locks.withLock(identity.lockKey, async () => {
+      const projection = await this.readUnlocked(identity.filePath);
+      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      if (projection.runtimeTurnId && projection.runtimeTurnId !== runtimeTurnId) {
+        throw new WorkbenchPersistenceError("El runtime turn ha canviat de forma insegura.");
+      }
+      if (projection.runtimeTurnId === runtimeTurnId) return projection;
+      const next = turnProjectionSchema.parse({
+        ...projection,
+        runtimeTurnId,
+        localRevision: projection.localRevision + 1,
+        updatedAt: new Date().toISOString(),
+      });
+      await this.write(identity.filePath, next);
+      return next;
+    });
+  }
+}
