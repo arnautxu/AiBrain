@@ -1,6 +1,6 @@
 # Contrato UI ↔ backend y gaps
 
-Última verificación backend: `origin/codex/aibrain-backend-definitivo@7a20c51f6d5870a9f02ba3df8311b6955dd3b386`, 2026-08-27.
+Última verificación backend: `origin/codex/aibrain-backend-definitivo@b8b0f3c64119e0e723ddf286077da97cf1555c59`, 2026-08-27.
 
 ## Contratos consumibles hoy
 
@@ -12,7 +12,19 @@
 - Frames `ready`, `accepted`, `event`, `pong`, `rejected`, `overloaded` y cliente `resume`, `request`, `event-ack`, `ping`.
 - Estado de transporte `idle | connecting | connected | reconnecting | closing | closed`.
 
-## Mapping a contrato de aplicación
+Estos contratos existen y tienen pruebas en la rama backend, pero todavía no están conectados al flujo de producto: los checkpoints backend 5, 7 y 10 siguen en curso o pendientes.
+
+## Contrato conectado hoy en la rama UI
+
+- `POST /api/chat` recibe IDs opacos de proyecto, conversación y mensajes, opciones de turno e imágenes inline validadas.
+- La respuesta es NDJSON con el discriminante `ChatStreamEvent`: `activity`, `plan`, `approval`, `diff`, `delta`, `artifact`, `done` y `error`.
+- `src/ui/app-server-ui-adapter.ts` conserva el orden de lectura, soporta fragmentación arbitraria de chunks y falla cerrado ante JSON malformado, eventos desconocidos o líneas mayores de 1 MB.
+- `AbortController` cancela la petición existente y la UI conserva el resultado parcial con estado terminal `stopped`.
+- En Preview sintética, proyectos, conversaciones y mensajes se recuperan desde almacenamiento local; un mensaje que quedó `streaming` durante una recarga se recupera honestamente como `stopped`.
+- El contrato actual no expone `eventId`, `sequence`, cursor, ACK, `turnId` ni `itemId`; por tanto la UI no simula dedupe, replay o reconnect durable.
+- Los adjuntos actuales son únicamente PNG/JPEG/WebP/GIF inline, máximo 3, 2 MB por imagen y 5 MB agregados. No existe todavía una ruta de upload Office/PDF conectada a esta rama.
+
+## Mapping objetivo al contrato backend definitivo
 
 Los componentes no importarán tipos RPC generados. Un adapter server-side transforma los eventos en un envelope UI versionado:
 
@@ -31,7 +43,7 @@ type UiEventEnvelope = {
 
 `UiEvent` discrimina como mínimo `connection`, `thread`, `turn`, `message-delta`, `plan`, `activity`, `tool`, `diff`, `approval`, `artifact`, `browser`, `usage`, `error` y `complete`. IDs y rutas Codex permanecen server-side salvo IDs opacos que el backend declare públicos.
 
-## Reglas del reducer cliente
+## Reglas del reducer cliente definitivo
 
 1. Rechazar versiones desconocidas.
 2. Deduplicar por `eventId`.
@@ -48,12 +60,12 @@ type UiEventEnvelope = {
 
 | Gap backend | Estado | Consecuencia UI |
 | --- | --- | --- |
-| Auth-only + sesión local opaca | Pendiente checkpoint 2 | Login UI se puede completar; smoke definitivo espera endpoint |
-| Stores de producto migrados a filesystem | En curso checkpoint 3 | No se valida persistencia definitiva de proyectos/threads |
-| Provisionamiento y registry por empleado | Pendiente checkpoints 4–5 | No hay smoke multiusuario definitivo |
-| Proyectos/threads definitivos | Pendiente checkpoint 6 | Adapter conserva frontera y fixtures de test |
+| Auth-only + sesión local opaca | Completado localmente; QA externa pendiente | Login UI se puede completar; smoke definitivo espera endpoint |
+| Stores de producto migrados a filesystem | En curso checkpoint 3 | Preview verifica recuperación local, no persistencia definitiva |
+| Provisionamiento y registry por empleado | Provisionamiento completo; factory/gateway en curso checkpoint 5 | No hay smoke multiusuario definitivo |
+| Proyectos/threads definitivos | En curso checkpoint 6 | Adapter conserva frontera y fixtures de test |
 | Streaming/steer/stop/approval/replay integrados end-to-end | Pendiente checkpoint 7 | Transporte está probado, integración de producto no |
-| Office/PDF/previews/publicador | Pendiente checkpoint 8 | Estados UI honestos, smoke real bloqueado |
+| Office/PDF/previews/publicador | Servicios en curso; faltan routes autorizadas | Estados UI honestos, upload real bloqueado |
 | Browser/Computer Use aislado | Pendiente checkpoint 9 | Viewer UI sin declarar sesión disponible |
 | Contrato final para rama UI | Pendiente checkpoint 10 | Este documento es propuesta de integración, no API final |
 

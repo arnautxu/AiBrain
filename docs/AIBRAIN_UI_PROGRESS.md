@@ -27,7 +27,7 @@
 | 1. Auditoría, baseline, rutas, contratos, matriz, referencias | Completado | `REFERENCE_BRIEF.md`, `AIBRAIN_UI_AUDIT.md`, `AIBRAIN_UI_BACKEND_GAPS.md`, screenshots checkpoint 01 |
 | 2. Tokens, primitivas, white-label, tipografía, tema, responsive | Completado | proyección Example/Northwind, login light/dark/mobile, snapshots visuales |
 | 3. Login, shell, sidebar, navegación, proyectos, búsqueda, mobile | Completado | shell employee-first, composer persistente, Example/Northwind y desktop/mobile |
-| 4. Conversación, composer, attachments, streaming, stop, recovery | En curso | — |
+| 4. Conversación, composer, attachments, streaming, stop, recovery | Completado en la rebanada disponible | Markdown/GFM, adapter NDJSON fail-closed, imágenes, stop, recovery y scroll largo; replay definitivo bloqueado por backend 7/10 |
 | 5. Plan, actividad, tools, diffs, review, approvals, errores | Pendiente | — |
 | 6. PDF/Office/image, preview, publish, Browser/Computer Use | Pendiente | — |
 | 7. Responsive, temas, a11y, keyboard, motion, degraded | Pendiente | — |
@@ -50,15 +50,21 @@
 | Example shell | light, mobile | 390×844 | `artifacts/ui-parity/checkpoint-03/example-shell-light-390x844.png` | Composer persistente y navegación compacta |
 | Example sidebar | light, mobile | 390×844 | `artifacts/ui-parity/checkpoint-03/example-sidebar-light-390x844.png` | Drawer, backdrop y cierre verificados |
 | Northwind shell | light | 1440×900 | `artifacts/ui-parity/checkpoint-03/northwind-shell-light-1440x900.png` | Member sin onboarding, marca, proyectos y accent propios |
+| Example conversación, inicio | light | 1440×900 | `artifacts/ui-parity/checkpoint-04/example-conversation-start-light-1440x900.png` | Mensaje usuario, actividad, Markdown y control de volver al final |
+| Example conversación, resultado | light | 1440×900 | `artifacts/ui-parity/checkpoint-04/example-conversation-light-1440x900.png` | Listas GFM, tabla, acciones y composer persistente |
+| Example conversación, inicio mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-04/example-conversation-start-light-390x844.png` | Historia y respuesta responsive con composer fijo |
+| Example conversación, resultado mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-04/example-conversation-light-390x844.png` | Tabla responsive, acciones y composer móvil |
 | Codex desktop | no capturado | — | restricción Computer Use | Bloqueo de referencia, no de implementación |
 
 ## Contratos consumidos
 
 - Backend fijado para checkpoint 1: `7a20c51f6d5870a9f02ba3df8311b6955dd3b386`.
+- Backend reverificado para checkpoint 4: `b8b0f3c64119e0e723ddf286077da97cf1555c59`.
 - Codex App Server fijado por backend: `0.149.1`.
 - InstallationConfig v1.
 - Transporte privado durable v1 con cursor, ordering, dedupe, replay y ACK.
 - Contrato UI propuesto documentado en `AIBRAIN_UI_BACKEND_GAPS.md`.
+- La rama UI consume todavía el NDJSON legacy de `/api/chat`; el envelope durable con `eventId`, `sequence`, replay y ACK no está conectado y no se simula.
 
 ## Fuentes y decisiones
 
@@ -103,6 +109,20 @@
 - La primera pasada del shell detectó un input de adjuntos sin nombre, un listbox sin nombre y contraste insuficiente en resultados seleccionados; los tres problemas se corrigieron y se reejecutó axe sin excepciones.
 - Playwright usa Preview demo sintético y determinista durante pruebas; no escribe en el workbench local ni utiliza datos reales.
 
+## Gates del checkpoint 4
+
+- `npm run lint`: verde, 0 errores y 0 warnings.
+- `npm run typecheck`: verde.
+- `npm run test:unit`: verde, 4 ficheros y 9 tests; incluye chunks NDJSON fragmentados, orden y fallo cerrado.
+- `npm run test:component`: verde, 2 ficheros y 3 tests; incluye headings, listas, enlaces, tabla GFM y bloque de código copiable.
+- `npm run test:e2e`: verde, 7/7 en Example y 7/7 en Northwind; cubre autosize, error y drag/drop de imagen, stream completado, stop, recarga y conversación larga con scroll inteligente.
+- `npm run test:visual`: verde, 11 tests y 1 skip intencional; añade conversación completa en desktop/mobile y vistas estabilizadas al inicio/final.
+- `npm run test:a11y`: verde, 2/2; el recorrido autenticado añade conversación completa sin violaciones critical/serious.
+- `npm run build`: verde en Example y Northwind, Next.js 16.3.2 y 24 rutas de aplicación.
+- Revisión visual humana: cuatro capturas sintéticas abiertas a resolución original; ninguna contiene historial o datos privados.
+- Axe encontró inicialmente dos contrastes insuficientes en el estado de resultado; ambos se corrigieron y el gate se reejecutó sin excepciones.
+- El parser cliente no inventa garantías: el ordering de lectura está verificado, pero dedupe, replay, reconnect y ACK quedan explícitamente pendientes hasta que backend checkpoints 7/10 publiquen el contrato final.
+
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
@@ -110,8 +130,9 @@
 - `d2ad083 feat(ui): add white-label visual foundation` — checkpoint 2, tokens, marca, temas, login y regresión visual.
 - `1b2d4f1 docs(ui): record checkpoint two` — evidencia y SHA del checkpoint 2.
 - `af29858 feat(ui): build employee-first workbench shell` — checkpoint 3, navegación, búsqueda, proyectos, mobile y composer persistente.
+- `dc19cf5 feat(ui): complete conversation streaming slice` — checkpoint 4, Markdown/GFM, adapter NDJSON, attachments, stop, recovery, scroll y regresiones.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
-Completar el checkpoint 4 sobre la rebanada real: conversación y composer en español, attachments con contrato ampliado, streaming/reanudación/stop/error y persistencia de hilos sin exponer detalles internos.
+Completar el checkpoint 5: traducir y pulir plan, actividad, herramientas, diffs, Review, approvals, errores y acciones de resultado sobre eventos reales, manteniendo aislado el contrato backend pendiente.
