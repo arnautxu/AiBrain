@@ -517,3 +517,38 @@ export async function finishSupabaseThreadTurn(
     if (runtimeError) throw databaseError("No s’ha pogut persistir la represa de Codex.", runtimeError);
   }
 }
+
+export async function updateSupabaseMessageActivity(
+  session: AuthSession,
+  threadId: string,
+  messageId: string,
+  item: ChatMessage["activity"][number],
+) {
+  const client = await createSupabaseServerClient();
+  const tenantId = await resolveTenantId(client, session.tenant.id);
+  const { data: row, error: readError } = await client
+    .from("thread_messages")
+    .select(MESSAGE_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .eq("thread_id", threadId)
+    .eq("id", messageId)
+    .eq("role", "assistant")
+    .maybeSingle();
+  if (readError) throw databaseError("No s’ha pogut carregar el resultat.", readError);
+  if (!row) throw new WorkbenchNotFoundError("Resultat no trobat.");
+  const message = parseMessage(row);
+  const index = message.activity.findIndex((candidate) => candidate.id === item.id);
+  if (index === -1) message.activity.push(item);
+  else message.activity[index] = item;
+  const { data, error } = await client
+    .from("thread_messages")
+    .update({ activity: message.activity })
+    .eq("tenant_id", tenantId)
+    .eq("thread_id", threadId)
+    .eq("id", messageId)
+    .select(MESSAGE_COLUMNS)
+    .maybeSingle();
+  if (error) throw databaseError("No s’ha pogut desar l’estat del resultat.", error);
+  if (!data) throw new WorkbenchNotFoundError("Resultat no trobat.");
+  return parseMessage(data);
+}

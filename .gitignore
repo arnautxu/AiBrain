@@ -12,3 +12,4 @@ runtime/tenants/*/workspace/*
 .vercel
 .codex-context/
 supabase/.temp/
+.impeccable/review/

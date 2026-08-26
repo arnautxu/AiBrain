@@ -13,6 +13,7 @@ import {
 import type { AuthSession, UserRole } from "@/auth/types";
 import type { BrainWindowId } from "@/config/brain";
 import type { ManifestEditorData } from "@/control-plane/types";
+import { AutomationGovernance } from "@/components/automation-governance";
 
 const windowCopy: Array<{ id: BrainWindowId; title: string; detail: string }> = [
   { id: "chat", title: "Workbench", detail: "Superfície principal obligatòria" },
@@ -220,6 +221,8 @@ export function ControlPlaneForm({
             )}
             {inviteMessage ? <p role="status" className={`mt-4 rounded-xl px-4 py-3 text-[10px] ${inviteState === "error" ? "bg-[#fff1ec] text-[#8d503c]" : "bg-[#eaf3eb] text-[#4a6c50]"}`}>{inviteMessage}</p> : null}
           </section>
+
+          {session.provider === "supabase" ? <AutomationGovernance /> : null}
 
           {message ? <p role="status" className={`rounded-xl px-4 py-3 text-[10px] ${state === "error" ? "bg-[#fff1ec] text-[#8d503c]" : "bg-[#eaf3eb] text-[#4a6c50]"}`}>{message}</p> : null}
         </div>

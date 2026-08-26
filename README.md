@@ -4,19 +4,23 @@ Workbench propi, replicable i personalitzable sobre Codex App Server. Codex cont
 
 ## Què funciona
 
-- Client real de Codex App Server per `stdio`, amb inici i represa de threads, streaming i interrupció.
+- Client real de Codex App Server persistent per `stdio`, amb inici i represa de threads, cua per workspace, streaming i interrupció.
 - Plans, activitat, ordres, eines, canvis, diffs i aprovacions interactives amb un contracte NDJSON tipat.
-- Sessió demo signada en cookie `HttpOnly`, allowlist local, rols `owner` i `member` i protecció server-side de totes les APIs.
-- Adaptador Supabase SSR per producció, login passwordless invite-only, refresh de sessió i resolució de tenant/rol a cada petició.
+- Sessió demo local signada en cookie `HttpOnly`, allowlist, rols `owner` i `member` i protecció server-side de totes les APIs.
+- Auth Supabase SSR hosted validada amb login passwordless invite-only, refresh de sessió i resolució de tenant/rol a cada petició.
 - Projectes i fils durables amb crear, canviar, cercar, reanomenar, fixar, arxivar i reprendre per projecte.
 - Command center amb jerarquia projecte → fil, sidebar col·lapsable, cerca global amb `⌘K` i dreceres de creació.
 - Review per torn amb navegació per fitxer, comptadors, diff línia a línia, còpia i activitat separada.
+- Selector de model i profunditat, amb mode ràpid per defecte, estat del procés calent i mètriques d'ús de Codex.
+- Flux principal per a persones no tècniques: accions guiades, plantilles ràpides per projecte, formularis simples, seguiments suggerits i resultats que es poden aprovar, copiar, descarregar o convertir en una nova versió.
+- Onboarding de treballador en tres passos amb rol, responsabilitats, preferències i primera missió assignats per l’owner; Runtime i controls de model queden fora de la seva interfície.
+- Automatitzacions guiades governades per l’owner: activació per tenant, permisos per treballador i validació server-side abans de cada execució.
 - Migracions Postgres amb RLS, memberships, invitacions, manifests append-only, workspaces, threads, missatges i auditoria per triggers.
-- Dos tenants reals de demostració, cadascun amb manifest, identitat, preferències, finestres i workspace propis.
+- Dos tenants locals de demostració, cadascun amb manifest, identitat, preferències, finestres i workspace propis.
 - Tokens opacs de thread vinculats al tenant i al fil persistent; el navegador no rep ni l’ID cru de Codex ni el token de represa.
 - Control plane owner-only amb overlays de manifest validats i escriptura atòmica.
 - Registre extensible de finestres: workbench, inspector i runtime.
-- Selecció i preferències de navegador separades per tenant; projectes, fils i missatges viuen al servidor, excepte a la preview UX explícitament efímera.
+- Selecció i preferències de navegador separades per tenant; a la preview protegida, projectes, fils i missatges persisteixen a Supabase amb auth real.
 
 ## Executar el prototip local
 
@@ -34,7 +38,7 @@ L’entrada demo no demana contrasenya i està desactivada amb `NODE_ENV=product
 
 ## Activar l’adaptador Supabase
 
-El projecte hosted `aibrain-workbench` està creat, vinculat i té les tres migracions aplicades. La configuració, el bootstrap del primer owner i els gates live són a [docs/SUPABASE.md](docs/SUPABASE.md).
+El projecte hosted `aibrain-workbench` està creat i vinculat; les migracions d’automatitzacions governades i onboarding s’han d’aplicar abans de provar aquests dos fluxos a la preview hosted. SMTP, templates, bootstrap del primer owner i gates live d'auth i RLS previs estan validats; l'estat verificat és a [docs/SUPABASE.md](docs/SUPABASE.md).
 
 Quan les credencials existeixen, `AIBRAIN_AUTH_MODE=supabase` substitueix completament la sessió demo i el filesystem de manifests. Si falta configuració, l’aplicació queda tancada.
 

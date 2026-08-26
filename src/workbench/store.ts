@@ -14,6 +14,7 @@ import {
   loadDemoWorkbench,
   updateDemoProject,
   updateDemoThread,
+  updateDemoMessageActivity,
 } from "@/workbench/demo-store";
 import { WorkbenchPersistenceError } from "@/workbench/errors";
 import {
@@ -26,6 +27,7 @@ import {
   loadSupabaseWorkbench,
   updateSupabaseProject,
   updateSupabaseThread,
+  updateSupabaseMessageActivity,
 } from "@/workbench/supabase-store";
 import type {
   UpdateProjectInput,
@@ -133,4 +135,18 @@ export async function finishThreadTurn(
     assistantMessage,
     runtimeThreadToken,
   );
+}
+
+export async function updateMessageActivity(
+  session: AuthSession,
+  threadId: string,
+  messageId: string,
+  item: ChatMessage["activity"][number],
+) {
+  assertWorkbenchId(threadId);
+  assertWorkbenchId(messageId);
+  if (mode() === "supabase") {
+    return updateSupabaseMessageActivity(session, threadId, messageId, item);
+  }
+  return updateDemoMessageActivity(session, threadId, messageId, item);
 }

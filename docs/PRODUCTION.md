@@ -2,11 +2,11 @@
 
 ## Estat actual
 
-La imatge i el runtime estan preparats per aïllar recursos per tenant. El projecte Supabase hosted ja està provisionat, les migracions i la matriu RLS cross-tenant passen i l’advisor de seguretat és net. **El producte encara no està llest per exposar-se a usuaris externs**: falten el bootstrap consentit del primer owner, SMTP propi, l’host Codex persistent, quotes, backups i rotació operativa.
+La imatge i el runtime estan preparats per aïllar recursos per tenant. El projecte Supabase hosted té quatre migracions aplicades, SMTP i templates actius; el primer owner consentit i els gates live d'auth, rol, logout i revocació estan validats. Les migracions noves d’automatitzacions governades i onboarding encara són pendents de desplegament i validació hosted. La matriu RLS cross-tenant prèvia passa i l'advisor de seguretat és net. Aquest Mac ja funciona com a host persistent privat de validació, amb `CODEX_HOME` i workspace aïllats. **El producte encara no està llest per exposar-se a usuaris externs**: falten quotes pròpies per tenant, backups, rotació operativa i observabilitat de producció.
 
 ## Topologia mínima
 
-AiBrain necessita un procés Node persistent. El mateix servei entrega Next.js i inicia Codex App Server per `stdio` per cada torn. No utilitzis `/api/chat` com una funció serverless: binari, autenticació Codex i threads necessiten disc i processos persistents.
+AiBrain necessita un procés Node persistent. El mateix servei entrega Next.js i manté una sessió Codex App Server per `stdio` per cada combinació tenant/workspace. Els torns del mateix workspace es serialitzen, el catàleg i l'ús es reutilitzen durant 60 segons i el procés es tanca després de 15 minuts d'inactivitat. No utilitzis `/api/chat` com una funció serverless: binari, autenticació Codex, cues i threads necessiten disc i processos persistents.
 
 ```text
 /var/lib/aibrain/
@@ -37,14 +37,16 @@ Variables de runtime:
 
 ## Gates abans d’obrir trànsit
 
-Una preview visual pot activar el demo efímer amb `AIBRAIN_ENABLE_PREVIEW_DEMO=1`, però el codi només ho accepta quan Vercel injecta `VERCEL_ENV=preview`. Aquesta excepció no substitueix cap dels gates següents ni pot activar el demo al target de producció.
+La preview protegida actual funciona amb auth Supabase real i persistència hosted, però continua sent només el frontend de validació: no allotja Codex App Server ni els volums privats del runtime. Una preview separada pot activar el demo efímer amb `AIBRAIN_ENABLE_PREVIEW_DEMO=1`, però el codi només ho accepta quan Vercel injecta `VERCEL_ENV=preview`; aquesta excepció no pot activar el demo al target de producció.
 
-1. Completar [el bootstrap Supabase](SUPABASE.md), configurar SMTP/templates i validar una sessió i invitació reals per correu.
-2. Decidir i activar MFA/SSO si el perfil dels usuaris ho requereix.
-3. Provisionar i autenticar un `CODEX_HOME_ROOT/<tenant>` independent.
-4. Aplicar rate limits, límits de concurrència i quotes per tenant.
+1. Mantenir els gates hosted de [Supabase](SUPABASE.md) i decidir si cal MFA/SSO abans d'incorporar més usuaris.
+2. Convertir l'host privat validat en una topologia de producció monitorada o provisionar-ne un d'equivalent amb volum privat i xifrat.
+3. Autenticar la subscripció Codex dins de cada `CODEX_HOME_ROOT/<tenant>` independent, sense copiar credencials al checkout ni a la imatge. Això ja està validat per al tenant de prova d'aquest Mac.
+4. Mantenir la cua de concurrència per workspace i afegir quotes pròpies per tenant; la UI ja exposa el límit i l'ús que retorna Codex.
 5. Verificar backups, rotació de secrets, logs sense dades sensibles i recuperació.
 6. Fer una prova real de separació creuada de sessions, threads, approvals, workspace i credencials.
+7. Validar la matriu d’automatitzacions: desactivada, owner, treballador autoritzat, treballador no autoritzat i intent cross-tenant.
+8. Aplicar i validar hosted `automation_permissions` i `member_onboarding`, incloent assignació, onboarding completat i bloqueig de permisos per a members.
 
 ## Acceptació del runtime
 
@@ -55,4 +57,4 @@ Una preview visual pot activar el demo efímer amb `AIBRAIN_ENABLE_PREVIEW_DEMO=
 5. Un segon missatge reprèn el mateix thread mitjançant el token opac.
 6. Una aprovació només es resol des del tenant que l’ha originada.
 7. El canvi de manifest afecta només el tenant propietari.
-8. Un torn real produeix streaming, activitat, diff i interrupció sense deixar processos vius.
+8. Un torn real produeix streaming, activitat, diff i interrupció; el procés calent es reutilitza i es tanca per inactivitat sense deixar processos orfes.

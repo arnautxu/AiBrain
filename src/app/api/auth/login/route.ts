@@ -42,7 +42,7 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const emailRedirectTo = `${getPublicOrigin(request)}/auth/confirm?next=%2F`;
+  const emailRedirectTo = `${getPublicOrigin(request)}/auth/confirm`;
   const { error } = await supabase.auth.signInWithOtp({
     email,
     options: {

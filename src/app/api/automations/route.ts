@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
-import { automationCatalog, executeAutomation } from "@/automations/registry";
+import { executeAutomation } from "@/automations/registry";
+import { availableAutomations, canExecuteAutomation } from "@/automations/permissions";
 import { isAutomationId } from "@/lib/automation-contract";
 import { readRuntimeConfig } from "@/runtime/config";
 import { getProjectRuntimeContext } from "@/workbench/store";
@@ -12,7 +13,10 @@ export const runtime = "nodejs";
 export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
-  return NextResponse.json({ automations: automationCatalog }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json(
+    { automations: await availableAutomations(session) },
+    { headers: { "Cache-Control": "private, no-store" } },
+  );
 }
 
 export async function POST(request: Request) {
@@ -22,6 +26,12 @@ export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   if (!body || typeof body !== "object" || !("projectId" in body) || !isUuid(body.projectId) || !("automationId" in body) || !isAutomationId(body.automationId)) {
     return NextResponse.json({ error: "Execució no vàlida." }, { status: 400 });
+  }
+  if (!await canExecuteAutomation(session, body.automationId)) {
+    return NextResponse.json(
+      { error: "L’administrador no t’ha habilitat aquesta automatització." },
+      { status: 403 },
+    );
   }
   try {
     const project = await getProjectRuntimeContext(session, body.projectId);

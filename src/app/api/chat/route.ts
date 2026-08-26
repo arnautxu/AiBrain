@@ -121,7 +121,7 @@ export async function POST(request: Request) {
   const userMessage = message(
     body.userMessageId,
     "user",
-    body.message.trim(),
+    body.displayMessage?.trim() || body.message.trim(),
     "complete",
     startedAt.toISOString(),
   );

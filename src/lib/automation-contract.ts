@@ -15,6 +15,22 @@ export type AutomationRun = {
   output: string;
 };
 
+export type AutomationMember = {
+  id: string;
+  label: string;
+  email: string | null;
+};
+
+export type AutomationControlSnapshot = {
+  automations: Array<AutomationDefinition & { enabled: boolean }>;
+  members: AutomationMember[];
+  permissions: Array<{
+    userId: string;
+    automationId: AutomationDefinition["id"];
+    enabled: boolean;
+  }>;
+};
+
 export function isAutomationId(value: unknown): value is AutomationDefinition["id"] {
   return value === "workspace-inventory" || value === "runtime-diagnostics";
 }

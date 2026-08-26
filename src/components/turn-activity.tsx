@@ -46,6 +46,31 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
   return <Check {...props} weight="bold" />;
 }
 
+function friendlyActivity(item: ActivityItem) {
+  if (item.status === "running" || item.status === "waiting") {
+    return {
+      command: "Treballant amb el projecte",
+      file: "Preparant els canvis",
+      reasoning: "Pensant la millor resposta",
+      web: "Consultant informació",
+      tool: "Utilitzant una eina autoritzada",
+      agent: "Coordinant la feina",
+      plan: "Preparant els passos",
+      system: item.label,
+    }[item.kind];
+  }
+  return {
+    command: "Pas intern completat",
+    file: "Canvis preparats",
+    reasoning: "Resposta preparada",
+    web: "Informació consultada",
+    tool: "Eina completada",
+    agent: "Coordinació completada",
+    plan: "Passos preparats",
+    system: item.label,
+  }[item.kind];
+}
+
 function ApprovalCard({
   approval,
   onResolve,
@@ -55,11 +80,15 @@ function ApprovalCard({
 }) {
   const pending = approval.status === "pending";
   const result = {
-    accepted: "Aprovat una vegada",
-    accepted_session: "Aprovat per a la sessió",
-    declined: "Rebutjat",
-    pending: "Esperant decisió",
+    accepted: "Ho has permès aquesta vegada",
+    accepted_session: "Ho has permès durant aquesta tasca",
+    declined: "Has decidit no fer-ho",
+    pending: "Esperant la teva decisió",
   }[approval.status];
+  const title = approval.title;
+  const explanation = approval.kind === "file"
+    ? "AiBrain ha preparat canvis al projecte. Només s’aplicaran si els autoritzes."
+    : "Aquest pas intern necessita el teu permís. Pots permetre’l una vegada, durant aquesta tasca o cancel·lar-lo.";
 
   return (
     <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[#deddd9] bg-[#fbfbfa]">
@@ -68,24 +97,26 @@ function ApprovalCard({
           <ShieldCheck size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[#282725]">{approval.title}</p>
-          <p className="mt-1 text-[10px] leading-4 text-[#77746f]">{approval.detail}</p>
-          {approval.command ? (
-            <pre tabIndex={0} className="scrollbar-thin mt-2 overflow-x-auto rounded-lg bg-[#20201f] px-3 py-2 font-mono text-[9px] leading-4 text-[#e9e8e4]">
-              {approval.command}
-            </pre>
-          ) : null}
-          {approval.cwd ? <p className="mt-1.5 truncate font-mono text-[9px] text-[#999691]">{approval.cwd}</p> : null}
+          <p className="text-[11px] font-semibold text-[#282725]">{title}</p>
+          <p className="mt-1 text-[10px] leading-4 text-[#77746f]">{explanation}</p>
+          <details className="mt-2">
+            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#817d76]">Mostra per què ho necessita</summary>
+            <div className="mt-2 rounded-lg bg-[#f1f0ed] px-3 py-2 text-[9px] leading-4 text-[#66625d]">
+              <p>{approval.detail}</p>
+              {approval.command ? <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[8px] text-[#77736d]">{approval.command}</pre> : null}
+              {approval.cwd ? <p className="mt-1 truncate font-mono text-[8px] text-[#999691]">{approval.cwd}</p> : null}
+            </div>
+          </details>
         </div>
       </div>
 
       {pending ? (
         <div className="flex flex-wrap justify-end gap-2 border-t border-[#e6e5e1] bg-white px-3 py-2.5">
-          <button className="rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[#716e69] hover:bg-[#f2f1ee]" onClick={() => onResolve("decline")}>Rebutja</button>
+          <button className="rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[#716e69] hover:bg-[#f2f1ee]" onClick={() => onResolve("decline")}>No ho facis</button>
           {approval.kind === "command" ? (
-            <button className="rounded-lg border border-[#deddd9] px-2.5 py-1.5 text-[10px] font-medium text-[#4e4c48] hover:bg-[#f6f5f2]" onClick={() => onResolve("acceptForSession")}>Durant la sessió</button>
+            <button className="rounded-lg border border-[#deddd9] px-2.5 py-1.5 text-[10px] font-medium text-[#4e4c48] hover:bg-[#f6f5f2]" onClick={() => onResolve("acceptForSession")}>Sí, durant aquesta tasca</button>
           ) : null}
-          <button className="rounded-lg bg-[var(--brain-accent)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--brain-contrast)]" onClick={() => onResolve("accept")}>Permet una vegada</button>
+          <button className="rounded-lg bg-[var(--brain-accent)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--brain-contrast)]" onClick={() => onResolve("accept")}>Sí, aquesta vegada</button>
         </div>
       ) : (
         <div className="border-t border-[#e6e5e1] px-3.5 py-2 text-[9px] font-medium text-[#77746f]">{result}</div>
@@ -135,11 +166,11 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
                 <ActivityIcon item={item} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-medium text-[#4b4945]">{item.label}</p>
-                {item.detail ? <p className="mt-0.5 truncate text-[9px] text-[#6f6c67]">{item.detail}</p> : null}
+                <p className="text-[10px] font-medium text-[#4b4945]">{friendlyActivity(item)}</p>
+                {item.kind === "system" && item.detail ? <p className="mt-0.5 truncate text-[9px] text-[#6f6c67]">{item.detail}</p> : null}
                 {item.output ? (
                   <details className="mt-2">
-                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#6d6a65]">Mostra la sortida</summary>
+                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#6d6a65]">Detalls per a l’administrador</summary>
                     <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
                   </details>
                 ) : null}
@@ -154,12 +185,9 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ))}
 
       {message.diff && showDiff ? (
-        <section>
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[#77746f]">
-            <GitDiff size={13} />
-            Diff del torn
-          </div>
-          <pre tabIndex={0} className="diff-view scrollbar-thin max-h-64 overflow-auto rounded-[var(--brain-radius)] border border-[#deddd9] bg-[#20201f] px-3 py-3 font-mono text-[9px] leading-4 text-[#e7e5e1]">{message.diff}</pre>
+        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[#dde3dd] bg-[#f5f8f5] px-3.5 py-3 text-[#516456]">
+          <GitDiff size={14} className="mt-0.5 shrink-0" />
+          <div><p className="text-[10px] font-semibold">Canvis preparats</p><p className="mt-1 text-[9px] leading-4 text-[#748078]">Pots revisar què ha canviat des del botó “Obre Review”.</p></div>
         </section>
       ) : null}
     </div>

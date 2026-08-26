@@ -3,6 +3,7 @@
 import { useMemo, useState, type ReactNode } from "react";
 import {
   Archive,
+  ArrowClockwise,
   CaretDown,
   CaretRight,
   ChatCircleDots,
@@ -54,6 +55,7 @@ type SidebarProps = {
   onProjectAction: (project: WorkbenchProject, action: ProjectMenuAction) => void;
   onThreadAction: (thread: WorkbenchThread, action: ThreadMenuAction) => void;
   onOpenCustomization: () => void;
+  onOpenAutomations: () => void;
 };
 
 function relativeDate(date: string) {
@@ -154,6 +156,7 @@ export function Sidebar({
   onProjectAction,
   onThreadAction,
   onOpenCustomization,
+  onOpenAutomations,
 }: SidebarProps) {
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
@@ -177,7 +180,7 @@ export function Sidebar({
   const activeThreads = projectThreads.filter((thread) => thread.status === "active");
   const archivedThreads = projectThreads.filter((thread) => thread.status === "archived");
   const runtimeCopy = runtimeStatus.ready
-    ? "Codex connectat"
+    ? session.user.role === "owner" ? "Codex connectat" : "AiBrain preparat"
     : runtimeStatus.codex === "checking"
       ? "Comprovant Codex"
       : runtimeStatus.mode === "demo"
@@ -307,6 +310,10 @@ export function Sidebar({
         </div>
 
         <div className="shrink-0 border-t border-[#deddd9] p-2">
+          <button className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[#65625d] transition hover:bg-[#e7e6e2] hover:text-[#33312e]" onClick={onOpenAutomations}>
+            <ArrowClockwise size={14} />
+            <span className="flex-1 text-[10px] font-medium">Automatitzacions</span>
+          </button>
           {session.user.role === "owner" ? (
             <Link href="/control" className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[#65625d] transition hover:bg-[#e7e6e2] hover:text-[#33312e]">
               <GearSix size={14} />
@@ -322,7 +329,7 @@ export function Sidebar({
             <span className={`size-1.5 rounded-full ${runtimeStatus.ready ? "bg-[#4f8a5d]" : runtimeStatus.codex === "checking" ? "bg-[#d4a64c] motion-safe:animate-pulse" : "bg-[#aaa7a1]"}`} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-[9px] font-medium text-[#716e69]">{runtimeCopy}</p>
-              <p className="mt-0.5 truncate text-[8px] text-[#a09d97]">{persistenceCopy} · {runtimeStatus.authMode ?? runtimeStatus.mode}</p>
+              <p className="mt-0.5 truncate text-[8px] text-[#a09d97]">{session.user.role === "owner" ? `${persistenceCopy} · ${runtimeStatus.authMode ?? runtimeStatus.mode}` : "Entorn segur de l’empresa"}</p>
             </div>
           </div>
           <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#e0dfda] bg-[#f8f8f6] px-2.5 py-2">

@@ -8,6 +8,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { RuntimePanel } from "@/components/runtime-panel";
+import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -30,7 +31,12 @@ import {
   type ChatInputAttachment,
   type ComposerMode,
 } from "@/lib/chat-contract";
-import { initialRuntimeStatus, isRuntimeStatus, type RuntimeStatus } from "@/lib/runtime-status";
+import {
+  initialRuntimeStatus,
+  isRuntimeStatus,
+  type RuntimeReasoningEffort,
+  type RuntimeStatus,
+} from "@/lib/runtime-status";
 import {
   createProjectRequest,
   createThreadRequest,
@@ -62,7 +68,8 @@ type TextDialogState =
 
 type ConfirmDialogState =
   | { kind: "archive-project"; project: WorkbenchProject }
-  | { kind: "archive-thread"; thread: WorkbenchThread };
+  | { kind: "archive-thread"; thread: WorkbenchThread }
+  | { kind: "undo-result"; message: ChatMessage };
 
 type StoredSelection = {
   activeProjectId: string | null;
@@ -276,8 +283,10 @@ export function BrainApp({
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<BrainPreferences>(() => preferencesFromManifest(manifest));
   const [prompt, setPrompt] = useState("");
+  const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [composerModel, setComposerModel] = useState<string | null>(null);
+  const [composerEffort, setComposerEffort] = useState<RuntimeReasoningEffort | null>("low");
   const [webSearch, setWebSearch] = useState(false);
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
@@ -289,6 +298,7 @@ export function BrainApp({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
+  const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
@@ -421,6 +431,7 @@ export function BrainApp({
     const thread = remembered ?? firstActiveThread(threads, projectId);
     setActiveProjectId(projectId);
     setActiveThreadId(thread?.id ?? null);
+    setPendingRuntimeContext(null);
     setSelectedMessageId(null);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
@@ -435,6 +446,7 @@ export function BrainApp({
     if (!thread) return;
     setActiveProjectId(thread.projectId);
     setActiveThreadId(thread.id);
+    setPendingRuntimeContext(null);
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
@@ -446,10 +458,38 @@ export function BrainApp({
     setActiveThreadId(null);
     setSelectedMessageId(null);
     setPrompt("");
+    setPendingRuntimeContext(null);
     setAttachments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
   }, [activeProjectId, sending]);
+
+  const createVersionFromMessage = useCallback(async (message: ChatMessage) => {
+    if (!activeProject || sending || actionBusy || !message.content.trim()) return;
+    setActionBusy(true);
+    try {
+      const baseTitle = activeThread?.title ?? "Resultat";
+      const title = `${baseTitle.replace(/ · nova versió$/, "")} · nova versió`.slice(0, 120);
+      const thread = initialWorkbench.persistence === "browser-preview"
+        ? localThread(activeProject.id, title)
+        : await createThreadRequest(activeProject.id, title);
+      setThreads((current) => [thread, ...current]);
+      setActiveThreadId(thread.id);
+      threadByProjectRef.current[activeProject.id] = thread.id;
+      setSelectedMessageId(null);
+      setPrompt([
+        "Vull crear una nova versió d’aquest resultat. Pregunta’m què vull canviar.",
+      ].join("\n"));
+      setPendingRuntimeContext(`Resultat de partida que s’ha de conservar intacte:\n\n${message.content.slice(0, 12_000)}`);
+      setAttachments([]);
+      setActiveSideWindow(null);
+      setNotice("Nova versió preparada en un fil separat. L’original es conserva.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No s’ha pogut preparar una nova versió.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeProject, activeThread?.title, initialWorkbench.persistence, sending]);
 
   const handleStream = useCallback(async (
     response: Response,
@@ -485,17 +525,21 @@ export function BrainApp({
     if (buffer.trim()) applyLine(buffer);
   }, []);
 
-  const sendMessage = useCallback(async (messageOverride?: string) => {
-    const content = (messageOverride ?? prompt).trim();
-    if (!content || sending || !activeProject || activeProject.status !== "active") return;
+  const sendMessage = useCallback(async (messageOverride?: string, displayMessageOverride?: string) => {
+    const visibleContent = (displayMessageOverride ?? messageOverride ?? prompt).trim();
+    const runtimeContent = (messageOverride ?? (pendingRuntimeContext
+      ? `${prompt.trim()}\n\n${pendingRuntimeContext}`
+      : prompt)).trim();
+    if (!visibleContent || !runtimeContent || sending || !activeProject || activeProject.status !== "active") return;
 
     setSending(true);
     let thread = activeThread && activeThread.status === "active" &&
       activeThread.projectId === activeProject.id ? activeThread : null;
     let assistantMessage: ChatMessage | null = null;
+    let succeeded = false;
     try {
       if (!thread) {
-        const title = titleFromMessage(content);
+        const title = titleFromMessage(visibleContent);
         thread = initialWorkbench.persistence === "browser-preview"
           ? localThread(activeProject.id, title)
           : await createThreadRequest(activeProject.id, title);
@@ -508,7 +552,7 @@ export function BrainApp({
       const userMessage = createMessage(
         crypto.randomUUID(),
         "user",
-        content,
+        visibleContent,
         "complete",
         startedAt.toISOString(),
       );
@@ -531,6 +575,7 @@ export function BrainApp({
         : candidate));
       setSelectedMessageId(assistantId);
       setPrompt("");
+      setPendingRuntimeContext(null);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -543,7 +588,8 @@ export function BrainApp({
           threadId,
           userMessageId: userMessage.id,
           assistantMessageId: assistantId,
-          message: content,
+          message: runtimeContent,
+          ...(visibleContent !== runtimeContent ? { displayMessage: visibleContent } : {}),
           preferences: {
             tone: preferences.tone,
             language: memberPreferences?.language ?? manifest.identity.language,
@@ -552,6 +598,7 @@ export function BrainApp({
           options: {
             mode: composerMode,
             model: composerModel,
+            effort: composerEffort,
             webSearch,
             imageGeneration,
             skill: selectedSkill,
@@ -561,6 +608,7 @@ export function BrainApp({
       });
       await handleStream(response, threadId, assistantId);
       setAttachments([]);
+      succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {
         const stopped = abortRef.current?.signal.aborted === true;
@@ -585,7 +633,38 @@ export function BrainApp({
       setSending(false);
       abortRef.current = null;
     }
-  }, [activeProject, activeThread, attachments, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, preferences, prompt, selectedSkill, sending, webSearch]);
+    return succeeded;
+  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, memberPreferences?.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+
+  const persistResultAction = useCallback(async (
+    message: ChatMessage,
+    action: "approved" | "pending" | "undo",
+  ) => {
+    if (!activeThreadId || actionBusy || sending) return;
+    if (action === "undo") {
+      setConfirmDialog({ kind: "undo-result", message });
+      return;
+    }
+    setActionBusy(true);
+    try {
+      const response = await fetch(`/api/threads/${activeThreadId}/messages/${message.id}/result`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
+        throw new Error("No s’ha pogut desar l’aprovació.");
+      }
+      const updated = result.message as ChatMessage;
+      setThreads((current) => updateThreadMessage(current, activeThreadId, message.id, () => updated));
+      setNotice(action === "approved" ? "Resultat aprovat i desat." : "Resultat marcat com a pendent.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No s’ha pogut actualitzar el resultat.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeThreadId, sending]);
 
   const resolveApproval = useCallback(async (
     messageId: string,
@@ -721,13 +800,49 @@ export function BrainApp({
     else void persistThreadPatch(thread, { pinned: action === "pin" });
   }, [persistThreadPatch]);
 
-  const confirmArchive = useCallback(async () => {
+  const confirmAction = useCallback(async () => {
     if (!confirmDialog) return;
+    if (confirmDialog.kind === "undo-result") {
+      if (!activeThreadId) return;
+      setActionBusy(true);
+      const target = confirmDialog.message;
+      try {
+        const updateState = async (action: "undo_waiting" | "undo_complete") => {
+          const response = await fetch(`/api/threads/${activeThreadId}/messages/${target.id}/result`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action }),
+          });
+          const result: unknown = await response.json().catch(() => null);
+          if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
+            throw new Error("No s’ha pogut desar l’estat de la reversió.");
+          }
+          const updated = result.message as ChatMessage;
+          setThreads((current) => updateThreadMessage(current, activeThreadId, target.id, () => updated));
+        };
+        await updateState("undo_waiting");
+        setConfirmDialog(null);
+        setActionBusy(false);
+        const completed = await sendMessage(
+          `Reverteix exclusivament els canvis d’aquest resultat. Abans d’acabar, comprova l’estat final i explica què s’ha restaurat.\n\nCanvis originals:\n${target.diff.slice(0, 10_000)}`,
+          "Desfés els canvis d’aquest resultat i comprova que tot queda restaurat.",
+        );
+        setActionBusy(true);
+        if (!completed) throw new Error("La reversió no s’ha pogut verificar.");
+        await updateState("undo_complete");
+        setNotice("Canvis revertits i verificats. L’estat ha quedat desat.");
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : "No s’ha pogut completar la reversió.");
+      } finally {
+        setActionBusy(false);
+      }
+      return;
+    }
     const updated = confirmDialog.kind === "archive-project"
       ? await persistProjectPatch(confirmDialog.project, { status: "archived" })
       : await persistThreadPatch(confirmDialog.thread, { status: "archived" });
     if (updated) setConfirmDialog(null);
-  }, [confirmDialog, persistProjectPatch, persistThreadPatch]);
+  }, [activeThreadId, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage]);
 
   const inspectMessage = useCallback((messageId: string) => {
     setSelectedMessageId(messageId);
@@ -741,7 +856,8 @@ export function BrainApp({
     [],
   );
 
-  const enabledWindows = manifest.windows.filter((window) => window.enabled);
+  const enabledWindows = manifest.windows.filter((window) =>
+    window.enabled && (session.user.role === "owner" || window.id === "chat"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
   const runtimeEnabled = enabledWindows.some((window) => window.id === "runtime");
 
@@ -778,6 +894,7 @@ export function BrainApp({
       }
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
+      else if (automationsOpen) setAutomationsOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
@@ -790,6 +907,7 @@ export function BrainApp({
     actionBusy,
     activeProject,
     activeSideWindow,
+    automationsOpen,
     commandPaletteOpen,
     confirmDialog,
     customizationOpen,
@@ -831,6 +949,12 @@ export function BrainApp({
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
         onOpenCustomization={() => setCustomizationOpen(true)}
+        onOpenAutomations={() => {
+          setActiveSideWindow(null);
+          setCustomizationOpen(false);
+          setCommandPaletteOpen(false);
+          setAutomationsOpen(true);
+        }}
       />
 
       <ChatWorkspace
@@ -842,6 +966,7 @@ export function BrainApp({
         prompt={prompt}
         composerMode={composerMode}
         composerModel={composerModel}
+        composerEffort={composerEffort}
         webSearch={webSearch}
         imageGeneration={imageGeneration}
         selectedSkill={selectedSkill}
@@ -851,6 +976,7 @@ export function BrainApp({
         onPromptChange={setPrompt}
         onComposerModeChange={setComposerMode}
         onComposerModelChange={setComposerModel}
+        onComposerEffortChange={setComposerEffort}
         onWebSearchChange={setWebSearch}
         onImageGenerationChange={setImageGeneration}
         onSelectedSkillChange={setSelectedSkill}
@@ -868,6 +994,9 @@ export function BrainApp({
         canInspect={inspectorEnabled}
         onInspectMessage={inspectMessage}
         onResolveApproval={resolveApproval}
+        onCreateVersion={(message) => void createVersionFromMessage(message)}
+        onResultAction={persistResultAction}
+        showAdvancedControls={session.user.role === "owner"}
       />
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
@@ -881,7 +1010,7 @@ export function BrainApp({
         />
       ) : null}
 
-      {runtimeEnabled && activeSideWindow === "runtime" ? (
+      {session.user.role === "owner" && runtimeEnabled && activeSideWindow === "runtime" ? (
         <RuntimePanel
           manifest={manifest}
           session={session}
@@ -897,6 +1026,12 @@ export function BrainApp({
         onChange={changePreference}
         onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}
+      />
+
+      <AutomationsPanel
+        projectId={activeProject?.id ?? null}
+        open={automationsOpen}
+        onClose={() => setAutomationsOpen(false)}
       />
 
       <CommandPalette
@@ -933,14 +1068,16 @@ export function BrainApp({
 
       <ConfirmDialog
         open={Boolean(confirmDialog)}
-        title={confirmDialog?.kind === "archive-project" ? "Arxivar projecte?" : "Arxivar fil?"}
+        title={confirmDialog?.kind === "undo-result" ? "Vols desfer aquests canvis?" : confirmDialog?.kind === "archive-project" ? "Arxivar projecte?" : "Arxivar fil?"}
         description={confirmDialog?.kind === "archive-project"
           ? "El projecte i els seus fils deixaran d’aparèixer a la vista activa. Els podràs restaurar des d’Arxivats."
-          : "El fil deixarà d’aparèixer a la llista activa. El podràs restaurar més endavant."}
-        confirmLabel="Arxiva"
+          : confirmDialog?.kind === "undo-result"
+            ? "AiBrain revertirà només els canvis d’aquest resultat, comprovarà l’estat final i conservarà l’original a l’historial."
+            : "El fil deixarà d’aparèixer a la llista activa. El podràs restaurar més endavant."}
+        confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, desfés-los" : "Arxiva"}
         busy={actionBusy}
         onClose={() => !actionBusy && setConfirmDialog(null)}
-        onConfirm={() => void confirmArchive()}
+        onConfirm={() => void confirmAction()}
       />
 
       {notice ? (

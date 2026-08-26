@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   CaretRight,
   CheckCircle,
   Code,
   Command,
+  Copy,
+  DownloadSimple,
   FolderOpen,
   Globe,
   GitDiff,
@@ -15,6 +17,8 @@ import {
   ImagesSquare,
   List,
   Paperclip,
+  GitBranch,
+  MagicWand,
   SidebarSimple,
   SlidersHorizontal,
   SpinnerGap,
@@ -23,9 +27,10 @@ import {
   Wrench,
   X,
 } from "@phosphor-icons/react";
+import { GuidedActions } from "@/components/guided-actions";
 import type { ApprovalDecision, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindow, BrainWindowId } from "@/config/brain";
-import type { RuntimeStatus } from "@/lib/runtime-status";
+import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
 
@@ -38,6 +43,7 @@ type ChatWorkspaceProps = {
   prompt: string;
   composerMode: ComposerMode;
   composerModel: string | null;
+  composerEffort: RuntimeReasoningEffort | null;
   webSearch: boolean;
   imageGeneration: boolean;
   selectedSkill: string | null;
@@ -47,12 +53,13 @@ type ChatWorkspaceProps = {
   onPromptChange: (value: string) => void;
   onComposerModeChange: (value: ComposerMode) => void;
   onComposerModelChange: (value: string | null) => void;
+  onComposerEffortChange: (value: RuntimeReasoningEffort | null) => void;
   onWebSearchChange: (value: boolean) => void;
   onImageGenerationChange: (value: boolean) => void;
   onSelectedSkillChange: (value: string | null) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
   onComposerNotice: (message: string) => void;
-  onSend: (message?: string) => void;
+  onSend: (message?: string, displayMessage?: string) => void;
   onStop: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
@@ -68,13 +75,35 @@ type ChatWorkspaceProps = {
     approvalId: string,
     decision: ApprovalDecision,
   ) => Promise<void>;
+  onCreateVersion: (message: ChatMessage) => void;
+  onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
+  showAdvancedControls: boolean;
 };
 
-const starterPrompts = [
-  { title: "Inspecciona el projecte", detail: "Explica’m l’arquitectura i els punts de risc" },
-  { title: "Implementa una millora", detail: "Proposa un pla i fes un canvi verificable" },
-  { title: "Diagnostica un problema", detail: "Troba la causa abans de modificar res" },
-];
+function ResultActions({ message, onCreateVersion, onResultAction }: { message: ChatMessage; onCreateVersion: () => void; onResultAction: (action: "approved" | "pending" | "undo") => Promise<void> }) {
+  const [copied, setCopied] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const approved = message.activity.some((item) => item.id === "result-review" && item.label === "Resultat aprovat");
+  const copyResult = async () => {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  };
+  const downloadResult = () => {
+    const blob = new Blob([message.content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `resultat-aibrain-${message.createdAt.slice(0, 10)}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const review = async () => {
+    setBusy(true);
+    try { await onResultAction(approved ? "pending" : "approved"); } finally { setBusy(false); }
+  };
+  return <div className="mt-4 flex flex-wrap items-center gap-1.5"><button type="button" disabled={busy} aria-pressed={approved} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[#c8d8ca] bg-[#edf5ee] text-[#4f7255]" : "border-[#dfddd8] bg-white text-[#66625d] hover:bg-[#f4f3f0]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultat aprovat" : "Aprova resultat"}</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiat" : "Copia"}</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={downloadResult}><DownloadSimple size={13} />Descarrega</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={onCreateVersion}><GitBranch size={13} />Nova versió</button>{message.diff ? <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#ead7cf] bg-[#fff5f1] px-3 py-2 text-[12px] font-medium text-[#8a513e] hover:bg-[#f9e6de]" onClick={() => void onResultAction("undo")}>Desfés els canvis</button> : null}</div>;
+}
 
 function AssistantMessage({
   message,
@@ -84,6 +113,10 @@ function AssistantMessage({
   onResolveApproval,
   canInspect,
   showInlineDiff,
+  isLatest,
+  onFollowUp,
+  onCreateVersion,
+  onResultAction,
 }: {
   message: ChatMessage;
   assistantName: string;
@@ -92,6 +125,10 @@ function AssistantMessage({
   onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
   canInspect: boolean;
   showInlineDiff: boolean;
+  isLatest: boolean;
+  onFollowUp: (message: string) => void;
+  onCreateVersion: () => void;
+  onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
 }) {
   const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
 
@@ -140,6 +177,10 @@ function AssistantMessage({
         </div>
       ) : null}
 
+      {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
+
+      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[#918d86]">Què vols fer ara?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica’m aquest resultat de manera més senzilla i destaca només el que he de saber.")}>Explica-ho més fàcil</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir d’aquest resultat, dona’m els següents passos concrets i ordenats.")}>Següents passos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versió final, neta i llesta per utilitzar d’aquest resultat.")}>Prepara la versió final</button></div></div> : null}
+
       {hasDetails && canInspect ? (
         <button className="mt-3 flex items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[#67645f] transition hover:text-[#34322f]" onClick={onInspect}>
           <List size={12} />
@@ -178,6 +219,7 @@ export function ChatWorkspace({
   prompt,
   composerMode,
   composerModel,
+  composerEffort,
   webSearch,
   imageGeneration,
   selectedSkill,
@@ -187,6 +229,7 @@ export function ChatWorkspace({
   onPromptChange,
   onComposerModeChange,
   onComposerModelChange,
+  onComposerEffortChange,
   onWebSearchChange,
   onImageGenerationChange,
   onSelectedSkillChange,
@@ -204,19 +247,51 @@ export function ChatWorkspace({
   canInspect,
   onInspectMessage,
   onResolveApproval,
+  onCreateVersion,
+  onResultAction,
+  showAdvancedControls,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
+  const [manualComposerOpen, setManualComposerOpen] = useState(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [thread?.messages]);
 
   const hasMessages = Boolean(thread?.messages.length);
+  const guideVisible = guidedActionsOpen || (!hasMessages && !manualComposerOpen);
+  const latestAssistantId = thread?.messages.findLast((message) => message.role === "assistant")?.id ?? null;
   const runtimeLabel = runtimeStatus.mode === "codex" ? "Codex" : "Demo";
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canUseWeb = manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
+  const selectedModelOption = runtimeStatus.models.find((model) => model.id === composerModel) ??
+    runtimeStatus.models.find((model) => model.isDefault) ?? runtimeStatus.models[0] ?? null;
+  const effortOptions = selectedModelOption?.supportedReasoningEfforts.length
+    ? selectedModelOption.supportedReasoningEfforts
+    : (["low", "medium", "high"] satisfies RuntimeReasoningEffort[]);
+  const effortLabels: Record<RuntimeReasoningEffort, string> = {
+    none: "Sense raonament",
+    minimal: "Mínim",
+    low: "Ràpid",
+    medium: "Equilibrat",
+    high: "Profund",
+    xhigh: "Molt profund",
+    max: "Màxim",
+    ultra: "Ultra",
+  };
+
+  useEffect(() => {
+    if (!composerEffort || !selectedModelOption?.supportedReasoningEfforts.length) return;
+    if (selectedModelOption.supportedReasoningEfforts.includes(composerEffort)) return;
+    onComposerEffortChange(
+      selectedModelOption.defaultReasoningEffort ??
+        selectedModelOption.supportedReasoningEfforts[0] ??
+        null,
+    );
+  }, [composerEffort, onComposerEffortChange, selectedModelOption]);
 
   const addImages = async (files: FileList | null) => {
     if (!files) return;
@@ -300,33 +375,8 @@ export function ChatWorkspace({
             <div className="mb-8 h-7 w-48 rounded-md bg-[#eeedea] motion-safe:animate-pulse" />
             <div className="space-y-4"><div className="h-20 rounded-xl bg-[#f1f0ed] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[#f3f2ef] motion-safe:animate-pulse" /></div>
           </div>
-        ) : !hasMessages ? (
-          <div className="mx-auto flex min-h-full w-full max-w-[820px] flex-col justify-center px-5 py-10 md:px-10">
-            <div className="mb-7 flex items-center gap-2.5 text-[#77746f]">
-              <span className="grid size-8 place-items-center rounded-[10px] bg-[var(--brain-accent)] text-[var(--brain-contrast)] shadow-[0_8px_20px_-12px_rgba(20,19,17,.8)]"><Code size={16} weight="bold" /></span>
-              <div className="min-w-0">
-                <span className="block truncate text-[10px] font-semibold text-[#4d4944]">{project?.name ?? runtimeStatus.projectName}</span>
-                <span className="mt-0.5 block truncate text-[8px] text-[#99958e]">{project?.workspace.label ?? runtimeStatus.workspaceName}</span>
-              </div>
-            </div>
-            <h1 className="max-w-2xl text-balance text-[32px] font-semibold leading-[1.06] tracking-[-0.045em] text-[#252321] md:text-[42px]">{manifest.interface.welcomeTitle}</h1>
-            <p className="mt-4 max-w-[58ch] text-[13px] leading-6 text-[#77746f]">{manifest.interface.welcomeMessage}</p>
-
-            <div className="starter-grid mt-8 grid gap-2 sm:grid-cols-2">
-              {starterPrompts.map((starter, index) => (
-                <button disabled={!project} key={starter.title} className={`starter-command rounded-[var(--brain-radius)] border border-[#deddd8] bg-[#fefefd] p-3.5 text-left transition disabled:cursor-not-allowed disabled:opacity-40 ${index === 0 ? "sm:col-span-2" : ""}`} onClick={() => onSend(starter.title)}>
-                  <span className="block text-[11px] font-semibold text-[#3b3936]">{starter.title}</span>
-                  <span className="mt-2 block text-[9px] leading-4 text-[#918e88]">{starter.detail}</span>
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-7 flex flex-wrap items-center gap-2 text-[9px] text-[#908d87]">
-              <span className="rounded-md border border-[#e3e2de] px-2 py-1">{runtimeStatus.sandbox === "workspace-write" ? "Workspace write" : "Només lectura"}</span>
-              <span className="rounded-md border border-[#e3e2de] px-2 py-1">{runtimeStatus.approvalPolicy === "on-request" ? "Aprovacions actives" : "Sense aprovacions"}</span>
-              {runtimeStatus.model ? <span className="rounded-md border border-[#e3e2de] px-2 py-1">{runtimeStatus.model}</span> : null}
-            </div>
-          </div>
+        ) : guideVisible ? (
+          <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? runtimeStatus.projectName} onCancel={hasMessages ? () => setGuidedActionsOpen(false) : undefined} onWriteDirectly={!hasMessages ? () => setManualComposerOpen(true) : undefined} onStart={(message, summary) => { setGuidedActionsOpen(false); setManualComposerOpen(true); onSend(message, summary); }} />
         ) : (
           <div className={`mx-auto w-full max-w-[760px] px-5 md:px-8 ${preferences.density === "compact" ? "py-6" : "py-9"}`}>
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-9"}>
@@ -342,6 +392,10 @@ export function ChatWorkspace({
                   onResolveApproval={(approvalId, decision) => void onResolveApproval(message.id, approvalId, decision)}
                   canInspect={canInspect}
                   showInlineDiff={activeSideWindow !== "inspector"}
+                  isLatest={message.id === latestAssistantId}
+                  onFollowUp={onSend}
+                  onCreateVersion={() => onCreateVersion(message)}
+                  onResultAction={onResultAction}
                 />
               ))}
             </div>
@@ -350,7 +404,7 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className="shrink-0 bg-[#fbfbfa]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
+      {!guideVisible ? <div className="shrink-0 bg-[#fbfbfa]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
         <div className="mx-auto max-w-[820px]">
           <div className="composer-shadow rounded-[calc(var(--brain-radius)+4px)] border border-[#d4d2cc] bg-[#fefefd] p-2 focus-within:border-[#99958d]">
             {attachments.length ? (
@@ -381,18 +435,25 @@ export function ChatWorkspace({
             />
             <div className="flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="flex min-w-0 items-center gap-1">
-                <select aria-label="Mode del torn" className="composer-select" value={composerMode} onChange={(event) => onComposerModeChange(event.target.value as ComposerMode)} disabled={sending}>
+                {showAdvancedControls ? <select aria-label="Mode del torn" className="composer-select" value={composerMode} onChange={(event) => onComposerModeChange(event.target.value as ComposerMode)} disabled={sending}>
                   {manifest.composer.modes.includes("agent") ? <option value="agent">Agent</option> : null}
                   {manifest.composer.modes.includes("plan") ? <option value="plan">Pla</option> : null}
                   {manifest.composer.modes.includes("ask") ? <option value="ask">Pregunta</option> : null}
-                </select>
-                {manifest.composer.modelSelection ? (
+                </select> : null}
+                {showAdvancedControls && manifest.composer.modelSelection ? (
                   <select aria-label="Model" className="composer-select hidden sm:block" value={composerModel ?? ""} onChange={(event) => onComposerModelChange(event.target.value || null)} disabled={sending || runtimeStatus.models.length === 0}>
                     <option value="">{runtimeStatus.model ?? "Model automàtic"}</option>
                     {runtimeStatus.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
                   </select>
                 ) : null}
-                {manifest.composer.skills && runtimeStatus.skills.length ? (
+                {showAdvancedControls && manifest.composer.modelSelection && runtimeStatus.mode === "codex" ? (
+                  <select aria-label="Nivell de raonament" className="composer-select hidden sm:block" value={composerEffort ?? ""} onChange={(event) => onComposerEffortChange((event.target.value || null) as RuntimeReasoningEffort | null)} disabled={sending}>
+                    <option value="">Automàtic</option>
+                    {effortOptions.map((effort) => <option key={effort} value={effort}>{effortLabels[effort]}</option>)}
+                  </select>
+                ) : null}
+                <button aria-label="Obre les accions guiades" className={`composer-tool ${guidedActionsOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setGuidedActionsOpen((current) => !current)}><MagicWand size={12} /><span className="hidden lg:inline">Accions</span></button>
+                {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <label className="relative hidden sm:block">
                     <Wrench size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[#77736d]" />
                     <select aria-label="Skill" className="composer-select pl-6" value={selectedSkill ?? ""} onChange={(event) => onSelectedSkillChange(event.target.value || null)} disabled={sending}>
@@ -416,10 +477,10 @@ export function ChatWorkspace({
             </div>
           </div>
           <div className="mt-2 flex h-3 items-center justify-center gap-1.5 text-[9px] text-[#6f6c67]">
-            {sending ? <><SpinnerGap size={10} className="motion-safe:animate-spin" />{preferences.assistantName} està treballant</> : runtimeStatus.ready ? <><CheckCircle size={10} />Runtime preparat</> : null}
+            {sending ? <><SpinnerGap size={10} className="motion-safe:animate-spin" />{preferences.assistantName} està treballant</> : runtimeStatus.ready ? <><CheckCircle size={10} />{showAdvancedControls ? "Runtime preparat" : "Preparat per treballar"}</> : null}
           </div>
         </div>
-      </div>
+      </div> : null}
     </main>
   );
 }

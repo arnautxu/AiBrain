@@ -6,7 +6,7 @@
       <h1 style="font-size:26px;line-height:1.1">Entra al teu workbench</h1>
       <p style="font-size:14px;line-height:1.6;color:#686660">Aquest enllaç és d’un sol ús. Si no l’has demanat, ignora aquest correu.</p>
       <p style="margin-top:28px">
-        <a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email&amp;next=/" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#222320;color:#fff;text-decoration:none;font-size:13px;font-weight:700">Obre AiBrain</a>
+        <a href="{{ .RedirectTo }}?token_hash={{ .TokenHash }}&amp;type=email" style="display:inline-block;padding:12px 18px;border-radius:10px;background:#222320;color:#fff;text-decoration:none;font-size:13px;font-weight:700">Obre AiBrain</a>
       </p>
     </div>
   </body>

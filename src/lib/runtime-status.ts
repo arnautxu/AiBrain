@@ -1,9 +1,22 @@
+export type RuntimeReasoningEffort =
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max"
+  | "ultra";
+
 export type RuntimeModelOption = {
   id: string;
   label: string;
   description: string;
   isDefault: boolean;
   inputModalities: ("text" | "image" | "audio")[];
+  supportedReasoningEfforts: RuntimeReasoningEffort[];
+  defaultReasoningEffort: RuntimeReasoningEffort | null;
+  supportsPersonality: boolean;
 };
 
 export type RuntimeSkillOption = {
@@ -22,6 +35,17 @@ export type RuntimeStatus = {
   ready: boolean;
   authMode: "chatgpt" | "apiKey" | "amazonBedrock" | null;
   planType: string | null;
+  processWarm: boolean;
+  rateLimit: {
+    usedPercent: number;
+    windowDurationMins: number | null;
+    resetsAt: number | null;
+  } | null;
+  usage: {
+    lifetimeTokens: number | null;
+    currentStreakDays: number | null;
+    longestRunningTurnSec: number | null;
+  } | null;
   workspaceName: string;
   model: string | null;
   approvalPolicy: "never" | "on-request";
@@ -45,6 +69,9 @@ export const initialRuntimeStatus: RuntimeStatus = {
   ready: false,
   authMode: null,
   planType: null,
+  processWarm: false,
+  rateLimit: null,
+  usage: null,
   workspaceName: "workspace",
   model: null,
   approvalPolicy: "on-request",
@@ -78,6 +105,12 @@ export function isRuntimeStatus(value: unknown): value is RuntimeStatus {
     (value.authMode === null || value.authMode === "chatgpt" || value.authMode === "apiKey" || value.authMode === "amazonBedrock") &&
     "planType" in value &&
     (value.planType === null || typeof value.planType === "string") &&
+    "processWarm" in value &&
+    typeof value.processWarm === "boolean" &&
+    "rateLimit" in value &&
+    (value.rateLimit === null || Boolean(value.rateLimit && typeof value.rateLimit === "object")) &&
+    "usage" in value &&
+    (value.usage === null || Boolean(value.usage && typeof value.usage === "object")) &&
     "workspaceName" in value &&
     typeof value.workspaceName === "string" &&
     "model" in value &&

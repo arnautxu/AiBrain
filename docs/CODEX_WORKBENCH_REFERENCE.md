@@ -54,6 +54,6 @@
 
 ## Unknowns and deferrals
 
-- First-owner identity bootstrap and physical provisioning of tenant-specific `CODEX_HOME` volumes remain deferred; hosted Supabase, the tenant boundary and derived paths are implemented.
+- First-owner bootstrap, SMTP and hosted auth gates are validated. Physical provisioning and authentication of tenant-specific `CODEX_HOME` volumes remain deferred; the tenant boundary and derived paths are implemented.
 - Knowledge sources will be added later as generic plugins or MCP servers, never as a hard-coded provider.
 - The exact desktop packaging technology remains open; the workbench contract must work in both hosted and local shells.

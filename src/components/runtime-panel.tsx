@@ -40,6 +40,7 @@ export function RuntimePanel({
           <h3 className="text-[9px] font-semibold uppercase tracking-[.11em] text-[#918e88]">Runtime</h3>
           <div className="mt-3 divide-y divide-[#e5e3df] border-y border-[#e5e3df]">
             <RuntimeRow label="Connexió" value={status.ready ? "Codex connectat" : status.mode === "demo" ? "Mode demo" : "No disponible"} good={status.ready || status.mode === "demo"} />
+            <RuntimeRow label="Procés" value={status.processWarm ? "App Server calent" : status.mode === "demo" ? "Simulat" : "Arrencada pendent"} good={status.processWarm} />
             <RuntimeRow label="Aïllament" value={status.isolated ? "CODEX_HOME propi" : "Encara no configurat"} good={status.isolated} />
             <RuntimeRow label="Projecte" value={status.projectName} />
             <RuntimeRow label="Workspace" value={status.workspaceName} />
@@ -48,6 +49,8 @@ export function RuntimePanel({
             {status.model ? <RuntimeRow label="Model" value={status.model} /> : null}
             <RuntimeRow label="Catàleg de models" value={status.models.length ? `${status.models.length} disponibles` : "Automàtic"} />
             <RuntimeRow label="Skills" value={status.skills.length ? `${status.skills.length} disponibles` : "Cap descoberta"} />
+            {status.rateLimit ? <RuntimeRow label="Ús Codex" value={`${Math.round(status.rateLimit.usedPercent)}% de la finestra`} /> : null}
+            {status.usage?.lifetimeTokens != null ? <RuntimeRow label="Tokens acumulats" value={new Intl.NumberFormat("ca-ES", { notation: "compact" }).format(status.usage.lifetimeTokens)} /> : null}
             <RuntimeRow label="Cerca web" value={status.capabilities.webSearch ? "Disponible" : status.mode === "demo" ? "Simulada a la preview" : "No disponible"} good={status.capabilities.webSearch} />
             <RuntimeRow label="Imatges" value={status.capabilities.imageInput ? "Entrada nativa" : status.mode === "demo" ? "Simulada a la preview" : "No disponibles"} good={status.capabilities.imageInput} />
             <RuntimeRow label="Generació" value={status.capabilities.imageGeneration ? "Imatges generatives" : status.mode === "demo" ? "Simulada a la preview" : "No disponible"} good={status.capabilities.imageGeneration} />

@@ -337,6 +337,25 @@ export async function finishDemoThreadTurn(
   });
 }
 
+export async function updateDemoMessageActivity(
+  session: AuthSession,
+  threadId: string,
+  messageId: string,
+  item: ChatMessage["activity"][number],
+) {
+  return mutateState(session, (state) => {
+    const thread = state.threads.find((candidate) => candidate.id === threadId);
+    if (!thread) throw new WorkbenchNotFoundError("Fil no trobat.");
+    const message = thread.messages.find((candidate) => candidate.id === messageId && candidate.role === "assistant");
+    if (!message) throw new WorkbenchNotFoundError("Resultat no trobat.");
+    const index = message.activity.findIndex((candidate) => candidate.id === item.id);
+    if (index === -1) message.activity.push(item);
+    else message.activity[index] = item;
+    thread.updatedAt = new Date().toISOString();
+    return message;
+  });
+}
+
 export function assertWorkbenchId(value: string) {
   if (!isUuid(value)) throw new WorkbenchNotFoundError("Identificador no vàlid.");
 }

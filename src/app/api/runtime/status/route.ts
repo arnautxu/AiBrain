@@ -46,6 +46,9 @@ export async function GET(request: Request) {
   let codex: RuntimeStatus["codex"] = config.mode === "codex" ? "unavailable" : "disabled";
   let authMode: RuntimeStatus["authMode"] = null;
   let planType: string | null = null;
+  let processWarm = false;
+  let rateLimit: RuntimeStatus["rateLimit"] = null;
+  let usage: RuntimeStatus["usage"] = null;
   let models: RuntimeStatus["models"] = [];
   let skills: RuntimeStatus["skills"] = [];
   let webSearch = false;
@@ -57,6 +60,9 @@ export async function GET(request: Request) {
       codex = connection.connected ? "connected" : "unavailable";
       authMode = connection.authMode;
       planType = connection.planType;
+      processWarm = connection.processWarm;
+      rateLimit = connection.rateLimit;
+      usage = connection.usage;
       models = connection.models;
       skills = connection.skills;
       webSearch = connection.webSearch;
@@ -73,6 +79,9 @@ export async function GET(request: Request) {
     ready: config.mode === "codex" && codex === "connected",
     authMode,
     planType,
+    processWarm,
+    rateLimit,
+    usage,
     workspaceName: `${projectContext.projectName} / ${path.basename(config.workspace)}`,
     model: config.model,
     approvalPolicy: config.approvalPolicy,

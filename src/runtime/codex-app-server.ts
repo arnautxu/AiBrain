@@ -14,7 +14,11 @@ import type {
 import { waitForApproval } from "@/runtime/approval-store";
 import type { RuntimeConfig } from "@/runtime/config";
 import { issueThreadToken } from "@/runtime/thread-token";
-import type { RuntimeModelOption, RuntimeSkillOption } from "@/lib/runtime-status";
+import type {
+  RuntimeModelOption,
+  RuntimeReasoningEffort,
+  RuntimeSkillOption,
+} from "@/lib/runtime-status";
 
 type RpcId = number | string;
 
@@ -45,6 +49,17 @@ export type CodexConnection = {
   skills: RuntimeSkillOption[];
   webSearch: boolean;
   imageGeneration: boolean;
+  processWarm: boolean;
+  rateLimit: {
+    usedPercent: number;
+    windowDurationMins: number | null;
+    resetsAt: number | null;
+  } | null;
+  usage: {
+    lifetimeTokens: number | null;
+    currentStreakDays: number | null;
+    longestRunningTurnSec: number | null;
+  } | null;
 };
 
 export class RuntimeNotReadyError extends Error {}
@@ -116,12 +131,15 @@ class AppServerSession {
   private readonly pending = new Map<number, PendingRequest>();
   private nextId = 1;
   private closing = false;
+  private onNotification: (method: string, params: unknown) => void = () => undefined;
+  private onServerRequest: (request: ServerRequest) => Promise<object> = async () => {
+    throw new Error("No hi ha cap torn actiu per resoldre aquesta petició.");
+  };
+  private onActiveFailure: (error: Error) => void = () => undefined;
 
   constructor(
     config: RuntimeConfig,
-    private readonly onNotification: (method: string, params: unknown) => void,
-    private readonly onServerRequest: (request: ServerRequest) => Promise<object>,
-    private readonly onFailure: (error: Error) => void = () => undefined,
+    private readonly onProcessFailure: (error: Error) => void = () => undefined,
   ) {
     mkdirSync(config.workspace, { recursive: true, mode: 0o700 });
     if (config.codexHome) {
@@ -208,7 +226,26 @@ class AppServerSession {
       request.reject(error);
     }
     this.pending.clear();
-    this.onFailure(error);
+    this.onProcessFailure(error);
+    this.onActiveFailure(error);
+  }
+
+  setHandlers(
+    onNotification: (method: string, params: unknown) => void,
+    onServerRequest: (request: ServerRequest) => Promise<object>,
+    onFailure: (error: Error) => void,
+  ) {
+    this.onNotification = onNotification;
+    this.onServerRequest = onServerRequest;
+    this.onActiveFailure = onFailure;
+  }
+
+  clearHandlers() {
+    this.onNotification = () => undefined;
+    this.onServerRequest = async () => {
+      throw new Error("No hi ha cap torn actiu per resoldre aquesta petició.");
+    };
+    this.onActiveFailure = () => undefined;
   }
 
   notify(method: string, params: object) {
@@ -246,7 +283,7 @@ function extractTurnId(result: unknown) {
 
 function parseAccount(result: unknown): CodexConnection {
   if (!isRecord(result) || !isRecord(result.account)) {
-    return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false };
+    return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
 
   const account = result.account;
@@ -255,17 +292,27 @@ function parseAccount(result: unknown): CodexConnection {
       connected: true,
       authMode: "chatgpt",
       planType: typeof account.planType === "string" ? account.planType : null,
-      models: [], skills: [], webSearch: false, imageGeneration: false,
+      models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null,
     };
   }
   if (account.type === "apiKey") {
-    return { connected: true, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false };
+    return { connected: true, authMode: "apiKey", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
   if (account.type === "amazonBedrock") {
-    return { connected: true, authMode: "amazonBedrock", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false };
+    return { connected: true, authMode: "amazonBedrock", planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
   }
 
-  return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false };
+  return { connected: false, authMode: null, planType: null, models: [], skills: [], webSearch: false, imageGeneration: false, processWarm: false, rateLimit: null, usage: null };
+}
+
+const reasoningEfforts = new Set<RuntimeReasoningEffort>([
+  "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra",
+]);
+
+function reasoningEffort(value: unknown): RuntimeReasoningEffort | null {
+  return typeof value === "string" && reasoningEfforts.has(value as RuntimeReasoningEffort)
+    ? value as RuntimeReasoningEffort
+    : null;
 }
 
 function parseModels(result: unknown): RuntimeModelOption[] {
@@ -281,6 +328,15 @@ function parseModels(result: unknown): RuntimeModelOption[] {
       description: typeof model.description === "string" ? model.description : "Model disponible al runtime",
       isDefault: model.isDefault === true,
       inputModalities: modalities,
+      supportedReasoningEfforts: Array.isArray(model.supportedReasoningEfforts)
+        ? model.supportedReasoningEfforts.flatMap((option) => {
+            const value = isRecord(option) ? option.reasoningEffort : option;
+            const parsed = reasoningEffort(value);
+            return parsed ? [parsed] : [];
+          })
+        : [],
+      defaultReasoningEffort: reasoningEffort(model.defaultReasoningEffort),
+      supportsPersonality: model.supportsPersonality === true,
     }];
   }).slice(0, 24);
 }
@@ -305,46 +361,178 @@ function parseSkills(result: unknown): ResolvedSkill[] {
   return [...new Map(resolved.map((skill) => [skill.id, skill])).values()].slice(0, 80);
 }
 
-export async function checkCodexConnection(config: RuntimeConfig): Promise<CodexConnection> {
-  const session = new AppServerSession(
-    config,
-    () => undefined,
-    async () => {
-      throw new Error("El healthcheck no admet peticions interactives.");
-    },
-  );
+function parseRateLimit(result: unknown): CodexConnection["rateLimit"] {
+  if (!isRecord(result) || !isRecord(result.rateLimits) || !isRecord(result.rateLimits.primary)) return null;
+  const primary = result.rateLimits.primary;
+  if (typeof primary.usedPercent !== "number") return null;
+  return {
+    usedPercent: Math.max(0, Math.min(100, primary.usedPercent)),
+    windowDurationMins: typeof primary.windowDurationMins === "number" ? primary.windowDurationMins : null,
+    resetsAt: typeof primary.resetsAt === "number" ? primary.resetsAt : null,
+  };
+}
 
-  try {
-    await session.request("initialize", {
+function parseUsage(result: unknown): CodexConnection["usage"] {
+  if (!isRecord(result) || !isRecord(result.summary)) return null;
+  const summary = result.summary;
+  const metric = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : null;
+  return {
+    lifetimeTokens: metric(summary.lifetimeTokens),
+    currentStreakDays: metric(summary.currentStreakDays),
+    longestRunningTurnSec: metric(summary.longestRunningTurnSec),
+  };
+}
+
+type SessionHandlers = {
+  onNotification: (method: string, params: unknown) => void;
+  onServerRequest: (request: ServerRequest) => Promise<object>;
+  onFailure: (error: Error) => void;
+};
+
+const SESSION_IDLE_MS = 15 * 60_000;
+const CATALOG_TTL_MS = 60_000;
+
+class PooledAppServer {
+  readonly session: AppServerSession;
+  private readonly ready: Promise<void>;
+  private account: CodexConnection | null = null;
+  private cachedConnection: CodexConnection | null = null;
+  private cachedAt = 0;
+  private queue = Promise.resolve();
+  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  private closed = false;
+
+  constructor(
+    readonly config: RuntimeConfig,
+    private readonly onDispose: () => void,
+  ) {
+    this.session = new AppServerSession(config, () => {
+      this.close();
+    });
+    this.ready = this.initialize().catch((error) => {
+      this.close();
+      throw error;
+    });
+  }
+
+  private async initialize() {
+    await this.session.request("initialize", {
       clientInfo: {
-        name: "aibrain_healthcheck",
+        name: "aibrain_workbench",
         title: "AiBrain",
-        version: "0.2.0",
+        version: "0.3.0",
       },
       capabilities: null,
     });
-    session.notify("initialized", {});
-    const account = await session.request(
-      "account/read",
-      { refreshToken: false },
-      10_000,
+    this.session.notify("initialized", {});
+    this.account = parseAccount(
+      await this.session.request("account/read", { refreshToken: false }, 10_000),
     );
-    const connection = parseAccount(account);
-    const [modelsResult, skillsResult, capabilitiesResult] = await Promise.all([
-      session.request("model/list", { limit: 30, includeHidden: false }, 10_000).catch(() => null),
-      session.request("skills/list", { cwds: [config.workspace], forceReload: false }, 10_000).catch(() => null),
-      session.request("modelProvider/capabilities/read", {}, 10_000).catch(() => null),
+  }
+
+  private scheduleIdleClose() {
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(() => this.close(), SESSION_IDLE_MS);
+    this.idleTimer.unref?.();
+  }
+
+  async use<T>(handlers: SessionHandlers, task: (session: AppServerSession) => Promise<T>) {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const previous = this.queue;
+    this.queue = previous.then(() => gate);
+    await previous;
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    if (this.closed) throw new RuntimeNotReadyError("La sessió Codex s’ha tancat; torna-ho a provar.");
+    this.session.setHandlers(handlers.onNotification, handlers.onServerRequest, handlers.onFailure);
+    try {
+      await this.ready;
+      return await task(this.session);
+    } finally {
+      this.session.clearHandlers();
+      release();
+      if (!this.closed) this.scheduleIdleClose();
+    }
+  }
+
+  async connection(forceRefresh = false) {
+    await this.ready;
+    if (!this.account) throw new RuntimeNotReadyError("Codex no ha retornat l’estat del compte.");
+    if (!forceRefresh && this.cachedConnection && Date.now() - this.cachedAt < CATALOG_TTL_MS) {
+      return this.cachedConnection;
+    }
+    const [modelsResult, skillsResult, capabilitiesResult, rateLimitResult, usageResult] = await Promise.all([
+      this.session.request("model/list", { limit: 30, includeHidden: false }, 10_000).catch(() => null),
+      this.session.request("skills/list", { cwds: [this.config.workspace], forceReload: false }, 10_000).catch(() => null),
+      this.session.request("modelProvider/capabilities/read", {}, 10_000).catch(() => null),
+      this.session.request("account/rateLimits/read", undefined, 10_000).catch(() => null),
+      this.session.request("account/usage/read", undefined, 10_000).catch(() => null),
     ]);
-    return {
-      ...connection,
+    this.cachedConnection = {
+      ...this.account,
+      processWarm: true,
       models: parseModels(modelsResult),
       skills: parseSkills(skillsResult).map(({ path: _path, ...skill }) => skill),
       webSearch: isRecord(capabilitiesResult) && capabilitiesResult.webSearch === true,
       imageGeneration: isRecord(capabilitiesResult) && capabilitiesResult.imageGeneration === true,
+      rateLimit: parseRateLimit(rateLimitResult),
+      usage: parseUsage(usageResult),
     };
-  } finally {
-    session.close();
+    this.cachedAt = Date.now();
+    return this.cachedConnection;
   }
+
+  async resolvedSkills() {
+    await this.ready;
+    return parseSkills(
+      await this.session.request("skills/list", { cwds: [this.config.workspace], forceReload: false }, 10_000),
+    );
+  }
+
+  close() {
+    if (this.closed) return;
+    this.closed = true;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.session.close();
+    this.onDispose();
+  }
+}
+
+const globalCodexPool = globalThis as typeof globalThis & {
+  __aibrainCodexPool?: Map<string, PooledAppServer>;
+};
+const codexPool = globalCodexPool.__aibrainCodexPool ??= new Map<string, PooledAppServer>();
+
+function pooledAppServer(config: RuntimeConfig) {
+  const key = `${config.tenantId}:${config.workspace}`;
+  const existing = codexPool.get(key);
+  if (existing && existing.config.codexHome === config.codexHome && existing.config.codexBinary === config.codexBinary) {
+    return existing;
+  }
+  existing?.close();
+  let pooled: PooledAppServer;
+  pooled = new PooledAppServer(config, () => {
+    if (codexPool.get(key) === pooled) codexPool.delete(key);
+  });
+  codexPool.set(key, pooled);
+  return pooled;
+}
+
+export async function checkCodexConnection(config: RuntimeConfig): Promise<CodexConnection> {
+  const pooled = pooledAppServer(config);
+  return pooled.use(
+    {
+      onNotification: () => undefined,
+      onServerRequest: async () => {
+        throw new Error("El healthcheck no admet peticions interactives.");
+      },
+      onFailure: () => undefined,
+    },
+    () => pooled.connection(),
+  );
 }
 
 function statusFromItem(value: unknown, completed: boolean): ActivityItem["status"] {
@@ -550,7 +738,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
       item: {
         id: randomUUID(),
         kind: "command",
-        title: "Codex vol executar una ordre",
+        title: "Em dones permís per completar aquest pas?",
         detail: reason ?? command ?? "Revisa l’ordre abans de continuar.",
         ...(command ? { command } : {}),
         ...(typeof params.cwd === "string" ? { cwd: params.cwd } : {}),
@@ -565,7 +753,7 @@ function approvalFromRequest(request: ServerRequest): PendingServerApproval | nu
       item: {
         id: randomUUID(),
         kind: "file",
-        title: "Codex vol modificar fitxers",
+        title: "Vols que apliqui aquests canvis?",
         detail: reason ?? "Revisa els canvis abans de continuar.",
         status: "pending",
       },
@@ -696,12 +884,18 @@ export async function runCodexTurn(
     if (chatRequest.preferences.showActivity) emit({ type: "activity", item });
   };
 
-  const session = new AppServerSession(
-    config,
-    (method, params) => {
+  let activeSession: AppServerSession | null = null;
+  let firstDeltaAt: number | null = null;
+  const runtimeStartedAt = performance.now();
+  const pooled = pooledAppServer(config);
+  const handlers: SessionHandlers = {
+    onNotification: (method, params) => {
       if (method === "item/agentMessage/delta") {
         const delta = notificationDelta(params);
-        if (delta) emit({ type: "delta", value: delta });
+        if (delta) {
+          firstDeltaAt ??= performance.now();
+          emit({ type: "delta", value: delta });
+        }
         return;
       }
 
@@ -804,7 +998,7 @@ export async function runCodexTurn(
         );
       }
     },
-    async (request) => {
+    onServerRequest: async (request) => {
       const approval = approvalFromRequest(request);
       if (!approval) {
         throw new Error(`AiBrain encara no admet ${request.method}.`);
@@ -815,12 +1009,12 @@ export async function runCodexTurn(
       emit({ type: "approval", item: resolvedApproval(approval.item, decision) });
       return approval.response(decision);
     },
-    (error) => finishTurn?.({ status: "failed", error: error.message }),
-  );
+    onFailure: (error) => finishTurn?.({ status: "failed", error: error.message }),
+  };
 
   const interrupt = () => {
-    if (threadId && turnId) {
-      void session
+    if (threadId && turnId && activeSession) {
+      void activeSession
         .request("turn/interrupt", { threadId, turnId }, 5_000)
         .catch(() => undefined);
     }
@@ -828,20 +1022,10 @@ export async function runCodexTurn(
   };
   signal.addEventListener("abort", interrupt, { once: true });
 
-  try {
-    await session.request("initialize", {
-      clientInfo: {
-        name: "aibrain_workbench",
-        title: "AiBrain",
-        version: "0.2.0",
-      },
-      capabilities: null,
-    });
-    session.notify("initialized", {});
-
-    const account = parseAccount(
-      await session.request("account/read", { refreshToken: false }, 10_000),
-    );
+  return pooled.use(handlers, async (session) => {
+    activeSession = session;
+    try {
+    const account = await pooled.connection();
     if (!account.connected) {
       throw new RuntimeNotReadyError("Cal connectar un compte de Codex.");
     }
@@ -854,34 +1038,40 @@ export async function runCodexTurn(
       status: "complete",
     });
 
-    let selectedModel = config.model;
-    let selectedModelOption: RuntimeModelOption | null = null;
+    let selectedModel = chatRequest.options.model ?? config.model;
+    let selectedModelOption = selectedModel
+      ? account.models.find((model) => model.id === selectedModel) ?? null
+      : account.models.find((model) => model.isDefault) ?? account.models[0] ?? null;
     if (chatRequest.options.model) {
-      const catalog = parseModels(await session.request("model/list", { limit: 50, includeHidden: false }, 10_000));
+      const catalog = account.models;
       selectedModelOption = catalog.find((model) => model.id === chatRequest.options.model) ?? null;
       if (!selectedModelOption) {
         throw new Error("El model seleccionat ja no està disponible.");
       }
       selectedModel = chatRequest.options.model;
     }
+    selectedModel = selectedModel ?? selectedModelOption?.id ?? null;
     if (selectedModelOption && chatRequest.options.attachments.length > 0 && !selectedModelOption.inputModalities.includes("image")) {
       throw new Error("El model seleccionat no admet imatges.");
     }
+    if (selectedModelOption && chatRequest.options.effort &&
+      selectedModelOption.supportedReasoningEfforts.length > 0 &&
+      !selectedModelOption.supportedReasoningEfforts.includes(chatRequest.options.effort)) {
+      throw new Error("El nivell de raonament seleccionat no és compatible amb aquest model.");
+    }
     if (chatRequest.options.webSearch) {
-      const capabilities = await session.request("modelProvider/capabilities/read", {}, 10_000);
-      if (!isRecord(capabilities) || capabilities.webSearch !== true) {
+      if (!account.webSearch) {
         throw new Error("La cerca web no està disponible en aquest runtime.");
       }
     }
     if (chatRequest.options.imageGeneration) {
-      const capabilities = await session.request("modelProvider/capabilities/read", {}, 10_000);
-      if (!isRecord(capabilities) || capabilities.imageGeneration !== true) {
+      if (!account.imageGeneration) {
         throw new Error("La generació d’imatges no està disponible en aquest runtime.");
       }
     }
     let selectedSkill: ResolvedSkill | null = null;
     if (chatRequest.options.skill) {
-      const catalog = parseSkills(await session.request("skills/list", { cwds: [config.workspace], forceReload: false }, 10_000));
+      const catalog = await pooled.resolvedSkills();
       selectedSkill = catalog.find((skill) => skill.id === chatRequest.options.skill) ?? null;
       if (!selectedSkill) throw new Error("La skill seleccionada ja no està disponible.");
     }
@@ -929,6 +1119,7 @@ export async function runCodexTurn(
         approvalsReviewer: "user",
         sandboxPolicy: sandboxPolicy(config, chatRequest),
         ...(selectedModel ? { model: selectedModel } : {}),
+        ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
       },
       60_000,
     );
@@ -946,10 +1137,21 @@ export async function runCodexTurn(
       throw new Error(completed.error ?? "El torn de Codex ha fallat.");
     }
     if (completed.status === "interrupted" || signal.aborted) return;
+    const totalMs = Math.round(performance.now() - runtimeStartedAt);
+    const firstTextMs = firstDeltaAt === null ? null : Math.round(firstDeltaAt - runtimeStartedAt);
+    upsertActivity({
+      id: "runtime-performance",
+      kind: "system",
+      label: "Rendiment del torn",
+      detail: `${firstTextMs === null ? "Sense text incremental" : `Primer text ${firstTextMs} ms`} · Total ${totalMs} ms · Runtime calent`,
+      status: "complete",
+    });
+    console.info("AiBrain Codex turn metrics", { tenantId, workspace: config.workspace, firstTextMs, totalMs });
     emit({ type: "done" });
   } finally {
     if (turnTimeout) clearTimeout(turnTimeout);
     signal.removeEventListener("abort", interrupt);
-    session.close();
+    activeSession = null;
   }
+  });
 }

@@ -2,7 +2,7 @@
 
 ## Estat exacte
 
-La integració està implementada i el projecte hosted `aibrain-workbench` (`rqjmqzfwimiysrkvmnya`, `eu-west-3`, pla Pro) està creat i vinculat al checkout. Les migracions remotes són `aibrain_multitenant_foundation`, `projects_durable_threads`, `hosted_advisor_hardening` i `composer_attachments`.
+La integració està implementada i el projecte hosted `aibrain-workbench` (`rqjmqzfwimiysrkvmnya`, `eu-west-3`, pla Pro) està creat i vinculat al checkout. Les migracions remotes aplicades són `aibrain_multitenant_foundation`, `projects_durable_threads`, `hosted_advisor_hardening` i `composer_attachments`. Les migracions locals `automation_permissions` i `member_onboarding` estan preparades però encara no s’han aplicat al projecte hosted.
 
 El mateix esquema ha passat una matriu local i hosted amb creació de projecte, fil i missatge, separació cross-tenant i bloqueig de la columna privada de represa. L’advisor de seguretat no retorna avisos; el de rendiment només marca índexs encara no utilitzats perquè el projecte no té trànsit real. La Site URL, els redirects exactes i el bloqueig d’alta pública ja estan aplicats al projecte hosted. Resend està verificat per `auth.palsec.agency`, l’SMTP i els templates hosted estan actius, i el primer owner consentit ha completat els gates live d’accés, rol, logout i revocació.
 
@@ -44,7 +44,7 @@ supabase link --project-ref <project-ref>
 supabase db push
 ```
 
-Les migracions versionades són [20260825174319_aibrain_multitenant_foundation.sql](../supabase/migrations/20260825174319_aibrain_multitenant_foundation.sql), [20260825185207_projects_durable_threads.sql](../supabase/migrations/20260825185207_projects_durable_threads.sql), [20260825191156_hosted_advisor_hardening.sql](../supabase/migrations/20260825191156_hosted_advisor_hardening.sql) i [20260825210000_composer_attachments.sql](../supabase/migrations/20260825210000_composer_attachments.sql).
+Les migracions versionades ja aplicades són [20260825174319_aibrain_multitenant_foundation.sql](../supabase/migrations/20260825174319_aibrain_multitenant_foundation.sql), [20260825185207_projects_durable_threads.sql](../supabase/migrations/20260825185207_projects_durable_threads.sql), [20260825191156_hosted_advisor_hardening.sql](../supabase/migrations/20260825191156_hosted_advisor_hardening.sql) i [20260825210000_composer_attachments.sql](../supabase/migrations/20260825210000_composer_attachments.sql). [20260826074824_automation_permissions.sql](../supabase/migrations/20260826074824_automation_permissions.sql) i [20260826090000_member_onboarding.sql](../supabase/migrations/20260826090000_member_onboarding.sql) són pendents de desplegament i validació hosted.
 
 ## Primer owner
 

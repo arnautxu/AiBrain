@@ -1,3 +1,5 @@
+import type { RuntimeReasoningEffort } from "@/lib/runtime-status";
+
 export type ActivityKind =
   | "system"
   | "reasoning"
@@ -56,6 +58,7 @@ export type GeneratedArtifact = {
 export type TurnOptions = {
   mode: ComposerMode;
   model: string | null;
+  effort: RuntimeReasoningEffort | null;
   webSearch: boolean;
   imageGeneration: boolean;
   skill: string | null;
@@ -92,6 +95,7 @@ export type ChatRequest = {
   userMessageId: string;
   assistantMessageId: string;
   message: string;
+  displayMessage?: string;
   preferences: {
     tone: "direct" | "balanced" | "detailed";
     language: "ca" | "es" | "en";
@@ -153,6 +157,9 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
   return (
     (value.mode === "agent" || value.mode === "plan" || value.mode === "ask") &&
     (value.model === null || (typeof value.model === "string" && value.model.length <= 100)) &&
+    (value.effort === null || value.effort === "none" || value.effort === "minimal" ||
+      value.effort === "low" || value.effort === "medium" || value.effort === "high" ||
+      value.effort === "xhigh" || value.effort === "max" || value.effort === "ultra") &&
     typeof value.webSearch === "boolean" &&
     typeof value.imageGeneration === "boolean" &&
     (value.skill === null || (typeof value.skill === "string" && value.skill.length <= 100)) &&
