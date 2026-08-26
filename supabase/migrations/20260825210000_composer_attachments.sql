@@ -15,3 +15,8 @@ alter table public.thread_messages
     check (jsonb_typeof(artifacts) = 'array' and jsonb_array_length(artifacts) <= 12),
   add constraint thread_messages_artifacts_size
     check (octet_length(artifacts::text) <= 65536);
+
+grant insert (attachments, artifacts)
+  on public.thread_messages to authenticated;
+grant update (attachments, artifacts)
+  on public.thread_messages to authenticated;
