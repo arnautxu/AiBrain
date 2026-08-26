@@ -147,7 +147,7 @@ const runtimeGlobal = globalThis as typeof globalThis & {
   __aibrainWorkerRuntimeServicePromise?: Promise<RuntimeServiceState>;
 };
 
-async function serviceState() {
+async function serviceState(): Promise<RuntimeServiceState> {
   const config = await loadInstallationConfig();
   const fingerprint = installationFingerprint(config);
   const existing = runtimeGlobal.__aibrainWorkerRuntimeService;
