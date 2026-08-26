@@ -22,12 +22,12 @@ import {
 } from "@/config/brain";
 import {
   applyChatStreamEvent,
-  isChatStreamEvent,
   type ApprovalDecision,
   type ChatMessage,
   type ChatInputAttachment,
   type ComposerMode,
 } from "@/lib/chat-contract";
+import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
 import {
   initialRuntimeStatus,
   isRuntimeStatus,
@@ -174,7 +174,17 @@ function loadPreferences(key: string, defaults: BrainPreferences): BrainPreferen
 function loadPreviewSnapshot(key: string, fallback: WorkbenchSnapshot) {
   try {
     const stored: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
-    if (isWorkbenchSnapshot(stored) && stored.persistence === "browser-preview") return stored;
+    if (isWorkbenchSnapshot(stored) && stored.persistence === "browser-preview") {
+      return {
+        ...stored,
+        threads: stored.threads.map((thread) => ({
+          ...thread,
+          messages: thread.messages.map((message) => message.status === "streaming"
+            ? { ...message, status: "stopped" as const }
+            : message),
+        })),
+      };
+    }
   } catch {
     // A damaged preview cache is replaced by the server-provided seed.
   }
@@ -479,33 +489,15 @@ export function BrainApp({
     threadId: string,
     assistantMessageId: string,
   ) => {
-    if (!response.ok || !response.body) throw new Error(await chatError(response));
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    const applyLine = (currentLine: string) => {
-      if (!currentLine.trim()) return;
-      const event: unknown = JSON.parse(currentLine);
-      if (!isChatStreamEvent(event)) return;
+    if (!response.ok) throw new Error(await chatError(response));
+    await consumeChatEventStream(response, (event) => {
       setThreads((current) => updateThreadMessage(
         current,
         threadId,
         assistantMessageId,
         (message) => applyChatStreamEvent(message, event),
       ));
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-      for (const currentLine of lines) applyLine(currentLine);
-    }
-    buffer += decoder.decode();
-    if (buffer.trim()) applyLine(buffer);
+    });
   }, []);
 
   const sendMessage = useCallback(async (messageOverride?: string, displayMessageOverride?: string) => {
@@ -559,6 +551,7 @@ export function BrainApp({
       setSelectedMessageId(assistantId);
       setPrompt("");
       setPendingRuntimeContext(null);
+      setAttachments([]);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -590,7 +583,6 @@ export function BrainApp({
         }),
       });
       await handleStream(response, threadId, assistantId);
-      setAttachments([]);
       succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {
