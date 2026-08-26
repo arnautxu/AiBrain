@@ -6,13 +6,41 @@ import type {
 } from "@/runtime/transport/contracts";
 import { TransportProtocolError, parseAppServerEvent } from "@/runtime/transport/wire-protocol";
 import { FileJournal } from "@/storage/journal";
+import { atomicWriteJson, readValidatedJson } from "@/storage/atomic-file";
 import type { ResourceLockManager } from "@/storage/resource-lock";
-import type { StorageSchema } from "@/storage/schema";
+import {
+  defineVersionedSchema,
+  expectInteger,
+  expectString,
+  type StorageSchema,
+} from "@/storage/schema";
 
 const appServerEventSchema: StorageSchema<AppServerEvent> = Object.freeze({
   name: "AppServerEvent@codex-0.149.1",
   parse(value: unknown) {
     return parseAppServerEvent(value);
+  },
+});
+
+type DeliveryCursorRecord = {
+  schemaVersion: 1;
+  eventId: string;
+  sequence: number;
+};
+
+const deliveryCursorSchema = defineVersionedSchema<DeliveryCursorRecord>({
+  name: "TransportDeliveryCursor",
+  schemaVersion: 1,
+  keys: ["eventId", "sequence"],
+  parse(record, context) {
+    return {
+      schemaVersion: 1,
+      eventId: expectString(record.eventId, context.at("eventId"), {
+        minLength: 1,
+        maxLength: 256,
+      }),
+      sequence: expectInteger(record.sequence, context.at("sequence"), { minimum: 1 }),
+    };
   },
 });
 
@@ -25,9 +53,13 @@ export type FileTransportEventJournalOptions = {
 export class FileTransportEventJournal implements TransportEventJournal {
   readonly filePath: string;
   private readonly journal: FileJournal<AppServerEvent>;
+  private readonly lockManager: ResourceLockManager;
+  private readonly deliveryCursorPath: string;
 
   constructor(options: FileTransportEventJournalOptions) {
     this.filePath = path.resolve(options.filePath);
+    this.lockManager = options.lockManager;
+    this.deliveryCursorPath = `${this.filePath}.delivery.json`;
     this.journal = new FileJournal({
       filePath: this.filePath,
       lockManager: options.lockManager,
@@ -60,6 +92,56 @@ export class FileTransportEventJournal implements TransportEventJournal {
       return true;
     });
     return appended !== null;
+  }
+
+  async readEvents(afterSequence = 0, limit = Number.MAX_SAFE_INTEGER) {
+    return (await this.journal.read({ afterSequence, limit })).map((entry) => entry.payload);
+  }
+
+  private async loadDeliveryCursor() {
+    try {
+      return await readValidatedJson(this.deliveryCursorPath, deliveryCursorSchema);
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  async readUndelivered(limit: number) {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Undelivered event limit must be positive.");
+    return this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
+      const cursor = await this.loadDeliveryCursor();
+      if (cursor) {
+        const persisted = (await this.journal.read({ afterSequence: cursor.sequence - 1, limit: 1 }))[0]?.payload;
+        if (!persisted || persisted.eventId !== cursor.eventId || persisted.sequence !== cursor.sequence) {
+          throw new TransportProtocolError("Transport delivery cursor does not match the durable event journal.");
+        }
+      }
+      return this.readEvents(cursor?.sequence ?? 0, limit);
+    });
+  }
+
+  async markDelivered(event: AppServerEvent) {
+    const validated = appServerEventSchema.parse(event);
+    await this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
+      const cursor = await this.loadDeliveryCursor();
+      if (cursor?.eventId === validated.eventId && cursor.sequence === validated.sequence) return;
+      const expected = (cursor?.sequence ?? 0) + 1;
+      if (validated.sequence !== expected) {
+        throw new TransportProtocolError(
+          `Transport delivery expected sequence ${expected}, received ${validated.sequence}.`,
+        );
+      }
+      const persisted = (await this.journal.read({ afterSequence: validated.sequence - 1, limit: 1 }))[0]?.payload;
+      if (!persisted || persisted.eventId !== validated.eventId || persisted.sequence !== validated.sequence) {
+        throw new TransportProtocolError("Cannot acknowledge an event absent from the durable journal.");
+      }
+      await atomicWriteJson(this.deliveryCursorPath, {
+        schemaVersion: 1,
+        eventId: validated.eventId,
+        sequence: validated.sequence,
+      }, deliveryCursorSchema, { mode: 0o600 });
+    });
   }
 
   async verifyAndRepair() {
