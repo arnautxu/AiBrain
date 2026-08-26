@@ -47,6 +47,6 @@ La salida contiene solo instalación y recuentos, nunca emails, paths, tokens o 
   browser/downloads/
 ```
 
-La primera ejecución también crea `<dataRoot>/PERMISSIONS.md` con una política de instalación conservadora. La publicación queda denegada hasta que el administrador sustituya de forma atómica la regla correspondiente, incremente `policyVersion` y conserve la versión anterior. `PERMISSIONS.md` se mantiene `0400`; directorios privados `0700`, secretos/estado `0600`.
+La primera ejecución también crea `<companyContextRoot>/PERMISSIONS.md` con una política de instalación conservadora. La publicación queda denegada hasta que el administrador sustituya de forma atómica la regla correspondiente, incremente `policyVersion` y conserve la versión anterior. `PERMISSIONS.md` se mantiene `0400`; directorios privados `0700`, secretos/estado `0600`.
 
 El command no crea el usuario remoto, no cambia suscripciones, no toca Supabase product data y no realiza ninguna acción sobre NAS, DNS o producción.

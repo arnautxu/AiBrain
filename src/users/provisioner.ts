@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir } from "node:fs/promises";
+import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { localUserSchema, type LocalUser } from "@/auth/local-user-store";
@@ -148,6 +148,28 @@ async function ensurePrivateDirectory(directory: string) {
   await assertPrivateDirectory(directory);
 }
 
+function inside(root: string, candidate: string) {
+  const relative = path.relative(root, candidate);
+  return relative === ""
+    || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+async function ensureDescendantTree(root: string, target: string) {
+  const canonicalRoot = await realpath(root);
+  const relative = path.relative(root, target);
+  if (!relative || !inside(root, target)) {
+    throw new UserProvisioningError("USER_PATH_UNSAFE", "Provisioning path escapes dataRoot.");
+  }
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    await ensurePrivateDirectory(current);
+    if (!inside(canonicalRoot, await realpath(current))) {
+      throw new UserProvisioningError("USER_PATH_UNSAFE", "Provisioning path resolves outside dataRoot.");
+    }
+  }
+}
+
 async function regularFileExists(filePath: string) {
   try {
     const metadata = await lstat(filePath);
@@ -191,10 +213,15 @@ export class UserProvisioner {
   async ensureInstallationPolicy() {
     return this.lockManager.withLock(`installation-policy:${this.config.installationId}`, async () => {
       await ensurePrivateDirectory(this.config.paths.dataRoot);
-      const policyPath = path.join(this.config.paths.dataRoot, "PERMISSIONS.md");
+      await ensureDescendantTree(this.config.paths.dataRoot, this.config.paths.companyContextRoot);
+      const policyPath = path.join(this.config.paths.companyContextRoot, "PERMISSIONS.md");
       const expected = installationPolicy(this.config);
       if (!await createFileOnce(policyPath, expected, 0o400)) {
-        const contents = await readRegularFileWithin(this.config.paths.dataRoot, "PERMISSIONS.md", 256 * 1024);
+        const contents = await readRegularFileWithin(
+          this.config.paths.companyContextRoot,
+          "PERMISSIONS.md",
+          256 * 1024,
+        );
         const parsed = parsePermissionMarkdown(contents.toString("utf8"));
         if (parsed.scope !== "installation" || parsed.installationId !== this.config.installationId) {
           throw new UserProvisioningError(
@@ -211,7 +238,7 @@ export class UserProvisioner {
   async provision(input: UserProvisioningInput): Promise<ProvisionedUser> {
     const user = normalizeInput(input);
     await this.ensureInstallationPolicy();
-    await ensurePrivateDirectory(this.config.paths.usersRoot);
+    await ensureDescendantTree(this.config.paths.dataRoot, this.config.paths.usersRoot);
     return this.lockManager.withLock(
       `user-provision:${this.config.installationId}:${user.userId}`,
       async () => {

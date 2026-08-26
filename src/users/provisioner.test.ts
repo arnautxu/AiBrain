@@ -80,13 +80,13 @@ describe("UserProvisioner", () => {
     }
 
     const installationPolicy = parsePermissionMarkdown(
-      await readFile(path.join(config.paths.dataRoot, "PERMISSIONS.md"), "utf8"),
+      await readFile(path.join(config.paths.companyContextRoot, "PERMISSIONS.md"), "utf8"),
     );
     expect(installationPolicy).toMatchObject({
       installationId: config.installationId,
       scope: "installation",
     });
-    expect(await mode(path.join(config.paths.dataRoot, "PERMISSIONS.md"))).toBe(0o400);
+    expect(await mode(path.join(config.paths.companyContextRoot, "PERMISSIONS.md"))).toBe(0o400);
   }, 20_000);
 
   it("is idempotent and never recreates a consumed initial-password marker", async () => {
