@@ -23,7 +23,10 @@ ENV CONTROL_PLANE_DATA_DIR=/var/lib/aibrain/control-plane
 ENV CODEX_APPROVAL_POLICY=on-request
 ENV CODEX_SANDBOX=workspace-write
 
-RUN npm install --global @openai/codex@0.149.1 \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install --global @openai/codex@0.149.1 \
   && groupadd --system --gid 1001 aibrain \
   && useradd --system --uid 1001 --gid aibrain aibrain \
   && mkdir -p /var/lib/aibrain/codex/studio /var/lib/aibrain/codex/operations /var/lib/aibrain/control-plane /var/lib/aibrain/workspaces/studio/workspace /var/lib/aibrain/workspaces/operations/workspace \
