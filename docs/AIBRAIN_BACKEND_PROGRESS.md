@@ -42,7 +42,7 @@
 | 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`: streaming proyectado antes del ACK, stop scoped, approvals durables no bloqueantes, replay, routing aislado, retry por `clientUserMessageId` y recuperación desde historial Codex sin duplicar `turn/start`; faltan steering explícito y recovery E2E tras crash real |
+| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`: streaming proyectado antes del ACK, approvals durables no bloqueantes, replay, routing aislado, retry por `clientUserMessageId`, recuperación desde historial Codex y controles explícitos `turn/steer`/`turn/interrupt` autenticados e idempotentes; falta recovery E2E tras crash real |
 | 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`, `416d368`: validación segura, staging privado, preview real y publicador atómico/versionado/idempotente; faltan routes autorizadas y matriz completa de formatos |
 | 9. Browser/Computer Use aislado | En curso | `4bed095`: roots, perfil, descargas, estado durable, fencing, heartbeat, takeover, recovery, tokens HMAC y backpressure por usuario; faltan adapter Chrome/CDP/noVNC y routes autenticadas |
 | 10. Contratos reales para UI | Pendiente | — |
@@ -71,6 +71,7 @@
 - Cada delta, snapshot, actividad, approval y terminal de un turn se proyecta atómicamente antes de confirmar su secuencia de transporte; el workbench recompone mensajes aún activos tras refresh o restart.
 - Las peticiones de App Server usan IDs estables por operación y mensaje UI. Un retry inspecciona el historial del thread mediante `clientUserMessageId` y no emite un segundo `turn/start` cuando Codex ya conoce el turn.
 - Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
+- Steering y stop reciben únicamente IDs locales de UI: el servidor obtiene los IDs App Server desde la proyección vinculada al usuario, exige `expectedTurnId`, persiste la aceptación antes del ACK y cancela los waiters locales después de una interrupción confirmada.
 
 ## Riesgos y acciones externas pendientes
 
@@ -80,7 +81,7 @@
 
 ## Siguiente acción concreta
 
-Añadir steering y stop como operaciones autenticadas explícitas, con estado durable, aislamiento por instalación/usuario/thread/turn y pruebas de concurrencia antes de completar recovery E2E tras pérdida de red y restart.
+Exponer uploads y previews autorizados de DOCX, XLSX, PPTX, PDF, texto e imagen mediante routes file-backed, y conectar el publicador server-side con permiso `documents.publish` sin entregar `publish-rw` al worker.
 
 ## Últimas validaciones
 
@@ -112,4 +113,5 @@ Añadir steering y stop como operaciones autenticadas explícitas, con estado du
 - Camino real worker: tests de token user-bound, inicialización única y turn con `clientUserMessageId`; el pool legacy queda sin referencias desde `/api/chat` y `/api/runtime/status`.
 - Persistencia/recovery: tests de proyección exact-once, múltiples mutaciones sobre una misma secuencia, overlay tras restart y recuperación de un turn completado sin repetir `turn/start`.
 - Concurrencia del router: una approval pendiente no bloquea otro thread y los ACK permanecen globalmente ordenados; un response RPC no se confirma antes de su hook de persistencia.
-- Suite global más reciente: 189/189 tests en 39 ficheros; lint, typecheck y build Next.js verdes tras `368aec0`, `46569e6`, `4487ef2` y `2b8de16`.
+- Control de turn: ruta real con sesión/Origin, contrato estricto, rechazo de runtime IDs elegidos por cliente, aislamiento cross-user, steering con precondición de turn, stop durable y replay idempotente.
+- Suite global más reciente: 195/195 tests en 41 ficheros; lint, typecheck y build Next.js (incluida `/api/runtime/turns/control`) verdes tras `392d837`.
