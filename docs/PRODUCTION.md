@@ -11,9 +11,9 @@ AiBrain necessita un procés Node persistent. El mateix servei entrega Next.js i
 ```text
 /var/lib/aibrain/
   codex/<tenant>/          credencials i estat privat de Codex
+  workspaces/<tenant>/     workspace i projectes aïllats
+  computer/<tenant>/       perfil del navegador gràfic
   control-plane/           overlays de manifest del prototip
-/app/runtime/tenants/
-  <tenant>/workspace/      workspace aïllat
 ```
 
 Variables de runtime:
@@ -28,12 +28,14 @@ Variables de runtime:
 - `CHAT_RUNTIME=codex`
 - `CODEX_BIN=/usr/local/bin/codex`
 - `CODEX_HOME_ROOT=/var/lib/aibrain/codex`
-- `CODEX_WORKSPACE_ROOT=/app/runtime/tenants`
+- `CODEX_WORKSPACE_ROOT=/var/lib/aibrain/workspaces`
 - `CODEX_APPROVAL_POLICY=on-request`
 - `CODEX_SANDBOX=workspace-write`
 - `CODEX_MODEL=<opcional>`
 
 `CODEX_HOME_ROOT` i `CONTROL_PLANE_DATA_DIR` han d’estar en un volum privat, persistent, xifrat i no compartit amb el navegador. Cap secret no s’ha d’incorporar a la imatge.
+
+La preparació específica del host Hetzner i del navegador gràfic està descrita a [HETZNER_MIGRATION.md](HETZNER_MIGRATION.md). noVNC i CDP es mantenen a loopback fins que hi hagi un gateway autenticat i sessions curtes vinculades a tenant.
 
 ## Gates abans d’obrir trànsit
 

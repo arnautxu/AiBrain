@@ -1,0 +1,42 @@
+name: aibrain
+
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    env_file:
+      - /etc/aibrain/aibrain.env
+    environment:
+      CODEX_HOME_ROOT: /var/lib/aibrain/codex
+      CODEX_WORKSPACE_ROOT: /var/lib/aibrain/workspaces
+      CONTROL_PLANE_DATA_DIR: /var/lib/aibrain/control-plane
+    init: true
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    volumes:
+      - /var/lib/aibrain:/var/lib/aibrain
+
+  browser-studio:
+    build:
+      context: ../..
+      dockerfile: infra/hetzner/browser/Dockerfile
+    environment:
+      SCREEN_SIZE: 1440x900
+    ports:
+      - "127.0.0.1:6080:6080"
+      - "127.0.0.1:9222:9223"
+    restart: unless-stopped
+    security_opt:
+      - seccomp=./browser/seccomp_profile.json
+    shm_size: 1gb
+    volumes:
+      - /var/lib/aibrain/computer/studio/profile:/home/browser/profile
+
+networks:
+  default:
+    name: aibrain-private
