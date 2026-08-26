@@ -106,10 +106,32 @@ describe("worker Codex turn", () => {
         };
       },
       async resolvedSkills() { return []; },
-      async request(method: string, params: unknown, purpose: string) {
+      async request(
+        method: string,
+        params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
         calls.push({ method, params, purpose });
-        if (method === "thread/start") return { thread: { id: "runtime-thread-1" } };
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-1" } };
+          await beforeResolve?.(result as never, {
+            eventId: "response-thread",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
         if (method === "turn/start") {
+          const result = { turn: { id: "runtime-turn-1" } };
+          await beforeResolve?.(result as never, {
+            eventId: "response-turn",
+            sequence: 2,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
           queueMicrotask(() => {
             void (async () => {
               await handlers?.onNotification({
@@ -122,7 +144,7 @@ describe("worker Codex turn", () => {
               });
             })();
           });
-          return { turn: { id: "runtime-turn-1" } };
+          return result;
         }
         return {};
       },
@@ -154,7 +176,7 @@ describe("worker Codex turn", () => {
       permissions(),
       {} as never,
       new AbortController().signal,
-      (event) => events.push(event),
+      async (event) => { events.push(event); },
     );
 
     const turnStart = calls.find((call) => call.method === "turn/start");
@@ -167,6 +189,95 @@ describe("worker Codex turn", () => {
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
-    expect(events.at(-1)).toEqual({ type: "done" });
+    expect(events).toContainEqual({ type: "done" });
+  });
+
+  it("recovers a completed clientUserMessageId from thread history without starting it twice", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-recovery-"));
+    const workspace = path.join(userRoot, "workspace");
+    await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace, { mode: 0o700 }));
+    const calls: string[] = [];
+    const client = {
+      router: {
+        registerTurn() { throw new Error("A completed recovery must not register a live turn."); },
+      },
+      async connection() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method !== "thread/resume") throw new Error(`Unexpected request ${method}`);
+        const result = {
+          thread: {
+            id: "runtime-thread-1",
+            turns: [{
+              id: "runtime-turn-recovered",
+              status: "completed",
+              error: null,
+              items: [
+                { type: "userMessage", id: "item-user", clientId: userMessageId, content: [] },
+                { type: "agentMessage", id: "item-agent", text: "Recovered answer", phase: "final_answer" },
+              ],
+            }],
+          },
+        };
+        await beforeResolve?.(result as never, {
+          eventId: "response-resume",
+          sequence: 1,
+          occurredAt: new Date().toISOString(),
+          message: { kind: "rpc-response", rpc: { id: purpose, result } },
+        } as never);
+        return result;
+      },
+    };
+    mocked.runtime = {
+      config: { installationId },
+      handle: { roots: { workspace } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      "runtime-thread-1",
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls).toEqual(["thread/resume"]);
+    expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
+    expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
+    expect(events).toContainEqual({ type: "done" });
   });
 });

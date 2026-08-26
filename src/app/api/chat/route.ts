@@ -16,9 +16,10 @@ import {
 import { readRuntimeConfig } from "@/runtime/config";
 import { loadInstallationConfig } from "@/config/installation";
 import {
-  type CodexTurnEvent,
-} from "@/runtime/codex-app-server";
-import { runWorkerCodexTurn } from "@/runtime/worker-codex-turn";
+  runWorkerCodexTurn,
+  type WorkerCodexTurnEvent,
+  type WorkerTurnProjection,
+} from "@/runtime/worker-codex-turn";
 import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileApprovalStore } from "@/runtime/approval-store";
@@ -32,6 +33,8 @@ import {
   isBrowserPreviewWorkbench,
 } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
+import { workerTurnIsActive } from "@/runtime/worker-runtime-service";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -42,8 +45,14 @@ function line(event: ChatStreamEvent) {
 
 function delay(milliseconds: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
-    const timeout = setTimeout(resolve, milliseconds);
-    signal.addEventListener("abort", () => { clearTimeout(timeout); resolve(); }, { once: true });
+    const finish = () => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timeout = setTimeout(finish, milliseconds);
+    signal.addEventListener("abort", finish, { once: true });
+    if (signal.aborted) finish();
   });
 }
 
@@ -67,6 +76,53 @@ function message(
     attachments: [],
     artifacts: [],
   };
+}
+
+function replayHeaders() {
+  return {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "X-AiBrain-Idempotent-Replay": "true",
+  };
+}
+
+function replayMessageResponse(messageToReplay: ChatMessage) {
+  const replay = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(line({ type: "snapshot", message: messageToReplay }));
+      controller.close();
+    },
+  });
+  return new Response(replay, { headers: replayHeaders() });
+}
+
+function followProjectedTurn(
+  store: FileTurnProjectionStore,
+  threadId: string,
+  assistantMessageId: string,
+  initial: ChatMessage,
+  signal: AbortSignal,
+) {
+  const replay = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let lastUpdatedAt = "";
+      let current = initial;
+      controller.enqueue(line({ type: "snapshot", message: current }));
+      const deadline = Date.now() + 10 * 60_000;
+      while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
+        await delay(100, signal);
+        const projection = await store.read(threadId, assistantMessageId);
+        if (!projection) break;
+        current = projection.message;
+        if (projection.updatedAt !== lastUpdatedAt) {
+          lastUpdatedAt = projection.updatedAt;
+          controller.enqueue(line({ type: "snapshot", message: current }));
+        }
+      }
+      controller.close();
+    },
+  });
+  return new Response(replay, { headers: replayHeaders() });
 }
 
 export async function POST(request: Request) {
@@ -123,6 +179,7 @@ export async function POST(request: Request) {
 
   let turnPermissions: ResolvedPermissions | null = null;
   let approvalStore: FileApprovalStore | null = null;
+  let turnProjectionStore: FileTurnProjectionStore | null = null;
   if (config.mode === "codex") {
     try {
       const installation = await loadInstallationConfig();
@@ -133,6 +190,11 @@ export async function POST(request: Request) {
         turnId: body.assistantMessageId,
       });
       approvalStore = new FileApprovalStore({
+        installationId: installation.installationId,
+        userId: session.user.id,
+        usersRoot: installation.paths.usersRoot,
+      });
+      turnProjectionStore = new FileTurnProjectionStore({
         installationId: installation.installationId,
         userId: session.user.id,
         usersRoot: installation.paths.usersRoot,
@@ -165,27 +227,100 @@ export async function POST(request: Request) {
     "streaming",
     new Date(startedAt.getTime() + 1).toISOString(),
   );
+  let turnOutcome: "created" | "existing" = "created";
   if (persistent) {
     try {
-      await beginThreadTurn(session, body.threadId, userMessage, assistantMessage);
+      const begun = await beginThreadTurn(session, body.threadId, userMessage, assistantMessage);
+      turnOutcome = begun.outcome;
+      assistantMessage = begun.assistantMessage;
     } catch (error) {
       return workbenchErrorResponse(error, "No s’ha pogut iniciar el torn persistent.");
+    }
+  }
+  if (persistent && config.mode === "codex" && turnProjectionStore) {
+    try {
+      assistantMessage = (await turnProjectionStore.initialize(body.threadId, assistantMessage)).message;
+    } catch (error) {
+      assistantMessage = {
+        ...assistantMessage,
+        status: "error",
+        content: "No s’ha pogut preparar la recuperació durable del torn.",
+      };
+      await finishThreadTurn(session, body.threadId, assistantMessage, null).catch(() => undefined);
+      return workbenchErrorResponse(error, "No s’ha pogut preparar la recuperació durable del torn.");
+    }
+  }
+  if (turnOutcome === "existing") {
+    if (assistantMessage.status !== "streaming" || !turnProjectionStore) {
+      return replayMessageResponse(assistantMessage);
+    }
+    if (runtimeThreadId && workerTurnIsActive(
+      session.user.id,
+      runtimeThreadId,
+      body.assistantMessageId,
+    )) {
+      return followProjectedTurn(
+        turnProjectionStore,
+        body.threadId,
+        body.assistantMessageId,
+        assistantMessage,
+        request.signal,
+      );
     }
   }
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let runtimeThreadToken: string | null = null;
-      const emit = (event: ChatStreamEvent) => {
-        assistantMessage = applyChatStreamEvent(assistantMessage, event);
+      const emit = async (event: ChatStreamEvent, projection?: WorkerTurnProjection) => {
+        let applied = true;
+        if (persistent && turnProjectionStore) {
+          if (projection) {
+            const result = await turnProjectionStore.applyTransportEvent(
+              body.threadId,
+              body.assistantMessageId,
+              projection.envelope,
+              projection.key,
+              event,
+            );
+            assistantMessage = result.projection.message;
+            applied = result.applied;
+          } else {
+            assistantMessage = (await turnProjectionStore.applyLocalEvent(
+              body.threadId,
+              body.assistantMessageId,
+              event,
+            )).message;
+          }
+        } else {
+          assistantMessage = applyChatStreamEvent(assistantMessage, event);
+        }
+        if (!applied) return;
         controller.enqueue(line(event));
       };
-      const emitCodex = (event: CodexTurnEvent) => {
+      const emitCodex = async (event: WorkerCodexTurnEvent, projection?: WorkerTurnProjection) => {
         if (event.type === "runtimeThread") {
           runtimeThreadToken = event.threadToken;
+          if (persistent && turnProjectionStore) {
+            await turnProjectionStore.setRuntimeThreadToken(
+              body.threadId,
+              body.assistantMessageId,
+              event.threadToken,
+            );
+          }
           return;
         }
-        emit(event);
+        if (event.type === "runtimeTurn") {
+          if (persistent && turnProjectionStore) {
+            await turnProjectionStore.setRuntimeTurnId(
+              body.threadId,
+              body.assistantMessageId,
+              event.turnId,
+            );
+          }
+          return;
+        }
+        await emit(event, projection);
       };
 
       try {
@@ -205,22 +340,22 @@ export async function POST(request: Request) {
             emitCodex,
           );
         } else {
-          emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
+          await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
           for (const activity of buildDemoActivities(body.preferences.showActivity)) {
             if (request.signal.aborted) break;
-            emit({ type: "activity", item: activity });
+            await emit({ type: "activity", item: activity });
             await delay(110, request.signal);
           }
-          if (!request.signal.aborted) emit({ type: "diff", value: buildDemoDiff() });
+          if (!request.signal.aborted) await emit({ type: "diff", value: buildDemoDiff() });
           for (const word of buildDemoAnswer(body).split(/(?<=\s)/)) {
             if (request.signal.aborted) break;
-            emit({ type: "delta", value: word });
+            await emit({ type: "delta", value: word });
             await delay(14, request.signal);
           }
-          if (!request.signal.aborted) emit({ type: "done" });
+          if (!request.signal.aborted) await emit({ type: "done" });
         }
       } catch (error) {
-        emit({
+        await emit({
           type: "error",
           message: error instanceof Error ? error.message : "El runtime no està disponible.",
         });
@@ -242,7 +377,7 @@ export async function POST(request: Request) {
           } catch (error) {
             console.error("AiBrain thread persistence failed", error);
             if (!request.signal.aborted) {
-              emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
+              await emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
             }
           }
         }

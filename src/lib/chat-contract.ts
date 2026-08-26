@@ -116,6 +116,8 @@ export type ApprovalResolutionRequest = {
 };
 
 export type ChatStreamEvent =
+  | { type: "snapshot"; message: ChatMessage }
+  | { type: "content"; value: string }
   | { type: "activity"; item: ActivityItem }
   | { type: "plan"; explanation: string | null; steps: PlanStep[] }
   | { type: "approval"; item: ApprovalItem }
@@ -123,6 +125,7 @@ export type ChatStreamEvent =
   | { type: "delta"; value: string }
   | { type: "artifact"; item: GeneratedArtifact }
   | { type: "done" }
+  | { type: "stopped" }
   | { type: "error"; message: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -261,8 +264,9 @@ export function isApprovalResolutionRequest(
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
-  if (value.type === "done") return true;
-  if (value.type === "delta" || value.type === "diff") {
+  if (value.type === "done" || value.type === "stopped") return true;
+  if (value.type === "snapshot") return isChatMessage(value.message);
+  if (value.type === "delta" || value.type === "diff" || value.type === "content") {
     return typeof value.value === "string";
   }
   if (value.type === "error") return typeof value.message === "string";
@@ -303,6 +307,8 @@ export function isChatMessage(message: unknown): message is ChatMessage {
 }
 
 export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEvent): ChatMessage {
+  if (event.type === "snapshot") return event.message;
+  if (event.type === "content") return { ...message, content: event.value };
   if (event.type === "delta") return { ...message, content: message.content + event.value };
   if (event.type === "activity") {
     const index = message.activity.findIndex((item) => item.id === event.item.id);
@@ -322,6 +328,7 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
   if (event.type === "diff") return { ...message, diff: event.value };
   if (event.type === "artifact") return { ...message, artifacts: [...message.artifacts, event.item] };
   if (event.type === "done") return { ...message, status: "complete" };
+  if (event.type === "stopped") return { ...message, status: "stopped" };
   if (event.type === "error") {
     return { ...message, status: "error", content: message.content || event.message };
   }

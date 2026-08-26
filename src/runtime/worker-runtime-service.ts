@@ -12,6 +12,7 @@ import {
   type ResolvedSkill,
 } from "@/runtime/codex-app-server";
 import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
+import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gateway-runtime";
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
@@ -33,7 +34,7 @@ function installationFingerprint(config: Readonly<InstallationConfig>) {
   })).digest("hex");
 }
 
-function request(
+function randomRequest(
   method: ClientRequest["method"],
   params: unknown,
   purpose: string,
@@ -68,7 +69,7 @@ export class WorkerAppServerClient {
 
   private async initializeOnce() {
     await this.router.start();
-    await this.router.request(request("initialize", {
+    await this.router.request(randomRequest("initialize", {
       clientInfo: {
         name: "aibrain_workbench",
         title: "AiBrain",
@@ -77,7 +78,7 @@ export class WorkerAppServerClient {
       capabilities: null,
     }, "initialize"), 30_000);
     await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
-    this.account = parseAccount(await this.router.request(request(
+    this.account = parseAccount(await this.router.request(randomRequest(
       "account/read",
       { refreshToken: false },
       "account-read",
@@ -89,9 +90,17 @@ export class WorkerAppServerClient {
     params: unknown,
     purpose: string,
     timeoutMs = 30_000,
+    beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
   ) {
     await this.initialize();
-    return this.router.request(request(method, params, purpose), timeoutMs);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(purpose)) {
+      throw new Error("Stable App Server request id is invalid.");
+    }
+    return this.router.request(
+      { method, id: purpose, params } as ClientRequest,
+      timeoutMs,
+      beforeResolve,
+    );
   }
 
   async connection(cwd: string, forceRefresh = false): Promise<CodexConnection> {
@@ -101,11 +110,11 @@ export class WorkerAppServerClient {
       return this.cachedConnection;
     }
     const [modelsResult, skillsResult, capabilitiesResult, rateLimitResult, usageResult] = await Promise.all([
-      this.router.request(request("model/list", { limit: 30, includeHidden: false }, "models"), 10_000).catch(() => null),
-      this.router.request(request("skills/list", { cwds: [cwd], forceReload: false }, "skills"), 10_000).catch(() => null),
-      this.router.request(request("modelProvider/capabilities/read", {}, "capabilities"), 10_000).catch(() => null),
-      this.router.request(request("account/rateLimits/read", undefined, "rate-limits"), 10_000).catch(() => null),
-      this.router.request(request("account/usage/read", undefined, "usage"), 10_000).catch(() => null),
+      this.router.request(randomRequest("model/list", { limit: 30, includeHidden: false }, "models"), 10_000).catch(() => null),
+      this.router.request(randomRequest("skills/list", { cwds: [cwd], forceReload: false }, "skills"), 10_000).catch(() => null),
+      this.router.request(randomRequest("modelProvider/capabilities/read", {}, "capabilities"), 10_000).catch(() => null),
+      this.router.request(randomRequest("account/rateLimits/read", undefined, "rate-limits"), 10_000).catch(() => null),
+      this.router.request(randomRequest("account/usage/read", undefined, "usage"), 10_000).catch(() => null),
     ]);
     this.cachedConnection = {
       ...this.account,
@@ -123,7 +132,7 @@ export class WorkerAppServerClient {
 
   async resolvedSkills(cwd: string): Promise<ResolvedSkill[]> {
     await this.initialize();
-    return parseSkills(await this.router.request(request(
+    return parseSkills(await this.router.request(randomRequest(
       "skills/list",
       { cwds: [cwd], forceReload: false },
       "resolved-skills",
@@ -189,18 +198,43 @@ async function serviceState(): Promise<RuntimeServiceState> {
 
 export async function workerAppServerForUser(userId: string) {
   const state = await serviceState();
-  const handle = await state.registry.start(userId);
+  let handle = await state.registry.start(userId);
   let client = state.clients.get(userId);
   if (!client || client.handle.transport !== handle.transport) {
     if (client) await client.close();
     client = new WorkerAppServerClient(handle);
     state.clients.set(userId, client);
   }
-  await client.initialize();
+  try {
+    await client.initialize();
+  } catch {
+    await client.close().catch(() => undefined);
+    state.clients.delete(userId);
+    await state.registry.stop(userId).catch(() => undefined);
+    handle = await state.registry.start(userId);
+    client = new WorkerAppServerClient(handle);
+    state.clients.set(userId, client);
+    try {
+      await client.initialize();
+    } catch (retryError) {
+      state.clients.delete(userId);
+      throw retryError;
+    }
+  }
   return { config: state.config, registry: state.registry, handle, client };
 }
 
 export async function workerRuntimeHealth(userId: string) {
   const state = await serviceState();
   return state.registry.health(userId);
+}
+
+export function workerTurnIsActive(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  const client = state?.clients.get(userId);
+  return client?.router.hasActiveTurn(runtimeThreadId, localTurnId) ?? false;
 }
