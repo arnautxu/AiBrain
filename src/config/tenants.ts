@@ -16,12 +16,12 @@ export type TenantDefinition = {
 const tenants: Record<string, TenantDefinition> = {
   studio: {
     id: "studio",
-    name: "Arnau Studio",
+    name: "Example Laboratory",
     manifest: baseBrainManifest,
   },
   operations: {
     id: "operations",
-    name: "Northstar Operations",
+    name: "Northwind Advisory QA",
     manifest: operationsBrainManifest,
   },
 };
@@ -29,23 +29,23 @@ const tenants: Record<string, TenantDefinition> = {
 const demoAccounts: DemoAccount[] = [
   {
     id: "arnau-owner",
-    name: "Arnau",
-    email: "arnau@studio.demo",
+    name: "Alex",
+    email: "alex@example-laboratory.test",
     role: "owner",
     tenantId: "studio",
     tenantName: tenants.studio.name,
     productName: tenants.studio.manifest.identity.productName,
-    description: "Propietari · pot editar el manifest i les finestres",
+    description: "Cuenta de desarrollo con proyectos sintéticos",
   },
   {
     id: "ops-member",
-    name: "Equip Ops",
-    email: "equip@operations.demo",
+    name: "Taylor",
+    email: "taylor@northwind-advisory.test",
     role: "member",
     tenantId: "operations",
     tenantName: tenants.operations.name,
     productName: tenants.operations.manifest.identity.productName,
-    description: "Membre · experiència operativa sense accés al control plane",
+    description: "Cuenta QA con actividad sintética",
   },
 ];
 
