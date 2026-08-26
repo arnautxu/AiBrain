@@ -1,23 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import {
-  ArrowRight,
-  Code,
-  EnvelopeSimple,
-  LockKey,
-  PaperPlaneTilt,
-  UsersThree,
-} from "@phosphor-icons/react";
+import { ArrowRight, EnvelopeSimple, LockKey, UserCircle } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { AuthMode, DemoAccount } from "@/auth/types";
+import { BrandMark, Button, TextField, ThemeToggle } from "@/components/ui/primitives";
+import type { PublicInstallationBranding } from "@/ui/installation-branding";
 
 export function LoginForm({
   accounts,
+  branding,
   mode,
   remotePreview,
 }: {
   accounts: DemoAccount[];
+  branding: PublicInstallationBranding;
   mode: AuthMode;
   remotePreview: boolean;
 }) {
@@ -39,13 +36,13 @@ export function LoginForm({
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         const message = result && typeof result === "object" && "error" in result &&
-          typeof result.error === "string" ? result.error : "No s’ha pogut iniciar la sessió.";
+          typeof result.error === "string" ? result.error : "No se ha podido iniciar la sesión.";
         throw new Error(message);
       }
       router.replace("/");
       router.refresh();
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconegut.");
+      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
       setLoading(null);
     }
   }
@@ -63,12 +60,12 @@ export function LoginForm({
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         const message = result && typeof result === "object" && "error" in result &&
-          typeof result.error === "string" ? result.error : "No s’ha pogut enviar l’enllaç.";
+          typeof result.error === "string" ? result.error : "No se ha podido enviar el acceso.";
         throw new Error(message);
       }
       setSent(true);
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconegut.");
+      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
     } finally {
       setLoading(null);
     }
@@ -78,52 +75,22 @@ export function LoginForm({
   const isSupabase = mode === "supabase";
 
   return (
-    <main className="min-h-[100dvh] bg-[#f2f3f0] px-5 py-8 text-[#252522] md:grid md:place-items-center md:px-8">
-      <section className="mx-auto w-full max-w-[920px] overflow-hidden rounded-[26px] border border-[#ddded9] bg-[#fbfbfa] shadow-[0_32px_90px_-56px_rgba(30,34,29,.55)] md:grid md:grid-cols-[.82fr_1.18fr]">
-        <div className="flex min-h-[320px] flex-col justify-between bg-[#20221f] p-7 text-white md:min-h-[600px] md:p-9">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="grid size-8 place-items-center rounded-[10px] bg-white text-[#20221f]"><Code size={17} weight="bold" /></span>
-              <span className="text-[13px] font-semibold tracking-[-.02em]">AiBrain</span>
-            </div>
-            <p className="mt-16 max-w-[13ch] text-[34px] font-semibold leading-[1.02] tracking-[-.055em] md:mt-24 md:text-[46px]">
-              Un sol motor. Cada producte, propi.
-            </p>
-          </div>
-          <div className="mt-14 border-t border-white/12 pt-5">
-            <div className="flex items-center gap-2 text-[10px] font-medium text-white/60">
-              <LockKey size={13} /> {isDemo ? remotePreview ? "Preview signada · tenant demo verificat" : "Sessió signada · tenant verificat al servidor" : isSupabase ? "Identitat verificada · permisos via RLS" : "Accés bloquejat · configuració incompleta"}
-            </div>
-            <p className="mt-3 max-w-[34ch] text-[10px] leading-5 text-white/42">
-              {isDemo
-                ? remotePreview
-                  ? "Aquesta URL ensenya la UX actual amb dades simulades; no executa Codex ni desa dades de producció."
-                  : "Aquesta entrada valida arquitectura, rols i aïllament sense crear comptes externs."
-                : isSupabase
-                  ? "Cada sessió es resol contra membres, rols i tenant a Postgres abans d’obrir el workbench."
-                  : "No s’emetrà cap sessió fins que el proveïdor d’identitat tingui una configuració completa."}
-            </p>
-          </div>
+    <main className="relative flex min-h-[100dvh] bg-[var(--canvas)] px-5 py-20 text-[var(--text)] sm:px-8">
+      <header className="absolute inset-x-5 top-5 flex items-center justify-between sm:inset-x-8 sm:top-7">
+        <BrandMark branding={branding} />
+        <ThemeToggle />
+      </header>
+
+      <section className="m-auto w-full max-w-[400px]">
+        <div className="text-center">
+          <p className="text-[12px] font-medium text-[var(--text-muted)]">{branding.companyName}</p>
+          <h1 className="mt-2 text-[30px] font-semibold tracking-[-0.045em] text-[var(--text)]">Accede a tu espacio</h1>
+          <p className="mx-auto mt-3 max-w-[36ch] text-[13px] leading-5 text-[var(--text-muted)]">
+            Continúa donde lo dejaste con tus proyectos y conversaciones.
+          </p>
         </div>
 
-        <div className="flex flex-col justify-center p-6 sm:p-10 md:p-12">
-          <div className="mb-8">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[#dfdeda] bg-white px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[.11em] text-[#76736d]">
-              <span className={`size-1.5 rounded-full ${isSupabase ? "bg-[#4f9563]" : "bg-[#d39b3f]"}`} />
-              {isDemo ? remotePreview ? "Preview UX remota" : "Entorn demo local" : isSupabase ? "Accés privat" : "Configuració pendent"}
-            </span>
-            <h1 className="mt-5 text-[29px] font-semibold tracking-[-.045em] text-[#292825]">
-              {isDemo ? "Tria una experiència" : "Entra al teu workbench"}
-            </h1>
-            <p className="mt-2 max-w-[48ch] text-[11px] leading-5 text-[#77746e]">
-              {isDemo
-                ? "Les dues identitats carreguen manifests, finestres, preferències i workspaces diferents."
-                : isSupabase
-                  ? "T’enviarem un enllaç d’un sol ús. Només funcionen els comptes convidats a un tenant."
-                  : "Connecta Supabase per activar sessions, membres i permisos multi-tenant."}
-            </p>
-          </div>
-
+        <div className="mt-8">
           {isDemo ? (
             <div className="space-y-3">
               {accounts.map((account) => (
@@ -131,65 +98,72 @@ export function LoginForm({
                   key={account.id}
                   disabled={loading !== null}
                   onClick={() => void loginDemo(account.id)}
-                  className="group flex w-full items-center gap-4 rounded-2xl border border-[#dfded9] bg-white p-4 text-left transition hover:-translate-y-0.5 hover:border-[#bdbab3] hover:shadow-[0_16px_30px_-24px_rgba(0,0,0,.45)] disabled:cursor-not-allowed disabled:opacity-55"
+                  className="ui-surface group flex w-full items-center gap-3 p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] disabled:cursor-default disabled:opacity-50"
                 >
-                  <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-[#efefec] text-[#56534e]"><UsersThree size={18} /></span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[12px] font-semibold text-[#34322f]">{account.productName}</span>
-                    <span className="mt-1 block truncate text-[9px] text-[#8a8781]">{account.name} · {account.tenantName}</span>
-                    <span className="mt-1.5 block text-[9px] leading-4 text-[#aaa7a1]">{account.description}</span>
+                  <span className="grid size-10 shrink-0 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent-soft)] text-[var(--accent)]">
+                    <UserCircle size={20} />
                   </span>
-                  <ArrowRight size={15} className="shrink-0 text-[#aaa7a1] transition group-hover:translate-x-0.5 group-hover:text-[#504d48]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold">{account.name}</span>
+                    <span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">{account.email}</span>
+                  </span>
+                  <ArrowRight size={15} className="text-[var(--text-subtle)] transition-transform group-hover:translate-x-0.5" />
                 </button>
               ))}
+              {accounts.length === 0 ? (
+                <p role="alert" className="rounded-[var(--radius-md)] bg-[var(--warning-soft)] p-4 text-[12px] text-[var(--warning)]">
+                  No hay una cuenta de desarrollo para esta instalación.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
           {isSupabase && !sent ? (
-            <form className="space-y-4" onSubmit={(event) => void requestAccess(event)}>
+            <form className="space-y-3" onSubmit={(event) => void requestAccess(event)}>
               <label className="block">
-                <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Correu de l’equip</span>
-                <span className="flex items-center gap-2.5 rounded-xl border border-[#d9d7d2] bg-white px-3.5 focus-within:border-[#aaa7a1]">
-                  <EnvelopeSimple size={15} className="shrink-0 text-[#918e88]" />
-                  <input
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Correo del equipo</span>
+                <span className="relative block">
+                  <EnvelopeSimple aria-hidden size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
+                  <TextField
                     type="email"
                     autoComplete="email"
                     required
                     maxLength={320}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    placeholder="tu@empresa.cat"
-                    className="min-w-0 flex-1 bg-transparent py-3 text-[11px] outline-none placeholder:text-[#bbb8b2]"
+                    placeholder="tu@empresa.com"
+                    className="pl-9"
                   />
                 </span>
               </label>
-              <button disabled={loading !== null} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#222320] px-4 py-3 text-[10px] font-semibold text-white disabled:opacity-55">
-                <PaperPlaneTilt size={14} /> {loading ? "Enviant…" : "Envia’m l’enllaç"}
-              </button>
+              <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
+                {loading ? "Enviando…" : "Continuar"}
+              </Button>
             </form>
           ) : null}
 
           {isSupabase && sent ? (
-            <div role="status" className="rounded-2xl border border-[#d9e5da] bg-[#f2f8f3] p-5">
-              <span className="grid size-9 place-items-center rounded-xl bg-white text-[#4f7d5a]"><EnvelopeSimple size={17} /></span>
-              <p className="mt-4 text-[12px] font-semibold text-[#354b3a]">Revisa el correu</p>
-              <p className="mt-2 text-[10px] leading-5 text-[#65786a]">Si el compte està convidat, rebràs un enllaç d’accés. No tanquis aquesta pestanya fins obrir-lo.</p>
-              <button type="button" onClick={() => setSent(false)} className="mt-4 text-[9px] font-semibold text-[#52695a] underline underline-offset-4">Tornar-ho a provar</button>
+            <div role="status" className="ui-surface p-5">
+              <span className="grid size-9 place-items-center rounded-[var(--radius-sm)] bg-[var(--positive-soft)] text-[var(--positive)]"><EnvelopeSimple size={17} /></span>
+              <p className="mt-4 text-[13px] font-semibold">Revisa tu correo</p>
+              <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">Si tu cuenta tiene acceso, recibirás un enlace para continuar.</p>
+              <Button size="sm" variant="ghost" className="mt-3" onClick={() => setSent(false)}>Volver a intentarlo</Button>
             </div>
           ) : null}
 
           {mode === "unavailable" ? (
-            <p role="alert" className="rounded-xl bg-[#fff4df] px-4 py-3 text-[10px] leading-5 text-[#805f27]">
-              Falta configurar el proveïdor d’identitat. L’aplicació queda tancada per seguretat.
+            <p role="alert" className="rounded-[var(--radius-md)] bg-[var(--warning-soft)] p-4 text-[12px] leading-5 text-[var(--warning)]">
+              El acceso no está disponible en este momento. Inténtalo de nuevo más tarde.
             </p>
           ) : null}
 
-          {loading ? <p className="mt-4 text-[10px] text-[#74716b]">Preparant el tenant…</p> : null}
-          {error ? <p role="alert" className="mt-4 rounded-lg bg-[#fff3ee] px-3 py-2 text-[10px] text-[#8b4e39]">{error}</p> : null}
-          <p className="mt-7 text-[9px] leading-4 text-[#aaa7a1]">
-            {isDemo ? remotePreview ? "Preview efímera i aïllada; no és un entorn de producció." : "Mode exclusiu de desenvolupament; no accepta credencials arbitràries." : "Sense alta pública. L’accés i el rol els controla el propietari del tenant."}
-          </p>
+          {error ? <p role="alert" className="mt-4 rounded-[var(--radius-md)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--danger)]">{error}</p> : null}
         </div>
+
+        <p className="mt-8 flex items-center justify-center gap-1.5 text-center text-[11px] text-[var(--text-subtle)]">
+          <LockKey aria-hidden size={12} />
+          {isDemo ? remotePreview ? "Preview con datos sintéticos" : "Entorno local con datos sintéticos" : "Acceso privado"}
+        </p>
       </section>
     </main>
   );
