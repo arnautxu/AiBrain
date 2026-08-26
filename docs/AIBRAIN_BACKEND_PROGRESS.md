@@ -37,13 +37,13 @@
 |---|---|---|
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
-| 2. Supabase Auth-only + sesión local | En curso | `1c0386b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; falta retirar los stores legacy de producto Supabase y validar Supabase QA real |
-| 3. Stores file-backed resilientes | En curso | `38eeaaf`: schemas estrictos, atomic write/fsync, locks, journals e índices; falta migrar stores de producto |
-| 4. Provisionamiento idempotente + 20 usuarios | En curso | `75316e1`: veinte roots/manifest de worker provisionados de forma idempotente y aislada; falta unir `user.json`, políticas y comando operativo |
+| 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
+| 3. Stores file-backed resilientes | En curso | `38eeaaf`, `9efb45a`, `facda49`: schemas estrictos, atomic write/fsync, locks, journals, índices, workbench aislado y backup/restore real; approvals y proyecciones del runtime aún deben migrarse |
+| 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
 | 5. Worker registry + WebSocket + contratos | En curso | `fc29316`, `75316e1`: transporte WS privado durable, registry por usuario y contratos Codex 0.149.1; falta factory/gateway real |
-| 6. Proyectos y threads completos | Pendiente | — |
+| 6. Proyectos y threads completos | En curso | `9efb45a`: crear/listar/renombrar/fijar/archivar/restaurar y estado durable por usuario; faltan búsqueda y autoridad final de historial App Server |
 | 7. Streaming, steering, stop, approvals, replay | Pendiente | — |
-| 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`: validación segura, staging privado y preview real DOCX→PDF/PNG; falta API/publicador y matriz completa |
+| 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`, `416d368`: validación segura, staging privado, preview real y publicador atómico/versionado/idempotente; faltan routes autorizadas y matriz completa de formatos |
 | 9. Browser/Computer Use aislado | Pendiente | — |
 | 10. Contratos reales para UI | Pendiente | — |
 | 11. Compose y operación | Pendiente | — |
@@ -60,8 +60,10 @@
 - Los eventos del transporte se aceptan únicamente tras persistencia JSONL y se reanudan con cursor durable; no existe journal in-memory implícito en la composición WebSocket.
 - Los payloads RPC se validan en runtime con los JSON Schemas generados por Codex 0.149.1, además del tipado estático.
 - Las credenciales efímeras usadas durante el cambio inicial se cifran en disco con AES-256-GCM; la cookie de sesión contiene 256 bits aleatorios y el store conserva solo su SHA-256.
-- `PERMISSIONS.md` v1 se lee server-side con precedencia determinista, protección de symlink/hardlink y fingerprint canónico; falta conectarlo a la creación de cada turn y a un journal de auditoría durable.
+- `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en App Server y registra fingerprint/versiones en un journal durable por usuario; la ruta de ejecución todavía debe migrar del adapter `stdio` legacy al registry por empleado.
 - El launch context del worker no contiene `publishWriteRoot`; la factory concreta deberá imponer esos mounts a nivel proceso/contenedor.
+- El UUID de Supabase Auth es exactamente el UUID filesystem del empleado; no existe membership, rol, proyecto o sesión de producto remota.
+- El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 
 ## Riesgos y acciones externas pendientes
 
@@ -71,7 +73,7 @@
 
 ## Siguiente acción concreta
 
-Migrar proyectos, metadatos de threads y operaciones de turn desde los stores demo/Supabase al filesystem privado por usuario, usando los primitives durables ya validados.
+Sustituir el pool `stdio` compartido por la composición real `WorkerRuntimeRegistry` + `AppServerTransport` por usuario, vinculando requests y eventos a instalación/usuario/thread/turn/item.
 
 ## Últimas validaciones
 
@@ -90,4 +92,10 @@ Migrar proyectos, metadatos de threads y operaciones de turn desde los stores de
 - Permisos: 27/27 tests específicos verdes; fingerprint estable y auditoría obligatoria sin contenido sensible.
 - Workers: 7/7 tests verdes en cinco ejecuciones consecutivas; veinte usuarios, aislamiento, backpressure, restart y rechazo de symlinks.
 - Auth: 10/10 tests focalizados verdes; tokens de challenge ausentes del fichero en claro y sesión local operativa con proveedor offline.
-- Suite global posterior: 122/122 tests en 22 ficheros; lint, typecheck y build Next.js verdes.
+- Provisionamiento: 20 empleados sintéticos con perfiles, policies y roots completos; repetición idempotente verde.
+- Backup/restore: tres pruebas reales de snapshot inmutable, verificación por hash, restore separado y rechazo de corrupción/symlink/hardlink.
+- Workbench filesystem: seis pruebas de aislamiento, restart, concurrencia y lifecycle de proyecto/thread.
+- Permisos por turn: 31 pruebas focalizadas con auditoría durable, binding de identidad y fallo cerrado.
+- Supabase Auth-only: contract test impide SDK fuera del identity provider, llamadas Data API, adapters de producto, migraciones y servicios opcionales; 5/5 contract tests verdes.
+- Publicación: 10/10 pruebas focalizadas y 21/21 documentales para freeze, preview, decline, exactly-once, conflicto, versión, recovery, symlinks y frontera de mounts.
+- Suite global más reciente: 151/151 tests en 29 ficheros; lint, typecheck y build Next.js verdes tras `323243b` y `416d368`.
