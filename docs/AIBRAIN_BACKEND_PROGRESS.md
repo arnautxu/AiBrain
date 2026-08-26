@@ -38,11 +38,11 @@
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
 | 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
-| 3. Stores file-backed resilientes | En curso | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`: schemas estrictos, atomic write/fsync, locks multi-proceso y cola local, journals, índices, workbench y approvals aislados, backup/restore real; falta la proyección durable de cada evento de streaming |
+| 3. Stores file-backed resilientes | Completado localmente | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`, `368aec0`, `4487ef2`: schemas estrictos, atomic write/fsync, locks multi-proceso y cola local, journals batched, índices, workbench, approvals y proyección incremental de turns aislados, backup/restore real |
 | 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`: streaming, stop scoped, approvals durables, clientUserMessageId, replay y routing sin handlers globales; faltan steering explícito, proyección durable incremental y recovery E2E tras crash |
+| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`: streaming proyectado antes del ACK, stop scoped, approvals durables no bloqueantes, replay, routing aislado, retry por `clientUserMessageId` y recuperación desde historial Codex sin duplicar `turn/start`; faltan steering explícito y recovery E2E tras crash real |
 | 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`, `416d368`: validación segura, staging privado, preview real y publicador atómico/versionado/idempotente; faltan routes autorizadas y matriz completa de formatos |
 | 9. Browser/Computer Use aislado | En curso | `4bed095`: roots, perfil, descargas, estado durable, fencing, heartbeat, takeover, recovery, tokens HMAC y backpressure por usuario; faltan adapter Chrome/CDP/noVNC y routes autenticadas |
 | 10. Contratos reales para UI | Pendiente | — |
@@ -68,6 +68,9 @@
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
 - Los locks filesystem mantienen la exclusión entre procesos y añaden una cola FIFO abortable dentro del proceso para evitar thundering herd sin ampliar timeouts.
+- Cada delta, snapshot, actividad, approval y terminal de un turn se proyecta atómicamente antes de confirmar su secuencia de transporte; el workbench recompone mensajes aún activos tras refresh o restart.
+- Las peticiones de App Server usan IDs estables por operación y mensaje UI. Un retry inspecciona el historial del thread mediante `clientUserMessageId` y no emite un segundo `turn/start` cuando Codex ya conoce el turn.
+- Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
 
 ## Riesgos y acciones externas pendientes
 
@@ -77,7 +80,7 @@
 
 ## Siguiente acción concreta
 
-Persistir cada evento de turn antes de su ACK y añadir recuperación/reanudación E2E después de refresh, pérdida de red y restart, incluyendo steering y retry idempotente de `clientUserMessageId`.
+Añadir steering y stop como operaciones autenticadas explícitas, con estado durable, aislamiento por instalación/usuario/thread/turn y pruebas de concurrencia antes de completar recovery E2E tras pérdida de red y restart.
 
 ## Últimas validaciones
 
@@ -107,4 +110,6 @@ Persistir cada evento de turn antes de su ACK y añadir recuperación/reanudaci�
 - Browser foundation: 6 pruebas focalizadas para aislamiento de perfiles/cookies/downloads, takeover, heartbeat, recovery y tokens autenticados.
 - Gateway/router: 20 pruebas de transporte, gateway y routing, incluido replay durable, ACK posterior al handler, requests inciertos, dedupe y concurrencia por thread.
 - Camino real worker: tests de token user-bound, inicialización única y turn con `clientUserMessageId`; el pool legacy queda sin referencias desde `/api/chat` y `/api/runtime/status`.
-- Suite global más reciente: 184/184 tests en 38 ficheros; lint, typecheck y build Next.js verdes tras `ac0b62e` y `a67ecf5`.
+- Persistencia/recovery: tests de proyección exact-once, múltiples mutaciones sobre una misma secuencia, overlay tras restart y recuperación de un turn completado sin repetir `turn/start`.
+- Concurrencia del router: una approval pendiente no bloquea otro thread y los ACK permanecen globalmente ordenados; un response RPC no se confirma antes de su hook de persistencia.
+- Suite global más reciente: 189/189 tests en 39 ficheros; lint, typecheck y build Next.js verdes tras `368aec0`, `46569e6`, `4487ef2` y `2b8de16`.
