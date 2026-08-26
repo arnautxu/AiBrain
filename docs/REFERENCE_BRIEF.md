@@ -1,59 +1,84 @@
-# Reference brief · workbench multi-tenant amb projectes durables
+# AiBrain UI parity — reference brief
 
-## Resultat
+Última actualización: 2026-08-27 (Europe/Madrid)
 
-- Workbench propi sobre Codex amb una UX de fils, activitat, approvals i diffs.
-- Dues experiències configurades per manifest, sense forks de la UI.
-- Sessió demo signada, rols, control plane i límits de tenant verificats al servidor.
-- Workspace, credencials Codex, threads, approvals i estat de navegador amb namespace de tenant.
-- Projectes, workspaces, fils i missatges persistents; el token de represa de Codex queda exclusivament al servidor.
+## Resultado observable
 
-## Invariants
+Una interfaz web white-label propia, comparable en claridad y ritmo a ChatGPT Work y Codex, donde una persona abre su instalación, encuentra proyectos y conversaciones, escribe inmediatamente en un composer persistente y sigue un turno real de Codex sin ver conceptos internos de runtime, tenants, rutas, terminal o Git.
 
-- Codex és el runtime; la UI no fabrica estats de connexió ni d’execució.
-- El navegador no rep secrets, rutes administratives ni IDs crus de thread.
-- El tenant prové de la sessió i no del cos de la petició.
-- Cada Route Handler protegeix les seves dades i accions directament.
-- `chat` és una finestra obligatòria; `inspector` i `runtime` són mòduls activables.
-- L’auth demo no es presenta com a producció i no funciona amb `NODE_ENV=production`.
-- Cap sincronització al NAS forma part d’aquest milestone.
+## Jerarquía de fuentes
 
-## Prova d’acceptació
+1. `AIBRAIN_UI_PARITY_GOAL 2.md` adjunto: definición de producto y aceptación de esta rama.
+2. `docs/AIBRAIN_V1_PLAN_MAESTRO.md` del checkout principal: decisiones vinculantes de arquitectura de V1. Se leyó sin copiar el fichero no versionado a esta rama.
+3. Contratos generados de Codex App Server `0.149.1` y transporte durable de `origin/codex/aibrain-backend-definitivo@7a20c51`.
+4. Inspección visual autenticada de ChatGPT en una conversación temporal vacía y datos sintéticos, realizada el 2026-08-27.
+5. Implementación actual de AiBrain en el commit base `a548387` como baseline, no como especificación final.
 
-1. Sense cookie, `/` redirigeix a `/login` i les APIs retornen `401`.
-2. Studio i Operations mostren marca, accent, densitat, finestres i workspace propis.
-3. Els projectes i fils persistents d’un tenant no apareixen a l’altre.
-4. L’owner pot desar el seu manifest; el member rep `403`.
-5. Les mutacions d’un origen creuat reben `403`.
-6. Un fil només es pot reprendre dins del tenant i projecte signats, sense exposar el token opac al navegador.
-7. Typecheck, build i audit completen; desktop i mobile es revisen en navegador real.
+`AIBRAIN_NOTAS_VINCULANTES_PLAN_DEFINITIVO.md` no existe en el checkout ni en los adjuntos disponibles. Su ausencia se registra como gap de fuente y no bloquea el trabajo seguro.
 
-## Decisions pendents
+## Invariantes
 
-- Bootstrap del primer owner i SMTP de producció per al model Supabase invite-only ja escollit.
-- Host persistent, provisioning de `CODEX_HOME` i estratègia de quotes.
-- Empaquetat desktop, si continua sent necessari després de validar la versió web.
+- Supabase se limita a Auth en la arquitectura objetivo. Los datos de producto y la sesión durable pertenecen al backend local/file-backed definitivo.
+- El navegador nunca recibe credenciales de Codex, rutas internas ni acceso directo a App Server.
+- `InstallationConfig` configura marca, empresa, origen y assets sin forks por cliente.
+- La UI consume IDs opacos y un adapter de aplicación versionado; no interpreta el protocolo RPC directamente en componentes.
+- Los eventos aceptados se ordenan por `sequence`, se deduplican por `eventId` y se reanudan desde un cursor durable.
+- Un turno activo puede continuar mientras la persona cambia de proyecto o conversación.
+- Approvals, publicación, Computer Use y estados de archivos solo se muestran cuando proceden de estado real.
+- No hay respuestas falsas ni runtime mocks en producción. Los fixtures deterministas pertenecen exclusivamente a tests y visual regression.
+- La UI no presenta OpenAI, ChatGPT o Codex como marca del producto. Codex puede citarse únicamente como motor en superficies administrativas apropiadas.
+- Production permanece intacta; Preview y el host existente son las únicas superficies externas autorizadas.
 
-## Tall UX/UI · command center
+## Slice de referencia
 
-### Evidència
+La primera rebanada vertical es `shell + empty conversation + composer + real thread`:
 
-- Direcció de l’usuari: la qualitat d’interacció de Codex és un requisit literal; la marca i les capes han de continuar sent pròpies.
-- Referència visual observada: rail de projectes i fils, top bar mínima, conversa centrada, composer persistent i superfícies contextuals que no desplacen el focus principal.
-- Referència funcional oficial: projectes amb múltiples fils, agents en paral·lel, review de canvis dins del fil, aprovacions, worktrees i configuració per projecte.
-- Implementació AiBrain existent: projectes, fils, activitat, aprovacions, diffs, finestres i runtime ja aporten dades reals; no cal fabricar controls sense backend.
+1. Login con marca de instalación.
+2. Sidebar tranquila con proyectos, búsqueda, pins y conversaciones.
+3. Estado vacío centrado con composer persistente y adjuntos.
+4. Creación o reanudación de una conversación mediante IDs AiBrain.
+5. Turno que recibe del adapter texto, plan, actividad, diff, approval, error y completion.
+6. Stop, refresh y reconnect sin duplicados.
 
-### Tall verificable
+Esta rebanada demuestra geometría, white-label, navegación y contrato antes de ampliar previews, publicación y Computer Use.
 
-1. Sidebar col·lapsable amb projectes i fils agrupats.
-2. Cerca global i command palette amb `⌘K`, navegació per teclat i accions reals.
-3. Top bar amb breadcrumb de projecte/fil i estat de runtime.
-4. Review pane amb fitxers, comptadors i diff real del torn, separat de l’activitat.
-5. Composer amb context visible, dreceres i accés directe a ordres i runtime.
-6. Paritat responsive: rail en drawer i review a pantalla completa en mòbil, sense overflow.
+## Evidencia visual aceptada
 
-### No-objectius d’aquest tall
+| Evidencia | Estado | Restricción |
+| --- | --- | --- |
+| `artifacts/ui-parity/reference/chatgpt-temporary-empty-dark.png` | ChatGPT autenticado, conversación temporal vacía, sidebar colapsada | Se recortó el chrome del navegador; no contiene historial, prompts ni datos de cliente |
+| `artifacts/ui-parity/checkpoint-01/aibrain-baseline-shell-1440x900.png` | AiBrain base, demo Studio, proyecto sin conversaciones | Datos sintéticos del repositorio |
+| Codex desktop | Inspección bloqueada por la política de Computer Use del host | No se fabricará una captura ni se sorteará la restricción |
 
-- No mostrar selectors de model, adjunts, terminal o worktrees fins que les seves accions tinguin contracte i backend reals.
-- No copiar assets privats, marca ni codi intern de Codex.
-- No canviar el model de dades, l’auth, RLS ni la frontera server-side del runtime.
+No se conservaron capturas que mostraran historial o drafts privados. La primera captura no apta se eliminó de forma inmediata.
+
+## Rasgos extraídos, no copiados
+
+- Canvas dominante y navegación de baja intensidad visual.
+- Composer compacto, persistente, centrado y cercano al contenido.
+- Sidebar estrecha, colapsable y jerárquica.
+- Controles secundarios discretos; el estado del agente aparece cerca del turno.
+- Tipografía de interfaz neutra, bordes suaves, pocos fondos elevados y motion funcional.
+- Estados oscuros y claros equivalentes, no un tema invertido incompleto.
+
+No se copian assets privados, texto de marca, iconografía propietaria ni estructuras DOM de terceros.
+
+## Dependencias y riesgos
+
+| Dependencia | Estado 2026-08-27 | Tratamiento UI |
+| --- | --- | --- |
+| InstallationConfig | Implementado en backend checkpoint 1 | Consumir su proyección pública; mantener fallback de desarrollo no secreto |
+| Transporte WS durable | Implementado y probado en `7a20c51` | Adapter tipado con ordering, dedupe, replay, reconnect y ACK |
+| Auth-only + sesión local | Pendiente en backend | Mantener frontera intercambiable; no extender persistencia Supabase |
+| Stores de producto file-backed | En curso | No acoplar componentes al store actual |
+| Contrato final para UI | Pendiente en backend checkpoint 10 | Versionar el contrato de aplicación de esta rama y documentar el mapping |
+| PDF/Office/publicación | Pendiente | Estados honestos y tests del adapter; smoke real solo cuando exista backend |
+| Browser/Computer Use aislado | Pendiente | Viewer y estados tipados sin fingir disponibilidad |
+
+## Anti-slop aplicado
+
+- Una sola jerarquía de sidebar y una sola familia de superficies.
+- Sin gradients decorativos, glassmorphism, paneles flotantes arbitrarios ni tarjetas para cada bloque.
+- Iconos Phosphor existentes; no se añade otra librería.
+- Tokens semánticos antes de valores ad hoc.
+- Lenguaje de producto para empleados; detalles técnicos plegados y solo cuando son necesarios para una decisión.

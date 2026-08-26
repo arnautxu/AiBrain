@@ -13,3 +13,6 @@ runtime/tenants/*/workspace/*
 .codex-context/
 supabase/.temp/
 .impeccable/review/
+coverage/
+playwright-report/
+test-results/

@@ -83,9 +83,12 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
   const deletions = files.reduce((total, file) => total + file.deletions, 0);
 
   useEffect(() => {
-    setTab(message?.diff ? "changes" : "activity");
-    setActiveFile(0);
-    setCopied(false);
+    const frame = requestAnimationFrame(() => {
+      setTab(message?.diff ? "changes" : "activity");
+      setActiveFile(0);
+      setCopied(false);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [message?.id, message?.diff]);
 
   const copyDiff = async () => {

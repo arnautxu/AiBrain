@@ -29,8 +29,10 @@ export function TextDialog({
 
   useEffect(() => {
     if (!open) return;
-    setValue(initialValue);
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      setValue(initialValue);
+      inputRef.current?.focus();
+    });
     return () => cancelAnimationFrame(frame);
   }, [initialValue, open]);
 

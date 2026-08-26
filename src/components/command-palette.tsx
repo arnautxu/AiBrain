@@ -167,18 +167,16 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
-    setActiveIndex(0);
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      setQuery("");
+      setActiveIndex(0);
+      inputRef.current?.focus();
+    });
     return () => cancelAnimationFrame(frame);
   }, [open]);
 
-  useEffect(() => {
-    if (activeIndex < visibleItems.length) return;
-    setActiveIndex(Math.max(visibleItems.length - 1, 0));
-  }, [activeIndex, visibleItems.length]);
-
   if (!open) return null;
+  const visibleActiveIndex = Math.min(activeIndex, Math.max(visibleItems.length - 1, 0));
 
   const run = (item: PaletteItem) => {
     if (busy && item.id.startsWith("action:new")) return;
@@ -201,9 +199,9 @@ export function CommandPalette({
           } else if (event.key === "ArrowUp") {
             event.preventDefault();
             setActiveIndex((current) => visibleItems.length ? (current - 1 + visibleItems.length) % visibleItems.length : 0);
-          } else if (event.key === "Enter" && visibleItems[activeIndex]) {
+          } else if (event.key === "Enter" && visibleItems[visibleActiveIndex]) {
             event.preventDefault();
-            run(visibleItems[activeIndex]);
+            run(visibleItems[visibleActiveIndex]);
           } else if (event.key === "Escape") {
             event.preventDefault();
             onClose();
@@ -229,7 +227,7 @@ export function CommandPalette({
         <div role="listbox" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
           {visibleItems.length ? visibleItems.map((item, index) => {
             const previousGroup = visibleItems[index - 1]?.group;
-            const selected = index === activeIndex;
+            const selected = index === visibleActiveIndex;
             const disabled = busy && item.id.startsWith("action:new");
             return (
               <div key={item.id}>
