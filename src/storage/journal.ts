@@ -161,11 +161,15 @@ export class FileJournal<Payload> {
     return { entries, repairedBytes };
   }
 
-  async append(payload: Payload) {
+  async appendIf(
+    payload: Payload,
+    shouldAppend: (entries: readonly JournalEntry<Payload>[]) => boolean | Promise<boolean>,
+  ) {
     const validatedPayload = this.payloadSchema.parse(payload, `${this.filePath}:payload`);
     return this.lockManager.withLock(this.lockKey(), async () => {
       await this.assertNotSymlink();
       const { entries } = await this.readUnlocked(true);
+      if (!await shouldAppend(entries)) return null;
       const entry = this.entrySchema.parse({
         schemaVersion: 1,
         sequence: (entries.at(-1)?.sequence ?? 0) + 1,
@@ -197,6 +201,14 @@ export class FileJournal<Payload> {
       if (!existed) await fsyncDirectory(directory);
       return entry;
     });
+  }
+
+  async append(payload: Payload) {
+    const appended = await this.appendIf(payload, () => true);
+    if (!appended) {
+      throw new StorageError("STORAGE_JOURNAL_APPEND_REJECTED", "Journal append was rejected unexpectedly.");
+    }
+    return appended;
   }
 
   async read(options: JournalReadOptions = {}) {
