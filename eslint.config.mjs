@@ -5,6 +5,7 @@ export default defineConfig([
   ...nextVitals,
   globalIgnores([
     ".next/**",
+    "contracts/codex/**",
     "coverage/**",
     "out/**",
     "build/**",
