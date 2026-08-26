@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -60,6 +60,18 @@ describe("document preview service", () => {
     expect(first).toMatchObject({ files: ["preview.txt"], pages: null, status: "ready" });
     expect(runner.calls).toHaveLength(0);
     expect(await readFile(path.join(previewRoot, THREAD_ID, UPLOAD_ID, "preview.txt"), "utf8")).toBe("safe text");
+    expect((await service.read(THREAD_ID, UPLOAD_ID)).sourceSha256).toBe(staged.sha256);
+    expect((await service.readFile(THREAD_ID, UPLOAD_ID, "preview.txt")).toString("utf8")).toBe("safe text");
+    await expect(service.readFile(THREAD_ID, UPLOAD_ID, "not-listed.txt"))
+      .rejects.toMatchObject({ code: "DOCUMENT_PREVIEW_FILE_NOT_FOUND" });
+
+    const previewPath = path.join(previewRoot, THREAD_ID, UPLOAD_ID, "preview.txt");
+    const outside = path.join(root, "outside-preview.txt");
+    await writeFile(outside, "outside", { mode: 0o600 });
+    await unlink(previewPath);
+    await symlink(outside, previewPath);
+    await expect(service.readFile(THREAD_ID, UPLOAD_ID, "preview.txt"))
+      .rejects.toThrow("Only regular files are readable");
   });
 
   it("fails closed when production requires qpdf but none is configured", () => {
