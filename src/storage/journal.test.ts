@@ -90,6 +90,22 @@ describe("append-only file journal", () => {
     expect(new Set(appended.map((entry) => entry.payload.label)).size).toBe(60);
   });
 
+  it("supports an atomic conditional append under the journal lock", async () => {
+    const events = journal();
+    const first = await events.appendIf(
+      { schemaVersion: 1, label: "unique" },
+      (entries) => !entries.some((entry) => entry.payload.label === "unique"),
+    );
+    const duplicate = await events.appendIf(
+      { schemaVersion: 1, label: "unique" },
+      (entries) => !entries.some((entry) => entry.payload.label === "unique"),
+    );
+
+    expect(first?.sequence).toBe(1);
+    expect(duplicate).toBeNull();
+    expect(await events.read()).toHaveLength(1);
+  });
+
   it("truncates only a torn final record and continues at the next sequence", async () => {
     const events = journal();
     await events.append({ schemaVersion: 1, label: "committed" });
