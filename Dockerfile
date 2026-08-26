@@ -31,6 +31,7 @@ RUN npm install --global @openai/codex@0.149.1 \
 
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
+COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=aibrain:aibrain /app/runtime/tenants ./runtime/tenants
 
 USER aibrain
