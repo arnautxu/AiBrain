@@ -15,7 +15,8 @@
     "test:e2e": "vitest run tests/e2e",
     "test:coverage": "vitest run --coverage",
     "contracts:generate": "npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-ts --experimental --out contracts/codex/0.149.1/types && npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-json-schema --experimental --out contracts/codex/0.149.1/schema",
-    "installation:new": "node scripts/create-installation.mjs"
+    "installation:new": "node scripts/create-installation.mjs",
+    "users:provision": "tsx scripts/provision-users.ts"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
@@ -35,6 +36,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.3.2",
     "tailwindcss": "4.3.3",
+    "tsx": "^4.20.6",
     "typescript": "6.0.2",
     "vitest": "^4.1.11"
   }
