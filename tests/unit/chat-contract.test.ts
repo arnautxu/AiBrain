@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyChatStreamEvent,
   isChatAttachment,
   isChatInputAttachment,
+  isGeneratedArtifact,
   isTurnOptions,
+  type ChatMessage,
 } from "@/lib/chat-contract";
 
 const attachment = {
@@ -41,5 +44,75 @@ describe("chat contract", () => {
       skill: null,
       attachments: [large, { ...large, id: "018f5f68-4a6e-7abc-8def-0123456789ac" }, { ...large, id: "018f5f68-4a6e-7abc-8def-0123456789ad" }],
     })).toBe(false);
+  });
+
+  it("accepts bounded document and browser view models without widening upload input", () => {
+    expect(isGeneratedArtifact({
+      id: "018f5f68-4a6e-7abc-8def-0123456789ae",
+      type: "document",
+      name: "informe.pdf",
+      url: "/api/projects/018f5f68-4a6e-7abc-8def-0123456789ab/artifacts/018f5f68-4a6e-7abc-8def-0123456789ae",
+      kind: "pdf",
+      mimeType: "application/pdf",
+      size: 1024,
+      status: "ready",
+      pages: 3,
+      previewUrl: "/api/projects/018f5f68-4a6e-7abc-8def-0123456789ab/artifacts/018f5f68-4a6e-7abc-8def-0123456789ae/preview/1",
+      publicationStatus: "awaiting_confirmation",
+      publicationError: null,
+      targetLabel: "Informes/informe.pdf",
+      error: null,
+    })).toBe(true);
+    expect(isGeneratedArtifact({
+      id: "018f5f68-4a6e-7abc-8def-0123456789af",
+      type: "browser",
+      name: "Comprobación web",
+      status: "active",
+      control: "agent",
+      viewerUrl: "/api/browser/sessions/018f5f68-4a6e-7abc-8def-0123456789af/viewer",
+      captureUrl: null,
+      downloadUrl: null,
+      error: null,
+    })).toBe(true);
+    expect(isChatAttachment({ ...attachment, mimeType: "application/pdf" })).toBe(false);
+  });
+
+  it("updates an artifact by id instead of duplicating a status transition", () => {
+    const message: ChatMessage = {
+      id: "message-1",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-08-27T00:00:00.000Z",
+      status: "streaming",
+      activity: [],
+      plan: [],
+      approvals: [],
+      diff: "",
+      attachments: [],
+      artifacts: [],
+    };
+    const processing = {
+      id: "018f5f68-4a6e-7abc-8def-0123456789ae",
+      type: "document" as const,
+      name: "informe.pdf",
+      url: "/api/projects/p/artifacts/a",
+      kind: "pdf" as const,
+      mimeType: "application/pdf",
+      size: 1024,
+      status: "processing" as const,
+      pages: null,
+      previewUrl: null,
+      publicationStatus: null,
+      publicationError: null,
+      targetLabel: null,
+      error: null,
+    };
+    const first = applyChatStreamEvent(message, { type: "artifact", item: processing });
+    const ready = applyChatStreamEvent(first, {
+      type: "artifact",
+      item: { ...processing, status: "ready", pages: 2 },
+    });
+    expect(ready.artifacts).toHaveLength(1);
+    expect(ready.artifacts[0]).toMatchObject({ status: "ready", pages: 2 });
   });
 });
