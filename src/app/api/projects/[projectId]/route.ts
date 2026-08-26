@@ -11,7 +11,7 @@ export async function PATCH(
   request: Request,
   context: { params: Promise<{ projectId: string }> },
 ) {
-  if (!isSameOriginMutation(request)) {
+  if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
   const session = await getSession();

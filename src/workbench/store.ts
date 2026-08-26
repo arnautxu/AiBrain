@@ -34,7 +34,10 @@ import type {
   UpdateThreadInput,
 } from "@/workbench/types";
 
-function mode() {
+function mode(session?: AuthSession) {
+  // Supabase is only the identity verifier. Authenticated local sessions always
+  // use the installation's filesystem-backed workbench and never call it again.
+  if (session?.provider === "local") return "demo";
   const authMode = getAuthMode();
   if (authMode === "unavailable") {
     throw new WorkbenchPersistenceError("La persistència del workbench no està disponible.");
@@ -47,7 +50,7 @@ export function isBrowserPreviewWorkbench() {
 }
 
 export async function loadWorkbench(session: AuthSession) {
-  if (mode() === "supabase") return loadSupabaseWorkbench(session);
+  if (mode(session) === "supabase") return loadSupabaseWorkbench(session);
   return loadDemoWorkbench(
     session,
     isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
@@ -55,7 +58,7 @@ export async function loadWorkbench(session: AuthSession) {
 }
 
 export async function createProject(session: AuthSession, name: string) {
-  if (mode() === "supabase") return createSupabaseProject(session, name);
+  if (mode(session) === "supabase") return createSupabaseProject(session, name);
   return createDemoProject(session, name);
 }
 
@@ -65,7 +68,7 @@ export async function updateProject(
   patch: UpdateProjectInput,
 ) {
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return updateSupabaseProject(session, projectId, patch);
+  if (mode(session) === "supabase") return updateSupabaseProject(session, projectId, patch);
   return updateDemoProject(session, projectId, patch);
 }
 
@@ -75,7 +78,7 @@ export async function createThread(
   title: string,
 ) {
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return createSupabaseThread(session, projectId, title);
+  if (mode(session) === "supabase") return createSupabaseThread(session, projectId, title);
   return createDemoThread(session, projectId, title);
 }
 
@@ -85,19 +88,19 @@ export async function updateThread(
   patch: UpdateThreadInput,
 ) {
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") return updateSupabaseThread(session, threadId, patch);
+  if (mode(session) === "supabase") return updateSupabaseThread(session, threadId, patch);
   return updateDemoThread(session, threadId, patch);
 }
 
 export async function getProjectRuntimeContext(session: AuthSession, projectId: string) {
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return getSupabaseProjectRuntimeContext(session, projectId);
+  if (mode(session) === "supabase") return getSupabaseProjectRuntimeContext(session, projectId);
   return getDemoProjectRuntimeContext(session, projectId);
 }
 
 export async function getThreadRuntimeContext(session: AuthSession, threadId: string) {
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") return getSupabaseThreadRuntimeContext(session, threadId);
+  if (mode(session) === "supabase") return getSupabaseThreadRuntimeContext(session, threadId);
   return getDemoThreadRuntimeContext(session, threadId);
 }
 
@@ -108,7 +111,7 @@ export async function beginThreadTurn(
   assistantMessage: ChatMessage,
 ) {
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") {
+  if (mode(session) === "supabase") {
     return beginSupabaseThreadTurn(session, threadId, userMessage, assistantMessage);
   }
   return beginDemoThreadTurn(session, threadId, userMessage, assistantMessage);
@@ -121,7 +124,7 @@ export async function finishThreadTurn(
   runtimeThreadToken: string | null,
 ) {
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") {
+  if (mode(session) === "supabase") {
     return finishSupabaseThreadTurn(
       session,
       threadId,
@@ -145,7 +148,7 @@ export async function updateMessageActivity(
 ) {
   assertWorkbenchId(threadId);
   assertWorkbenchId(messageId);
-  if (mode() === "supabase") {
+  if (mode(session) === "supabase") {
     return updateSupabaseMessageActivity(session, threadId, messageId, item);
   }
   return updateDemoMessageActivity(session, threadId, messageId, item);

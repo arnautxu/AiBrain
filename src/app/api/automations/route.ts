@@ -20,7 +20,7 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  if (!isSameOriginMutation(request)) return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
+  if (!await isSameOriginMutation(request)) return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   const body: unknown = await request.json().catch(() => null);

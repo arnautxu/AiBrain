@@ -7,7 +7,7 @@ import { resolveApproval } from "@/runtime/approval-store";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  if (!isSameOriginMutation(request)) {
+  if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
   const session = await getSession();

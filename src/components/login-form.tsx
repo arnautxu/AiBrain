@@ -28,6 +28,10 @@ export function LoginForm({
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [sent, setSent] = useState(false);
 
   async function loginDemo(userId: string) {
@@ -61,14 +65,63 @@ export function LoginForm({
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, password }),
       });
       const result: unknown = await response.json().catch(() => null);
       if (!response.ok) {
         const message = result && typeof result === "object" && "error" in result &&
-          typeof result.error === "string" ? result.error : "No s’ha pogut enviar l’enllaç.";
+          typeof result.error === "string" ? result.error : "No s’ha pogut iniciar la sessió.";
         throw new Error(message);
       }
+      if (result && typeof result === "object" && "passwordChangeRequired" in result &&
+        result.passwordChangeRequired === true) {
+        setPassword("");
+        setPasswordChangeRequired(true);
+        return;
+      }
+      router.replace("/");
+      router.refresh();
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : "Error desconegut.");
+    } finally {
+      setLoading(null);
+    }
+  }
+
+  async function changeInitialPassword(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading("password-change");
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/password/change-initial", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, confirmation }),
+      });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(result && typeof result === "object" && "error" in result &&
+          typeof result.error === "string" ? result.error : "No s’ha pogut canviar la contrasenya.");
+      }
+      router.replace("/");
+      router.refresh();
+    } catch (currentError) {
+      setError(currentError instanceof Error ? currentError.message : "Error desconegut.");
+      setLoading(null);
+    }
+  }
+
+  async function requestRecovery(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading("recovery");
+    setError(null);
+    try {
+      const response = await fetch("/api/auth/password/reset/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      if (!response.ok) throw new Error("No s’ha pogut sol·licitar la recuperació.");
       setSent(true);
     } catch (currentError) {
       setError(currentError instanceof Error ? currentError.message : "Error desconegut.");
@@ -104,7 +157,7 @@ export function LoginForm({
           </div>
           <div className="mt-14 border-t border-white/12 pt-5">
             <div className="flex items-center gap-2 text-[10px] font-medium text-white/60">
-              <LockKey size={13} /> {isDemo ? remotePreview ? "Preview signada · tenant demo verificat" : "Sessió signada · tenant verificat al servidor" : isSupabase ? "Identitat verificada · permisos via RLS" : "Accés bloquejat · configuració incompleta"}
+              <LockKey size={13} /> {isDemo ? remotePreview ? "Preview signada · tenant demo verificat" : "Sessió signada · tenant verificat al servidor" : isSupabase ? "Identitat externa · sessió local opaca" : "Accés bloquejat · configuració incompleta"}
             </div>
             <p className="mt-3 max-w-[34ch] text-[10px] leading-5 text-white/42">
               {isDemo
@@ -112,7 +165,7 @@ export function LoginForm({
                   ? "Aquesta URL ensenya la UX actual amb dades simulades; no executa Codex ni desa dades de producció."
                   : "Aquesta entrada valida arquitectura, rols i aïllament sense crear comptes externs."
                 : isSupabase
-                  ? "Cada sessió es resol contra membres, rols i tenant a Postgres abans d’obrir el workbench."
+                  ? "Supabase només verifica la identitat. Després, una sessió local aïllada manté el workbench disponible."
                   : "No s’emetrà cap sessió fins que el proveïdor d’identitat tingui una configuració completa."}
             </p>
           </div>
@@ -131,7 +184,7 @@ export function LoginForm({
               {isDemo
                 ? "Les dues identitats carreguen manifests, finestres, preferències i workspaces diferents."
                 : isSupabase
-                  ? "T’enviarem un enllaç d’un sol ús. Només funcionen els comptes convidats a un tenant."
+                  ? "Entra amb les credencials assignades a la teva instal·lació."
                   : "Connecta Supabase per activar sessions, membres i permisos multi-tenant."}
             </p>
           </div>
@@ -157,8 +210,8 @@ export function LoginForm({
             </div>
           ) : null}
 
-          {isSupabase && !sent ? (
-            <form className="space-y-4" onSubmit={(event) => void requestAccess(event)}>
+          {isSupabase && !sent && !passwordChangeRequired ? (
+            <form className="space-y-4" onSubmit={(event) => void (recovering ? requestRecovery(event) : requestAccess(event))}>
               <label className="block">
                 <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Correu de l’equip</span>
                 <span className="flex items-center gap-2.5 rounded-xl border border-[#d9d7d2] bg-white px-3.5 focus-within:border-[#aaa7a1]">
@@ -175,9 +228,30 @@ export function LoginForm({
                   />
                 </span>
               </label>
+              {!recovering ? (
+                <label className="block">
+                  <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Contrasenya</span>
+                  <span className="flex items-center gap-2.5 rounded-xl border border-[#d9d7d2] bg-white px-3.5 focus-within:border-[#aaa7a1]">
+                    <LockKey size={15} className="shrink-0 text-[#918e88]" />
+                    <input type="password" autoComplete="current-password" required maxLength={4096} value={password} onChange={(event) => setPassword(event.target.value)} className="min-w-0 flex-1 bg-transparent py-3 text-[11px] outline-none" />
+                  </span>
+                </label>
+              ) : null}
               <button disabled={loading !== null} style={{ backgroundColor: branding.accentColor }} className="flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-[10px] font-semibold text-white disabled:opacity-55">
-                <PaperPlaneTilt size={14} /> {loading ? "Enviant…" : "Envia’m l’enllaç"}
+                <PaperPlaneTilt size={14} /> {loading ? "Validant…" : recovering ? "Envia l’enllaç de recuperació" : "Entra"}
               </button>
+              <button type="button" onClick={() => { setRecovering(!recovering); setError(null); }} className="w-full text-[9px] font-semibold text-[#77746e] underline underline-offset-4">
+                {recovering ? "Torna a l’inici de sessió" : "He oblidat la contrasenya"}
+              </button>
+            </form>
+          ) : null}
+
+          {isSupabase && passwordChangeRequired ? (
+            <form className="space-y-4" onSubmit={(event) => void changeInitialPassword(event)}>
+              <p className="text-[10px] leading-5 text-[#77746e]">Per seguretat, crea una contrasenya pròpia abans d’entrar.</p>
+              <input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Contrasenya nova" className="w-full rounded-xl border border-[#d9d7d2] bg-white px-3.5 py-3 text-[11px] outline-none" />
+              <input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="Repeteix la contrasenya" className="w-full rounded-xl border border-[#d9d7d2] bg-white px-3.5 py-3 text-[11px] outline-none" />
+              <button disabled={loading !== null} style={{ backgroundColor: branding.accentColor }} className="w-full rounded-xl px-4 py-3 text-[10px] font-semibold text-white disabled:opacity-55">{loading ? "Actualitzant…" : "Actualitza i entra"}</button>
             </form>
           ) : null}
 
@@ -185,8 +259,8 @@ export function LoginForm({
             <div role="status" className="rounded-2xl border border-[#d9e5da] bg-[#f2f8f3] p-5">
               <span className="grid size-9 place-items-center rounded-xl bg-white text-[#4f7d5a]"><EnvelopeSimple size={17} /></span>
               <p className="mt-4 text-[12px] font-semibold text-[#354b3a]">Revisa el correu</p>
-              <p className="mt-2 text-[10px] leading-5 text-[#65786a]">Si el compte està convidat, rebràs un enllaç d’accés. No tanquis aquesta pestanya fins obrir-lo.</p>
-              <button type="button" onClick={() => setSent(false)} className="mt-4 text-[9px] font-semibold text-[#52695a] underline underline-offset-4">Tornar-ho a provar</button>
+              <p className="mt-2 text-[10px] leading-5 text-[#65786a]">Si el compte existeix, rebràs un enllaç per crear una contrasenya nova.</p>
+              <button type="button" onClick={() => { setSent(false); setRecovering(false); }} className="mt-4 text-[9px] font-semibold text-[#52695a] underline underline-offset-4">Torna a l’inici</button>
             </div>
           ) : null}
 
@@ -199,7 +273,7 @@ export function LoginForm({
           {loading ? <p className="mt-4 text-[10px] text-[#74716b]">Preparant el tenant…</p> : null}
           {error ? <p role="alert" className="mt-4 rounded-lg bg-[#fff3ee] px-3 py-2 text-[10px] text-[#8b4e39]">{error}</p> : null}
           <p className="mt-7 text-[9px] leading-4 text-[#aaa7a1]">
-            {isDemo ? remotePreview ? "Preview efímera i aïllada; no és un entorn de producció." : "Mode exclusiu de desenvolupament; no accepta credencials arbitràries." : "Sense alta pública. L’accés i el rol els controla el propietari del tenant."}
+            {isDemo ? remotePreview ? "Preview efímera i aïllada; no és un entorn de producció." : "Mode exclusiu de desenvolupament; no accepta credencials arbitràries." : "Sense alta pública. L’accés es provisiona al servidor de la instal·lació."}
           </p>
         </div>
       </section>

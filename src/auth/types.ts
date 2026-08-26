@@ -1,6 +1,6 @@
 export type UserRole = "owner" | "member";
-export type AuthProvider = "demo" | "supabase";
-export type AuthMode = AuthProvider | "unavailable";
+export type AuthProvider = "demo" | "local" | "supabase";
+export type AuthMode = "demo" | "supabase" | "unavailable";
 
 export type AuthSession = {
   provider: AuthProvider;
