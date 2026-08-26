@@ -150,14 +150,17 @@ export function GuidedActions({
 
   useEffect(() => {
     if (!storageKey) return;
-    try {
-      const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
-      if (Array.isArray(parsed)) {
-        setSavedTemplates(parsed.filter((item): item is ProjectTemplate => Boolean(item && typeof item === "object" && "label" in item && "detail" in item && "action" in item && "goal" in item)).slice(0, 12));
+    const frame = requestAnimationFrame(() => {
+      try {
+        const parsed: unknown = JSON.parse(localStorage.getItem(storageKey) ?? "[]");
+        if (Array.isArray(parsed)) {
+          setSavedTemplates(parsed.filter((item): item is ProjectTemplate => Boolean(item && typeof item === "object" && "label" in item && "detail" in item && "action" in item && "goal" in item)).slice(0, 12));
+        }
+      } catch {
+        setSavedTemplates([]);
       }
-    } catch {
-      setSavedTemplates([]);
-    }
+    });
+    return () => cancelAnimationFrame(frame);
   }, [storageKey]);
 
   const saveCurrentTemplate = () => {

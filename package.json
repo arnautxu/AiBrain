@@ -6,7 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit src",
+    "test:component": "vitest run tests/component",
+    "test:adapter": "vitest run tests/adapter",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test --project=chromium-desktop",
+    "test:visual": "playwright test --project=visual-desktop --project=visual-mobile",
+    "test:a11y": "playwright test --project=accessibility"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
@@ -17,11 +26,20 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "26.2.0",
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.3",
+    "@vitest/coverage-v8": "^4.1.11",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "16.3.2",
+    "jsdom": "^29.1.1",
     "tailwindcss": "4.3.3",
-    "typescript": "6.0.2"
+    "typescript": "6.0.2",
+    "vitest": "^4.1.11"
   }
 }

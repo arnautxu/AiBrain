@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import NextImage from "next/image";
 import {
   ArrowUp,
   CaretRight,
@@ -13,7 +14,7 @@ import {
   Globe,
   GitDiff,
   HardDrives,
-  Image,
+  Image as ImageIcon,
   ImagesSquare,
   List,
   Paperclip,
@@ -170,7 +171,7 @@ function AssistantMessage({
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {message.artifacts.map((artifact) => (
             <figure key={artifact.id} className="overflow-hidden rounded-[calc(var(--brain-radius)+2px)] border border-[#dedcd7] bg-[#f4f3f0]">
-              <a href={artifact.url} target="_blank" rel="noreferrer"><img src={artifact.url} alt={artifact.prompt ?? artifact.name} className="aspect-square w-full object-cover" /></a>
+              <a href={artifact.url} target="_blank" rel="noreferrer"><NextImage unoptimized width={720} height={720} src={artifact.url} alt={artifact.prompt ?? artifact.name} className="aspect-square w-full object-cover" /></a>
               <figcaption className="flex items-center gap-2 px-3 py-2 text-[9px] text-[#716d67]"><ImagesSquare size={12} /><span className="min-w-0 flex-1 truncate">{artifact.prompt ?? artifact.name}</span><a href={artifact.url} download={artifact.name} className="font-medium text-[#403d39] hover:underline">Descarrega</a></figcaption>
             </figure>
           ))}
@@ -199,7 +200,7 @@ function UserMessage({ message }: { message: ChatMessage }) {
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
               <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-white/70 px-2 py-1 text-[9px] text-[#625f5a]">
-                <Image size={11} /><span className="truncate">{attachment.name}</span>
+                <ImageIcon size={11} /><span className="truncate">{attachment.name}</span>
               </span>
             ))}
           </div>
@@ -411,7 +412,7 @@ export function ChatWorkspace({
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[#e3e1dc] bg-[#f7f6f3] px-2.5 py-1.5">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-white text-[#6f6b65]"><Image size={12} /></span>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-white text-[#6f6b65]"><ImageIcon size={12} /></span>
                     <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[#4b4844]">{attachment.name}</span><span className="block text-[8px] text-[#9a968f]">{Math.ceil(attachment.size / 1024)} KB</span></span>
                     <button aria-label={`Treu ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[#918d86] hover:bg-white hover:text-[#413e39]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>

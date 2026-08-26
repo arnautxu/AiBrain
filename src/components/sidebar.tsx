@@ -22,6 +22,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { AuthSession } from "@/auth/types";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type {
@@ -158,6 +159,7 @@ export function Sidebar({
   onOpenCustomization,
   onOpenAutomations,
 }: SidebarProps) {
+  const router = useRouter();
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false);
@@ -342,7 +344,7 @@ export function Sidebar({
               aria-label="Tanca la sessió"
               className="rounded-md p-1.5 text-[#918e88] hover:bg-[#e9e8e4] hover:text-[#4b4844]"
               onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => {
-                if (response.ok) window.location.assign("/login");
+                if (response.ok) router.push("/login");
               })}
             >
               <SignOut size={13} />

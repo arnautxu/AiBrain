@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -47,6 +48,7 @@ export function MemberOnboarding({
   tenantName: string;
   assistantName: string;
 }) {
+  const router = useRouter();
   const [step, setStep] = useState(0);
   const [language, setLanguage] = useState(profile.preferences.language);
   const [responseStyle, setResponseStyle] = useState(profile.preferences.responseStyle);
@@ -72,7 +74,7 @@ export function MemberOnboarding({
       return;
     }
     const params = new URLSearchParams({ starter: assignment.firstMission, onboarding: "complete" });
-    window.location.assign(`/?${params.toString()}`);
+    router.push(`/?${params.toString()}`);
   }
 
   if (!assignment) {
