@@ -7,9 +7,8 @@
 un usuario en una publicación confirmada, versionada, atómica y auditable.
 
 El publicador no es un editor ni un renderizador. La generación de Office/PDF y
-sus previews ocurre antes. Tampoco concede permisos: la futura route/factory
-server-side debe resolver `PERMISSIONS.md`, autenticar la sesión y autorizar el
-target antes de llamar al servicio.
+sus previews ocurre antes. Las routes server-side resuelven `PERMISSIONS.md`,
+autentican la sesión y autorizan el target antes de llamar al servicio.
 
 Archivos de implementación:
 
@@ -163,9 +162,9 @@ operación explícita y autorizada; este módulo no restaura automáticamente.
 - Candidato, snapshot y versión se abren dentro de sus raíces con protección
   `O_NOFOLLOW` cuando el sistema la ofrece.
 
-## Integración server-side pendiente
+## Integración server-side
 
-La futura route/factory debe, en este orden:
+Las routes implementadas siguen este orden:
 
 1. validar sesión local, Origin/CSRF y scope de instalación/usuario;
 2. resolver permisos server-side y comprobar autorización sobre el target;
@@ -174,7 +173,7 @@ La futura route/factory debe, en este orden:
 5. devolver solo `PublicationOperation` y, únicamente al congelar, el token;
 6. registrar el fingerprint de permisos del turn junto a la auditoría superior.
 
-No debe aceptar una raíz del navegador, del worker ni del request. Las raíces y
+No aceptan una raíz del navegador, del worker ni del request. Las raíces y
 el secret provienen exclusivamente de `InstallationConfig`/secret store del
 servidor. El secret debe permanecer estable durante la vida de confirmaciones
 pendientes; su rotación necesita drenar o invalidar explícitamente esas
@@ -198,3 +197,15 @@ No simulan ni afirman haber validado un NAS. Quedan como validaciones de
 infraestructura la matriz real de mounts/UIDs, el filesystem del servidor QA,
 backup/restore de `stateRoot + publishWriteRoot` y un ensayo de corte de proceso
 en contenedor.
+
+Routes disponibles:
+
+- `POST /api/threads/:threadId/documents`
+- `GET /api/threads/:threadId/documents/:uploadId/preview/:fileName`
+- `POST /api/threads/:threadId/publications`
+- `POST /api/threads/:threadId/publications/:operationId`
+
+La congelación y la confirmación requieren la regla efectiva
+`documents.publish | publish | allow`; una regla publish denegada cierra el
+flujo. El rechazo de una operación ya congelada permanece disponible para que
+un cambio posterior de permisos no obligue a dejarla pendiente.

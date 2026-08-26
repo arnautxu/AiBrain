@@ -43,7 +43,7 @@
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
 | 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`: streaming proyectado antes del ACK, approvals durables no bloqueantes, replay, routing aislado, retry por `clientUserMessageId`, recuperación desde historial Codex y controles explícitos `turn/steer`/`turn/interrupt` autenticados e idempotentes; falta recovery E2E tras crash real |
-| 8. Uploads, Office/PDF, previews y publicación | En curso | `d51f171`, `afcec39`, `e090832`, `416d368`: validación segura, staging privado, preview real y publicador atómico/versionado/idempotente; faltan routes autorizadas y matriz completa de formatos |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`: multipart autorizado, staging privado, previews autenticados y matriz real DOCX/XLSX/PPTX/PDF/texto/imagen; freeze/decline/confirm con permiso server-side, hash, conflicto, versión, exactly-once y auditoría |
 | 9. Browser/Computer Use aislado | En curso | `4bed095`: roots, perfil, descargas, estado durable, fencing, heartbeat, takeover, recovery, tokens HMAC y backpressure por usuario; faltan adapter Chrome/CDP/noVNC y routes autenticadas |
 | 10. Contratos reales para UI | Pendiente | — |
 | 11. Compose y operación | Pendiente | — |
@@ -72,6 +72,8 @@
 - Las peticiones de App Server usan IDs estables por operación y mensaje UI. Un retry inspecciona el historial del thread mediante `clientUserMessageId` y no emite un segundo `turn/start` cuando Codex ya conoce el turn.
 - Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
 - Steering y stop reciben únicamente IDs locales de UI: el servidor obtiene los IDs App Server desde la proyección vinculada al usuario, exige `expectedTurnId`, persiste la aceptación antes del ACK y cancela los waiters locales después de una interrupción confirmada.
+- Los uploads aceptan un único `File + uploadId`, no aceptan raíces ni paths del navegador, revalidan propiedad del thread y generan previews bajo estado privado. El publicador deriva candidato/preview/target desde estado server-side y exige `documents.publish=allow` para freeze/confirm; decline sigue disponible para cerrar una operación pendiente.
+- La matriz pesada de LibreOffice/Poppler se ejecuta con `npm run test:documents:real`; la suite general serializa los ficheros de test para conservar sin ampliar los umbrales de 5 s de locks/gateway en hosts QA pequeños. La concurrencia funcional se mantiene dentro de los suites focalizados.
 
 ## Riesgos y acciones externas pendientes
 
@@ -81,7 +83,7 @@
 
 ## Siguiente acción concreta
 
-Exponer uploads y previews autorizados de DOCX, XLSX, PPTX, PDF, texto e imagen mediante routes file-backed, y conectar el publicador server-side con permiso `documents.publish` sin entregar `publish-rw` al worker.
+Implementar el adapter Chrome headless con CDP loopback privado, viewer autenticado, takeover/heartbeat/input y routes por usuario, seguido de una prueba real con dos perfiles sin cookies, tabs ni descargas compartidas.
 
 ## Últimas validaciones
 
@@ -114,4 +116,6 @@ Exponer uploads y previews autorizados de DOCX, XLSX, PPTX, PDF, texto e imagen 
 - Persistencia/recovery: tests de proyección exact-once, múltiples mutaciones sobre una misma secuencia, overlay tras restart y recuperación de un turn completado sin repetir `turn/start`.
 - Concurrencia del router: una approval pendiente no bloquea otro thread y los ACK permanecen globalmente ordenados; un response RPC no se confirma antes de su hook de persistencia.
 - Control de turn: ruta real con sesión/Origin, contrato estricto, rechazo de runtime IDs elegidos por cliente, aislamiento cross-user, steering con precondición de turn, stop durable y replay idempotente.
-- Suite global más reciente: 195/195 tests en 41 ficheros; lint, typecheck y build Next.js (incluida `/api/runtime/turns/control`) verdes tras `392d837`.
+- Documentos HTTP: tests de sesión, ownership cross-user, multipart, MIME falso, preview privado, permiso publish, decline sin escritura, confirmación exactly-once y versión recuperable.
+- Matriz documental real: `npm run test:documents:real`, 2/2 pruebas; conversiones y previews reales DOCX, XLSX, PPTX y PDF con LibreOffice/Poppler, más texto e imagen. QPDF sigue pendiente de instalación local, pero es obligatorio por configuración en producción.
+- Suite global más reciente: dos ejecuciones verdes serializadas, 202/202 tests ejecutados en 44 ficheros (1 test de matriz pesada omitido y ejecutado por separado); lint, typecheck y build Next.js con las cuatro nuevas routes documentales verdes tras `907feab`.
