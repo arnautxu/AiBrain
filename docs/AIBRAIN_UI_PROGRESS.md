@@ -70,7 +70,8 @@
 
 ## Commits y push
 
-- Commit del checkpoint 1 pendiente de crear tras el último build y `git diff --check`.
+- `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
+- Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
