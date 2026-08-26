@@ -4,7 +4,7 @@ import { isChatMessage } from "@/lib/chat-contract";
 export type ProjectStatus = "active" | "archived";
 export type ThreadStatus = "active" | "archived";
 export type WorkspaceStatus = "ready" | "pending" | "unavailable";
-export type WorkbenchPersistence = "supabase" | "filesystem-demo" | "browser-preview";
+export type WorkbenchPersistence = "supabase" | "filesystem" | "filesystem-demo" | "browser-preview";
 
 export type WorkbenchWorkspace = {
   id: string;
@@ -113,6 +113,7 @@ export function isWorkbenchThread(value: unknown): value is WorkbenchThread {
 export function isWorkbenchSnapshot(value: unknown): value is WorkbenchSnapshot {
   if (!isRecord(value)) return false;
   return (value.persistence === "supabase" ||
+      value.persistence === "filesystem" ||
       value.persistence === "filesystem-demo" ||
       value.persistence === "browser-preview") &&
     Array.isArray(value.projects) && value.projects.every(isWorkbenchProject) &&
