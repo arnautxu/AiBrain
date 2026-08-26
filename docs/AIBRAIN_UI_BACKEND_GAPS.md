@@ -21,8 +21,12 @@ Estos contratos existen y tienen pruebas en la rama backend, pero todavía no es
 - `src/ui/app-server-ui-adapter.ts` conserva el orden de lectura, soporta fragmentación arbitraria de chunks y falla cerrado ante JSON malformado, eventos desconocidos o líneas mayores de 1 MB.
 - `AbortController` cancela la petición existente y la UI conserva el resultado parcial con estado terminal `stopped`.
 - En Preview sintética, proyectos, conversaciones y mensajes se recuperan desde almacenamiento local; un mensaje que quedó `streaming` durante una recarga se recupera honestamente como `stopped`.
+- El evento `artifact` admite tres view models fail-closed: imagen, documento y navegador. Los documentos conservan `kind`, MIME, tamaño, estado de conversión, total de páginas, preview, lifecycle de publicación y errores; los cambios de estado con el mismo ID reemplazan el artefacto anterior sin duplicarlo.
+- El límite documental del view model es 50 MB, alineado con `StagedDocument` v1 del backend. Las URLs visibles solo se aceptan bajo rutas opacas `/api/projects/…`; viewer, captura y descarga de navegador quedan limitados a `/api/browser/sessions/…`.
+- La presentación cubre DOCX/XLSX/PPTX/PDF, imagen generada, conversión, preview/error, página 1 de N, descarga, estados `awaiting_confirmation | publishing | published | declined | conflict`, error de publicación y lifecycle de browser/Computer Use (`starting | ready | active | reconnecting | disconnected | closed | error`) con control del agente, empleado o aprobación pendiente.
+- El iframe de Computer Use no recibe `allow-same-origin`, no envía referrer y solo se monta si llega un artefacto válido en estado listo/activo. El logout desmonta el viewer. No hay fallback productivo ni sesión sintética fuera de tests.
 - El contrato actual no expone `eventId`, `sequence`, cursor, ACK, `turnId` ni `itemId`; por tanto la UI no simula dedupe, replay o reconnect durable.
-- Los adjuntos actuales son únicamente PNG/JPEG/WebP/GIF inline, máximo 3, 2 MB por imagen y 5 MB agregados. No existe todavía una ruta de upload Office/PDF conectada a esta rama.
+- Los adjuntos de entrada actuales siguen siendo únicamente PNG/JPEG/WebP/GIF inline, máximo 3, 2 MB por imagen y 5 MB agregados. No se amplía el selector a Office/PDF porque todavía no existe una route autorizada conectada a esta rama.
 
 ## Mapping objetivo al contrato backend definitivo
 
@@ -65,8 +69,8 @@ type UiEventEnvelope = {
 | Provisionamiento y registry por empleado | Provisionamiento completo; factory/gateway en curso checkpoint 5 | No hay smoke multiusuario definitivo |
 | Proyectos/threads definitivos | En curso checkpoint 6 | Adapter conserva frontera y fixtures de test |
 | Streaming/steer/stop/approval/replay integrados end-to-end | Pendiente checkpoint 7 | Transporte está probado, integración de producto no |
-| Office/PDF/previews/publicador | Servicios en curso; faltan routes autorizadas | Estados UI honestos, upload real bloqueado |
-| Browser/Computer Use aislado | Pendiente checkpoint 9 | Viewer UI sin declarar sesión disponible |
+| Office/PDF/previews/publicador | Servicios backend checkpoint 8 en curso; `StagedDocument`, `DocumentPreview` y publicador v1 existen, pero faltan routes autorizadas y el preview real solo materializa página 1 | UI/adapter/fixtures cubren tipos y lifecycle; upload, paginación interactiva y confirmación real siguen bloqueados |
+| Browser/Computer Use aislado | Pendiente backend checkpoint 9; no existe gateway/viewer autenticado por usuario/thread | UI/adapter/fixtures cubren estados, captura, takeover representado, devolución, descarga, reconexión y cierre; ninguna acción declara una sesión real disponible |
 | Contrato final para rama UI | Pendiente checkpoint 10 | Este documento es propuesta de integración, no API final |
 
 ## Integración segura
