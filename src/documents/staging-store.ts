@@ -62,7 +62,7 @@ function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoExcepti
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-async function ensurePrivateDirectoryTree(root: string, segments: readonly string[]) {
+export async function ensurePrivateDirectoryTree(root: string, segments: readonly string[]) {
   const assertDirectory = async (directory: string) => {
     const metadata = await lstat(directory);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
