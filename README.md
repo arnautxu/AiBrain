@@ -75,3 +75,5 @@ Si `CODEX_HOME_ROOT` no està configurat, el prototip pot utilitzar la sessió l
 - `POST /api/control-plane/invitations`: alta owner-only de membres amb assignació i audit atòmics.
 
 Consulta [AIBRAIN_CODEX_ARCHITECTURE.md](AIBRAIN_CODEX_ARCHITECTURE.md), [docs/SUPABASE.md](docs/SUPABASE.md), [docs/PRODUCTION.md](docs/PRODUCTION.md) i [.env.example](.env.example).
+
+La preparació del host Hetzner i de la pantalla Chromium per a computer use és a [docs/HETZNER_MIGRATION.md](docs/HETZNER_MIGRATION.md). Els ports del navegador queden limitats a loopback fins que el gateway multi-tenant autenticat estigui implementat i validat.
