@@ -6,6 +6,11 @@ case "${SCREEN_SIZE:-1440x900}" in
 esac
 
 export DISPLAY="${DISPLAY:-:99}"
+export HOME="${HOME:-/home/browser}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp/runtime-browser}"
+
+mkdir -p "$HOME/profile" "$HOME/Desktop" "$HOME/Downloads" "$XDG_RUNTIME_DIR"
+chmod 0700 "$XDG_RUNTIME_DIR"
 
 for singleton_lock in SingletonCookie SingletonLock SingletonSocket; do
   singleton_path="/home/browser/profile/$singleton_lock"
@@ -27,13 +32,16 @@ until xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; do
   sleep 0.1
 done
 
-openbox >/tmp/openbox.log 2>&1 &
-openbox_pid=$!
+dbus-run-session -- xfce4-session >/tmp/xfce.log 2>&1 &
+desktop_pid=$!
+
+sleep 2
 
 x11vnc \
   -display "$DISPLAY" \
   -forever \
   -shared \
+  -noxdamage \
   -nopw \
   -localhost \
   -rfbport 5900 \
@@ -55,6 +63,8 @@ chromium \
   --user-data-dir=/home/browser/profile \
   --remote-debugging-address=0.0.0.0 \
   --remote-debugging-port=9222 \
+  --disable-gpu \
+  --disable-gpu-compositing \
   --disable-extensions \
   --disable-background-networking \
   --disable-component-update \
@@ -69,7 +79,7 @@ chromium \
 browser_pid=$!
 
 cleanup() {
-  kill "$browser_pid" "$cdp_bridge_pid" "$websockify_pid" "$vnc_pid" "$openbox_pid" "$xvfb_pid" 2>/dev/null || true
+  kill "$browser_pid" "$cdp_bridge_pid" "$websockify_pid" "$vnc_pid" "$desktop_pid" "$xvfb_pid" 2>/dev/null || true
   wait || true
 }
 

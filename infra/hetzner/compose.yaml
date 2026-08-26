@@ -19,7 +19,11 @@ services:
       - no-new-privileges:true
     stop_grace_period: 30s
     volumes:
-      - /var/lib/aibrain:/var/lib/aibrain
+      - type: bind
+        source: /var/lib/aibrain
+        target: /var/lib/aibrain
+        bind:
+          propagation: rslave
 
   browser-studio:
     build:
@@ -35,7 +39,7 @@ services:
       - seccomp=./browser/seccomp_profile.json
     shm_size: 1gb
     volumes:
-      - /var/lib/aibrain/computer/studio/profile:/home/browser/profile
+      - /var/lib/aibrain/computer/studio/home:/home/browser
 
 networks:
   default:

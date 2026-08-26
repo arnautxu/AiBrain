@@ -14,16 +14,18 @@ OpenClaw i el seu helper de bootstrap s’han retirat del runtime BGreenly. La s
 /var/lib/aibrain/codex/<tenant>/         identitat i estat Codex privat
 /var/lib/aibrain/workspaces/<tenant>/    workspaces i projectes
 /var/lib/aibrain/control-plane/           fallback local, no Supabase
-/var/lib/aibrain/computer/<tenant>/       perfil del navegador gràfic
+/var/lib/aibrain/computer/<tenant>/home/  escriptori, descàrregues i perfil Chromium
 ```
 
 Cap `CODEX_HOME`, perfil de navegador o secret s’ha de muntar en més d’un tenant. El tenant del navegador ha de coincidir amb el tenant resolt server-side per la sessió Supabase.
 
 ## Computer use
 
-La base preparada executa Chromium amb pantalla virtual, noVNC i CDP dins un contenidor separat. Això permet que l’agent controli el mateix navegador que veu l’usuari. La implementació segueix tres límits:
+La base preparada executa un escriptori XFCE complet amb terminal, gestor de fitxers, editor de text i Chromium, sobre una pantalla virtual amb noVNC i CDP dins un contenidor separat. L’usuari i l’agent veuen i controlen la mateixa sessió. El directori personal és persistent per tenant, de manera que es conserven preferències, descàrregues i aplicacions web instal·lades com a PWA.
 
-1. El navegador i el perfil són aïllats per tenant.
+Les aplicacions del sistema s’incorporen de forma administrada a la imatge. L’usuari del desktop no té accés root ni al socket Docker. En el cas de WhatsApp, l’opció suportada a Linux és WhatsApp Web instal·lat com a PWA des de Chromium; no s’ha d’instal·lar un client no oficial amb accés a la sessió. La implementació segueix tres límits:
+
+1. L’escriptori, el navegador i el directori personal són aïllats per tenant.
 2. noVNC i CDP només escolten a loopback; mai s’exposen directament a Internet.
 3. Les accions sensibles continuen passant per aprovació humana i el contingut de les pàgines es tracta com a entrada no fiable.
 
