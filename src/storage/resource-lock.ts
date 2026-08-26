@@ -91,6 +91,77 @@ function abortError() {
   return new StorageError("STORAGE_LOCK_ABORTED", "Resource lock acquisition was aborted.");
 }
 
+type ProcessLockWaiter = {
+  active: boolean;
+  resolve: (release: () => void) => void;
+};
+
+type ProcessLockState = {
+  locked: boolean;
+  waiters: ProcessLockWaiter[];
+};
+
+const processLocks = new Map<string, ProcessLockState>();
+
+function processLockRelease(lockPath: string, state: ProcessLockState) {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    let next = state.waiters.shift();
+    while (next && !next.active) next = state.waiters.shift();
+    if (next) {
+      next.active = false;
+      next.resolve(processLockRelease(lockPath, state));
+      return;
+    }
+    state.locked = false;
+    if (processLocks.get(lockPath) === state) processLocks.delete(lockPath);
+  };
+}
+
+function acquireProcessLock(
+  lockPath: string,
+  resourceKey: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) return Promise.reject(abortError());
+  const state = processLocks.get(lockPath) ?? { locked: false, waiters: [] };
+  processLocks.set(lockPath, state);
+  if (!state.locked) {
+    state.locked = true;
+    return Promise.resolve(processLockRelease(lockPath, state));
+  }
+  if (timeoutMs === 0) return Promise.reject(new ResourceLockTimeoutError(resourceKey, timeoutMs));
+  return new Promise<() => void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const waiter: ProcessLockWaiter = {
+      active: true,
+      resolve: (release) => {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        resolve(release);
+      },
+    };
+    const fail = (error: Error) => {
+      if (!waiter.active) return;
+      waiter.active = false;
+      if (timer) clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(error);
+    };
+    const onAbort = () => fail(abortError());
+    timer = setTimeout(
+      () => fail(new ResourceLockTimeoutError(resourceKey, timeoutMs)),
+      timeoutMs,
+    );
+    timer.unref?.();
+    signal?.addEventListener("abort", onAbort, { once: true });
+    state.waiters.push(waiter);
+  });
+}
+
 async function wait(delayMs: number, signal?: AbortSignal) {
   if (signal?.aborted) throw abortError();
   await new Promise<void>((resolve, reject) => {
@@ -328,13 +399,30 @@ export class ResourceLockManager {
     operation: (lease: ResourceLockLease) => T | Promise<T>,
     options: AcquireLockOptions = {},
   ): Promise<T> {
-    const lease = await this.acquire(resourceKey, options);
+    const timeoutMs = options.timeoutMs ?? this.defaultTimeoutMs;
+    validatePositiveFinite("timeoutMs", timeoutMs, true);
+    const deadline = this.now() + timeoutMs;
+    const releaseProcessLock = await acquireProcessLock(
+      this.lockPathFor(resourceKey),
+      resourceKey,
+      timeoutMs,
+      options.signal,
+    );
+    let lease: ResourceLockLease | null = null;
     try {
+      lease = await this.acquire(resourceKey, {
+        ...options,
+        timeoutMs: Math.max(0, deadline - this.now()),
+      });
       const result = await operation(lease);
       await lease.assertHeld();
       return result;
     } finally {
-      await lease.release();
+      try {
+        await lease?.release();
+      } finally {
+        releaseProcessLock();
+      }
     }
   }
 }
