@@ -96,7 +96,7 @@ function ResultActions({ message, onCreateVersion, onResultAction }: { message: 
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `resultat-aibrain-${message.createdAt.slice(0, 10)}.txt`;
+    link.download = `resultado-aibrain-${message.createdAt.slice(0, 10)}.txt`;
     link.click();
     URL.revokeObjectURL(url);
   };
@@ -104,7 +104,15 @@ function ResultActions({ message, onCreateVersion, onResultAction }: { message: 
     setBusy(true);
     try { await onResultAction(approved ? "pending" : "approved"); } finally { setBusy(false); }
   };
-  return <div className="mt-4 flex flex-wrap items-center gap-1.5"><button type="button" disabled={busy} aria-pressed={approved} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[#c8d8ca] bg-[#edf5ee] text-[#4f7255]" : "border-[#dfddd8] bg-white text-[#66625d] hover:bg-[#f4f3f0]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultat aprovat" : "Aprova resultat"}</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiat" : "Copia"}</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={downloadResult}><DownloadSimple size={13} />Descarrega</button><button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#66625d] hover:bg-[#f4f3f0]" onClick={onCreateVersion}><GitBranch size={13} />Nova versió</button>{message.diff ? <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#ead7cf] bg-[#fff5f1] px-3 py-2 text-[12px] font-medium text-[#8a513e] hover:bg-[#f9e6de]" onClick={() => void onResultAction("undo")}>Desfés els canvis</button> : null}</div>;
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-1.5">
+      <button type="button" disabled={busy} aria-pressed={approved} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[#c8d8ca] bg-[#edf5ee] text-[#315a39]" : "border-[#dfddd8] bg-white text-[#44413d] hover:bg-[#f4f3f0]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultado aprobado" : "Aprobar resultado"}</button>
+      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiado" : "Copiar"}</button>
+      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={downloadResult}><DownloadSimple size={13} />Descargar</button>
+      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={onCreateVersion}><GitBranch size={13} />Nueva versión</button>
+      {message.diff ? <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#ead7cf] bg-[#fff5f1] px-3 py-2 text-[12px] font-medium text-[#6f3526] hover:bg-[#f9e6de]" onClick={() => void onResultAction("undo")}>Deshacer cambios</button> : null}
+    </div>
+  );
 }
 
 function AssistantMessage({
@@ -160,7 +168,7 @@ function AssistantMessage({
       ) : null}
 
       {message.status === "error" ? (
-        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[#ead0c7] bg-[#fff8f5] px-3 py-2.5 text-[11px] text-[#884b38]">
+        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[#ead0c7] bg-[#fff8f5] px-3 py-2.5 text-[11px] text-[#884b38]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
           <span>No se ha podido completar esta respuesta. Inténtalo de nuevo.</span>
         </div>
@@ -173,7 +181,7 @@ function AssistantMessage({
           {message.artifacts.map((artifact) => (
             <figure key={artifact.id} className="overflow-hidden rounded-[calc(var(--brain-radius)+2px)] border border-[#dedcd7] bg-[#f4f3f0]">
               <a href={artifact.url} target="_blank" rel="noreferrer"><NextImage unoptimized width={720} height={720} src={artifact.url} alt={artifact.prompt ?? artifact.name} className="aspect-square w-full object-cover" /></a>
-              <figcaption className="flex items-center gap-2 px-3 py-2 text-[9px] text-[#716d67]"><ImagesSquare size={12} /><span className="min-w-0 flex-1 truncate">{artifact.prompt ?? artifact.name}</span><a href={artifact.url} download={artifact.name} className="font-medium text-[#403d39] hover:underline">Descarrega</a></figcaption>
+              <figcaption className="flex items-center gap-2 px-3 py-2 text-[9px] text-[#716d67]"><ImagesSquare size={12} /><span className="min-w-0 flex-1 truncate">{artifact.prompt ?? artifact.name}</span><a href={artifact.url} download={artifact.name} className="font-medium text-[#403d39] hover:underline">Descargar</a></figcaption>
             </figure>
           ))}
         </div>
@@ -181,12 +189,12 @@ function AssistantMessage({
 
       {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
 
-      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[var(--text-muted)]">Què vols fer ara?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica’m aquest resultat de manera més senzilla i destaca només el que he de saber.")}>Explica-ho més fàcil</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir d’aquest resultat, dona’m els següents passos concrets i ordenats.")}>Següents passos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#625f5a] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versió final, neta i llesta per utilitzar d’aquest resultat.")}>Prepara la versió final</button></div></div> : null}
+      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[#44413d]">¿Qué quieres hacer ahora?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica este resultado de forma más sencilla y destaca solo lo que debo saber.")}>Explicarlo mejor</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir de este resultado, dame los siguientes pasos concretos y ordenados.")}>Siguientes pasos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versión final, limpia y lista para utilizar de este resultado.")}>Preparar versión final</button></div></div> : null}
 
       {hasDetails && canInspect ? (
-        <button className="mt-3 flex items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[#67645f] transition hover:text-[#34322f]" onClick={onInspect}>
+        <button className="mt-3 flex items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[#44413d] transition hover:text-[#24221f]" onClick={onInspect}>
           <List size={12} />
-          Obre Review
+          Abrir Review
         </button>
       ) : null}
     </article>
@@ -378,7 +386,7 @@ export function ChatWorkspace({
             return (
               <button
                 key={window.id}
-                aria-label={`Obrir ${window.label}`}
+                aria-label={`Abrir ${window.label}`}
                 aria-pressed={active}
                 className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => onOpenWindow(windowId)}

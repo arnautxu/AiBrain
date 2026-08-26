@@ -41,12 +41,12 @@ function parseDiff(diff: string): DiffFile[] {
   if (!diff.trim()) return [];
   const sections = diff.split(/(?=^diff --git )/m).filter((section) => section.trim());
   if (!sections.length || !sections[0]?.startsWith("diff --git ")) {
-    return [{ path: "Canvis del torn", content: diff, ...countChanges(diff) }];
+    return [{ path: "Cambios del turno", content: diff, ...countChanges(diff) }];
   }
   return sections.map((content, index) => {
     const header = content.match(/^diff --git a\/.+ b\/(.+)$/m);
     const destination = content.match(/^\+\+\+ b\/(.+)$/m);
-    const path = destination?.[1] ?? header?.[1] ?? `Fitxer ${index + 1}`;
+    const path = destination?.[1] ?? header?.[1] ?? `Archivo ${index + 1}`;
     return { path, content, ...countChanges(content) };
   });
 }
@@ -103,18 +103,18 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-[#deddd8] px-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <GitDiff size={15} className="shrink-0 text-[#68655f]" />
-          <h2 className="truncate text-[11px] font-semibold text-[#34312d]">Review del torn</h2>
-          {pending > 0 ? <span className="rounded-md bg-[#eee4cf] px-1.5 py-0.5 text-[8px] font-semibold text-[#826328]">{pending} pendent</span> : null}
+          <h2 className="truncate text-[11px] font-semibold text-[#34312d]">Review del turno</h2>
+          {pending > 0 ? <span className="rounded-md bg-[#eee4cf] px-1.5 py-0.5 text-[8px] font-semibold text-[#65480f]">{pending} {pending === 1 ? "pendiente" : "pendientes"}</span> : null}
         </div>
-        <button aria-label="Tancar review" className="rounded-md p-1.5 text-[#77736d] transition hover:bg-[#e7e6e2] hover:text-[#2f2c28]" onClick={onClose}><X size={15} /></button>
+        <button type="button" aria-label="Cerrar Review" className="rounded-md p-1.5 text-[#77736d] transition hover:bg-[#e7e6e2] hover:text-[#2f2c28]" onClick={onClose}><X size={15} /></button>
       </header>
 
       <div className="flex h-10 shrink-0 items-end gap-1 border-b border-[#deddd8] px-3">
-        <button aria-pressed={tab === "changes"} className={`review-tab ${tab === "changes" ? "review-tab-active" : ""}`} onClick={() => setTab("changes")}>
-          Canvis {files.length ? <span className="tabular-nums text-[8px] text-[#8c8881]">{files.length}</span> : null}
+        <button type="button" aria-pressed={tab === "changes"} className={`review-tab ${tab === "changes" ? "review-tab-active" : ""}`} onClick={() => setTab("changes")}>
+          Cambios {files.length ? <span className="tabular-nums text-[8px] text-[#8c8881]">{files.length}</span> : null}
         </button>
-        <button aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
-          Activitat {message?.activity.length ? <span className="tabular-nums text-[8px] text-[#8c8881]">{message.activity.length}</span> : null}
+        <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
+          Actividad {message?.activity.length ? <span className="tabular-nums text-[8px] text-[#8c8881]">{message.activity.length}</span> : null}
         </button>
       </div>
 
@@ -122,8 +122,8 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
         <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
           <div className="max-w-56">
             <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[#eae9e5] text-[#77736d]"><ListChecks size={18} /></span>
-            <p className="mt-3 text-[11px] font-semibold text-[#4d4944]">Selecciona una resposta</p>
-            <p className="mt-1.5 text-[9px] leading-4 text-[#918d86]">El review mostra canvis, activitat i aprovacions reals del torn.</p>
+            <p className="mt-3 text-[11px] font-semibold text-[#4d4944]">Selecciona una respuesta</p>
+            <p className="mt-1.5 text-[9px] leading-4 text-[#6f6d67]">Review muestra los cambios, la actividad y las aprobaciones del turno.</p>
           </div>
         </div>
       ) : tab === "changes" ? (
@@ -133,19 +133,19 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
               <div className="flex items-center gap-2 text-[9px] font-medium">
                 <span className="text-[#4f7b58]">+{additions}</span>
                 <span className="text-[#a45748]">−{deletions}</span>
-                <span className="text-[#8e8a83]">{files.length} {files.length === 1 ? "fitxer" : "fitxers"}</span>
+                <span className="text-[#6f6d67]">{files.length} {files.length === 1 ? "archivo" : "archivos"}</span>
               </div>
-              <button className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-medium text-[#77736d] transition hover:bg-[#eeede9] hover:text-[#3e3b36]" onClick={() => void copyDiff()}>
-                {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiat" : "Copia diff"}
+              <button type="button" className="flex items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-medium text-[#77736d] transition hover:bg-[#eeede9] hover:text-[#3e3b36]" onClick={() => void copyDiff()}>
+                {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar diff"}
               </button>
             </div>
 
             <div className="scrollbar-thin flex max-h-36 shrink-0 flex-col overflow-y-auto border-b border-[#deddd8] bg-[#f2f1ee] p-1.5">
               {files.map((file, index) => (
-                <button key={`${file.path}-${index}`} className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${activeFile === index ? "bg-[#deddd8] text-[#34312d]" : "text-[#716d67] hover:bg-[#e8e7e3]"}`} onClick={() => setActiveFile(index)}>
+                <button type="button" key={`${file.path}-${index}`} className={`flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${activeFile === index ? "bg-[#deddd8] text-[#34312d]" : "text-[#716d67] hover:bg-[#e8e7e3]"}`} onClick={() => setActiveFile(index)}>
                   <FileCode size={13} className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate font-mono text-[9px]">{file.path}</span>
-                  <span className="flex shrink-0 gap-1.5 font-mono text-[8px]"><span className="text-[#4f7b58]">+{file.additions}</span><span className="text-[#a45748]">−{file.deletions}</span></span>
+                  <span className="flex shrink-0 gap-1.5 font-mono text-[8px] font-semibold"><span className="text-[#2f6139]">+{file.additions}</span><span className="text-[#7b3026]">−{file.deletions}</span></span>
                 </button>
               ))}
             </div>
@@ -159,9 +159,9 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
           <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
             <div className="max-w-56">
               <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[#e9eee9] text-[#58705d]"><ShieldCheck size={18} /></span>
-              <p className="mt-3 text-[11px] font-semibold text-[#4d4944]">Sense canvis de fitxers</p>
-              <p className="mt-1.5 text-[9px] leading-4 text-[#918d86]">Aquest torn no ha produït cap diff. Consulta Activitat per veure què ha executat.</p>
-              <button className="mt-3 rounded-lg border border-[#d9d7d2] bg-white px-3 py-1.5 text-[9px] font-medium text-[#625e58] hover:bg-[#f7f6f3]" onClick={() => setTab("activity")}>Obre Activitat</button>
+              <p className="mt-3 text-[11px] font-semibold text-[#4d4944]">Sin cambios en archivos</p>
+              <p className="mt-1.5 text-[9px] leading-4 text-[#6f6d67]">Este turno no ha producido ningún diff. Consulta Actividad para ver qué se ha ejecutado.</p>
+              <button type="button" className="mt-3 rounded-lg border border-[#d9d7d2] bg-white px-3 py-1.5 text-[9px] font-medium text-[#625e58] hover:bg-[#f7f6f3]" onClick={() => setTab("activity")}>Abrir Actividad</button>
             </div>
           </div>
         )

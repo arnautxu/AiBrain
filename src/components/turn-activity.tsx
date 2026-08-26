@@ -47,27 +47,36 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
 }
 
 function friendlyActivity(item: ActivityItem) {
+  const systemLabels: Record<string, string> = {
+    "Resultat aprovat": "Resultado aprobado",
+    "Resultat pendent de revisió": "Resultado pendiente de revisión",
+    "Revertint els canvis": "Deshaciendo los cambios",
+    "Canvis revertits i verificats": "Cambios deshechos y verificados",
+  };
   if (item.status === "running" || item.status === "waiting") {
     return {
-      command: "Treballant amb el projecte",
-      file: "Preparant els canvis",
-      reasoning: "Pensant la millor resposta",
-      web: "Consultant informació",
-      tool: "Utilitzant una eina autoritzada",
-      agent: "Coordinant la feina",
-      plan: "Preparant els passos",
-      system: item.label,
+      command: "Ejecutando un comando",
+      file: "Preparando los cambios",
+      reasoning: "Preparando la respuesta",
+      web: "Consultando información",
+      tool: "Usando una herramienta autorizada",
+      agent: "Coordinando el trabajo",
+      plan: "Preparando los pasos",
+      system: systemLabels[item.label] ?? item.label,
     }[item.kind];
   }
+  if (item.status === "failed") return `No se ha podido completar: ${item.label}`;
+  if (item.status === "stopped") return `Paso detenido: ${item.label}`;
+  if (item.status === "pending") return `Pendiente: ${item.label}`;
   return {
-    command: "Pas intern completat",
-    file: "Canvis preparats",
-    reasoning: "Resposta preparada",
-    web: "Informació consultada",
-    tool: "Eina completada",
-    agent: "Coordinació completada",
-    plan: "Passos preparats",
-    system: item.label,
+    command: "Comando completado",
+    file: "Cambios preparados",
+    reasoning: "Respuesta preparada",
+    web: "Información consultada",
+    tool: "Herramienta completada",
+    agent: "Coordinación completada",
+    plan: "Pasos preparados",
+    system: systemLabels[item.label] ?? item.label,
   }[item.kind];
 }
 
@@ -80,27 +89,27 @@ function ApprovalCard({
 }) {
   const pending = approval.status === "pending";
   const result = {
-    accepted: "Ho has permès aquesta vegada",
-    accepted_session: "Ho has permès durant aquesta tasca",
-    declined: "Has decidit no fer-ho",
-    pending: "Esperant la teva decisió",
+    accepted: "Permitido una vez",
+    accepted_session: "Permitido durante esta tarea",
+    declined: "Acción rechazada",
+    pending: "Esperando tu decisión",
   }[approval.status];
   const title = approval.title;
   const explanation = approval.kind === "file"
-    ? "AiBrain ha preparat canvis al projecte. Només s’aplicaran si els autoritzes."
-    : "Aquest pas intern necessita el teu permís. Pots permetre’l una vegada, durant aquesta tasca o cancel·lar-lo.";
+    ? "AiBrain ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
+    : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";
 
   return (
-    <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[#deddd9] bg-[#fbfbfa]">
+    <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[#deddd9] bg-[#fbfbfa]" role="group" aria-label={`Aprobación: ${title}`}>
       <div className="flex items-start gap-3 px-3.5 py-3">
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#f0efec] text-[#464541]">
           <ShieldCheck size={15} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold text-[#282725]">{title}</p>
-          <p className="mt-1 text-[10px] leading-4 text-[#77746f]">{explanation}</p>
+          <p className="mt-1 text-[10px] leading-4 text-[#44413d]">{explanation}</p>
           <details className="mt-2">
-            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#817d76]">Mostra per què ho necessita</summary>
+            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#44413d]">Ver por qué necesita permiso</summary>
             <div className="mt-2 rounded-lg bg-[#f1f0ed] px-3 py-2 text-[9px] leading-4 text-[#66625d]">
               <p>{approval.detail}</p>
               {approval.command ? <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[8px] text-[#77736d]">{approval.command}</pre> : null}
@@ -112,14 +121,14 @@ function ApprovalCard({
 
       {pending ? (
         <div className="flex flex-wrap justify-end gap-2 border-t border-[#e6e5e1] bg-white px-3 py-2.5">
-          <button className="rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[#716e69] hover:bg-[#f2f1ee]" onClick={() => onResolve("decline")}>No ho facis</button>
+          <button type="button" className="rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[#44413d] hover:bg-[#f2f1ee]" onClick={() => onResolve("decline")}>Rechazar</button>
           {approval.kind === "command" ? (
-            <button className="rounded-lg border border-[#deddd9] px-2.5 py-1.5 text-[10px] font-medium text-[#4e4c48] hover:bg-[#f6f5f2]" onClick={() => onResolve("acceptForSession")}>Sí, durant aquesta tasca</button>
+            <button type="button" className="rounded-lg border border-[#deddd9] px-2.5 py-1.5 text-[10px] font-medium text-[#4e4c48] hover:bg-[#f6f5f2]" onClick={() => onResolve("acceptForSession")}>Permitir durante esta tarea</button>
           ) : null}
-          <button className="rounded-lg bg-[var(--brain-accent)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--brain-contrast)]" onClick={() => onResolve("accept")}>Sí, aquesta vegada</button>
+          <button type="button" className="rounded-lg bg-[color-mix(in_srgb,var(--brain-accent)_55%,#000)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir una vez</button>
         </div>
       ) : (
-        <div className="border-t border-[#e6e5e1] px-3.5 py-2 text-[9px] font-medium text-[#77746f]">{result}</div>
+        <div className="border-t border-[#e6e5e1] px-3.5 py-2 text-[9px] font-medium text-[#44413d]" role="status">{result}</div>
       )}
     </div>
   );
@@ -133,13 +142,13 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 ? (
         <section>
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[#77746f]">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[#44413d]">
             <ListChecks size={13} />
-            Pla
+            Plan
           </div>
           <ol className="space-y-1.5">
             {message.plan.map((step, index) => (
-              <li key={`${step.step}-${index}`} className="flex items-start gap-2 text-[10px] leading-4 text-[#625f5a]">
+              <li key={`${step.step}-${index}`} className="flex items-start gap-2 text-[10px] leading-4 text-[#44413d]">
                 <span className={`mt-[3px] grid size-3.5 shrink-0 place-items-center rounded-full ${
                   step.status === "completed"
                     ? "bg-[#e8eee8] text-[#51705a]"
@@ -167,10 +176,10 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
               </span>
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] font-medium text-[#4b4945]">{friendlyActivity(item)}</p>
-                {item.kind === "system" && item.detail ? <p className="mt-0.5 truncate text-[9px] text-[#6f6c67]">{item.detail}</p> : null}
+                {item.detail ? <p className="mt-0.5 text-[9px] leading-4 text-[#44413d]">{item.detail}</p> : null}
                 {item.output ? (
                   <details className="mt-2">
-                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#6d6a65]">Detalls per a l’administrador</summary>
+                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#44413d]">Ver salida</summary>
                     <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
                   </details>
                 ) : null}
@@ -185,9 +194,9 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ))}
 
       {message.diff && showDiff ? (
-        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[#dde3dd] bg-[#f5f8f5] px-3.5 py-3 text-[#516456]">
+        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[#dde3dd] bg-[#f5f8f5] px-3.5 py-3 text-[#324b38]">
           <GitDiff size={14} className="mt-0.5 shrink-0" />
-          <div><p className="text-[10px] font-semibold">Canvis preparats</p><p className="mt-1 text-[9px] leading-4 text-[#5f6d63]">Pots revisar què ha canviat des del botó “Obre Review”.</p></div>
+          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-1 text-[9px] leading-4 text-[#3f4f44]">Puedes revisar el diff desde el botón “Abrir Review”.</p></div>
         </section>
       ) : null}
     </div>

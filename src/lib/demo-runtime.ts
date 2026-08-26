@@ -25,18 +25,18 @@ export function isChatRequest(value: unknown): value is ChatRequest {
 
 export function buildDemoPlan(): PlanStep[] {
   return [
-    { step: "Entendre l’objectiu", status: "completed" },
-    { step: "Inspeccionar el workspace", status: "completed" },
-    { step: "Preparar el canvi", status: "in_progress" },
+    { step: "Entender el objetivo", status: "completed" },
+    { step: "Revisar el proyecto", status: "completed" },
+    { step: "Preparar el resultado", status: "in_progress" },
   ];
 }
 
 export function buildDemoActivities(showActivity: boolean): ActivityItem[] {
   if (!showActivity) return [];
   return [
-    { id: "demo-reasoning", kind: "reasoning", label: "Analitzant la petició", detail: "Objectiu, context i límits identificats", status: "complete" },
-    { id: "demo-files", kind: "file", label: "Inspeccionant el projecte", detail: "src/components · src/runtime", status: "complete" },
-    { id: "demo-plan", kind: "plan", label: "Pla preparat", detail: "Tall vertical llest per executar", status: "complete" },
+    { id: "demo-reasoning", kind: "reasoning", label: "Analizando la petición", detail: "Objetivo, contexto y límites identificados", status: "complete" },
+    { id: "demo-files", kind: "file", label: "Revisando el proyecto", detail: "Se han identificado los elementos necesarios", status: "complete" },
+    { id: "demo-plan", kind: "plan", label: "Plan preparado", detail: "Resultado listo para revisar", status: "complete" },
   ];
 }
 
