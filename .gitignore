@@ -13,3 +13,4 @@ runtime/tenants/*/workspace/*
 .codex-context/
 supabase/.temp/
 .impeccable/review/
+coverage/

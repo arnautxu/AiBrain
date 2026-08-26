@@ -35,8 +35,8 @@
 
 | # | Estado | Evidencia / commit |
 |---|---|---|
-| 0. Baseline, rama y protección | Completado | Baseline anterior; commit pendiente |
-| 1. InstallationConfig + segunda instalación | En curso | Siguiente cambio concreto |
+| 0. Baseline, rama y protección | Completado | `e2b571e` |
+| 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
 | 2. Supabase Auth-only + sesión local | Pendiente | — |
 | 3. Stores file-backed resilientes | Pendiente | — |
 | 4. Provisionamiento idempotente + 20 usuarios | Pendiente | — |
@@ -55,6 +55,8 @@
 - El modo local de desarrollo utilizará una instalación fixture explícita; producción fallará cerrada si no existe configuración.
 - Los fixtures de empresa vivirán bajo `config/installations/` y quedarán marcados como desarrollo/QA; los datos reales no entrarán en Git.
 - Los límites de archivos y backpressure serán controles de seguridad/capacidad, no cuotas comerciales.
+- `InstallationConfig` v1 separa identidad, branding, origen público y seis raíces filesystem; producción exige una ruta absoluta montada read-only y falla cerrada si falta.
+- Los fixtures `example-lab-dev` y `northwind-qa` son sintéticos y prueban que la misma base arranca con empresa, dominio, marca, assets y rutas distintos.
 
 ## Riesgos y acciones externas pendientes
 
@@ -64,4 +66,13 @@
 
 ## Siguiente acción concreta
 
-Implementar y probar `InstallationConfig` versionado, loader estricto, branding server-side, rutas derivadas y una segunda instalación QA sin hardcodes funcionales.
+Integrar los primitives de almacenamiento resiliente: schemas versionados, escrituras atómicas, locks, journal, índices regenerables y recuperación comprobada.
+
+## Últimas validaciones
+
+- `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
+- `npm run lint`: verde, sin warnings.
+- `npm run typecheck`: verde.
+- `AIBRAIN_INSTALLATION_CONFIG=.../qa.example.json npm run build`: verde.
+- `env -u AIBRAIN_INSTALLATION_CONFIG npm run build`: verde; la imagen puede compilarse sin secretos/configuración runtime.
+- Smoke HTTP de `/login` con el fixture QA: devolvió `Northwind Brain`, `Northwind Advisory QA`, su dominio y favicon específicos.
