@@ -337,7 +337,11 @@ export class LocalFileMemoryService implements MemoryService {
       subjectUserId: context.userId,
       kind: candidate.kind,
       content: candidate.content,
-      provenance: candidate.provenance,
+      provenance: {
+        sourceType: candidate.provenance.sourceType,
+        sourceId: candidate.provenance.sourceId,
+        sourceExcerpt: candidate.provenance.sourceExcerpt,
+      },
       explicit: candidate.explicit,
     });
     const storage = await this.userStorage(context);
