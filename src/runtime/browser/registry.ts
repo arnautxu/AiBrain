@@ -488,6 +488,22 @@ export class BrowserRuntimeRegistry {
       generation: state.generation,
       recovering,
       roots: await this.store.roots(userId),
+      downloadProjection: Object.freeze({
+        start: async (fileName: string) => {
+          const current = await this.store.load(userId);
+          if (!current.browserSessionId) throw new Error("Browser download session is unavailable.");
+          const download = await this.store.startDownload(userId, current.browserSessionId, fileName);
+          return Object.freeze({ id: download.id });
+        },
+        finish: async (
+          downloadId: string,
+          result: { status: "complete"; sizeBytes: number } | { status: "failed" },
+        ) => {
+          const current = await this.store.load(userId);
+          if (!current.browserSessionId) throw new Error("Browser download session is unavailable.");
+          await this.store.finishDownload(userId, current.browserSessionId, downloadId, result);
+        },
+      }),
     });
   }
 }

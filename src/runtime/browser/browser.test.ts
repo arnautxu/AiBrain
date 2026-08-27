@@ -183,6 +183,37 @@ describe("BrowserSessionStore", () => {
     expect(rootsA.profile.startsWith(path.join(config.paths.usersRoot, USER_A))).toBe(true);
   });
 
+  it("bounds durable download metadata without dropping active records", async () => {
+    const { config } = await fixture();
+    const store = new BrowserSessionStore({ config, maxDownloadRecords: 3 });
+    const starting = await store.createSession(USER_A);
+    const sessionId = starting.browserSessionId as string;
+    await store.markReady(USER_A, sessionId);
+    for (const fileName of ["one.txt", "two.txt", "three.txt"]) {
+      const download = await store.startDownload(USER_A, sessionId, fileName);
+      await store.finishDownload(USER_A, sessionId, download.id, { status: "failed" });
+    }
+    await store.startDownload(USER_A, sessionId, "four.txt");
+    await expect(store.load(USER_A)).resolves.toMatchObject({
+      downloads: [
+        expect.objectContaining({ fileName: "two.txt" }),
+        expect.objectContaining({ fileName: "three.txt" }),
+        expect.objectContaining({ fileName: "four.txt", status: "active" }),
+      ],
+    });
+
+    const activeOnly = new BrowserSessionStore({ config, maxDownloadRecords: 3 });
+    await activeOnly.finishDownload(USER_A, sessionId, (await activeOnly.load(USER_A)).downloads[2]!.id, { status: "failed" });
+    for (const fileName of ["five.txt", "six.txt", "seven.txt"]) {
+      await activeOnly.startDownload(USER_A, sessionId, fileName);
+    }
+    await expect(activeOnly.startDownload(USER_A, sessionId, "eight.txt"))
+      .rejects.toMatchObject({ code: "BROWSER_DOWNLOAD_BACKPRESSURE" });
+
+    const recovering = await activeOnly.beginRecovery(USER_A, sessionId, "process_restart");
+    expect(recovering.downloads.every((download) => download.status !== "active")).toBe(true);
+  });
+
   it("fences stale sessions through takeover, release and heartbeat-timeout recovery", async () => {
     let now = Date.UTC(2026, 7, 27, 10, 0, 0);
     const { store } = await fixture({ now: () => now, heartbeatTtlMs: 2_000 });
@@ -308,6 +339,29 @@ describe("BrowserGatewayTokenService", () => {
 });
 
 describe("BrowserRuntimeRegistry", () => {
+  it("projects real downloads through a rotated takeover session without losing ownership", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    await registry.start(USER_A);
+    const projection = factory.contexts[0]!.downloadProjection as NonNullable<BrowserRuntimeContext["downloadProjection"]>;
+    const download = await projection.start("report.pdf");
+    await registry.takeOver(USER_A);
+    const beforeRelease = registry.get(USER_A)?.browserSessionId;
+    await registry.releaseTakeover(USER_A);
+    expect(registry.get(USER_A)?.browserSessionId).not.toBe(beforeRelease);
+    await projection.finish(download.id, { status: "complete", sizeBytes: 42 });
+    await expect(registry.state(USER_A)).resolves.toMatchObject({
+      downloads: [expect.objectContaining({
+        id: download.id,
+        fileName: "report.pdf",
+        status: "complete",
+        sizeBytes: 42,
+      })],
+    });
+    await registry.close();
+  });
+
   it("recovers expired human and agent control before accepting direct actions", async () => {
     let now = Date.UTC(2026, 7, 27, 12, 0, 0);
     const { store } = await fixture({ now: () => now, heartbeatTtlMs: 1_000 });

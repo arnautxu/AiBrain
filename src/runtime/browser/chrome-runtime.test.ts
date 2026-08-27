@@ -229,11 +229,23 @@ describe("ChromeCdpRuntime private pipe", () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
     const client = new FakeCdpClient(() => child.exit());
+    let nextDownload = 0;
+    const downloadStart = vi.fn(async (_fileName: string) => ({
+      id: `0198b9f0-6631-7000-8000-${String(500 + nextDownload++).padStart(12, "0")}`,
+    }));
+    const downloadFinish = vi.fn(async (
+      _downloadId: string,
+      _result: { status: "complete"; sizeBytes: number } | { status: "failed" },
+    ) => undefined);
+    const runtimeContext: BrowserRuntimeContext = {
+      ...context,
+      downloadProjection: { start: downloadStart, finish: downloadFinish },
+    };
     let spawnedArgs: readonly string[] = [];
     let spawnedStdio: unknown;
     let connectedRequest: unknown;
     let connectedResponse: unknown;
-    const runtime = new ChromeCdpRuntime(context, {
+    const runtime = new ChromeCdpRuntime(runtimeContext, {
       executablePath: "/bin/sh",
       expectedVersion: "140.0.0.0",
       startupTimeoutMs: 2_000,
@@ -360,6 +372,12 @@ describe("ChromeCdpRuntime private pipe", () => {
       readFile(downloadA, "utf8").then((value) => value === "A").catch(() => false),
       readFile(downloadB, "utf8").then((value) => value === "B").catch(() => false),
     ]).then((values) => values.every(Boolean)));
+    await eventually(() => downloadFinish.mock.calls.length === 2);
+    expect(downloadStart).toHaveBeenCalledTimes(2);
+    expect(downloadFinish.mock.calls.map(([, result]) => result)).toEqual([
+      { status: "complete", sizeBytes: 1 },
+      { status: "complete", sizeBytes: 1 },
+    ]);
 
     await expect(runtime.captureFrame("0198b9f0-6631-7000-8000-000000000413"))
       .resolves.toMatchObject({ mediaType: "image/png" });

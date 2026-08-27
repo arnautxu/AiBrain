@@ -60,6 +60,13 @@ export type BrowserRuntimeContext = Readonly<{
   generation: number;
   recovering: boolean;
   roots: BrowserRoots;
+  downloadProjection?: Readonly<{
+    start(fileName: string): Promise<Readonly<{ id: string }>>;
+    finish(
+      downloadId: string,
+      result: { status: "complete"; sizeBytes: number } | { status: "failed" },
+    ): Promise<void>;
+  }>;
 }>;
 
 export type BrowserRuntimeHealth = {

@@ -95,7 +95,10 @@ type ThreadPage = {
   readonly targetId: string;
   readonly sessionId: string;
   readonly downloadsPath: string;
-  readonly downloads: Map<string, string>;
+  readonly downloads: Map<string, Readonly<{
+    fileName: string;
+    projectionId: Promise<string | null>;
+  }>>;
   fetchUnsubscribe: (() => void) | null;
   navigationUnsubscribe: (() => void) | null;
   downloadUnsubscribes: Array<() => void>;
@@ -1241,12 +1244,27 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     const fileName = this.safeDownloadFileName(record.suggestedFilename, guid);
     const existing = this.downloadOwners.get(guid);
     if (existing && existing !== page) {
+      const tracked = existing.downloads.get(guid);
       existing.downloads.delete(guid);
       this.downloadOwners.delete(guid);
-      void this.removeQuarantinedDownload(guid);
+      const cleanup = Promise.all([
+        this.removeQuarantinedDownload(guid),
+        tracked ? this.finishDownloadProjection(tracked.projectionId, { status: "failed" }) : Promise.resolve(),
+      ]).then(() => undefined);
+      this.trackDownloadFinalization(cleanup);
       return;
     }
-    page.downloads.set(guid, fileName);
+    const projectionId = this.context.downloadProjection
+      ? this.context.downloadProjection.start(fileName)
+        .then((download) => download.id)
+        .catch((error: unknown) => {
+          this.lastDownloadFailure = boundedErrorText(
+            error instanceof Error ? error.message : "Browser download projection failed.",
+          );
+          return null;
+        })
+      : Promise.resolve(null);
+    page.downloads.set(guid, Object.freeze({ fileName, projectionId }));
     this.downloadOwners.set(guid, page);
   }
 
@@ -1258,12 +1276,22 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       this.downloadOwners.get(guid) !== page) return;
     const state = record.state;
     if (state !== "completed" && state !== "canceled") return;
-    const fileName = page.downloads.get(guid);
+    const tracked = page.downloads.get(guid);
     page.downloads.delete(guid);
     this.downloadOwners.delete(guid);
-    const finalization = state === "completed" && fileName
-      ? this.promoteQuarantinedDownload(page, guid, fileName)
-      : this.removeQuarantinedDownload(guid);
+    const finalization = (async () => {
+      if (state === "completed" && tracked) {
+        const sizeBytes = await this.promoteQuarantinedDownload(page, guid, tracked.fileName);
+        await this.finishDownloadProjection(tracked.projectionId, { status: "complete", sizeBytes });
+        return;
+      }
+      await this.removeQuarantinedDownload(guid);
+      if (tracked) await this.finishDownloadProjection(tracked.projectionId, { status: "failed" });
+    })();
+    this.trackDownloadFinalization(finalization);
+  }
+
+  private trackDownloadFinalization(finalization: Promise<void>) {
     this.downloadFinalizations.add(finalization);
     void finalization.finally(() => this.downloadFinalizations.delete(finalization))
       .catch((error: unknown) => {
@@ -1271,6 +1299,16 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
           error instanceof Error ? error.message : "Unknown download routing failure.",
         );
       });
+  }
+
+  private async finishDownloadProjection(
+    projectionId: Promise<string | null>,
+    result: { status: "complete"; sizeBytes: number } | { status: "failed" },
+  ) {
+    const downloadId = await projectionId;
+    if (downloadId && this.context.downloadProjection) {
+      await this.context.downloadProjection.finish(downloadId, result);
+    }
   }
 
   private safeDownloadFileName(value: unknown, guid: string) {
@@ -1286,7 +1324,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
 
   private async promoteQuarantinedDownload(page: ThreadPage, guid: string, fileName: string) {
     const quarantine = this.downloadQuarantine;
-    if (!quarantine) return;
+    if (!quarantine) {
+      throw new ChromeRuntimeError("CHROME_DOWNLOAD_INVALID", "Chrome download quarantine is unavailable.");
+    }
     const source = path.join(quarantine, guid);
     let metadata: Awaited<ReturnType<typeof lstat>> | null = null;
     for (let attempt = 0; attempt < 80; attempt += 1) {
@@ -1319,7 +1359,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         await link(source, destination);
         await chmod(destination, 0o600);
         await unlink(source);
-        return;
+        return metadata.size;
       } catch (error) {
         if (isNodeError(error, "EEXIST")) continue;
         throw error;
@@ -1454,15 +1494,16 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     page.navigationUnsubscribe?.();
     page.navigationUnsubscribe = null;
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
-    const activeDownloadGuids = [...page.downloads.keys()];
+    const activeDownloads = [...page.downloads.entries()];
     if (browser?.isOpen) {
       await browser.send("Fetch.disable", {}, { sessionId: page.sessionId }).catch(() => undefined);
       await browser.send("Target.detachFromTarget", { sessionId: page.sessionId }).catch(() => undefined);
       await browser.send("Target.closeTarget", { targetId: page.targetId }).catch(() => undefined);
     }
-    await Promise.all(activeDownloadGuids.map((guid) => {
+    await Promise.all(activeDownloads.map(async ([guid, tracked]) => {
       this.downloadOwners.delete(guid);
-      return this.removeQuarantinedDownload(guid);
+      await this.removeQuarantinedDownload(guid);
+      await this.finishDownloadProjection(tracked.projectionId, { status: "failed" });
     }));
     page.downloads.clear();
   }

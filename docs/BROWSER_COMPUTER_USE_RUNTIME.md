@@ -138,11 +138,17 @@ shared only between threads of that same employee.
 
 Downloads first land under a GUID in a private per-user quarantine. Target-
 scoped Page events bind the GUID to an owned thread, after which the completed
-file is atomically promoted to that thread's private download directory. A
+file is atomically promoted to that thread's private download directory and its
+real terminal size/status is projected into `session.json`. The projection
+resolves the current fenced browser session at each transition, so a normal
+takeover/release rotation cannot orphan a completion. Process restart,
+heartbeat loss, runtime failure and stop mark active metadata as failed. A
 restart cleans bounded orphan quarantine entries rather than assigning them to
-an arbitrary thread. The adapter validates PNG signatures/sizes, URL schemes
-and input dimensions. Network CDP flags, `--no-sandbox`, shell execution and
-`docker.sock` are forbidden.
+an arbitrary thread. Metadata retains at most 1,000 recent records per user by
+default, evicting only the oldest terminal records; if all retained entries are
+active it applies backpressure and deletes no user file. The adapter validates
+PNG signatures/sizes, URL schemes and input dimensions. Network CDP flags,
+`--no-sandbox`, shell execution and `docker.sock` are forbidden.
 
 Production requires `AIBRAIN_CHROME_EXPECTED_VERSION` with all four version
 components. Use a pinned Chrome for Testing/Chromium artifact rather than a
