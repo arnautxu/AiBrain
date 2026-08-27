@@ -372,4 +372,18 @@ export class FileDocumentStagingStore {
     }
     return metadata;
   }
+
+  async resolveContentById(threadId: string, uploadId: string) {
+    const document = await this.readById(threadId, uploadId);
+    const locations = this.paths(threadId, uploadId, document.fileName);
+    await assertExistingContentMatches(locations.contentPath, {
+      kind: document.kind,
+      fileName: document.fileName,
+      mediaType: document.mediaType,
+      size: document.size,
+      sha256: document.sha256,
+      officeEntries: null,
+    }, "STORAGE_STAGING_CONTENT_CORRUPT");
+    return Object.freeze({ document, absolutePath: locations.contentPath });
+  }
 }

@@ -52,6 +52,11 @@ import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import type { JsonValue } from "@/runtime/transport";
 import type { AppServerEvent } from "@/runtime/transport";
 import { atomicWriteFile } from "@/storage";
+import {
+  assertWorkerTurnDocuments,
+  turnDocumentCodexInputs,
+  type ResolvedTurnDocument,
+} from "@/documents/turn-attachments";
 
 export type WorkerTurnProjection = {
   envelope: AppServerEvent;
@@ -166,6 +171,7 @@ export async function runWorkerCodexTurn(
   permissions: ResolvedPermissions,
   approvalStore: FileApprovalStore,
   memory: WorkerTurnMemoryDependencies,
+  turnDocuments: readonly ResolvedTurnDocument[],
   signal: AbortSignal,
   emit: EmitEvent,
 ) {
@@ -190,6 +196,16 @@ export async function runWorkerCodexTurn(
   const runtime = await workerAppServerForUser(authenticatedUserId);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
+  }
+  const documentUploadIds = chatRequest.options.documentUploadIds ?? [];
+  if (documentUploadIds.length > 0 || turnDocuments.length > 0) {
+    assertWorkerTurnDocuments({
+      documents: turnDocuments,
+      stagingRoot: runtime.handle.roots.staging,
+      threadId: chatRequest.threadId,
+      uploadIds: documentUploadIds,
+      permissions,
+    });
   }
   const projectWorkspace = await resolveWorkerOwnedPath(
     runtime.handle.roots.workspace,
@@ -247,7 +263,7 @@ export async function runWorkerCodexTurn(
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
-    runtimeWorkspaceRoots: [projectWorkspace],
+    runtimeWorkspaceRoots: [projectWorkspace, runtime.handle.roots.staging],
     approvalPolicy: runtimeConfig.approvalPolicy,
     approvalsReviewer: "user",
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
@@ -552,6 +568,7 @@ export async function runWorkerCodexTurn(
       clientUserMessageId: chatRequest.userMessageId,
       input: [
         { type: "text", text: chatRequest.message, text_elements: [] },
+        ...turnDocumentCodexInputs(turnDocuments),
         ...(selectedSkill ? [{ type: "skill" as const, name: selectedSkill.id, path: selectedSkill.path }] : []),
         ...chatRequest.options.attachments.map((attachment) => ({
           type: "image" as const,
@@ -559,7 +576,7 @@ export async function runWorkerCodexTurn(
         })),
       ],
       cwd: projectWorkspace,
-      runtimeWorkspaceRoots: [projectWorkspace],
+      runtimeWorkspaceRoots: [projectWorkspace, runtime.handle.roots.staging],
       approvalPolicy: runtimeConfig.approvalPolicy,
       approvalsReviewer: "user",
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),

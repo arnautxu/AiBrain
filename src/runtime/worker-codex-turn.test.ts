@@ -33,6 +33,7 @@ const userMessageId = "00000000-0000-4000-8000-000000000031";
 const assistantMessageId = "00000000-0000-4000-8000-000000000041";
 const fingerprint = "a".repeat(64);
 const memoryId = "00000000-0000-4000-8000-000000000051";
+const documentUploadId = "00000000-0000-4000-8000-000000000061";
 
 function memoryDependencies(
   overrides: {
@@ -81,7 +82,7 @@ function chatRequest(): ChatRequest {
   };
 }
 
-function permissions(): ResolvedPermissions {
+function permissions(rules: ResolvedPermissions["rules"] = []): ResolvedPermissions {
   return {
     schemaVersion: 1,
     installationId,
@@ -92,7 +93,7 @@ function permissions(): ResolvedPermissions {
     resolvedAt: new Date().toISOString(),
     fingerprint,
     sources: [],
-    rules: [],
+    rules,
     developerInstructions: `Policy fingerprint: ${fingerprint}`,
   };
 }
@@ -103,7 +104,13 @@ describe("worker Codex turn", () => {
   it("uses a user-scoped worker, stable client message id and routed turn events", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-turn-"));
     const workspace = path.join(userRoot, "workspace");
-    await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace, { mode: 0o700 }));
+    const staging = path.join(userRoot, "staging");
+    const documentPath = path.join(staging, "threads", threadId, "uploads", documentUploadId, "notes.txt");
+    await import("node:fs/promises").then(async ({ mkdir, writeFile }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.dirname(documentPath), { recursive: true, mode: 0o700 });
+      await writeFile(documentPath, "Attachment text\n", { mode: 0o600 });
+    });
     let handlers: {
       onNotification(value: unknown): Promise<void> | void;
       onFailure(error: Error): void;
@@ -186,14 +193,25 @@ describe("worker Codex turn", () => {
     mocked.runtime = {
       config: { installationId },
       handle: {
-        roots: { workspace },
+        roots: { workspace, staging },
       },
       client,
     };
 
     const events: Array<Record<string, unknown>> = [];
+    const request = chatRequest();
+    request.options.documentUploadIds = [documentUploadId];
+    const turnPermissions = permissions([{
+      ruleId: "documents.read",
+      action: "consult",
+      effect: "allow",
+      instruction: "Read the attached document.",
+      sourceScope: "installation",
+      sourcePolicyVersion: 1,
+      precedence: 100,
+    }]);
     await runWorkerCodexTurn(
-      chatRequest(),
+      request,
       installationId,
       userId,
       null,
@@ -207,9 +225,25 @@ describe("worker Codex turn", () => {
         approvalPolicy: "on-request",
         sandbox: "workspace-write",
       },
-      permissions(),
+      turnPermissions,
       {} as never,
       memoryDependencies(),
+      [{
+        document: {
+          schemaVersion: 1,
+          uploadId: documentUploadId,
+          threadId,
+          fileName: "notes.txt",
+          relativePath: `threads/${threadId}/uploads/${documentUploadId}/notes.txt`,
+          kind: "text",
+          mediaType: "text/plain",
+          size: 16,
+          sha256: "b".repeat(64),
+          status: "staged",
+          createdAt: "2026-08-27T00:00:00.000Z",
+        },
+        absolutePath: documentPath,
+      }],
       new AbortController().signal,
       async (event) => { events.push(event); },
     );
@@ -218,8 +252,13 @@ describe("worker Codex turn", () => {
     expect(turnStart?.params).toMatchObject({
       threadId: "runtime-thread-1",
       clientUserMessageId: userMessageId,
-      runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId)],
+      runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId), staging],
     });
+    expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: "text", text: expect.stringContaining("server-attached documents") }),
+        { type: "mention", name: "notes.txt", path: documentPath },
+      ]));
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
     const threadStart = calls.find((call) => call.method === "thread/start");
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
@@ -251,7 +290,11 @@ describe("worker Codex turn", () => {
   it("recovers a completed clientUserMessageId from thread history without starting it twice", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-recovery-"));
     const workspace = path.join(userRoot, "workspace");
-    await import("node:fs/promises").then(({ mkdir }) => mkdir(workspace, { mode: 0o700 }));
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(staging, { mode: 0o700 });
+    });
     const calls: string[] = [];
     const client = {
       router: {
@@ -306,7 +349,7 @@ describe("worker Codex turn", () => {
     };
     mocked.runtime = {
       config: { installationId },
-      handle: { roots: { workspace } },
+      handle: { roots: { workspace, staging } },
       client,
     };
     const events: Array<Record<string, unknown>> = [];
@@ -328,6 +371,7 @@ describe("worker Codex turn", () => {
       permissions(),
       {} as never,
       memoryDependencies(),
+      [],
       new AbortController().signal,
       async (event) => { events.push(event); },
     );
@@ -361,6 +405,7 @@ describe("worker Codex turn", () => {
         buildPromptSnapshot: async () => { throw new Error("corrupt memory journal"); },
         record: async (event) => { audited = true; return event; },
       }),
+      [],
       new AbortController().signal,
       async () => undefined,
     )).rejects.toMatchObject({ code: "MEMORY_TURN_SNAPSHOT_UNAVAILABLE" });

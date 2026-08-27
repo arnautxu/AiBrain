@@ -40,6 +40,13 @@ import {
   FileMemoryTurnAuditSink,
   type WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
+import { documentServicesForUser } from "@/documents/server-service";
+import {
+  resolveTurnDocumentAttachments,
+  TurnDocumentAttachmentError,
+  turnDocumentChatAttachments,
+  type ResolvedTurnDocument,
+} from "@/documents/turn-attachments";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -186,6 +193,7 @@ export async function POST(request: Request) {
   let approvalStore: FileApprovalStore | null = null;
   let turnProjectionStore: FileTurnProjectionStore | null = null;
   let turnMemory: WorkerTurnMemoryDependencies | null = null;
+  let turnDocuments: readonly ResolvedTurnDocument[] = [];
   if (config.mode === "codex") {
     try {
       const installation = await loadInstallationConfig();
@@ -213,7 +221,25 @@ export async function POST(request: Request) {
           usersRoot: installation.paths.usersRoot,
         }),
       };
+      const documentUploadIds = body.options.documentUploadIds ?? [];
+      if (documentUploadIds.length > 0) {
+        const documentServices = await documentServicesForUser(installation, session.user.id);
+        turnDocuments = await resolveTurnDocumentAttachments({
+          staging: documentServices.staging,
+          threadId: body.threadId,
+          uploadIds: documentUploadIds,
+          permissions: turnPermissions,
+        });
+      }
     } catch (error) {
+      if (error instanceof TurnDocumentAttachmentError) {
+        return NextResponse.json(
+          { error: error.code === "TURN_DOCUMENT_PERMISSION_DENIED"
+            ? "La política del torn no permet consultar aquests documents."
+            : "Els adjunts documentals del torn no són vàlids." },
+          { status: error.code === "TURN_DOCUMENT_PERMISSION_DENIED" ? 403 : 400 },
+        );
+      }
       const code = error && typeof error === "object" && "code" in error
         ? String(error.code)
         : "PERMISSION_PREFLIGHT_FAILED";
@@ -234,6 +260,7 @@ export async function POST(request: Request) {
     startedAt.toISOString(),
   );
   userMessage.attachments = body.options.attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment);
+  userMessage.attachments.push(...turnDocumentChatAttachments(turnDocuments));
   let assistantMessage = message(
     body.assistantMessageId,
     "assistant",
@@ -351,6 +378,7 @@ export async function POST(request: Request) {
             turnPermissions,
             approvalStore,
             turnMemory,
+            turnDocuments,
             request.signal,
             emitCodex,
           );
