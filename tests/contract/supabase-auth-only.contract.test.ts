@@ -24,10 +24,13 @@ describe("Supabase Auth-only architecture", () => {
     const imports: string[] = [];
     for (const file of files) {
       const contents = await readFile(file, "utf8");
+      const relative = path.relative(repositoryRoot, file);
       if (contents.includes("@supabase/")) {
-        imports.push(path.relative(repositoryRoot, file));
+        imports.push(relative);
       }
-      expect(contents, path.relative(repositoryRoot, file)).not.toMatch(/\.(?:from|rpc)\(\s*["']/);
+      expect(contents, relative).not.toMatch(/\.(?:from|rpc)\(\s*["']/);
+      expect(contents, relative).not.toMatch(/\/(?:rest|graphql|storage|realtime)\/v1\b/iu);
+      expect(contents, relative).not.toMatch(/\.supabase\.(?:from|rpc|storage|realtime|functions)\b/iu);
     }
     expect(imports).toEqual(["src/auth/supabase-identity-provider.ts"]);
   });
@@ -56,6 +59,8 @@ describe("Supabase Auth-only architecture", () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
     expect(packageJson.dependencies["@supabase/supabase-js"]).toBe("2.112.4");
     expect(packageJson.dependencies["@supabase/ssr"]).toBeUndefined();
+    expect(packageJson.dependencies["@supabase/postgrest-js"]).toBeUndefined();
+    expect(packageJson.dependencies["graphql-request"]).toBeUndefined();
 
     const config = await readFile(path.join(repositoryRoot, "supabase", "config.toml"), "utf8");
     expect(config).toMatch(/\[db\.migrations\]\s+[\s\S]*?enabled = false/);
