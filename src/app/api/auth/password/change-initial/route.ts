@@ -73,6 +73,12 @@ export async function POST(request: Request) {
     if (error instanceof IdentityProviderError && error.code === "provider_unavailable") {
       return NextResponse.json({ error: "El servei d’identitat no està disponible." }, { status: 503 });
     }
+    if (error instanceof IdentityProviderError && error.code === "provider_rejected") {
+      return NextResponse.json(
+        { error: "El proveïdor ha rebutjat la contrasenya. Tria una contrasenya diferent i torna-ho a provar." },
+        { status: 400, headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     await clearAuthChallengeCookie();
     return NextResponse.json({ error: "El canvi de contrasenya ha caducat." }, { status: 401 });
   }

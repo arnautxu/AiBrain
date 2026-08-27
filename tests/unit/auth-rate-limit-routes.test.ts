@@ -6,6 +6,7 @@ const mocked = vi.hoisted(() => ({
   requestPasswordRecovery: vi.fn(),
   completePasswordRecovery: vi.fn(),
   changeInitialPassword: vi.fn(),
+  clearAuthChallengeCookie: vi.fn(),
   challengeId: "initial-password-challenge-secret",
 }));
 
@@ -33,7 +34,7 @@ vi.mock("@/auth/session", () => ({
 }));
 vi.mock("@/auth/session-cookie", () => ({
   LOCAL_AUTH_CHALLENGE_COOKIE: "aibrain_auth_challenge",
-  clearAuthChallengeCookie: async () => undefined,
+  clearAuthChallengeCookie: (...args: unknown[]) => mocked.clearAuthChallengeCookie(...args),
   setAuthChallengeCookie: async () => undefined,
   setLocalSessionCookie: async () => undefined,
 }));
@@ -47,6 +48,7 @@ import { POST as loginPost } from "@/app/api/auth/login/route";
 import { POST as recoveryPost } from "@/app/api/auth/password/recovery/route";
 import { POST as resetRequestPost } from "@/app/api/auth/password/reset/request/route";
 import { POST as initialChangePost } from "@/app/api/auth/password/change-initial/route";
+import { IdentityProviderError } from "@/auth/identity-provider";
 
 function request(pathname: string, body: Record<string, unknown>) {
   return new Request(`https://brain.example.test${pathname}`, {
@@ -133,5 +135,23 @@ describe("auth route rate limits", () => {
       "initial-password-change",
       `challenge:${mocked.challengeId}`,
     );
+  });
+
+  it("keeps a provider password rejection retryable instead of expiring the challenge", async () => {
+    mocked.changeInitialPassword.mockRejectedValue(new IdentityProviderError(
+      "provider_rejected",
+      "provider rejected password",
+    ));
+    const response = await initialChangePost(request("/api/auth/password/change-initial", {
+      password: "Permanent-pass-123",
+      confirmation: "Permanent-pass-123",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "El proveïdor ha rebutjat la contrasenya. Tria una contrasenya diferent i torna-ho a provar.",
+    });
+    expect(response.headers.get("cache-control")).toContain("no-store");
+    expect(mocked.clearAuthChallengeCookie).not.toHaveBeenCalled();
   });
 });
