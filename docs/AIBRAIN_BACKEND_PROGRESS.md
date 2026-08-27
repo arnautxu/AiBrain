@@ -542,3 +542,7 @@ npm run infra:validate
 ### Cierre de la incidencia
 
 [Installation-specific operational details omitted.]
+
+## Continuación secuencial en un thread persistente — 2026-08-27
+
+[Installation-specific operational details omitted.]
