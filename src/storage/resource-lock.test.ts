@@ -99,6 +99,19 @@ describe("resource lock manager", () => {
     await lease.release();
   });
 
+  it("fails closed when a live local owner has an artificially stale timestamp", async () => {
+    const first = manager({ staleAfterMs: 100, heartbeatIntervalMs: 90 });
+    const second = manager({ staleAfterMs: 100, heartbeatIntervalMs: 90 });
+    const lease = await first.acquire("live-but-old-timestamp");
+    const staleTime = new Date(Date.now() - 5_000);
+    await utimes(lease.lockPath, staleTime, staleTime);
+
+    await expect(second.acquire("live-but-old-timestamp", { timeoutMs: 20 }))
+      .rejects.toBeInstanceOf(ResourceLockTimeoutError);
+    await lease.assertHeld();
+    await lease.release();
+  });
+
   it("supports cancellation while waiting and idempotent release", async () => {
     const first = manager();
     const second = manager();
