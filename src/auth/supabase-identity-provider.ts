@@ -1,6 +1,10 @@
 import "server-only";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  createClient,
+  isAuthRetryableFetchError,
+  type SupabaseClient,
+} from "@supabase/supabase-js";
 import {
   IdentityProviderError,
   type AuthIdentityProvider,
@@ -45,7 +49,11 @@ function providerFailure(
   rejectedCode: "invalid_credentials" | "invalid_recovery" | "provider_rejected",
 ) {
   if (error instanceof IdentityProviderError) return error;
-  if (error instanceof TypeError || (error && typeof error === "object" && "cause" in error)) {
+  if (
+    isAuthRetryableFetchError(error) ||
+    error instanceof TypeError ||
+    (error && typeof error === "object" && "cause" in error)
+  ) {
     return new IdentityProviderError(
       "provider_unavailable",
       "Identity provider is unavailable.",
