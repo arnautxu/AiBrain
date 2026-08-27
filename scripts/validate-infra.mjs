@@ -67,6 +67,7 @@ forbidMatch(arnallDeployGateway, /(?:docker\s+(?:system|builder|image)\s+prune|d
 requireMatch(arnallDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,120}\^deploy\\ \(\[0-9a-f\]\{40\}\)\$/u, "Arnall deploy gateway does not constrain the forced SSH command to one immutable revision");
 requireMatch(arnallDeployGateway, /AIBRAIN_INSTALLATION_ID=\$\{INSTALLATION_ID\}[\s\S]{0,250}AIBRAIN_COMPOSE_PROJECT_NAME=\$\{COMPOSE_PROJECT\}/u, "Arnall deploy gateway does not verify the exact installation and Compose project");
 requireMatch(arnallDeployGateway, /validate_archive[\s\S]{0,1500}source archive contains links or special files/u, "Arnall deploy gateway does not validate the source archive before root extraction");
+requireMatch(arnallDeployGateway, /dd if=\/dev\/stdin.*iflag=fullblock/u, "Arnall deploy gateway can truncate a streamed archive on short pipe reads");
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful Backend CI");
 requireMatch(arnallDeployWorkflow, /head_sha[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnall deployment does not transmit the immutable tested revision");

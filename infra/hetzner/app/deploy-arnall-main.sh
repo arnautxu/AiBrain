@@ -101,7 +101,7 @@ main() {
   fi
   [[ ! -e "$release_dir" ]] || fail "release directory already exists for a non-current revision"
 
-  dd if=/dev/stdin of="$archive" bs=1M count=65 status=none
+  dd if=/dev/stdin of="$archive" bs=1M count=65 iflag=fullblock status=none
   validate_archive "$archive"
   install -d -m 0700 -o root -g root "$release_dir"
   tar --extract --file="$archive" --directory="$release_dir" --no-same-owner --no-same-permissions
