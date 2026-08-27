@@ -10,6 +10,7 @@ export const PRIVATE_CDP_METHODS = [
   "DOM.getDocument",
   "DOM.querySelector",
   "Fetch.continueRequest",
+  "Fetch.continueWithAuth",
   "Fetch.disable",
   "Fetch.enable",
   "Fetch.failRequest",

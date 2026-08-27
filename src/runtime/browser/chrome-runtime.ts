@@ -100,6 +100,7 @@ type ThreadPage = {
     projectionId: Promise<string | null>;
   }>>;
   fetchUnsubscribe: (() => void) | null;
+  authUnsubscribe: (() => void) | null;
   navigationUnsubscribe: (() => void) | null;
   downloadUnsubscribes: Array<() => void>;
   interceptedRequests: number;
@@ -382,6 +383,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private readonly downloadOwners = new Map<string, ThreadPage>();
   private readonly downloadFinalizations = new Set<Promise<void>>();
   private readonly navigationWrites = new Set<Promise<void>>();
+  private readonly proxyAuthResponses = new Set<Promise<void>>();
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
   private stderrTail = "";
@@ -389,8 +391,10 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private takenOver = false;
   private browserVersion: string | null = null;
   private downloadQuarantine: string | null = null;
+  private egressProxyUrl: string | null = null;
   private lastDownloadFailure: string | null = null;
   private lastNavigationFailure: string | null = null;
+  private lastProxyAuthFailure: string | null = null;
   private detachedUnsubscribe: (() => void) | null = null;
   private targetCreatedUnsubscribe: (() => void) | null = null;
   private targetDestroyedUnsubscribe: (() => void) | null = null;
@@ -476,6 +480,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       }
       if (this.lastNavigationFailure) {
         return { healthy: false, detail: `Chrome navigation persistence failed: ${this.lastNavigationFailure}` };
+      }
+      if (this.lastProxyAuthFailure) {
+        return { healthy: false, detail: `Chrome loopback proxy authentication failed: ${this.lastProxyAuthFailure}` };
       }
       const version = await this.browserClient.send<{ product: string }>("Browser.getVersion");
       const current = extractBrowserVersion(version.product);
@@ -775,6 +782,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     };
     try {
       const proxyUrl = this.egressProxy ? await this.egressProxy.start() : null;
+      this.egressProxyUrl = proxyUrl;
       const args = buildChromeArguments(this.context, proxyUrl);
       const version = await this.launchPipeWithBackoff(executable, args, environment);
       if (this.expectedVersion && version !== this.expectedVersion) {
@@ -980,6 +988,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         downloadsPath,
         downloads: new Map(),
         fetchUnsubscribe: null,
+        authUnsubscribe: null,
         navigationUnsubscribe: null,
         downloadUnsubscribes: [],
         interceptedRequests: 0,
@@ -993,6 +1002,11 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       page.fetchUnsubscribe = browser.on("Fetch.requestPaused", (params) => {
         this.queueInterceptedRequest(page as ThreadPage, params);
       }, { sessionId });
+      if (this.egressProxy) {
+        page.authUnsubscribe = browser.on("Fetch.authRequired", (params) => {
+          this.queueProxyAuthentication(page as ThreadPage, params);
+        }, { sessionId });
+      }
       page.navigationUnsubscribe = browser.on("Page.frameNavigated", (params) => {
         this.queueNavigationPersistence(page as ThreadPage, params);
       }, { sessionId });
@@ -1005,6 +1019,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         }, { sessionId }),
       );
       await browser.send("Fetch.enable", {
+        handleAuthRequests: Boolean(this.egressProxy),
         patterns: [
           { urlPattern: "http://*", requestStage: "Request" },
           { urlPattern: "https://*", requestStage: "Request" },
@@ -1028,6 +1043,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       return page;
     } catch (error) {
       page?.fetchUnsubscribe?.();
+      page?.authUnsubscribe?.();
       page?.navigationUnsubscribe?.();
       for (const unsubscribe of page?.downloadUnsubscribes ?? []) unsubscribe();
       if (browser.isOpen) {
@@ -1126,6 +1142,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     if (this.threadPages.get(page.threadId) === page) this.threadPages.delete(page.threadId);
     page.fetchUnsubscribe?.();
     page.fetchUnsubscribe = null;
+    page.authUnsubscribe?.();
+    page.authUnsubscribe = null;
     page.navigationUnsubscribe?.();
     page.navigationUnsubscribe = null;
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
@@ -1186,6 +1204,46 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       if (!this.ownsTarget(targetId)) this.queueUnownedTargetClosure(targetId);
     }
     await Promise.allSettled([...this.unownedTargetClosures]);
+  }
+
+  private queueProxyAuthentication(page: ThreadPage, value: unknown) {
+    if (page.closed || !this.browserClient?.isOpen) return;
+    const response = this.handleProxyAuthentication(page, value);
+    this.proxyAuthResponses.add(response);
+    void response.finally(() => this.proxyAuthResponses.delete(response)).catch((error: unknown) => {
+      this.lastProxyAuthFailure = boundedErrorText(
+        error instanceof Error ? error.message : "Unknown loopback proxy authentication failure.",
+      );
+    });
+  }
+
+  private async handleProxyAuthentication(page: ThreadPage, value: unknown) {
+    if (!isRecord(value) || typeof value.requestId !== "string" ||
+      !/^[A-Za-z0-9.-]{1,256}$/u.test(value.requestId) || !isRecord(value.authChallenge)) {
+      throw new ChromeRuntimeError("CHROME_PROXY_AUTH_INVALID", "Chrome proxy auth challenge is invalid.");
+    }
+    const challenge = value.authChallenge;
+    let provide = false;
+    if (challenge.source === "Proxy" && challenge.scheme === "basic" &&
+      challenge.realm === "aibrain-browser" && typeof challenge.origin === "string" && this.egressProxyUrl) {
+      try {
+        provide = new URL(challenge.origin).origin === this.egressProxyUrl;
+      } catch {
+        provide = false;
+      }
+    }
+    const credentials = this.egressProxy?.clientCredentials();
+    await this.requireBrowser().send("Fetch.continueWithAuth", {
+      requestId: value.requestId,
+      authChallengeResponse: provide && credentials
+        ? {
+            response: "ProvideCredentials",
+            username: credentials.username,
+            password: credentials.password,
+          }
+        : { response: "CancelAuth" },
+    }, { sessionId: page.sessionId });
+    if (provide) this.lastProxyAuthFailure = null;
   }
 
   private queueInterceptedRequest(page: ThreadPage, value: unknown) {
@@ -1441,6 +1499,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     await Promise.allSettled([...this.threadPagePromises.values()]);
     await Promise.allSettled([...this.downloadFinalizations]);
     await Promise.allSettled([...this.navigationWrites]);
+    await Promise.allSettled([...this.proxyAuthResponses]);
     await Promise.allSettled([...this.unownedTargetClosures]);
     const pages = [...this.threadPages.values()];
     const activeDownloadGuids = pages.flatMap((page) => [...page.downloads.keys()]);
@@ -1468,6 +1527,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     await Promise.allSettled(pages.map((page) => this.closeThreadPage(page, browser)));
     await Promise.allSettled([...this.downloadFinalizations]);
     await Promise.allSettled([...this.navigationWrites]);
+    await Promise.allSettled([...this.proxyAuthResponses]);
     if (browser?.isOpen) await browser.send("Browser.close").catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
     if (child && child.exitCode === null) {
@@ -1482,8 +1542,10 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     await Promise.allSettled(activeDownloadGuids.map((guid) => this.removeQuarantinedDownload(guid)));
     this.process = null;
     this.downloadQuarantine = null;
+    this.egressProxyUrl = null;
     this.lastDownloadFailure = null;
     this.lastNavigationFailure = null;
+    this.lastProxyAuthFailure = null;
     this.browserVersion = null;
   }
 
@@ -1491,6 +1553,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     page.closed = true;
     page.fetchUnsubscribe?.();
     page.fetchUnsubscribe = null;
+    page.authUnsubscribe?.();
+    page.authUnsubscribe = null;
     page.navigationUnsubscribe?.();
     page.navigationUnsubscribe = null;
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();

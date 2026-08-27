@@ -1,3 +1,4 @@
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { Agent, createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { connect as netConnect, isIP, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
@@ -17,6 +18,7 @@ const DEFAULT_ALLOWED_PORTS = Object.freeze([80, 443]);
 const MAX_AUTHORITY_BYTES = 1_024;
 const MAX_UPSTREAM_RESPONSE_BYTES = 16 * 1_024;
 const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
+const CLIENT_USERNAME = "aibrain-browser";
 
 const STATIC_HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -51,6 +53,7 @@ export type BrowserEgressProxyOptions = Readonly<{
   networkPolicy?: BrowserNetworkPolicy;
   connect?: BrowserPinnedConnector;
   upstreamProxy?: Readonly<{ url: string; token: string }>;
+  clientPassword?: string;
   maxHeaderBytes?: number;
   maxConnections?: number;
   connectTimeoutMs?: number;
@@ -231,10 +234,6 @@ function upstreamPinnedConnector(value: Readonly<{ url: string; token: string }>
   });
 }
 
-function containsProxyCredentials(headers: IncomingHttpHeaders) {
-  return headers["proxy-authorization"] !== undefined || headers["proxy-authenticate"] !== undefined;
-}
-
 function connectionHeaderNames(headers: IncomingHttpHeaders) {
   const values = headers.connection;
   const joined = Array.isArray(values) ? values.join(",") : values ?? "";
@@ -303,6 +302,20 @@ function socketResponse(socket: Duplex, status: number, reason: string) {
   }
 }
 
+function proxyAuthenticationRequired(socket: Duplex) {
+  if (!socket.destroyed && socket.writable) {
+    socket.end([
+      "HTTP/1.1 407 Proxy Authentication Required",
+      "Proxy-Authenticate: Basic realm=\"aibrain-browser\"",
+      "Cache-Control: no-store",
+      "Connection: close",
+      "Content-Length: 0",
+      "",
+      "",
+    ].join("\r\n"));
+  } else socket.destroy();
+}
+
 function proxyStatus(error: unknown) {
   if (error instanceof BrowserNetworkPolicyError) {
     return error.code === "BROWSER_NETWORK_DNS_BACKPRESSURE" ? 429 : 403;
@@ -336,6 +349,8 @@ export class BrowserEgressProxy {
   private readonly requestTimeoutMs: number;
   private readonly maxBytesPerExchange: number;
   private readonly allowedPorts: ReadonlySet<number>;
+  private readonly clientPassword: string;
+  private readonly expectedClientAuthorization: Buffer;
   private readonly clientSockets = new Set<Socket>();
   private readonly upstreamSockets = new Set<Socket>();
   private server: Server | null = null;
@@ -361,6 +376,17 @@ export class BrowserEgressProxy {
     this.connector = options.connect ?? (configuredUpstream
       ? upstreamPinnedConnector(configuredUpstream)
       : defaultPinnedConnector);
+    this.clientPassword = options.clientPassword ?? randomBytes(32).toString("base64url");
+    if (!EGRESS_TOKEN_PATTERN.test(this.clientPassword)) {
+      throw new BrowserEgressProxyError(
+        "BROWSER_PROXY_OPTIONS_INVALID",
+        "Browser proxy client password must be a strong base64url secret.",
+      );
+    }
+    this.expectedClientAuthorization = Buffer.from(
+      `Basic ${Buffer.from(`${CLIENT_USERNAME}:${this.clientPassword}`, "utf8").toString("base64")}`,
+      "utf8",
+    );
     this.maxHeaderBytes = boundedInteger(
       "maxHeaderBytes",
       options.maxHeaderBytes ?? DEFAULT_MAX_HEADER_BYTES,
@@ -496,6 +522,10 @@ export class BrowserEgressProxy {
     });
   }
 
+  clientCredentials() {
+    return Object.freeze({ username: CLIENT_USERNAME, password: this.clientPassword });
+  }
+
   async health(): Promise<BrowserEgressProxyHealth> {
     const healthy = this.server?.listening === true && this.proxyUrl !== null;
     return Object.freeze({
@@ -528,6 +558,14 @@ export class BrowserEgressProxy {
     this.upstreamSockets.add(socket);
     socket.setTimeout(this.idleTimeoutMs, () => socket.destroy());
     socket.once("close", () => this.upstreamSockets.delete(socket));
+  }
+
+  private authorized(headers: IncomingHttpHeaders) {
+    if (headers["proxy-authenticate"] !== undefined ||
+      typeof headers["proxy-authorization"] !== "string") return false;
+    const provided = Buffer.from(headers["proxy-authorization"], "utf8");
+    return provided.length === this.expectedClientAuthorization.length &&
+      timingSafeEqual(provided, this.expectedClientAuthorization);
   }
 
   private async resolveTarget(url: string, expectedProtocol: "http:" | "https:") {
@@ -610,8 +648,9 @@ export class BrowserEgressProxy {
 
   private async handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
     try {
-      if (containsProxyCredentials(request.headers)) {
-        responseText(response, 403, "Proxy credentials are forbidden.");
+      if (!this.authorized(request.headers)) {
+        response.setHeader("proxy-authenticate", "Basic realm=\"aibrain-browser\"");
+        responseText(response, 407, "Proxy authentication required.");
         return;
       }
       if (hasAmbiguousBodyFraming(request)) {
@@ -705,7 +744,11 @@ export class BrowserEgressProxy {
 
   private async handleConnect(request: IncomingMessage, client: Duplex, head: Buffer) {
     try {
-      if (containsProxyCredentials(request.headers) || hasAmbiguousBodyFraming(request) ||
+      if (!this.authorized(request.headers)) {
+        proxyAuthenticationRequired(client);
+        return;
+      }
+      if (hasAmbiguousBodyFraming(request) ||
         request.headers["content-length"] !== undefined || request.headers["transfer-encoding"] !== undefined) {
         socketResponse(client, 403, "Forbidden");
         return;

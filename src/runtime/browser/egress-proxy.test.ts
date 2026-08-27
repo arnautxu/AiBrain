@@ -6,6 +6,7 @@ import { BrowserNetworkPolicy, type BrowserDnsLookup } from "@/runtime/browser/n
 
 const proxies = new Set<BrowserEgressProxy>();
 const servers = new Set<NetServer | ReturnType<typeof createHttpServer>>();
+const CLIENT_PASSWORD = "browser-client-password-00000000000000000001";
 
 afterEach(async () => {
   vi.unstubAllEnvs();
@@ -50,10 +51,17 @@ function publicPolicy(lookup?: BrowserDnsLookup) {
 }
 
 async function startProxy(options: ConstructorParameters<typeof BrowserEgressProxy>[0] = {}) {
-  const proxy = new BrowserEgressProxy(options);
+  const proxy = new BrowserEgressProxy({ clientPassword: CLIENT_PASSWORD, ...options });
   proxies.add(proxy);
-  const url = await proxy.start();
-  return { proxy, url: new URL(url) };
+  const url = new URL(await proxy.start());
+  const credentials = proxy.clientCredentials();
+  url.username = credentials.username;
+  url.password = credentials.password;
+  return { proxy, url };
+}
+
+function clientAuthorization(proxy: URL) {
+  return `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`, "utf8").toString("base64")}`;
 }
 
 function proxyRequest(
@@ -67,7 +75,7 @@ function proxyRequest(
       port: Number(proxy.port),
       method: options.method ?? "GET",
       path: target,
-      headers: options.headers,
+      headers: { "proxy-authorization": clientAuthorization(proxy), ...options.headers },
       agent: false,
     }, (response) => {
       const chunks: Buffer[] = [];
@@ -106,6 +114,7 @@ function openConnect(proxy: URL, authority: string, headers: readonly string[] =
       socket.write([
         `CONNECT ${authority} HTTP/1.1`,
         `Host: ${authority}`,
+        `Proxy-Authorization: ${clientAuthorization(proxy)}`,
         ...headers,
         "",
         "",
@@ -121,7 +130,12 @@ function rawProxyResponse(proxy: URL, requestText: string) {
     socket.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
     socket.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     socket.once("error", reject);
-    socket.once("connect", () => socket.end(requestText));
+    socket.once("connect", () => {
+      const authenticated = /^Proxy-Authorization:/imu.test(requestText)
+        ? requestText
+        : requestText.replace("\r\n", `\r\nProxy-Authorization: ${clientAuthorization(proxy)}\r\n`);
+      socket.end(authenticated);
+    });
   });
 }
 
@@ -315,7 +329,7 @@ describe("BrowserEgressProxy pinned transport", () => {
 });
 
 describe("BrowserEgressProxy rejection and bounds", () => {
-  it("rejects proxy auth and URL credentials before DNS or connection", async () => {
+  it("rejects wrong proxy auth and URL credentials before DNS or connection", async () => {
     let lookups = 0;
     let connects = 0;
     const { url } = await startProxy({
@@ -330,7 +344,7 @@ describe("BrowserEgressProxy rejection and bounds", () => {
     });
     await expect(proxyRequest(url, "http://public.example/", {
       headers: { "proxy-authorization": "Basic Zm9vOmJhcg==" },
-    })).resolves.toMatchObject({ status: 403 });
+    })).resolves.toMatchObject({ status: 407 });
     await expect(proxyRequest(url, "http://user:password@public.example/"))
       .resolves.toMatchObject({ status: 403 });
     const connectResponse = await rawProxyResponse(url, [
@@ -347,7 +361,7 @@ describe("BrowserEgressProxy rejection and bounds", () => {
       "",
       "",
     ].join("\r\n"));
-    expect(authenticatedConnect).toContain("403 Forbidden");
+    expect(authenticatedConnect).toContain("407 Proxy Authentication Required");
     expect(lookups).toBe(0);
     expect(connects).toBe(0);
   });
