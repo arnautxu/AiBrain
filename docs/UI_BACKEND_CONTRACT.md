@@ -1244,6 +1244,8 @@ heredado sin listener TCP. El runtime normal fuerza un proxy efímero en
 `127.0.0.1`, resuelve cada hostname con la política privada y conecta solo a la
 IP pública aprobada; QUIC y UDP WebRTC no proxyado quedan deshabilitados. El
 interceptor Fetch conserva una segunda validación con la misma policy.
+El proxy solo permite TCP 80/443 por defecto; un puerto público arbitrario se
+rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
 ## 15. Estados degradados y errores recuperables
 

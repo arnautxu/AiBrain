@@ -135,18 +135,21 @@ user's auto-updating desktop Chrome. `AIBRAIN_CHROME_EXECUTABLE` selects the ser
 executable. `AIBRAIN_BROWSER_GATEWAY_SECRET` must be a dedicated secret of at
 least 32 bytes.
 
-## Remaining browser work
+## Operational browser boundary
 
-The browser checkpoint stays open until these plan requirements are added and
-validated:
+The agent receives only the closed browser tool namespace and sensitive
+mutations require durable, replayable approval. Chrome egress crosses a
+private loopback proxy: DNS is resolved once under `BrowserNetworkPolicy`, all
+answers must be globally routable, and the socket connects to the pinned IP.
+Only TCP 80 and 443 are allowed by default for absolute HTTP and CONNECT; a
+different bounded server-side allowlist must be explicit and is never chosen
+by the browser/UI.
 
-1. add the closed agent tool and durable approvals for sensitive external acts;
-2. proxy browser egress through a DNS-pinned policy boundary so hostname
-   validation and the connection cannot diverge;
-3. expose only the required target/tab lifecycle operations without arbitrary
-   CDP;
-4. add durable browser action/recovery audit records;
-5. add crash-loop, memory and CPU operational probes.
+CDP target discovery closes popups, service workers and pages not owned by the
+active thread creation. Production launches Chrome inside the employee bwrap
+filesystem namespace, masking other profiles, source and publish roots. The
+remaining validation is host-specific: exercise bwrap/seccomp/Chromium and
+resource probes inside the immutable QA image.
 
 ## Focused validation
 

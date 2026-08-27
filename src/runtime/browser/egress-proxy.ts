@@ -13,6 +13,7 @@ const DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_BYTES_PER_EXCHANGE = 128 * 1_024 * 1_024;
+const DEFAULT_ALLOWED_PORTS = Object.freeze([80, 443]);
 const MAX_AUTHORITY_BYTES = 1_024;
 
 const STATIC_HOP_BY_HOP_HEADERS = new Set([
@@ -53,6 +54,7 @@ export type BrowserEgressProxyOptions = Readonly<{
   idleTimeoutMs?: number;
   requestTimeoutMs?: number;
   maxBytesPerExchange?: number;
+  allowedPorts?: readonly number[];
 }>;
 
 export type BrowserEgressProxyHealth = Readonly<{
@@ -183,6 +185,13 @@ function proxyStatus(error: unknown) {
   if (error instanceof BrowserNetworkPolicyError) {
     return error.code === "BROWSER_NETWORK_DNS_BACKPRESSURE" ? 429 : 403;
   }
+  if (error instanceof BrowserEgressProxyError && new Set([
+    "BROWSER_PROXY_PORT_INVALID",
+    "BROWSER_PROXY_PORT_REJECTED",
+    "BROWSER_PROXY_TARGET_REJECTED",
+    "BROWSER_PROXY_PIN_REQUIRED",
+    "BROWSER_PROXY_PIN_INVALID",
+  ]).has(error.code)) return 403;
   if (error instanceof BrowserEgressProxyError && error.code === "BROWSER_PROXY_SATURATED") return 429;
   if (error instanceof BrowserEgressProxyError && error.code === "BROWSER_PROXY_CONNECT_TIMEOUT") return 504;
   return 502;
@@ -204,6 +213,7 @@ export class BrowserEgressProxy {
   private readonly idleTimeoutMs: number;
   private readonly requestTimeoutMs: number;
   private readonly maxBytesPerExchange: number;
+  private readonly allowedPorts: ReadonlySet<number>;
   private readonly clientSockets = new Set<Socket>();
   private readonly upstreamSockets = new Set<Socket>();
   private server: Server | null = null;
@@ -256,6 +266,16 @@ export class BrowserEgressProxy {
       1_024,
       1024 * 1_024 * 1_024,
     );
+    const allowedPorts = options.allowedPorts ?? DEFAULT_ALLOWED_PORTS;
+    if (!Array.isArray(allowedPorts) || allowedPorts.length < 1 || allowedPorts.length > 16 ||
+        allowedPorts.some((port) => !Number.isSafeInteger(port) || port < 1 || port > 65_535) ||
+        new Set(allowedPorts).size !== allowedPorts.length) {
+      throw new BrowserEgressProxyError(
+        "BROWSER_PROXY_OPTIONS_INVALID",
+        "allowedPorts must contain between 1 and 16 unique TCP ports.",
+      );
+    }
+    this.allowedPorts = new Set(allowedPorts);
   }
 
   async start() {
@@ -403,7 +423,17 @@ export class BrowserEgressProxy {
     if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
       throw new BrowserEgressProxyError("BROWSER_PROXY_PORT_INVALID", "Browser proxy target port is invalid.");
     }
+    this.assertPortAllowed(port);
     return Object.freeze({ hostname: decision.hostname, address, family, port }) satisfies ResolvedTarget;
+  }
+
+  private assertPortAllowed(port: number) {
+    if (!this.allowedPorts.has(port)) {
+      throw new BrowserEgressProxyError(
+        "BROWSER_PROXY_PORT_REJECTED",
+        "Browser proxy target port is outside the configured web allowlist.",
+      );
+    }
   }
 
   private async openPinnedSocket(target: ResolvedTarget) {
@@ -483,6 +513,7 @@ export class BrowserEgressProxy {
         return;
       }
       const port = parsed.port ? Number(parsed.port) : 80;
+      this.assertPortAllowed(port);
       const target = Object.freeze({ hostname: decision.hostname, address, family, port }) satisfies ResolvedTarget;
       const upstreamSocket = await this.openPinnedSocket(target);
       const pinnedAgent = new Agent({ keepAlive: false, maxSockets: 1 });

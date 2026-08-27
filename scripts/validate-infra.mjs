@@ -142,6 +142,7 @@ requireMatch(chromeRuntime, /finally \{[\s\S]{0,120}this\.egressProxy\?\.stop\(\
 requireMatch(chromeRuntime, /await this\.egressProxy\.health\(\)/u, "Chrome health does not include pinned egress health");
 requireMatch(browserEgressProxy, /server\.listen\(\{ host: "127\.0\.0\.1", port: 0, exclusive: true \}\)/u, "Browser egress proxy is not an exclusive ephemeral loopback listener");
 requireMatch(browserEgressProxy, /this\.networkPolicy\.assertAllowed\(/u, "Browser egress proxy bypasses BrowserNetworkPolicy");
+requireMatch(browserEgressProxy, /DEFAULT_ALLOWED_PORTS = Object\.freeze\(\[80, 443\]\)/u, "Browser egress proxy does not restrict public service ports");
 requireMatch(productionRunbook, /canal CDP heredado[\s\S]*sin socket TCP/u, "production runbook does not document the private CDP process boundary");
 for (const syscall of ["ptrace", "process_vm_readv", "process_vm_writev"]) {
   const unsafeRule = seccompProfile.syscalls?.find((rule) =>
