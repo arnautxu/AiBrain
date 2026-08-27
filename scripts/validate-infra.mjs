@@ -26,6 +26,7 @@ const backup = read("infra/hetzner/app/backup.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
+const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
@@ -84,6 +85,11 @@ requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypo
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
 requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/ready/u, "healthcheck does not verify socket absence and loopback readiness");
+requireMatch(nginx, /server 127\.0\.0\.1:__AIBRAIN_HTTP_PORT__/u, "Nginx upstream is not constrained to the installation loopback port");
+requireMatch(nginx, /location = \/api\/chat[\s\S]*proxy_buffering off;[\s\S]*X-Accel-Buffering no/u, "Nginx buffers the streaming chat response");
+requireMatch(nginx, /\/documents\$[\s\S]*client_max_body_size 52m;[\s\S]*proxy_request_buffering off;/u, "Nginx does not stream bounded document uploads");
+requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain_auth/u, "Nginx does not rate-limit auth mutations");
+forbidMatch(nginx, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for/u, "Nginx trusts a client-supplied forwarding chain");
 requireMatch(productionRunbook, /Riesgos P0[\s\S]*namespace de red/u, "production runbook does not disclose the browser network gap");
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
