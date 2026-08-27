@@ -21,7 +21,7 @@ const IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$/u;
 const REVISION = /^[0-9a-f]{7,64}$/u;
 const INSTALLATION = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
 const POSITIVE_INTEGER = /^[1-9][0-9]*$/u;
-const RELEASE_SCHEMA_VERSION = 1;
+const RELEASE_SCHEMA_VERSION = 2;
 
 class ReleaseError extends Error {
   constructor(code, message, options = {}) {
@@ -34,7 +34,7 @@ class ReleaseError extends Error {
 function usage() {
   return [
     "Usage:",
-    "  node scripts/manage-release.mjs promote --image <name@sha256:...> --revision <git-sha> --installation-id <slug> --env-file <absolute> --compose-file <absolute> --state-file <absolute>",
+    "  node scripts/manage-release.mjs promote --image <name@sha256:...> --egress-image <name@sha256:...> --revision <git-sha> --installation-id <slug> --env-file <absolute> --compose-file <absolute> --state-file <absolute>",
     "  node scripts/manage-release.mjs rollback --installation-id <slug> --env-file <absolute> --compose-file <absolute> --state-file <absolute>",
     "Optional: --docker-bin <absolute> --health-timeout-ms <positive integer>",
   ].join("\n");
@@ -57,6 +57,7 @@ function parseArguments(argv) {
   }
   const allowed = new Set([
     "--image",
+    "--egress-image",
     "--revision",
     "--installation-id",
     "--env-file",
@@ -69,7 +70,7 @@ function parseArguments(argv) {
     if (!allowed.has(name)) throw new ReleaseError("RELEASE_USAGE", `Unknown option ${name}.`);
   }
   const required = ["--installation-id", "--env-file", "--compose-file", "--state-file"];
-  if (command === "promote") required.push("--image", "--revision");
+  if (command === "promote") required.push("--image", "--egress-image", "--revision");
   for (const name of required) {
     if (!values.has(name)) throw new ReleaseError("RELEASE_USAGE", `Missing ${name}.`);
   }
@@ -78,9 +79,13 @@ function parseArguments(argv) {
     throw new ReleaseError("RELEASE_INSTALLATION_INVALID", "Installation ID is invalid.");
   }
   const image = values.get("--image") ?? null;
+  const egressImage = values.get("--egress-image") ?? null;
   const revision = values.get("--revision") ?? null;
   if (image !== null && !IMAGE.test(image)) {
     throw new ReleaseError("RELEASE_IMAGE_MUTABLE", "Release images must use an immutable sha256 digest.");
+  }
+  if (egressImage !== null && !IMAGE.test(egressImage)) {
+    throw new ReleaseError("RELEASE_IMAGE_MUTABLE", "Egress release images must use an immutable sha256 digest.");
   }
   if (revision !== null && !REVISION.test(revision)) {
     throw new ReleaseError("RELEASE_REVISION_INVALID", "Release revision must be a hexadecimal git commit.");
@@ -93,6 +98,7 @@ function parseArguments(argv) {
     command,
     installationId,
     image,
+    egressImage,
     revision,
     envFile: safeExistingFile(values.get("--env-file"), "compose env"),
     composeFile: safeExistingFile(values.get("--compose-file"), "Compose"),
@@ -153,14 +159,20 @@ function parseEnv(contents) {
   return values;
 }
 
-function replaceImage(contents, image) {
-  let replacements = 0;
-  const updated = contents.replace(/^AIBRAIN_IMAGE=.*$/gmu, () => {
-    replacements += 1;
-    return `AIBRAIN_IMAGE=${image}`;
-  });
-  if (replacements !== 1) {
-    throw new ReleaseError("RELEASE_ENV_INVALID", "Compose env must contain AIBRAIN_IMAGE exactly once.");
+function replaceImages(contents, images) {
+  let appReplacements = 0;
+  let egressReplacements = 0;
+  const updated = contents
+    .replace(/^AIBRAIN_IMAGE=.*$/gmu, () => {
+      appReplacements += 1;
+      return `AIBRAIN_IMAGE=${images.image}`;
+    })
+    .replace(/^AIBRAIN_EGRESS_IMAGE=.*$/gmu, () => {
+      egressReplacements += 1;
+      return `AIBRAIN_EGRESS_IMAGE=${images.egressImage}`;
+    });
+  if (appReplacements !== 1 || egressReplacements !== 1) {
+    throw new ReleaseError("RELEASE_ENV_INVALID", "Compose env must contain both release images exactly once.");
   }
   return updated;
 }
@@ -221,10 +233,10 @@ function composeArgs(options, ...args) {
   return ["compose", "--env-file", options.envFile, "-f", options.composeFile, ...args];
 }
 
-function waitUntilHealthy(options) {
-  const containerId = runDocker(options, composeArgs(options, "ps", "-q", "app"));
+function waitUntilHealthy(options, service) {
+  const containerId = runDocker(options, composeArgs(options, "ps", "-q", service));
   if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
-    throw new ReleaseError("RELEASE_CONTAINER_INVALID", "Compose did not return the app container ID.");
+    throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
   }
   const deadline = Date.now() + options.healthTimeoutMs;
   while (Date.now() <= deadline) {
@@ -233,13 +245,14 @@ function waitUntilHealthy(options) {
     if (health === "unhealthy") break;
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Math.min(500, options.healthTimeoutMs));
   }
-  throw new ReleaseError("RELEASE_HEALTH_FAILED", "App did not become healthy before the release deadline.");
+  throw new ReleaseError("RELEASE_HEALTH_FAILED", `${service} did not become healthy before the release deadline.`);
 }
 
 function deploy(options) {
   runDocker(options, composeArgs(options, "config", "--quiet"));
-  runDocker(options, composeArgs(options, "up", "-d", "--no-deps", "app"));
-  waitUntilHealthy(options);
+  runDocker(options, composeArgs(options, "up", "-d", "--no-deps", "egress-gateway", "app"));
+  waitUntilHealthy(options, "egress-gateway");
+  waitUntilHealthy(options, "app");
 }
 
 function readState(options) {
@@ -251,15 +264,15 @@ function readState(options) {
     throw new ReleaseError("RELEASE_STATE_INVALID", "Release state is invalid JSON.", { cause: error });
   }
   if (value?.schemaVersion !== RELEASE_SCHEMA_VERSION || value.installationId !== options.installationId ||
-      !value.current || !IMAGE.test(value.current.image) || !REVISION.test(value.current.revision) ||
-      (value.previous !== null && (!IMAGE.test(value.previous?.image) || !REVISION.test(value.previous?.revision)))) {
+      !value.current || !IMAGE.test(value.current.image) || !IMAGE.test(value.current.egressImage) || !REVISION.test(value.current.revision) ||
+      (value.previous !== null && (!IMAGE.test(value.previous?.image) || !IMAGE.test(value.previous?.egressImage) || !REVISION.test(value.previous?.revision)))) {
     throw new ReleaseError("RELEASE_STATE_INVALID", "Release state failed validation.");
   }
   return value;
 }
 
-function releaseRecord(image, revision, promotedAt = new Date().toISOString()) {
-  return { image, revision, promotedAt };
+function releaseRecord(image, egressImage, revision, promotedAt = new Date().toISOString()) {
+  return { image, egressImage, revision, promotedAt };
 }
 
 function withReleaseLock(options, operation) {
@@ -305,28 +318,39 @@ function executeUnlocked(options) {
     throw new ReleaseError("RELEASE_PROJECT_MISMATCH", "Compose project does not identify the installation.");
   }
   const currentImage = env.get("AIBRAIN_IMAGE");
-  if (!currentImage || !IMAGE.test(currentImage)) {
-    throw new ReleaseError("RELEASE_IMAGE_MUTABLE", "Current Compose image must already use an immutable digest.");
+  const currentEgressImage = env.get("AIBRAIN_EGRESS_IMAGE");
+  if (!currentImage || !IMAGE.test(currentImage) || !currentEgressImage || !IMAGE.test(currentEgressImage)) {
+    throw new ReleaseError("RELEASE_IMAGE_MUTABLE", "Current Compose app and egress images must already use immutable digests.");
   }
   const state = readState(options);
-  if (options.command === "rollback" && state?.current.image !== currentImage) {
+  if (options.command === "rollback" &&
+      (state?.current.image !== currentImage || state?.current.egressImage !== currentEgressImage)) {
     throw new ReleaseError(
       "RELEASE_STATE_DRIFT",
       "Compose image does not match the current durable release state.",
     );
   }
   const currentRevision = inspectImage(options, currentImage);
-  const current = state?.current?.image === currentImage
+  inspectImage(options, currentEgressImage, currentRevision);
+  const current = state?.current?.image === currentImage && state.current.egressImage === currentEgressImage
     ? state.current
-    : releaseRecord(currentImage, currentRevision);
+    : releaseRecord(currentImage, currentEgressImage, currentRevision);
   const target = options.command === "promote"
-    ? releaseRecord(options.image, inspectImage(options, options.image, options.revision))
+    ? releaseRecord(
+      options.image,
+      options.egressImage,
+      (() => {
+        const revision = inspectImage(options, options.image, options.revision);
+        inspectImage(options, options.egressImage, options.revision);
+        return revision;
+      })(),
+    )
     : state?.previous;
   if (!target) throw new ReleaseError("RELEASE_ROLLBACK_UNAVAILABLE", "No previous release is recorded.");
-  if (target.image === currentImage) {
+  if (target.image === currentImage && target.egressImage === currentEgressImage) {
     throw new ReleaseError("RELEASE_NO_CHANGE", "Target release is already current.");
   }
-  writeAtomic(options.envFile, replaceImage(envContents, target.image));
+  writeAtomic(options.envFile, replaceImages(envContents, target));
   try {
     deploy(options);
   } catch (error) {

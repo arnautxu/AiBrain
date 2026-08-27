@@ -149,6 +149,9 @@ describe("BrowserEgressProxy lifecycle", () => {
       expect.objectContaining({ code: "BROWSER_PROXY_PRODUCTION_CONNECTOR_FORBIDDEN" }),
     );
     expect(() => new BrowserEgressProxy({ connect: localConnector() })).toThrow(BrowserEgressProxyError);
+    expect(() => new BrowserEgressProxy()).toThrowError(
+      expect.objectContaining({ code: "BROWSER_PROXY_UPSTREAM_REQUIRED" }),
+    );
   });
 });
 
@@ -242,6 +245,43 @@ describe("BrowserEgressProxy pinned transport", () => {
       family: 6,
       port: upstreamPort,
     });
+    tunnel.socket.destroy();
+  });
+
+  it("carries the approved DNS pin through the authenticated isolated gateway", async () => {
+    let handshake = "";
+    const gatewayPort = await listen(createNetServer((socket) => {
+      let pending = Buffer.alloc(0);
+      const receiveHandshake = (chunk: Buffer) => {
+        pending = Buffer.concat([pending, chunk]);
+        const boundary = pending.indexOf("\r\n\r\n");
+        if (boundary < 0) return;
+        socket.off("data", receiveHandshake);
+        handshake = pending.subarray(0, boundary).toString("ascii");
+        socket.write("HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n");
+        const head = pending.subarray(boundary + 4);
+        if (head.length > 0) socket.write(head);
+        socket.on("data", (payload) => socket.write(payload));
+      };
+      socket.on("data", receiveHandshake);
+    }));
+    const { url } = await startProxy({
+      networkPolicy: publicPolicy(async () => [{ address: "93.184.216.34", family: 4 }]),
+      upstreamProxy: {
+        url: `http://127.0.0.1:${gatewayPort}`,
+        token: "browser_token_00000000000000000000000000000000",
+      },
+    });
+    const tunnel = await openConnect(url, "secure.example:443");
+    const echoed = new Promise<string>((resolve, reject) => {
+      tunnel.socket.once("data", (chunk) => resolve(chunk.toString("utf8")));
+      tunnel.socket.once("error", reject);
+    });
+    tunnel.socket.write("tls-through-gateway");
+    await expect(echoed).resolves.toBe("tls-through-gateway");
+    expect(handshake).toContain("CONNECT secure.example:443 HTTP/1.1");
+    expect(handshake).toContain("Proxy-Authorization: Bearer browser_token_00000000000000000000000000000000");
+    expect(handshake).toContain("X-AiBrain-Pinned-IP: 93.184.216.34");
     tunnel.socket.destroy();
   });
 

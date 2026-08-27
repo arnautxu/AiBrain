@@ -5,6 +5,7 @@ services:
     image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
     env_file:
       - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
+      - "${AIBRAIN_EGRESS_ENV_FILE:?set AIBRAIN_EGRESS_ENV_FILE}"
     environment:
       AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
       AIBRAIN_CHROME_BIN: /usr/local/bin/aibrain-chrome
@@ -19,6 +20,7 @@ services:
       CODEX_SANDBOX: workspace-write
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+      AIBRAIN_EGRESS_PROXY_URL: http://egress-gateway:8080
     labels:
       com.graphikai.aibrain.product: aibrain
       com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
@@ -32,6 +34,9 @@ services:
     ports:
       - "127.0.0.1:${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
     restart: unless-stopped
+    depends_on:
+      egress-gateway:
+        condition: service_healthy
     stop_grace_period: 45s
     pids_limit: ${AIBRAIN_PIDS_LIMIT:-768}
     cpus: ${AIBRAIN_CPU_LIMIT:-2.0}
@@ -74,7 +79,7 @@ services:
         bind:
           create_host_path: false
     networks:
-      - aibrain-private
+      - aibrain-internal
     healthcheck:
       test: [CMD, node, /usr/local/share/aibrain/healthcheck.mjs]
       interval: 15s
@@ -89,13 +94,72 @@ services:
         mode: non-blocking
         max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
 
+  egress-gateway:
+    image: "${AIBRAIN_EGRESS_IMAGE:?set AIBRAIN_EGRESS_IMAGE to an immutable image digest}"
+    env_file:
+      - "${AIBRAIN_EGRESS_ENV_FILE:?set AIBRAIN_EGRESS_ENV_FILE}"
+    environment:
+      AIBRAIN_EGRESS_LISTEN_HOST: 0.0.0.0
+      AIBRAIN_EGRESS_PORT: "8080"
+      NODE_ENV: production
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.component: egress-gateway
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
+    user: "${AIBRAIN_EGRESS_UID:-10002}:${AIBRAIN_EGRESS_GID:-10002}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "8080"
+    restart: unless-stopped
+    stop_grace_period: 15s
+    init: true
+    pids_limit: ${AIBRAIN_EGRESS_PIDS_LIMIT:-128}
+    cpus: ${AIBRAIN_EGRESS_CPU_LIMIT:-0.5}
+    mem_limit: "${AIBRAIN_EGRESS_MEMORY_LIMIT:-256m}"
+    mem_reservation: "${AIBRAIN_EGRESS_MEMORY_RESERVATION:-64m}"
+    ulimits:
+      nofile:
+        soft: ${AIBRAIN_EGRESS_NOFILE_SOFT:-2048}
+        hard: ${AIBRAIN_EGRESS_NOFILE_HARD:-4096}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=1777
+    networks:
+      - aibrain-internal
+      - aibrain-egress
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8080/__aibrain_egress_health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 4
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${AIBRAIN_LOG_MAX_SIZE:-10m}"
+        max-file: "${AIBRAIN_LOG_MAX_FILES:-5}"
+        mode: non-blocking
+        max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
+
 networks:
-  aibrain-private:
+  aibrain-internal:
     name: "${AIBRAIN_NETWORK_NAME:?set a unique AIBRAIN_NETWORK_NAME}"
+    driver: bridge
+    internal: true
+    attachable: false
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
+  aibrain-egress:
+    name: "${AIBRAIN_EGRESS_NETWORK_NAME:?set a unique AIBRAIN_EGRESS_NETWORK_NAME}"
     driver: bridge
     attachable: false
     labels:
       com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.component: egress
       com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
 
 volumes:

@@ -18,9 +18,10 @@ Coloca el checkout exacto en `/opt/aibrain-<installation>/releases/<git-sha>` si
 ```bash
 cp infra/hetzner/compose.env.example /etc/aibrain/<installation>/compose.env
 cp infra/hetzner/aibrain.env.example /etc/aibrain/<installation>/runtime.env
+cp infra/hetzner/egress.env.example /etc/aibrain/<installation>/egress.env
 cp infra/hetzner/installation.qa.example.json /etc/aibrain/<installation>/installation.json
 chmod 0640 /etc/aibrain/<installation>/compose.env /etc/aibrain/<installation>/installation.json
-chmod 0600 /etc/aibrain/<installation>/runtime.env
+chmod 0600 /etc/aibrain/<installation>/runtime.env /etc/aibrain/<installation>/egress.env
 chown root:10001 /etc/aibrain/<installation>/installation.json
 ```
 
@@ -58,14 +59,17 @@ convivir sin colisiones. El template desactiva buffering para chat y uploads,
 fija el Host público, sobrescribe los headers de IP del cliente y no publica
 CDP, workers ni viewers internos.
 
-Genera cuatro secretos distintos. No pegues el resultado en terminales grabadas, tickets o commits:
+Genera cinco secretos de runtime distintos y tres tokens de salida distintos.
+No pegues el resultado en terminales grabadas, tickets o commits:
 
 ```bash
 umask 077
 openssl rand -base64 48
 ```
 
-Completa `runtime.env` con Supabase Auth y los secretos. No añadas `SUPABASE_SECRET_KEY`.
+Completa `runtime.env` con Supabase Auth y los cinco secretos; completa
+`egress.env` con los tres tokens. No añadas `SUPABASE_SECRET_KEY`. Consulta los
+nombres exactos y la separación obligatoria en `docs/EGRESS_GATEWAY.md`.
 
 ## 2. Validación estática y build inmutable
 
@@ -95,7 +99,8 @@ docker compose \
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
-  build --pull app
+  -f infra/hetzner/compose.build.yaml \
+  build --pull egress-gateway app
 docker scout cves --only-severity critical --exit-code \
   aibrain-<installation>:<git-sha>
 ```
@@ -111,7 +116,11 @@ docker run --rm --entrypoint /usr/bin/chromium \
 
 Escribe solo los cuatro componentes numéricos en `AIBRAIN_CHROME_EXPECTED_VERSION` de `runtime.env`, vuelve a ejecutar `config --quiet` y conserva como evidencia el tag, digest local, commit, versión Codex `0.149.1` y versión Chromium.
 
-Este check fija la versión aceptada al arrancar, no el artifact de build: APT puede resolver otra versión en una reconstrucción futura. Registra también `dpkg-query -W chromium chromium-sandbox libreoffice-core poppler-utils qpdf` dentro de la imagen y su SBOM. El build solo será reproducible cuando estas dependencias procedan de snapshot/artifacts con checksums fijos o de una imagen interna inmutable ya escaneada.
+El snapshot Debian fija el índice de paquetes aceptado al construir y el
+entrypoint fija la versión de Chromium aceptada al arrancar. Registra también
+`dpkg-query -W chromium chromium-sandbox libreoffice-core poppler-utils qpdf`
+dentro de la imagen, sus checksums y la SBOM. Conserva además los dos digests de
+imagen promovidos para que la reconstrucción no sea el mecanismo de rollback.
 
 ## 3. Primer arranque QA
 
@@ -120,6 +129,7 @@ Comprueba que el puerto no está ocupado y que los nombres no existen antes de c
 ```bash
 ss -ltn | grep ':<qa-port> ' || true
 docker network inspect aibrain-<installation>-private >/dev/null 2>&1 && exit 1 || true
+docker network inspect aibrain-<installation>-egress >/dev/null 2>&1 && exit 1 || true
 docker volume inspect aibrain-<installation>-data >/dev/null 2>&1 && exit 1 || true
 docker volume inspect aibrain-<installation>-backups >/dev/null 2>&1 && exit 1 || true
 docker volume inspect aibrain-<installation>-restores >/dev/null 2>&1 && exit 1 || true
@@ -131,7 +141,7 @@ Si cualquiera de esos recursos pertenece a otro stack, detente: no lo conectes, 
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
-  up -d --no-deps app
+  up -d --no-deps egress-gateway app
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
@@ -230,7 +240,7 @@ Crea un segundo `compose.env` con proyecto, red, puerto, data volume, backup vol
 Reinicia la instancia primaria y valida recovery:
 
 ```bash
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps app
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps egress-gateway app
 ```
 
 La copia cifrada fuera del servidor, sus credenciales y la prueba del proveedor externo son gates externos.
@@ -239,11 +249,16 @@ La copia cifrada fuera del servidor, sus credenciales y la prueba del proveedor 
 
 Antes de un release, completa maintenance/drain, backup/verify, SBOM, scan y tests. Construye con `compose.build.yaml` y `AIBRAIN_REVISION=<git-sha>`, publica la imagen en el registry aprobado y resuelve su digest `sha256`. El Compose runtime no contiene `build:` y nunca acepta un tag mutable.
 
-Promueve mediante el gestor transaccional. Este verifica que el digest existe localmente, que la label OCI coincide con el commit, valida Compose, cambia `AIBRAIN_IMAGE` atómicamente, espera health y registra `current`/`previous`. Si el health falla, restaura el digest anterior y exige que vuelva a estar healthy:
+Promueve mediante el gestor transaccional. Este verifica que ambos digests
+existen localmente, que sus labels OCI coinciden con el commit, valida Compose,
+cambia `AIBRAIN_IMAGE` y `AIBRAIN_EGRESS_IMAGE` atómicamente, espera los dos
+healthchecks y registra `current`/`previous`. Si cualquiera falla, restaura
+ambos digests anteriores y exige que vuelvan a estar healthy:
 
 ```bash
 node scripts/manage-release.mjs promote \
   --image registry.example/aibrain@sha256:<64-hex> \
+  --egress-image registry.example/aibrain-egress@sha256:<64-hex> \
   --revision <git-sha> \
   --installation-id <installation> \
   --env-file /etc/aibrain/<installation>/compose.env \
@@ -267,9 +282,9 @@ No borres imágenes, releases, volúmenes ni backups. Si el release migró datos
 
 - Docker build y Compose deben ejecutarse en el host QA; Docker no está disponible en el Mac de desarrollo actual.
 - El kernel/daemon del host debe pasar el preflight real de `bubblewrap`, seccomp y sandbox de Chromium.
-- El canal CDP heredado y sin socket debe repetirse en la imagen QA con dos
-  empleados. Sigue pendiente validar en el host la política de egress del
-  browser, incluido pinning DNS y bloqueo de destinos privados/metadata.
+- El canal CDP heredado y el sidecar de egress ya tienen gates locales. Deben
+  repetirse en la imagen QA con dos empleados para obtener evidencia del
+  aislamiento Docker, pinning DNS y bloqueo privado/metadata en el host real.
 - La base, el snapshot Debian y los paquetes Node están fijados. Falta ejecutar build limpio, SBOM y scan sobre la imagen resultante en el host QA antes de considerarla promovible.
 - Faltan credenciales reales de Supabase Auth y login de una suscripción Codex dedicada.
 - La réplica cifrada fuera del servidor y el canal de alertas deben configurarse y probarse.

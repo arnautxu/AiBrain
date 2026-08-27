@@ -15,6 +15,8 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_BYTES_PER_EXCHANGE = 128 * 1_024 * 1_024;
 const DEFAULT_ALLOWED_PORTS = Object.freeze([80, 443]);
 const MAX_AUTHORITY_BYTES = 1_024;
+const MAX_UPSTREAM_RESPONSE_BYTES = 16 * 1_024;
+const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
 
 const STATIC_HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -48,6 +50,7 @@ export type BrowserPinnedConnector = (target: BrowserPinnedConnection) => Promis
 export type BrowserEgressProxyOptions = Readonly<{
   networkPolicy?: BrowserNetworkPolicy;
   connect?: BrowserPinnedConnector;
+  upstreamProxy?: Readonly<{ url: string; token: string }>;
   maxHeaderBytes?: number;
   maxConnections?: number;
   connectTimeoutMs?: number;
@@ -105,6 +108,125 @@ function defaultPinnedConnector(target: BrowserPinnedConnection) {
     socket.once("error", (error) => {
       target.signal.removeEventListener("abort", abort);
       reject(error);
+    });
+  });
+}
+
+function validatedUpstreamProxy(value: Readonly<{ url: string; token: string }>) {
+  let url: URL;
+  try {
+    url = new URL(value.url);
+  } catch (error) {
+    throw new BrowserEgressProxyError(
+      "BROWSER_PROXY_UPSTREAM_INVALID",
+      "Browser upstream proxy URL is invalid.",
+      { cause: error },
+    );
+  }
+  const port = url.port ? Number(url.port) : 80;
+  if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" ||
+      url.search || url.hash || !url.hostname || !Number.isSafeInteger(port) || port < 1 || port > 65_535 ||
+      !EGRESS_TOKEN_PATTERN.test(value.token)) {
+    throw new BrowserEgressProxyError(
+      "BROWSER_PROXY_UPSTREAM_INVALID",
+      "Browser upstream proxy must be a credential-free HTTP origin with a strong token.",
+    );
+  }
+  return Object.freeze({ hostname: url.hostname, port, token: value.token });
+}
+
+function environmentUpstreamProxy() {
+  const url = process.env.AIBRAIN_EGRESS_PROXY_URL?.trim();
+  const token = process.env.AIBRAIN_EGRESS_BROWSER_TOKEN?.trim();
+  if (!url && !token) {
+    if (process.env.NODE_ENV === "production") {
+      throw new BrowserEgressProxyError(
+        "BROWSER_PROXY_UPSTREAM_REQUIRED",
+        "Production browser egress requires the isolated gateway.",
+      );
+    }
+    return null;
+  }
+  if (!url || !token) {
+    throw new BrowserEgressProxyError(
+      "BROWSER_PROXY_UPSTREAM_INVALID",
+      "Browser upstream proxy URL and token must be configured together.",
+    );
+  }
+  return { url, token };
+}
+
+function upstreamPinnedConnector(value: Readonly<{ url: string; token: string }>): BrowserPinnedConnector {
+  const upstream = validatedUpstreamProxy(value);
+  return (target) => new Promise<Socket>((resolve, reject) => {
+    if (target.signal.aborted) {
+      reject(new BrowserEgressProxyError("BROWSER_PROXY_CONNECT_ABORTED", "Pinned connection was aborted."));
+      return;
+    }
+    const socket = netConnect({ host: upstream.hostname, port: upstream.port, allowHalfOpen: false });
+    let response = Buffer.alloc(0);
+    let settled = false;
+    const cleanup = () => {
+      target.signal.removeEventListener("abort", abort);
+      socket.off("data", receive);
+      socket.off("error", fail);
+      socket.off("close", closed);
+    };
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(error);
+    };
+    const abort = () => fail(new BrowserEgressProxyError(
+      "BROWSER_PROXY_CONNECT_ABORTED",
+      "Pinned connection was aborted.",
+    ));
+    const closed = () => fail(new BrowserEgressProxyError(
+      "BROWSER_PROXY_UPSTREAM_CLOSED",
+      "Isolated egress gateway closed the tunnel handshake.",
+    ));
+    const receive = (chunk: Buffer) => {
+      response = Buffer.concat([response, chunk]);
+      if (response.length > MAX_UPSTREAM_RESPONSE_BYTES) {
+        fail(new BrowserEgressProxyError(
+          "BROWSER_PROXY_UPSTREAM_INVALID",
+          "Isolated egress gateway response exceeded the handshake limit.",
+        ));
+        return;
+      }
+      const boundary = response.indexOf("\r\n\r\n");
+      if (boundary < 0) return;
+      const headers = response.subarray(0, boundary).toString("ascii");
+      if (!/^HTTP\/1\.[01] 200(?: |\r\n)/u.test(headers)) {
+        fail(new BrowserEgressProxyError(
+          "BROWSER_PROXY_UPSTREAM_REJECTED",
+          "Isolated egress gateway rejected the pinned destination.",
+        ));
+        return;
+      }
+      settled = true;
+      cleanup();
+      const head = response.subarray(boundary + 4);
+      if (head.length > 0) socket.unshift(head);
+      resolve(socket);
+    };
+    target.signal.addEventListener("abort", abort, { once: true });
+    socket.on("data", receive);
+    socket.once("error", fail);
+    socket.once("close", closed);
+    socket.once("connect", () => {
+      const authority = `${target.hostname}:${target.port}`;
+      socket.write([
+        `CONNECT ${authority} HTTP/1.1`,
+        `Host: ${authority}`,
+        `Proxy-Authorization: Bearer ${upstream.token}`,
+        `X-AiBrain-Pinned-IP: ${target.address}`,
+        "Connection: keep-alive",
+        "",
+        "",
+      ].join("\r\n"));
     });
   });
 }
@@ -228,8 +350,17 @@ export class BrowserEgressProxy {
         "A custom browser proxy connector cannot be used in production.",
       );
     }
+    if (options.connect && options.upstreamProxy) {
+      throw new BrowserEgressProxyError(
+        "BROWSER_PROXY_OPTIONS_INVALID",
+        "Browser proxy cannot combine direct and upstream connectors.",
+      );
+    }
+    const configuredUpstream = options.upstreamProxy ?? environmentUpstreamProxy();
     this.networkPolicy = options.networkPolicy ?? new BrowserNetworkPolicy();
-    this.connector = options.connect ?? defaultPinnedConnector;
+    this.connector = options.connect ?? (configuredUpstream
+      ? upstreamPinnedConnector(configuredUpstream)
+      : defaultPinnedConnector);
     this.maxHeaderBytes = boundedInteger(
       "maxHeaderBytes",
       options.maxHeaderBytes ?? DEFAULT_MAX_HEADER_BYTES,

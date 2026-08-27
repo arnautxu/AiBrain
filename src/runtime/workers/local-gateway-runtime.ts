@@ -43,6 +43,38 @@ const MAX_STDIO_LINE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_RETAINED_COMPLETED_REQUESTS = 4_096;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
+const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
+
+export function workerEgressEnvironment(
+  environment: NodeJS.ProcessEnv = process.env,
+): Readonly<Record<string, string>> {
+  const base = environment.AIBRAIN_EGRESS_PROXY_URL?.trim();
+  const token = environment.AIBRAIN_EGRESS_WORKER_TOKEN?.trim();
+  if (!base && !token && environment.NODE_ENV !== "production") return Object.freeze({});
+  if (!base || !token || !EGRESS_TOKEN_PATTERN.test(token)) {
+    throw new Error("Worker egress gateway URL and strong worker token are required.");
+  }
+  let url: URL;
+  try {
+    url = new URL(base);
+  } catch (error) {
+    throw new Error("Worker egress gateway URL is invalid.", { cause: error });
+  }
+  const port = url.port ? Number(url.port) : 80;
+  if (url.protocol !== "http:" || url.username || url.password || url.pathname !== "/" ||
+      url.search || url.hash || !url.hostname || !Number.isSafeInteger(port) || port < 1 || port > 65_535) {
+    throw new Error("Worker egress gateway must be a credential-free HTTP origin.");
+  }
+  url.username = "aibrain";
+  url.password = token;
+  const authenticatedProxy = url.toString();
+  return Object.freeze({
+    HTTP_PROXY: authenticatedProxy,
+    HTTPS_PROXY: authenticatedProxy,
+    ALL_PROXY: authenticatedProxy,
+    NO_PROXY: "127.0.0.1,localhost,::1",
+  });
+}
 
 type GatewayRequestRecord = {
   schemaVersion: 1;
@@ -281,6 +313,7 @@ export class PrivateWorkerGateway {
           SSL_CERT_FILE: process.env.SSL_CERT_FILE,
           SSL_CERT_DIR: process.env.SSL_CERT_DIR,
           NODE_EXTRA_CA_CERTS: process.env.NODE_EXTRA_CA_CERTS,
+          ...workerEgressEnvironment(),
           ...context.environment,
         },
         stdio: ["pipe", "pipe", "pipe"],

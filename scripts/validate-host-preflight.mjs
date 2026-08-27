@@ -7,6 +7,8 @@ import process from "node:process";
 const OWNER_FILE = ".aibrain-owner.json";
 const LABEL_PRODUCT = "com.graphikai.aibrain.product";
 const LABEL_INSTALLATION = "com.graphikai.aibrain.installation";
+const IMMUTABLE_IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$/u;
+const CHANNEL_TOKEN = /^[A-Za-z0-9_-]{32,256}$/u;
 
 function fail(message) {
   process.stderr.write(`AiBrain host preflight failed: ${message}\n`);
@@ -115,6 +117,7 @@ const prefix = `aibrain-${installationId}`;
 const exactNames = new Map([
   ["AIBRAIN_COMPOSE_PROJECT_NAME", prefix],
   ["AIBRAIN_NETWORK_NAME", `${prefix}-private`],
+  ["AIBRAIN_EGRESS_NETWORK_NAME", `${prefix}-egress`],
   ["AIBRAIN_DATA_VOLUME_NAME", `${prefix}-data`],
   ["AIBRAIN_BACKUP_VOLUME_NAME", `${prefix}-backups`],
   ["AIBRAIN_RESTORE_VOLUME_NAME", `${prefix}-restores`],
@@ -127,9 +130,44 @@ if (new Set(resourceNames).size !== resourceNames.length) fail("project, network
 
 const configFile = assertRegularNoSymlink(required(env, "AIBRAIN_INSTALLATION_CONFIG_HOST"), "installation config");
 const runtimeEnv = assertRegularNoSymlink(required(env, "AIBRAIN_RUNTIME_ENV_FILE"), "runtime env");
+const egressEnv = assertRegularNoSymlink(required(env, "AIBRAIN_EGRESS_ENV_FILE"), "egress env");
 const configRoot = realpathSync(path.dirname(configFile));
-if (path.dirname(runtimeEnv) !== configRoot) fail("installation config and runtime env must share one owned config root");
+if (path.dirname(runtimeEnv) !== configRoot || path.dirname(egressEnv) !== configRoot) {
+  fail("installation config, runtime env and egress env must share one owned config root");
+}
 assertOwner(configRoot, installationId);
+
+for (const key of ["AIBRAIN_IMAGE", "AIBRAIN_EGRESS_IMAGE"]) {
+  if (!IMMUTABLE_IMAGE.test(required(env, key))) fail(`${key} must use an immutable sha256 digest`);
+}
+const egressPolicy = parseEnv(readFileSync(egressEnv, "utf8"));
+const channelTokens = [
+  required(egressPolicy, "AIBRAIN_EGRESS_BROWSER_TOKEN"),
+  required(egressPolicy, "AIBRAIN_EGRESS_WORKER_TOKEN"),
+  required(egressPolicy, "AIBRAIN_EGRESS_SERVER_TOKEN"),
+];
+if (channelTokens.some((token) => !CHANNEL_TOKEN.test(token)) || new Set(channelTokens).size !== 3) {
+  fail("egress channel tokens must be strong and pairwise distinct");
+}
+const workerHosts = required(egressPolicy, "AIBRAIN_EGRESS_WORKER_HOSTS").split(",");
+if (workerHosts.some((host) => !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(host) ||
+    host.includes("..") || host === "localhost" || host.endsWith(".localhost"))) {
+  fail("worker egress hosts must be exact normalized DNS hostnames");
+}
+let supabaseOrigin;
+try {
+  supabaseOrigin = new URL(required(egressPolicy, "AIBRAIN_EGRESS_SUPABASE_ORIGIN"));
+} catch {
+  fail("Supabase egress origin is invalid");
+}
+if (supabaseOrigin.protocol !== "https:" || supabaseOrigin.username || supabaseOrigin.password ||
+    supabaseOrigin.port || supabaseOrigin.pathname !== "/" || supabaseOrigin.search || supabaseOrigin.hash) {
+  fail("Supabase egress origin must be an exact credential-free HTTPS origin");
+}
+const runtimePolicy = parseEnv(readFileSync(runtimeEnv, "utf8"));
+if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origin) {
+  fail("Supabase auth URL and server egress origin must match exactly");
+}
 
 const hostRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_HOST_ROOT"), "installation host root");
 const sourceRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_SOURCE_HOST_PATH"), "source root");
@@ -138,7 +176,7 @@ assertOwner(hostRoot, installationId);
 if (!isInside(hostRoot, sourceRoot) || !isInside(hostRoot, publishRoot)) fail("source and publish roots must be children of the owned host root");
 if (sourceRoot === publishRoot || isInside(sourceRoot, publishRoot) || isInside(publishRoot, sourceRoot)) fail("source and publish roots must not overlap");
 
-for (const target of [envFileReal, configRoot, hostRoot, sourceRoot, publishRoot]) {
+for (const target of [envFileReal, runtimeEnv, egressEnv, configRoot, hostRoot, sourceRoot, publishRoot]) {
   if (/(?:^|[\\/])bgreenly(?:[\\/]|$)/iu.test(target)) fail("an AiBrain path must never address BGreenly");
 }
 
@@ -154,6 +192,7 @@ if (offline) {
   const docker = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8" });
   if (docker.status !== 0 || !docker.stdout.trim()) fail("Docker daemon is unavailable");
   inspectExistingDockerResource("network", required(env, "AIBRAIN_NETWORK_NAME"), installationId);
+  inspectExistingDockerResource("network", required(env, "AIBRAIN_EGRESS_NETWORK_NAME"), installationId);
   for (const key of ["AIBRAIN_DATA_VOLUME_NAME", "AIBRAIN_BACKUP_VOLUME_NAME", "AIBRAIN_RESTORE_VOLUME_NAME"]) {
     inspectExistingDockerResource("volume", required(env, key), installationId);
   }
