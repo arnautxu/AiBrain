@@ -564,13 +564,18 @@ function waitUntilHealthy(options, release, service, deadline) {
     throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
   }
   while (performance.now() <= deadline) {
-    const health = runDocker(
+    const state = runDocker(
       options,
-      ["inspect", "--format", "{{.State.Health.Status}}", containerId],
+      ["inspect", "--format", "{{.State.Status}} {{.State.Health.Status}}", containerId],
       remainingDockerTimeout(options, deadline),
     );
-    if (health === "healthy") return;
-    if (health === "unhealthy") break;
+    const [runtimeStatus, health] = state.split(/\s+/u);
+    if (runtimeStatus === "running" && health === "healthy") return;
+    if (runtimeStatus !== "running") break;
+    // Docker can report `unhealthy` briefly while a readiness dependency
+    // recovers (for example immediately after bounded build-cache cleanup).
+    // A running container is allowed the complete shared health deadline;
+    // only a terminal container state fails immediately.
     const waitMs = Math.min(500, Math.max(0, deadline - performance.now()));
     if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
   }
