@@ -74,6 +74,9 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
+for (const tool of ["soffice", "pdfinfo", "pdftoppm", "pdftotext", "qpdf"]) {
+  requireMatch(dockerfile, new RegExp(`COPY --chown=root:root infra/hetzner/app/soffice-safe\\.sh /usr/local/bin/aibrain-${tool}`, "u"), `Dockerfile does not install the sandboxed ${tool} launcher`);
+}
 requireMatch(dockerfile, /org\.opencontainers\.image\.revision="\$\{AIBRAIN_REVISION\}"/u, "Docker image does not record its exact source revision");
 requireMatch(dockerfile, /FROM \$\{NODE_IMAGE\} AS egress-gateway/u, "Dockerfile lacks the first-party egress gateway target on the pinned Node base");
 requireMatch(dockerfile, /USER aibrain-egress:aibrain-egress[\s\S]*ENTRYPOINT \["node", "\/usr\/local\/share\/aibrain\/egress-gateway\.mts"\]/u, "egress gateway image is not an unprivileged first-party Node target");
@@ -116,6 +119,15 @@ forbidMatch(compose, /^\s*build\s*:/mu, "runtime Compose permits an implicit mut
 requireMatch(composeBuild, /AIBRAIN_REVISION: "\$\{AIBRAIN_REVISION:\?/u, "build override does not require an exact source revision");
 requireMatch(composeBuild, /context: \.\.\/\.\./u, "build override does not use the reviewed repository context");
 requireMatch(composeBuild, /egress-gateway:[\s\S]*target: egress-gateway/u, "build override does not build the reviewed egress target");
+for (const [key, tool] of [
+  ["AIBRAIN_SOFFICE_BIN", "soffice"],
+  ["AIBRAIN_PDFINFO_BIN", "pdfinfo"],
+  ["AIBRAIN_PDFTOPPM_BIN", "pdftoppm"],
+  ["AIBRAIN_PDFTOTEXT_BIN", "pdftotext"],
+  ["AIBRAIN_QPDF_BIN", "qpdf"],
+]) {
+  requireMatch(compose, new RegExp(`${key}: /usr/local/bin/aibrain-${tool}`, "u"), `Compose bypasses the sandboxed ${tool} launcher`);
+}
 
 requireMatch(egressGateway, /headers\["proxy-authorization"\][\s\S]{0,500}value\.startsWith\("Bearer "\)[\s\S]{0,500}value\.startsWith\("Basic "\)/u, "egress gateway lacks authenticated Bearer and Basic channels");
 requireMatch(egressGateway, /timingSafeEqual/u, "egress gateway does not compare channel tokens safely");
@@ -153,6 +165,10 @@ requireMatch(entrypoint, /\/usr\/local\/bin\/aibrain-alerts/u, "entrypoint does 
 requireMatch(entrypoint, /\/usr\/bin\/restic/u, "entrypoint does not require the encrypted replica runtime");
 requireMatch(entrypoint, /AIBRAIN_CHROME_BIN must use the employee browser filesystem sandbox/u, "entrypoint does not require the browser sandbox launcher");
 requireMatch(entrypoint, /bubblewrap browser isolation is unavailable/u, "entrypoint does not fail closed when browser isolation is unavailable");
+requireMatch(entrypoint, /bubblewrap document isolation is unavailable/u, "entrypoint does not fail closed when document isolation is unavailable");
+for (const tool of ["soffice", "pdfinfo", "pdftoppm", "pdftotext", "qpdf"]) {
+  requireMatch(entrypoint, new RegExp(`/usr/local/bin/aibrain-${tool}`, "u"), `entrypoint does not require the sandboxed ${tool} launcher`);
+}
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
 requireMatch(entrypoint, /codex-real --version[\s\S]*actual_codex_version[\s\S]*generated App Server contracts/u, "entrypoint does not enforce the contract-pinned Codex version");
@@ -209,6 +225,25 @@ requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffic
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
   requireMatch(soffice, new RegExp(flag, "u"), `LibreOffice wrapper does not require ${flag}`);
 }
+for (const launcher of ["soffice", "pdfinfo", "pdftoppm", "pdftotext", "qpdf"]) {
+  requireMatch(soffice, new RegExp(`aibrain-${launcher}\\) tool=/usr/bin/${launcher}`, "u"), `document sandbox cannot dispatch ${launcher}`);
+}
+for (const boundary of [
+  "--unshare-pid",
+  "--unshare-ipc",
+  "--unshare-uts",
+  "--unshare-net",
+  "--clearenv",
+  "--cap-drop ALL",
+  "--tmpfs /etc/aibrain",
+  "--tmpfs /var/lib/aibrain/data",
+  "--tmpfs /srv/aibrain/source-ro",
+  "--tmpfs /srv/aibrain/publish-rw",
+  "--bind \"$work_root\" /work",
+]) requireMatch(soffice, new RegExp(boundary.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"), `document sandbox is missing ${boundary}`);
+requireMatch(soffice, /preview_pattern=.*document-previews[\s\S]*turn_pattern=.*aibrain-turn-document/u, "document sandbox does not constrain conversion work roots");
+requireMatch(soffice, /absolute argument escapes the private conversion root/u, "document sandbox does not reject escaping absolute tool arguments");
+forbidMatch(soffice, /exec \/usr\/bin\/(?:soffice|pdfinfo|pdftoppm|pdftotext|qpdf) "\$@"/u, "document sandbox has an unsandboxed execution fallback");
 
 const requiredRuntimeKeys = [
   "AIBRAIN_SESSION_SECRET",
@@ -266,7 +301,7 @@ for (const script of [
   "infra/hetzner/app/backup.sh",
 ]) {
   try {
-    execFileSync("sh", ["-n", relative(script)], { stdio: "pipe" });
+    execFileSync(script.endsWith("soffice-safe.sh") ? "bash" : "sh", ["-n", relative(script)], { stdio: "pipe" });
   } catch {
     failures.push(`${script} does not pass sh -n`);
   }

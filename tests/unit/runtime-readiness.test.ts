@@ -6,9 +6,10 @@ const environment = {
   AIBRAIN_CHROME_BIN: "/usr/local/bin/aibrain-chrome",
   AIBRAIN_CHROME_EXPECTED_VERSION: "140.0.0.0",
   AIBRAIN_SOFFICE_BIN: "/usr/local/bin/aibrain-soffice",
-  AIBRAIN_PDFINFO_BIN: "/usr/bin/pdfinfo",
-  AIBRAIN_PDFTOPPM_BIN: "/usr/bin/pdftoppm",
-  AIBRAIN_QPDF_BIN: "/usr/bin/qpdf",
+  AIBRAIN_PDFINFO_BIN: "/usr/local/bin/aibrain-pdfinfo",
+  AIBRAIN_PDFTOPPM_BIN: "/usr/local/bin/aibrain-pdftoppm",
+  AIBRAIN_PDFTOTEXT_BIN: "/usr/local/bin/aibrain-pdftotext",
+  AIBRAIN_QPDF_BIN: "/usr/local/bin/aibrain-qpdf",
 };
 
 describe("runtime readiness probes", () => {
@@ -31,7 +32,7 @@ describe("runtime readiness probes", () => {
 
   it("degrades independently for version drift and a missing document executable", async () => {
     const probes = runtimeReadinessProbes(environment, {
-      async executable(executable) { return executable !== "/usr/bin/qpdf"; },
+      async executable(executable) { return executable !== "/usr/local/bin/aibrain-qpdf"; },
       async version(executable) {
         return executable.endsWith("codex-real") ? "codex-cli 0.150.0" : "Chromium 141.0.0.0";
       },

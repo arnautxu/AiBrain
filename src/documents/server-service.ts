@@ -19,23 +19,23 @@ export type ConfiguredDocumentToolchain = DocumentToolchain & { pdftotext: strin
 export function documentToolchainFromEnvironment(): ConfiguredDocumentToolchain {
   const darwin = process.platform === "darwin";
   const qpdf = process.env.AIBRAIN_QPDF_BIN?.trim() ||
-    (process.env.NODE_ENV === "production" ? "/usr/bin/qpdf" : undefined);
+    (process.env.NODE_ENV === "production" ? "/usr/local/bin/aibrain-qpdf" : undefined);
   return {
     soffice: configuredAbsolutePath(
       "AIBRAIN_SOFFICE_BIN",
-      darwin ? "/Applications/LibreOffice.app/Contents/MacOS/soffice" : "/usr/bin/soffice",
+      darwin ? "/Applications/LibreOffice.app/Contents/MacOS/soffice" : "/usr/local/bin/aibrain-soffice",
     ),
     pdfinfo: configuredAbsolutePath(
       "AIBRAIN_PDFINFO_BIN",
-      darwin ? "/opt/homebrew/bin/pdfinfo" : "/usr/bin/pdfinfo",
+      darwin ? "/opt/homebrew/bin/pdfinfo" : "/usr/local/bin/aibrain-pdfinfo",
     ),
     pdftoppm: configuredAbsolutePath(
       "AIBRAIN_PDFTOPPM_BIN",
-      darwin ? "/opt/homebrew/bin/pdftoppm" : "/usr/bin/pdftoppm",
+      darwin ? "/opt/homebrew/bin/pdftoppm" : "/usr/local/bin/aibrain-pdftoppm",
     ),
     pdftotext: configuredAbsolutePath(
       "AIBRAIN_PDFTOTEXT_BIN",
-      darwin ? "/opt/homebrew/bin/pdftotext" : "/usr/bin/pdftotext",
+      darwin ? "/opt/homebrew/bin/pdftotext" : "/usr/local/bin/aibrain-pdftotext",
     ),
     ...(qpdf ? { qpdf: configuredAbsolutePath("AIBRAIN_QPDF_BIN", qpdf) } : {}),
   };

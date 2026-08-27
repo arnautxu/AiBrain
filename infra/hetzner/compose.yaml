@@ -10,9 +10,10 @@ services:
       AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
       AIBRAIN_CHROME_BIN: /usr/local/bin/aibrain-chrome
       AIBRAIN_SOFFICE_BIN: /usr/local/bin/aibrain-soffice
-      AIBRAIN_PDFINFO_BIN: /usr/bin/pdfinfo
-      AIBRAIN_PDFTOPPM_BIN: /usr/bin/pdftoppm
-      AIBRAIN_QPDF_BIN: /usr/bin/qpdf
+      AIBRAIN_PDFINFO_BIN: /usr/local/bin/aibrain-pdfinfo
+      AIBRAIN_PDFTOPPM_BIN: /usr/local/bin/aibrain-pdftoppm
+      AIBRAIN_PDFTOTEXT_BIN: /usr/local/bin/aibrain-pdftotext
+      AIBRAIN_QPDF_BIN: /usr/local/bin/aibrain-qpdf
       AIBRAIN_CODEX_EXPECTED_VERSION: "0.149.1"
       CHAT_RUNTIME: codex
       CODEX_BIN: /usr/local/bin/aibrain-codex-worker
