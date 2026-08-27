@@ -476,11 +476,12 @@ function unlinkDurably(file) {
 
 function runDocker(options, args, timeoutMs = options.dockerCommandTimeoutMs) {
   try {
+    const boundedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
     return execFileSync(options.dockerBin, args, {
       encoding: "utf8",
       maxBuffer: 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"],
-      timeout: timeoutMs,
+      timeout: boundedTimeoutMs,
       killSignal: "SIGKILL",
     }).trim();
   } catch (error) {
