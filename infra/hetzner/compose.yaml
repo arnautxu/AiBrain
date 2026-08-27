@@ -31,6 +31,12 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      - apparmor=aibrain-container
+      # Bubblewrap mounts a fresh procfs inside each private PID namespace.
+      # Docker's inherited masked proc submounts make modern kernels reject
+      # that mount as "too revealing". The process remains non-root, has no
+      # capabilities, uses the fail-closed seccomp profile and a read-only root.
+      - systempaths=unconfined
       - seccomp=./browser/seccomp_profile.json
     ports:
       - "127.0.0.1:${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
