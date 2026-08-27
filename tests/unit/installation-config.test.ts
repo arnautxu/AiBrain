@@ -90,6 +90,52 @@ describe("InstallationConfig", () => {
     );
   });
 
+  it("rejects overlapping private, source and publisher roots", async () => {
+    const nestedPrivate = await readFixture();
+    nestedPrivate.paths = {
+      ...(nestedPrivate.paths as Record<string, unknown>),
+      usersRoot: "/tmp/aibrain-example-lab/data/company/users",
+      backupsRoot: "/tmp/aibrain-example-lab/data/company/users/backups",
+    };
+    expect(() => parseInstallationConfig(nestedPrivate)).toThrowError(
+      expect.objectContaining<Partial<InstallationConfigValidationError>>({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: "$.paths.usersRoot" }),
+          expect.objectContaining({ path: "$.paths.backupsRoot" }),
+        ]),
+      }),
+    );
+
+    const externalInsideData = await readFixture();
+    externalInsideData.paths = {
+      ...(externalInsideData.paths as Record<string, unknown>),
+      sourceReadRoot: "/tmp/aibrain-example-lab/data/source-ro",
+      publishWriteRoot: "/tmp/aibrain-example-lab/data/publish-rw",
+    };
+    expect(() => parseInstallationConfig(externalInsideData)).toThrowError(
+      expect.objectContaining<Partial<InstallationConfigValidationError>>({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: "$.paths.sourceReadRoot" }),
+          expect.objectContaining({ path: "$.paths.publishWriteRoot" }),
+        ]),
+      }),
+    );
+
+    const dataInsideSource = await readFixture();
+    dataInsideSource.paths = {
+      ...(dataInsideSource.paths as Record<string, unknown>),
+      sourceReadRoot: "/tmp/aibrain-example-lab",
+      publishWriteRoot: "/tmp/aibrain-example-lab-publish",
+    };
+    expect(() => parseInstallationConfig(dataInsideSource)).toThrowError(
+      expect.objectContaining<Partial<InstallationConfigValidationError>>({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ path: "$.paths.sourceReadRoot" }),
+        ]),
+      }),
+    );
+  });
+
   it("fails closed when production has no absolute config path", () => {
     expect(() => resolveInstallationConfigPath({ env: { NODE_ENV: "production" } })).toThrow(
       "AIBRAIN_INSTALLATION_CONFIG es obligatorio en producción.",

@@ -196,6 +196,10 @@ function isStrictDescendant(parent: string, candidate: string) {
   return relative.length > 0 && relative !== ".." && !relative.startsWith("../") && !path.posix.isAbsolute(relative);
 }
 
+function pathsOverlap(left: string, right: string) {
+  return left === right || isStrictDescendant(left, right) || isStrictDescendant(right, left);
+}
+
 function parseBranding(
   value: unknown,
   issues: InstallationConfigIssue[],
@@ -250,6 +254,27 @@ function parsePaths(value: unknown, issues: InstallationConfigIssue[]): Installa
   for (const key of ["companyContextRoot", "usersRoot", "backupsRoot"] as const) {
     if (parsed.dataRoot && parsed[key] && !isStrictDescendant(parsed.dataRoot, parsed[key])) {
       issues.push({ path: `$.paths.${key}`, message: "debe estar dentro de paths.dataRoot" });
+    }
+  }
+  const privateDataRoots = ["companyContextRoot", "usersRoot", "backupsRoot"] as const;
+  for (let leftIndex = 0; leftIndex < privateDataRoots.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < privateDataRoots.length; rightIndex += 1) {
+      const leftKey = privateDataRoots[leftIndex];
+      const rightKey = privateDataRoots[rightIndex];
+      if (parsed[leftKey] && parsed[rightKey] && pathsOverlap(parsed[leftKey], parsed[rightKey])) {
+        issues.push({
+          path: `$.paths.${rightKey}`,
+          message: `no puede solaparse con paths.${leftKey}`,
+        });
+      }
+    }
+  }
+  for (const externalKey of ["sourceReadRoot", "publishWriteRoot"] as const) {
+    if (parsed.dataRoot && parsed[externalKey] && pathsOverlap(parsed.dataRoot, parsed[externalKey])) {
+      issues.push({
+        path: `$.paths.${externalKey}`,
+        message: "no puede solaparse con paths.dataRoot",
+      });
     }
   }
   if (
