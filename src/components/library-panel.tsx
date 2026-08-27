@@ -207,7 +207,7 @@ export function LibraryPanel({
   const previewIsImage = selected?.previewUrl && selected.mimeType?.startsWith("image/");
 
   return (
-    <div className="fixed inset-0 z-[75] flex bg-black/20 backdrop-blur-[2px] sm:p-5">
+    <div className="workspace-overlay fixed inset-0 z-[75] flex sm:p-5">
       <button aria-label="Cerrar biblioteca" className="absolute inset-0" onClick={onClose} />
       <section
         ref={dialogRef}
@@ -215,12 +215,12 @@ export function LibraryPanel({
         role="dialog"
         aria-modal="true"
         aria-label="Biblioteca"
-        className="panel-enter relative m-auto flex h-full w-full max-w-[1180px] flex-col overflow-hidden bg-[var(--surface-raised)] shadow-[var(--shadow-popover)] sm:h-[min(820px,calc(100dvh-2.5rem))] sm:rounded-[26px] sm:border sm:border-[var(--border-subtle)]"
+        className="workspace-panel panel-enter relative m-auto flex h-full w-full max-w-[1120px] flex-col overflow-hidden bg-[var(--surface-raised)] shadow-[var(--shadow-popover)] sm:h-[min(800px,calc(100dvh-2.5rem))] sm:rounded-[22px] sm:border sm:border-[var(--border-subtle)]"
       >
-        <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 sm:px-6">
+        <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 sm:px-6">
           <div className="min-w-0 flex-1">
-            <h2 className="text-[17px] font-semibold text-[var(--text)]">Biblioteca</h2>
-            <p className="mt-0.5 hidden text-[11px] text-[var(--text-subtle)] sm:block">Tus archivos, imágenes y resultados, juntos y listos para descargar.</p>
+            <h2 className="workspace-panel-title text-[var(--text)]">Biblioteca</h2>
+            <p className="workspace-panel-subtitle mt-0.5 hidden sm:block">Archivos y resultados creados en tus conversaciones.</p>
           </div>
           <button aria-label="Cerrar biblioteca" className="grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={18} /></button>
         </header>
@@ -247,7 +247,7 @@ export function LibraryPanel({
                     <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-[var(--text)]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[var(--text-subtle)]">{label(item.type)} · {item.projectName}</span></span>
                     <span className="shrink-0 text-[9px] tabular-nums text-[var(--text-subtle)]">{formatSize(item.size)}</span>
                   </button>;
-                }) : <div className="grid min-h-48 place-items-center px-8 text-center"><div><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><File size={19} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No hay resultados</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Prueba otro filtro o busca por nombre, proyecto o conversación.</p></div></div>}
+                }) : <div className="grid min-h-48 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><File size={19} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No hay resultados</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Prueba otro filtro o busca por nombre, proyecto o conversación.</p></div></div>}
             </div>
           </div>
 
@@ -271,7 +271,7 @@ export function LibraryPanel({
               {selected.type === "result" ? <div className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">Crear desde esta respuesta</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">La visualización usa una tabla numérica existente. El sitio interno conserva el contenido y elimina código inseguro.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("visualization")}>{artifactAction === "visualization" ? "Creando…" : "Crear visualización"}</button><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("internal-site")}>{artifactAction === "internal-site" ? "Creando…" : "Crear sitio interno"}</button></div></div> : null}
               {artifactNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{artifactNotice}</p> : null}
               <p className="mt-3 truncate text-[10px] text-[var(--text-subtle)]">{selected.projectName} · {selected.threadTitle}</p>
-            </div> : null}
+            </div> : <div className="workspace-empty-state m-auto text-center"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><ImagesSquare size={20} /></span><p className="mt-3 font-semibold text-[var(--text)]">Selecciona un elemento</p><p className="mt-1">Aquí podrás previsualizarlo, descargarlo o volver a la conversación donde se creó.</p></div>}
           </div>
         </div>
 

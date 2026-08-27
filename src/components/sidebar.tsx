@@ -330,7 +330,7 @@ export function Sidebar({
           </button>
           <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
             <CalendarBlank size={17} />
-            <span className="min-w-0 flex-1 text-[13px]">Tareas programadas</span>
+            <span className="min-w-0 flex-1 text-[13px]">Programadas</span>
           </button>
         </nav>
 

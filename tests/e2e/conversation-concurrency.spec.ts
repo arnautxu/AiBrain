@@ -3,7 +3,8 @@ import { expect, test, type Page, type Route } from "@playwright/test";
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 
 async function login(page: Page) {
-  const origin = "http://127.0.0.1:3100";
+  await page.goto("/login");
+  const origin = new URL(page.url()).origin;
   const response = await page.context().request.post(`${origin}/api/auth/login`, {
     data: { userId: demoUserId },
     headers: { Origin: origin },

@@ -83,7 +83,7 @@ export function AdminCenter() {
       setNewMember({ userId: "", displayName: "", email: "" }));
   };
 
-  return <div className="space-y-8">
+  return <div className="admin-center space-y-8">
     <section>
       <div className="flex items-start gap-3 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
         <ShieldCheck size={19} className="mt-0.5 text-[var(--positive)]" />

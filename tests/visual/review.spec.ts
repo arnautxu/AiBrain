@@ -43,7 +43,7 @@ test("turn activity and approval", async ({ page }) => {
 
 test("Review diff", async ({ page }) => {
   await openSyntheticTurn(page);
-  await page.getByRole("button", { name: "Revisar cambios" }).click();
+  await page.getByRole("button", { name: "Revisar resultados" }).click();
   await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
   await expect(page).toHaveScreenshot("review-diff.png", { fullPage: true });
 });
@@ -60,7 +60,7 @@ test("turn activity and approval dark", async ({ page }) => {
 test("Review diff dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openSyntheticTurn(page);
-  await page.getByRole("button", { name: "Revisar cambios" }).click();
+  await page.getByRole("button", { name: "Revisar resultados" }).click();
   await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
   await expect(page).toHaveScreenshot("review-diff-dark.png", { fullPage: true });
 });

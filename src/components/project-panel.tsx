@@ -140,11 +140,11 @@ export function ProjectPanel({ project, open, onClose, onSave }: ProjectPanelPro
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/20 backdrop-blur-[1px]" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <aside className="panel-enter flex h-full w-full max-w-[520px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
-        <header className="flex min-h-16 items-center gap-3 border-b border-[var(--border-subtle)] px-5">
+    <div className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+      <aside className="workspace-panel panel-enter flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
+        <header className="workspace-panel-header flex items-center gap-3 border-b border-[var(--border-subtle)] px-5">
           <span className="grid size-9 place-items-center rounded-xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><Brain size={18} /></span>
-          <div className="min-w-0 flex-1"><h2 className="truncate text-[15px] font-semibold">{project?.name ?? "Proyecto"}</h2><p className="text-[11px] text-[var(--text-muted)]">Contexto compartido para todas sus conversaciones</p></div>
+          <div className="min-w-0 flex-1"><h2 className="workspace-panel-title truncate">{project?.name ?? "Proyecto"}</h2><p className="workspace-panel-subtitle">Contexto compartido por todas sus conversaciones</p></div>
           <button type="button" aria-label="Cerrar" className="touch-target rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button>
         </header>
 

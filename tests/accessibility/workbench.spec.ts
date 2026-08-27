@@ -4,6 +4,11 @@ import { expect, test } from "@playwright/test";
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
 
 test("the authenticated employee shell has no critical or serious axe violations", async ({ page }) => {
+  await page.route("**/api/chat", (route) => route.fulfill({
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+    body: `${JSON.stringify({ type: "delta", value: "## Vista previa\n\nResumen sintético preparado para revisión." })}\n${JSON.stringify({ type: "done" })}\n`,
+  }));
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
   await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
@@ -23,8 +28,8 @@ test("the authenticated employee shell has no critical or serious axe violations
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("menuitem", { name: "Preferencias", exact: true }).click();
-  await expect(page.getByRole("heading", { name: /Preferencias de/ })).toBeVisible();
+  await page.getByRole("menuitem", { name: "Configuración", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Configuración" })).toBeVisible();
   await page.waitForTimeout(300);
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
