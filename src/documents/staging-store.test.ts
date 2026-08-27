@@ -45,6 +45,87 @@ describe("file document staging store", () => {
     expect((await store.readById(THREAD_ID, UPLOAD_ID)).fileName).toBe("notes.txt");
   });
 
+  it("copies a validated private file without loading it as a Buffer", async () => {
+    const data = Buffer.from("streamed private notes");
+    const sourcePath = path.join(root, "incoming.upload");
+    await writeFile(sourcePath, data, { mode: 0o600 });
+    const validated = validateUploadedDocument({
+      fileName: "notes.txt",
+      declaredMimeType: "text/plain",
+      data,
+    });
+    const staged = await store.stageFile({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated,
+      sourcePath,
+    });
+    expect(await readFile(path.join(staging, staged.relativePath), "utf8")).toBe(data.toString("utf8"));
+    expect(staged.sha256).toBe(validated.sha256);
+  });
+
+  it("recovers a crash after content publication and makes retry idempotent", async () => {
+    const data = Buffer.from("crash-safe content");
+    const sourcePath = path.join(root, "incoming.upload");
+    await writeFile(sourcePath, data, { mode: 0o600 });
+    const validated = validateUploadedDocument({
+      fileName: "notes.txt",
+      declaredMimeType: "text/plain",
+      data,
+    });
+    const uploadDirectory = path.join(staging, "threads", THREAD_ID, "uploads", UPLOAD_ID);
+    await mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
+    const orphanPath = path.join(uploadDirectory, "notes.txt");
+    await writeFile(orphanPath, data, { mode: 0o600 });
+
+    const recovered = await store.stageFile({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated,
+      sourcePath,
+    });
+    const retry = await store.stageFile({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated,
+      sourcePath,
+    });
+    expect(retry).toEqual(recovered);
+    expect(await readFile(orphanPath, "utf8")).toBe(data.toString("utf8"));
+    expect((await readdir(uploadDirectory)).sort()).toEqual(["notes.txt", "upload.json"]);
+  });
+
+  it("never overwrites differing or ambiguous orphaned staged content", async () => {
+    const sourceData = Buffer.from("new validated content");
+    const sourcePath = path.join(root, "incoming.upload");
+    await writeFile(sourcePath, sourceData, { mode: 0o600 });
+    const validated = validateUploadedDocument({
+      fileName: "notes.txt",
+      declaredMimeType: "text/plain",
+      data: sourceData,
+    });
+    const uploadDirectory = path.join(staging, "threads", THREAD_ID, "uploads", UPLOAD_ID);
+    await mkdir(uploadDirectory, { recursive: true, mode: 0o700 });
+    const orphanPath = path.join(uploadDirectory, "notes.txt");
+    await writeFile(orphanPath, "existing different content", { mode: 0o600 });
+    await expect(store.stageFile({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated,
+      sourcePath,
+    })).rejects.toMatchObject({ code: "STORAGE_STAGING_ID_CONFLICT" });
+    expect(await readFile(orphanPath, "utf8")).toBe("existing different content");
+
+    await writeFile(path.join(uploadDirectory, "unexpected.tmp"), "orphan", { mode: 0o600 });
+    await expect(store.stageFile({
+      threadId: THREAD_ID,
+      uploadId: UPLOAD_ID,
+      validated,
+      sourcePath,
+    })).rejects.toMatchObject({ code: "STORAGE_STAGING_ORPHAN_CONFLICT" });
+    expect(await readFile(orphanPath, "utf8")).toBe("existing different content");
+  });
+
   it("rejects reuse of an upload id for different content", async () => {
     const firstData = Buffer.from("one");
     const secondData = Buffer.from("two");
