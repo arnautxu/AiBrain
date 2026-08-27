@@ -5,6 +5,7 @@ import type { Duplex } from "node:stream";
 import {
   BrowserNetworkPolicy,
   BrowserNetworkPolicyError,
+  type BrowserDnsLookup,
   isGlobalNetworkAddress,
 } from "@/runtime/browser/network-policy";
 
@@ -19,6 +20,7 @@ const MAX_AUTHORITY_BYTES = 1_024;
 const MAX_UPSTREAM_RESPONSE_BYTES = 16 * 1_024;
 const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
 const CLIENT_USERNAME = "aibrain-browser";
+const BROWSER_RESOLVE_PATH = "/__aibrain_egress_resolve";
 
 const STATIC_HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -157,6 +159,82 @@ function environmentUpstreamProxy() {
     );
   }
   return { url, token };
+}
+
+export function browserDnsLookupFromEnvironment(): BrowserDnsLookup | undefined {
+  const configured = environmentUpstreamProxy();
+  if (!configured) return undefined;
+  const upstream = validatedUpstreamProxy(configured);
+  return async (hostname) => await new Promise((resolve, reject) => {
+    const request = httpRequest({
+      host: upstream.hostname,
+      port: upstream.port,
+      method: "GET",
+      path: `${BROWSER_RESOLVE_PATH}?hostname=${encodeURIComponent(hostname)}`,
+      headers: {
+        accept: "application/json",
+        connection: "close",
+        "proxy-authorization": `Bearer ${upstream.token}`,
+      },
+      agent: false,
+      timeout: DEFAULT_CONNECT_TIMEOUT_MS,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      let bytes = 0;
+      response.on("data", (chunk: Buffer) => {
+        bytes += chunk.byteLength;
+        if (bytes > MAX_UPSTREAM_RESPONSE_BYTES) {
+          response.destroy(new BrowserEgressProxyError(
+            "BROWSER_PROXY_DNS_INVALID",
+            "Isolated browser DNS response exceeded its limit.",
+          ));
+          return;
+        }
+        chunks.push(Buffer.from(chunk));
+      });
+      response.once("error", reject);
+      response.once("end", () => {
+        if (response.statusCode !== 200) {
+          reject(new BrowserEgressProxyError(
+            "BROWSER_PROXY_DNS_REJECTED",
+            "Isolated egress gateway rejected browser DNS.",
+          ));
+          return;
+        }
+        let body: unknown;
+        try {
+          body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        } catch (error) {
+          reject(new BrowserEgressProxyError(
+            "BROWSER_PROXY_DNS_INVALID",
+            "Isolated browser DNS response is invalid JSON.",
+            { cause: error },
+          ));
+          return;
+        }
+        const candidate = body as { schemaVersion?: unknown; hostname?: unknown; addresses?: unknown };
+        if (candidate.schemaVersion !== 1 || candidate.hostname !== hostname ||
+            !Array.isArray(candidate.addresses) || candidate.addresses.length === 0 ||
+            candidate.addresses.length > 32 || candidate.addresses.some((address) =>
+              !address || typeof address !== "object" ||
+              (address as { family?: unknown }).family !== 4 && (address as { family?: unknown }).family !== 6 ||
+              typeof (address as { address?: unknown }).address !== "string")) {
+          reject(new BrowserEgressProxyError(
+            "BROWSER_PROXY_DNS_INVALID",
+            "Isolated browser DNS response does not match its contract.",
+          ));
+          return;
+        }
+        resolve(candidate.addresses as Array<{ address: string; family: number }>);
+      });
+    });
+    request.once("timeout", () => request.destroy(new BrowserEgressProxyError(
+      "BROWSER_PROXY_DNS_TIMEOUT",
+      "Isolated browser DNS request timed out.",
+    )));
+    request.once("error", reject);
+    request.end();
+  });
 }
 
 function upstreamPinnedConnector(value: Readonly<{ url: string; token: string }>): BrowserPinnedConnector {

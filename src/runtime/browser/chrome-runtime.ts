@@ -19,7 +19,7 @@ import {
   type PrivateCdpClientOptions,
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
-import { BrowserEgressProxy } from "@/runtime/browser/egress-proxy";
+import { BrowserEgressProxy, browserDnsLookupFromEnvironment } from "@/runtime/browser/egress-proxy";
 import { BrowserNavigationStore } from "@/runtime/browser/navigation-store";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 
@@ -422,9 +422,13 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       spawn(executable, [...args], spawnOptions) as ChromeProcess);
     this.connectCdpPipe = options.connectCdpPipe ?? ((requestPipe, responsePipe, clientOptions) =>
       PrivateCdpClient.connect(requestPipe, responsePipe, clientOptions));
-    this.networkPolicy = options.networkPolicy ?? new BrowserNetworkPolicy({
-      allowPrivateNetwork: options.allowPrivateNetwork,
-    });
+    this.networkPolicy = options.networkPolicy ?? (() => {
+      const lookup = options.allowPrivateNetwork ? undefined : browserDnsLookupFromEnvironment();
+      return new BrowserNetworkPolicy({
+        allowPrivateNetwork: options.allowPrivateNetwork,
+        ...(lookup ? { lookup } : {}),
+      });
+    })();
     // The local-network override exists only for real, synthetic browser tests
     // and BrowserNetworkPolicy rejects it in production. All normal runtimes
     // share this exact policy with their per-user DNS-pinning egress proxy.

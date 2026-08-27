@@ -16,6 +16,7 @@ import process from "node:process";
 import type { Duplex } from "node:stream";
 
 const HEALTH_PATH = "/__aibrain_egress_health";
+const BROWSER_RESOLVE_PATH = "/__aibrain_egress_resolve";
 const METADATA_HOSTNAMES = new Set([
   "instance-data.ec2.internal",
   "metadata.azure.internal",
@@ -314,6 +315,18 @@ function sendHttp(response: ServerResponse, status: number, message: string) {
   response.end(message);
 }
 
+function sendJson(response: ServerResponse, status: number, value: unknown) {
+  if (response.headersSent) return response.destroy();
+  const body = `${JSON.stringify(value)}\n`;
+  response.writeHead(status, {
+    "cache-control": "no-store",
+    connection: "close",
+    "content-type": "application/json",
+    "content-length": Buffer.byteLength(body),
+  });
+  response.end(body);
+}
+
 function sendConnect(socket: Duplex, status: number, reason: string) {
   if (!socket.destroyed && socket.writable) {
     socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
@@ -556,6 +569,37 @@ export class EgressGateway {
       const body = `${JSON.stringify(this.health())}\n`;
       response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json", "content-length": Buffer.byteLength(body) });
       response.end(body);
+      return;
+    }
+    if (request.method === "GET" && request.url?.startsWith(BROWSER_RESOLVE_PATH)) {
+      try {
+        const channel = channelFor(request.headers, this.tokens);
+        if (channel !== "browser") {
+          throw new EgressGatewayError("CHANNEL_REJECTED", "Only the browser channel may resolve browser destinations.");
+        }
+        const requestUrl = new URL(request.url, "http://aibrain-egress.internal");
+        const hostnames = requestUrl.searchParams.getAll("hostname");
+        if (requestUrl.pathname !== BROWSER_RESOLVE_PATH || hostnames.length !== 1 ||
+            [...requestUrl.searchParams.keys()].some((key) => key !== "hostname")) {
+          throw new EgressGatewayError("TARGET_INVALID", "Browser DNS request is invalid.");
+        }
+        const hostname = normalizeHostname(hostnames[0]!);
+        if (isIP(hostname)) {
+          throw new EgressGatewayError("TARGET_INVALID", "Browser DNS requires a hostname.");
+        }
+        rejectLocalHostname(hostname);
+        const addresses = validateDnsResults(
+          await this.lookup(hostname, { all: true, verbatim: true }),
+          this.config.maxAddresses,
+        );
+        sendJson(response, 200, { schemaVersion: 1, hostname, addresses });
+      } catch (error) {
+        const status = statusFor(error);
+        if (status === 407 && !response.headersSent) {
+          response.setHeader("proxy-authenticate", "Bearer realm=\"aibrain-egress\"");
+        }
+        sendHttp(response, status, `${reasonFor(status)}.\n`);
+      }
       return;
     }
     let upstreamSocket: Socket | null = null;
