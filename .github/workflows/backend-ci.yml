@@ -45,7 +45,9 @@ jobs:
       - name: Production build
         run: npm run build
       - name: Validate infrastructure contracts
-        run: npm run infra:validate
+        run: |
+          npm run infra:validate
+          bash -n infra/hetzner/app/deploy-arnall-main.sh
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=critical
       - name: Audit complete dependency tree

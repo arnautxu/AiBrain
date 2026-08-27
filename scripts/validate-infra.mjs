@@ -53,7 +53,9 @@ const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
 const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway].join("\n");
+const arnallDeployGateway = read("infra/hetzner/app/deploy-arnall-main.sh");
+const arnallDeployWorkflow = read(".github/workflows/deploy-arnall.yml");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway, arnallDeployGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -61,6 +63,14 @@ forbidMatch(deployArtifacts, /docker\.sock/iu, "deployment artifacts reference d
 forbidMatch(compose, /^\s*privileged\s*:/mu, "Compose enables privileged mode");
 forbidMatch(compose, /^\s*network_mode\s*:/mu, "Compose joins another network namespace");
 forbidMatch(compose, /^\s*external\s*:\s*true/mu, "Compose reuses an external network or volume");
+forbidMatch(arnallDeployGateway, /(?:docker\s+(?:system|builder|image)\s+prune|docker\s+volume\s+(?:rm|prune)|docker\s+network\s+(?:rm|prune)|BGreenly)/iu, "Arnall deploy gateway contains a broad cleanup or foreign tenant reference");
+requireMatch(arnallDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,120}\^deploy\\ \(\[0-9a-f\]\{40\}\)\$/u, "Arnall deploy gateway does not constrain the forced SSH command to one immutable revision");
+requireMatch(arnallDeployGateway, /AIBRAIN_INSTALLATION_ID=\$\{INSTALLATION_ID\}[\s\S]{0,250}AIBRAIN_COMPOSE_PROJECT_NAME=\$\{COMPOSE_PROJECT\}/u, "Arnall deploy gateway does not verify the exact installation and Compose project");
+requireMatch(arnallDeployGateway, /validate_archive[\s\S]{0,1500}source archive contains links or special files/u, "Arnall deploy gateway does not validate the source archive before root extraction");
+requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
+requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful Backend CI");
+requireMatch(arnallDeployWorkflow, /head_sha[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnall deployment does not transmit the immutable tested revision");
+requireMatch(arnallDeployWorkflow, /StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnall deployment does not pin the SSH host identity");
 
 requireMatch(dockerfile, /@openai\/codex@0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
 forbidMatch(dockerfile, /ARG CODEX_VERSION/u, "Dockerfile permits the App Server contract version to be overridden");
