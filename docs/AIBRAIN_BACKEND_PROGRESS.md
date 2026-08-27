@@ -485,3 +485,32 @@ npm run infra:validate
    digest nuevos.
 4. Cuando la rama integrada esté aceptada visual y funcionalmente, abrir PR a
    `main`; el merge sigue siendo una acción separada y no se ha realizado.
+
+## Dominio canónico Arnall y revisión integrada final — 2026-08-27
+
+[Installation-specific operational details omitted.]
+
+### Pendientes exclusivamente externos
+
+1. Supabase Dashboard exige MFA del propietario para añadir explícitamente
+   `https://arnall.graphikai.com/auth/recovery` a Redirect URLs/Site URL. No se
+   intentó enviar correo de recuperación ni se alteró Auth sin completar MFA.
+   El login, el cambio inicial y las sesiones locales ya funcionan en el dominio.
+2. Google OAuth no forma parte aún del login desplegado. Si se habilita, debe ser
+   solo para empleados previamente provisionados; nunca un signup público que
+   cree acceso al producto automáticamente.
+3. El worker de Arnau tiene su suscripción Codex dedicada y un turn real verde.
+   El usuario de David conserva CODEX_HOME/workspace/browser propios y necesita
+   autenticar su propia suscripción antes de ejecutar turns reales; no se
+   compartirán credenciales Codex entre empleados.
+4. NAS/documental real, DNS adicionales, merge a `main` y cualquier cutover de
+   otra empresa siguen fuera de este despliegue aislado.
+
+### Siguiente integración de UI
+
+1. Arnau continúa en `codex/aibrain-ui-parity` y hace push de commits pequeños.
+2. Se fusionan backend y UI únicamente en `codex/aibrain-integrated-qa` mediante
+   merge commits normales, usando `docs/UI_BACKEND_CONTRACT.md` como contrato.
+3. Se ejecutan typecheck, lint, unit/integración/contratos/E2E y build; solo un
+   checkpoint verde genera dos digests OCI nuevos y recrea los tres servicios
+   AiBrain. `main` no se toca hasta aprobación humana separada.
