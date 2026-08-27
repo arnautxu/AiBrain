@@ -166,7 +166,10 @@ describe("LocalFileMemoryService", () => {
 
     const input = rememberInput(2, { kind: "decision", content: "Use the approved delivery workflow." });
     const first = await service.remember(contextA, input);
-    const duplicate = await service.remember(contextA, input);
+    const duplicate = await service.remember(contextA, {
+      ...input,
+      provenance: { ...input.provenance, capturedAt: "2026-08-27T10:00:01.000Z" },
+    });
     expect(first.created).toBe(true);
     expect(duplicate).toEqual({ memory: first.memory, created: false });
     expect(first.memory).toMatchObject({
