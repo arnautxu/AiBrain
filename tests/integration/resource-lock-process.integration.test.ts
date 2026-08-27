@@ -107,13 +107,15 @@ describe("resource locks across real processes", () => {
   it("does not steal a heartbeat-protected owner after the stale threshold", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-lock-live-process-"));
     roots.push(root);
-    const owner = start(root, "hold", 450, 2_000);
-    await owner.waitFor("acquired");
+    const owner = start(root, "crash", 0, 2_000);
+    const acquired = await owner.waitFor("acquired");
     const contender = start(root, "hold", 0, 180);
     const failure = await contender.waitFor("failed");
     expect(failure.code).toBe("STORAGE_LOCK_TIMEOUT");
     expect((await waitForExit(contender.child)).code).toBe(1);
-    expect((await waitForExit(owner.child)).code).toBe(0);
+    process.kill(acquired.processId!, "SIGKILL");
+    await waitForExit(owner.child);
+    expect(() => process.kill(acquired.processId!, 0)).toThrow(expect.objectContaining({ code: "ESRCH" }));
   });
 
   it("recovers the abandoned lease after an owner process is killed", async () => {

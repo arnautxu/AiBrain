@@ -254,6 +254,8 @@ const requiredRuntimeKeys = [
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "AIBRAIN_CHROME_EXPECTED_VERSION",
+  "AIBRAIN_DOCUMENT_MAX_CONVERSIONS",
+  "AIBRAIN_DOCUMENT_RETRY_AFTER_MS",
 ];
 for (const key of requiredRuntimeKeys) requireMatch(runtimeEnv, new RegExp(`^${key}=`, "mu"), `runtime env example is missing ${key}`);
 forbidMatch(runtimeEnv, /SUPABASE_SECRET_KEY/u, "runtime env includes an unnecessary Supabase server key");

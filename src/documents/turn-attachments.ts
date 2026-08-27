@@ -4,6 +4,10 @@ import { tmpdir } from "node:os";
 import type { UserInput } from "../../contracts/codex/0.149.1/types/v2/UserInput";
 import type { ChatAttachment } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
+import {
+  DocumentConversionBackpressureError,
+  type DocumentConversionAdmission,
+} from "@/documents/conversion-gate";
 import type { FileDocumentStagingStore, StagedDocument } from "@/documents/staging-store";
 import {
   SystemDocumentToolRunner,
@@ -72,10 +76,17 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
     stagingRoot: string;
     previews: TurnDocumentPreviewReader;
     pdftotext: string;
+    conversionGate?: DocumentConversionAdmission;
     runner?: DocumentToolRunner;
   }) {
     if (!path.isAbsolute(options.stagingRoot) || !path.isAbsolute(options.pdftotext)) {
       throw new TurnDocumentAttachmentError("TURN_DOCUMENT_RESOLVER_INVALID", "Document resolver paths must be absolute.");
+    }
+    if (!options.conversionGate && process.env.NODE_ENV === "production") {
+      throw new TurnDocumentAttachmentError(
+        "TURN_DOCUMENT_RESOLVER_INVALID",
+        "Production document extraction requires installation-wide conversion admission.",
+      );
     }
   }
 
@@ -119,16 +130,20 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
           : Promise.resolve(null),
       ]);
       work = await mkdtemp(path.join(tmpdir(), "aibrain-turn-document-"));
-      const pdfPath = path.join(work, "document.pdf");
+      const workRoot = work;
+      const pdfPath = path.join(workRoot, "document.pdf");
       await atomicWriteFile(pdfPath, pdf, { mode: 0o600 });
       const runner = this.options.runner ?? new SystemDocumentToolRunner();
-      const extracted = await runner.run(this.options.pdftotext, [
-        "-layout", "-nopgbrk", "-enc", "UTF-8", pdfPath, "-",
-      ], {
-        cwd: work,
-        env: { HOME: work, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
-        timeoutMs: 30_000,
-      });
+      const extract = () => runner.run(this.options.pdftotext, [
+          "-layout", "-nopgbrk", "-enc", "UTF-8", pdfPath, "-",
+        ], {
+          cwd: workRoot,
+          env: { HOME: workRoot, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
+          timeoutMs: 30_000,
+        });
+      const extracted = this.options.conversionGate
+        ? await this.options.conversionGate.run(extract)
+        : await extract();
       if (Buffer.byteLength(extracted.stdout, "utf8") > MAX_EXTRACTED_TEXT_BYTES_PER_DOCUMENT) {
         throw new TurnDocumentAttachmentError("TURN_DOCUMENT_TEXT_TOO_LARGE", "Extracted document text exceeds the safe turn boundary.");
       }
@@ -142,6 +157,7 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
       ]);
     } catch (error) {
       if (error instanceof TurnDocumentAttachmentError) throw error;
+      if (error instanceof DocumentConversionBackpressureError) throw error;
       throw new TurnDocumentAttachmentError(
         "TURN_DOCUMENT_PREPARATION_FAILED",
         "The attested document preview could not be prepared as a bounded turn input.",

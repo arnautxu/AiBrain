@@ -2,6 +2,7 @@ import "server-only";
 
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
+import { FileDocumentConversionGate } from "@/documents/conversion-gate";
 import { FileDocumentPublisher } from "@/documents/document-publisher";
 import { DocumentPreviewService, type DocumentToolchain } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
@@ -51,14 +52,18 @@ export async function documentServicesForUser(
     rootDirectory: path.join(stateRoot, ".locks", "documents"),
   });
   const staging = new FileDocumentStagingStore(manifest.roots.staging, locks);
+  const conversionGate = new FileDocumentConversionGate({
+    rootDirectory: path.join(installation.paths.dataRoot, "locks", "document-conversions"),
+  });
   const toolchain = documentToolchainFromEnvironment();
   const previews = new DocumentPreviewService({
     stagingRoot: manifest.roots.staging,
     previewRoot: path.join(stateRoot, "document-previews"),
     lockManager: locks,
     tools: toolchain,
+    conversionGate,
   });
-  return { manifest, locks, staging, previews, toolchain };
+  return { manifest, locks, staging, previews, toolchain, conversionGate };
 }
 
 function publicationSecret() {

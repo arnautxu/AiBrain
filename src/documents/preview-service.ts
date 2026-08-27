@@ -3,6 +3,7 @@ import { chmod, lstat, mkdtemp, readFile, rm } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { StagedDocument } from "@/documents/staging-store";
+import type { DocumentConversionAdmission } from "@/documents/conversion-gate";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile, atomicWriteJson, readValidatedJson } from "@/storage/atomic-file";
@@ -125,6 +126,7 @@ export class DocumentPreviewService {
     lockManager: ResourceLockManager;
     runner?: DocumentToolRunner;
     tools: DocumentToolchain;
+    conversionGate?: DocumentConversionAdmission;
     requireQpdf?: boolean;
     now?: () => number;
   }) {
@@ -135,6 +137,13 @@ export class DocumentPreviewService {
     this.previewRoot = path.resolve(options.previewRoot);
     this.lockManager = options.lockManager;
     this.runner = options.runner ?? new SystemDocumentToolRunner();
+    this.conversionGate = options.conversionGate ?? null;
+    if (!this.conversionGate && process.env.NODE_ENV === "production") {
+      throw new StorageError(
+        "DOCUMENT_CONVERSION_GATE_MISSING",
+        "Production document previews require installation-wide conversion admission.",
+      );
+    }
     this.now = options.now ?? Date.now;
     this.tools = {
       soffice: validateToolPath("soffice", options.tools.soffice, true)!,
@@ -147,6 +156,7 @@ export class DocumentPreviewService {
   private readonly stagingRoot: string;
   private readonly lockManager: ResourceLockManager;
   private readonly runner: DocumentToolRunner;
+  private readonly conversionGate: DocumentConversionAdmission | null;
   private readonly now: () => number;
 
   private previewLocations(threadId: string, uploadId: string) {
@@ -197,6 +207,7 @@ export class DocumentPreviewService {
           await atomicWriteFile(path.join(directory, name), source, { mode: 0o600 });
           files.push(name);
         } else {
+          await this.runWithConversionAdmission(async () => {
           let pdfPath = inputPath;
           const environment = {
             HOME: path.join(work, "home"),
@@ -237,6 +248,7 @@ export class DocumentPreviewService {
             chmod(path.join(directory, "page-1.png"), 0o600),
           ]);
           files.push("document.pdf", "page-1.png");
+          });
         }
 
         const preview: DocumentPreview = {
@@ -256,6 +268,10 @@ export class DocumentPreviewService {
         await rm(work, { recursive: true, force: true });
       }
     });
+  }
+
+  private runWithConversionAdmission<T>(operation: () => Promise<T>) {
+    return this.conversionGate ? this.conversionGate.run(operation) : operation();
   }
 
   async read(threadId: string, uploadId: string) {
