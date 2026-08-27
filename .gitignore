@@ -6,6 +6,7 @@ out
 *.tsbuildinfo
 .env*
 !.env.example
+runtime/demo/
 runtime/control-plane/
 runtime/tenants/*/workspace/*
 !runtime/tenants/*/workspace/AGENTS.md

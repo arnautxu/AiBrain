@@ -13,7 +13,6 @@ import {
   FolderOpen,
   Globe,
   GitDiff,
-  HardDrives,
   Image as ImageIcon,
   ImagesSquare,
   List,
@@ -67,8 +66,8 @@ type ChatWorkspaceProps = {
   onOpenCommandPalette: () => void;
   onOpenCustomization: () => void;
   enabledWindows: BrainWindow[];
-  activeSideWindow: Exclude<BrainWindowId, "chat"> | null;
-  onOpenWindow: (windowId: Exclude<BrainWindowId, "chat">) => void;
+  activeSideWindow: Exclude<BrainWindowId, "chat" | "runtime"> | null;
+  onOpenWindow: (windowId: Exclude<BrainWindowId, "chat" | "runtime">) => void;
   canInspect: boolean;
   onInspectMessage: (messageId: string) => void;
   onResolveApproval: (
@@ -346,7 +345,8 @@ export function ChatWorkspace({
 
         <div className="flex items-center gap-1">
           {enabledWindows.filter((window) => window.id !== "chat").map((window) => {
-            const windowId = window.id as Exclude<BrainWindowId, "chat">;
+            if (window.id !== "inspector") return null;
+            const windowId = window.id;
             const active = activeSideWindow === windowId;
             return (
               <button
@@ -356,7 +356,7 @@ export function ChatWorkspace({
                 className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[9px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]" : "text-[#77746f] hover:bg-[#efeeeb] hover:text-[#2f2d2a]"}`}
                 onClick={() => onOpenWindow(windowId)}
               >
-                {windowId === "inspector" ? <GitDiff size={14} /> : <HardDrives size={14} />}
+                <GitDiff size={14} />
                 <span className="hidden xl:inline">{window.label}</span>
               </button>
             );

@@ -39,15 +39,15 @@ type DemoState = {
 const mutationQueues = new Map<string, Promise<unknown>>();
 
 function dataDirectory() {
-  const configured = process.env.CONTROL_PLANE_DATA_DIR?.trim();
+  const configured = process.env.AIBRAIN_DEMO_DATA_DIR?.trim();
   if (configured && !path.isAbsolute(configured)) {
-    throw new WorkbenchPersistenceError("CONTROL_PLANE_DATA_DIR ha de ser una ruta absoluta.");
+    throw new WorkbenchPersistenceError("AIBRAIN_DEMO_DATA_DIR ha de ser una ruta absoluta.");
   }
   if (configured) return path.join(configured, "workbench");
   if (process.env.NODE_ENV === "production") {
     throw new WorkbenchPersistenceError("La persistència demo no està configurada.");
   }
-  return path.join(process.cwd(), "runtime", "control-plane", "workbench");
+  return path.join(process.cwd(), "runtime", "demo", "workbench");
 }
 
 function statePath(tenantId: string) {
@@ -59,7 +59,7 @@ function statePath(tenantId: string) {
 
 function seedNames(tenantId: string, tenantName: string) {
   if (tenantId === "studio") return ["AiBrain", "Laboratori"] as const;
-  if (tenantId === "operations") return ["Operacions", "Automatitzacions"] as const;
+  if (tenantId === "operations") return ["Operacions", "Processos"] as const;
   return [tenantName, "Laboratori"] as const;
 }
 
