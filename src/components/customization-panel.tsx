@@ -1,222 +1,143 @@
 "use client";
 
 import {
-  Check,
-  Gauge,
-  PaintBrush,
-  UsersThree,
-  Wrench,
-  X,
+  Bell, Browsers, Check, Gauge, LockKey, PaintBrush, PlugsConnected,
+  ShieldCheck, UserCircle, UsersThree, Wrench, X,
 } from "@phosphor-icons/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { BrainPreferences, CornerStyle, Density } from "@/config/brain";
 import type { RuntimeStatus } from "@/lib/runtime-status";
+import {
+  isControllableAppId, isSettingsSnapshot,
+  type AppCatalogueItem, type NotificationSettings, type SettingsPatch, type SettingsSnapshot,
+} from "@/settings/contracts";
 import type { CompanyUsageResponse, PersonalUsageResponse } from "@/usage/contracts";
 import { useModalFocus } from "@/ui/use-modal-focus";
 import { ThemeToggle } from "@/components/ui/primitives";
 
-type CustomizationPanelProps = {
-  productName: string;
-  open: boolean;
-  preferences: BrainPreferences;
-  runtimeStatus: RuntimeStatus;
-  selectedSkill: string | null;
-  onSelectedSkillChange: (skillId: string | null) => void;
+type Props = {
+  productName: string; open: boolean; preferences: BrainPreferences; runtimeStatus: RuntimeStatus;
+  selectedSkill: string | null; onSelectedSkillChange: (skillId: string | null) => void;
   onChange: <Key extends keyof BrainPreferences>(key: Key, value: BrainPreferences[Key]) => void;
-  onReset: () => void;
-  onClose: () => void;
+  onReset: () => void; onSettingsSnapshot?: (snapshot: SettingsSnapshot) => void; onClose: () => void;
 };
-
-type SettingsTab = "appearance" | "skills" | "team" | "usage";
+type Tab = "account" | "apps" | "appearance" | "privacy" | "permissions" | "browser" | "notifications" | "team" | "usage";
 type TeamMember = { userId: string; displayName: string; email: string; workerId: string };
 
-function formatNumber(value: number) {
-  return new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(value);
-}
-
+const number = (value: number) => new Intl.NumberFormat("es-ES", { maximumFractionDigits: 0 }).format(value);
 function planPercent(usage: PersonalUsageResponse | CompanyUsageResponse | null) {
   const windows = usage?.sharedSubscription?.rateLimits.flatMap((bucket) =>
     [bucket.primary, bucket.secondary].filter((item): item is NonNullable<typeof item> => Boolean(item))) ?? [];
   return windows.length ? Math.max(...windows.map((item) => item.usedPercent)) : null;
 }
-
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <button aria-label={label} aria-pressed={checked} className={`touch-target relative h-5 w-9 rounded-full transition ${checked ? "bg-[var(--brain-accent)]" : "bg-[var(--border-strong)]"}`} onClick={() => onChange(!checked)}>
-      <span className={`absolute top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-[var(--surface-raised)] shadow-sm transition-transform ${checked ? "translate-x-[18px]" : "translate-x-0.5"}`}>
-        {checked ? <Check size={8} weight="bold" className="text-[var(--brain-accent)]" /> : null}
-      </span>
-    </button>
-  );
+function Toggle({ label, checked, disabled = false, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
+  return <button type="button" aria-label={label} aria-pressed={checked} disabled={disabled} className={`touch-target relative h-5 w-9 rounded-full transition disabled:cursor-not-allowed disabled:opacity-45 ${checked ? "bg-[var(--brain-accent)]" : "bg-[var(--border-strong)]"}`} onClick={() => onChange(!checked)}><span className={`absolute top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-[var(--surface-raised)] shadow-sm transition-transform ${checked ? "translate-x-[18px]" : "translate-x-0.5"}`}>{checked ? <Check size={8} weight="bold" className="text-[var(--brain-accent)]" /> : null}</span></button>;
+}
+function runtimeApp(app: AppCatalogueItem, runtime: RuntimeStatus) {
+  if (!app.effectiveEnabled || app.status === "blocked") return app;
+  if (app.id === "codex-runtime") return runtime.codex === "connected"
+    ? { ...app, status: "connected" as const, statusDetail: "Conectado al runtime de trabajo." }
+    : { ...app, status: "not_configured" as const, statusDetail: "El runtime no está conectado ahora mismo." };
+  if (app.id === "web-search" && !runtime.capabilities.webSearch) return { ...app, status: "not_configured" as const, statusDetail: "El runtime conectado no publica búsqueda web." };
+  if (app.id === "image-generation" && !runtime.capabilities.imageGeneration) return { ...app, status: "not_configured" as const, statusDetail: "El runtime conectado no publica generación de imágenes." };
+  if (app.id === "skills" && runtime.skills.length === 0) return { ...app, status: "not_configured" as const, statusDetail: "No hay skills instaladas para este empleado." };
+  return { ...app, status: "connected" as const };
 }
 
-export function CustomizationPanel({
-  productName,
-  open,
-  preferences,
-  runtimeStatus,
-  selectedSkill,
-  onSelectedSkillChange,
-  onChange,
-  onReset,
-  onClose,
-}: CustomizationPanelProps) {
+export function CustomizationPanel({ productName, open, preferences, runtimeStatus, selectedSkill, onSelectedSkillChange, onChange, onReset, onSettingsSnapshot, onClose }: Props) {
   const panelRef = useModalFocus(open, onClose);
-  const [tab, setTab] = useState<SettingsTab>("appearance");
+  const [tab, setTab] = useState<Tab>("account");
   const [team, setTeam] = useState<TeamMember[]>([]);
   const [personalUsage, setPersonalUsage] = useState<PersonalUsageResponse | null>(null);
   const [companyUsage, setCompanyUsage] = useState<CompanyUsageResponse | null>(null);
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
     void Promise.all([
-      fetch("/api/settings/team", { cache: "no-store" }).then(async (response) => response.ok ? response.json() as Promise<{ members?: TeamMember[] }> : null),
-      fetch("/api/usage/me", { cache: "no-store" }).then(async (response) => response.ok ? response.json() as Promise<PersonalUsageResponse> : null),
-      fetch("/api/usage/company", { cache: "no-store" }).then(async (response) => response.ok ? response.json() as Promise<CompanyUsageResponse> : null),
-    ]).then(([teamResponse, personal, company]) => {
+      fetch("/api/settings", { cache: "no-store" }).then(async (r) => r.ok ? r.json() as Promise<unknown> : null),
+      fetch("/api/settings/team", { cache: "no-store" }).then(async (r) => r.ok ? r.json() as Promise<{ members?: TeamMember[] }> : null),
+      fetch("/api/usage/me", { cache: "no-store" }).then(async (r) => r.ok ? r.json() as Promise<PersonalUsageResponse> : null),
+      fetch("/api/usage/company", { cache: "no-store" }).then(async (r) => r.ok ? r.json() as Promise<CompanyUsageResponse> : null),
+    ]).then(([snapshot, teamResult, personal, company]) => {
       if (cancelled) return;
-      setTeam(Array.isArray(teamResponse?.members) ? teamResponse.members : []);
-      setPersonalUsage(personal);
-      setCompanyUsage(company);
-    });
+      if (isSettingsSnapshot(snapshot)) { setSettings(snapshot); setError(null); onSettingsSnapshot?.(snapshot); }
+      else setError("No se ha podido cargar toda la configuración.");
+      setTeam(Array.isArray(teamResult?.members) ? teamResult.members : []);
+      setPersonalUsage(personal); setCompanyUsage(company);
+    }).catch(() => { if (!cancelled) setError("No se ha podido cargar la configuración."); })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [open]);
+  }, [onSettingsSnapshot, open]);
 
-  if (!open) return null;
+  const save = async (patch: SettingsPatch, key: string) => {
+    setSavingKey(key); setError(null);
+    try {
+      const response = await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
+      const result: unknown = await response.json().catch(() => null);
+      if (!response.ok || !isSettingsSnapshot(result)) {
+        const message = result && typeof result === "object" && "error" in result && typeof result.error === "string" ? result.error : "No se ha podido guardar el cambio.";
+        throw new Error(message);
+      }
+      setSettings(result); onSettingsSnapshot?.(result);
+      if (!result.apps.find((app) => app.id === "skills")?.effectiveEnabled) onSelectedSkillChange(null);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No se ha podido guardar el cambio."); }
+    finally { setSavingKey(null); }
+  };
 
-  const usage = companyUsage ?? personalUsage;
-  const usedPercent = planPercent(usage);
-  const loadingData = !usage && team.length === 0;
-  const tabs: Array<{ id: SettingsTab; label: string; icon: ReactNode }> = [
-    { id: "appearance", label: "Apariencia", icon: <PaintBrush size={17} /> },
-    { id: "skills", label: "Skills", icon: <Wrench size={17} /> },
+  const apps = useMemo(() => settings?.apps.map((app) => runtimeApp(app, runtimeStatus)) ?? [], [runtimeStatus, settings]);
+  const usage = companyUsage ?? personalUsage; const usedPercent = planPercent(usage);
+  const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
+    { id: "account", label: "Cuenta", icon: <UserCircle size={17} /> },
+    { id: "apps", label: "Apps y herramientas", icon: <PlugsConnected size={17} /> },
+    { id: "appearance", label: "Personalización", icon: <PaintBrush size={17} /> },
+    { id: "privacy", label: "Privacidad y datos", icon: <ShieldCheck size={17} /> },
+    { id: "permissions", label: "Permisos", icon: <LockKey size={17} /> },
+    { id: "browser", label: "Navegador y red", icon: <Browsers size={17} /> },
+    { id: "notifications", label: "Notificaciones", icon: <Bell size={17} /> },
     { id: "team", label: "Equipo", icon: <UsersThree size={17} /> },
-    { id: "usage", label: "Usage", icon: <Gauge size={17} /> },
+    { id: "usage", label: "Uso", icon: <Gauge size={17} /> },
   ];
-
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--overlay)] p-0 backdrop-blur-[2px] md:p-6">
-      <button className="absolute inset-0" aria-label="Cerrar configuración" onClick={onClose} />
-      <section ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Preferencias de ${productName}`} className="panel-enter relative flex h-full w-full max-w-[980px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(760px,calc(100dvh-3rem))] md:rounded-[24px]">
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5">
-          <h2 id="preferences-title" className="text-[14px] font-semibold text-[var(--text)]">Configuración de {productName}</h2>
-          <button aria-label="Cerrar" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={16} /></button>
-        </header>
-
-        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <nav aria-label="Secciones de configuración" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">
-            {tabs.map((item) => <button key={item.id} aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium transition ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}
-          </nav>
-          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
-            {tab === "appearance" ? <div className="space-y-8">
-              <section>
-              <SectionTitle>Asistente</SectionTitle>
-              <label className="block">
-                <span className="mb-2 block text-[12px] font-medium text-[var(--text-secondary)]">Nombre del asistente</span>
-                <input className="w-full rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[13px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" maxLength={32} value={preferences.assistantName} onChange={(event) => onChange("assistantName", event.target.value)} />
-              </label>
-              <div className="mt-5">
-                <SegmentedControl
-                  label="Estilo de respuesta"
-                  value={preferences.tone}
-                  options={[{ value: "direct", label: "Directo" }, { value: "balanced", label: "Equilibrado" }, { value: "detailed", label: "Detallado" }]}
-                  onChange={(value) => onChange("tone", value)}
-                />
-              </div>
-              </section>
-
-              <section>
-                <SectionTitle>Tema</SectionTitle>
-                <div className="flex items-center justify-between rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><div><p className="text-[12px] font-semibold text-[var(--text)]">Claro u oscuro</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Se guarda en este navegador.</p></div><ThemeToggle /></div>
-                <div className="mt-5"><SegmentedControl label="Color" value={preferences.accent} options={[{ value: "graphite", label: "Grafito" }, { value: "blue", label: "Azul" }, { value: "violet", label: "Violeta" }]} onChange={(value) => onChange("accent", value)} /></div>
-              </section>
-
-              <section>
-                <SectionTitle>Interfaz</SectionTitle>
-              <div><SegmentedControl<Density> label="Densidad" value={preferences.density} options={[{ value: "comfortable", label: "Cómoda" }, { value: "compact", label: "Compacta" }]} onChange={(value) => onChange("density", value)} /></div>
-              <div className="mt-5"><SegmentedControl<CornerStyle> label="Contornos" value={preferences.corners} options={[{ value: "soft", label: "Suaves" }, { value: "rounded", label: "Redondos" }, { value: "precise", label: "Precisos" }]} onChange={(value) => onChange("corners", value)} /></div>
-              </section>
-
-              <section>
-                <SectionTitle>Conversación</SectionTitle>
-                <div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">
-                <PreferenceToggle title="Mostrar progreso" description="Enseña los pasos relevantes mientras se prepara el resultado." checked={preferences.showActivityPanel} onChange={(value) => onChange("showActivityPanel", value)} />
-                <PreferenceToggle title="Panel de revisión" description="Permite revisar el progreso, las decisiones y los cambios en un panel lateral." checked={preferences.showInspector} onChange={(value) => onChange("showInspector", value)} />
-                <PreferenceToggle title="Recordar la última conversación" description="Vuelve a abrir el último proyecto y conversación en este navegador." checked={preferences.conversationMemory} onChange={(value) => onChange("conversationMemory", value)} />
-                </div>
-              </section>
-            </div> : null}
-
-            {tab === "skills" ? <section>
-              <SectionTitle>Skill predeterminada</SectionTitle>
-              <p className="mb-5 text-[12px] leading-5 text-[var(--text-muted)]">Elige la skill que aparecerá seleccionada al trabajar. Las skills disponibles se instalan y revisan en el servidor de esta empresa.</p>
-              <div className="space-y-2">
-                <button className={`w-full rounded-[14px] border p-4 text-left ${selectedSkill === null ? "border-[var(--brain-accent)] bg-[var(--brain-accent-soft)]" : "border-[var(--border)]"}`} onClick={() => onSelectedSkillChange(null)}><p className="text-[12px] font-semibold">Sin skill predeterminada</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">El asistente decide con las herramientas base.</p></button>
-                {runtimeStatus.skills.map((skill) => <button key={skill.id} className={`w-full rounded-[14px] border p-4 text-left ${selectedSkill === skill.id ? "border-[var(--brain-accent)] bg-[var(--brain-accent-soft)]" : "border-[var(--border)] hover:bg-[var(--surface-hover)]"}`} onClick={() => onSelectedSkillChange(skill.id)}><p className="text-[12px] font-semibold text-[var(--text)]">{skill.label}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{skill.description}</p></button>)}
-                {!runtimeStatus.skills.length ? <p className="rounded-[14px] border border-dashed border-[var(--border)] p-5 text-[12px] text-[var(--text-subtle)]">No hay skills instaladas para este usuario todavía.</p> : null}
-              </div>
-            </section> : null}
-
-            {tab === "team" ? <section>
-              <SectionTitle>Personas y workers</SectionTitle>
-              <p className="mb-5 text-[12px] leading-5 text-[var(--text-muted)]">Cada persona tiene login, historial, workspace, navegador y worker aislados.</p>
-              <div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">
-                {team.map((member) => <div key={member.userId} className="flex items-center gap-3 px-4 py-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[12px] font-semibold">{member.displayName.slice(0, 1).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold">{member.displayName}</p><p className="truncate text-[10px] text-[var(--text-subtle)]">{member.email}</p></div><span className="rounded-full bg-[var(--positive-soft)] px-2 py-1 text-[9px] font-semibold text-[var(--positive)]">Activo</span></div>)}
-                {!team.length ? <p className="p-5 text-[12px] text-[var(--text-subtle)]">{loadingData ? "Cargando equipo…" : "No se ha podido cargar el equipo."}</p> : null}
-              </div>
-            </section> : null}
-
-            {tab === "usage" ? <section>
-              <SectionTitle>Suscripción compartida</SectionTitle>
-              <div className="rounded-[18px] border border-[var(--border)] bg-[var(--surface)] p-5">
-                <div className="flex items-end justify-between gap-4"><div><p className="text-[12px] font-semibold text-[var(--text)]">Plan {usage?.sharedSubscription?.planType ?? runtimeStatus.planType ?? "Codex"}</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Consumo global de la cuenta conectada</p></div><p className="text-[28px] font-semibold tracking-[-.03em]">{usedPercent === null ? "—" : `${Math.round(usedPercent)}%`}</p></div>
-                <div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-[var(--brain-accent)] transition-[width]" style={{ width: `${usedPercent ?? 0}%` }} /></div>
-              </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                <Metric label="Turns" value={formatNumber((companyUsage ?? personalUsage)?.internal.turns ?? 0)} />
-                <Metric label="Tokens medidos" value={formatNumber((companyUsage ?? personalUsage)?.internal.tokens.totalTokens ?? 0)} />
-                <Metric label="Primer texto medio" value={(companyUsage ?? personalUsage)?.internal.averageFirstTextMs === null || !(companyUsage ?? personalUsage) ? "—" : `${formatNumber((companyUsage ?? personalUsage)!.internal.averageFirstTextMs!)} ms`} />
-              </div>
-              {companyUsage ? <div className="mt-7"><SectionTitle>Uso por empleado</SectionTitle><div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{companyUsage.members.map((member) => <div key={member.userId} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-[11px]"><span className="truncate font-semibold">{member.displayName}</span><span className="text-[var(--text-subtle)]">{formatNumber(member.usage.turns)} turns</span><span className="min-w-20 text-right text-[var(--text-secondary)]">{formatNumber(member.usage.tokens.totalTokens)} tok.</span></div>)}</div></div> : null}
-              {!usage && !loadingData ? <p className="mt-4 text-[11px] text-[var(--danger)]">No se ha podido cargar el uso ahora mismo.</p> : null}
-            </section> : null}
-          </div>
+  if (!open) return null;
+  return <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--overlay)] p-0 backdrop-blur-[2px] md:p-6">
+    <button className="absolute inset-0" aria-label="Cerrar configuración" onClick={onClose} />
+    <section ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Configuración de ${productName}`} className="panel-enter relative flex h-full w-full max-w-[1080px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(780px,calc(100dvh-3rem))] md:rounded-[24px]">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><h2 className="text-[14px] font-semibold">Configuración</h2><button aria-label="Cerrar" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={16} /></button></header>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <nav aria-label="Secciones de configuración" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-60 md:flex-col md:border-b-0 md:border-r md:p-3">{tabs.map((item) => <button key={item.id} aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}</nav>
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">
+          {error ? <p role="alert" className="mb-5 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
+          {loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">Cargando configuración…</p> : null}
+          {tab === "account" ? <div className="space-y-7"><section><SectionTitle>Tu cuenta</SectionTitle><InfoCard rows={[["Nombre", settings?.account.displayName ?? "—"], ["Correo", settings?.account.email ?? "—"], ["Acceso", settings?.account.provider === "local" ? "Cuenta de empresa" : "Sesión de demostración"]]} /></section><section><SectionTitle>Empresa</SectionTitle><InfoCard rows={[["Organización", settings?.company.name ?? "—"], ["Rol de configuración", settings?.company.isAdmin ? "Administrador" : "Empleado"], ["Aislamiento", "Workspace, worker y navegador privados"]]} /></section></div> : null}
+          {tab === "apps" ? <section><SectionTitle>Apps y herramientas disponibles</SectionTitle><p className="mb-5 max-w-2xl text-[12px] leading-5 text-[var(--text-muted)]">Solo aparecen capacidades publicadas por este servidor. Si falta un proveedor u OAuth, verás el requisito real; no se simulan conexiones.</p><div className="space-y-3">{apps.map((app) => <AppCard key={app.id} app={app} runtimeStatus={runtimeStatus} busy={savingKey === `user:${app.id}` || savingKey === `company:${app.id}`} onUserChange={(enabled) => { if (isControllableAppId(app.id)) void save({ target: "user-app", appId: app.id, enabled }, `user:${app.id}`); }} onCompanyChange={(enabled) => { if (isControllableAppId(app.id)) void save({ target: "installation-app", appId: app.id, enabled }, `company:${app.id}`); }} />)}</div>{!apps.length && !loading ? <EmptyState>No hay capacidades publicadas por este servidor.</EmptyState> : null}{runtimeStatus.skills.length > 0 && settings?.apps.find((app) => app.id === "skills")?.effectiveEnabled ? <div className="mt-7"><SectionTitle>Skill predeterminada</SectionTitle><label className="block"><span className="mb-2 block text-[11px] text-[var(--text-subtle)]">Se seleccionará al abrir el compositor.</span><select className="w-full rounded-[12px] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[12px] outline-none focus:border-[var(--brain-accent)]" value={selectedSkill ?? ""} onChange={(event) => onSelectedSkillChange(event.target.value || null)}><option value="">Sin skill predeterminada</option>{runtimeStatus.skills.map((skill) => <option key={skill.id} value={skill.id}>{skill.label}</option>)}</select></label></div> : null}</section> : null}
+          {tab === "appearance" ? <Appearance preferences={preferences} onChange={onChange} /> : null}
+          {tab === "privacy" ? <section><SectionTitle>Privacidad y datos</SectionTitle><InfoList items={[["Conversaciones", "Se guardan en la instalación privada de la empresa, separadas por empleado."], ["Entrenamiento del proveedor", "AiBrain no cambia esta opción. Depende del contrato y la cuenta del proveedor conectada."], ["Memoria", "Solo se usa la memoria explícita que el empleado puede consultar y revocar."], ["Aislamiento", "Los archivos, el navegador y el runtime no se comparten entre empleados."]]} /></section> : null}
+          {tab === "permissions" ? <section><SectionTitle>Permisos efectivos</SectionTitle><p className="mb-5 text-[12px] leading-5 text-[var(--text-muted)]">Reglas resueltas por el servidor desde PERMISSIONS.md. Esta pantalla es de solo lectura.</p><div className="space-y-3">{settings?.permissions.map((permission) => <div key={permission.action} className="rounded-[16px] border border-[var(--border)] p-4"><div className="flex items-center justify-between gap-3"><p className="text-[12px] font-semibold">{{ consult: "Consultar", respond: "Responder", execute: "Ejecutar", publish: "Publicar" }[permission.action]}</p><StatusBadge status={permission.effect === "allow" ? "connected" : permission.effect === "deny" ? "blocked" : "not_configured"} label={permission.effect === "allow" ? "Permitido" : permission.effect === "deny" ? "Bloqueado" : "Sin regla"} /></div>{permission.rules.map((rule) => <p key={`${rule.ruleId}:${rule.effect}`} className="mt-2 text-[11px] leading-4 text-[var(--text-subtle)]"><span className="font-semibold text-[var(--text-secondary)]">{rule.ruleId}</span> · {rule.instruction}</p>)}</div>)}</div></section> : null}
+          {tab === "browser" ? <section><SectionTitle>Navegador y red</SectionTitle><InfoList items={[["Perfil", "Privado y persistente para este empleado."], ["Red", "Solo HTTP/HTTPS público; localhost, red privada y metadata cloud están bloqueados."], ["Control", "Las acciones sensibles requieren aprobación y el empleado puede tomar el control."], ["Descargas", "Se guardan en la carpeta privada de la conversación."]]} /><p className="mt-5 rounded-[12px] bg-[var(--surface-muted)] p-3 text-[11px] leading-4 text-[var(--text-subtle)]">La política de red es de seguridad y no se puede relajar desde esta pantalla.</p></section> : null}
+          {tab === "notifications" ? <section><SectionTitle>Avisos de trabajo</SectionTitle><p className="mb-4 text-[12px] leading-5 text-[var(--text-muted)]">Controla los avisos dentro de AiBrain. No se solicita permiso del sistema operativo desde esta pantalla.</p><div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]"><NotificationToggle field="backgroundTurns" title="Tareas terminadas" description="Avisa cuando una conversación termina mientras trabajas en otra." settings={settings} busy={savingKey === "notifications"} onSave={save} /><NotificationToggle field="approvals" title="Aprobaciones pendientes" description="Avisa cuando una acción necesita tu decisión." settings={settings} busy={savingKey === "notifications"} onSave={save} /><NotificationToggle field="failures" title="Errores y bloqueos" description="Avisa cuando una tarea requiere atención." settings={settings} busy={savingKey === "notifications"} onSave={save} /><NotificationToggle field="sound" title="Sonido" description="Reproduce un sonido discreto para avisos dentro de la aplicación." settings={settings} busy={savingKey === "notifications"} onSave={save} /></div></section> : null}
+          {tab === "team" ? <Team team={team} loading={loading} /> : null}
+          {tab === "usage" ? <Usage usage={usage} personalUsage={personalUsage} companyUsage={companyUsage} usedPercent={usedPercent} runtimeStatus={runtimeStatus} /> : null}
         </div>
-
-        <footer className="flex shrink-0 items-center justify-between border-t border-[var(--border-subtle)] px-5 py-3.5">
-          <button className={`text-[11px] font-semibold text-[var(--text-subtle)] hover:text-[var(--text)] ${tab === "appearance" ? "visible" : "invisible"}`} onClick={onReset}>Restablecer apariencia</button>
-          <button className="rounded-lg bg-[var(--brain-accent)] px-4 py-2 text-[12px] font-semibold text-[var(--brain-contrast)]" onClick={onClose}>Cerrar</button>
-        </footer>
-      </section>
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: ReactNode }) {
-  return <h3 className="mb-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">{children}</h3>;
-}
-
-function SegmentedControl<Value extends string>({ label, value, options, onChange }: { label: string; value: Value; options: Array<{ value: Value; label: string }>; onChange: (value: Value) => void }) {
-  return (
-    <div>
-      <span className="mb-2 block text-[12px] font-medium text-[var(--text-secondary)]">{label}</span>
-      <div className="grid auto-cols-fr grid-flow-col rounded-lg bg-[var(--surface-muted)] p-1">
-        {options.map((option) => <button key={option.value} className={`rounded-md px-2 py-1.5 text-[11px] font-medium transition ${option.value === value ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-sm" : "text-[var(--text-subtle)] hover:text-[var(--text)]"}`} onClick={() => onChange(option.value)}>{option.label}</button>)}
       </div>
-    </div>
-  );
+      <footer className="flex shrink-0 items-center justify-between border-t border-[var(--border-subtle)] px-5 py-3.5"><button className={`text-[11px] font-semibold text-[var(--text-subtle)] hover:text-[var(--text)] ${tab === "appearance" ? "visible" : "invisible"}`} onClick={onReset}>Restablecer apariencia</button><button className="rounded-lg bg-[var(--brain-accent)] px-4 py-2 text-[12px] font-semibold text-[var(--brain-contrast)]" onClick={onClose}>Cerrar</button></footer>
+    </section>
+  </div>;
 }
 
-function PreferenceToggle({ title, description, checked, onChange }: { title: string; description: string; checked: boolean; onChange: (value: boolean) => void }) {
-  return (
-    <div className="flex items-center gap-4 py-3.5">
-      <div className="min-w-0 flex-1"><p className="text-[12px] font-semibold text-[var(--text)]">{title}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{description}</p></div>
-      <Toggle label={title} checked={checked} onChange={onChange} />
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-[14px] border border-[var(--border)] p-4"><p className="text-[10px] font-medium text-[var(--text-subtle)]">{label}</p><p className="mt-2 text-[18px] font-semibold text-[var(--text)]">{value}</p></div>;
-}
+function Appearance({ preferences, onChange }: { preferences: BrainPreferences; onChange: Props["onChange"] }) { return <div className="space-y-8"><section><SectionTitle>Asistente</SectionTitle><label className="block"><span className="mb-2 block text-[12px] font-medium text-[var(--text-secondary)]">Nombre del asistente</span><input className="w-full rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[13px] outline-none focus:border-[var(--brain-accent)]" maxLength={32} value={preferences.assistantName} onChange={(e) => onChange("assistantName", e.target.value)} /></label><div className="mt-5"><SegmentedControl label="Estilo de respuesta" value={preferences.tone} options={[{ value: "direct", label: "Directo" }, { value: "balanced", label: "Equilibrado" }, { value: "detailed", label: "Detallado" }]} onChange={(value) => onChange("tone", value)} /></div></section><section><SectionTitle>Tema</SectionTitle><div className="flex items-center justify-between rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><div><p className="text-[12px] font-semibold">Claro u oscuro</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Se guarda en este navegador.</p></div><ThemeToggle /></div><div className="mt-5"><SegmentedControl label="Color" value={preferences.accent} options={[{ value: "graphite", label: "Grafito" }, { value: "blue", label: "Azul" }, { value: "violet", label: "Violeta" }]} onChange={(value) => onChange("accent", value)} /></div></section><section><SectionTitle>Interfaz</SectionTitle><SegmentedControl<Density> label="Densidad" value={preferences.density} options={[{ value: "comfortable", label: "Cómoda" }, { value: "compact", label: "Compacta" }]} onChange={(value) => onChange("density", value)} /><div className="mt-5"><SegmentedControl<CornerStyle> label="Contornos" value={preferences.corners} options={[{ value: "soft", label: "Suaves" }, { value: "rounded", label: "Redondos" }, { value: "precise", label: "Precisos" }]} onChange={(value) => onChange("corners", value)} /></div></section><section><SectionTitle>Conversación</SectionTitle><div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]"><PreferenceToggle title="Mostrar progreso" description="Enseña los pasos relevantes mientras se prepara el resultado." checked={preferences.showActivityPanel} onChange={(value) => onChange("showActivityPanel", value)} /><PreferenceToggle title="Panel de revisión" description="Muestra decisiones y cambios en un panel lateral." checked={preferences.showInspector} onChange={(value) => onChange("showInspector", value)} /><PreferenceToggle title="Recordar la última conversación" description="Vuelve a abrir la última conversación en este navegador." checked={preferences.conversationMemory} onChange={(value) => onChange("conversationMemory", value)} /></div></section></div>; }
+function AppCard({ app, runtimeStatus, busy, onUserChange, onCompanyChange }: { app: AppCatalogueItem; runtimeStatus: RuntimeStatus; busy: boolean; onUserChange: (enabled: boolean) => void; onCompanyChange: (enabled: boolean) => void }) { const labels = { connected: "Conectado", available: app.userEnabled ? "Disponible" : "Desactivado", blocked: "Bloqueado", not_configured: "No configurado" } as const; return <article className="rounded-[18px] border border-[var(--border)] p-4"><div className="flex items-start gap-3"><span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[11px] bg-[var(--surface-muted)] text-[var(--text-secondary)]">{app.kind === "plugin" ? <Wrench size={17} /> : <PlugsConnected size={17} />}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h4 className="text-[13px] font-semibold">{app.label}</h4><StatusBadge status={app.status} label={labels[app.status]} /></div><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{app.description}</p><p className="mt-2 text-[10px] text-[var(--text-muted)]">{app.statusDetail}</p></div>{app.canUserChange ? <Toggle label={`Activar ${app.label}`} checked={app.userEnabled} disabled={busy} onChange={onUserChange} /> : null}</div><div className="mt-3 flex flex-wrap gap-1.5">{app.scopes.map((scope) => <span key={scope} className="rounded-full bg-[var(--surface-muted)] px-2 py-1 text-[9px] font-medium text-[var(--text-subtle)]">{scope}</span>)}</div><p className="mt-3 text-[10px] text-[var(--text-subtle)]">Permisos: {app.permissionActions.join(", ") || "ninguno"}{app.approvalRequired ? " · acciones sensibles con aprobación" : ""}</p>{app.id === "skills" && runtimeStatus.skills.length ? <p className="mt-3 border-t border-[var(--border-subtle)] pt-3 text-[10px] font-semibold text-[var(--text-secondary)]">Instaladas: {runtimeStatus.skills.map((skill) => skill.label).join(", ")}</p> : null}{app.configurationHint && app.status === "not_configured" ? <p className="mt-3 rounded-[10px] bg-[var(--surface-muted)] p-2 text-[10px] text-[var(--text-subtle)]">{app.configurationHint}</p> : null}{app.canAdminChange ? <div className="mt-3 flex items-center justify-between border-t border-[var(--border-subtle)] pt-3"><div><p className="text-[10px] font-semibold">Disponible para la empresa</p><p className="text-[9px] text-[var(--text-subtle)]">Afecta a todos los empleados.</p></div><Toggle label={`Disponibilidad empresarial de ${app.label}`} checked={app.installationEnabled} disabled={busy} onChange={onCompanyChange} /></div> : null}</article>; }
+function NotificationToggle({ field, title, description, settings, busy, onSave }: { field: keyof NotificationSettings; title: string; description: string; settings: SettingsSnapshot | null; busy: boolean; onSave: (patch: SettingsPatch, key: string) => Promise<void> }) { return <PreferenceToggle title={title} description={description} checked={settings?.notifications[field] ?? false} disabled={!settings || busy} onChange={(enabled) => void onSave({ target: "notifications", values: { [field]: enabled } }, "notifications")} />; }
+function Team({ team, loading }: { team: TeamMember[]; loading: boolean }) { return <section><SectionTitle>Personas y workers</SectionTitle><p className="mb-5 text-[12px] leading-5 text-[var(--text-muted)]">Cada persona tiene login, historial, workspace, navegador y worker aislados.</p><div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{team.map((member) => <div key={member.userId} className="flex items-center gap-3 px-4 py-3"><span className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[12px] font-semibold">{member.displayName.slice(0, 1).toUpperCase()}</span><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-semibold">{member.displayName}</p><p className="truncate text-[10px] text-[var(--text-subtle)]">{member.email}</p></div><StatusBadge status="connected" label="Activo" /></div>)}{!team.length ? <p className="p-5 text-[12px] text-[var(--text-subtle)]">{loading ? "Cargando equipo…" : "No se ha podido cargar el equipo."}</p> : null}</div></section>; }
+function Usage({ usage, personalUsage, companyUsage, usedPercent, runtimeStatus }: { usage: PersonalUsageResponse | CompanyUsageResponse | null; personalUsage: PersonalUsageResponse | null; companyUsage: CompanyUsageResponse | null; usedPercent: number | null; runtimeStatus: RuntimeStatus }) { const measured = companyUsage ?? personalUsage; return <section><SectionTitle>Suscripción compartida</SectionTitle><div className="rounded-[18px] border border-[var(--border)] bg-[var(--surface)] p-5"><div className="flex items-end justify-between gap-4"><div><p className="text-[12px] font-semibold">Plan {usage?.sharedSubscription?.planType ?? runtimeStatus.planType ?? "Codex"}</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Consumo global de la cuenta conectada</p></div><p className="text-[28px] font-semibold tracking-[-.03em]">{usedPercent === null ? "—" : `${Math.round(usedPercent)}%`}</p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--surface-muted)]"><div className="h-full rounded-full bg-[var(--brain-accent)]" style={{ width: `${usedPercent ?? 0}%` }} /></div></div><div className="mt-5 grid gap-3 sm:grid-cols-3"><Metric label="Turns" value={number(measured?.internal.turns ?? 0)} /><Metric label="Tokens medidos" value={number(measured?.internal.tokens.totalTokens ?? 0)} /><Metric label="Primer texto medio" value={measured?.internal.averageFirstTextMs == null ? "—" : `${number(measured.internal.averageFirstTextMs)} ms`} /></div>{companyUsage ? <div className="mt-7"><SectionTitle>Uso por empleado</SectionTitle><div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{companyUsage.members.map((member) => <div key={member.userId} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-4 py-3 text-[11px]"><span className="truncate font-semibold">{member.displayName}</span><span className="text-[var(--text-subtle)]">{number(member.usage.turns)} turns</span><span className="min-w-20 text-right text-[var(--text-secondary)]">{number(member.usage.tokens.totalTokens)} tok.</span></div>)}</div></div> : null}</section>; }
+function SectionTitle({ children }: { children: ReactNode }) { return <h3 className="mb-4 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">{children}</h3>; }
+function StatusBadge({ status, label }: { status: AppCatalogueItem["status"]; label: string }) { const style = status === "connected" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : status === "blocked" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : status === "not_configured" ? "bg-[var(--warning-soft)] text-[var(--warning)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"; return <span className={`rounded-full px-2 py-1 text-[9px] font-semibold ${style}`}>{label}</span>; }
+function EmptyState({ children }: { children: ReactNode }) { return <p className="rounded-[14px] border border-dashed border-[var(--border)] p-5 text-[12px] text-[var(--text-subtle)]">{children}</p>; }
+function InfoCard({ rows }: { rows: Array<[string, string]> }) { return <dl className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{rows.map(([term, detail]) => <div key={term} className="grid gap-1 px-4 py-3 sm:grid-cols-[180px_1fr]"><dt className="text-[11px] font-medium text-[var(--text-subtle)]">{term}</dt><dd className="text-[12px] font-medium">{detail}</dd></div>)}</dl>; }
+function InfoList({ items }: { items: Array<[string, string]> }) { return <div className="divide-y divide-[var(--border-subtle)] border-y border-[var(--border-subtle)]">{items.map(([title, description]) => <div key={title} className="py-3.5"><p className="text-[12px] font-semibold">{title}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{description}</p></div>)}</div>; }
+function SegmentedControl<Value extends string>({ label, value, options, onChange }: { label: string; value: Value; options: Array<{ value: Value; label: string }>; onChange: (value: Value) => void }) { return <div><span className="mb-2 block text-[12px] font-medium text-[var(--text-secondary)]">{label}</span><div className="grid auto-cols-fr grid-flow-col rounded-lg bg-[var(--surface-muted)] p-1">{options.map((option) => <button key={option.value} className={`rounded-md px-2 py-1.5 text-[11px] font-medium ${option.value === value ? "bg-[var(--surface-raised)] shadow-sm" : "text-[var(--text-subtle)] hover:text-[var(--text)]"}`} onClick={() => onChange(option.value)}>{option.label}</button>)}</div></div>; }
+function PreferenceToggle({ title, description, checked, disabled = false, onChange }: { title: string; description: string; checked: boolean; disabled?: boolean; onChange: (value: boolean) => void }) { return <div className="flex items-center gap-4 py-3.5"><div className="min-w-0 flex-1"><p className="text-[12px] font-semibold">{title}</p><p className="mt-1 text-[11px] leading-4 text-[var(--text-subtle)]">{description}</p></div><Toggle label={title} checked={checked} disabled={disabled} onChange={onChange} /></div>; }
+function Metric({ label, value }: { label: string; value: string }) { return <div className="rounded-[14px] border border-[var(--border)] p-4"><p className="text-[10px] font-medium text-[var(--text-subtle)]">{label}</p><p className="mt-2 text-[18px] font-semibold">{value}</p></div>; }
