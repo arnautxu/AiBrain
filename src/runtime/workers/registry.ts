@@ -1,5 +1,9 @@
 import { availableParallelism } from "node:os";
 import type { InstallationConfig } from "@/config/installation-schema";
+import {
+  MaintenanceCoordinator,
+  type MaintenanceActivityLease,
+} from "@/operations/maintenance";
 import type { AppServerTransport } from "@/runtime/transport";
 import {
   buildWorkerLaunchContext,
@@ -93,6 +97,7 @@ export type WorkerRuntimeRegistryOptions = {
   maxConcurrentStarts?: number;
   maxPendingStarts?: number;
   backpressureRetryAfterMs?: number;
+  maintenance?: MaintenanceCoordinator;
 };
 
 function positiveInteger(name: string, value: number, allowZero = false) {
@@ -146,6 +151,7 @@ export class WorkerRuntimeRegistry {
   readonly provisioner: WorkerProvisioner;
   private readonly factory: WorkerRuntimeFactory;
   private readonly starts: StartGate;
+  private readonly maintenance: MaintenanceCoordinator | null;
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly runtimeOwners = new WeakMap<object, string>();
   private readonly transportOwners = new WeakMap<object, string>();
@@ -154,6 +160,7 @@ export class WorkerRuntimeRegistry {
   constructor(options: WorkerRuntimeRegistryOptions) {
     this.config = options.config;
     this.factory = options.factory;
+    this.maintenance = options.maintenance ?? null;
     this.provisioner = options.provisioner ?? new WorkerProvisioner({ config: options.config });
     const maxConcurrentStarts = positiveInteger(
       "maxConcurrentStarts",
@@ -171,9 +178,16 @@ export class WorkerRuntimeRegistry {
     this.starts = new StartGate(maxConcurrentStarts, maxPendingStarts, retryAfterMs);
   }
 
-  async start(userId: string): Promise<WorkerRuntimeHandle> {
+  async start(
+    userId: string,
+    activityLease?: MaintenanceActivityLease,
+  ): Promise<WorkerRuntimeHandle> {
     validateWorkerUserId(userId);
     if (this.closed) throw new Error("Worker registry is closed.");
+    if (activityLease && !this.maintenance) {
+      throw new Error("Worker registry does not own the supplied maintenance lease.");
+    }
+    if (activityLease) this.maintenance!.assertActiveLease(activityLease);
     let entry = this.entries.get(userId);
     if (!entry) {
       entry = createEntry(userId);
@@ -181,12 +195,16 @@ export class WorkerRuntimeRegistry {
     }
     if (entry.stopPromise) {
       await entry.stopPromise;
-      return this.start(userId);
+      return this.start(userId, activityLease);
     }
     if ((entry.state === "running" || entry.state === "degraded") && entry.handle) {
       return entry.handle;
     }
     if (entry.startPromise) return entry.startPromise;
+
+    const startLease = activityLease
+      ? null
+      : this.maintenance?.acquire("worker-start") ?? null;
 
     entry.state = "starting";
     entry.lastError = null;
@@ -194,6 +212,7 @@ export class WorkerRuntimeRegistry {
     entry.startPromise = startPromise;
     void startPromise.finally(() => {
       if (entry?.startPromise === startPromise) entry.startPromise = null;
+      startLease?.release();
     }).catch(() => undefined);
     return startPromise;
   }

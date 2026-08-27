@@ -11,6 +11,7 @@ import type {
   JsonValue,
   TransportHealth,
 } from "@/runtime/transport";
+import { MaintenanceCoordinator } from "@/operations/maintenance";
 import { WorkerAppServerClient } from "@/runtime/worker-runtime-service";
 import type { WorkerRuntimeHandle, WorkerRoots } from "@/runtime/workers/types";
 
@@ -129,6 +130,27 @@ describe("worker App Server client", () => {
       imageGeneration: false,
       models: [{ id: "gpt-test", isDefault: true }],
     });
+    await client.close();
+  });
+
+  it("requires an admitted maintenance lease before sending turn/start to the gateway", async () => {
+    const transport = new FakeTransport();
+    const maintenance = new MaintenanceCoordinator();
+    const client = new WorkerAppServerClient(handle(transport), maintenance);
+
+    await expect(client.request("turn/start", {}, "turn-without-lease"))
+      .rejects.toMatchObject({ code: "MAINTENANCE_ACTIVE" });
+    expect(transport.sent).toEqual([]);
+
+    const lease = maintenance.acquire("turn");
+    const draining = maintenance.enter({ timeoutMs: 1_000 });
+    await expect(client.request("turn/start", {}, "turn-with-lease", 1_000, undefined, lease))
+      .resolves.toEqual({});
+    expect(transport.sent.some((message) =>
+      message.kind === "rpc-request" && message.rpc.method === "turn/start")).toBe(true);
+
+    lease.release();
+    await expect(draining).resolves.toMatchObject({ phase: "maintenance", activeActivities: 0 });
     await client.close();
   });
 });

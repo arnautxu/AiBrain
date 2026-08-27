@@ -1247,6 +1247,13 @@ interceptor Fetch conserva una segunda validación con la misma policy.
 
 ## 15. Estados degradados y errores recuperables
 
+Durante un drain operativo, un chat nuevo devuelve `503` con
+`code: "MAINTENANCE_ACTIVE"`, `retryAfterMs` y header `Retry-After`. La UI debe
+conservar el borrador y reintentar solo por acción del usuario o backoff; no
+debe interpretar la respuesta como un turn aceptado. Turns ya admitidos siguen
+hasta terminar. `/api/operations/maintenance` es control host-local y no forma
+parte del cliente UI.
+
 ### 15.1 Mapa de respuesta UI
 
 | Señal | Interpretación | Acción UI segura |

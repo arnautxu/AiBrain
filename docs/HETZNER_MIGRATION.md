@@ -177,12 +177,26 @@ No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en 
 
 ## 5. Backup y restore QA reales
 
-Primero drena turns y mutaciones desde la aplicación. Después detén `app` para congelar el filesystem:
+El endpoint de operador no se publica por Nginx: solo responde en el puerto app ligado a loopback. Configura `AIBRAIN_MAINTENANCE_SECRET` independiente y usa el origen público exacto. Primero cierra admisión y espera los turns/arranques ya admitidos (el timeout deja el sistema cerrado):
+
+```bash
+curl --fail --silent --show-error \
+  --request POST \
+  --header 'Authorization: Bearer <maintenance-secret>' \
+  --header 'Origin: https://<public-host>' \
+  --header 'Content-Type: application/json' \
+  --data '{"action":"drain","timeoutMs":600000}' \
+  http://127.0.0.1:<qa-port>/api/operations/maintenance
+```
+
+La respuesta debe ser `phase: maintenance` y `activeActivities: 0`. Después detén `app` para congelar también las mutaciones HTTP cortas y el filesystem completo:
 
 ```bash
 docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml stop app
 docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app aibrain-backup create
 ```
+
+Si abortas el backup antes de detener la app, reabre admisión explícitamente con el mismo endpoint y `{"action":"resume"}`. Un restart de la app vuelve a `accepting`; no describas un drain como durable entre procesos.
 
 Anota `backupId`, `sourceFingerprint` y `fileCount`. Verifica el snapshot indicado por el comando:
 
