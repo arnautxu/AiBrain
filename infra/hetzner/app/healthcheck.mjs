@@ -39,13 +39,13 @@ try {
   } catch (error) {
     if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
   }
-  const response = await fetch("http://127.0.0.1:3000/api/health/live", {
+  const response = await fetch("http://127.0.0.1:3000/api/health/ready", {
     redirect: "manual",
     signal: AbortSignal.timeout(3_000),
   });
   if (response.status !== 200) throw new Error("server error");
   const payload = await response.json();
-  if (payload?.schemaVersion !== 1 || payload?.status !== "live") throw new Error("invalid health response");
+  if (payload?.schemaVersion !== 1 || payload?.status !== "ready") throw new Error("invalid health response");
 } catch {
   process.stderr.write("AIBRAIN_HEALTHCHECK_FAILED\n");
   process.exit(1);
