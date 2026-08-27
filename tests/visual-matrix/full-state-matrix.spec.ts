@@ -181,7 +181,7 @@ for (const viewport of viewports) {
     await expect(approval).toBeInViewport();
     await screenshot(page, "turn-approval-light", viewport);
 
-    await page.getByLabel("Abrir Review", { exact: true }).click();
+    await page.getByRole("button", { name: "Revisar cambios" }).click();
     await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
     await screenshot(page, "review-light", viewport);
     await page.getByRole("button", { name: "Cerrar Review" }).click();

@@ -45,7 +45,7 @@ test("dark shell, guided actions, turn capabilities and Review have no blocking 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" })).toBeVisible();
   await assertNoBlockingViolations();
-  await page.getByLabel("Abrir Review", { exact: true }).click();
+  await page.getByRole("button", { name: "Revisar cambios" }).click();
   await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
   await assertNoBlockingViolations();
 });
