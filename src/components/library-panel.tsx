@@ -6,21 +6,26 @@ import {
   ArrowDown,
   ArrowSquareOut,
   Browser,
+  ChartLineUp,
   File,
   FileText,
+  GlobeHemisphereWest,
   ImagesSquare,
   MagnifyingGlass,
   SpinnerGap,
   X,
 } from "@phosphor-icons/react";
 import {
+  advancedArtifactLibraryItem,
   buildLibraryItems,
   isLibraryItem,
   type LibraryItem,
   type LibraryItemType,
 } from "@/library/contracts";
+import { isAdvancedArtifactSummary, type AdvancedArtifactKind } from "@/artifacts/contracts";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { SafeVisualizationPreview } from "@/components/safe-visualization-preview";
 
 type LibraryFilter = "all" | LibraryItemType;
 
@@ -31,12 +36,16 @@ const filterCopy: Array<{ id: LibraryFilter; label: string }> = [
   { id: "image", label: "Imágenes" },
   { id: "result", label: "Resultados" },
   { id: "browser", label: "Navegador" },
+  { id: "visualization", label: "Visualizaciones" },
+  { id: "internal-site", label: "Sitios internos" },
 ];
 
 function icon(type: LibraryItemType) {
   if (type === "image") return <ImagesSquare size={17} />;
   if (type === "result") return <FileText size={17} />;
   if (type === "browser") return <Browser size={17} />;
+  if (type === "visualization") return <ChartLineUp size={17} />;
+  if (type === "internal-site") return <GlobeHemisphereWest size={17} />;
   return <File size={17} />;
 }
 
@@ -54,6 +63,8 @@ function label(type: LibraryItemType) {
     image: "Imagen generada",
     result: "Respuesta descargable",
     browser: "Resultado del navegador",
+    visualization: "Visualización segura",
+    "internal-site": "Sitio interno",
   }[type];
 }
 
@@ -83,6 +94,8 @@ export function LibraryPanel({
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [offlineFallback, setOfflineFallback] = useState(false);
+  const [artifactAction, setArtifactAction] = useState<AdvancedArtifactKind | "publish" | null>(null);
+  const [artifactNotice, setArtifactNotice] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalFocus(open, onClose, searchRef);
 
@@ -123,6 +136,72 @@ export function LibraryPanel({
       (!needle || `${item.name} ${item.projectName} ${item.threadTitle}`.toLocaleLowerCase("es").includes(needle)));
   }, [filter, items, query]);
   const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+
+  const upsertAdvancedItem = (summary: unknown) => {
+    if (!isAdvancedArtifactSummary(summary)) return null;
+    const projectName = projects.find((project) => project.id === summary.projectId)?.name;
+    const threadTitle = threads.find((thread) => thread.id === summary.threadId)?.title;
+    if (!projectName || !threadTitle) return null;
+    const item = advancedArtifactLibraryItem(summary, { projectName, threadTitle });
+    setRemoteItems((current) => [item, ...(current ?? fallbackItems).filter((candidate) => candidate.id !== item.id)]);
+    setFilter("all");
+    setSelectedId(item.id);
+    return item;
+  };
+
+  const createArtifact = async (kind: AdvancedArtifactKind) => {
+    if (!selected || selected.type !== "result") return;
+    setArtifactAction(kind);
+    setArtifactNotice(null);
+    try {
+      const titleBase = selected.name.replace(/\.(?:md|txt)$/i, "");
+      const response = await fetch("/api/artifacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind,
+          title: kind === "visualization" ? `Visualización · ${titleBase}` : `Sitio interno · ${titleBase}`,
+          threadId: selected.threadId,
+          messageId: selected.messageId,
+        }),
+      });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "No se ha podido crear el artefacto.";
+        setArtifactNotice(message);
+        return;
+      }
+      const summary = payload && typeof payload === "object" && "summary" in payload ? payload.summary : null;
+      const item = upsertAdvancedItem(summary);
+      setArtifactNotice(item ? (kind === "visualization" ? "Visualización creada desde los datos reales de la respuesta." : "Sitio interno creado. Puedes revisarlo antes de publicarlo.") : "Artefacto creado.");
+    } catch {
+      setArtifactNotice("No se ha podido conectar con el servicio de artefactos.");
+    } finally {
+      setArtifactAction(null);
+    }
+  };
+
+  const publishArtifact = async () => {
+    if (!selected?.artifactId) return;
+    setArtifactAction("publish");
+    setArtifactNotice(null);
+    try {
+      const response = await fetch(`/api/artifacts/${encodeURIComponent(selected.artifactId)}/publish`, { method: "POST" });
+      const payload: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string" ? payload.error : "No se ha podido publicar.";
+        setArtifactNotice(message);
+        return;
+      }
+      const summary = payload && typeof payload === "object" && "summary" in payload ? payload.summary : null;
+      upsertAdvancedItem(summary);
+      setArtifactNotice("Snapshot publicado como sitio interno. Sigue protegido por tu sesión de empresa.");
+    } catch {
+      setArtifactNotice("No se ha podido conectar con el servicio de publicación.");
+    } finally {
+      setArtifactAction(null);
+    }
+  };
 
   if (!open) return null;
   const previewIsImage = selected?.previewUrl && selected.mimeType?.startsWith("image/");
@@ -179,13 +258,18 @@ export function LibraryPanel({
                 <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{selected.name}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{label(selected.type)} · {formatSize(selected.size) ?? "Tamaño no disponible"}</p></div>
               </div>
               <div className="mt-5 grid min-h-64 flex-1 place-items-center overflow-hidden rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-                {previewIsImage && selected.previewUrl ? <NextImage unoptimized width={960} height={720} src={selected.previewUrl} alt={`Vista previa de ${selected.name}`} className="max-h-[460px] w-full object-contain" /> : selected.previewUrl ? <iframe sandbox="" title={`Vista previa de ${selected.name}`} src={selected.previewUrl} className="h-[460px] w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
+                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && selected.previewUrl ? <NextImage unoptimized width={960} height={720} src={selected.previewUrl} alt={`Vista previa de ${selected.name}`} className="max-h-[460px] w-full object-contain" /> : selected.previewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${selected.name}`} src={selected.previewUrl} className="h-[460px] w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {selected.downloadUrl ? <a href={selected.downloadUrl} download={selected.name} className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />Descargar</a> : null}
+                {selected.downloadZipUrl ? <a href={selected.downloadZipUrl} download className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowDown size={14} />Exportar ZIP</a> : null}
                 {selected.previewUrl ? <a href={selected.previewUrl} target="_blank" rel="noreferrer" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowSquareOut size={14} />Abrir</a> : null}
+                {selected.artifactId ? <button type="button" disabled={artifactAction !== null} className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => void publishArtifact()}>{artifactAction === "publish" ? "Publicando…" : selected.internalSiteUrl ? "Actualizar sitio interno" : "Publicar sitio interno"}</button> : null}
+                {selected.internalSiteUrl ? <a href={selected.internalSiteUrl} target="_blank" rel="noreferrer" className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--positive)] px-4 text-[12px] font-semibold text-white"><ArrowSquareOut size={14} />Ver sitio interno</a> : null}
                 <button type="button" className="min-h-10 rounded-full px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>Ver conversación</button>
               </div>
+              {selected.type === "result" ? <div className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">Crear desde esta respuesta</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">La visualización usa una tabla numérica existente. El sitio interno conserva el contenido y elimina código inseguro.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("visualization")}>{artifactAction === "visualization" ? "Creando…" : "Crear visualización"}</button><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("internal-site")}>{artifactAction === "internal-site" ? "Creando…" : "Crear sitio interno"}</button></div></div> : null}
+              {artifactNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{artifactNotice}</p> : null}
               <p className="mt-3 truncate text-[10px] text-[var(--text-subtle)]">{selected.projectName} · {selected.threadTitle}</p>
             </div> : null}
           </div>
