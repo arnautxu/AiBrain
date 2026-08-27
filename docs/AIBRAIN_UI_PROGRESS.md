@@ -31,7 +31,7 @@
 | 5. Plan, actividad, tools, diffs, Review, approvals, errores | Completado en la rebanada disponible | Presentación employee-first, permisos aceptar/rechazar, diff, salida y error de red; integración App Server definitiva sigue bloqueada por backend 7/10 |
 | 6. PDF/Office/image, preview, publish, Browser/Computer Use | Completado en la rebanada disponible | View models fail-closed, PDF/Office/image, lifecycle de preview/publicación/browser, viewer aislado, logout y evidencia desktop/mobile; routes reales bloqueadas por backend 8/9/10 |
 | 7. Responsive, temas, a11y, keyboard, motion, degraded | Completado | 7 viewports, temas claro/oscuro/sistema, focus traps, motion reducido, recuperación offline/runtime y evidencia checkpoint 07 |
-| 8. Integración, ordering, dedupe, replay, reconnect, performance | Pendiente | — |
+| 8. Integración, ordering, dedupe, replay, reconnect, performance | Completado en la rebanada disponible | E2E real stdio con primer turno/resume/cancel, adapter durable fail-closed, batching por frame y tests; conexión al gateway durable bloqueada por backend 7/10 |
 | 9. Comparación visual exhaustiva | Pendiente | — |
 | 10. Regresiones, build, handoff, integración segura | Pendiente | — |
 
@@ -71,6 +71,8 @@
 | Example Review | dark, mobile | 390×844 | `artifacts/ui-parity/checkpoint-07/example-review-dark-390x844.png` | Diálogo a viewport completo, diff y focus trap |
 | Example documento | dark, mobile | 390×844 | `artifacts/ui-parity/checkpoint-07/example-document-dark-390x844.png` | Preview, volver al final en flujo y composer sin solapamiento |
 | Example Computer Use | dark | 1440×900 | `artifacts/ui-parity/checkpoint-07/example-browser-dark-1440x900.png` | Viewer aislado y estados legibles en tema oscuro |
+| Host real: resume Codex | light | 1280×720 | `artifacts/ui-parity/checkpoint-08/real-app-server-resume-1280x720.png` | Primer turno y segundo turno reanudado en el mismo thread con datos sintéticos |
+| Host real: cancelación Codex | light | 1280×720 | `artifacts/ui-parity/checkpoint-08/real-app-server-cancelled-1280x720.png` | Turno real abortado y estado terminal `Torn aturat` |
 | Codex desktop | no capturado | — | restricción Computer Use | Bloqueo de referencia, no de implementación |
 
 ## Contratos consumidos
@@ -183,6 +185,19 @@
 - Axe detectó durante la pasada contraste insuficiente en textos oscuros y en el estado activo de Review (mínimo 2,74:1). Se corrigieron los tokens semánticos y se reejecutó el gate completo sin excepciones.
 - El estado degradado no inventa continuidad: cuando el runtime falla u offline, el historial sigue visible pero enviar queda bloqueado; al recuperar conectividad se revalida el status antes de habilitar el composer.
 
+## Gates del checkpoint 8
+
+- `npm run lint` y `npm run typecheck`: verdes, 0 errores y 0 warnings.
+- `npm run test:unit`: verde, 6 ficheros y 18 tests. `npm run test:adapter`: verde, 3 ficheros y 9 tests dedicados.
+- El adapter durable valida schema v1 e IDs opacos, preserva `projectId`, `threadId`, `turnId` e `itemId`, aplica secuencias contiguas, deduplica por `eventId`, pausa ante gaps, solicita replay una sola vez por hueco, rechaza cross-scope/event-id reuse/eventos post-terminal y limpia callbacks/estado al cerrar.
+- El reader NDJSON legacy cancela el body y elimina el listener de AbortSignal en error/abort. Los deltas contiguos se agrupan por animation frame y se vacían antes de eventos no-delta para mantener orden reduciendo renders globales durante streaming.
+- `npm run test:e2e`: verde, 22/22 y 1 skip explícito del smoke externo en Example; 22/22 y 1 skip en Northwind. La nueva prueba aplica 240 deltas tras latencia artificial, mantiene Preferencias interactiva y comprueba orden/ausencia de duplicados después de refresh.
+- E2E real autorizado: `AIBRAIN_REAL_RUNTIME_BASE_URL=<loopback-tunnel> npx playwright test --config=playwright.real-runtime.config.ts`, verde 1/1. En el host existente devolvió `mode: codex`, `ready: true`, `isolated: true`; completó primer turno, resume en el mismo thread y cancelación real en 12 s, sin errores de página, consola o red no esperados.
+- El smoke real usó un contenedor QA efímero con auth/tenant sintéticos, sandbox read-only y puertos solo loopback. El túnel y el contenedor fueron eliminados tras la prueba; los servicios originales permanecieron activos y Production/DNS no se tocaron.
+- `npm run test:visual`: verde sin regeneración final, 29 tests y 1 skip intencional. `npm run test:a11y`: verde 5/5. Los dos builds secuenciales Example/Northwind son verdes con Next.js 16.3.2.
+- Revisión visual humana: ambas capturas del runtime real se abrieron a resolución original; muestran exclusivamente prompts y respuestas sintéticas. El segundo screenshot confirma el estado terminal de cancelación.
+- La ruta real probada continúa siendo `/api/chat` NDJSON sobre App Server `stdio`. El gateway durable del backend no está compuesto en la ruta de producto: el adapter está listo y cubierto, pero no se conecta ni se simula hasta que backend checkpoints 7/10 publiquen el endpoint/envelope final.
+
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
@@ -194,8 +209,9 @@
 - `72e7d17 feat(ui): complete turn review and approvals` — checkpoint 5, plan, actividad, comandos, permisos, Review, diff, error de red y regresiones.
 - `1bdd060 feat(ui): add honest capability artifact states` — checkpoint 6, PDF/Office/image, preview/publicación, Computer Use, seguridad del viewer y regresiones.
 - `909affb feat(ui): harden responsive themes and accessibility` — checkpoint 7, responsive, dark/system, teclado, focus, motion, degradación y regresiones.
+- `0906d9a feat(ui): add durable event integration boundary` — checkpoint 8, ordering, dedupe, gap/replay, cleanup, batching, performance y smoke App Server real.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
-Completar el checkpoint 8: integrar el contrato durable definitivo solo donde exista, y verificar ordering, dedupe, replay, reconnect, lifecycle y performance sin simular garantías ausentes del backend.
+Completar el checkpoint 9: comparación visual exhaustiva de todos los estados y viewports, corrección iterativa y cierre de la regresión visual con evidencia reproducible.
