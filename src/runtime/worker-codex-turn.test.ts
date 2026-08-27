@@ -289,6 +289,7 @@ describe("worker Codex turn", () => {
     expect(JSON.stringify(turnStart?.params)).not.toContain(staging);
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
     const threadStart = calls.find((call) => call.method === "thread/start");
+    expect(threadStart?.params).not.toHaveProperty("projectId");
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
       expect.objectContaining({
         type: "namespace",

@@ -341,7 +341,6 @@ export async function runWorkerCodexTurn(
         dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
         ephemeral: false,
         serviceName: "aibrain_workbench",
-        projectId: chatRequest.projectId,
       }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
