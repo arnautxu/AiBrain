@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `14f63af` en
+- Último checkpoint backend publicado: `bded0b6` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -45,11 +45,11 @@
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
 | 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
-| 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, reserva previa de volumen y recovery de temporales tras `SIGKILL` |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`, `eff6edc`, `42c7539`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, retención terminal de candidato, gates separados de data/publish y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`: backup compuesto, réplica Restic, alertas y recovery transaccional de release cerrados localmente; falta evidencia Docker/host QA real |
-| 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
+| 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`: CI protegida y reproducible, denegación física de tools, artefactos no cacheables y capacidad independiente de publicación cerrados; aún quedan gaps operativos locales del checkpoint 11 |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
@@ -181,11 +181,24 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Reauditar los checkpoints 11/12 contra el árbol actual y cerrar cualquier gap
-local reproducible restante. Mantener separados los gates externos exactos de
-Docker/host QA, Supabase, Codex dedicado, Restic y alertas reales.
+Corregir los P0 operativos verificados: hacer que rollback restaure Compose y
+configuración exactos, integrar un sink externo de alertas en una topología con
+egress explícito y alertar por gateway/réplica ausentes. Después cerrar preflight
+y orquestación transaccional de backup/restore antes de repetir la matriz total.
 
 ## Últimas validaciones
+
+- Resiliencia documental `eff6edc`: 20/20 focalizadas, typecheck, lint e infra
+  estática verdes; retención terminal de 30 días conserva operación, receipts,
+  versiones y auditoría y corrige el lease de multipart ante boundary inválido.
+- CI `bded0b6`: workflow sin secretos y acciones fijadas por SHA; contratos,
+  typecheck, lint, suite, E2E, build, auditorías, matriz Office/PDF y builds
+  Docker limpios. Validación local agregada: 100 ficheros pasados + 1 omitido,
+  463 pruebas pasadas + 3 omitidas, E2E 4/4, build y 0 vulnerabilidades.
+- Hardening `42c7539`: 43/43 pruebas focalizadas verdes antes del commit;
+  `tools.execute=deny` cubre tres requests App Server sin pendiente ni grants,
+  artefactos privados se reautorizan con `no-store` y capacidad data/publish se
+  mide por separado antes de cambiar una publicación a `publishing`.
 
 - `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
 - `npm run lint`: verde, sin warnings.
