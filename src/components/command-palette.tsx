@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Browser,
+  BookOpenText,
   ChatCircleDots,
   Command,
   Folder,
@@ -42,6 +43,7 @@ type CommandPaletteProps = {
   onOpenInspector: () => void;
   onOpenBrowser: () => void;
   onOpenCustomization: () => void;
+  onOpenMemory: () => void;
 };
 
 function searchable(value: string) {
@@ -67,6 +69,7 @@ export function CommandPalette({
   onOpenInspector,
   onOpenBrowser,
   onOpenCustomization,
+  onOpenMemory,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -116,6 +119,15 @@ export function CommandPalette({
         run: onOpenBrowser,
       }] : []),
       {
+        id: "action:memory",
+        group: "Acciones",
+        label: "Abrir memoria",
+        detail: "Gestiona decisiones y recordatorios guardados",
+        icon: <BookOpenText size={16} />,
+        keywords: "memoria recordar decision recordatorio contexto",
+        run: onOpenMemory,
+      },
+      {
         id: "action:customize",
         group: "Acciones",
         label: "Abrir preferencias",
@@ -153,6 +165,7 @@ export function CommandPalette({
     onNewProject,
     onNewThread,
     onOpenCustomization,
+    onOpenMemory,
     onOpenBrowser,
     onOpenInspector,
     onSelectProject,

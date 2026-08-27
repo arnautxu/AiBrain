@@ -8,6 +8,7 @@ import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
+import { MemoryPanel } from "@/components/memory-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -324,6 +325,7 @@ export function BrainApp({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [networkOnline, setNetworkOnline] = useState(true);
@@ -1110,6 +1112,7 @@ export function BrainApp({
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
+      else if (memoryOpen) setMemoryOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
       else if (activeSideWindow) setActiveSideWindow(null);
@@ -1124,6 +1127,7 @@ export function BrainApp({
     commandPaletteOpen,
     confirmDialog,
     customizationOpen,
+    memoryOpen,
     mobileSidebarOpen,
     sending,
     startNewThread,
@@ -1239,6 +1243,11 @@ export function BrainApp({
         onClose={() => setCustomizationOpen(false)}
       />
 
+      <MemoryPanel
+        open={memoryOpen}
+        onClose={() => setMemoryOpen(false)}
+      />
+
       <CommandPalette
         open={commandPaletteOpen}
         busy={actionBusy || sending}
@@ -1255,6 +1264,7 @@ export function BrainApp({
         onOpenInspector={() => setActiveSideWindow("inspector")}
         onOpenBrowser={() => setActiveSideWindow("browser")}
         onOpenCustomization={() => setCustomizationOpen(true)}
+        onOpenMemory={() => setMemoryOpen(true)}
       />
 
       {textDialogCopy ? (
