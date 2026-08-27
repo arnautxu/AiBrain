@@ -1,0 +1,85 @@
+# Render one copy per installation. Replace only the two __AIBRAIN_*__ tokens
+# and point the TLS paths at certificates owned by that installation.
+limit_req_zone $binary_remote_addr zone=aibrain_auth:10m rate=10r/m;
+
+upstream aibrain_backend {
+    server 127.0.0.1:__AIBRAIN_HTTP_PORT__;
+    keepalive 32;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __AIBRAIN_PUBLIC_HOST__;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name __AIBRAIN_PUBLIC_HOST__;
+
+    ssl_certificate /etc/letsencrypt/live/__AIBRAIN_PUBLIC_HOST__/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/__AIBRAIN_PUBLIC_HOST__/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_tickets off;
+
+    client_max_body_size 2m;
+
+    location / {
+        proxy_pass http://aibrain_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        # Overwrite, rather than append to, any client-supplied forwarding chain.
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 65s;
+        proxy_send_timeout 65s;
+    }
+
+    location = /api/chat {
+        proxy_pass http://aibrain_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_cache off;
+        add_header X-Accel-Buffering no always;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+
+    location ~ ^/api/threads/[0-9a-f-]{36}/documents$ {
+        client_max_body_size 52m;
+        proxy_pass http://aibrain_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 5m;
+        proxy_send_timeout 5m;
+    }
+
+    location ~ ^/api/auth/(?:login|password/reset/request|password/recovery|password/change-initial)$ {
+        limit_req zone=aibrain_auth burst=10 nodelay;
+        proxy_pass http://aibrain_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}

@@ -26,6 +26,13 @@ chown root:10001 /etc/aibrain/<installation>/installation.json
 
 En `compose.env`, usa nombres únicos para proyecto, red y los tres volúmenes, un puerto loopback libre, rutas host exclusivas y el tag `aibrain-<installation>:<git-sha>`. Usa paths absolutos para los dos ficheros montados. En `installation.json`, cambia identidad, branding y `publicUrl`, pero conserva exactamente los seis paths internos del ejemplo: son el contrato de mounts del contenedor.
 
+Renderiza `infra/hetzner/nginx/aibrain.conf.example` en un fichero exclusivo de
+la instalación, sustituyendo `__AIBRAIN_HTTP_PORT__` y
+`__AIBRAIN_PUBLIC_HOST__`. Valida con `nginx -t` antes de recargar. El template
+desactiva buffering para chat y uploads, sobrescribe los headers de IP del
+cliente y aplica rate limiting únicamente a las mutaciones de autenticación;
+no publica CDP, workers ni viewers internos.
+
 Genera cuatro secretos distintos. No pegues el resultado en terminales grabadas, tickets o commits:
 
 ```bash
