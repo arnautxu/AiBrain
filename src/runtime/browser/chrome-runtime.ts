@@ -14,6 +14,7 @@ import type {
   InteractiveManagedBrowserRuntime,
 } from "@/runtime/browser/types";
 import {
+  CdpClientError,
   PrivateCdpClient,
   type CdpSessionScope,
   type PrivateCdpClientOptions,
@@ -116,6 +117,12 @@ function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoExcept
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function isRecoverableThreadSessionError(error: unknown) {
+  if (!(error instanceof CdpClientError) || error.code !== "CDP_COMMAND_FAILED") return false;
+  return /(?:not attached to an active page|session.*(?:not found|closed|does not exist)|no target with given id|target.*(?:closed|navigated)|execution context.*destroyed)/iu
+    .test(error.message);
 }
 
 function positiveInteger(name: string, value: number, maximum: number) {
@@ -505,12 +512,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   }
 
   async captureFrame(threadId: string): Promise<BrowserFrame> {
-    const page = await this.requireThreadPage(threadId);
-    const result = await this.requireBrowser().send<{ data: string }>("Page.captureScreenshot", {
-      format: "png",
-      fromSurface: true,
-      captureBeyondViewport: false,
-    }, { sessionId: page.sessionId });
+    const result = await this.withThreadPageRecovery(threadId, async (page) =>
+      this.requireBrowser().send<{ data: string }>("Page.captureScreenshot", {
+        format: "png",
+        fromSurface: true,
+        captureBeyondViewport: false,
+      }, { sessionId: page.sessionId }));
     if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
       throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
     }
@@ -547,55 +554,63 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private async navigatePage(threadId: string, url: string, assertController: () => void) {
     const destination = validateBrowserNavigationUrl(url);
     await this.networkPolicy.assertAllowed(destination);
-    const page = await this.requireThreadPage(threadId);
-    assertController();
-    const result = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
-      url: destination,
-    }, { sessionId: page.sessionId });
+    let navigatedPage: ThreadPage | null = null;
+    const result = await this.withThreadPageRecovery(threadId, async (page) => {
+      assertController();
+      const response = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
+        url: destination,
+      }, { sessionId: page.sessionId });
+      navigatedPage = page;
+      return response;
+    });
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
-    if (!result.isDownload) await this.persistNavigation(page, destination);
+    if (!result.isDownload && navigatedPage) await this.persistNavigation(navigatedPage, destination);
   }
 
   async dispatchInput(threadId: string, command: BrowserInputCommand) {
     this.assertHumanControl();
     validateInput(command);
-    const page = await this.requireThreadPage(threadId);
-    const browser = this.requireBrowser();
-    if (command.kind === "mouse") {
-      await browser.send("Input.dispatchMouseEvent", {
+    await this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertHumanControl();
+      const browser = this.requireBrowser();
+      if (command.kind === "mouse") {
+        await browser.send("Input.dispatchMouseEvent", {
+          type: command.event,
+          x: command.x,
+          y: command.y,
+          button: command.button ?? "none",
+          clickCount: command.clickCount ?? 0,
+          deltaX: command.deltaX ?? 0,
+          deltaY: command.deltaY ?? 0,
+        }, { sessionId: page.sessionId });
+        return;
+      }
+      await browser.send("Input.dispatchKeyEvent", {
         type: command.event,
-        x: command.x,
-        y: command.y,
-        button: command.button ?? "none",
-        clickCount: command.clickCount ?? 0,
-        deltaX: command.deltaX ?? 0,
-        deltaY: command.deltaY ?? 0,
+        key: command.key,
+        code: command.code ?? "",
+        text: command.text ?? "",
+        modifiers: command.modifiers ?? 0,
       }, { sessionId: page.sessionId });
-      return;
-    }
-    await browser.send("Input.dispatchKeyEvent", {
-      type: command.event,
-      key: command.key,
-      code: command.code ?? "",
-      text: command.text ?? "",
-      modifiers: command.modifiers ?? 0,
-    }, { sessionId: page.sessionId });
+    });
   }
 
   async readPage(threadId: string): Promise<BrowserPageSnapshot> {
     this.assertAgentControl();
-    const page = await this.requireThreadPage(threadId);
-    const evaluated = await this.requireBrowser().send<{
-      result?: { value?: unknown };
-      exceptionDetails?: unknown;
-    }>("Runtime.evaluate", {
-      expression: `(() => ({url: location.href, title: document.title, text: (document.body?.innerText ?? document.documentElement?.innerText ?? "").slice(0, ${MAX_PAGE_TEXT_CHARS})}))()`,
-      returnByValue: true,
-      awaitPromise: false,
-      userGesture: false,
-    }, { sessionId: page.sessionId });
+    const evaluated = await this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertAgentControl();
+      return this.requireBrowser().send<{
+        result?: { value?: unknown };
+        exceptionDetails?: unknown;
+      }>("Runtime.evaluate", {
+        expression: `(() => ({url: location.href, title: document.title, text: (document.body?.innerText ?? document.documentElement?.innerText ?? "").slice(0, ${MAX_PAGE_TEXT_CHARS})}))()`,
+        returnByValue: true,
+        awaitPromise: false,
+        userGesture: false,
+      }, { sessionId: page.sessionId });
+    });
     if (evaluated.exceptionDetails || !evaluated.result ||
       !evaluated.result.value || typeof evaluated.result.value !== "object" ||
       Array.isArray(evaluated.result.value)) {
@@ -645,67 +660,73 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       Math.abs(deltaX) > 5_000 || Math.abs(deltaY) > 5_000 || (deltaX === 0 && deltaY === 0)) {
       throw new ChromeRuntimeError("CHROME_SCROLL_INVALID", "Browser scroll delta is invalid.");
     }
-    const page = await this.requireThreadPage(threadId);
-    this.assertAgentControl();
-    await this.requireBrowser().send("Input.dispatchMouseEvent", {
-      type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
-    }, { sessionId: page.sessionId });
+    await this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertAgentControl();
+      await this.requireBrowser().send("Input.dispatchMouseEvent", {
+        type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
+      }, { sessionId: page.sessionId });
+    });
   }
 
   async agentClick(threadId: string, selector: string) {
     this.assertAgentControl();
-    const page = await this.requireThreadPage(threadId);
-    const nodeId = await this.querySelector(page, validateSelector(selector));
-    const result = await this.requireBrowser().send<{
-      model?: { border?: number[] };
-    }>("DOM.getBoxModel", { nodeId }, { sessionId: page.sessionId });
-    const border = result.model?.border;
-    if (!Array.isArray(border) || border.length !== 8 || !border.every(Number.isFinite)) {
-      throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_VISIBLE", "Browser element is not visible.");
-    }
-    const x = (border[0] + border[2] + border[4] + border[6]) / 4;
-    const y = (border[1] + border[3] + border[5] + border[7]) / 4;
-    this.assertAgentControl();
-    const browser = this.requireBrowser();
-    await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, { sessionId: page.sessionId });
-    this.assertAgentControl();
-    await browser.send("Input.dispatchMouseEvent", {
-      type: "mousePressed", x, y, button: "left", clickCount: 1,
-    }, { sessionId: page.sessionId });
-    this.assertAgentControl();
-    await browser.send("Input.dispatchMouseEvent", {
-      type: "mouseReleased", x, y, button: "left", clickCount: 1,
-    }, { sessionId: page.sessionId });
+    const safeSelector = validateSelector(selector);
+    await this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertAgentControl();
+      const nodeId = await this.querySelector(page, safeSelector);
+      const result = await this.requireBrowser().send<{
+        model?: { border?: number[] };
+      }>("DOM.getBoxModel", { nodeId }, { sessionId: page.sessionId });
+      const border = result.model?.border;
+      if (!Array.isArray(border) || border.length !== 8 || !border.every(Number.isFinite)) {
+        throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_VISIBLE", "Browser element is not visible.");
+      }
+      const x = (border[0] + border[2] + border[4] + border[6]) / 4;
+      const y = (border[1] + border[3] + border[5] + border[7]) / 4;
+      this.assertAgentControl();
+      const browser = this.requireBrowser();
+      await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, { sessionId: page.sessionId });
+      this.assertAgentControl();
+      await browser.send("Input.dispatchMouseEvent", {
+        type: "mousePressed", x, y, button: "left", clickCount: 1,
+      }, { sessionId: page.sessionId });
+      this.assertAgentControl();
+      await browser.send("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x, y, button: "left", clickCount: 1,
+      }, { sessionId: page.sessionId });
+    });
   }
 
   async agentType(threadId: string, selector: string, text: string, clear: boolean) {
     this.assertAgentControl();
-    const page = await this.requireThreadPage(threadId);
-    const nodeId = await this.querySelector(page, validateSelector(selector));
+    const safeSelector = validateSelector(selector);
     validateTypedText(text);
-    this.assertAgentControl();
-    const browser = this.requireBrowser();
-    await browser.send("DOM.focus", { nodeId }, { sessionId: page.sessionId });
-    if (clear) {
+    await this.withThreadPageRecovery(threadId, async (page) => {
       this.assertAgentControl();
-      await browser.send("Input.dispatchKeyEvent", {
-        type: "keyDown", key: "a", code: "KeyA", modifiers: 2,
-      }, { sessionId: page.sessionId });
+      const nodeId = await this.querySelector(page, safeSelector);
+      const browser = this.requireBrowser();
+      await browser.send("DOM.focus", { nodeId }, { sessionId: page.sessionId });
+      if (clear) {
+        this.assertAgentControl();
+        await browser.send("Input.dispatchKeyEvent", {
+          type: "keyDown", key: "a", code: "KeyA", modifiers: 2,
+        }, { sessionId: page.sessionId });
+        this.assertAgentControl();
+        await browser.send("Input.dispatchKeyEvent", {
+          type: "keyUp", key: "a", code: "KeyA", modifiers: 2,
+        }, { sessionId: page.sessionId });
+        this.assertAgentControl();
+        await browser.send("Input.dispatchKeyEvent", {
+          type: "keyDown", key: "Backspace", code: "Backspace",
+        }, { sessionId: page.sessionId });
+        this.assertAgentControl();
+        await browser.send("Input.dispatchKeyEvent", {
+          type: "keyUp", key: "Backspace", code: "Backspace",
+        }, { sessionId: page.sessionId });
+      }
       this.assertAgentControl();
-      await browser.send("Input.dispatchKeyEvent", {
-        type: "keyUp", key: "a", code: "KeyA", modifiers: 2,
-      }, { sessionId: page.sessionId });
-      this.assertAgentControl();
-      await browser.send("Input.dispatchKeyEvent", {
-        type: "keyDown", key: "Backspace", code: "Backspace",
-      }, { sessionId: page.sessionId });
-      this.assertAgentControl();
-      await browser.send("Input.dispatchKeyEvent", {
-        type: "keyUp", key: "Backspace", code: "Backspace",
-      }, { sessionId: page.sessionId });
-    }
-    this.assertAgentControl();
-    await browser.send("Input.insertText", { text }, { sessionId: page.sessionId });
+      await browser.send("Input.insertText", { text }, { sessionId: page.sessionId });
+    });
   }
 
   private async querySelector(page: ThreadPage, selector: string) {
@@ -942,6 +963,24 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       if (this.threadPagePromises.get(threadId) === promise) {
         this.threadPagePromises.delete(threadId);
       }
+    }
+  }
+
+  private async withThreadPageRecovery<Result>(
+    threadId: string,
+    operation: (page: ThreadPage) => Promise<Result>,
+  ): Promise<Result> {
+    const page = await this.requireThreadPage(threadId);
+    try {
+      return await operation(page);
+    } catch (error) {
+      if (!isRecoverableThreadSessionError(error)) throw error;
+      if (this.threadPages.get(threadId) === page) {
+        this.threadPages.delete(threadId);
+        await this.closeThreadPage(page);
+      }
+      const replacement = await this.requireThreadPage(threadId);
+      return operation(replacement);
     }
   }
 
