@@ -36,6 +36,7 @@ describe("installation branding", () => {
     const config = installation("#0f766e");
     const branded = applyInstallationBranding(baseBrainManifest, config);
     expect(branded.identity.productName).toBe("Configured Brain");
+    expect(branded.identity.assistantName).toBe("Configured Brain");
     expect(branded.interface.accentColor).toBe("#0f766e");
     expect(baseBrainManifest.interface.accentColor).toBeUndefined();
     expect(publicInstallationBranding(config)).toMatchObject({

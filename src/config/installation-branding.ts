@@ -36,6 +36,7 @@ export function applyInstallationBranding(
     identity: {
       ...manifest.identity,
       productName: installation.branding.productName,
+      assistantName: installation.branding.productName,
     },
     interface: {
       ...manifest.interface,

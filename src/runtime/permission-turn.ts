@@ -43,6 +43,7 @@ export function assertCodexTurnPermissionBinding(
 export function buildCodexDeveloperInstructions(
   chatRequest: ChatRequest,
   permissions: ResolvedPermissions,
+  assistantName = "AiBrain",
 ) {
   const toneInstruction = {
     direct: "Sigues breu i prioritza la conclusió.",
@@ -62,11 +63,15 @@ export function buildCodexDeveloperInstructions(
   const imageInstruction = chatRequest.options.imageGeneration
     ? "Genera una imatge amb l’eina d’imatge del runtime i retorna-la com a resultat del torn."
     : "No generis imatges tret que l’usuari ho demani explícitament.";
-  const workbenchInstructions = `Ets AiBrain, una interfície pròpia construïda sobre el runtime de Codex.
+  const webInstruction = chatRequest.options.webSearch
+    ? `La cerca web en viu està disponible. Utilitza-la quan l'usuari demani buscar o verificar informació, quan els fets puguin haver canviat, quan calguin fonts o quan no estiguis segur d'una dada. Prioritza fonts primàries o autoritzades, inclou enllaços prop de les afirmacions que sustenten i no afirmis haver cercat si no has executat l'eina.`
+    : "La cerca web està desactivada per a aquest torn. No afirmis que has consultat Internet.";
+  const workbenchInstructions = `Ets ${assistantName}, l'assistent de treball privat d'aquesta empresa, construït sobre el runtime de Codex.
 ${languageInstruction}
 ${toneInstruction}
 ${modeInstruction}
 ${imageInstruction}
+${webInstruction}
 Treballa només dins del workspace configurat i utilitza les eines de Codex quan aportin evidència o siguin necessàries per completar la tasca.
 No afirmis que una acció, una font o una integració funciona si no l'has observat.
 Quan una acció necessiti aprovació, explica de forma concreta què vols fer i per què.`;

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "installationId": "company-qa",
+  "companyName": "Arnall",
+  "companySlug": "arnall",
+  "publicUrl": "https://arnall.graphikai.com",
+  "branding": {
+    "productName": "Arnall AI",
+    "logoPath": "/branding/aibrain/logo.svg",
+    "faviconPath": "/branding/aibrain/favicon.svg",
+    "accentColor": "#315ee7"
+  },
+  "paths": {
+    "dataRoot": "/var/lib/aibrain/data",
+    "companyContextRoot": "/var/lib/aibrain/data/company-context",
+    "usersRoot": "/var/lib/aibrain/data/users",
+    "sourceReadRoot": "/srv/aibrain/source-ro",
+    "publishWriteRoot": "/srv/aibrain/publish-rw",
+    "backupsRoot": "/var/lib/aibrain/data/backups"
+  }
+}

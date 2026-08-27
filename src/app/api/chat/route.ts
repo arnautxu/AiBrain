@@ -231,9 +231,11 @@ export async function POST(request: Request) {
   let turnProjectionStore: FileTurnProjectionStore | null = null;
   let turnMemory: WorkerTurnMemoryDependencies | null = null;
   let turnDocuments: readonly ResolvedTurnDocument[] = [];
+  let assistantName = "AiBrain";
   if (config.mode === "codex") {
     try {
       const installation = await loadInstallationConfig();
+      assistantName = installation.branding.productName;
       turnPermissions = await resolveServerTurnPermissions(installation, {
         installationId: session.tenant.id,
         userId: session.user.id,
@@ -442,6 +444,7 @@ export async function POST(request: Request) {
             request.signal,
             emitCodex,
             maintenanceActivity ?? undefined,
+            assistantName,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

@@ -46,7 +46,11 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await addMenuButton.click();
   const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
   await expect(addMenu).toBeVisible();
-  await expect(addMenu.getByRole("menuitemcheckbox", { name: /Buscar en la web/ })).toBeVisible();
+  const webSearch = addMenu.getByRole("menuitemcheckbox", { name: /Buscar en la web/ });
+  await expect(webSearch).toBeVisible();
+  await expect(webSearch).toHaveAttribute("aria-checked", "true");
+  await webSearch.click();
+  await expect(webSearch).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
   await expect(addMenu).toBeHidden();
 
