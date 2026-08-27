@@ -738,7 +738,22 @@ npm run infra:validate
   pasados y 1 omitido (553 tests pasados, 3 omitidos), E2E backend 4/4,
   typecheck y lint
   verdes.
-- Siguiente acción concreta: construir y desplegar la revisión inmutable y
-  aceptar al menos tres turnos reales consecutivos en un único thread público,
-  verificando persistencia terminal, métricas, healthchecks y aislamiento de
-  BGreenly.
+- Revisión pública aceptada: `736409b4a1b81b0a245939001accd78199b429ea`.
+  Digests inmutables: app
+  `sha256:e756c33c3cd3ed46a1fcabb48792b3f428d8de2c5caf29491321babc37b53379`
+  y egress/ingress
+  `sha256:c4fcd3c1d30cd794fa6f1927474796cb395a390263dbc239ae090bc41664c1d4`.
+- Aceptación pública sobre el mismo thread que falló: tres turnos consecutivos
+  devolvieron `AIBRAIN_CONTINUATION_FIXED_1_OK`, `_2_OK` y `_3_OK`, todos con
+  streaming, `done`, cero eventos de error, estado persistido `complete` y tres
+  runtimeTurnId distintos. Latencias primer texto/total: 3003/4891 ms,
+  2021/3513 ms y 2250/3774 ms.
+- Los tres servicios quedaron `healthy`, cero restarts y revisión OCI exacta;
+  readiness pública 200. Tras retirar solo imágenes intermedias verificadas
+  como AiBrain, el disco quedó con 26,76 % libre. La revisión `3a5f718` se
+  conserva localmente como rollback inmediato y las anteriores siguen
+  recuperables desde el registry privado.
+- BGreenly siguió sin cambios: su sentinel devolvió 410 y el body fue idéntico
+  antes y después. Siguiente acción concreta: aceptación manual desde la UI;
+  el commit UI-only `c2bece6` de Arnau puede integrarse después mediante merge
+  normal sin cambiar este contrato de runtime.
