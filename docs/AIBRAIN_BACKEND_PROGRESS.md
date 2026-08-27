@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `283caf8` en
+- Último checkpoint backend publicado: `40c94b8` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -47,13 +47,13 @@
 | 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
 | 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`: staging queda server-only, Codex recibe inputs preparados sin paths y el lock físico de target es global por instalación; faltan retención/backpressure, sandbox del conversor y backup documental |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
-| 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`: Auth y contrato ya no tienen roles; retirados build/routes/paneles de onboarding, invitaciones, control plane, automations y Runtime técnico; falta hacer ejecutables los schemas/ejemplos HTTP restantes |
+| 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`: Auth/contrato role-free, superficies rechazadas retiradas y schemas Codex 0.149.1 regenerados/comparados byte a byte; falta hacer ejecutables los schemas/ejemplos HTTP propios restantes |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3` y la continuidad HTTP sin Supabase en `283caf8`. La siguiente acción concreta es ampliar el guard Auth-only a endpoints REST/GraphQL directos y hacer reproducible la comparación de contratos Codex fijados.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8` y el guard/regeneración de contratos fijados en `40c94b8`. La siguiente acción concreta es convertir el contrato HTTP propio en schemas ejecutables contra las routes.
 
 ## Decisiones menores registradas
 
@@ -69,6 +69,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en el App Server privado y registra fingerprint/versiones en un journal durable por usuario.
 - El worker se ejecuta bajo `bubblewrap`: oculta todo `dataRoot`, reexpone únicamente sus raíces declaradas y sustituye `publishWriteRoot` por un mount vacío read-only. El preflight del contenedor falla si esa frontera no existe.
 - El UUID de Supabase Auth es exactamente el UUID filesystem del empleado; no existe membership, rol, proyecto o sesión de producto remota.
+- El guard Auth-only rechaza imports SDK fuera del identity adapter, `.from/.rpc`, servicios `rest/graphql/storage/realtime`, clientes de producto y dependencias PostgREST/GraphQL directas.
 - Después del intercambio inicial con Supabase, sesión, workbench y logout no construyen un cliente remoto. El E2E corta el servidor de identidad, crea proyecto/thread, reinicia Next y conserva la cookie local; un nuevo login durante el corte devuelve `503`, no un falso `401`.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
@@ -268,6 +269,11 @@ las acciones externas autorizadas.
   388 pruebas pasadas + 3 omitidas; E2E global 4/4 y build verde.
 - Push verificado: `bc03471..283caf8` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Contratos fijados `40c94b8`: contract tests 8/8, guard Auth-only ampliado y
+  `npm run contracts:verify` regeneró tipos+JSON Schema con Codex 0.149.1 en
+  temporal y confirmó igualdad byte a byte.
+- Push verificado: `ed2ba70..40c94b8` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -289,7 +295,7 @@ las acciones externas autorizadas.
 | Publicación confirmada | Freeze+hash+preview+HMAC+conflicto+versión+atomic write+lock global por target | Focalizadas, carrera concurrente entre dos usuarios y 28/28 de la selección documental/runtime |
 | Browser/Computer Use aislado | CDP pipe autenticado, perfil/targets/navegación/descargas/viewer por usuario/thread | Chrome real 2/2 y matriz browser focalizada 50/50 |
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
-| Contratos UI reales | Schemas HTTP/eventos/tools/errores en `UI_BACKEND_CONTRACT.md` | Contract tests y validación Codex 0.149.1 |
+| Contratos UI reales | Schemas HTTP/eventos/tools/errores en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | Contract tests y regeneración/compare byte a byte de Codex 0.149.1; schemas HTTP propios aún en curso |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
 | Backup/restore/recovery | Snapshots con manifest/hash y restore separado | 8 pruebas locales, incluidas corrupción, hardlink y recovery interrumpido; contenedor QA pendiente |
 | Operación/release/rollback | Compose, Nginx, health, logs, alertas, drain y release dual atómica | Release manager 5/5 y validator estático verde; ejecución Docker QA pendiente |
