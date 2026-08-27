@@ -23,6 +23,8 @@ evaluator de alertas usa tanto la edad de creación como la de verificación.
 
 Conservar `backupId`, `sourceFingerprint`, número de ficheros y resultado del verify en el registro de release. El volumen de backups debe usar cifrado en reposo y una copia fuera del servidor con acceso separado; este command no sube ni elimina copias.
 
+La réplica cifrada, su proceso one-shot y el restore drill externo se describen en [BACKUP_REPLICATION.md](BACKUP_REPLICATION.md). Solo debe ejecutarse después del verify local.
+
 ## Restaurar sin sobrescribir
 
 La restauración nunca escribe encima de `dataRoot` ni `publishWriteRoot` activos. Exige dos destinos inexistentes, no solapados, con padres reales y escribibles y espacio libre comprobado. Ambos componentes se preparan primero bajo nombres `.pending`; solo después se promocionan. Si la segunda promoción falla, la primera se revierte y ambos árboles parciales se conservan con sufijo `.failed.<uuid>`.

@@ -512,7 +512,7 @@ export class FileBackupService {
     });
   }
 
-  async verify(snapshotRoot: string) {
+  async verify(snapshotRoot: string, options: { writeReceipt?: boolean } = {}) {
     const root = path.resolve(snapshotRoot);
     const canonicalSnapshots = await realpath(path.join(this.backupsRoot, "snapshots"));
     const canonicalRoot = await realpath(root);
@@ -567,9 +567,11 @@ export class FileBackupService {
       backupCreatedAt: manifest.createdAt,
       verifiedAt: new Date(this.now()).toISOString(),
     };
-    await this.lockManager.withLock(`backup-verification:${this.installationId}`, async () => {
-      await atomicWriteJson(this.verificationReceiptPath(), receipt, backupVerificationReceiptSchema, { mode: 0o600 });
-    });
+    if (options.writeReceipt !== false) {
+      await this.lockManager.withLock(`backup-verification:${this.installationId}`, async () => {
+        await atomicWriteJson(this.verificationReceiptPath(), receipt, backupVerificationReceiptSchema, { mode: 0o600 });
+      });
+    }
     return manifest;
   }
 
