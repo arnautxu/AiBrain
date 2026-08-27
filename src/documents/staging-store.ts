@@ -1,8 +1,9 @@
-import { createHash } from "node:crypto";
-import { lstat, mkdir } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { constants } from "node:fs";
+import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { ValidatedUpload } from "@/documents/upload-validation";
-import { atomicWriteFile, atomicWriteJson, readValidatedJson } from "@/storage/atomic-file";
+import { atomicWriteFile, atomicWriteJson, fsyncDirectory, readValidatedJson } from "@/storage/atomic-file";
 import { StorageError } from "@/storage/errors";
 import type { ResourceLockManager } from "@/storage/resource-lock";
 import {
@@ -72,6 +73,103 @@ async function readStagedMetadata(metadataPath: string) {
   return readValidatedJson(metadataPath, stagedDocumentSchema);
 }
 
+async function atomicCopyValidatedFile(
+  sourcePath: string,
+  targetPath: string,
+  validated: ValidatedUpload,
+) {
+  const temporary = path.join(path.dirname(targetPath), `.${path.basename(targetPath)}.${randomUUID()}.tmp`);
+  let source: Awaited<ReturnType<typeof open>> | null = null;
+  let destination: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    source = await open(sourcePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const sourceMetadata = await source.stat();
+    if (!sourceMetadata.isFile() || sourceMetadata.nlink !== 1 || (sourceMetadata.mode & 0o077) !== 0) {
+      throw new StorageError("STORAGE_STAGING_SOURCE_UNSAFE", "Staging source is not a private regular file.");
+    }
+    destination = await open(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+      0o600,
+    );
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    while (position <= validated.size) {
+      const { bytesRead } = await source.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      position += bytesRead;
+      if (position > validated.size) {
+        throw new StorageError("STORAGE_STAGING_CONTENT_MISMATCH", "Validated upload grew before staging.");
+      }
+      hash.update(buffer.subarray(0, bytesRead));
+      let written = 0;
+      while (written < bytesRead) {
+        const result = await destination.write(buffer, written, bytesRead - written);
+        written += result.bytesWritten;
+      }
+    }
+    if (position !== validated.size || hash.digest("hex") !== validated.sha256) {
+      throw new StorageError("STORAGE_STAGING_CONTENT_MISMATCH", "Validated upload changed before staging.");
+    }
+    await destination.sync();
+    await destination.close();
+    destination = null;
+    try {
+      await link(temporary, targetPath);
+    } catch (error) {
+      if (isNodeError(error, "EEXIST")) {
+        throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Staged content already exists and was not overwritten.");
+      }
+      throw error;
+    }
+    await fsyncDirectory(path.dirname(targetPath));
+    await unlink(temporary);
+    await fsyncDirectory(path.dirname(targetPath));
+  } finally {
+    await source?.close().catch(() => undefined);
+    await destination?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+  }
+}
+
+async function assertExistingContentMatches(
+  targetPath: string,
+  validated: ValidatedUpload,
+  mismatchCode = "STORAGE_STAGING_ID_CONFLICT",
+) {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(targetPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) {
+      throw new StorageError("STORAGE_STAGING_CONTENT_MISSING", "Staging metadata points to missing content.");
+    }
+    throw error;
+  }
+  try {
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || metadata.nlink !== 1 || (metadata.mode & 0o077) !== 0) {
+      throw new StorageError("STORAGE_STAGING_ORPHAN_UNSAFE", "Orphaned staged content is not a private regular file.");
+    }
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    let position = 0;
+    while (position <= validated.size) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, position);
+      if (bytesRead === 0) break;
+      position += bytesRead;
+      if (position > validated.size) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+    if (position !== validated.size || hash.digest("hex") !== validated.sha256) {
+      throw new StorageError(mismatchCode, "Staged content differs from its validated identity.");
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
 export async function ensurePrivateDirectoryTree(root: string, segments: readonly string[]) {
   const assertDirectory = async (directory: string) => {
     const metadata = await lstat(directory);
@@ -117,6 +215,18 @@ export class FileDocumentStagingStore {
     if (!UUID.test(threadId) || !UUID.test(uploadId)) {
       throw new StorageError("STORAGE_STAGING_ID_INVALID", "Thread and upload ids must be UUIDs.");
     }
+    if (
+      fileName.length < 1
+      || fileName.length > 120
+      || fileName === "."
+      || fileName === ".."
+      || fileName !== path.basename(fileName)
+      || fileName.includes("/")
+      || fileName.includes("\\")
+      || /[\u0000-\u001f\u007f]/u.test(fileName)
+    ) {
+      throw new StorageError("STORAGE_STAGING_FILENAME_INVALID", "Staging filename is unsafe.");
+    }
     const relativeDirectory = path.posix.join("threads", threadId, "uploads", uploadId);
     return {
       relativeDirectory,
@@ -144,6 +254,11 @@ export class FileDocumentStagingStore {
         if (existing.sha256 !== input.validated.sha256 || existing.fileName !== input.validated.fileName) {
           throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Upload id already identifies different content.");
         }
+        await assertExistingContentMatches(
+          locations.contentPath,
+          input.validated,
+          "STORAGE_STAGING_CONTENT_CORRUPT",
+        );
         return existing;
       } catch (error) {
         if (!isNodeError(error, "ENOENT")) throw error;
@@ -153,6 +268,61 @@ export class FileDocumentStagingStore {
         "threads", input.threadId, "uploads", input.uploadId,
       ]);
       await atomicWriteFile(locations.contentPath, input.data, { mode: 0o600 });
+      const metadata: StagedDocument = {
+        schemaVersion: 1,
+        uploadId: input.uploadId,
+        threadId: input.threadId,
+        fileName: input.validated.fileName,
+        relativePath: locations.relativePath,
+        kind: input.validated.kind,
+        mediaType: input.validated.mediaType,
+        size: input.validated.size,
+        sha256: input.validated.sha256,
+        status: "staged",
+        createdAt: new Date(this.now()).toISOString(),
+      };
+      await atomicWriteJson(locations.metadataPath, metadata, stagedDocumentSchema);
+      return metadata;
+    });
+  }
+
+  async stageFile(input: {
+    threadId: string;
+    uploadId: string;
+    validated: ValidatedUpload;
+    sourcePath: string;
+  }) {
+    const locations = this.paths(input.threadId, input.uploadId, input.validated.fileName);
+    return this.lockManager.withLock(`document-upload:${locations.metadataPath}`, async () => {
+      try {
+        const existing = await readStagedMetadata(locations.metadataPath);
+        if (existing.sha256 !== input.validated.sha256 || existing.fileName !== input.validated.fileName) {
+          throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Upload id already identifies different content.");
+        }
+        await assertExistingContentMatches(
+          locations.contentPath,
+          input.validated,
+          "STORAGE_STAGING_CONTENT_CORRUPT",
+        );
+        return existing;
+      } catch (error) {
+        if (!isNodeError(error, "ENOENT")) throw error;
+      }
+
+      await ensurePrivateDirectoryTree(this.rootDirectory, [
+        "threads", input.threadId, "uploads", input.uploadId,
+      ]);
+      const orphanEntries = await readdir(locations.directory);
+      if (orphanEntries.length === 0) {
+        await atomicCopyValidatedFile(input.sourcePath, locations.contentPath, input.validated);
+      } else if (orphanEntries.length === 1 && orphanEntries[0] === input.validated.fileName) {
+        await assertExistingContentMatches(locations.contentPath, input.validated);
+      } else {
+        throw new StorageError(
+          "STORAGE_STAGING_ORPHAN_CONFLICT",
+          "Upload directory contains ambiguous orphaned content and cannot be recovered automatically.",
+        );
+      }
       const metadata: StagedDocument = {
         schemaVersion: 1,
         uploadId: input.uploadId,

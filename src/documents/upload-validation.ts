@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import path from "node:path";
+import { createInflateRaw } from "node:zlib";
 
 export type SupportedUploadKind = "docx" | "xlsx" | "pptx" | "pdf" | "text" | "image";
 
@@ -13,8 +16,8 @@ export type ValidatedUpload = {
 };
 
 export class UploadValidationError extends Error {
-  constructor(readonly code: string, message: string) {
-    super(message);
+  constructor(readonly code: string, message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "UploadValidationError";
   }
 }
@@ -159,6 +162,228 @@ function inspectOfficeArchive(data: Buffer): OfficeInspection {
   throw new UploadValidationError("UPLOAD_OFFICE_INVALID", "OOXML archive is not DOCX, XLSX or PPTX.");
 }
 
+async function readExactly(
+  handle: Awaited<ReturnType<typeof open>>,
+  position: number,
+  length: number,
+) {
+  const data = Buffer.alloc(length);
+  let offset = 0;
+  while (offset < length) {
+    const result = await handle.read(data, offset, length - offset, position + offset);
+    if (result.bytesRead === 0) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML central directory is truncated.");
+    }
+    offset += result.bytesRead;
+  }
+  return data;
+}
+
+const CRC32_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
+  let crc = value;
+  for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) !== 0 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  return crc >>> 0;
+});
+
+function updateCrc32(crc: number, data: Buffer) {
+  let next = crc;
+  for (const byte of data) next = CRC32_TABLE[(next ^ byte) & 0xff]! ^ (next >>> 8);
+  return next >>> 0;
+}
+
+type FileZipEntry = {
+  method: number;
+  crc32: number;
+  compressed: number;
+  uncompressed: number;
+  localOffset: number;
+  dataStart: number;
+  dataEnd: number;
+};
+
+async function verifyZipEntryPayload(
+  handle: Awaited<ReturnType<typeof open>>,
+  entry: FileZipEntry,
+  totalOutput: { value: number },
+) {
+  if (entry.compressed === 0) {
+    if (entry.uncompressed !== 0 || entry.crc32 !== 0) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML empty entry has inconsistent metadata.");
+    }
+    return;
+  }
+  const compressed = handle.createReadStream({
+    start: entry.dataStart,
+    end: entry.dataEnd - 1,
+    autoClose: false,
+    highWaterMark: 64 * 1024,
+  });
+  const output = entry.method === 8 ? compressed.pipe(createInflateRaw()) : compressed;
+  if (output !== compressed) compressed.on("error", (error) => output.destroy(error));
+  let actualBytes = 0;
+  let crc = 0xffffffff;
+  try {
+    for await (const chunk of output) {
+      const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      actualBytes += data.length;
+      totalOutput.value += data.length;
+      if (
+        actualBytes > MAX_ZIP_UNCOMPRESSED_BYTES
+        || totalOutput.value > MAX_ZIP_UNCOMPRESSED_BYTES
+        || actualBytes > entry.compressed * MAX_ZIP_RATIO
+      ) {
+        throw new UploadValidationError("UPLOAD_ARCHIVE_BOMB", "OOXML actual expansion exceeds the safety limit.");
+      }
+      crc = updateCrc32(crc, data);
+    }
+  } catch (error) {
+    compressed.destroy();
+    output.destroy();
+    if (error instanceof UploadValidationError) throw error;
+    throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML entry data is truncated or corrupt.", { cause: error });
+  }
+  if (actualBytes !== entry.uncompressed || ((crc ^ 0xffffffff) >>> 0) !== entry.crc32) {
+    throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML entry size or CRC does not match its payload.");
+  }
+}
+
+async function inspectOfficeArchiveFile(
+  handle: Awaited<ReturnType<typeof open>>,
+  size: number,
+): Promise<OfficeInspection> {
+  const tailBytes = Math.min(size, 65_557);
+  const tailStart = size - tailBytes;
+  const tail = await readExactly(handle, tailStart, tailBytes);
+  const relativeEnd = findEndOfCentralDirectory(tail);
+  const end = tailStart + relativeEnd;
+  const disk = tail.readUInt16LE(relativeEnd + 4);
+  const centralDisk = tail.readUInt16LE(relativeEnd + 6);
+  const entriesOnDisk = tail.readUInt16LE(relativeEnd + 8);
+  const entries = tail.readUInt16LE(relativeEnd + 10);
+  const centralBytes = tail.readUInt32LE(relativeEnd + 12);
+  const centralOffset = tail.readUInt32LE(relativeEnd + 16);
+  const commentBytes = tail.readUInt16LE(relativeEnd + 20);
+  if (
+    disk !== 0
+    || centralDisk !== 0
+    || entriesOnDisk !== entries
+    || entries > MAX_ZIP_ENTRIES
+    || end + 22 + commentBytes !== size
+    || centralOffset + centralBytes !== end
+    || centralOffset > size
+  ) {
+    throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML central directory is unsupported or inconsistent.");
+  }
+
+  let offset = centralOffset;
+  let declaredCompressed = 0;
+  let declaredUncompressed = 0;
+  const names = new Set<string>();
+  const officeKinds = new Set<OfficeInspection["kind"]>();
+  const fileEntries: FileZipEntry[] = [];
+  for (let index = 0; index < entries; index += 1) {
+    if (offset + 46 > end) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML central directory entry is truncated.");
+    }
+    const header = await readExactly(handle, offset, 46);
+    if (header.readUInt32LE(0) !== 0x02014b50) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML central directory entry is truncated.");
+    }
+    const flags = header.readUInt16LE(8);
+    const method = header.readUInt16LE(10);
+    const crc32 = header.readUInt32LE(16);
+    const compressed = header.readUInt32LE(20);
+    const uncompressed = header.readUInt32LE(24);
+    const nameBytes = header.readUInt16LE(28);
+    const extraBytes = header.readUInt16LE(30);
+    const entryCommentBytes = header.readUInt16LE(32);
+    const localOffset = header.readUInt32LE(42);
+    const next = offset + 46 + nameBytes + extraBytes + entryCommentBytes;
+    if (
+      next > end
+      || compressed === 0xffffffff
+      || uncompressed === 0xffffffff
+      || localOffset === 0xffffffff
+      || (flags & 0x0009) !== 0
+      || (flags & ~0x0806) !== 0
+      || (method === 0 && (flags & 0x0006) !== 0)
+      || (method !== 0 && method !== 8)
+    ) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML entry uses unsupported flags, descriptors, Zip64 or codec.");
+    }
+    const nameData = await readExactly(handle, offset + 46, nameBytes);
+    const name = decodeZipName(nameData);
+    validateZipEntryName(name);
+    if (names.has(name)) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML archive contains duplicate paths.");
+    }
+    names.add(name);
+    const lower = name.toLowerCase();
+    if (
+      lower.endsWith("vbaproject.bin")
+      || lower.includes("/activex/")
+      || lower.startsWith("customui/")
+      || lower.includes("/macrosheets/")
+    ) {
+      throw new UploadValidationError("UPLOAD_MACROS_REJECTED", "Macro-enabled or active OOXML content is not accepted.");
+    }
+    if (name.startsWith("word/")) officeKinds.add("docx");
+    else if (name.startsWith("xl/")) officeKinds.add("xlsx");
+    else if (name.startsWith("ppt/")) officeKinds.add("pptx");
+
+    if (localOffset + 30 > centralOffset) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML local header points outside file data.");
+    }
+    const local = await readExactly(handle, localOffset, 30);
+    const localNameBytes = local.readUInt16LE(26);
+    const localExtraBytes = local.readUInt16LE(28);
+    const dataStart = localOffset + 30 + localNameBytes + localExtraBytes;
+    const dataEnd = dataStart + compressed;
+    if (
+      local.readUInt32LE(0) !== 0x04034b50
+      || local.readUInt16LE(6) !== flags
+      || local.readUInt16LE(8) !== method
+      || local.readUInt32LE(14) !== crc32
+      || local.readUInt32LE(18) !== compressed
+      || local.readUInt32LE(22) !== uncompressed
+      || localNameBytes !== nameBytes
+      || dataStart > centralOffset
+      || dataEnd > centralOffset
+      || !(await readExactly(handle, localOffset + 30, localNameBytes)).equals(nameData)
+    ) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML local and central headers are inconsistent.");
+    }
+    fileEntries.push({ method, crc32, compressed, uncompressed, localOffset, dataStart, dataEnd });
+    declaredCompressed += compressed;
+    declaredUncompressed += uncompressed;
+    if (declaredUncompressed > MAX_ZIP_UNCOMPRESSED_BYTES) {
+      throw new UploadValidationError("UPLOAD_ARCHIVE_BOMB", "OOXML declared expansion exceeds the safety limit.");
+    }
+    offset = next;
+  }
+  if (
+    offset !== end
+    || declaredUncompressed / Math.max(1, declaredCompressed) > MAX_ZIP_RATIO
+  ) {
+    throw new UploadValidationError("UPLOAD_ARCHIVE_BOMB", "OOXML declared compression ratio exceeds the safety limit.");
+  }
+  const ranges = [...fileEntries].sort((left, right) => left.localOffset - right.localOffset);
+  for (let index = 1; index < ranges.length; index += 1) {
+    if (ranges[index]!.localOffset < ranges[index - 1]!.dataEnd) {
+      throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML local entries overlap.");
+    }
+  }
+  const totalOutput = { value: 0 };
+  for (const entry of fileEntries) await verifyZipEntryPayload(handle, entry, totalOutput);
+  if (totalOutput.value !== declaredUncompressed) {
+    throw new UploadValidationError("UPLOAD_ZIP_INVALID", "OOXML actual total size is inconsistent.");
+  }
+  if (!names.has("[Content_Types].xml") || officeKinds.size !== 1) {
+    throw new UploadValidationError("UPLOAD_OFFICE_INVALID", "OOXML archive is missing or mixes required package parts.");
+  }
+  return { kind: [...officeKinds][0]!, entries };
+}
+
 function detectedImageType(data: Buffer) {
   if (startsWith(data, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "image/png";
   if (startsWith(data, [0xff, 0xd8, 0xff])) return "image/jpeg";
@@ -252,4 +477,123 @@ export function validateUploadedDocument(input: {
     sha256: createHash("sha256").update(data).digest("hex"),
     officeEntries,
   };
+}
+
+/** Validates a private regular file with bounded reads and streaming hashing. */
+export async function validateUploadedDocumentFile(input: {
+  fileName: string;
+  declaredMimeType: string;
+  filePath: string;
+}): Promise<ValidatedUpload> {
+  const fileName = safeFileName(input.fileName);
+  const declaredMimeType = input.declaredMimeType.trim().toLowerCase();
+  const pathMetadata = await lstat(input.filePath);
+  if (
+    pathMetadata.isSymbolicLink()
+    || !pathMetadata.isFile()
+    || pathMetadata.nlink !== 1
+    || (pathMetadata.mode & 0o077) !== 0
+  ) {
+    throw new UploadValidationError("UPLOAD_SOURCE_UNSAFE", "Upload source must be a private regular file.");
+  }
+  const handle = await open(input.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (
+      !before.isFile()
+      || before.nlink !== 1
+      || (before.mode & 0o077) !== 0
+      || before.dev !== pathMetadata.dev
+      || before.ino !== pathMetadata.ino
+    ) {
+      throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Upload changed before validation.");
+    }
+    if (before.size < 1 || before.size > MAX_FILE_BYTES) {
+      throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Upload size is outside the safety limit.");
+    }
+    const head = await readExactly(handle, 0, Math.min(16, before.size));
+
+    let kind: SupportedUploadKind;
+    let mediaType: string;
+    let officeEntries: number | null = null;
+    if (head.subarray(0, 5).toString("ascii") === "%PDF-") {
+      kind = "pdf";
+      mediaType = "application/pdf";
+    } else if (startsWith(head, [0x50, 0x4b])) {
+      const office = await inspectOfficeArchiveFile(handle, before.size);
+      kind = office.kind;
+      officeEntries = office.entries;
+      mediaType = {
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      }[kind];
+    } else {
+      const imageType = detectedImageType(head);
+      if (imageType) {
+        kind = "image";
+        mediaType = imageType;
+        if (before.size > MAX_IMAGE_BYTES) {
+          throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Image exceeds the safety limit.");
+        }
+      } else {
+        if (before.size > MAX_TEXT_BYTES) {
+          throw new UploadValidationError("UPLOAD_TYPE_UNSUPPORTED", "Upload is not a supported text or document format.");
+        }
+        kind = "text";
+        mediaType = declaredMimeType === "application/json" ? "application/json" : "text/plain";
+      }
+    }
+    assertMimeAndExtension(fileName, declaredMimeType, kind, mediaType);
+
+    const hash = createHash("sha256");
+    const decoder = kind === "text" ? new TextDecoder("utf-8", { fatal: true }) : null;
+    let streamedBytes = 0;
+    try {
+      const source = handle.createReadStream({ start: 0, autoClose: false, highWaterMark: 64 * 1024 });
+      for await (const chunk of source) {
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        streamedBytes += data.length;
+        if (streamedBytes > MAX_FILE_BYTES) {
+          throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Upload grew beyond the safety limit.");
+        }
+        hash.update(data);
+        if (decoder) {
+          if (data.includes(0)) {
+            throw new UploadValidationError("UPLOAD_TYPE_UNSUPPORTED", "Text upload contains NUL bytes.");
+          }
+          decoder.decode(data, { stream: true });
+        }
+      }
+      decoder?.decode();
+    } catch (error) {
+      if (error instanceof UploadValidationError) throw error;
+      if (error instanceof TypeError && decoder) {
+        throw new UploadValidationError("UPLOAD_TYPE_UNSUPPORTED", "Text upload must be valid UTF-8.", { cause: error });
+      }
+      throw error;
+    }
+    const after = await handle.stat();
+    if (
+      !after.isFile()
+      || after.nlink !== 1
+      || (after.mode & 0o077) !== 0
+      || after.dev !== before.dev
+      || after.ino !== before.ino
+      || after.size !== before.size
+      || streamedBytes !== before.size
+    ) {
+      throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Upload changed during validation.");
+    }
+    return {
+      kind,
+      fileName,
+      mediaType,
+      size: streamedBytes,
+      sha256: hash.digest("hex"),
+      officeEntries,
+    };
+  } finally {
+    await handle.close();
+  }
 }
