@@ -15,6 +15,11 @@ import {
   parsePublicationDecisionReceipt,
   parsePublicationFreezeReceipt,
 } from "@/ui/publication-ui-adapter";
+import {
+  createExplicitMemory,
+  listExplicitMemories,
+  revokeExplicitMemory,
+} from "@/ui/memory-ui-adapter";
 
 const threadId = "0198b9f0-6631-7000-8000-000000000302";
 const uploadId = "0198b9f0-6631-7000-8000-000000000511";
@@ -93,6 +98,29 @@ const publicationOperation = {
   result: null,
   createdAt: "2026-08-27T10:00:00.000Z",
   updatedAt: "2026-08-27T10:00:00.000Z",
+};
+
+const memory = {
+  schemaVersion: 1,
+  memoryId: "0198b9f0-6631-7000-8000-000000000724",
+  installationId: "example-lab-playwright",
+  subjectUserId: "0198b9f0-6631-7000-8000-000000000600",
+  kind: "decision",
+  content: "Use the approved handoff.",
+  provenance: {
+    sourceType: "manual",
+    sourceId: "0198b9f0-6631-7000-8000-000000000725",
+    sourceExcerpt: "Use the approved handoff.",
+    capturedAt: "2026-08-27T10:00:00.000Z",
+  },
+  explicit: true,
+  createdBy: "0198b9f0-6631-7000-8000-000000000600",
+  createdAt: "2026-08-27T10:00:00.000Z",
+  status: "active",
+  revokedAt: null,
+  revokedBy: null,
+  revokeReason: null,
+  idempotencyKey: "manual:0198b9f0-6631-7000-8000-000000000725",
 };
 
 afterEach(() => vi.unstubAllGlobals());
@@ -191,5 +219,31 @@ describe("publication UI adapter", () => {
       confirmationToken: "v1.synthetic-confirmation-token",
       permissionFingerprint: "b".repeat(64),
     })).toBeNull();
+  });
+});
+
+describe("memory UI adapter", () => {
+  it("uses only the explicit-memory routes and client generated request ids", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("/revoke")) return Response.json({ memory: { ...memory, status: "revoked" } });
+      if (init?.method === "POST") return Response.json({ memory }, { status: 201 });
+      return Response.json({ memories: [memory] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(listExplicitMemories()).resolves.toEqual([memory]);
+    await expect(createExplicitMemory({ kind: "decision", content: memory.content })).resolves.toEqual(memory);
+    await expect(revokeExplicitMemory(memory.memoryId, "Replaced by a newer decision.")).resolves.toMatchObject({ status: "revoked" });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/memory?status=all&limit=100");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/memory");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(`/api/memory/${memory.memoryId}/revoke`);
+    const createBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(createBody).toMatchObject({ explicit: true, kind: "decision", content: memory.content });
+    expect(createBody.clientRequestId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("fails closed when a memory response is malformed", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ memories: [{ memoryId: memory.memoryId }] })));
+    await expect(listExplicitMemories()).rejects.toThrow("respuesta de memoria no es válida");
   });
 });

@@ -1,0 +1,138 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { BookOpenText, Check, ClockCounterClockwise, Plus, Trash, X } from "@phosphor-icons/react";
+import type { MemoryKind, MemoryRecord } from "@/memory/types";
+import {
+  createExplicitMemory,
+  listExplicitMemories,
+  revokeExplicitMemory,
+} from "@/ui/memory-ui-adapter";
+import { useModalFocus } from "@/ui/use-modal-focus";
+
+function memoryDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "" : new Intl.DateTimeFormat("es", { dateStyle: "medium" }).format(date);
+}
+
+function kindLabel(kind: MemoryKind) {
+  return kind === "decision" ? "Decisión" : "Recordatorio";
+}
+
+export function MemoryPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const panelRef = useModalFocus(open, onClose);
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [kind, setKind] = useState<MemoryKind>("recollection");
+  const [revokeTarget, setRevokeTarget] = useState<MemoryRecord | null>(null);
+  const [revokeReason, setRevokeReason] = useState("");
+
+  const activeMemories = useMemo(() => memories.filter((memory) => memory.status === "active"), [memories]);
+  const revokedMemories = useMemo(() => memories.filter((memory) => memory.status === "revoked"), [memories]);
+
+  const refresh = async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+    try {
+      setMemories(await listExplicitMemories(signal));
+    } catch (cause) {
+      if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "No se ha podido cargar la memoria.");
+    } finally {
+      if (!signal?.aborted) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    const frame = requestAnimationFrame(() => void refresh(controller.signal));
+    return () => {
+      cancelAnimationFrame(frame);
+      controller.abort();
+    };
+  }, [open]);
+
+  const save = async () => {
+    if (!content.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const memory = await createExplicitMemory({ kind, content });
+      setMemories((current) => [memory, ...current.filter((item) => item.memoryId !== memory.memoryId)]);
+      setContent("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se ha podido guardar la memoria.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const revoke = async () => {
+    if (!revokeTarget || !revokeReason.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const memory = await revokeExplicitMemory(revokeTarget.memoryId, revokeReason);
+      setMemories((current) => current.map((item) => item.memoryId === memory.memoryId ? memory : item));
+      setRevokeTarget(null);
+      setRevokeReason("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se ha podido revocar la memoria.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-[var(--overlay)] backdrop-blur-[2px]">
+      <button className="absolute inset-0" aria-label="Cerrar memoria" onClick={onClose} />
+      <aside ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="memory-title" className="panel-enter relative flex h-full w-full max-w-[460px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5">
+          <div className="flex items-center gap-2"><BookOpenText size={16} /><h2 id="memory-title" className="text-[13px] font-semibold text-[var(--text)]">Memoria</h2></div>
+          <button type="button" aria-label="Cerrar memoria" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={16} /></button>
+        </header>
+
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6">
+          <p className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-[12px] leading-5 text-[var(--text-muted)]">
+            Guarda decisiones o datos que quieras que el asistente tenga presentes. Puedes revocarlos en cualquier momento.
+          </p>
+
+          <section className="mt-6">
+            <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Añadir memoria</h3>
+            <div className="mt-3 rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3">
+              <div className="flex gap-2" role="group" aria-label="Tipo de memoria">
+                {(["recollection", "decision"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`min-h-9 rounded-lg px-3 text-[11px] font-medium ${kind === option ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-muted)]"}`}>{kindLabel(option)}</button>)}
+              </div>
+              <label className="sr-only" htmlFor="memory-content">Memoria a guardar</label>
+              <textarea id="memory-content" value={content} maxLength={32_000} rows={4} placeholder="Por ejemplo: el horario de atención se confirma siempre antes de publicar." onChange={(event) => setContent(event.target.value)} className="mt-3 w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" />
+              <div className="mt-3 flex items-center justify-between gap-3"><span className="text-[10px] text-[var(--text-subtle)]">Solo se guarda cuando lo confirmas.</span><button type="button" disabled={saving || !content.trim()} onClick={() => void save()} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--brain-accent)] px-3 text-[11px] font-semibold text-[var(--brain-contrast)] disabled:opacity-40"><Plus size={13} />{saving ? "Guardando…" : "Guardar"}</button></div>
+            </div>
+          </section>
+
+          {error ? <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
+
+          <section className="mt-7">
+            <div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Activas</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{activeMemories.length}</span></div>
+            {loading ? <p className="mt-3 text-[11px] text-[var(--text-muted)]">Cargando memoria…</p> : activeMemories.length ? <div className="mt-3 space-y-2">{activeMemories.map((memory) => <MemoryCard key={memory.memoryId} memory={memory} onRevoke={() => { setRevokeTarget(memory); setRevokeReason(""); }} />)}</div> : <EmptyState />}
+          </section>
+
+          {revokedMemories.length ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Revocadas</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{revokedMemories.length}</span></div><div className="mt-3 space-y-2 opacity-70">{revokedMemories.map((memory) => <MemoryCard key={memory.memoryId} memory={memory} />)}</div></section> : null}
+        </div>
+
+        {revokeTarget ? <footer className="border-t border-[var(--border-subtle)] bg-[var(--surface)] p-4"><p className="text-[12px] font-semibold text-[var(--text)]">¿Revocar esta memoria?</p><label className="sr-only" htmlFor="revoke-reason">Motivo de la revocación</label><input id="revoke-reason" value={revokeReason} maxLength={2_000} placeholder="Motivo de la revocación" onChange={(event) => setRevokeReason(event.target.value)} className="mt-2 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" /><div className="mt-3 flex justify-end gap-2"><button type="button" onClick={() => setRevokeTarget(null)} className="min-h-9 rounded-lg px-3 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Cancelar</button><button type="button" disabled={saving || !revokeReason.trim()} onClick={() => void revoke()} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--danger)] px-3 text-[11px] font-semibold text-white disabled:opacity-40"><Trash size={13} />{saving ? "Revocando…" : "Revocar"}</button></div></footer> : null}
+      </aside>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return <div className="mt-3 rounded-[var(--brain-radius)] border border-dashed border-[var(--border)] px-4 py-5 text-center"><Check size={17} className="mx-auto text-[var(--positive)]" /><p className="mt-2 text-[11px] font-medium text-[var(--text)]">Aún no hay memorias guardadas</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">Añade solo información que sea útil en futuras conversaciones.</p></div>;
+}
+
+function MemoryCard({ memory, onRevoke }: { memory: MemoryRecord; onRevoke?: () => void }) {
+  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3"><div className="flex items-start gap-2"><span className="mt-0.5 rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold text-[var(--text-secondary)]">{kindLabel(memory.kind)}</span><p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text)]">{memory.content}</p>{onRevoke ? <button type="button" aria-label="Revocar memoria" onClick={onRevoke} className="rounded-md p-1 text-[var(--text-subtle)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash size={14} /></button> : null}</div><p className="mt-2 flex items-center gap-1 text-[10px] text-[var(--text-subtle)]"><ClockCounterClockwise size={11} />{memory.status === "revoked" ? "Revocada" : "Guardada"} {memoryDate(memory.status === "revoked" ? memory.revokedAt ?? memory.createdAt : memory.createdAt)}</p></article>;
+}
