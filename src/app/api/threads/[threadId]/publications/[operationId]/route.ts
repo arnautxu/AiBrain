@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { loadInstallationConfig } from "@/config/installation";
@@ -21,7 +22,7 @@ function mayPublish(rules: readonly { ruleId: string; action: string; effect: st
 
 function publicationDecisionError(error: unknown) {
   const code = error instanceof StorageError ? error.code : "PUBLICATION_UNAVAILABLE";
-  console.error("AiBrain publication decision rejected", { code });
+  operationalLogger.warn("publication.decision_rejected", { code });
   if (code === "PUBLICATION_NOT_FOUND") {
     return NextResponse.json({ error: "Publicació no trobada." }, { status: 404 });
   }

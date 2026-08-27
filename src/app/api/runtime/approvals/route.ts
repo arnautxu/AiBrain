@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { isApprovalResolutionRequest } from "@/lib/chat-contract";
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
     const code = error && typeof error === "object" && "code" in error
       ? String(error.code)
       : "APPROVAL_STORE_UNAVAILABLE";
-    console.error("AiBrain approval decision failed", { code });
+    operationalLogger.warn("approval.decision_failed", { code });
     return NextResponse.json(
       { error: "No s’ha pogut registrar la decisió de forma segura." },
       { status: code === "APPROVAL_DECISION_CONFLICT" ? 409 : 503 },

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { loadInstallationConfig } from "@/config/installation";
@@ -18,7 +19,7 @@ function documentErrorResponse(error: unknown) {
   const code = error instanceof UploadValidationError || error instanceof StorageError
     ? error.code
     : "DOCUMENT_UPLOAD_FAILED";
-  console.error("AiBrain document upload rejected", { code });
+  operationalLogger.warn("document.upload_rejected", { code });
   if (code === "UPLOAD_SIZE_INVALID") {
     return NextResponse.json({ error: "El document supera el límit de seguretat." }, { status: 413 });
   }

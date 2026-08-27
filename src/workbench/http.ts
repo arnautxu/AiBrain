@@ -7,6 +7,7 @@ import {
   WorkbenchPersistenceError,
   WorkbenchValidationError,
 } from "@/workbench/errors";
+import { operationalLogger } from "@/operations/server-logger";
 
 export function workbenchErrorResponse(error: unknown, fallback: string) {
   if (error instanceof WorkbenchNotFoundError) {
@@ -21,6 +22,6 @@ export function workbenchErrorResponse(error: unknown, fallback: string) {
   if (error instanceof WorkbenchPersistenceError) {
     return NextResponse.json({ error: error.message }, { status: 503 });
   }
-  console.error(fallback, error);
+  operationalLogger.error("workbench.request_failed", { error, fallback });
   return NextResponse.json({ error: fallback }, { status: 503 });
 }

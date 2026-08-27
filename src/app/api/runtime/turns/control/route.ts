@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { loadInstallationConfig } from "@/config/installation";
@@ -90,7 +91,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, action: body.action, idempotent: false });
   } catch (error) {
     if (error instanceof TurnControlError) {
-      console.error("AiBrain turn control rejected", { code: error.code });
+      operationalLogger.warn("turn.control_rejected", { code: error.code });
       return NextResponse.json(
         { error: "Codex no ha pogut aplicar aquest control al torn actiu." },
         { status: error.code === "TURN_CONTROL_RESPONSE_INVALID" ? 502 : 409 },

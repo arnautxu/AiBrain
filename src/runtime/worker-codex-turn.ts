@@ -57,6 +57,7 @@ import {
   turnDocumentCodexInputs,
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
+import { operationalLogger } from "@/operations/server-logger";
 
 export type WorkerTurnProjection = {
   envelope: AppServerEvent;
@@ -608,7 +609,7 @@ export async function runWorkerCodexTurn(
       detail: `${firstTextMs === null ? "Sense text incremental" : `Primer text ${firstTextMs} ms`} · Total ${totalMs} ms · Worker calent`,
       status: "complete",
     });
-    console.info("AiBrain Codex turn metrics", {
+    operationalLogger.info("codex.turn_metrics", {
       installationId,
       userId: authenticatedUserId,
       projectId: chatRequest.projectId,
