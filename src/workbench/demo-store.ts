@@ -225,6 +225,13 @@ export async function loadDemoWorkbench(
   return snapshot(await readState(session), persistence);
 }
 
+export async function getDemoThread(session: AuthSession, threadId: string): Promise<WorkbenchThread> {
+  assertWorkbenchId(threadId);
+  const thread = (await readState(session)).threads.find((candidate) => candidate.id === threadId);
+  if (!thread) throw new WorkbenchNotFoundError("Fil no trobat.");
+  return publicThread(thread);
+}
+
 export async function createDemoProject(session: AuthSession, name: string): Promise<WorkbenchProject> {
   return mutateState(session, (state) => {
     const slug = uniqueSlug(name, new Set(state.projects.map((project) => project.slug)));

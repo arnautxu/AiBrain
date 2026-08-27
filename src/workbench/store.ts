@@ -9,6 +9,7 @@ import {
   createDemoProject,
   createDemoThread,
   finishDemoThreadTurn,
+  getDemoThread,
   getDemoProjectRuntimeContext,
   getDemoThreadRuntimeContext,
   loadDemoWorkbench,
@@ -78,8 +79,12 @@ export async function listThreads(
 }
 
 export async function getThread(session: AuthSession, threadId: string) {
-  assertFilesystemWorkbenchId(threadId);
-  return (await filesystemStore(session)).getThread(session.user.id, threadId);
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).getThread(session.user.id, threadId);
+  }
+  assertWorkbenchId(threadId);
+  return getDemoThread(session, threadId);
 }
 
 export async function createProject(session: AuthSession, name: string) {

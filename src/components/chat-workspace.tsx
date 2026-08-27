@@ -528,23 +528,24 @@ export function ChatWorkspace({
         ) : hasMessages ? (
           <div className="mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
-              {thread?.messages.map((message) => message.role === "user" ? (
-                <UserMessage key={message.id} message={message} />
-              ) : (
-                <AssistantMessage
-                  key={message.id}
-                  message={message}
-                  showActivity={preferences.showActivityPanel}
-                  onInspect={() => onInspectMessage(message.id)}
-                  onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
-                  canInspect={canInspect}
-                  showInlineDiff={activeSideWindow !== "inspector"}
-                  onCreateVersion={() => onCreateVersion(message)}
-                  onResultAction={onResultAction}
-                  publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
-                  onFreezePublication={onFreezePublication}
-                  onDecidePublication={onDecidePublication}
-                />
+              {thread?.messages.map((message) => (
+                <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
+                  {message.role === "user" ? <UserMessage message={message} /> : (
+                    <AssistantMessage
+                      message={message}
+                      showActivity={preferences.showActivityPanel}
+                      onInspect={() => onInspectMessage(message.id)}
+                      onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
+                      canInspect={canInspect}
+                      showInlineDiff={activeSideWindow !== "inspector"}
+                      onCreateVersion={() => onCreateVersion(message)}
+                      onResultAction={onResultAction}
+                      publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
+                      onFreezePublication={onFreezePublication}
+                      onDecidePublication={onDecidePublication}
+                    />
+                  )}
+                </div>
               ))}
             </div>
             <div ref={bottomRef} className="h-8" />
