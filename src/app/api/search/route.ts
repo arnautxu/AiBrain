@@ -4,6 +4,7 @@ import { buildGlobalSearchResults } from "@/library/contracts";
 import { memoryServiceForSession } from "@/memory/server-service";
 import type { MemoryRecord } from "@/memory/types";
 import { loadWorkbench } from "@/workbench/store";
+import { advancedArtifactStoreForSession } from "@/artifacts/server-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,8 +31,30 @@ export async function GET(request: Request) {
         // Search remains useful when the optional memory index is temporarily unavailable.
       }
     }
+    const results = buildGlobalSearchResults(snapshot, query, memories);
+    try {
+      const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es");
+      const store = await advancedArtifactStoreForSession(session);
+      for (const artifact of await store.list(session.user.id)) {
+        const searchable = `${artifact.title} ${artifact.kind}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es");
+        if (!searchable.includes(normalizedQuery)) continue;
+        results.unshift({
+          id: `advanced:${artifact.id}`,
+          type: "artifact",
+          title: artifact.title,
+          snippet: artifact.kind === "visualization" ? "Visualización segura" : "Sitio interno versionado",
+          createdAt: artifact.updatedAt,
+          projectId: artifact.projectId,
+          threadId: artifact.threadId,
+          messageId: artifact.messageId,
+          libraryItemId: `advanced:${artifact.id}`,
+        });
+      }
+    } catch {
+      // Search remains useful if the optional artifact index is unavailable.
+    }
     return NextResponse.json(
-      { results: buildGlobalSearchResults(snapshot, query, memories) },
+      { results: results.slice(0, 60) },
       { headers: { "Cache-Control": "private, no-store" } },
     );
   } catch {

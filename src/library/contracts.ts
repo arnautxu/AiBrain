@@ -1,8 +1,9 @@
 import type { GeneratedArtifact } from "@/lib/chat-contract";
+import type { AdvancedArtifactSummary } from "@/artifacts/contracts";
 import type { MemoryRecord } from "@/memory/types";
 import type { WorkbenchSnapshot } from "@/workbench/types";
 
-export type LibraryItemType = "upload" | "image" | "document" | "result" | "browser";
+export type LibraryItemType = "upload" | "image" | "document" | "result" | "browser" | "visualization" | "internal-site";
 
 export type LibraryItem = {
   id: string;
@@ -19,6 +20,10 @@ export type LibraryItem = {
   previewUrl: string | null;
   downloadUrl: string | null;
   status: "ready" | "processing" | "error";
+  artifactId?: string | null;
+  downloadZipUrl?: string | null;
+  internalSiteUrl?: string | null;
+  latestVersion?: number | null;
 };
 
 export type SearchResultType =
@@ -56,7 +61,7 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
   if (!record(value)) return false;
   return typeof value.id === "string" && value.id.length > 0 && value.id.length <= 240 &&
     (value.type === "upload" || value.type === "image" || value.type === "document" ||
-      value.type === "result" || value.type === "browser") &&
+      value.type === "result" || value.type === "browser" || value.type === "visualization" || value.type === "internal-site") &&
     typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 160 &&
     (value.mimeType === null || typeof value.mimeType === "string") &&
     (value.size === null || (Number.isSafeInteger(value.size) && (value.size as number) > 0)) &&
@@ -66,7 +71,37 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
     typeof value.messageId === "string" &&
     (value.previewUrl === null || (typeof value.previewUrl === "string" && value.previewUrl.startsWith("/api/"))) &&
     (value.downloadUrl === null || (typeof value.downloadUrl === "string" && value.downloadUrl.startsWith("/api/"))) &&
-    (value.status === "ready" || value.status === "processing" || value.status === "error");
+    (value.status === "ready" || value.status === "processing" || value.status === "error") &&
+    (!("artifactId" in value) || value.artifactId === null || (typeof value.artifactId === "string" && /^[0-9a-f-]{36}$/i.test(value.artifactId))) &&
+    (!("downloadZipUrl" in value) || value.downloadZipUrl === null || (typeof value.downloadZipUrl === "string" && value.downloadZipUrl.startsWith("/api/artifacts/"))) &&
+    (!("internalSiteUrl" in value) || value.internalSiteUrl === null || (typeof value.internalSiteUrl === "string" && value.internalSiteUrl.startsWith("/api/artifacts/"))) &&
+    (!("latestVersion" in value) || value.latestVersion === null || (Number.isSafeInteger(value.latestVersion) && (value.latestVersion as number) >= 1));
+}
+
+export function advancedArtifactLibraryItem(
+  artifact: AdvancedArtifactSummary,
+  context: { projectName: string; threadTitle: string },
+): LibraryItem {
+  return {
+    id: `advanced:${artifact.id}`,
+    type: artifact.kind,
+    name: artifact.title,
+    mimeType: "text/html",
+    size: null,
+    createdAt: artifact.createdAt,
+    projectId: artifact.projectId,
+    projectName: context.projectName,
+    threadId: artifact.threadId,
+    threadTitle: context.threadTitle,
+    messageId: artifact.messageId,
+    previewUrl: artifact.previewUrl,
+    downloadUrl: artifact.downloadHtmlUrl,
+    status: "ready",
+    artifactId: artifact.id,
+    downloadZipUrl: artifact.downloadZipUrl,
+    internalSiteUrl: artifact.internalSiteUrl,
+    latestVersion: artifact.latestVersion,
+  };
 }
 
 export function isGlobalSearchResult(value: unknown): value is GlobalSearchResult {

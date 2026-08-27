@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
-import { buildLibraryItems, type LibraryItemType } from "@/library/contracts";
+import { advancedArtifactLibraryItem, buildLibraryItems, type LibraryItemType } from "@/library/contracts";
+import { advancedArtifactStoreForSession } from "@/artifacts/server-service";
 import { loadWorkbench } from "@/workbench/store";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const types = new Set<LibraryItemType>(["upload", "image", "document", "result", "browser"]);
+const types = new Set<LibraryItemType>(["upload", "image", "document", "result", "browser", "visualization", "internal-site"]);
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("es");
@@ -26,7 +27,21 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Consulta no vàlida." }, { status: 400 });
   }
   try {
-    let items = buildLibraryItems(await loadWorkbench(session));
+    const snapshot = await loadWorkbench(session);
+    let items = buildLibraryItems(snapshot);
+    try {
+      const projectNames = new Map(snapshot.projects.map((project) => [project.id, project.name]));
+      const threadTitles = new Map(snapshot.threads.map((thread) => [thread.id, thread.title]));
+      const store = await advancedArtifactStoreForSession(session);
+      const advanced = (await store.list(session.user.id)).flatMap((artifact) => {
+        const projectName = projectNames.get(artifact.projectId);
+        const threadTitle = threadTitles.get(artifact.threadId);
+        return projectName && threadTitle ? [advancedArtifactLibraryItem(artifact, { projectName, threadTitle })] : [];
+      });
+      items = [...advanced, ...items].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    } catch {
+      // The core library remains available if the optional advanced-artifact index is unavailable.
+    }
     if (type) items = items.filter((item) => item.type === type);
     if (projectId) items = items.filter((item) => item.projectId === projectId);
     if (query) {
