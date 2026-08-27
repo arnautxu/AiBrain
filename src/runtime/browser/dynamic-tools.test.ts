@@ -211,7 +211,16 @@ describe("closed browser dynamic tools", () => {
     const execute = vi.fn(async () => ({ ok: true }));
     const emitted: ApprovalItem[] = [];
     const input = request("click", { selector: "button[type=submit]" });
-    const ctx = context(approvalStore, execute, emitted, { callStore });
+    const delivered = new Set<string>();
+    const ctx = context(approvalStore, execute, emitted, {
+      callStore,
+      emitApproval: async (item) => {
+        const key = `${item.id}:${item.status}`;
+        if (delivered.has(key)) return;
+        delivered.add(key);
+        emitted.push(item);
+      },
+    });
     const first = handleBrowserDynamicToolCall(input, ctx);
     await vi.waitFor(() => expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1));
     const second = handleBrowserDynamicToolCall(input, ctx);
@@ -226,6 +235,49 @@ describe("closed browser dynamic tools", () => {
     expect(responses.some((response) => response.success)).toBe(true);
     expect(execute).toHaveBeenCalledOnce();
     expect(emitted.filter((item) => item.status === "accepted")).toHaveLength(1);
+  });
+
+  it("re-emits durable pending and resolved approvals after delivery faults without executing early", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async () => ({ ok: true }));
+    const input = request("type", { selector: "input[name=password]", text: "never-log-this", clear: true });
+    let failPending = true;
+    await expect(handleBrowserDynamicToolCall(input, context(approvalStore, execute, [], {
+      callStore,
+      emitApproval: async (item) => {
+        if (item.status === "pending" && failPending) {
+          failPending = false;
+          throw new Error("synthetic stream interruption");
+        }
+      },
+    }))).rejects.toThrow("synthetic stream interruption");
+    expect(execute).not.toHaveBeenCalled();
+
+    const emitted: ApprovalItem[] = [];
+    let failResolved = true;
+    const replay = handleBrowserDynamicToolCall(input, context(approvalStore, execute, emitted, {
+      callStore,
+      emitApproval: async (item) => {
+        emitted.push(item);
+        if (item.status !== "pending" && failResolved) {
+          failResolved = false;
+          throw new Error("synthetic resolved stream interruption");
+        }
+      },
+    }));
+    await vi.waitFor(() => expect(emitted.some((item) => item.status === "pending")).toBe(true));
+    const approval = emitted.find((item) => item.status === "pending") as ApprovalItem;
+    expect(approval.detail).not.toContain("never-log-this");
+    await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, approval), "accept");
+    await expect(replay).rejects.toThrow("synthetic resolved stream interruption");
+    expect(execute).not.toHaveBeenCalled();
+
+    const finalEvents: ApprovalItem[] = [];
+    await expect(handleBrowserDynamicToolCall(input, context(approvalStore, execute, finalEvents, { callStore })))
+      .resolves.toMatchObject({ success: true });
+    expect(finalEvents).toEqual([expect.objectContaining({ status: "accepted" })]);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("rejects cross-thread calls, arbitrary tools and unknown argument fields before execution", async () => {
