@@ -9,8 +9,8 @@
 - Remoto: `origin` (`arnautxu/AiBrain`)
 - Último checkpoint backend publicado: `bded0b6` en
   `origin/codex/aibrain-backend-definitivo`.
-- Último checkpoint backend local: `326c5bd`; push retenido hasta cerrar el
-  siguiente gate verde de backup/recovery.
+- Último checkpoint backend local: `e765eb0`; push retenido hasta cerrar la
+  reaudit de artefactos efectivos de release.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
 
@@ -50,7 +50,7 @@
 | 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`, `eff6edc`, `42c7539`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, retención terminal de candidato, gates separados de data/publish y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`: alert-dispatcher externo y rollback V3 de imágenes+env+Compose+InstallationConfig cerrados; falta orquestación durable de backup y evidencia Docker/host QA real |
+| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`, `e765eb0`: alert-dispatcher externo, rollback V3 y backup durable con recovery systemd cerrados; quedan P1 de atestado efectivo/candidate env/config schema y evidencia Docker/host QA real |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`: CI protegida y reproducible, denegación física de tools, artefactos no cacheables y capacidad independiente de publicación cerrados; aún quedan gaps operativos locales del checkpoint 11 |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
@@ -85,6 +85,11 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
   paths alternativos del operador: restaura los tres inputs con metadata
   preservada, fuerza recreación, valida tres servicios y falla antes de Docker
   ante drift, symlink, hardlink, owner o modo inseguro.
+- El backup host usa un journal privado por fases y lock advisory del SO. Ante
+  fallo recupera app+admisión antes de salir; tras SIGKILL/reboot, la unidad
+  systemd verifica un snapshot ya creado, espera health y solo emite receipt
+  `verified` tras readback. Un intento sin snapshot probado queda `aborted`, no
+  se presenta como backup válido.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -189,9 +194,10 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Cerrar la orquestación durable de drain/stop/backup/verify/restart y restore;
-el P0 de restauración exacta de Compose/config quedó cerrado en `326c5bd`.
-Después repetir la matriz total.
+Cerrar los P1 encontrados en la reaudit de release: atestar el seccomp efectivo,
+aceptar un `compose.env` candidato no secreto, validar InstallationConfig contra
+instalación/paths y dar diagnóstico/procedimiento V2→V3. Después repetir la
+matriz total.
 
 ## Últimas validaciones
 
@@ -218,6 +224,11 @@ Después repetir la matriz total.
   comprometido y fallback; drift, secreto mal ubicado, symlink, hardlink y modo
   inseguro fallan cerrados. Typecheck, lint e infra estática verdes; Docker real
   sigue siendo gate QA externo.
+- Orquestación de backup `e765eb0`: 7/7 integraciones verdes entre CLI y
+  controlador. Cubre drain/stop/create/verify/start/resume, fallo de create,
+  `SIGKILL` durante verify, recovery de snapshot y app, secreto runtime privado
+  y receipts `verified/aborted`; typecheck, lint e infra estática verdes. La
+  unidad systemd de boot queda pendiente de ejecución real en Hetzner QA.
 
 - `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
 - `npm run lint`: verde, sin warnings.
@@ -432,7 +443,7 @@ Después repetir la matriz total.
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
-| Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación, promoción dual y Restic off-host one-shot | 10 pruebas backup + CLI/proceso Restic sintético, incluidas corrupción, enlaces, publicación concurrente, restore, crash/replay y secretos; contenedor QA y proveedor externo pendientes |
+| Backup/restore/recovery | Manifest V2 compuesto, controlador durable drain/stop/create/verify/start/resume, recovery systemd y Restic off-host one-shot | Pruebas backup + 7 integraciones CLI/controlador, incluidos corrupción, enlaces, publicación concurrente, SIGKILL, receipt verified/aborted y recovery; contenedor QA y proveedor externo pendientes |
 | Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual atómica con journal | Alertas 13/13, release/preflight 19/19 y validator estático verde; ejecución Docker/reboot QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
