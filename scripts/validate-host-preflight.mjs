@@ -57,11 +57,20 @@ function assertRegularNoSymlink(target, description) {
   return realpathSync(target);
 }
 
-function assertPrivateFile(target, description) {
+function assertPrivateFile(target, description, expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined) {
   const canonical = assertRegularNoSymlink(target, description);
   const info = lstatSync(canonical);
-  if (info.nlink !== 1 || (info.mode & 0o077) !== 0) {
-    fail(`${description} must have one link and no group/world permissions: ${target}`);
+  if (info.nlink !== 1 || (expectedUid !== undefined && info.uid !== expectedUid) || (info.mode & 0o077) !== 0) {
+    fail(`${description} must be owner-controlled, have one link and no group/world permissions: ${target}`);
+  }
+  return canonical;
+}
+
+function assertControlledFile(target, description, expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined) {
+  const canonical = assertRegularNoSymlink(target, description);
+  const info = lstatSync(canonical);
+  if (info.nlink !== 1 || (expectedUid !== undefined && info.uid !== expectedUid) || (info.mode & 0o022) !== 0) {
+    fail(`${description} must be owner-controlled, exclusive and not group/world writable: ${target}`);
   }
   return canonical;
 }
@@ -72,6 +81,24 @@ function assertDirectoryNoSymlink(target, description) {
   return realpathSync(target);
 }
 
+function assertDirectoryPolicy(target, description, { uid, gid, forbiddenMode = 0, requiredMode = 0 }) {
+  const canonical = assertDirectoryNoSymlink(target, description);
+  const info = lstatSync(canonical);
+  if (info.uid !== uid || info.gid !== gid || (info.mode & forbiddenMode) !== 0
+    || (info.mode & requiredMode) !== requiredMode) {
+    fail(`${description} has unsafe ownership or permissions: ${target}`);
+  }
+  return canonical;
+}
+
+function numericId(env, key) {
+  const value = required(env, key);
+  if (!/^[0-9]+$/u.test(value)) fail(`${key} must be numeric`);
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 2_147_483_647) fail(`${key} is invalid`);
+  return parsed;
+}
+
 function isInside(parent, candidate) {
   const relative = path.relative(parent, candidate);
   return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
@@ -79,7 +106,7 @@ function isInside(parent, candidate) {
 
 function assertOwner(root, installationId) {
   const markerPath = path.join(root, OWNER_FILE);
-  assertRegularNoSymlink(markerPath, "ownership marker");
+  assertControlledFile(markerPath, "ownership marker");
   let marker;
   try {
     marker = JSON.parse(readFileSync(markerPath, "utf8"));
@@ -125,9 +152,11 @@ if (process.platform === "linux") {
     fail("/usr/bin/flock is required for crash-safe release serialization");
   }
 }
-const envFileReal = assertRegularNoSymlink(envFile, "compose env file");
+const envFileReal = assertControlledFile(envFile, "compose env file");
 const env = parseEnv(readFileSync(envFileReal, "utf8"));
 if (required(env, "AIBRAIN_INSTALLATION_ID") !== installationId) fail("installation id does not match compose env");
+const serviceUid = numericId(env, "AIBRAIN_UID");
+const serviceGid = numericId(env, "AIBRAIN_GID");
 
 const prefix = `aibrain-${installationId}`;
 const exactNames = new Map([
@@ -144,13 +173,16 @@ for (const [key, expected] of exactNames) {
 const resourceNames = [...exactNames.values()];
 if (new Set(resourceNames).size !== resourceNames.length) fail("project, network and volume names must be distinct");
 
-const configFile = assertRegularNoSymlink(required(env, "AIBRAIN_INSTALLATION_CONFIG_HOST"), "installation config");
-const runtimeEnv = assertRegularNoSymlink(required(env, "AIBRAIN_RUNTIME_ENV_FILE"), "runtime env");
-const egressEnv = assertRegularNoSymlink(required(env, "AIBRAIN_EGRESS_ENV_FILE"), "egress env");
+const configFile = assertControlledFile(required(env, "AIBRAIN_INSTALLATION_CONFIG_HOST"), "installation config");
+const runtimeEnv = assertPrivateFile(required(env, "AIBRAIN_RUNTIME_ENV_FILE"), "runtime env");
+const egressEnv = assertPrivateFile(required(env, "AIBRAIN_EGRESS_ENV_FILE"), "egress env");
+const alertsEnv = assertPrivateFile(required(env, "AIBRAIN_ALERTS_ENV_FILE"), "alerts env");
 const replicaEnv = assertPrivateFile(required(env, "AIBRAIN_REPLICA_ENV_FILE"), "replica env");
-const resticPassword = assertPrivateFile(required(env, "AIBRAIN_RESTIC_PASSWORD_FILE_HOST"), "Restic password file");
+const resticPassword = assertPrivateFile(required(env, "AIBRAIN_RESTIC_PASSWORD_FILE_HOST"), "Restic password file", serviceUid);
+if ((lstatSync(resticPassword).mode & 0o222) !== 0) fail("Restic password file must be read-only");
 const configRoot = realpathSync(path.dirname(configFile));
 if (path.dirname(runtimeEnv) !== configRoot || path.dirname(egressEnv) !== configRoot
+  || path.dirname(alertsEnv) !== configRoot
   || path.dirname(replicaEnv) !== configRoot || path.dirname(resticPassword) !== configRoot) {
   fail("installation config and all secret env/password files must share one owned config root");
 }
@@ -187,16 +219,43 @@ const runtimePolicy = parseEnv(readFileSync(runtimeEnv, "utf8"));
 if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origin) {
   fail("Supabase auth URL and server egress origin must match exactly");
 }
+const alertPolicy = parseEnv(readFileSync(alertsEnv, "utf8"));
+if (required(alertPolicy, "AIBRAIN_ALERT_SINK") !== "webhook") fail("external alert sink must be webhook");
+let alertWebhook;
+try {
+  alertWebhook = new URL(required(alertPolicy, "AIBRAIN_ALERT_WEBHOOK_URL"));
+} catch {
+  fail("alert webhook URL is invalid");
+}
+if (alertWebhook.protocol !== "https:" || alertWebhook.username || alertWebhook.password || alertWebhook.hash) {
+  fail("alert webhook must be a credential-free HTTPS URL");
+}
+if (!CHANNEL_TOKEN.test(required(alertPolicy, "AIBRAIN_ALERT_WEBHOOK_TOKEN"))) {
+  fail("alert webhook token must be strong");
+}
 const replicaPolicy = parseEnv(readFileSync(replicaEnv, "utf8"));
 const resticRepository = required(replicaPolicy, "AIBRAIN_RESTIC_REPOSITORY");
 if (!/^(?:s3:https:\/\/|rest:https:\/\/|b2:|azure:|gs:)/u.test(resticRepository)) {
   fail("Restic repository must use an approved off-host encrypted backend");
 }
 
-const hostRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_HOST_ROOT"), "installation host root");
-const sourceRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_SOURCE_HOST_PATH"), "source root");
-const publishRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_PUBLISH_HOST_PATH"), "publish root");
-const replicaStateRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_REPLICA_STATE_HOST_PATH"), "replica state root");
+const operatorUid = typeof process.getuid === "function" ? process.getuid() : lstatSync(configRoot).uid;
+const operatorGid = typeof process.getgid === "function" ? process.getgid() : lstatSync(configRoot).gid;
+assertDirectoryPolicy(configRoot, "installation config root", {
+  uid: operatorUid, gid: operatorGid, forbiddenMode: 0o022,
+});
+const hostRoot = assertDirectoryPolicy(required(env, "AIBRAIN_HOST_ROOT"), "installation host root", {
+  uid: operatorUid, gid: operatorGid, forbiddenMode: 0o022,
+});
+const sourceRoot = assertDirectoryPolicy(required(env, "AIBRAIN_SOURCE_HOST_PATH"), "source root", {
+  uid: serviceUid, gid: serviceGid, forbiddenMode: 0o222, requiredMode: 0o500,
+});
+const publishRoot = assertDirectoryPolicy(required(env, "AIBRAIN_PUBLISH_HOST_PATH"), "publish root", {
+  uid: serviceUid, gid: serviceGid, forbiddenMode: 0o022, requiredMode: 0o700,
+});
+const replicaStateRoot = assertDirectoryPolicy(required(env, "AIBRAIN_REPLICA_STATE_HOST_PATH"), "replica state root", {
+  uid: serviceUid, gid: serviceGid, forbiddenMode: 0o077, requiredMode: 0o700,
+});
 assertOwner(hostRoot, installationId);
 if (!isInside(hostRoot, sourceRoot) || !isInside(hostRoot, publishRoot) || !isInside(hostRoot, replicaStateRoot)) {
   fail("source, publish and replica state roots must be children of the owned host root");
@@ -212,7 +271,7 @@ for (let left = 0; left < isolatedRoots.length; left += 1) {
   }
 }
 
-for (const target of [envFileReal, runtimeEnv, egressEnv, replicaEnv, resticPassword, configRoot, hostRoot, sourceRoot, publishRoot, replicaStateRoot]) {
+for (const target of [envFileReal, runtimeEnv, egressEnv, alertsEnv, replicaEnv, resticPassword, configRoot, hostRoot, sourceRoot, publishRoot, replicaStateRoot]) {
   if (/(?:^|[\\/])bgreenly(?:[\\/]|$)/iu.test(target)) fail("an AiBrain path must never address BGreenly");
 }
 

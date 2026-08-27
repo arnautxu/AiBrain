@@ -99,7 +99,7 @@ los paquetes o una imagen interna inmutable ya escaneada.
 
 ## Variables obligatorias
 
-Los valores de Compose, no secretos, parten de `infra/hetzner/compose.env.example`. Los secretos de runtime parten de `infra/hetzner/aibrain.env.example` y la política/tokens de salida de `infra/hetzner/egress.env.example`; ambos deben vivir fuera del checkout con modo `0600`. La separación física y operación están en `docs/EGRESS_GATEWAY.md`.
+Los valores de Compose, no secretos, parten de `infra/hetzner/compose.env.example`. Los secretos de runtime, salida, alertas y réplica parten respectivamente de `aibrain.env.example`, `egress.env.example`, `alerts.env.example` y `replica.env.example`; viven fuera del checkout con modo `0600`. El password Restic es un fichero separado, read-only y propiedad del UID AiBrain. La separación física y operación están en `docs/EGRESS_GATEWAY.md` y `docs/BACKUP_REPLICATION.md`.
 
 Secretos independientes, cada uno con al menos 32 bytes:
 
@@ -130,15 +130,17 @@ Cada `backup:verify` correcto escribe atómicamente
 `backups/verification/latest.json` con installation, backup ID, fingerprint,
 fecha de creación y fecha de verificación. El evaluator local
 `evaluateOperationalAlerts` produce códigos tipados para readiness degradado,
-disco >=80/90 %, tres reinicios en 15 minutos, fallos de preflight y backup
-ausente o con más de 26 horas. Verificar hoy un snapshot antiguo no reinicia su
-edad. `aibrain-alerts` recoge readiness loopback, disco y receipt dentro del
-contenedor, y exige que el controlador host aporte explícitamente los contadores
-de reinicios y preflight de 15 minutos. El outbox file-backed deduplica
+disco de datos/publicación >=80/90 %, gateway degradado, tres reinicios en 15
+minutos, fallos de preflight, backup o réplica ausentes y evidencias con más de
+26 horas. Verificar hoy un snapshot antiguo no reinicia su edad. `aibrain-alerts`
+recoge readiness privada, ambos volúmenes, snapshot y receipt off-host dentro del
+contenedor, y exige que el controlador aporte explícitamente los contadores de
+reinicios y preflight de 15 minutos. El outbox file-backed deduplica
 raised/updated/resolved, aplica backoff y entrega primero a un sink local
-durable; no requiere `docker.sock`. El adapter webhook HTTPS está implementado
-y probado, pero su destino/token y allowlist externa siguen pendientes por
-instalación. Procedimiento: `docs/ALERTING.md`.
+durable; no requiere `docker.sock`. `alert-dispatcher` arranca sin depender de
+la salud de app, conserva su propio health y entrega mediante el adapter webhook
+HTTPS. Solo su destino/token reales y la confirmación externa siguen pendientes
+por instalación. Procedimiento: `docs/ALERTING.md`.
 
 Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
 

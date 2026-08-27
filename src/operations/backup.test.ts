@@ -172,6 +172,21 @@ describe("FileBackupService", () => {
 
   });
 
+  it("does not report a verification receipt whose referenced snapshot disappeared", async () => {
+    const { service } = await fixture();
+    const created = await service.create();
+    await service.verify(created.snapshotRoot);
+    const makeWritable = async (directory: string): Promise<void> => {
+      await chmod(directory, 0o700);
+      const entries = await readdir(directory, { withFileTypes: true });
+      await Promise.all(entries.filter((entry) => entry.isDirectory()).map((entry) =>
+        makeWritable(path.join(directory, entry.name))));
+    };
+    await makeWritable(created.snapshotRoot);
+    await rm(created.snapshotRoot, { recursive: true, force: true });
+    await expect(service.readVerificationReceipt()).resolves.toBeNull();
+  });
+
   it("fails closed on symbolic links in live state", async () => {
     const { root, dataRoot, service } = await fixture();
     const outside = path.join(root, "outside.txt");

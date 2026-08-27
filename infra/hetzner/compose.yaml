@@ -159,6 +159,75 @@ services:
         mode: non-blocking
         max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
 
+  alert-dispatcher:
+    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
+    entrypoint: [/usr/bin/tini, --, /usr/local/bin/aibrain-alert-controller]
+    env_file:
+      - "${AIBRAIN_ALERTS_ENV_FILE:?set AIBRAIN_ALERTS_ENV_FILE}"
+    environment:
+      AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
+      NODE_ENV: production
+      TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.component: alert-dispatcher
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
+    user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    pids_limit: 96
+    cpus: 0.25
+    mem_limit: 256m
+    mem_reservation: 64m
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m,mode=0700,uid=${AIBRAIN_UID:-10001},gid=${AIBRAIN_GID:-10001}
+    volumes:
+      - type: bind
+        source: "${AIBRAIN_INSTALLATION_CONFIG_HOST:?set AIBRAIN_INSTALLATION_CONFIG_HOST}"
+        target: /etc/aibrain/installation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: aibrain-data
+        target: /var/lib/aibrain/data
+      - type: volume
+        source: aibrain-backups
+        target: /var/lib/aibrain/data/backups
+        read_only: true
+      - type: bind
+        source: "${AIBRAIN_PUBLISH_HOST_PATH:?set AIBRAIN_PUBLISH_HOST_PATH}"
+        target: /srv/aibrain/publish-rw
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AIBRAIN_REPLICA_STATE_HOST_PATH:?set AIBRAIN_REPLICA_STATE_HOST_PATH}"
+        target: /var/lib/aibrain-replication
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - aibrain-internal
+      - aibrain-egress
+    healthcheck:
+      test: [CMD-SHELL, "test -f /tmp/aibrain-alert-controller-heartbeat && now=$$(date +%s) && last=$$(cat /tmp/aibrain-alert-controller-heartbeat) && test $$((now-last)) -le 180"]
+      interval: 30s
+      timeout: 3s
+      retries: 4
+      start_period: 90s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${AIBRAIN_LOG_MAX_SIZE:-10m}"
+        max-file: "${AIBRAIN_LOG_MAX_FILES:-5}"
+        mode: non-blocking
+        max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
+
   egress-gateway:
     image: "${AIBRAIN_EGRESS_IMAGE:?set AIBRAIN_EGRESS_IMAGE to an immutable image digest}"
     env_file:

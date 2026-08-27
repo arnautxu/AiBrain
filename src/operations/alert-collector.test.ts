@@ -71,4 +71,29 @@ describe("collectOperationalAlertInput", () => {
       readBackupReceipt: async () => null,
     })).rejects.toThrow("exact loopback");
   });
+
+  it("allows only the exact app service health endpoint when Compose mode is explicit", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-alert-collector-"));
+    roots.push(root);
+    await expect(collectOperationalAlertInput({
+      dataRoot: root,
+      publishWriteRoot: root,
+      readinessUrl: "http://app:3000/api/health/ready",
+      egressReadinessUrl: "http://egress-gateway:8080/__aibrain_egress_health",
+      allowComposeServiceReadiness: true,
+      restartCount15m: 0,
+      preflightFailureCount15m: 0,
+      readBackupReceipt: async () => null,
+      fetchImplementation: async () => new Response("ok"),
+    })).resolves.toMatchObject({ readiness: "ready", egressGateway: "ready" });
+    await expect(collectOperationalAlertInput({
+      dataRoot: root,
+      publishWriteRoot: root,
+      readinessUrl: "http://egress-gateway:8080/__aibrain_egress_health",
+      allowComposeServiceReadiness: true,
+      restartCount15m: 0,
+      preflightFailureCount15m: 0,
+      readBackupReceipt: async () => null,
+    })).rejects.toThrow("exact loopback");
+  });
 });

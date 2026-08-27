@@ -19,7 +19,8 @@ docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
   --profile backup run --rm \
-  --entrypoint /usr/bin/restic backup-replicator init
+  --entrypoint /bin/sh backup-replicator \
+  -c 'exec /usr/bin/restic -r "$AIBRAIN_RESTIC_REPOSITORY" --password-file "$AIBRAIN_RESTIC_PASSWORD_FILE" init'
 ```
 
 `backup-replicator` es one-shot, no publica puertos y solo se une a la red egress. El volumen de backups está read-only; el password también. La raíz de receipts y el volumen separado de restores son sus únicas escrituras locales.
@@ -47,9 +48,9 @@ docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
   --profile backup run --rm \
-  --entrypoint /usr/bin/restic backup-replicator \
-  restore <remote-snapshot-id> \
-  --target /var/lib/aibrain-restores/offhost-<backup-id>
+  --entrypoint /bin/sh backup-replicator \
+  -c 'exec /usr/bin/restic -r "$AIBRAIN_RESTIC_REPOSITORY" --password-file "$AIBRAIN_RESTIC_PASSWORD_FILE" restore "$1" --target "$2"' -- \
+  <remote-snapshot-id> /var/lib/aibrain-restores/offhost-<backup-id>
 ```
 
 Localiza dentro del target el directorio restaurado cuyo basename sea `<backup-id>`. Copia ese snapshot a un volumen de backups QA aislado, ejecuta `aibrain-backup verify` y después el restore dual `--data-destination` + `--publish-destination`. Arranca solo la instalación QA contra ambas raíces restauradas y valida health, workbench, documentos y hashes. No conviertas el drill en cutover, no borres el snapshot remoto/local ni el root previo y no uses el destino restaurado en producción sin aprobación separada.

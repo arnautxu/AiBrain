@@ -11,6 +11,7 @@ install -d -m 0750 /opt/aibrain-<installation>/releases/<git-sha>
 install -d -m 0750 /etc/aibrain/<installation>
 install -d -m 0550 -o 10001 -g 10001 /srv/aibrain-<installation>/source-ro
 install -d -m 0750 -o 10001 -g 10001 /srv/aibrain-<installation>/publish-rw
+install -d -m 0700 -o 10001 -g 10001 /srv/aibrain-<installation>/replication
 ```
 
 Coloca el checkout exacto en `/opt/aibrain-<installation>/releases/<git-sha>` sin modificar otro checkout. Copia y edita:
@@ -19,9 +20,13 @@ Coloca el checkout exacto en `/opt/aibrain-<installation>/releases/<git-sha>` si
 cp infra/hetzner/compose.env.example /etc/aibrain/<installation>/compose.env
 cp infra/hetzner/aibrain.env.example /etc/aibrain/<installation>/runtime.env
 cp infra/hetzner/egress.env.example /etc/aibrain/<installation>/egress.env
+cp infra/hetzner/alerts.env.example /etc/aibrain/<installation>/alerts.env
+cp infra/hetzner/replica.env.example /etc/aibrain/<installation>/replica.env
 cp infra/hetzner/installation.qa.example.json /etc/aibrain/<installation>/installation.json
+install -m 0400 -o 10001 -g 10001 /dev/null /etc/aibrain/<installation>/restic-password
 chmod 0640 /etc/aibrain/<installation>/compose.env /etc/aibrain/<installation>/installation.json
-chmod 0600 /etc/aibrain/<installation>/runtime.env /etc/aibrain/<installation>/egress.env
+chmod 0600 /etc/aibrain/<installation>/runtime.env /etc/aibrain/<installation>/egress.env \
+  /etc/aibrain/<installation>/alerts.env /etc/aibrain/<installation>/replica.env
 chown root:10001 /etc/aibrain/<installation>/installation.json
 ```
 
@@ -33,10 +38,13 @@ con permisos de root y este contenido, cambiando únicamente el identificador:
 {"schemaVersion":1,"product":"aibrain","installationId":"company-qa"}
 ```
 
+Deja ambos markers propiedad del operador, con un solo enlace y sin escritura
+de grupo/mundo. No uses hardlinks para ningún env, config, password o marker.
+
 En `compose.env`, usa la convención exacta `aibrain-<installation>` para el
 proyecto, red y los tres volúmenes, un puerto loopback libre, rutas host
-exclusivas y el tag `aibrain-<installation>:<git-sha>`. Usa paths absolutos para
-los dos ficheros montados. En `installation.json`, cambia identidad, branding y
+exclusivas y los dos digests inmutables de app/gateway. Usa paths absolutos para
+todos los ficheros y roots. En `installation.json`, cambia identidad, branding y
 `publicUrl`, pero conserva exactamente los seis paths internos del ejemplo: son
 el contrato de mounts del contenedor.
 
@@ -68,8 +76,11 @@ openssl rand -base64 48
 ```
 
 Completa `runtime.env` con Supabase Auth y los cinco secretos; completa
-`egress.env` con los tres tokens. No añadas `SUPABASE_SECRET_KEY`. Consulta los
-nombres exactos y la separación obligatoria en `docs/EGRESS_GATEWAY.md`.
+`egress.env` con los tres tokens; configura `alerts.env` con un webhook HTTPS y
+token dedicados; y configura `replica.env` más `restic-password` para el backend
+cifrado off-host autorizado. No añadas `SUPABASE_SECRET_KEY`. Consulta los
+nombres exactos y la separación obligatoria en `docs/EGRESS_GATEWAY.md` y
+`docs/BACKUP_REPLICATION.md`. No continúes con valores `replace-*`.
 
 ## 2. Validación estática y build inmutable
 
@@ -141,7 +152,7 @@ Si cualquiera de esos recursos pertenece a otro stack, detente: no lo conectes, 
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
-  up -d --no-deps egress-gateway app
+  up -d --no-deps egress-gateway app alert-dispatcher
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
@@ -178,12 +189,12 @@ docker inspect --format '{{.State.Health.Status}} {{.RestartCount}}' \
 docker compose \
   --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml \
-  logs --tail 200 app
+  logs --tail 200 app alert-dispatcher
 docker stats --no-stream \
   "$(docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml ps -q app)"
 ```
 
-No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en una sesión compartida. Alerta ante `unhealthy`, tres reinicios en 15 minutos, disco/volumen mayor al 80 %, ausencia de backup verificado o errores de sandbox/publicación. El envío de esas alertas al canal del cliente requiere integración externa y no forma parte del repositorio.
+No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en una sesión compartida. `alert-dispatcher` persiste outbox y dedupe, comprueba app, gateway, data, publicación, snapshot y receipt off-host y entrega solo payloads saneados al webhook HTTPS. Un URL/token real y la comprobación de recepción siguen siendo gates externos de cada instalación.
 
 ## 5. Backup y restore QA reales
 
@@ -235,7 +246,7 @@ docker run --rm --entrypoint /bin/sh \
   aibrain-<installation>:<git-sha> \
   -c 'cp -a /restores/<backup-id>-data/. /var/lib/aibrain/data/'
 
-install -d -m 0700 /srv/aibrain-<installation>-restore-<backup-id>/publish-rw
+install -d -m 0700 -o 10001 -g 10001 /srv/aibrain-<installation>-restore-<backup-id>/publish-rw
 docker run --rm --entrypoint /bin/sh \
   --mount source=aibrain-<installation>-restores,target=/restores,readonly \
   --mount type=bind,source=/srv/aibrain-<installation>-restore-<backup-id>/publish-rw,target=/publish-rw \
@@ -248,7 +259,7 @@ Crea un segundo `compose.env` con proyecto, red, puerto, data volume, backup vol
 Reinicia la instancia primaria y valida recovery:
 
 ```bash
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps egress-gateway app
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps egress-gateway app alert-dispatcher
 ```
 
 La copia cifrada fuera del servidor, sus credenciales y la prueba del proveedor externo son gates externos.
@@ -297,5 +308,5 @@ No borres imágenes, releases, volúmenes ni backups. Si el release migró datos
   aislamiento Docker, pinning DNS y bloqueo privado/metadata en el host real.
 - La base, el snapshot Debian y los paquetes Node están fijados. Falta ejecutar build limpio, SBOM y scan sobre la imagen resultante en el host QA antes de considerarla promovible.
 - Faltan credenciales reales de Supabase Auth y login de una suscripción Codex dedicada.
-- La réplica cifrada fuera del servidor y el canal de alertas deben configurarse y probarse.
+- La réplica cifrada fuera del servidor y el webhook de alertas deben configurarse con credenciales reales y probarse contra sus proveedores.
 - DNS, TLS público, NAS/documental real y cutover requieren autorización separada.

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -21,12 +21,17 @@ async function fixture(installationId = "company-alpha") {
     mkdir(publishRoot, { recursive: true }),
     mkdir(replicaStateRoot, { recursive: true }),
   ]);
+  await Promise.all([
+    chmod(sourceRoot, 0o550),
+    chmod(publishRoot, 0o750),
+    chmod(replicaStateRoot, 0o700),
+  ]);
   const marker = JSON.stringify({ schemaVersion: 1, product: "aibrain", installationId });
   await Promise.all([
     writeFile(path.join(configRoot, ".aibrain-owner.json"), marker),
     writeFile(path.join(hostRoot, ".aibrain-owner.json"), marker),
     writeFile(path.join(configRoot, "installation.json"), "{}"),
-    writeFile(path.join(configRoot, "runtime.env"), "NEXT_PUBLIC_SUPABASE_URL=https://project-ref.supabase.co\n"),
+    writeFile(path.join(configRoot, "runtime.env"), "NEXT_PUBLIC_SUPABASE_URL=https://project-ref.supabase.co\n", { mode: 0o600 }),
     writeFile(path.join(configRoot, "egress.env"), [
       `AIBRAIN_EGRESS_BROWSER_TOKEN=${"a".repeat(96)}`,
       `AIBRAIN_EGRESS_WORKER_TOKEN=${"b".repeat(96)}`,
@@ -34,14 +39,20 @@ async function fixture(installationId = "company-alpha") {
       "AIBRAIN_EGRESS_WORKER_HOSTS=api.openai.com",
       "AIBRAIN_EGRESS_SUPABASE_ORIGIN=https://project-ref.supabase.co",
       "",
-    ].join("\n")),
+    ].join("\n"), { mode: 0o600 }),
+    writeFile(path.join(configRoot, "alerts.env"), [
+      "AIBRAIN_ALERT_SINK=webhook",
+      "AIBRAIN_ALERT_WEBHOOK_URL=https://alerts.example.test/aibrain",
+      `AIBRAIN_ALERT_WEBHOOK_TOKEN=${"d".repeat(96)}`,
+      "",
+    ].join("\n"), { mode: 0o600 }),
     writeFile(path.join(configRoot, "replica.env"), [
       "AIBRAIN_RESTIC_REPOSITORY=s3:https://backup.example.test/company-alpha",
       "AWS_ACCESS_KEY_ID=synthetic",
       "AWS_SECRET_ACCESS_KEY=synthetic",
       "",
     ].join("\n"), { mode: 0o600 }),
-    writeFile(path.join(configRoot, "restic-password"), "synthetic-password\n", { mode: 0o600 }),
+    writeFile(path.join(configRoot, "restic-password"), "synthetic-password\n", { mode: 0o400 }),
   ]);
   const envFile = path.join(root, "compose.env");
   const values = {
@@ -57,6 +68,7 @@ async function fixture(installationId = "company-alpha") {
     AIBRAIN_INSTALLATION_CONFIG_HOST: path.join(configRoot, "installation.json"),
     AIBRAIN_RUNTIME_ENV_FILE: path.join(configRoot, "runtime.env"),
     AIBRAIN_EGRESS_ENV_FILE: path.join(configRoot, "egress.env"),
+    AIBRAIN_ALERTS_ENV_FILE: path.join(configRoot, "alerts.env"),
     AIBRAIN_REPLICA_ENV_FILE: path.join(configRoot, "replica.env"),
     AIBRAIN_RESTIC_PASSWORD_FILE_HOST: path.join(configRoot, "restic-password"),
     AIBRAIN_HOST_ROOT: hostRoot,
@@ -64,6 +76,8 @@ async function fixture(installationId = "company-alpha") {
     AIBRAIN_PUBLISH_HOST_PATH: publishRoot,
     AIBRAIN_REPLICA_STATE_HOST_PATH: replicaStateRoot,
     AIBRAIN_HTTP_PORT: "43100",
+    AIBRAIN_UID: String(typeof process.getuid === "function" ? process.getuid() : 10001),
+    AIBRAIN_GID: String(typeof process.getgid === "function" ? process.getgid() : 10001),
   };
   await writeFile(envFile, `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n")}\n`);
   return { root, envFile, values, configRoot, hostRoot, sourceRoot };
@@ -96,5 +110,15 @@ describe("Hetzner host preflight", () => {
 
     const bgreenly = await fixture("bgreenly");
     await expect(run(bgreenly.envFile, "bgreenly")).rejects.toThrow();
+  });
+
+  it("rejects exposed secrets and hard-linked policy files", async () => {
+    const exposed = await fixture();
+    await chmod(path.join(exposed.configRoot, "runtime.env"), 0o644);
+    await expect(run(exposed.envFile)).rejects.toThrow();
+
+    const hardLinked = await fixture();
+    await link(path.join(hardLinked.configRoot, "egress.env"), path.join(hardLinked.configRoot, "egress-copy.env"));
+    await expect(run(hardLinked.envFile)).rejects.toThrow();
   });
 });

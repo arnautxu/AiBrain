@@ -6,6 +6,7 @@ import { backupManifestSchema, type BackupManifest } from "@/operations/backup";
 import {
   BackupReplicaError,
   ResticBackupReplicator,
+  readLatestBackupReplicaReceipt,
   runResticCommand,
   type ResticCommandRunner,
 } from "@/operations/backup-replica";
@@ -120,6 +121,8 @@ describe("ResticBackupReplicator", () => {
     const receipt = await readFile(path.join(test.stateRoot, "receipts", `${manifest().backupId}.json`), "utf8");
     expect(receipt).not.toContain("storage.example.test");
     expect(receipt).not.toContain("synthetic-secret");
+    await expect(readLatestBackupReplicaReceipt(test.stateRoot, "replica-qa"))
+      .resolves.toEqual(first);
   });
 
   it("reuses an already tagged remote snapshot after a local interruption", async () => {
