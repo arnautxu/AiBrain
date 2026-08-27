@@ -55,7 +55,7 @@
   --text: #f1f0ec;
   --text-secondary: #b2afa8;
   --text-muted: #b2afa8;
-  --text-subtle: #85827c;
+  --text-subtle: #aaa7a0;
   --border: #343431;
   --border-subtle: #2b2b29;
   --border-strong: #4a4945;
@@ -85,7 +85,7 @@
     --text: #f1f0ec;
     --text-secondary: #b2afa8;
     --text-muted: #b2afa8;
-    --text-subtle: #85827c;
+    --text-subtle: #aaa7a0;
     --border: #343431;
     --border-subtle: #2b2b29;
     --border-strong: #4a4945;
@@ -528,14 +528,14 @@ button:disabled {
 }
 
 .starter-command {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface-raised) 82%, transparent);
 }
 
 .starter-command:hover {
   transform: translateY(-2px);
-  border-color: #c9c6bf;
-  background: #ffffff;
-  box-shadow: 0 16px 30px -26px rgba(37, 34, 29, 0.5);
+  border-color: var(--border-strong);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-md);
 }
 
 .starter-command:active {
@@ -549,7 +549,7 @@ button:disabled {
   align-items: center;
   gap: 0.35rem;
   padding: 0 0.6rem;
-  color: #5f5b55;
+  color: var(--text-secondary);
   font-size: 9px;
   font-weight: 600;
   transition: color 160ms ease;
@@ -567,11 +567,11 @@ button:disabled {
 
 .review-tab:hover,
 .review-tab-active {
-  color: #34312d;
+  color: var(--text);
 }
 
 .review-tab-active::after {
-  background: #34312d;
+  background: var(--text);
 }
 
 .diff-line {
@@ -657,11 +657,9 @@ button:disabled {
 
 @keyframes message-enter {
   from {
-    opacity: 0;
     transform: translateY(8px);
   }
   to {
-    opacity: 1;
     transform: translateY(0);
   }
 }
@@ -696,5 +694,18 @@ button:disabled {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .touch-target,
+  .ui-icon-button {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .composer-tool {
+    min-width: 2.75rem;
+    height: 2.75rem;
   }
 }

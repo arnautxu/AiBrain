@@ -41,3 +41,20 @@ test("Review diff", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
   await expect(page).toHaveScreenshot("review-diff.png", { fullPage: true });
 });
+
+test("turn activity and approval dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSyntheticTurn(page);
+  const approval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
+  await approval.scrollIntoViewIfNeeded();
+  await expect(approval).toBeVisible();
+  await expect(page).toHaveScreenshot("turn-approval-dark.png", { fullPage: true });
+});
+
+test("Review diff dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSyntheticTurn(page);
+  await page.getByLabel("Abrir Review", { exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
+  await expect(page).toHaveScreenshot("review-diff-dark.png", { fullPage: true });
+});

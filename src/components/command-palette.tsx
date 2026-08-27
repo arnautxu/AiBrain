@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
 } from "@phosphor-icons/react";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 type PaletteItem = {
   id: string;
@@ -65,6 +66,7 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useModalFocus(open, onClose, inputRef);
 
   const items = useMemo<PaletteItem[]>(() => {
     const activeProjects = projects.filter((project) => project.status === "active");
@@ -172,6 +174,8 @@ export function CommandPalette({
     <div className="fixed inset-0 z-[80] flex justify-center bg-[var(--overlay)] px-3 pt-[10vh] backdrop-blur-[3px] sm:px-6 sm:pt-[13vh]">
       <button aria-label="Cerrar búsqueda" className="absolute inset-0" onClick={onClose} />
       <section
+        ref={dialogRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Buscar proyectos y conversaciones"

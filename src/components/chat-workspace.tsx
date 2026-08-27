@@ -52,6 +52,8 @@ type ChatWorkspaceProps = {
   attachments: ChatInputAttachment[];
   sending: boolean;
   runtimeStatus: RuntimeStatus;
+  networkOnline: boolean;
+  onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
   onComposerModeChange: (value: ComposerMode) => void;
   onComposerModelChange: (value: string | null) => void;
@@ -106,11 +108,11 @@ function ResultActions({ message, onCreateVersion, onResultAction }: { message: 
   };
   return (
     <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      <button type="button" disabled={busy} aria-pressed={approved} className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[#c8d8ca] bg-[#edf5ee] text-[#315a39]" : "border-[#dfddd8] bg-white text-[#44413d] hover:bg-[#f4f3f0]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultado aprobado" : "Aprobar resultado"}</button>
-      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiado" : "Copiar"}</button>
-      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={downloadResult}><DownloadSimple size={13} />Descargar</button>
-      <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#dfddd8] bg-white px-3 py-2 text-[12px] font-medium text-[#44413d] hover:bg-[#f4f3f0]" onClick={onCreateVersion}><GitBranch size={13} />Nueva versión</button>
-      {message.diff ? <button type="button" className="flex items-center gap-1.5 rounded-lg border border-[#ead7cf] bg-[#fff5f1] px-3 py-2 text-[12px] font-medium text-[#6f3526] hover:bg-[#f9e6de]" onClick={() => void onResultAction("undo")}>Deshacer cambios</button> : null}
+      <button type="button" disabled={busy} aria-pressed={approved} className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text)] hover:bg-[var(--surface-muted)]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultado aprobado" : "Aprobar resultado"}</button>
+      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiado" : "Copiar"}</button>
+      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={downloadResult}><DownloadSimple size={13} />Descargar</button>
+      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={onCreateVersion}><GitBranch size={13} />Nueva versión</button>
+      {message.diff ? <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[12px] font-medium text-[var(--danger)] hover:brightness-95" onClick={() => void onResultAction("undo")}>Deshacer cambios</button> : null}
     </div>
   );
 }
@@ -148,7 +150,7 @@ function AssistantMessage({
         <span className="grid size-5 place-items-center rounded-md bg-[var(--brain-accent)] text-[var(--brain-contrast)]">
           <Code size={12} weight="bold" />
         </span>
-        <span className="text-[11px] font-semibold text-[#3b3936]">{assistantName}</span>
+        <span className="text-[11px] font-semibold text-[var(--text)]">{assistantName}</span>
       </div>
 
       {showActivity ? (
@@ -168,7 +170,7 @@ function AssistantMessage({
       ) : null}
 
       {message.status === "error" ? (
-        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[#ead0c7] bg-[#fff8f5] px-3 py-2.5 text-[11px] text-[#884b38]" role="alert">
+        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[11px] text-[var(--danger)]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
           <span>No se ha podido completar esta respuesta. Inténtalo de nuevo.</span>
         </div>
@@ -186,10 +188,10 @@ function AssistantMessage({
 
       {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
 
-      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[#e5e3df] pt-4"><p className="text-[12px] font-medium text-[#44413d]">¿Qué quieres hacer ahora?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Explica este resultado de forma más sencilla y destaca solo lo que debo saber.")}>Explicarlo mejor</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("A partir de este resultado, dame los siguientes pasos concretos y ordenados.")}>Siguientes pasos</button><button type="button" className="rounded-lg bg-[#f0efec] px-3 py-2 text-[12px] font-medium text-[#41403c] hover:bg-[#e7e5e1]" onClick={() => onFollowUp("Prepara una versión final, limpia y lista para utilizar de este resultado.")}>Preparar versión final</button></div></div> : null}
+      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[var(--border-subtle)] pt-4"><p className="text-[12px] font-medium text-[var(--text)]">¿Qué quieres hacer ahora?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("Explica este resultado de forma más sencilla y destaca solo lo que debo saber.")}>Explicarlo mejor</button><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("A partir de este resultado, dame los siguientes pasos concretos y ordenados.")}>Siguientes pasos</button><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("Prepara una versión final, limpia y lista para utilizar de este resultado.")}>Preparar versión final</button></div></div> : null}
 
       {hasDetails && canInspect ? (
-        <button className="mt-3 flex items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[#44413d] transition hover:text-[#24221f]" onClick={onInspect}>
+        <button className="mt-3 flex min-h-10 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text)] transition" onClick={onInspect}>
           <List size={12} />
           Abrir Review
         </button>
@@ -201,11 +203,11 @@ function AssistantMessage({
 function UserMessage({ message }: { message: ChatMessage }) {
   return (
     <article className="message-enter flex justify-end">
-      <div className="max-w-[86%] rounded-[var(--brain-radius)] rounded-br-[4px] bg-[#ecebe8] px-4 py-3 text-[13px] leading-6 text-[#33312e] md:max-w-[70%]">
+      <div className="max-w-[86%] rounded-[var(--brain-radius)] rounded-br-[4px] bg-[var(--surface-selected)] px-4 py-3 text-[13px] leading-6 text-[var(--text)] md:max-w-[70%]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
-              <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-white/70 px-2 py-1 text-[9px] text-[#625f5a]">
+              <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[9px] text-[var(--text)]">
                 <ImageIcon size={11} /><span className="truncate">{attachment.name}</span>
               </span>
             ))}
@@ -233,6 +235,8 @@ export function ChatWorkspace({
   attachments,
   sending,
   runtimeStatus,
+  networkOnline,
+  onRetryRuntime,
   onPromptChange,
   onComposerModeChange,
   onComposerModelChange,
@@ -290,19 +294,20 @@ export function ChatWorkspace({
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canUseWeb = manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
+  const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
   const selectedModelOption = runtimeStatus.models.find((model) => model.id === composerModel) ??
     runtimeStatus.models.find((model) => model.isDefault) ?? runtimeStatus.models[0] ?? null;
   const effortOptions = selectedModelOption?.supportedReasoningEfforts.length
     ? selectedModelOption.supportedReasoningEfforts
     : (["low", "medium", "high"] satisfies RuntimeReasoningEffort[]);
   const effortLabels: Record<RuntimeReasoningEffort, string> = {
-    none: "Sense raonament",
-    minimal: "Mínim",
-    low: "Ràpid",
-    medium: "Equilibrat",
-    high: "Profund",
-    xhigh: "Molt profund",
-    max: "Màxim",
+    none: "Sin razonamiento",
+    minimal: "Mínimo",
+    low: "Rápido",
+    medium: "Equilibrado",
+    high: "Profundo",
+    xhigh: "Muy profundo",
+    max: "Máximo",
     ultra: "Ultra",
   };
 
@@ -365,7 +370,7 @@ export function ChatWorkspace({
     <main className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2.5 md:px-4">
         <div className="flex min-w-0 items-center gap-2">
-          <button aria-label="Mostrar u ocultar la barra lateral" className={`rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] ${sidebarOpen ? "md:hidden" : "md:block"}`} onClick={onToggleSidebar}>
+          <button aria-label="Mostrar u ocultar la barra lateral" className={`touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] ${sidebarOpen ? "md:hidden" : "md:block"}`} onClick={onToggleSidebar}>
             <SidebarSimple size={17} />
           </button>
           <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1">
@@ -385,7 +390,7 @@ export function ChatWorkspace({
                 key={window.id}
                 aria-label={`Abrir ${window.label}`}
                 aria-pressed={active}
-                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
+                className={`touch-target flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => onOpenWindow(windowId)}
               >
                 <GitDiff size={15} />
@@ -393,10 +398,10 @@ export function ChatWorkspace({
               </button>
             );
           })}
-          <button aria-label="Abrir búsqueda" className="hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] sm:flex" onClick={onOpenCommandPalette}>
+          <button aria-label="Abrir búsqueda" className="touch-target hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] sm:flex" onClick={onOpenCommandPalette}>
             <Command size={13} /><span>K</span>
           </button>
-          <button aria-label="Abrir preferencias" className="rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
+          <button aria-label="Abrir preferencias" className="touch-target rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
             <SlidersHorizontal size={16} />
           </button>
         </div>
@@ -405,8 +410,8 @@ export function ChatWorkspace({
       <div ref={scrollRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto" onScroll={updateScrollState}>
         {!hydrated ? (
           <div className="mx-auto max-w-3xl px-6 py-14">
-            <div className="mb-8 h-7 w-48 rounded-md bg-[#eeedea] motion-safe:animate-pulse" />
-            <div className="space-y-4"><div className="h-20 rounded-xl bg-[#f1f0ed] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[#f3f2ef] motion-safe:animate-pulse" /></div>
+            <div className="mb-8 h-7 w-48 rounded-md bg-[var(--surface-muted)] motion-safe:animate-pulse" />
+            <div className="space-y-4"><div className="h-20 rounded-xl bg-[var(--surface-muted)] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[var(--surface-hover)] motion-safe:animate-pulse" /></div>
           </div>
         ) : guideVisible ? (
           <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? "Proyecto"} onCancel={() => setGuidedActionsOpen(false)} onStart={(message, summary) => { setGuidedActionsOpen(false); onSend(message, summary); }} />
@@ -436,7 +441,7 @@ export function ChatWorkspace({
           </div>
         ) : (
           <section className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center px-5 pb-10 pt-16 text-center md:px-8">
-            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]"><MagicWand size={21} /></span>
+            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]"><MagicWand size={21} /></span>
             <h1 className="mt-5 text-balance text-[28px] font-semibold tracking-[-.035em] text-[var(--text)] md:text-[34px]">¿En qué trabajamos?</h1>
             <p className="mt-2 max-w-md text-[14px] leading-6 text-[var(--text-muted)]">Escribe directamente o empieza con una sugerencia. Podrás revisar el resultado antes de usarlo.</p>
             <div className="mt-7 grid w-full max-w-[620px] gap-2 sm:grid-cols-3">
@@ -455,10 +460,10 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className="relative shrink-0 bg-[var(--surface)]/94 px-3 pb-3 pt-2 backdrop-blur-md md:px-6 md:pb-5">
-        {showJumpToBottom ? <button type="button" className="absolute left-1/2 top-0 z-20 flex -translate-x-1/2 -translate-y-full items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] hover:text-[var(--text)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button> : null}
+      <div className="relative shrink-0 bg-[var(--surface)]/94 px-3 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:px-6 md:pb-5">
+        {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="mx-auto max-w-[820px]">
-          {runtimeStatus.codex === "checking" ? <p className="mb-2 text-center text-[10px] text-[var(--text-muted)]" role="status">Conectando con el servicio…</p> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <p className="mb-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text-muted)]" role="status">El servicio no está disponible. Puedes revisar el historial y volver a intentarlo.</p> : null}
+          {!networkOnline ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><WarningCircle size={14} />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <p className="mb-2 text-center text-[10px] text-[var(--text)]" role="status">Conectando con el servicio…</p> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 py-1 font-semibold" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             data-testid="composer"
             className={`composer-shadow relative rounded-[calc(var(--brain-radius)+4px)] border bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-[var(--border-strong)]"}`}
@@ -491,7 +496,7 @@ export function ChatWorkspace({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  if (!sending && prompt.trim()) {
+                  if (!sending && prompt.trim() && runtimeReady) {
                     shouldStickToBottomRef.current = true;
                     onSend();
                   }
@@ -499,44 +504,44 @@ export function ChatWorkspace({
               }}
             />
             <div className="flex items-center justify-between gap-3 px-1 pb-0.5">
-              <div className="flex min-w-0 items-center gap-1">
-                {showAdvancedControls ? <select aria-label="Mode del torn" className="composer-select" value={composerMode} onChange={(event) => onComposerModeChange(event.target.value as ComposerMode)} disabled={sending}>
+              <div className="scrollbar-thin flex min-w-0 items-center gap-1 overflow-x-auto">
+                {showAdvancedControls ? <select aria-label="Modo del turno" className="composer-select" value={composerMode} onChange={(event) => onComposerModeChange(event.target.value as ComposerMode)} disabled={sending}>
                   {manifest.composer.modes.includes("agent") ? <option value="agent">Agent</option> : null}
-                  {manifest.composer.modes.includes("plan") ? <option value="plan">Pla</option> : null}
+                  {manifest.composer.modes.includes("plan") ? <option value="plan">Plan</option> : null}
                   {manifest.composer.modes.includes("ask") ? <option value="ask">Pregunta</option> : null}
                 </select> : null}
                 {showAdvancedControls && manifest.composer.modelSelection ? (
-                  <select aria-label="Model" className="composer-select hidden sm:block" value={composerModel ?? ""} onChange={(event) => onComposerModelChange(event.target.value || null)} disabled={sending || runtimeStatus.models.length === 0}>
-                    <option value="">{runtimeStatus.model ?? "Model automàtic"}</option>
+                  <select aria-label="Modelo" className="composer-select hidden sm:block" value={composerModel ?? ""} onChange={(event) => onComposerModelChange(event.target.value || null)} disabled={sending || runtimeStatus.models.length === 0}>
+                    <option value="">{runtimeStatus.model ?? "Modelo automático"}</option>
                     {runtimeStatus.models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
                   </select>
                 ) : null}
                 {showAdvancedControls && manifest.composer.modelSelection && runtimeStatus.mode === "codex" ? (
-                  <select aria-label="Nivell de raonament" className="composer-select hidden sm:block" value={composerEffort ?? ""} onChange={(event) => onComposerEffortChange((event.target.value || null) as RuntimeReasoningEffort | null)} disabled={sending}>
-                    <option value="">Automàtic</option>
+                  <select aria-label="Nivel de razonamiento" className="composer-select hidden sm:block" value={composerEffort ?? ""} onChange={(event) => onComposerEffortChange((event.target.value || null) as RuntimeReasoningEffort | null)} disabled={sending}>
+                    <option value="">Automático</option>
                     {effortOptions.map((effort) => <option key={effort} value={effort}>{effortLabels[effort]}</option>)}
                   </select>
                 ) : null}
                 <button aria-label="Abrir acciones guiadas" aria-pressed={guidedActionsOpen} className={`composer-tool ${guidedActionsOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setGuidedActionsOpen((current) => !current)}><MagicWand size={12} /><span className="hidden lg:inline">Ayuda</span></button>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <label className="relative hidden sm:block">
-                    <Wrench size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[#77736d]" />
+                    <Wrench size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text)]" />
                     <select aria-label="Skill" className="composer-select pl-6" value={selectedSkill ?? ""} onChange={(event) => onSelectedSkillChange(event.target.value || null)} disabled={sending}>
-                      <option value="">Sense skill</option>
+                      <option value="">Sin skill</option>
                       {runtimeStatus.skills.map((skill) => <option key={skill.id} value={skill.id}>{skill.label}</option>)}
                     </select>
                   </label>
                 ) : null}
-                {canUseWeb ? <button aria-label="Activa o desactiva la cerca web" aria-pressed={webSearch} className={`composer-tool ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={12} /><span className="hidden lg:inline">Web</span></button> : null}
-                {canGenerateImages ? <button aria-label="Activa o desactiva la generació d’imatges" aria-pressed={imageGeneration} className={`composer-tool ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={13} /><span className="hidden lg:inline">Imatge</span></button> : null}
+                {canUseWeb ? <button aria-label="Activar o desactivar la búsqueda web" aria-pressed={webSearch} className={`composer-tool ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={12} /><span className="hidden lg:inline">Web</span></button> : null}
+                {canGenerateImages ? <button aria-label="Activar o desactivar la generación de imágenes" aria-pressed={imageGeneration} className={`composer-tool ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={13} /><span className="hidden lg:inline">Imagen</span></button> : null}
                 {canAttachImages ? <><input ref={fileInputRef} aria-label="Seleccionar imágenes para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={(event) => void addImages(event.target.files)} /><button aria-label="Adjuntar imágenes" className="composer-tool" disabled={sending || attachments.length >= 3} onClick={() => fileInputRef.current?.click()}><Paperclip size={13} /></button></> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
-                  <button aria-label="Detener respuesta" className="grid size-7 place-items-center rounded-lg bg-[var(--text)] text-[var(--surface)] transition active:scale-95" onClick={onStop}><Stop size={11} weight="fill" /></button>
+                  <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-7 sm:rounded-lg" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
-                  <button aria-label="Enviar mensaje" className="grid size-7 place-items-center rounded-lg bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30" disabled={!project || !prompt.trim()} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
+                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-7 sm:rounded-lg" disabled={!project || !prompt.trim() || !runtimeReady} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
                 )}
               </div>
             </div>

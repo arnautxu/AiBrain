@@ -54,6 +54,7 @@ type SideWindowId = Exclude<BrainWindowId, "chat">;
 
 type BrainStyle = CSSProperties & {
   "--brain-accent": string;
+  "--brain-accent-strong": string;
   "--brain-accent-soft": string;
   "--brain-contrast": string;
   "--brain-radius": string;
@@ -302,6 +303,8 @@ export function BrainApp({
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
+  const [networkOnline, setNetworkOnline] = useState(true);
+  const [runtimeRetry, setRuntimeRetry] = useState(0);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -364,6 +367,22 @@ export function BrainApp({
   }, [notice]);
 
   useEffect(() => {
+    const updateNetwork = () => {
+      const online = navigator.onLine;
+      setNetworkOnline(online);
+      if (online) setRuntimeRetry((current) => current + 1);
+      else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+    };
+    setNetworkOnline(navigator.onLine);
+    window.addEventListener("online", updateNetwork);
+    window.addEventListener("offline", updateNetwork);
+    return () => {
+      window.removeEventListener("online", updateNetwork);
+      window.removeEventListener("offline", updateNetwork);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
     const params = new URLSearchParams(window.location.search);
     const starter = params.get("starter")?.trim();
@@ -388,7 +407,7 @@ export function BrainApp({
   );
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !networkOnline) return;
     const controller = new AbortController();
     const query = activeProjectId ? `?projectId=${encodeURIComponent(activeProjectId)}` : "";
     setRuntimeStatus((current) => ({ ...current, codex: "checking", ready: false }));
@@ -396,14 +415,20 @@ export function BrainApp({
       .then((response) => response.ok ? response.json() : null)
       .then((status: unknown) => {
         if (isRuntimeStatus(status)) setRuntimeStatus(status);
+        else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+        }
+      });
     return () => controller.abort();
-  }, [activeProjectId, hydrated]);
+  }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
 
   const style = useMemo<BrainStyle>(() => {
     return {
       "--brain-accent": branding.accentColor,
+      "--brain-accent-strong": `color-mix(in srgb, ${branding.accentColor} 72%, #000000)`,
       "--brain-accent-soft": `color-mix(in srgb, ${branding.accentColor} 12%, transparent)`,
       "--brain-contrast": "#ffffff",
       "--brain-radius": cornerTokens[preferences.corners],
@@ -462,7 +487,7 @@ export function BrainApp({
     setActionBusy(true);
     try {
       const baseTitle = activeThread?.title ?? "Resultado";
-      const title = `${baseTitle.replace(/ · nova versió$/, "")} · nova versió`.slice(0, 120);
+      const title = `${baseTitle.replace(/ · (?:nova versió|nueva versión)$/, "")} · nueva versión`.slice(0, 120);
       const thread = initialWorkbench.persistence === "browser-preview"
         ? localThread(activeProject.id, title)
         : await createThreadRequest(activeProject.id, title);
@@ -471,9 +496,9 @@ export function BrainApp({
       threadByProjectRef.current[activeProject.id] = thread.id;
       setSelectedMessageId(null);
       setPrompt([
-        "Vull crear una nova versió d’aquest resultat. Pregunta’m què vull canviar.",
+        "Quiero crear una nueva versión de este resultado. Pregúntame qué quiero cambiar.",
       ].join("\n"));
-      setPendingRuntimeContext(`Resultat de partida que s’ha de conservar intacte:\n\n${message.content.slice(0, 12_000)}`);
+      setPendingRuntimeContext(`Resultado de partida que debe conservarse intacto:\n\n${message.content.slice(0, 12_000)}`);
       setAttachments([]);
       setActiveSideWindow(null);
       setNotice("Nueva versión preparada en una conversación separada. El original se conserva.");
@@ -799,7 +824,7 @@ export function BrainApp({
         setConfirmDialog(null);
         setActionBusy(false);
         const completed = await sendMessage(
-          `Reverteix exclusivament els canvis d’aquest resultat. Abans d’acabar, comprova l’estat final i explica què s’ha restaurat.\n\nCanvis originals:\n${target.diff.slice(0, 10_000)}`,
+          `Revierte exclusivamente los cambios de este resultado. Antes de terminar, comprueba el estado final y explica qué se ha restaurado.\n\nCambios originales:\n${target.diff.slice(0, 10_000)}`,
           "Deshaz los cambios de este resultado y comprueba que todo queda restaurado.",
         );
         setActionBusy(true);
@@ -937,6 +962,8 @@ export function BrainApp({
         attachments={attachments}
         sending={sending}
         runtimeStatus={runtimeStatus}
+        networkOnline={networkOnline}
+        onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
         onComposerModeChange={setComposerMode}
         onComposerModelChange={setComposerModel}

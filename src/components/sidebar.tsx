@@ -24,6 +24,7 @@ import type { AuthSession } from "@/auth/types";
 import { BrandMark, ThemeToggle } from "@/components/ui/primitives";
 import type { PublicInstallationBranding } from "@/ui/installation-branding";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 export type ProjectMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
 export type ThreadMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
@@ -127,6 +128,7 @@ export function Sidebar({
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false);
   const [archivedThreadsOpen, setArchivedThreadsOpen] = useState(false);
+  const sidebarRef = useModalFocus(mobileOpen, onCloseMobile);
   const activeProjects = useMemo(
     () => projects.filter((project) => project.status === "active").sort(byPriority),
     [projects],
@@ -162,13 +164,18 @@ export function Sidebar({
     <>
       {mobileOpen ? <button aria-label="Cerrar barra lateral" className="fixed inset-0 z-30 bg-black/25 backdrop-blur-[2px] md:hidden" onClick={onCloseMobile} /> : null}
       <aside
+        ref={sidebarRef}
+        tabIndex={mobileOpen ? -1 : undefined}
+        aria-modal={mobileOpen ? "true" : undefined}
+        role={mobileOpen ? "dialog" : undefined}
+        aria-label={mobileOpen ? "Navegación" : undefined}
         data-testid="workbench-sidebar"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col border-r border-[var(--border-subtle)] bg-[var(--sidebar)] transition-[transform,visibility] duration-200 md:static md:w-[260px] md:translate-x-0 ${desktopOpen ? "md:flex" : "md:hidden"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col border-r border-[var(--border-subtle)] bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:static md:w-[260px] md:translate-x-0 md:pb-0 md:pt-0 ${desktopOpen ? "md:flex" : "md:hidden"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
         <div className="flex h-14 shrink-0 items-center justify-between px-3">
           <BrandMark branding={branding} />
-          <button aria-label="Ocultar barra lateral" className="hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:block" onClick={onCloseDesktop}><SidebarSimple size={18} /></button>
-          <button aria-label="Cerrar menú" className="rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>
+          <button aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:block" onClick={onCloseDesktop}><SidebarSimple size={18} /></button>
+          <button aria-label="Cerrar menú" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>
         </div>
 
         <nav aria-label="Navegación principal" className="space-y-1 px-2 pb-3">
@@ -262,7 +269,7 @@ export function Sidebar({
               <p className="truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</p>
               <p className="mt-0.5 truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</p>
             </div>
-            <button aria-label="Cerrar sesión" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-selected)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={15} /></button>
+            <button aria-label="Cerrar sesión" className="touch-target rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-selected)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={15} /></button>
           </div>
         </div>
       </aside>

@@ -42,3 +42,16 @@ test("document preview, publication state and browser viewer", async ({ page }) 
   await expect(page.frameLocator('iframe[title="Sesión de navegador: Comprobación web sintética"]').getByText("Comprobación web")).toBeVisible();
   await expect(page).toHaveScreenshot("browser-viewer.png", { fullPage: true });
 });
+
+test("document preview and browser viewer dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openCapabilities(page);
+  const document = page.getByRole("heading", { name: "informe-sintetico.pdf" });
+  await document.scrollIntoViewIfNeeded();
+  await expect(page.getByRole("img", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
+  await expect(page).toHaveScreenshot("document-preview-dark.png", { fullPage: true });
+  const viewer = page.getByTitle("Sesión de navegador: Comprobación web sintética");
+  await viewer.scrollIntoViewIfNeeded();
+  await expect(page.frameLocator('iframe[title="Sesión de navegador: Comprobación web sintética"]').getByText("Comprobación web")).toBeVisible();
+  await expect(page).toHaveScreenshot("browser-viewer-dark.png", { fullPage: true });
+});

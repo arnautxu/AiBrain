@@ -1,6 +1,7 @@
 import { Check, Code, X } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import type { BrainPreferences, CornerStyle, Density } from "@/config/brain";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 type CustomizationPanelProps = {
   productName: string;
@@ -13,8 +14,8 @@ type CustomizationPanelProps = {
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (value: boolean) => void }) {
   return (
-    <button aria-label={label} aria-pressed={checked} className={`relative h-5 w-9 rounded-full transition ${checked ? "bg-[var(--brain-accent)]" : "bg-[#d4d2cd]"}`} onClick={() => onChange(!checked)}>
-      <span className={`absolute top-0.5 grid size-4 place-items-center rounded-full bg-white shadow-sm transition-transform ${checked ? "translate-x-[18px]" : "translate-x-0.5"}`}>
+    <button aria-label={label} aria-pressed={checked} className={`touch-target relative h-5 w-9 rounded-full transition ${checked ? "bg-[var(--brain-accent)]" : "bg-[var(--border-strong)]"}`} onClick={() => onChange(!checked)}>
+      <span className={`absolute top-1/2 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-[var(--surface-raised)] shadow-sm transition-transform ${checked ? "translate-x-[18px]" : "translate-x-0.5"}`}>
         {checked ? <Check size={8} weight="bold" className="text-[var(--brain-accent)]" /> : null}
       </span>
     </button>
@@ -22,14 +23,15 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 
 export function CustomizationPanel({ productName, open, preferences, onChange, onReset, onClose }: CustomizationPanelProps) {
+  const panelRef = useModalFocus(open, onClose);
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-[var(--overlay)] backdrop-blur-[2px]">
       <button className="absolute inset-0" aria-label="Cerrar preferencias" onClick={onClose} />
-      <aside className="panel-enter relative flex h-full w-full max-w-[430px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]">
+      <aside ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="preferences-title" className="panel-enter relative flex h-full w-full max-w-[430px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]">
         <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5">
-          <div className="flex items-center gap-2"><Code size={15} /><h2 className="text-[13px] font-semibold text-[var(--text)]">Preferencias de {productName}</h2></div>
+          <div className="flex items-center gap-2"><Code size={15} /><h2 id="preferences-title" className="text-[13px] font-semibold text-[var(--text)]">Preferencias de {productName}</h2></div>
           <button aria-label="Cerrar" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={16} /></button>
         </header>
 
