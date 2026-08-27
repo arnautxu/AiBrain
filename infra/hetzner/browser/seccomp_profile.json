@@ -56,6 +56,8 @@
 				"clone",
 				"mount",
 				"pivot_root",
+				"setdomainname",
+				"sethostname",
 				"setns",
 				"unshare",
 				"umount",

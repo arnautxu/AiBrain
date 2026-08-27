@@ -107,7 +107,6 @@ exec /usr/bin/bwrap \
   --remount-ro /srv/aibrain/source-ro \
   --tmpfs /srv/aibrain/publish-rw \
   --remount-ro /srv/aibrain/publish-rw \
-  --dir /work \
   --bind "$work_root" /work \
   --chdir /work \
   --clearenv \
