@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `78972d3` en
+- Último checkpoint backend publicado: `283caf8` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -39,7 +39,7 @@
 |---|---|---|
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
-| 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
+| 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`, `283caf8`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y E2E HTTP de continuidad offline tras corte total y restart; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
 | 3. Stores file-backed resilientes | Completado localmente | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`, `368aec0`, `4487ef2`, `016f708`: schemas estrictos, atomic write/fsync, journals, índices y locks con recovery verificado entre procesos reales; owner local vivo no se roba aunque el timestamp parezca stale |
 | 4. Provisionamiento idempotente + 20 usuarios | Completado localmente | `75316e1`, `545948a`, `323243b`, `d74a800`: alta real de 20 empleados, baja/reactivación/recuperación idempotentes, revocación de sesiones, parada selectiva de worker/browser, receipts y auditoría sin datos sensibles |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708` y la aceptación conjunta multiusuario en `78972d3`. La siguiente acción concreta es elevar la continuidad sin Supabase desde test de servicio a un E2E HTTP con cookie local ya emitida.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3` y la continuidad HTTP sin Supabase en `283caf8`. La siguiente acción concreta es ampliar el guard Auth-only a endpoints REST/GraphQL directos y hacer reproducible la comparación de contratos Codex fijados.
 
 ## Decisiones menores registradas
 
@@ -69,6 +69,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en el App Server privado y registra fingerprint/versiones en un journal durable por usuario.
 - El worker se ejecuta bajo `bubblewrap`: oculta todo `dataRoot`, reexpone únicamente sus raíces declaradas y sustituye `publishWriteRoot` por un mount vacío read-only. El preflight del contenedor falla si esa frontera no existe.
 - El UUID de Supabase Auth es exactamente el UUID filesystem del empleado; no existe membership, rol, proyecto o sesión de producto remota.
+- Después del intercambio inicial con Supabase, sesión, workbench y logout no construyen un cliente remoto. El E2E corta el servidor de identidad, crea proyecto/thread, reinicia Next y conserva la cookie local; un nuevo login durante el corte devuelve `503`, no un falso `401`.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
@@ -262,6 +263,11 @@ las acciones externas autorizadas.
   85 ficheros pasados + 1 opt-in omitido, 386 pruebas pasadas + 3 omitidas.
 - Push verificado: `31eb34a..78972d3` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Auth outage `283caf8`: clasificación de red 2/2; E2E HTTP Supabase-offline
+  1/1 verde en 8,35 s; suite completa 86 ficheros pasados + 1 opt-in omitido,
+  388 pruebas pasadas + 3 omitidas; E2E global 4/4 y build verde.
+- Push verificado: `bc03471..283caf8` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -275,7 +281,7 @@ las acciones externas autorizadas.
 | Sesión/worker/workspace/staging/browser independientes | `WorkerRuntimeRegistry` y layout por usuario | Tests de workers, browser, cookies, archivos y symlinks cross-user |
 | WebSocket privado resiliente | Gateway loopback autenticado, journal, ACK/replay/dedupe/backoff | 20 pruebas gateway/router, crash/restart y soak con 28 replays |
 | Concurrencia sin mezcla | Routing por instalación+usuario+thread+turn+item | Aceptación real 2 users × 2 threads: approval, stop, crash/replay/restart y cero mezcla |
-| Supabase solo Auth | Identity provider único; estado de producto filesystem y contrato sin modo de persistencia Supabase | Contract test 6/6 y continuidad workbench con provider offline |
+| Supabase solo Auth | Identity provider único; estado de producto filesystem y contrato sin modo de persistencia Supabase | Guard contract 6/6 + E2E HTTP con provider apagado, restart, workbench y logout |
 | Persistencia tras refresh/restart | Stores versionados, atomic/fsync, locks, journal e índices | E2E HTTP reiniciado, 10/10 locks focalizadas y tres escenarios en procesos hijos reales |
 | `PERMISSIONS.md` server-side | Provider Markdown read-only y fingerprint por turn | 31 tests focalizados y auditoría durable |
 | Office/PDF/texto/imagen | Staging validado, LibreOffice/Poppler/QPDF configurable | Matriz real 2/2 y suites de OOXML/bomb/MIME/macros |
