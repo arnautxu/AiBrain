@@ -364,7 +364,17 @@ if (existsSync("/usr/local/bin/docker") || existsSync("/usr/bin/docker") || exis
       "--env-file", "compose.env.example",
       "-f", "compose.yaml",
       "config", "--no-env-resolution", "--quiet",
-    ], { cwd: relative("infra/hetzner"), stdio: "inherit" });
+    ], {
+      cwd: relative("infra/hetzner"),
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        AIBRAIN_RUNTIME_ENV_FILE: "ci.env.placeholder",
+        AIBRAIN_EGRESS_ENV_FILE: "ci.env.placeholder",
+        AIBRAIN_ALERTS_ENV_FILE: "ci.env.placeholder",
+        AIBRAIN_REPLICA_ENV_FILE: "ci.env.placeholder",
+      },
+    });
     process.stdout.write("docker compose config: PASS\n");
   } catch {
     process.stderr.write("docker compose config: FAIL\n");
