@@ -185,7 +185,7 @@ export function LoginForm({
                 ? "Les dues identitats carreguen manifests, finestres, preferències i workspaces diferents."
                 : isSupabase
                   ? "Entra amb les credencials assignades a la teva instal·lació."
-                  : "Connecta Supabase per activar sessions, membres i permisos multi-tenant."}
+                  : "Configura Supabase Auth per verificar la identitat i emetre sessions locals."}
             </p>
           </div>
 

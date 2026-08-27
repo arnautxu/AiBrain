@@ -188,9 +188,7 @@ export function Sidebar({
       : runtimeStatus.mode === "demo"
         ? "Mode demostració"
         : "Codex no disponible";
-  const persistenceCopy = persistence === "supabase"
-    ? "Supabase"
-    : persistence === "browser-preview"
+  const persistenceCopy = persistence === "browser-preview"
       ? "Preview navegador"
       : "Servidor local";
 
