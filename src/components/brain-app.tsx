@@ -12,6 +12,7 @@ import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { LibraryPanel } from "@/components/library-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
+import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -432,6 +433,7 @@ export function BrainApp({
   });
   const [taskCenterBusy, setTaskCenterBusy] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
@@ -1604,6 +1606,7 @@ export function BrainApp({
       else if (memoryOpen) setMemoryOpen(false);
       else if (libraryOpen) setLibraryOpen(false);
       else if (taskCenterOpen) setTaskCenterOpen(false);
+      else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
       else if (activeSideWindow) setActiveSideWindow(null);
@@ -1621,6 +1624,7 @@ export function BrainApp({
     memoryOpen,
     libraryOpen,
     taskCenterOpen,
+    automationsOpen,
     mobileSidebarOpen,
     startNewThread,
     textDialog,
@@ -1654,6 +1658,7 @@ export function BrainApp({
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenLibrary={() => setLibraryOpen(true)}
         onOpenTaskCenter={() => setTaskCenterOpen(true)}
+        onOpenAutomations={() => setAutomationsOpen(true)}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onNewThread={startNewThread}
@@ -1787,6 +1792,12 @@ export function BrainApp({
         onMarkAllRead={markAllTasksRead}
         onPreferencesChange={(next) => void updateTaskCenter({ action: "preferences", preferences: next })}
         onRequestDesktopNotifications={() => void requestDesktopNotifications()}
+      />
+
+      <AutomationsPanel
+        open={automationsOpen}
+        projects={projects}
+        onClose={() => setAutomationsOpen(false)}
       />
 
       <CommandPalette

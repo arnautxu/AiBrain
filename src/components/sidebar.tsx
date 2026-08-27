@@ -5,6 +5,7 @@ import {
   Archive,
   Bell,
   Books,
+  CalendarBlank,
   CaretDown,
   CaretRight,
   ChatCircleDots,
@@ -57,6 +58,7 @@ type SidebarProps = {
   onOpenCommandPalette: () => void;
   onOpenLibrary: () => void;
   onOpenTaskCenter: () => void;
+  onOpenAutomations: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
   onNewThread: () => void;
@@ -191,6 +193,7 @@ export function Sidebar({
   onOpenCommandPalette,
   onOpenLibrary,
   onOpenTaskCenter,
+  onOpenAutomations,
   onSelectProject,
   onSelectThread,
   onNewThread,
@@ -324,6 +327,10 @@ export function Sidebar({
             <span className="min-w-0 flex-1 text-[13px]">Tareas</span>
             {taskSummary.running ? <SpinnerGap aria-label={`${taskSummary.running} ${taskSummary.running === 1 ? "tarea en curso" : "tareas en curso"}`} size={13} className="motion-safe:animate-spin" /> : null}
             {taskSummary.unread ? <span aria-label={`${taskSummary.unread} ${taskSummary.unread === 1 ? "tarea sin leer" : "tareas sin leer"}`} className="grid min-w-5 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[9px] font-bold leading-5 text-[var(--brain-contrast)]">{taskSummary.unread > 99 ? "99+" : taskSummary.unread}</span> : null}
+          </button>
+          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
+            <CalendarBlank size={17} />
+            <span className="min-w-0 flex-1 text-[13px]">Tareas programadas</span>
           </button>
         </nav>
 

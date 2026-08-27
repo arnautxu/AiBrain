@@ -36,6 +36,8 @@
     "backup:orchestrate": "node scripts/orchestrate-backup.mjs",
     "documents:maintain": "tsx scripts/maintain-document-temporaries.ts",
     "alerts:run": "tsx scripts/run-operational-alerts.ts",
+    "automations:worker": "tsx scripts/run-automations.ts",
+    "automations:once": "tsx scripts/run-automations.ts --once",
     "infra:validate": "node scripts/validate-infra.mjs",
     "infra:preflight": "node scripts/validate-host-preflight.mjs",
     "release:manage": "node scripts/manage-release.mjs"

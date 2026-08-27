@@ -1,7 +1,10 @@
 {
   "schemaVersion": 1,
   "operations": {
+    "DELETE /api/automations/{taskId}": "JsonObject",
     "GET /api/auth/session": "AuthSessionResponse",
+    "GET /api/automations": "JsonObject",
+    "GET /api/automations/{taskId}/runs": "JsonObject",
     "GET /api/health/live": "JsonObject",
     "GET /api/health/ready": "JsonObject",
     "GET /api/library": "JsonObject",
@@ -27,6 +30,7 @@
     "GET /api/usage/company": "CompanyUsageResponse",
     "GET /api/usage/me": "PersonalUsageResponse",
     "GET /api/workbench": "WorkbenchResponse",
+    "PATCH /api/automations/{taskId}": "JsonObject",
     "PATCH /api/projects/{projectId}": "JsonObject",
     "PATCH /api/settings": "JsonObject",
     "PATCH /api/task-center": "TaskCenterResponse",
@@ -36,6 +40,7 @@
     "POST /api/auth/password/change-initial": "JsonObject",
     "POST /api/auth/password/recovery": "JsonObject",
     "POST /api/auth/password/reset/request": "JsonObject",
+    "POST /api/automations": "JsonObject",
     "POST /api/chat": "stream:ChatStreamEvent",
     "POST /api/memory": "JsonObject",
     "POST /api/memory/{memoryId}/revoke": "JsonObject",

@@ -697,7 +697,9 @@ La UI debe habilitar selección/invocación según `models`, `skills` y `capabil
 
 ### 7.3 Superficies no publicadas
 
-V1 no publica rutas de onboarding, envío de invitaciones, control plane remoto o automatizaciones programadas. El panel de proyecto puede persistir roles declarativos simples y marcar miembros como `invited-local`, pero debe explicar que no se ha enviado nada y que la autorización efectiva sigue en la política server-side. No deben añadirse estados que simulen acceso remoto efectivo.
+V1 no publica rutas ni paneles de onboarding o control plane remoto. El panel de proyecto puede persistir roles declarativos simples y marcar miembros como `invited-local`, pero debe explicar que no se ha enviado nada y que la autorización efectiva sigue en la política server-side. No deben añadirse estados que simulen acceso remoto efectivo.
+
+Las automatizaciones programadas son locales y explícitas: `/api/automations` administra tareas privadas del empleado y el runner documentado en `docs/AUTOMATIONS.md` ejecuta sus prompts únicamente mientras ese proceso está vivo. La API y la UI muestran la señal real del worker; no prometen ejecución cloud, no envían mensajes externos por sí solas y conservan las aprobaciones normales del runtime.
 
 ## 8. Approvals
 
