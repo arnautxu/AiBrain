@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Copy,
   DownloadSimple,
+  DotsThree,
   FolderOpen,
   File as FileIcon,
   Globe,
@@ -21,6 +22,9 @@ import {
   Plus,
   GitBranch,
   MagicWand,
+  PencilSimple,
+  ArrowClockwise,
+  ShareNetwork,
   SidebarSimple,
   SlidersHorizontal,
   SpinnerGap,
@@ -90,6 +94,10 @@ type ChatWorkspaceProps = {
     decision: ApprovalDecision,
   ) => Promise<void>;
   onCreateVersion: (message: ChatMessage) => void;
+  onEditMessage: (message: ChatMessage, content: string) => void;
+  onRegenerate: (message: ChatMessage) => void;
+  onShareConversation: () => Promise<void>;
+  onExportConversation: (format: "markdown" | "json") => void;
   onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
   showAdvancedControls: boolean;
 };
@@ -173,7 +181,7 @@ function ComposerPicker({
   );
 }
 
-function ResultActions({ message, onCreateVersion, onResultAction }: { message: ChatMessage; onCreateVersion: () => void; onResultAction: (action: "approved" | "pending" | "undo") => Promise<void> }) {
+function ResultActions({ message, onCreateVersion, onRegenerate, onResultAction }: { message: ChatMessage; onCreateVersion: () => void; onRegenerate: () => void; onResultAction: (action: "approved" | "pending" | "undo") => Promise<void> }) {
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const approved = message.activity.some((item) => item.id === "result-review" && item.label === "Resultat aprovat");
@@ -200,7 +208,8 @@ function ResultActions({ message, onCreateVersion, onResultAction }: { message: 
       <button type="button" title={approved ? "Resultado aprobado" : "Aprobar resultado"} aria-label={approved ? "Resultado aprobado" : "Aprobar resultado"} disabled={busy} aria-pressed={approved} className={`result-action ${approved ? "text-[var(--positive)]" : ""}`} onClick={() => void review()}><CheckCircle size={14} weight={approved ? "fill" : "regular"} /></button>
       <button type="button" title="Copiar resultado" aria-label="Copiar resultado" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
       <button type="button" title="Descargar resultado" aria-label="Descargar resultado" className="result-action" onClick={downloadResult}><DownloadSimple size={14} /></button>
-      <button type="button" title="Crear una nueva versión" aria-label="Crear una nueva versión" className="result-action" onClick={onCreateVersion}><GitBranch size={14} /></button>
+      <button type="button" title="Regenerar respuesta" aria-label="Regenerar respuesta" className="result-action" onClick={onRegenerate}><ArrowClockwise size={14} /></button>
+      <button type="button" title="Crear rama desde aquí" aria-label="Crear rama desde aquí" className="result-action" onClick={onCreateVersion}><GitBranch size={14} /></button>
       {message.diff ? <button type="button" title="Deshacer cambios" aria-label="Deshacer cambios" className="result-action text-[var(--danger)]" onClick={() => void onResultAction("undo")}><ArrowUp size={14} className="rotate-[-90deg]" /></button> : null}
     </div>
   );
@@ -214,6 +223,7 @@ function AssistantMessage({
   canInspect,
   showInlineDiff,
   onCreateVersion,
+  onRegenerate,
   onResultAction,
   publications,
   onFreezePublication,
@@ -226,6 +236,7 @@ function AssistantMessage({
   canInspect: boolean;
   showInlineDiff: boolean;
   onCreateVersion: () => void;
+  onRegenerate: () => void;
   onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
   publications: DocumentPublicationDraft[];
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
@@ -270,7 +281,7 @@ function AssistantMessage({
         <DocumentPublicationCard key={draft.id} draft={draft} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
       ))}
 
-      {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
+      {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onRegenerate={onRegenerate} onResultAction={(action) => onResultAction(message, action)} /> : null}
 
       {hasDetails && canInspect ? (
         <button className="mt-2 flex min-h-9 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text-muted)] transition hover:text-[var(--text)]" onClick={onInspect}>
@@ -282,10 +293,13 @@ function AssistantMessage({
   );
 }
 
-function UserMessage({ message }: { message: ChatMessage }) {
+function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (content: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(message.content);
   return (
-    <article className="message-enter flex justify-end">
-      <div className="max-w-[86%] rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)] md:max-w-[70%]">
+    <article className="message-enter group flex justify-end">
+      <div className="max-w-[86%] md:max-w-[70%]">
+      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -295,7 +309,18 @@ function UserMessage({ message }: { message: ChatMessage }) {
             ))}
           </div>
         ) : null}
-        <div>{message.content}</div>
+        {editing ? (
+          <div>
+            <label className="sr-only" htmlFor={`edit-${message.id}`}>Editar mensaje</label>
+            <textarea id={`edit-${message.id}`} autoFocus value={value} maxLength={32_000} rows={Math.min(8, Math.max(2, value.split("\n").length))} className="w-full min-w-64 resize-y bg-transparent outline-none" onChange={(event) => setValue(event.target.value)} />
+            <div className="mt-2 flex justify-end gap-2 text-[12px]">
+              <button type="button" className="rounded-full px-3 py-1.5 hover:bg-black/5" onClick={() => { setValue(message.content); setEditing(false); }}>Cancelar</button>
+              <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--brain-accent)] px-3 py-1.5 font-semibold text-[var(--brain-contrast)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
+            </div>
+          </div>
+        ) : <div>{message.content}</div>}
+      </div>
+      {!editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label="Editar mensaje y crear una rama" title="Editar mensaje" onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
       </div>
     </article>
   );
@@ -346,6 +371,10 @@ export function ChatWorkspace({
   onInspectMessage,
   onResolveApproval,
   onCreateVersion,
+  onEditMessage,
+  onRegenerate,
+  onShareConversation,
+  onExportConversation,
   onResultAction,
   showAdvancedControls,
 }: ChatWorkspaceProps) {
@@ -360,6 +389,7 @@ export function ChatWorkspace({
   const [composerPickerOpen, setComposerPickerOpen] = useState<"mode" | "model" | "effort" | "skill" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
 
   useEffect(() => {
@@ -371,6 +401,15 @@ export function ChatWorkspace({
     shouldStickToBottomRef.current = true;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [thread?.id]);
+
+  useEffect(() => {
+    if (!conversationMenuOpen) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConversationMenuOpen(false);
+    };
+    document.addEventListener("keydown", close);
+    return () => document.removeEventListener("keydown", close);
+  }, [conversationMenuOpen]);
 
   useEffect(() => {
     const textarea = composerRef.current;
@@ -510,7 +549,13 @@ export function ChatWorkspace({
           </button>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="relative flex items-center gap-1">
+          {thread ? <button type="button" aria-label="Acciones de conversación" aria-haspopup="menu" aria-expanded={conversationMenuOpen} className="touch-target rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => setConversationMenuOpen((open) => !open)}><DotsThree size={18} weight="bold" /></button> : null}
+          {thread && conversationMenuOpen ? <div role="menu" aria-label="Acciones de conversación" className="menu-enter absolute right-0 top-full z-50 mt-1 w-56 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]">
+            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); void onShareConversation(); }}><ShareNetwork size={15} />Compartir copia interna</button>
+            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); onExportConversation("markdown"); }}><DownloadSimple size={15} />Exportar como Markdown</button>
+            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); onExportConversation("json"); }}><DownloadSimple size={15} />Exportar como JSON</button>
+          </div> : null}
           <button aria-label="Abrir preferencias" className="touch-target rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
             <SlidersHorizontal size={16} />
           </button>
@@ -530,7 +575,7 @@ export function ChatWorkspace({
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
               {thread?.messages.map((message) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
-                  {message.role === "user" ? <UserMessage message={message} /> : (
+                  {message.role === "user" ? <UserMessage message={message} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
                       showActivity={preferences.showActivityPanel}
@@ -539,6 +584,7 @@ export function ChatWorkspace({
                       canInspect={canInspect}
                       showInlineDiff={activeSideWindow !== "inspector"}
                       onCreateVersion={() => onCreateVersion(message)}
+                      onRegenerate={() => onRegenerate(message)}
                       onResultAction={onResultAction}
                       publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
                       onFreezePublication={onFreezePublication}

@@ -50,6 +50,7 @@ import {
   type RuntimeStatus,
 } from "@/lib/runtime-status";
 import {
+  branchThreadRequest,
   createProjectRequest,
   createThreadRequest,
   updateProjectRequest,
@@ -58,6 +59,7 @@ import {
 import {
   isWorkbenchSnapshot,
   STANDALONE_PROJECT_SLUG,
+  type BranchThreadInput,
   type UpdateProjectInput,
   type UpdateThreadInput,
   type WorkbenchProject,
@@ -310,6 +312,33 @@ function localThread(projectId: string, title: string): WorkbenchThread {
   };
 }
 
+function localBranchThread(parent: WorkbenchThread, input: BranchThreadInput) {
+  const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
+  const target = parent.messages[targetIndex];
+  if (!target) throw new Error("No se ha encontrado el mensaje.");
+  let prefixEnd = targetIndex;
+  let draftMessage: string | null = null;
+  if (input.kind === "edit") {
+    if (target.role !== "user" || !input.editedContent?.trim()) throw new Error("Este mensaje no se puede editar.");
+    prefixEnd = targetIndex - 1;
+    draftMessage = input.editedContent.trim();
+  } else if (input.kind === "retry") {
+    const userIndex = parent.messages.findLastIndex((message, index) => index < targetIndex && message.role === "user");
+    if (target.role !== "assistant" || userIndex < 0) throw new Error("Esta respuesta no se puede regenerar.");
+    prefixEnd = userIndex - 1;
+    draftMessage = parent.messages[userIndex].content;
+  } else if (target.role !== "assistant") throw new Error("La rama debe partir de una respuesta.");
+  const suffix = input.kind === "edit" ? "editada" : input.kind === "retry" ? "regenerada" : "rama";
+  return {
+    thread: {
+      ...localThread(parent.projectId, `${parent.title.replace(/ · (?:editada|regenerada|rama)$/u, "")} · ${suffix}`.slice(0, 120)),
+      messages: structuredClone(parent.messages.slice(0, prefixEnd + 1)),
+      lineage: { parentThreadId: parent.id, branchedFromMessageId: target.id, kind: input.kind },
+    },
+    draftMessage,
+  };
+}
+
 async function chatError(response: Response) {
   const body: unknown = await response.json().catch(() => null);
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
@@ -373,6 +402,7 @@ export function BrainApp({
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const threadByProjectRef = useRef<Record<string, string>>({});
   const turnControllersRef = useRef(new Map<string, {
     assistantMessageId: string;
@@ -611,34 +641,6 @@ export function BrainApp({
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
   }, [activeProjectId, documentUploading, projects]);
-
-  const createVersionFromMessage = useCallback(async (message: ChatMessage) => {
-    if (!activeProject || sending || actionBusy || !message.content.trim()) return;
-    setActionBusy(true);
-    try {
-      const baseTitle = activeThread?.title ?? "Resultado";
-      const title = `${baseTitle.replace(/ · (?:nova versió|nueva versión)$/, "")} · nueva versión`.slice(0, 120);
-      const thread = initialWorkbench.persistence === "browser-preview"
-        ? localThread(activeProject.id, title)
-        : await createThreadRequest(activeProject.id, title);
-      setThreads((current) => [thread, ...current]);
-      setActiveThreadId(thread.id);
-      threadByProjectRef.current[activeProject.id] = thread.id;
-      setSelectedMessageId(null);
-      setPrompt([
-        "Quiero crear una nueva versión de este resultado. Pregúntame qué quiero cambiar.",
-      ].join("\n"));
-      setPendingRuntimeContext(`Resultado de partida que debe conservarse intacto:\n\n${message.content.slice(0, 12_000)}`);
-      setAttachments([]);
-      setDocuments([]);
-      setActiveSideWindow(null);
-      setNotice("Nueva versión preparada en una conversación separada. El original se conserva.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido preparar una nueva versión.");
-    } finally {
-      setActionBusy(false);
-    }
-  }, [actionBusy, activeProject, activeThread?.title, initialWorkbench.persistence, sending]);
 
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
@@ -955,6 +957,80 @@ export function BrainApp({
     }
     return succeeded;
   }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+
+  const branchConversation = useCallback(async (
+    message: ChatMessage,
+    input: BranchThreadInput,
+    autoSend: boolean,
+  ) => {
+    if (!activeThread || sending || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const result = initialWorkbench.persistence === "browser-preview"
+        ? localBranchThread(activeThread, input)
+        : await branchThreadRequest(activeThread.id, input);
+      setThreads((current) => [result.thread, ...current]);
+      setActiveProjectId(result.thread.projectId);
+      setActiveThreadId(result.thread.id);
+      threadByProjectRef.current[result.thread.projectId] = result.thread.id;
+      setSelectedMessageId(null);
+      setPrompt(result.draftMessage ?? "");
+      setPendingRuntimeContext(null);
+      setAttachments([]);
+      setDocuments([]);
+      setActiveSideWindow(null);
+      if (autoSend && result.draftMessage) {
+        setPendingBranchSend({ threadId: result.thread.id, content: result.draftMessage });
+      } else {
+        setNotice("Rama creada. La conversación original se conserva intacta.");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido crear la rama.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeThread, initialWorkbench.persistence, sending]);
+
+  useEffect(() => {
+    if (!pendingBranchSend || pendingBranchSend.threadId !== activeThreadId || sending || actionBusy) return;
+    const pending = pendingBranchSend;
+    setPendingBranchSend(null);
+    void sendMessage(pending.content);
+  }, [actionBusy, activeThreadId, pendingBranchSend, sendMessage, sending]);
+
+  const shareConversation = useCallback(async () => {
+    if (!activeThread || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const response = await fetch(`/api/threads/${encodeURIComponent(activeThread.id)}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body: unknown = await response.json().catch(() => null);
+      const url = body && typeof body === "object" && "share" in body && body.share &&
+        typeof body.share === "object" && "url" in body.share && typeof body.share.url === "string"
+        ? body.share.url : null;
+      if (!response.ok || !url) throw new Error("No se ha podido crear la copia interna.");
+      const absolute = new URL(url, window.location.origin).toString();
+      await navigator.clipboard.writeText(absolute);
+      setNotice("Enlace interno copiado. Solo funciona para personas autenticadas de la empresa.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido compartir la conversación.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeThread]);
+
+  const exportConversation = useCallback((format: "markdown" | "json") => {
+    if (!activeThread) return;
+    const link = document.createElement("a");
+    link.href = `/api/threads/${encodeURIComponent(activeThread.id)}/export?format=${format}`;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [activeThread]);
 
   const stopActiveTurn = useCallback(async () => {
     const activeRun = activeThread ? turnControllersRef.current.get(activeThread.id) : null;
@@ -1363,7 +1439,11 @@ export function BrainApp({
         canInspect={inspectorEnabled}
         onInspectMessage={inspectMessage}
         onResolveApproval={resolveApproval}
-        onCreateVersion={(message) => void createVersionFromMessage(message)}
+        onCreateVersion={(message) => void branchConversation(message, { kind: "branch", messageId: message.id }, false)}
+        onEditMessage={(message, content) => void branchConversation(message, { kind: "edit", messageId: message.id, editedContent: content }, true)}
+        onRegenerate={(message) => void branchConversation(message, { kind: "retry", messageId: message.id }, true)}
+        onShareConversation={shareConversation}
+        onExportConversation={exportConversation}
         onResultAction={persistResultAction}
         showAdvancedControls
       />

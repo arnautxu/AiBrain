@@ -3,6 +3,7 @@ import { isChatMessage } from "@/lib/chat-contract";
 
 export type ProjectStatus = "active" | "archived";
 export type ThreadStatus = "active" | "archived";
+export type ThreadBranchKind = "edit" | "retry" | "branch";
 export type WorkspaceStatus = "ready" | "pending" | "unavailable";
 export type WorkbenchPersistence = "filesystem" | "filesystem-demo" | "browser-preview";
 export type ProjectVisibility = "private" | "shared";
@@ -82,6 +83,12 @@ export type WorkbenchThread = {
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
+  /** Present only for conversations created from a specific point in another conversation. */
+  lineage?: {
+    parentThreadId: string;
+    branchedFromMessageId: string;
+    kind: ThreadBranchKind;
+  } | null;
 };
 
 export type WorkbenchThreadSummary = Omit<WorkbenchThread, "messages"> & {
@@ -128,6 +135,17 @@ export type UpdateThreadInput = {
   title?: string;
   pinned?: boolean;
   status?: ThreadStatus;
+};
+
+export type BranchThreadInput = {
+  kind: ThreadBranchKind;
+  messageId: string;
+  editedContent?: string;
+};
+
+export type BranchThreadResult = {
+  thread: WorkbenchThread;
+  draftMessage: string | null;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -220,6 +238,7 @@ export function isWorkbenchProject(value: unknown): value is WorkbenchProject {
 
 export function isWorkbenchThread(value: unknown): value is WorkbenchThread {
   if (!isRecord(value)) return false;
+  const lineage = value.lineage;
   return isUuid(value.id) &&
     isUuid(value.projectId) &&
     isThreadTitle(value.title) &&
@@ -228,7 +247,12 @@ export function isWorkbenchThread(value: unknown): value is WorkbenchThread {
     isIsoDate(value.createdAt) &&
     isIsoDate(value.updatedAt) &&
     Array.isArray(value.messages) &&
-    value.messages.every(isChatMessage);
+    value.messages.every(isChatMessage) &&
+    (lineage === undefined || lineage === null || (
+      isRecord(lineage) && Object.keys(lineage).length === 3 &&
+      isUuid(lineage.parentThreadId) && isUuid(lineage.branchedFromMessageId) &&
+      (lineage.kind === "edit" || lineage.kind === "retry" || lineage.kind === "branch")
+    ));
 }
 
 export function isWorkbenchThreadSummary(value: unknown): value is WorkbenchThreadSummary {
@@ -237,13 +261,29 @@ export function isWorkbenchThreadSummary(value: unknown): value is WorkbenchThre
     "id", "projectId", "title", "status", "pinned", "createdAt", "updatedAt",
     "messageCount", "lastMessageAt",
   ];
-  if (Object.keys(value).length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))) {
+  if (Object.keys(value).some((key) => ![...keys, "lineage"].includes(key)) ||
+    keys.some((key) => !Object.hasOwn(value, key))) {
     return false;
   }
   const { messageCount, lastMessageAt, ...thread } = value;
   return isWorkbenchThread({ ...thread, messages: [] }) &&
     Number.isSafeInteger(messageCount) && (messageCount as number) >= 0 &&
     (lastMessageAt === null || isIsoDate(lastMessageAt));
+}
+
+export function isBranchThreadInput(value: unknown): value is BranchThreadInput {
+  if (!isRecord(value)) return false;
+  const allowed = value.kind === "edit"
+    ? ["kind", "messageId", "editedContent"]
+    : ["kind", "messageId"];
+  if (Object.keys(value).length !== allowed.length ||
+    Object.keys(value).some((key) => !allowed.includes(key))) return false;
+  if (!(value.kind === "edit" || value.kind === "retry" || value.kind === "branch") ||
+    !isUuid(value.messageId)) return false;
+  return value.kind !== "edit" || (
+    typeof value.editedContent === "string" && value.editedContent.trim().length > 0 &&
+    value.editedContent.length <= 32_000 && !/\p{C}/u.test(value.editedContent)
+  );
 }
 
 export function isWorkbenchPage<Item>(

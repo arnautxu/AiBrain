@@ -173,6 +173,52 @@ describe("FileWorkbenchStore", () => {
     });
   });
 
+  it("creates durable conversation branches with exact lineage and complete prior context", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Branch project");
+    const parent = await store.createThread(USER_A, project.id, "Original conversation");
+    const firstUser = { ...message("user", "complete"), content: "First request" };
+    const longResult = `${"A".repeat(13_500)}-END-OF-FULL-RESULT`;
+    const firstAssistant = { ...message("assistant", "complete"), content: longResult };
+    const secondUser = { ...message("user", "complete"), content: "Second request" };
+    const secondAssistant = { ...message("assistant", "complete"), content: "Second result" };
+    await store.beginThreadTurn(USER_A, parent.id, firstUser, firstAssistant);
+    await store.beginThreadTurn(USER_A, parent.id, secondUser, secondAssistant);
+
+    const edited = await store.branchThread(USER_A, parent.id, {
+      kind: "edit", messageId: secondUser.id, editedContent: "Edited second request",
+    });
+    expect(edited).toMatchObject({
+      draftMessage: "Edited second request",
+      thread: {
+        lineage: { parentThreadId: parent.id, branchedFromMessageId: secondUser.id, kind: "edit" },
+        messages: [{ id: firstUser.id }, { id: firstAssistant.id }],
+      },
+    });
+    const context = await store.getThreadRuntimeContext(USER_A, edited.thread.id);
+    expect(context.branchHistory).toContain("-END-OF-FULL-RESULT");
+    expect(context.branchHistory?.length).toBeGreaterThan(13_500);
+
+    const retried = await store.branchThread(USER_A, parent.id, {
+      kind: "retry", messageId: secondAssistant.id,
+    });
+    expect(retried.draftMessage).toBe("Second request");
+    expect(retried.thread.messages.map((item) => item.id)).toEqual([firstUser.id, firstAssistant.id]);
+
+    const continued = await store.branchThread(USER_A, parent.id, {
+      kind: "branch", messageId: firstAssistant.id,
+    });
+    expect(continued.draftMessage).toBeNull();
+    expect(continued.thread.messages.map((item) => item.id)).toEqual([firstUser.id, firstAssistant.id]);
+    expect((await store.getThread(USER_A, parent.id)).messages).toHaveLength(4);
+
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    await expect(restarted.getThread(USER_A, edited.thread.id)).resolves.toMatchObject({
+      lineage: { parentThreadId: parent.id, branchedFromMessageId: secondUser.id, kind: "edit" },
+    });
+    await expect(restarted.getThread(USER_B, edited.thread.id)).rejects.toBeInstanceOf(WorkbenchNotFoundError);
+  });
+
   it("provisions the hidden standalone-chat workspace and persists projects, threads, turns, activity and runtime token across restart", async () => {
     const { usersRoot, store } = await fixture();
     const initial = await store.load(USER_A);
