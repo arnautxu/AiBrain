@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `016f708` en
+- Último checkpoint backend publicado: `78972d3` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -44,7 +44,7 @@
 | 4. Provisionamiento idempotente + 20 usuarios | Completado localmente | `75316e1`, `545948a`, `323243b`, `d74a800`: alta real de 20 empleados, baja/reactivación/recuperación idempotentes, revocación de sesiones, parada selectiva de worker/browser, receipts y auditoría sin datos sensibles |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | Reabierto por auditoría estricta | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`: las piezas aisladas están probadas; falta una aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket reales con approval, stop y crash/reconnect |
+| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
 | 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`: staging queda server-only, Codex recibe inputs preparados sin paths y el lock físico de target es global por instalación; faltan retención/backpressure, sandbox del conversor y backup documental |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`: Auth y contrato ya no tienen roles; retirados build/routes/paneles de onboarding, invitaciones, control plane, automations y Runtime técnico; falta hacer ejecutables los schemas/ejemplos HTTP restantes |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c` y la exclusión/recovery multiproceso de locks en `016f708`. La siguiente acción concreta es construir la aceptación WebSocket conjunta 2 usuarios × 2 threads con approval, stop y crash/reconnect.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708` y la aceptación conjunta multiusuario en `78972d3`. La siguiente acción concreta es elevar la continuidad sin Supabase desde test de servicio a un E2E HTTP con cookie local ya emitida.
 
 ## Decisiones menores registradas
 
@@ -78,6 +78,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Cada delta, snapshot, actividad, approval y terminal de un turn se proyecta atómicamente antes de confirmar su secuencia de transporte; el workbench recompone mensajes aún activos tras refresh o restart.
 - Las peticiones de App Server usan IDs estables por operación y mensaje UI. Un retry inspecciona el historial del thread mediante `clientUserMessageId` y no emite un segundo `turn/start` cuando Codex ya conoce el turn.
 - Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
+- La aceptación integrada arranca dos procesos App Server sintéticos detrás de dos gateways WebSocket autenticados y cuatro turns simultáneos. Una approval de usuario 1 queda pendiente mientras usuario 1/thread 2 y ambos threads de usuario 2 avanzan; el stop de usuario 2/thread 1 no detiene el otro thread; el crash/replay del worker 1 no duplica su delta ni afecta al worker 2.
 - Steering y stop reciben únicamente IDs locales de UI: el servidor obtiene los IDs App Server desde la proyección vinculada al usuario, exige `expectedTurnId`, persiste la aceptación antes del ACK y cancela los waiters locales después de una interrupción confirmada.
 - Los uploads aceptan un único `File + uploadId`, no aceptan raíces ni paths del navegador, revalidan propiedad del thread y generan previews bajo estado privado. El publicador deriva candidato/preview/target desde estado server-side y exige `documents.publish=allow` para freeze/confirm; decline sigue disponible para cerrar una operación pendiente.
 - Los uploads staged no se montan en el worker ni se añaden a `runtimeWorkspaceRoots`: el servidor prepara texto UTF-8 o texto/primera página desde el PDF atestado y entrega data URLs acotadas. Codex solo conserva `staging/tmp` para temporales privados y nunca recibe un path de upload.
@@ -256,6 +257,11 @@ las acciones externas autorizadas.
   pasadas + 3 omitidas; build Next 16.3.2 verde.
 - Push verificado: `04801ee..016f708` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Aceptación multiusuario `78972d3`: escenario integrado 1/1 verde en 3,24 s;
+  typecheck y lint verdes; regresión conjunta crash/recovery 2/2; suite completa
+  85 ficheros pasados + 1 opt-in omitido, 386 pruebas pasadas + 3 omitidas.
+- Push verificado: `31eb34a..78972d3` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -268,7 +274,7 @@ las acciones externas autorizadas.
 | Sin roles/control/onboarding/automations | Auth role-free, UI sin panel Runtime y rutas rechazadas eliminadas | Contract test 2/2, build de 38 rutas y E2E 3/3 |
 | Sesión/worker/workspace/staging/browser independientes | `WorkerRuntimeRegistry` y layout por usuario | Tests de workers, browser, cookies, archivos y symlinks cross-user |
 | WebSocket privado resiliente | Gateway loopback autenticado, journal, ACK/replay/dedupe/backoff | 20 pruebas gateway/router, crash/restart y soak con 28 replays |
-| Concurrencia sin mezcla | Routing por instalación+usuario+thread+turn+item | Tests concurrentes, approval pendiente y stop aislado |
+| Concurrencia sin mezcla | Routing por instalación+usuario+thread+turn+item | Aceptación real 2 users × 2 threads: approval, stop, crash/replay/restart y cero mezcla |
 | Supabase solo Auth | Identity provider único; estado de producto filesystem y contrato sin modo de persistencia Supabase | Contract test 6/6 y continuidad workbench con provider offline |
 | Persistencia tras refresh/restart | Stores versionados, atomic/fsync, locks, journal e índices | E2E HTTP reiniciado, 10/10 locks focalizadas y tres escenarios en procesos hijos reales |
 | `PERMISSIONS.md` server-side | Provider Markdown read-only y fingerprint por turn | 31 tests focalizados y auditoría durable |
