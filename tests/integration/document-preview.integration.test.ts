@@ -20,6 +20,10 @@ const hasToolchain = Object.values(tools).every(existsSync);
 const runFullMatrix = hasToolchain && process.env.AIBRAIN_REAL_DOCUMENT_MATRIX === "1";
 const roots: string[] = [];
 
+function isolatedLibreOfficeProfile(root: string, name: string): string {
+  return `-env:UserInstallation=file://${path.join(root, name)}`;
+}
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -30,6 +34,7 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
   const sourceText = path.join(root, "source.txt");
   await writeFile(sourceText, "AiBrain document preview integration\n", "utf8");
   await run(tools.soffice, [
+    isolatedLibreOfficeProfile(root, "lo-profile-docx-fixture"),
     "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
     "--convert-to", "docx", "--outdir", root, sourceText,
   ], { timeout: 30_000 });
@@ -74,10 +79,12 @@ it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with t
     writeFile(textPath, "AiBrain text preview\n", "utf8"),
   ]);
   await run(tools.soffice, [
+    isolatedLibreOfficeProfile(root, "lo-profile-xlsx-fixture"),
     "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
     "--convert-to", "xlsx", "--outdir", root, csvPath,
   ], { timeout: 30_000 });
   await run(tools.soffice, [
+    isolatedLibreOfficeProfile(root, "lo-profile-pdf-fixture"),
     "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
     "--convert-to", "pdf", "--outdir", root, textPath,
   ], { timeout: 30_000 });
