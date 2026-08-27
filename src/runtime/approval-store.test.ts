@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { isApprovalResolutionRequest, type ApprovalItem } from "@/lib/chat-contract";
+import { isApprovalItem, isApprovalResolutionRequest, type ApprovalItem } from "@/lib/chat-contract";
 import {
   FileApprovalStore,
   approvalLocatorFromItem,
@@ -220,6 +220,11 @@ describe("FileApprovalStore", () => {
   });
 
   it("requires the complete routing tuple in the browser decision contract", () => {
+    expect(isApprovalItem({
+      ...approval("approval-browser", "thread-browser", "turn-browser", "item-browser"),
+      kind: "browser",
+      permissionFingerprint: "a".repeat(64),
+    })).toBe(true);
     expect(isApprovalResolutionRequest({
       approvalId: "approval-contract",
       threadId: "thread-contract",

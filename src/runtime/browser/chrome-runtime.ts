@@ -4,8 +4,10 @@ import { spawn, type SpawnOptions } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import path from "node:path";
 import type {
+  BrowserDownloadSnapshot,
   BrowserFrame,
   BrowserInputCommand,
+  BrowserPageSnapshot,
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
   BrowserRuntimeHealth,
@@ -17,6 +19,7 @@ import {
   type PrivateCdpClientOptions,
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
+import { BrowserEgressProxy } from "@/runtime/browser/egress-proxy";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/u;
@@ -25,6 +28,10 @@ const MAX_INTERCEPTED_REQUESTS = 64;
 const MAX_QUARANTINE_ENTRIES = 1_024;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const MAX_PAGE_TEXT_CHARS = 20_000;
+const MAX_SELECTOR_BYTES = 1_000;
+const MAX_TYPE_TEXT_BYTES = 32_000;
+const MAX_LISTED_DOWNLOADS = 100;
 
 export class ChromeRuntimeError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {
@@ -193,7 +200,29 @@ function validateExpectedVersion(expectedVersion: string | undefined) {
   return normalized;
 }
 
-export function buildChromeArguments(context: BrowserRuntimeContext) {
+function normalizePrivateProxyUrl(value: string | null) {
+  if (value === null) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch (error) {
+    throw new ChromeRuntimeError("CHROME_PROXY_URL_INVALID", "Chrome proxy URL is invalid.", { cause: error });
+  }
+  const port = Number(parsed.port);
+  if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" ||
+    !Number.isSafeInteger(port) || port < 1 || port > 65_535 ||
+    parsed.username || parsed.password || parsed.pathname !== "/" ||
+    parsed.search || parsed.hash) {
+    throw new ChromeRuntimeError(
+      "CHROME_PROXY_URL_INVALID",
+      "Chrome proxy must be an unauthenticated ephemeral IPv4 loopback URL.",
+    );
+  }
+  return parsed.origin;
+}
+
+export function buildChromeArguments(context: BrowserRuntimeContext, egressProxyUrl: string | null) {
+  const proxyUrl = normalizePrivateProxyUrl(egressProxyUrl);
   const args = [
     "--headless=new",
     "--remote-debugging-pipe",
@@ -204,14 +233,22 @@ export function buildChromeArguments(context: BrowserRuntimeContext) {
     "--disable-component-update",
     "--disable-default-apps",
     "--disable-extensions",
+    "--disable-quic",
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
     "--disable-sync",
     "--metrics-recording-only",
     "--mute-audio",
     "--password-store=basic",
     "--use-mock-keychain",
     "--window-size=1440,900",
-    "about:blank",
   ];
+  if (proxyUrl) {
+    args.push(
+      `--proxy-server=${proxyUrl}`,
+      "--proxy-bypass-list=<-loopback>",
+    );
+  }
+  args.push("about:blank");
   if (args.includes("--no-sandbox") || args.some((argument) => argument.includes("docker.sock"))) {
     throw new ChromeRuntimeError("CHROME_ARGUMENTS_UNSAFE", "Unsafe Chrome launch arguments are forbidden.");
   }
@@ -296,6 +333,21 @@ function validateThreadId(threadId: string) {
   return threadId;
 }
 
+function validateSelector(selector: string) {
+  if (typeof selector !== "string" || selector.length < 1 ||
+    Buffer.byteLength(selector, "utf8") > MAX_SELECTOR_BYTES || /[\u0000-\u001f\u007f]/u.test(selector)) {
+    throw new ChromeRuntimeError("CHROME_SELECTOR_INVALID", "Browser selector is invalid.");
+  }
+  return selector;
+}
+
+function validateTypedText(text: string) {
+  if (typeof text !== "string" || Buffer.byteLength(text, "utf8") > MAX_TYPE_TEXT_BYTES || text.includes("\0")) {
+    throw new ChromeRuntimeError("CHROME_TEXT_INVALID", "Browser input text is invalid.");
+  }
+  return text;
+}
+
 async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -311,6 +363,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private readonly spawnProcess: NonNullable<RuntimeDependencies["spawnProcess"]>;
   private readonly connectCdpPipe: NonNullable<RuntimeDependencies["connectCdpPipe"]>;
   private readonly networkPolicy: BrowserNetworkPolicy;
+  private readonly egressProxy: BrowserEgressProxy | null;
   private readonly now: () => number;
   private process: ChromeProcess | null = null;
   private browserClient: CdpClientLike | null = null;
@@ -349,6 +402,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.networkPolicy = options.networkPolicy ?? new BrowserNetworkPolicy({
       allowPrivateNetwork: options.allowPrivateNetwork,
     });
+    // The local-network override exists only for real, synthetic browser tests
+    // and BrowserNetworkPolicy rejects it in production. All normal runtimes
+    // share this exact policy with their per-user DNS-pinning egress proxy.
+    this.egressProxy = options.allowPrivateNetwork
+      ? null
+      : new BrowserEgressProxy({ networkPolicy: this.networkPolicy });
     this.now = options.now ?? Date.now;
   }
 
@@ -381,6 +440,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       return { healthy: false, detail: "Chrome process or private CDP connection is not running." };
     }
     try {
+      if (this.egressProxy) {
+        const proxy = await this.egressProxy.health();
+        if (!proxy.healthy) {
+          return { healthy: false, detail: `Chrome pinned egress proxy is unavailable: ${proxy.detail}` };
+        }
+      }
       if (this.lastDownloadFailure) {
         return { healthy: false, detail: `Chrome download routing failed: ${this.lastDownloadFailure}` };
       }
@@ -389,7 +454,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       if (current !== this.browserVersion) {
         return { healthy: false, detail: "Chrome version changed during the runtime session." };
       }
-      return { healthy: true, detail: `Chrome ${current} on a private inherited CDP pipe.` };
+      return {
+        healthy: true,
+        detail: this.egressProxy
+          ? `Chrome ${current} on a private inherited CDP pipe with pinned loopback egress.`
+          : `Chrome ${current} on a private inherited CDP pipe with the development private-network override.`,
+      };
     } catch {
       return { healthy: false, detail: "Chrome private CDP health check failed." };
     }
@@ -418,11 +488,28 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     });
   }
 
+  async agentCaptureFrame(threadId: string): Promise<BrowserFrame> {
+    this.assertAgentControl();
+    const frame = await this.captureFrame(threadId);
+    this.assertAgentControl();
+    return frame;
+  }
+
   async navigate(threadId: string, url: string) {
     this.assertHumanControl();
+    await this.navigatePage(threadId, url, () => this.assertHumanControl());
+  }
+
+  async agentNavigate(threadId: string, url: string) {
+    this.assertAgentControl();
+    await this.navigatePage(threadId, url, () => this.assertAgentControl());
+  }
+
+  private async navigatePage(threadId: string, url: string, assertController: () => void) {
     const destination = validateBrowserNavigationUrl(url);
     await this.networkPolicy.assertAllowed(destination);
     const page = await this.requireThreadPage(threadId);
+    assertController();
     const result = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
       url: destination,
     }, { sessionId: page.sessionId });
@@ -455,6 +542,150 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       text: command.text ?? "",
       modifiers: command.modifiers ?? 0,
     }, { sessionId: page.sessionId });
+  }
+
+  async readPage(threadId: string): Promise<BrowserPageSnapshot> {
+    this.assertAgentControl();
+    const page = await this.requireThreadPage(threadId);
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `(() => ({url: location.href, title: document.title, text: (document.body?.innerText ?? document.documentElement?.innerText ?? "").slice(0, ${MAX_PAGE_TEXT_CHARS})}))()`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    if (evaluated.exceptionDetails || !evaluated.result ||
+      !evaluated.result.value || typeof evaluated.result.value !== "object" ||
+      Array.isArray(evaluated.result.value)) {
+      throw new ChromeRuntimeError("CHROME_PAGE_READ_FAILED", "Chrome could not return a safe page snapshot.");
+    }
+    const value = evaluated.result.value as Record<string, unknown>;
+    this.assertAgentControl();
+    if (typeof value.url !== "string" || value.url.length > 8_192 ||
+      typeof value.title !== "string" || value.title.length > 1_000 ||
+      typeof value.text !== "string" || value.text.length > MAX_PAGE_TEXT_CHARS) {
+      throw new ChromeRuntimeError("CHROME_PAGE_READ_FAILED", "Chrome returned an invalid page snapshot.");
+    }
+    return Object.freeze({ schemaVersion: 1, url: value.url, title: value.title, text: value.text });
+  }
+
+  async listTabs(threadId: string) {
+    const page = await this.readPage(threadId);
+    return Object.freeze([Object.freeze({
+      id: threadId,
+      url: page.url,
+      title: page.title,
+      active: true as const,
+    })]);
+  }
+
+  async listDownloads(threadId: string): Promise<readonly BrowserDownloadSnapshot[]> {
+    this.assertAgentControl();
+    validateThreadId(threadId);
+    const downloadsPath = await this.ensureThreadDownloadsPath(threadId);
+    const names = (await readdir(downloadsPath)).sort().slice(0, MAX_LISTED_DOWNLOADS);
+    const downloads: BrowserDownloadSnapshot[] = [];
+    for (const fileName of names) {
+      if (fileName === "." || fileName === ".." || path.basename(fileName) !== fileName ||
+        /[\\/\u0000-\u001f\u007f]/u.test(fileName)) continue;
+      const metadata = await lstat(path.join(downloadsPath, fileName));
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+        (metadata.mode & 0o022) !== 0) continue;
+      downloads.push(Object.freeze({ fileName, sizeBytes: metadata.size }));
+    }
+    this.assertAgentControl();
+    return Object.freeze(downloads);
+  }
+
+  async agentScroll(threadId: string, deltaX: number, deltaY: number) {
+    this.assertAgentControl();
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) ||
+      Math.abs(deltaX) > 5_000 || Math.abs(deltaY) > 5_000 || (deltaX === 0 && deltaY === 0)) {
+      throw new ChromeRuntimeError("CHROME_SCROLL_INVALID", "Browser scroll delta is invalid.");
+    }
+    const page = await this.requireThreadPage(threadId);
+    this.assertAgentControl();
+    await this.requireBrowser().send("Input.dispatchMouseEvent", {
+      type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
+    }, { sessionId: page.sessionId });
+  }
+
+  async agentClick(threadId: string, selector: string) {
+    this.assertAgentControl();
+    const page = await this.requireThreadPage(threadId);
+    const nodeId = await this.querySelector(page, validateSelector(selector));
+    const result = await this.requireBrowser().send<{
+      model?: { border?: number[] };
+    }>("DOM.getBoxModel", { nodeId }, { sessionId: page.sessionId });
+    const border = result.model?.border;
+    if (!Array.isArray(border) || border.length !== 8 || !border.every(Number.isFinite)) {
+      throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_VISIBLE", "Browser element is not visible.");
+    }
+    const x = (border[0] + border[2] + border[4] + border[6]) / 4;
+    const y = (border[1] + border[3] + border[5] + border[7]) / 4;
+    this.assertAgentControl();
+    const browser = this.requireBrowser();
+    await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, { sessionId: page.sessionId });
+    this.assertAgentControl();
+    await browser.send("Input.dispatchMouseEvent", {
+      type: "mousePressed", x, y, button: "left", clickCount: 1,
+    }, { sessionId: page.sessionId });
+    this.assertAgentControl();
+    await browser.send("Input.dispatchMouseEvent", {
+      type: "mouseReleased", x, y, button: "left", clickCount: 1,
+    }, { sessionId: page.sessionId });
+  }
+
+  async agentType(threadId: string, selector: string, text: string, clear: boolean) {
+    this.assertAgentControl();
+    const page = await this.requireThreadPage(threadId);
+    const nodeId = await this.querySelector(page, validateSelector(selector));
+    validateTypedText(text);
+    this.assertAgentControl();
+    const browser = this.requireBrowser();
+    await browser.send("DOM.focus", { nodeId }, { sessionId: page.sessionId });
+    if (clear) {
+      this.assertAgentControl();
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyDown", key: "a", code: "KeyA", modifiers: 2,
+      }, { sessionId: page.sessionId });
+      this.assertAgentControl();
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyUp", key: "a", code: "KeyA", modifiers: 2,
+      }, { sessionId: page.sessionId });
+      this.assertAgentControl();
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyDown", key: "Backspace", code: "Backspace",
+      }, { sessionId: page.sessionId });
+      this.assertAgentControl();
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyUp", key: "Backspace", code: "Backspace",
+      }, { sessionId: page.sessionId });
+    }
+    this.assertAgentControl();
+    await browser.send("Input.insertText", { text }, { sessionId: page.sessionId });
+  }
+
+  private async querySelector(page: ThreadPage, selector: string) {
+    const browser = this.requireBrowser();
+    const document = await browser.send<{ root?: { nodeId?: number } }>("DOM.getDocument", {
+      depth: 0,
+      pierce: false,
+    }, { sessionId: page.sessionId });
+    const rootNodeId = document.root?.nodeId;
+    if (!Number.isSafeInteger(rootNodeId) || (rootNodeId as number) < 1) {
+      throw new ChromeRuntimeError("CHROME_DOCUMENT_INVALID", "Chrome document root is unavailable.");
+    }
+    const found = await browser.send<{ nodeId?: number }>("DOM.querySelector", {
+      nodeId: rootNodeId,
+      selector,
+    }, { sessionId: page.sessionId });
+    if (!Number.isSafeInteger(found.nodeId) || (found.nodeId as number) < 1) {
+      throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_FOUND", "Browser selector did not match an element.");
+    }
+    return found.nodeId as number;
   }
 
   async takeOver() {
@@ -503,7 +734,6 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     const runtimeTmp = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "runtime-tmp");
     const xdgConfig = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "xdg/config");
     const xdgCache = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "xdg/cache");
-    const args = buildChromeArguments(this.context);
     const environment: NodeJS.ProcessEnv = {
       NODE_ENV: process.env.NODE_ENV,
       HOME: this.context.roots.browserRoot,
@@ -515,6 +745,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       TZ: process.env.TZ ?? "UTC",
     };
     try {
+      const proxyUrl = this.egressProxy ? await this.egressProxy.start() : null;
+      const args = buildChromeArguments(this.context, proxyUrl);
       const version = await this.launchPipeWithBackoff(executable, args, environment);
       if (this.expectedVersion && version !== this.expectedVersion) {
         throw new ChromeRuntimeError(
@@ -783,6 +1015,15 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     }
   }
 
+  private assertAgentControl() {
+    if (this.takenOver) {
+      throw new ChromeRuntimeError(
+        "CHROME_HUMAN_CONTROL_ACTIVE",
+        "Browser mutation is blocked during human takeover.",
+      );
+    }
+  }
+
   private handleDetachedTarget(value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const detachedSessionId = (value as Record<string, unknown>).sessionId;
@@ -1006,6 +1247,14 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   }
 
   private async stopOnce() {
+    try {
+      await this.stopBrowserOnce();
+    } finally {
+      await this.egressProxy?.stop();
+    }
+  }
+
+  private async stopBrowserOnce() {
     this.running = false;
     this.takenOver = false;
     const browser = this.browserClient;

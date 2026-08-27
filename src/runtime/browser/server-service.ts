@@ -242,6 +242,72 @@ export async function sendBrowserViewerCommand(input: {
   }
 }
 
+export type BrowserAgentCommand =
+  | { action: "open"; url: string }
+  | { action: "read" }
+  | { action: "screenshot" }
+  | { action: "scroll"; deltaX: number; deltaY: number }
+  | { action: "click"; selector: string }
+  | { action: "type"; selector: string; text: string; clear: boolean }
+  | { action: "tabs" }
+  | { action: "downloads" };
+
+/** Closed, typed browser surface for server-owned Codex dynamic tools. */
+export async function executeBrowserAgentCommand(input: {
+  installationId: string;
+  userId: string;
+  threadId: string;
+  command: BrowserAgentCommand;
+}) {
+  const state = await serviceState();
+  ensureBinding(state, input.installationId, input.userId);
+  try {
+    await state.registry.start(input.userId);
+  } catch (error) {
+    if (error instanceof BrowserRegistryBackpressureError) {
+      throw new BrowserServiceError(error.code, error.message, 429, true);
+    }
+    throw error;
+  }
+  if (input.command.action === "open") {
+    await state.registry.agentNavigate(input.userId, input.threadId, input.command.url);
+    return { ok: true as const };
+  }
+  if (input.command.action === "read") {
+    return state.registry.readPage(input.userId, input.threadId);
+  }
+  if (input.command.action === "screenshot") {
+    return state.registry.agentCaptureFrame(input.userId, input.threadId);
+  }
+  if (input.command.action === "scroll") {
+    await state.registry.agentScroll(
+      input.userId,
+      input.threadId,
+      input.command.deltaX,
+      input.command.deltaY,
+    );
+    return { ok: true as const };
+  }
+  if (input.command.action === "click") {
+    await state.registry.agentClick(input.userId, input.threadId, input.command.selector);
+    return { ok: true as const };
+  }
+  if (input.command.action === "type") {
+    await state.registry.agentType(
+      input.userId,
+      input.threadId,
+      input.command.selector,
+      input.command.text,
+      input.command.clear,
+    );
+    return { ok: true as const };
+  }
+  if (input.command.action === "tabs") {
+    return state.registry.listTabs(input.userId, input.threadId);
+  }
+  return state.registry.listDownloads(input.userId, input.threadId);
+}
+
 export function resetBrowserServiceForTests() {
   const current = browserGlobal.__aibrainBrowserRuntimeService;
   delete browserGlobal.__aibrainBrowserRuntimeService;

@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { connect as netConnect } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
@@ -118,6 +119,23 @@ class FakeCdpClient implements CdpClientLike {
       if (targetId) this.targetUrls.set(targetId, String(params.url));
       return {} as Result;
     }
+    if (method === "Runtime.evaluate" && scopedSessionId) {
+      const targetId = this.sessionTargets.get(scopedSessionId);
+      return {
+        result: {
+          value: {
+            url: targetId ? this.targetUrls.get(targetId) ?? "about:blank" : "about:blank",
+            title: "Synthetic page",
+            text: "Untrusted synthetic page text",
+          },
+        },
+      } as Result;
+    }
+    if (method === "DOM.getDocument") return { root: { nodeId: 1 } } as Result;
+    if (method === "DOM.querySelector") return { nodeId: 2 } as Result;
+    if (method === "DOM.getBoxModel") {
+      return { model: { border: [0, 0, 100, 0, 100, 20, 0, 20] } } as Result;
+    }
     return {} as Result;
   }
 
@@ -159,6 +177,20 @@ async function eventually(check: () => boolean | Promise<boolean>, timeoutMs = 1
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("condition did not become true");
+}
+
+function proxyAcceptsConnections(value: string) {
+  const url = new URL(value);
+  return new Promise<boolean>((resolve) => {
+    const socket = netConnect({ host: url.hostname, port: Number(url.port) });
+    const finish = (result: boolean) => {
+      socket.destroy();
+      resolve(result);
+    };
+    socket.setTimeout(500, () => finish(false));
+    socket.once("connect", () => finish(true));
+    socket.once("error", () => finish(false));
+  });
 }
 
 async function contextFixture() {
@@ -221,6 +253,13 @@ describe("ChromeCdpRuntime private pipe", () => {
 
     await runtime.start();
     expect(spawnedArgs).toContain("--remote-debugging-pipe");
+    expect(spawnedArgs).toContain("--disable-quic");
+    expect(spawnedArgs).toContain("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+    expect(spawnedArgs).toContain("--proxy-bypass-list=<-loopback>");
+    const proxyArgument = spawnedArgs.find((argument) => argument.startsWith("--proxy-server="));
+    expect(proxyArgument).toMatch(/^--proxy-server=http:\/\/127\.0\.0\.1:\d+$/u);
+    const proxyUrl = (proxyArgument as string).slice("--proxy-server=".length);
+    await expect(proxyAcceptsConnections(proxyUrl)).resolves.toBe(true);
     expect(spawnedArgs.some((argument) => argument.startsWith("--remote-debugging-port"))).toBe(false);
     expect(spawnedArgs.some((argument) => argument.startsWith("--remote-debugging-address"))).toBe(false);
     expect(spawnedArgs).toContain(`--user-data-dir=${context.roots.profile}`);
@@ -244,7 +283,30 @@ describe("ChromeCdpRuntime private pipe", () => {
 
     await expect(runtime.navigate(THREAD_A, "https://a.example.test/path"))
       .rejects.toMatchObject({ code: "CHROME_TAKEOVER_REQUIRED" });
+    await runtime.agentNavigate(THREAD_A, "https://agent.example.test/path");
+    await expect(runtime.readPage(THREAD_A)).resolves.toMatchObject({
+      url: "https://agent.example.test/path",
+      title: "Synthetic page",
+    });
+    await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
+    await runtime.agentScroll(THREAD_A, 0, 250);
+    await runtime.agentClick(THREAD_A, "button[type=submit]");
+    await runtime.agentType(THREAD_A, "input[name=email]", "person@example.test", true);
+    await expect(runtime.listTabs(THREAD_A)).resolves.toEqual([
+      expect.objectContaining({ id: THREAD_A, url: "https://agent.example.test/path", active: true }),
+    ]);
+    await expect(runtime.listDownloads(THREAD_A)).resolves.toEqual([]);
     await runtime.takeOver();
+    await expect(runtime.agentCaptureFrame(THREAD_A)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.readPage(THREAD_A)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.listTabs(THREAD_A)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.listDownloads(THREAD_A)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.agentNavigate(THREAD_A, "https://blocked.example.test"))
+      .rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.agentScroll(THREAD_A, 0, 100)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.agentClick(THREAD_A, "button")).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+    await expect(runtime.agentType(THREAD_A, "input", "blocked", true))
+      .rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
     await Promise.all([
       runtime.navigate(THREAD_A, "https://a.example.test/path"),
       runtime.navigate(THREAD_B, "https://b.example.test/path"),
@@ -298,6 +360,7 @@ describe("ChromeCdpRuntime private pipe", () => {
       expect.objectContaining({ method: "Browser.close" }),
     ]));
     expect(client.isOpen).toBe(false);
+    await expect(proxyAcceptsConnections(proxyUrl)).resolves.toBe(false);
   });
 
   it("applies target backpressure and recreates only a detached thread session", async () => {
@@ -360,11 +423,20 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(() => validateBrowserNavigationUrl("file:///etc/passwd")).toThrow(ChromeRuntimeError);
     expect(() => validateBrowserNavigationUrl("https://user:pass@example.test"))
       .toThrow(ChromeRuntimeError);
-    const args = buildChromeArguments(context);
+    const args = buildChromeArguments(context, "http://127.0.0.1:49152");
     expect(args).toContain("--remote-debugging-pipe");
+    expect(args).toContain("--disable-quic");
+    expect(args).toContain("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+    expect(args).toContain("--proxy-server=http://127.0.0.1:49152");
+    expect(args).toContain("--proxy-bypass-list=<-loopback>");
     expect(args.some((argument) => argument.includes("remote-debugging-port"))).toBe(false);
     expect(args.some((argument) => argument.includes("remote-debugging-address"))).toBe(false);
     expect(args).not.toContain("--no-sandbox");
+    expect(() => buildChromeArguments(context, "http://localhost:49152"))
+      .toThrowError(expect.objectContaining({ code: "CHROME_PROXY_URL_INVALID" }));
+    const privateOverrideArgs = buildChromeArguments(context, null);
+    expect(privateOverrideArgs).toContain("--disable-quic");
+    expect(privateOverrideArgs.some((argument) => argument.startsWith("--proxy-server="))).toBe(false);
     vi.stubEnv("NODE_ENV", "production");
     expect(() => new ChromeBrowserRuntimeFactory()).toThrowError(
       expect.objectContaining({ code: "CHROME_VERSION_REQUIRED" }),
@@ -375,6 +447,31 @@ describe("ChromeCdpRuntime private pipe", () => {
     })).toThrowError(expect.objectContaining({
       code: "BROWSER_NETWORK_PRODUCTION_OVERRIDE_FORBIDDEN",
     }));
+  });
+
+  it("stops the pinned egress proxy when Chrome version validation fails", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    let proxyUrl = "";
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "141.0.0.0",
+      startupTimeoutMs: 500,
+      shutdownTimeoutMs: 50,
+      spawnProcess: (_executable, args) => {
+        const proxyArgument = args.find((argument) => argument.startsWith("--proxy-server="));
+        proxyUrl = proxyArgument?.slice("--proxy-server=".length) ?? "";
+        return child;
+      },
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await expect(runtime.start()).rejects.toMatchObject({ code: "CHROME_VERSION_MISMATCH" });
+    expect(proxyUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/u);
+    await expect(proxyAcceptsConnections(proxyUrl)).resolves.toBe(false);
+    expect(child.exitCode).toBe(0);
+    await expect(runtime.health()).resolves.toMatchObject({ healthy: false });
   });
 
   it("rejects unsafe stale quarantine entries before spawning Chrome", async () => {

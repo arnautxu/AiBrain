@@ -222,6 +222,20 @@ describe("worker Codex turn", () => {
     });
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
     const threadStart = calls.find((call) => call.method === "thread/start");
+    expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
+      expect.objectContaining({
+        type: "namespace",
+        name: "browser",
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "open" }),
+          expect.objectContaining({ name: "read" }),
+          expect.objectContaining({ name: "screenshot" }),
+          expect.objectContaining({ name: "scroll" }),
+          expect.objectContaining({ name: "click" }),
+          expect.objectContaining({ name: "type" }),
+        ]),
+      }),
+    ]);
     const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");

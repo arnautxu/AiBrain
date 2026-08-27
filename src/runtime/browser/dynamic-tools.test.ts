@@ -1,0 +1,290 @@
+import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { DynamicToolCallParams } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
+import type { ApprovalItem } from "@/lib/chat-contract";
+import type { ResolvedPermissions } from "@/permissions";
+import {
+  FileApprovalStore,
+  approvalLocatorFromItem,
+} from "@/runtime/approval-store";
+import {
+  BROWSER_DYNAMIC_TOOLS,
+  handleBrowserDynamicToolCall,
+} from "@/runtime/browser/dynamic-tools";
+import { BrowserToolCallStore } from "@/runtime/browser/tool-call-store";
+import { assertCodexClientRequest } from "@/runtime/transport/codex-contract-validation";
+
+const INSTALLATION_ID = "browser-tools-test";
+const USER_ID = "11a11111-1111-4111-8111-111111111111";
+const BROWSER_THREAD_A = "11a11111-1111-4111-8111-111111111121";
+const BROWSER_THREAD_B = "11a11111-1111-4111-8111-111111111122";
+const FINGERPRINT = "a".repeat(64);
+
+function permissions(allowed = true): ResolvedPermissions {
+  return {
+    schemaVersion: 1,
+    installationId: INSTALLATION_ID,
+    userId: USER_ID,
+    roleId: null,
+    projectId: null,
+    turnId: "local-turn",
+    resolvedAt: "2026-08-27T00:00:00.000Z",
+    fingerprint: FINGERPRINT,
+    sources: [],
+    rules: [{
+      ruleId: "tools.execute",
+      action: "execute",
+      effect: allowed ? "allow" : "deny",
+      instruction: "Synthetic browser tool permission.",
+      sourceScope: "installation",
+      sourcePolicyVersion: 1,
+      precedence: 100,
+    }],
+    developerInstructions: `Policy fingerprint: ${FINGERPRINT}`,
+  };
+}
+
+function request(
+  tool: string,
+  argumentsValue: unknown,
+  overrides: Partial<DynamicToolCallParams> = {},
+): DynamicToolCallParams {
+  return {
+    threadId: "runtime-thread-a",
+    turnId: "runtime-turn-a",
+    callId: `call-${tool}`,
+    namespace: "browser",
+    tool,
+    arguments: argumentsValue as never,
+    ...overrides,
+  };
+}
+
+describe("closed browser dynamic tools", () => {
+  const roots: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+  });
+
+  async function fixture() {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-browser-tools-"));
+    roots.push(root);
+    const usersRoot = path.join(root, "users");
+    const userRoot = path.join(usersRoot, USER_ID);
+    await mkdir(userRoot, { recursive: true, mode: 0o700 });
+    await chmod(usersRoot, 0o700);
+    await chmod(userRoot, 0o700);
+    const approvalStore = new FileApprovalStore({
+      installationId: INSTALLATION_ID,
+      userId: USER_ID,
+      usersRoot,
+    });
+    return { root, usersRoot, userRoot, approvalStore };
+  }
+
+  function context(
+    approvalStore: FileApprovalStore,
+    execute: Parameters<typeof handleBrowserDynamicToolCall>[1]["execute"],
+    emitted: ApprovalItem[],
+    overrides: Partial<Omit<Parameters<typeof handleBrowserDynamicToolCall>[1], "execute">> = {},
+  ): Parameters<typeof handleBrowserDynamicToolCall>[1] {
+    return {
+      installationId: INSTALLATION_ID,
+      userId: USER_ID,
+      runtimeThreadId: "runtime-thread-a",
+      runtimeTurnId: "runtime-turn-a",
+      browserThreadId: BROWSER_THREAD_A,
+      permissions: permissions(),
+      approvalStore,
+      signal: new AbortController().signal,
+      emitApproval: async (item) => { emitted.push(item); },
+      ...overrides,
+      execute,
+    };
+  }
+
+  it("matches the pinned ThreadStartParams contract with one closed browser namespace", () => {
+    expect(() => assertCodexClientRequest({
+      method: "thread/start",
+      id: "browser-contract",
+      params: { dynamicTools: [...BROWSER_DYNAMIC_TOOLS] },
+    })).not.toThrow();
+    expect(BROWSER_DYNAMIC_TOOLS).toHaveLength(1);
+    expect((BROWSER_DYNAMIC_TOOLS[0] as { tools: Array<{ name: string }> }).tools.map(({ name }) => name))
+      .toEqual(["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
+  });
+
+  it("runs permissioned reads without approval and returns the durable cached result on replay", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async () => ({
+      schemaVersion: 1,
+      url: "https://example.test/",
+      title: "Example",
+      text: "Untrusted page text",
+    }));
+    const emitted: ApprovalItem[] = [];
+    const input = request("read", {});
+    const first = await handleBrowserDynamicToolCall(input, context(approvalStore, execute, emitted, { callStore }));
+    const replay = await handleBrowserDynamicToolCall(input, context(approvalStore, execute, emitted, { callStore }));
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({ success: true });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      userId: USER_ID,
+      threadId: BROWSER_THREAD_A,
+      command: { action: "read" },
+    }));
+    expect(emitted).toEqual([]);
+    const audit = await callStore.readAudit();
+    expect(audit.map(({ payload }) => payload.status)).toEqual(["reserved", "executing", "completed"]);
+    const serializedAudit = JSON.stringify(audit);
+    expect(serializedAudit).not.toContain("example.test");
+    expect(serializedAudit).not.toContain("Untrusted page text");
+    expect(serializedAudit).toContain(FINGERPRINT);
+  });
+
+  it("persists explicit mutation approval without blocking a different turn", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn(async ({ command }: { command: { action: string } }) => ({ action: command.action }));
+    const emitted: ApprovalItem[] = [];
+    let durableAtEmission = false;
+    const pending = handleBrowserDynamicToolCall(
+      request("open", { url: "https://example.test/approved" }),
+      context(approvalStore, execute, emitted, {
+        emitApproval: async (item) => {
+          if (item.status === "pending") {
+            durableAtEmission = (await approvalStore.read(
+              approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item),
+            ))?.status === "pending";
+          }
+          emitted.push(item);
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(emitted.find((item) => item.status === "pending")).toBeDefined());
+    const approval = emitted.find((item) => item.status === "pending") as ApprovalItem;
+    expect(approval).toMatchObject({
+      kind: "browser",
+      permissionFingerprint: FINGERPRINT,
+      threadId: "runtime-thread-a",
+      turnId: "runtime-turn-a",
+      itemId: "call-open",
+    });
+    expect(durableAtEmission).toBe(true);
+
+    const otherExecute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "" }));
+    const other = await handleBrowserDynamicToolCall(
+      request("read", {}, {
+        threadId: "runtime-thread-b",
+        turnId: "runtime-turn-b",
+        callId: "call-read-b",
+      }),
+      context(approvalStore, otherExecute, [], {
+        runtimeThreadId: "runtime-thread-b",
+        runtimeTurnId: "runtime-turn-b",
+        browserThreadId: BROWSER_THREAD_B,
+      }),
+    );
+    expect(other.success).toBe(true);
+    expect(execute).not.toHaveBeenCalled();
+
+    await approvalStore.resolve(
+      approvalLocatorFromItem(INSTALLATION_ID, USER_ID, approval),
+      "accept",
+    );
+    await expect(pending).resolves.toMatchObject({ success: true });
+    expect(execute).toHaveBeenCalledOnce();
+    expect(emitted.at(-1)?.status).toBe("accepted");
+  });
+
+  it("does not duplicate a pending approval or execute twice when the same call is replayed", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async () => ({ ok: true }));
+    const emitted: ApprovalItem[] = [];
+    const input = request("click", { selector: "button[type=submit]" });
+    const ctx = context(approvalStore, execute, emitted, { callStore });
+    const first = handleBrowserDynamicToolCall(input, ctx);
+    await vi.waitFor(() => expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1));
+    const second = handleBrowserDynamicToolCall(input, ctx);
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+    expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1);
+    const approval = emitted.find((item) => item.status === "pending") as ApprovalItem;
+    await approvalStore.resolve(
+      approvalLocatorFromItem(INSTALLATION_ID, USER_ID, approval),
+      "accept",
+    );
+    const responses = await Promise.all([first, second]);
+    expect(responses.some((response) => response.success)).toBe(true);
+    expect(execute).toHaveBeenCalledOnce();
+    expect(emitted.filter((item) => item.status === "accepted")).toHaveLength(1);
+  });
+
+  it("rejects cross-thread calls, arbitrary tools and unknown argument fields before execution", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn();
+    const ctx = context(approvalStore, execute, []);
+    await expect(handleBrowserDynamicToolCall(
+      request("read", {}, { threadId: "runtime-thread-other" }),
+      ctx,
+    )).rejects.toMatchObject({ code: "BROWSER_TOOL_SCOPE_MISMATCH" });
+    await expect(handleBrowserDynamicToolCall(
+      request("Runtime.evaluate", { expression: "steal()" }),
+      ctx,
+    )).rejects.toMatchObject({ code: "BROWSER_TOOL_REJECTED" });
+    await expect(handleBrowserDynamicToolCall(
+      request("click", { selector: "button", method: "Runtime.evaluate" }),
+      ctx,
+    )).rejects.toMatchObject({ code: "BROWSER_TOOL_ARGUMENTS_INVALID" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed instead of replaying a call left executing by a crash", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const input = request("read", {});
+    const argumentsHash = await import("node:crypto").then(({ createHash }) => createHash("sha256")
+      .update(JSON.stringify({ arguments: {}, browserThreadId: BROWSER_THREAD_A }))
+      .digest("hex"));
+    const identity = {
+      installationId: INSTALLATION_ID,
+      userId: USER_ID,
+      threadId: input.threadId,
+      turnId: input.turnId,
+      callId: input.callId,
+      tool: input.tool,
+      argumentsHash,
+      permissionFingerprint: FINGERPRINT,
+    };
+    await callStore.begin(identity);
+    await callStore.markExecuting(identity);
+    const execute = vi.fn();
+    const response = await handleBrowserDynamicToolCall(
+      input,
+      context(approvalStore, execute, [], { callStore }),
+    );
+    expect(response).toMatchObject({ success: false });
+    expect(response.contentItems[0]).toMatchObject({
+      type: "inputText",
+      text: expect.stringContaining("not replayed"),
+    });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("records a permission denial and never asks for approval or touches the browser", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn();
+    const emitted: ApprovalItem[] = [];
+    const response = await handleBrowserDynamicToolCall(
+      request("open", { url: "https://example.test/" }),
+      context(approvalStore, execute, emitted, { permissions: permissions(false) }),
+    );
+    expect(response.success).toBe(false);
+    expect(execute).not.toHaveBeenCalled();
+    expect(emitted).toEqual([]);
+  });
+});
