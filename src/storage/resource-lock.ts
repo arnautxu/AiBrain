@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import type { Stats } from "node:fs";
 import { hostname } from "node:os";
 import { mkdir, readFile, rename, rm, stat, utimes } from "node:fs/promises";
 import path from "node:path";
@@ -89,6 +90,26 @@ function validatePositiveFinite(name: string, value: number, allowZero = false) 
 
 function abortError() {
   return new StorageError("STORAGE_LOCK_ABORTED", "Resource lock acquisition was aborted.");
+}
+
+function processAppearsAlive(processId: number) {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    if (isNodeError(error, "ESRCH")) return false;
+    if (isNodeError(error, "EPERM")) return true;
+    throw error;
+  }
+}
+
+function sameLockSnapshot(
+  before: Stats,
+  after: Stats,
+  includeCtime = true,
+) {
+  return before.dev === after.dev && before.ino === after.ino &&
+    before.mtimeMs === after.mtimeMs && (!includeCtime || before.ctimeMs === after.ctimeMs);
 }
 
 type ProcessLockWaiter = {
@@ -317,22 +338,65 @@ export class ResourceLockManager {
     return path.join(this.rootDirectory, `${this.resourceHash(resourceKey)}.lock`);
   }
 
-  private async recoverStaleLock(lockPath: string) {
-    let metadata;
+  private async recoverStaleLock(lockPath: string, resourceHash: string) {
+    let initial;
     try {
-      metadata = await stat(lockPath);
+      initial = await stat(lockPath);
     } catch (error) {
-      if (isNodeError(error, "ENOENT")) return true;
+      if (isNodeError(error, "ENOENT")) return false;
       throw error;
     }
-    if (this.now() - metadata.mtimeMs < this.staleAfterMs) return false;
+    if (this.now() - initial.mtimeMs < this.staleAfterMs) return false;
+
+    let owner: ResourceLockMetadata | null = null;
+    try {
+      owner = parseJson(
+        resourceLockMetadataSchema,
+        await readFile(path.join(lockPath, "owner.json"), "utf8"),
+        path.join(lockPath, "owner.json"),
+      );
+    } catch (error) {
+      // A stale, abandoned directory may contain a torn owner record. It still
+      // has to pass the unchanged-inode checks below before quarantine.
+    }
+    if (owner?.resourceHash && owner.resourceHash !== resourceHash) {
+      throw new StorageError(
+        "STORAGE_LOCK_RESOURCE_MISMATCH",
+        "Resource lock metadata does not match its canonical lock path.",
+      );
+    }
+    if (owner?.hostname === hostname() && processAppearsAlive(owner.processId)) {
+      return false;
+    }
+
+    let confirmed;
+    try {
+      confirmed = await stat(lockPath);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return false;
+      throw error;
+    }
+    if (!sameLockSnapshot(initial, confirmed) || this.now() - confirmed.mtimeMs < this.staleAfterMs) {
+      return false;
+    }
 
     const stalePath = `${lockPath}.stale.${randomUUID()}`;
     try {
       await rename(lockPath, stalePath);
     } catch (error) {
-      if (isNodeError(error, "ENOENT")) return true;
+      if (isNodeError(error, "ENOENT")) return false;
       throw error;
+    }
+    const quarantined = await stat(stalePath);
+    if (!sameLockSnapshot(confirmed, quarantined, false)) {
+      try {
+        await rename(stalePath, lockPath);
+      } catch (error) {
+        if (!isNodeError(error, "EEXIST")) throw error;
+        await rm(stalePath, { recursive: true, force: false });
+      }
+      await fsyncDirectory(this.rootDirectory);
+      return false;
     }
     await rm(stalePath, { recursive: true, force: false });
     await fsyncDirectory(this.rootDirectory);
@@ -385,7 +449,7 @@ export class ResourceLockManager {
         if (!isNodeError(error, "EEXIST")) throw error;
       }
 
-      if (await this.recoverStaleLock(lockPath)) continue;
+      if (await this.recoverStaleLock(lockPath, resourceHash)) continue;
       const remaining = deadline - this.now();
       if (remaining <= 0) throw new ResourceLockTimeoutError(resourceKey, timeoutMs);
       const jitter = 1 + ((this.random() * 2) - 1) * this.jitterRatio;
