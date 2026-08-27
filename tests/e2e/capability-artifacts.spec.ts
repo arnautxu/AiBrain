@@ -63,7 +63,8 @@ test("document preview, publication state and isolated browser viewer consume ar
   await expect(page.locator("iframe")).toHaveCount(0);
   await expect(page.getByText("Control del agente")).toBeVisible();
   await expect(page.getByRole("link", { name: "Descargar resultado" })).toBeVisible();
-  await page.getByRole("button", { name: "Cerrar sesión" }).click();
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("menuitem", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL(/\/login/);
   await expect(page.locator("iframe")).toHaveCount(0);
 });

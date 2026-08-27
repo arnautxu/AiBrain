@@ -26,22 +26,24 @@ export async function GET(request: Request) {
     workspaceKey: "workspace",
   };
   if (requestedProjectId) {
-    try {
-      const stored = await getProjectRuntimeContext(session, requestedProjectId);
-      projectContext = {
-        projectId: stored.projectId,
-        projectName: stored.projectName,
-        workspaceKey: stored.workspaceKey,
-      };
-    } catch (error) {
-      if (!isBrowserPreviewWorkbench() || !(error instanceof WorkbenchNotFoundError)) {
-        return NextResponse.json({ error: "Projecte no trobat." }, { status: 404 });
-      }
+    if (isBrowserPreviewWorkbench()) {
       projectContext = {
         projectId: requestedProjectId,
         projectName: "Preview local",
         workspaceKey: "workspace",
       };
+    } else {
+      try {
+        const stored = await getProjectRuntimeContext(session, requestedProjectId);
+        projectContext = {
+          projectId: stored.projectId,
+          projectName: stored.projectName,
+          workspaceKey: stored.workspaceKey,
+        };
+      } catch (error) {
+        if (!(error instanceof WorkbenchNotFoundError)) throw error;
+        return NextResponse.json({ error: "Projecte no trobat." }, { status: 404 });
+      }
     }
   }
   const config = readRuntimeConfig(session.tenant.id, projectContext.workspaceKey);

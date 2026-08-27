@@ -1074,10 +1074,7 @@ export function BrainApp({
   const enabledWindows = manifest.windows.filter((window) =>
     window.enabled && (window.id === "chat" || window.id === "inspector" || window.id === "browser"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-
-  const openSideWindow = useCallback((windowId: SideWindowId) => {
-    setActiveSideWindow((current) => current === windowId ? null : windowId);
-  }, []);
+  const browserEnabled = enabledWindows.some((window) => window.id === "browser");
 
   const toggleSidebar = useCallback(() => {
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -1151,6 +1148,7 @@ export function BrainApp({
         busy={actionBusy || sending}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
+        onOpenDesktop={() => setDesktopSidebarOpen(true)}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
@@ -1199,11 +1197,8 @@ export function BrainApp({
         onStop={() => void stopActiveTurn()}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
-        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenCustomization={() => setCustomizationOpen(true)}
-        enabledWindows={enabledWindows}
         activeSideWindow={activeSideWindow}
-        onOpenWindow={openSideWindow}
         canInspect={inspectorEnabled}
         onInspectMessage={inspectMessage}
         onResolveApproval={resolveApproval}
@@ -1247,12 +1242,14 @@ export function BrainApp({
         threads={threads}
         activeProjectId={activeProjectId}
         inspectorEnabled={inspectorEnabled}
+        browserEnabled={browserEnabled}
         onClose={() => setCommandPaletteOpen(false)}
         onNewThread={startNewThread}
         onNewProject={() => setTextDialog({ kind: "create-project" })}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onOpenInspector={() => setActiveSideWindow("inspector")}
+        onOpenBrowser={() => setActiveSideWindow("browser")}
         onOpenCustomization={() => setCustomizationOpen(true)}
       />
 
