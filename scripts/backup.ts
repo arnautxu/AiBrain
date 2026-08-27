@@ -1,6 +1,6 @@
 import path from "node:path";
 import { loadInstallationConfig } from "../src/config/installation";
-import { FileBackupService } from "../src/operations";
+import { FileBackupService } from "../src/operations/backup";
 
 function argument(name: string, required = true) {
   const index = process.argv.indexOf(name);
@@ -13,6 +13,9 @@ function argument(name: string, required = true) {
 
 async function main() {
   const operation = process.argv[2];
+  if (operation !== "create" && operation !== "verify" && operation !== "restore") {
+    throw new Error("Expected create, verify or restore operation.");
+  }
   const installation = await loadInstallationConfig();
   const service = new FileBackupService(
     installation.paths.dataRoot,
@@ -56,7 +59,9 @@ async function main() {
     }) + "\n");
     return;
   }
-  throw new Error("Expected create, verify or restore operation.");
 }
 
-await main();
+void main().catch((error: unknown) => {
+  process.stderr.write(`${error instanceof Error ? error.message : "Backup command failed."}\n`);
+  process.exitCode = 1;
+});
