@@ -310,7 +310,11 @@ export async function handleBrowserDynamicToolCall(
     argumentsHash,
     permissionFingerprint: context.permissions.fingerprint,
   };
-  const store = context.callStore ?? new BrowserToolCallStore({ userRoot: context.approvalStore.userRoot });
+  const store = context.callStore ?? new BrowserToolCallStore({
+    userRoot: context.approvalStore.userRoot,
+    maxRecords: Number(process.env.AIBRAIN_BROWSER_TOOL_MAX_RECORDS || 100_000),
+    maxRecordBytes: Number(process.env.AIBRAIN_BROWSER_TOOL_MAX_BYTES || 2 * 1024 * 1024 * 1024),
+  });
   const reserved = await store.begin(identity);
   if (reserved.status === "completed") return reserved.response as DynamicToolCallResponse;
   if (reserved.status === "executing") {
