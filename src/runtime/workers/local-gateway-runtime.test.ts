@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,6 +17,9 @@ import { ResourceLockManager } from "@/storage";
 vi.mock("server-only", () => ({}));
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
+const APPROVAL_SCOPE_DIGEST = createHash("sha256")
+  .update(JSON.stringify(["thread-1", "turn-1"]))
+  .digest("hex");
 const roots: string[] = [];
 
 describe("worker egress environment", () => {
@@ -72,6 +76,14 @@ function initializeRequest(clientRequestId = "initialize-request-1") {
         capabilities: null,
       },
     },
+  };
+}
+
+function approvalResponse(clientRequestId = `server-response:approval-event:${APPROVAL_SCOPE_DIGEST}`) {
+  return {
+    clientRequestId,
+    kind: "rpc-response" as const,
+    rpc: { id: "approval-1", result: { decision: "accept" } },
   };
 }
 
@@ -276,6 +288,152 @@ describe("private per-user worker gateway", () => {
     } finally {
       await client.close();
       await worker.stop();
+    }
+  });
+
+  it("confirms a server response only after durable progress in the same turn", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) {',
+      '    write({ id: rpc.id, result: {} });',
+      '    write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
+      '    return;',
+      '  }',
+      '  setTimeout(() => write({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "agent-1", delta: "approval processed" } }), 100);',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const worker = gateway();
+    await worker.start();
+    const client = transport(worker);
+    try {
+      await client.connect();
+      await client.send(initializeRequest());
+      const initialized = await nextEvent(client);
+      const approval = await nextEvent(client);
+      expect(approval.value).toMatchObject({
+        message: { kind: "rpc-request", rpc: { id: "approval-1" } },
+      });
+      if (!initialized.done) await client.acknowledge(initialized.value);
+      if (!approval.done) await client.acknowledge(approval.value);
+
+      let confirmed = false;
+      const submission = client.send(approvalResponse()).then(() => { confirmed = true; });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(confirmed).toBe(false);
+      await submission;
+      const progress = await nextEvent(client);
+      expect(progress.value).toMatchObject({
+        message: { kind: "rpc-notification", rpc: { params: { delta: "approval processed" } } },
+      });
+    } finally {
+      await client.close();
+      await worker.stop();
+    }
+  });
+
+  it("retries the same server response after a child crash before processing evidence", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) {',
+      '    write({ id: rpc.id, result: {} });',
+      '    write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
+      '  } else process.exit(42);',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const firstWorker = gateway();
+    await firstWorker.start();
+    const firstClient = transport(firstWorker);
+    await firstClient.connect();
+    await firstClient.send(initializeRequest());
+    const initialized = await nextEvent(firstClient);
+    const approval = await nextEvent(firstClient);
+    if (!initialized.done) await firstClient.acknowledge(initialized.value);
+    if (!approval.done) await firstClient.acknowledge(approval.value);
+    await vi.waitFor(async () => {
+      const cursor = JSON.parse(await readFile(
+        path.join(context.transportAudit, "gateway-events.jsonl.delivery.json"),
+        "utf8",
+      )) as { sequence: number };
+      expect(cursor.sequence).toBe(2);
+    });
+    const firstSubmission = firstClient.send(approvalResponse()).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
+    await firstClient.close();
+    expect(await firstSubmission).toBeInstanceOf(Error);
+    await firstWorker.stop();
+
+    const compactingGatewayJournal = new FileTransportEventJournal({
+      filePath: path.join(context.transportAudit, "gateway-events.jsonl"),
+      lockManager: new ResourceLockManager({
+        rootDirectory: path.join(context.transportAudit, "gateway-locks"),
+      }),
+      maxRetainedDeliveredEvents: 1,
+    });
+    const compactingEvent = {
+      eventId: "44444444-4444-4444-8444-444444444444",
+      sequence: 3,
+      occurredAt: new Date().toISOString(),
+      message: {
+        kind: "rpc-notification" as const,
+        rpc: {
+          method: "item/agentMessage/delta" as const,
+          params: {
+            threadId: "unrelated-thread",
+            turnId: "unrelated-turn",
+            itemId: "unrelated-item",
+            delta: "unrelated progress",
+          },
+        },
+      },
+    };
+    const compactingClientJournal = new FileTransportEventJournal({
+      filePath: path.join(context.transportAudit, "test-client-events.jsonl"),
+      lockManager: new ResourceLockManager({
+        rootDirectory: path.join(context.transportAudit, "test-client-locks"),
+      }),
+      maxRetainedDeliveredEvents: 1,
+    });
+    await compactingGatewayJournal.append(compactingEvent);
+    await compactingGatewayJournal.markDelivered(compactingEvent);
+    await compactingClientJournal.append(compactingEvent);
+    await compactingClientJournal.markDelivered(compactingEvent);
+    expect((await compactingGatewayJournal.readEvents()).map((event) => event.sequence)).toEqual([3]);
+    expect((await compactingClientJournal.readEvents()).map((event) => event.sequence)).toEqual([3]);
+
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (!rpc.method) write({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "agent-1", delta: "recovered approval" } });',
+      '  else write({ id: rpc.id, result: {} });',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const restartedWorker = gateway();
+    await restartedWorker.start();
+    const restartedClient = transport(restartedWorker);
+    try {
+      await restartedClient.connect();
+      await expect(restartedClient.send(approvalResponse())).resolves.toBeUndefined();
+      const progress = await nextEvent(restartedClient);
+      expect(progress.value).toMatchObject({
+        message: { kind: "rpc-notification", rpc: { params: { delta: "recovered approval" } } },
+      });
+    } finally {
+      await restartedClient.close();
+      await restartedWorker.stop();
     }
   });
 });
