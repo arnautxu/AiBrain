@@ -361,13 +361,13 @@ Los recursos se resuelven por el usuario de sesión. Un ID válido de otro usuar
 
 ```ts
 type WorkbenchSnapshot = {
-  persistence: "supabase" | "filesystem" | "filesystem-demo" | "browser-preview";
+  persistence: "filesystem" | "filesystem-demo" | "browser-preview";
   projects: WorkbenchProject[];
   threads: WorkbenchThread[];
 };
 ```
 
-Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia esperada es `filesystem`. `supabase` permanece en el union por compatibilidad del frontend, pero el store de producto Supabase está deshabilitado y responde como indisponible si se intenta usar.
+Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia es `filesystem`. Supabase no es un valor válido de persistencia: participa únicamente durante los flujos de identidad anteriores a la emisión de la sesión local.
 
 ## 6. Mensajes, turns y streaming
 

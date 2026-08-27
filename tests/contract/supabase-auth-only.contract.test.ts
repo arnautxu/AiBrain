@@ -43,6 +43,15 @@ describe("Supabase Auth-only architecture", () => {
     expect(migrationEntries.filter((entry) => entry.endsWith(".sql"))).toEqual([]);
   });
 
+  it("does not expose Supabase as a product persistence mode", async () => {
+    const [workbenchTypes, uiContract] = await Promise.all([
+      readFile(path.join(sourceRoot, "workbench", "types.ts"), "utf8"),
+      readFile(path.join(repositoryRoot, "docs", "UI_BACKEND_CONTRACT.md"), "utf8"),
+    ]);
+    expect(workbenchTypes).not.toMatch(/WorkbenchPersistence\s*=\s*[^;]*["']supabase["']/);
+    expect(uiContract).not.toMatch(/persistence:\s*[^;\n]*["']supabase["']/);
+  });
+
   it("depends on the Auth client only and disables optional Supabase product services", async () => {
     const packageJson = JSON.parse(await readFile(path.join(repositoryRoot, "package.json"), "utf8"));
     expect(packageJson.dependencies["@supabase/supabase-js"]).toBe("2.112.4");
