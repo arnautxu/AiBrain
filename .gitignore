@@ -15,3 +15,5 @@ runtime/tenants/*/workspace/*
 supabase/.temp/
 .impeccable/review/
 coverage/
+playwright-report/
+test-results/
