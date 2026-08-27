@@ -10,6 +10,7 @@ import {
   approvalLocatorFromItem,
 } from "@/runtime/approval-store";
 import {
+  AIBRAIN_BROWSER_TOOL_NAMESPACE,
   BROWSER_DYNAMIC_TOOLS,
   handleBrowserDynamicToolCall,
 } from "@/runtime/browser/dynamic-tools";
@@ -59,7 +60,7 @@ function request(
     threadId: "runtime-thread-a",
     turnId: "runtime-turn-a",
     callId: `call-${tool}`,
-    namespace: "browser",
+    namespace: AIBRAIN_BROWSER_TOOL_NAMESPACE,
     tool,
     arguments: argumentsValue as never,
     ...overrides,
@@ -117,6 +118,10 @@ describe("closed browser dynamic tools", () => {
       params: { dynamicTools: [...BROWSER_DYNAMIC_TOOLS] },
     })).not.toThrow();
     expect(BROWSER_DYNAMIC_TOOLS).toHaveLength(1);
+    expect(BROWSER_DYNAMIC_TOOLS[0]).toMatchObject({
+      type: "namespace",
+      name: "aibrain_browser",
+    });
     expect((BROWSER_DYNAMIC_TOOLS[0] as { tools: Array<{ name: string }> }).tools.map(({ name }) => name))
       .toEqual(["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
   });

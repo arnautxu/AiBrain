@@ -293,7 +293,7 @@ describe("worker Codex turn", () => {
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
       expect.objectContaining({
         type: "namespace",
-        name: "browser",
+        name: "aibrain_browser",
         tools: expect.arrayContaining([
           expect.objectContaining({ name: "open" }),
           expect.objectContaining({ name: "read" }),
