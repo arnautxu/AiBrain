@@ -29,7 +29,12 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const BACKUP_ID_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f-]{36}$/;
 const MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
-const SENSITIVE_ROOT_DIRECTORIES = new Set(["auth-challenges", "secrets", "sessions"]);
+const SENSITIVE_ROOT_DIRECTORIES = new Set([
+  "auth-challenges",
+  "auth-rate-limits",
+  "secrets",
+  "sessions",
+]);
 
 export class BackupError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {

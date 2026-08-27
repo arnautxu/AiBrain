@@ -9,6 +9,8 @@ import {
   setAuthChallengeCookie,
   setLocalSessionCookie,
 } from "@/auth/session-cookie";
+import { authRateLimitSubject } from "@/auth/rate-limit";
+import { checkAuthRateLimit } from "@/auth/rate-limit-context";
 
 export const runtime = "nodejs";
 
@@ -25,11 +27,10 @@ export async function POST(request: Request) {
   }
 
   const body: unknown = await request.json().catch(() => null);
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Petició no vàlida." }, { status: 400 });
-  }
-
   if (mode === "demo") {
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ error: "Petició no vàlida." }, { status: 400 });
+    }
     if (!("userId" in body) || typeof body.userId !== "string") {
       return NextResponse.json({ error: "Usuari demo no vàlid." }, { status: 400 });
     }
@@ -40,12 +41,36 @@ export async function POST(request: Request) {
     return NextResponse.json({ session });
   }
 
-  const email = "email" in body && typeof body.email === "string"
+  const email = body && typeof body === "object" && "email" in body && typeof body.email === "string"
     ? body.email.trim().toLowerCase()
     : "";
-  const password = "password" in body && typeof body.password === "string"
+  const password = body && typeof body === "object" && "password" in body && typeof body.password === "string"
     ? body.password
     : "";
+  let rateLimit;
+  try {
+    rateLimit = await checkAuthRateLimit(request, "login", authRateLimitSubject("email", email));
+  } catch {
+    return NextResponse.json(
+      { error: "No s’ha pogut verificar temporalment l’accés." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Massa intents. Torna-ho a provar més tard." },
+      {
+        status: 429,
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Retry-After": String(rateLimit.retryAfterSeconds),
+        },
+      },
+    );
+  }
+  if (!body || typeof body !== "object") {
+    return NextResponse.json({ error: "Petició no vàlida." }, { status: 400 });
+  }
   if (!/^\S+@\S+\.\S+$/.test(email) || email.length > 320) {
     return NextResponse.json({ error: "Introdueix un correu vàlid." }, { status: 400 });
   }
