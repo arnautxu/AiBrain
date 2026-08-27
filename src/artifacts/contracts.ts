@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 export type AdvancedArtifactKind = "visualization" | "internal-site";
 export type VisualizationChartType = "bar" | "line" | "pie";
 
@@ -219,8 +217,4 @@ export function visualizationSpecFromMarkdown(markdown: string, title: string): 
     };
   }
   return null;
-}
-
-export function contentHash(value: unknown) {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
