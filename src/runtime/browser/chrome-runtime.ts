@@ -108,6 +108,10 @@ function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoExcept
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function positiveInteger(name: string, value: number, maximum: number) {
   if (!Number.isSafeInteger(value) || value < 1 || value > maximum) {
     throw new ChromeRuntimeError("CHROME_OPTIONS_INVALID", `${name} must be between 1 and ${maximum}.`);
@@ -380,6 +384,13 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private downloadQuarantine: string | null = null;
   private lastDownloadFailure: string | null = null;
   private detachedUnsubscribe: (() => void) | null = null;
+  private targetCreatedUnsubscribe: (() => void) | null = null;
+  private targetDestroyedUnsubscribe: (() => void) | null = null;
+  private readonly discoveredTargets = new Map<string, { type: string; openerId: string | null }>();
+  private readonly pendingOwnedTargets = new Set<string>();
+  private readonly closingTargetIds = new Set<string>();
+  private readonly unownedTargetClosures = new Set<Promise<void>>();
+  private targetCreations = 0;
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
     validateRuntimeContext(context);
@@ -759,6 +770,13 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       this.detachedUnsubscribe = browser.on("Target.detachedFromTarget", (params) => {
         this.handleDetachedTarget(params);
       });
+      this.targetCreatedUnsubscribe = browser.on("Target.targetCreated", (params) => {
+        this.handleTargetCreated(params);
+      });
+      this.targetDestroyedUnsubscribe = browser.on("Target.targetDestroyed", (params) => {
+        this.handleTargetDestroyed(params);
+      });
+      await browser.send("Target.setDiscoverTargets", { discover: true });
       // Page.setDownloadBehavior delegates to this same browser-context policy in
       // Chromium. Use GUID names in a private quarantine and route completed files
       // from target-scoped Page events instead of racing a path between threads.
@@ -909,17 +927,20 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
 
   private async createThreadPage(threadId: string) {
     const browser = this.requireBrowser();
-    const created = await browser.send<{ targetId?: string }>("Target.createTarget", {
-      url: "about:blank",
-    });
-    if (typeof created.targetId !== "string" ||
-      !/^[A-Za-z0-9._-]{1,256}$/u.test(created.targetId)) {
-      throw new ChromeRuntimeError("CHROME_TARGETS_INVALID", "Chrome returned an invalid page target ID.");
-    }
-    const targetId = created.targetId;
+    this.targetCreations += 1;
+    let targetId: string | null = null;
     let sessionId: string | null = null;
     let page: ThreadPage | null = null;
     try {
+      const created = await browser.send<{ targetId?: string }>("Target.createTarget", {
+        url: "about:blank",
+      });
+      if (typeof created.targetId !== "string" ||
+        !/^[A-Za-z0-9._-]{1,256}$/u.test(created.targetId)) {
+        throw new ChromeRuntimeError("CHROME_TARGETS_INVALID", "Chrome returned an invalid page target ID.");
+      }
+      targetId = created.targetId;
+      this.pendingOwnedTargets.add(targetId);
       const downloadsPath = await this.ensureThreadDownloadsPath(threadId);
       const attached = await browser.send<{ sessionId?: string }>("Target.attachToTarget", {
         targetId,
@@ -975,9 +996,13 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         if (sessionId) {
           await browser.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
         }
-        await browser.send("Target.closeTarget", { targetId }).catch(() => undefined);
+        if (targetId) await browser.send("Target.closeTarget", { targetId }).catch(() => undefined);
       }
       throw error;
+    } finally {
+      if (targetId) this.pendingOwnedTargets.delete(targetId);
+      this.targetCreations -= 1;
+      await this.reconcileUnownedTargets();
     }
   }
 
@@ -1044,6 +1069,55 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       void browser.send("Target.closeTarget", { targetId: page.targetId }).catch(() => undefined);
     }
     void Promise.allSettled(guids.map((guid) => this.removeQuarantinedDownload(guid)));
+  }
+
+  private handleTargetCreated(value: unknown) {
+    if (!isRecord(value) || !isRecord(value.targetInfo)) return;
+    const info = value.targetInfo;
+    if (typeof info.targetId !== "string" || !/^[A-Za-z0-9._-]{1,256}$/u.test(info.targetId) ||
+        typeof info.type !== "string" || info.type.length > 64) return;
+    const openerId = typeof info.openerId === "string" ? info.openerId : null;
+    this.discoveredTargets.set(info.targetId, { type: info.type, openerId });
+    if (info.type !== "page" || openerId || this.targetCreations === 0) {
+      this.queueUnownedTargetClosure(info.targetId);
+    }
+  }
+
+  private handleTargetDestroyed(value: unknown) {
+    if (!isRecord(value) || typeof value.targetId !== "string") return;
+    this.discoveredTargets.delete(value.targetId);
+    this.pendingOwnedTargets.delete(value.targetId);
+  }
+
+  private ownsTarget(targetId: string) {
+    return this.pendingOwnedTargets.has(targetId) ||
+      [...this.threadPages.values()].some((page) => page.targetId === targetId && !page.closed);
+  }
+
+  private queueUnownedTargetClosure(targetId: string) {
+    if (this.ownsTarget(targetId) || this.closingTargetIds.has(targetId)) return;
+    this.closingTargetIds.add(targetId);
+    const pending = Promise.resolve().then(async () => {
+      if (this.ownsTarget(targetId)) return;
+      const browser = this.browserClient;
+      if (browser?.isOpen) {
+        await browser.send("Target.closeTarget", { targetId }).catch(() => undefined);
+      }
+      this.discoveredTargets.delete(targetId);
+    });
+    this.unownedTargetClosures.add(pending);
+    void pending.finally(() => {
+      this.closingTargetIds.delete(targetId);
+      this.unownedTargetClosures.delete(pending);
+    }).catch(() => undefined);
+  }
+
+  private async reconcileUnownedTargets() {
+    if (this.targetCreations > 0) return;
+    for (const targetId of this.discoveredTargets.keys()) {
+      if (!this.ownsTarget(targetId)) this.queueUnownedTargetClosure(targetId);
+    }
+    await Promise.allSettled([...this.unownedTargetClosures]);
   }
 
   private queueInterceptedRequest(page: ThreadPage, value: unknown) {
@@ -1261,6 +1335,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     const child = this.process;
     await Promise.allSettled([...this.threadPagePromises.values()]);
     await Promise.allSettled([...this.downloadFinalizations]);
+    await Promise.allSettled([...this.unownedTargetClosures]);
     const pages = [...this.threadPages.values()];
     const activeDownloadGuids = pages.flatMap((page) => [...page.downloads.keys()]);
     this.threadPages.clear();
@@ -1268,8 +1343,17 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.downloadOwners.clear();
     this.detachedUnsubscribe?.();
     this.detachedUnsubscribe = null;
+    this.targetCreatedUnsubscribe?.();
+    this.targetCreatedUnsubscribe = null;
+    this.targetDestroyedUnsubscribe?.();
+    this.targetDestroyedUnsubscribe = null;
+    this.discoveredTargets.clear();
+    this.pendingOwnedTargets.clear();
+    this.closingTargetIds.clear();
+    this.targetCreations = 0;
     this.browserClient = null;
     if (browser?.isOpen) {
+      await browser.send("Target.setDiscoverTargets", { discover: false }).catch(() => undefined);
       await browser.send("Browser.setDownloadBehavior", {
         behavior: "deny",
         eventsEnabled: false,
