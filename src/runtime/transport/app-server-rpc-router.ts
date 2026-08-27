@@ -35,6 +35,8 @@ type TurnRegistrationState = {
   threadId: string;
   localTurnId: string;
   runtimeTurnId: string | null;
+  runtimeTurnBinding: Promise<string | null>;
+  resolveRuntimeTurnBinding: (turnId: string | null) => void;
   handlers: AppServerTurnHandlers;
 };
 
@@ -116,10 +118,16 @@ export class AppServerRpcRouter {
   ): AppServerTurnRegistration {
     if (!threadId || !localTurnId || this.closed) throw new Error("Turn registration scope is invalid.");
     if (this.turns.has(threadId)) throw new Error("A thread already has an active turn.");
+    let resolveRuntimeTurnBinding!: (turnId: string | null) => void;
+    const runtimeTurnBinding = new Promise<string | null>((resolve) => {
+      resolveRuntimeTurnBinding = resolve;
+    });
     const state: TurnRegistrationState = {
       threadId,
       localTurnId,
       runtimeTurnId: null,
+      runtimeTurnBinding,
+      resolveRuntimeTurnBinding,
       handlers,
     };
     this.turns.set(threadId, state);
@@ -131,10 +139,16 @@ export class AppServerRpcRouter {
         if (state.runtimeTurnId && state.runtimeTurnId !== turnId) {
           throw new Error("Turn registration cannot be rebound to another runtime turn.");
         }
-        state.runtimeTurnId = turnId;
+        if (!state.runtimeTurnId) {
+          state.runtimeTurnId = turnId;
+          state.resolveRuntimeTurnBinding(turnId);
+        }
       },
       dispose: () => {
-        if (this.turns.get(threadId) === state) this.turns.delete(threadId);
+        if (this.turns.get(threadId) === state) {
+          this.turns.delete(threadId);
+          state.resolveRuntimeTurnBinding(null);
+        }
       },
     });
   }
@@ -194,7 +208,10 @@ export class AppServerRpcRouter {
       pending.reject(error);
     }
     this.pending.clear();
-    for (const turn of this.turns.values()) turn.handlers.onFailure(error);
+    for (const turn of this.turns.values()) {
+      turn.resolveRuntimeTurnBinding(null);
+      turn.handlers.onFailure(error);
+    }
     this.turns.clear();
   }
 
@@ -300,8 +317,8 @@ export class AppServerRpcRouter {
         ? receivedTurnOwner.state
         : null;
       if (turn && scope?.turnId) {
-        if (turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId) return;
-        turn.runtimeTurnId ??= scope.turnId;
+        const runtimeTurnId = turn.runtimeTurnId ?? await turn.runtimeTurnBinding;
+        if (runtimeTurnId !== scope.turnId) return;
       }
       if (turn) await turn.handlers.onNotification(notification, event);
       return;
@@ -315,8 +332,8 @@ export class AppServerRpcRouter {
       : null;
     let turnScopeMismatch = false;
     if (turn && scope?.turnId) {
-      turnScopeMismatch = Boolean(turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId);
-      if (!turnScopeMismatch) turn.runtimeTurnId ??= scope.turnId;
+      const runtimeTurnId = turn.runtimeTurnId ?? await turn.runtimeTurnBinding;
+      turnScopeMismatch = runtimeTurnId !== scope.turnId;
     }
     const response: JsonRpcSuccess | JsonRpcFailure = turn && !turnScopeMismatch
       ? await Promise.resolve(turn.handlers.onServerRequest(request, event)).then(

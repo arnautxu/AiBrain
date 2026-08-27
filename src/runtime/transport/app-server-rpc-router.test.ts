@@ -287,6 +287,56 @@ describe("AppServerRpcRouter", () => {
     await router.close();
   });
 
+  it("waits for the explicit turn/start binding before routing post-resume turn notifications", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    await router.start();
+    const notification = vi.fn();
+    const registration = router.registerTurn("thread-resumed", "local-current", {
+      onNotification: notification,
+      onServerRequest: vi.fn(),
+      onFailure: vi.fn(),
+    });
+
+    transport.queue.push(event(1, {
+      kind: "rpc-notification",
+      rpc: {
+        method: "thread/tokenUsage/updated",
+        params: {
+          threadId: "thread-resumed",
+          turnId: "turn-previous",
+          tokenUsage: {
+            total: { totalTokens: 10, inputTokens: 5, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+            last: { totalTokens: 10, inputTokens: 5, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5, reasoningOutputTokens: 0 },
+            modelContextWindow: 1000,
+          },
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(transport.queue.pending).toBe(0));
+    expect(transport.acknowledged).toHaveLength(0);
+
+    expect(() => registration.bindRuntimeTurn("turn-current")).not.toThrow();
+    await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1]));
+    expect(notification).not.toHaveBeenCalled();
+
+    transport.queue.push(event(2, {
+      kind: "rpc-notification",
+      rpc: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-resumed",
+          turnId: "turn-current",
+          itemId: "item-current",
+          delta: "current",
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(notification).toHaveBeenCalledOnce());
+    registration.dispose();
+    await router.close();
+  });
+
   it("keeps another thread streaming while an approval is pending and ACKs in order", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
