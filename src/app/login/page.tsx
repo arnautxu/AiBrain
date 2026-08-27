@@ -14,12 +14,13 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage() {
   if (await getSession()) redirect("/");
   const installation = await loadInstallationConfig();
+  const mode = getAuthMode();
 
   return (
     <LoginForm
-      accounts={listDemoAccounts()}
+      accounts={mode === "demo" ? listDemoAccounts() : []}
       branding={publicInstallationBranding(installation)}
-      mode={getAuthMode()}
+      mode={mode}
       remotePreview={isVercelPreviewDemoEnabled()}
     />
   );
