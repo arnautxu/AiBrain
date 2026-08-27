@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CdpSessionScope } from "@/runtime/browser/cdp-client";
+import { CdpClientError, type CdpSessionScope } from "@/runtime/browser/cdp-client";
 import type { BrowserRuntimeContext } from "@/runtime/browser/types";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 import {
@@ -59,6 +59,7 @@ class FakeCdpClient implements CdpClientLike {
   private readonly sessionTargets = new Map<string, string>();
   private nextTarget = 1;
   private nextSession = 1;
+  private readonly commandFailures = new Map<string, Error[]>();
 
   constructor(
     private readonly onBrowserClose: () => void,
@@ -72,6 +73,9 @@ class FakeCdpClient implements CdpClientLike {
   ) {
     const scopedSessionId = scope.sessionId ?? null;
     this.commands.push({ method, params, sessionId: scopedSessionId });
+    const failures = this.commandFailures.get(method);
+    const failure = failures?.shift();
+    if (failure) throw failure;
     if (method === "Browser.getVersion") {
       if (this.versionFailure) throw this.versionFailure;
       return { product: "HeadlessChrome/140.0.0.0" } as Result;
@@ -157,6 +161,12 @@ class FakeCdpClient implements CdpClientLike {
 
   sessionForTarget(targetId: string) {
     return [...this.sessionTargets].find(([, candidate]) => candidate === targetId)?.[0] ?? null;
+  }
+
+  failNext(method: string, error: Error) {
+    const failures = this.commandFailures.get(method) ?? [];
+    failures.push(error);
+    this.commandFailures.set(method, failures);
   }
 
   async close() {
@@ -459,6 +469,32 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(runtime.targetIdFor(THREAD_B)).not.toBeNull();
     await expect(runtime.captureFrame("not-a-thread"))
       .rejects.toMatchObject({ code: "CHROME_THREAD_INVALID" });
+    await runtime.stop();
+  });
+
+  it("recreates only a stale thread target and restores its URL once", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.agentNavigate(THREAD_A, "https://example.test/recover");
+    const staleTarget = runtime.targetIdFor(THREAD_A);
+    client.failNext("Page.captureScreenshot", new CdpClientError(
+      "CDP_COMMAND_FAILED",
+      "Page.captureScreenshot failed: Not attached to an active page",
+    ));
+
+    await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
+    expect(runtime.targetIdFor(THREAD_A)).not.toBe(staleTarget);
+    await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://example.test/recover");
+    expect(client.commands.filter(({ method }) => method === "Page.captureScreenshot")).toHaveLength(2);
     await runtime.stop();
   });
 
