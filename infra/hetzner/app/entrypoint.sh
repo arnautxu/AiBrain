@@ -81,6 +81,8 @@ node -e '
 
 for private_directory in \
   /var/lib/aibrain/data/app-home \
+  /var/lib/aibrain/data/company-context \
+  /var/lib/aibrain/data/users \
   /var/lib/aibrain/data/server/xdg/cache \
   /var/lib/aibrain/data/server/xdg/config \
   /var/lib/aibrain/data/server/xdg/data \
@@ -105,22 +107,28 @@ done
 actual_chrome_version=$(/usr/bin/chromium --version | sed -n 's/^[^0-9]*\([0-9][0-9.]*\).*$/\1/p')
 [ "$actual_chrome_version" = "$AIBRAIN_CHROME_EXPECTED_VERSION" ] || fail "Chromium does not match AIBRAIN_CHROME_EXPECTED_VERSION"
 
-# Fail closed when the host cannot create the worker mount namespace or mask
-# the official publisher root. There is deliberately no unsandboxed fallback.
+# Fail closed when the host cannot create the worker mount namespace, hide the
+# product data root, selectively re-expose an approved read root, or mask the
+# official publisher root. There is deliberately no unsandboxed fallback.
 boundary_marker=$(mktemp /srv/aibrain/publish-rw/.aibrain-boundary.XXXXXX)
-trap 'rm -f "$boundary_marker"' EXIT INT TERM
+hidden_marker=$(mktemp /var/lib/aibrain/data/.aibrain-hidden.XXXXXX)
+allowed_marker=$(mktemp /var/lib/aibrain/data/company-context/.aibrain-allowed.XXXXXX)
+trap 'rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"' EXIT INT TERM
 /usr/bin/bwrap \
   --ro-bind / / \
   --dev /dev \
   --proc /proc \
   --unshare-pid \
   --unshare-ipc \
+  --tmpfs /var/lib/aibrain/data \
+  --ro-bind /var/lib/aibrain/data/company-context /var/lib/aibrain/data/company-context \
   --tmpfs /srv/aibrain/publish-rw \
   --remount-ro /srv/aibrain/publish-rw \
-  /bin/sh -c '[ ! -e "$1" ] && ! : >"$2"' sh \
+  /bin/sh -c '[ ! -e "$1" ] && [ -f "$2" ] && ! : >"$2" && [ ! -e "$3" ] && ! : >"$4"' sh \
+    "$hidden_marker" "$allowed_marker" \
     "$boundary_marker" /srv/aibrain/publish-rw/worker-write-test \
   >/dev/null 2>&1 || fail "bubblewrap worker isolation is unavailable on this host"
-rm -f "$boundary_marker"
+rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"
 trap - EXIT INT TERM
 
 exec "$@"

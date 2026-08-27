@@ -8,7 +8,7 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 
 - Next.js, el publicador documental y los App Servers ejecutan como UID/GID no-root configurable; el root filesystem del contenedor es read-only y todas las capabilities están eliminadas.
 - `sourceReadRoot` es un bind mount `ro` para Next.js y los workers.
-- `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only, solo sus raíces privadas se re-montan con escritura y `publish-rw` se reemplaza por un mount vacío read-only.
+- `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only y `dataRoot` queda oculto. Solo se reexponen el contexto corporativo/documental de lectura, los tres Markdown privados del empleado y sus raíces runtime/workspace/staging/artifacts/audit. Perfiles Chromium, sesiones, backups y carpetas de otros empleados no son legibles; `publish-rw` se reemplaza por un mount vacío read-only.
 - El arranque falla si el host no puede crear ese namespace o si `source-ro` es writable. No hay fallback de worker sin aislamiento.
 - No se monta `docker.sock`, no se usan redes/volúmenes externos y todos sus nombres son obligatoriamente únicos por instalación.
 - Chromium usa CDP en loopback dentro del mismo contenedor y perfiles/descargas por empleado. No se publican puertos CDP o noVNC.
