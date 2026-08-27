@@ -1108,6 +1108,12 @@ ruta autenticada de frames e input hasta `release` o expiración del heartbeat.
 
 `GET` también recupera un takeover con heartbeat caducado antes de calcular health. Tras un restart del proceso, un `start` sobre estado persistido no detenido inicia recuperación y cerca la sesión anterior.
 
+La UI no debe guardar ni reenviar una URL para reconstruir el browser. El
+backend mantiene una proyección privada y acotada de la última URL segura por
+thread; al recrear su target la revalida con la política de red vigente y la
+restaura. Si esa persistencia falla, `runtime.healthy` pasa a `false` con detalle
+de navegación degradada en vez de simular una recuperación correcta.
+
 ### 14.2 Token privado del viewer
 
 `POST /api/runtime/browser/token`

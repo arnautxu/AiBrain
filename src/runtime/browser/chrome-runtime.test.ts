@@ -402,6 +402,50 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
+  it("restores the last private URL for each thread after a browser process restart", async () => {
+    const { context } = await contextFixture();
+    const firstChild = new FakeChromeProcess();
+    const firstClient = new FakeCdpClient(() => firstChild.exit());
+    const first = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => firstChild,
+      connectCdpPipe: () => firstClient,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await first.start();
+    await Promise.all([
+      first.agentNavigate(THREAD_A, "https://a.example.test/recover"),
+      first.agentNavigate(THREAD_B, "https://b.example.test/recover"),
+    ]);
+    await first.stop();
+
+    const secondChild = new FakeChromeProcess();
+    const secondClient = new FakeCdpClient(() => secondChild.exit());
+    const second = new ChromeCdpRuntime({
+      ...context,
+      browserSessionId: "0198b9f0-6631-7000-8000-000000000403",
+      generation: 2,
+      recovering: true,
+    }, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => secondChild,
+      connectCdpPipe: () => secondClient,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await second.start();
+    await Promise.all([second.captureFrame(THREAD_A), second.captureFrame(THREAD_B)]);
+    await expect(second.currentUrl(THREAD_A)).resolves.toBe("https://a.example.test/recover");
+    await expect(second.currentUrl(THREAD_B)).resolves.toBe("https://b.example.test/recover");
+    expect(secondClient.commands.filter((command) => command.method === "Page.navigate"))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ params: { url: "https://a.example.test/recover" } }),
+        expect.objectContaining({ params: { url: "https://b.example.test/recover" } }),
+      ]));
+    await second.stop();
+  });
+
   it("retries a failed pipe handshake with bounded child cleanup instead of reconnecting", async () => {
     const { context } = await contextFixture();
     const children = [new FakeChromeProcess(), new FakeChromeProcess()];

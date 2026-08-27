@@ -20,6 +20,7 @@ import {
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
 import { BrowserEgressProxy } from "@/runtime/browser/egress-proxy";
+import { BrowserNavigationStore } from "@/runtime/browser/navigation-store";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/u;
@@ -96,6 +97,7 @@ type ThreadPage = {
   readonly downloadsPath: string;
   readonly downloads: Map<string, string>;
   fetchUnsubscribe: (() => void) | null;
+  navigationUnsubscribe: (() => void) | null;
   downloadUnsubscribes: Array<() => void>;
   interceptedRequests: number;
   closed: boolean;
@@ -368,6 +370,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private readonly connectCdpPipe: NonNullable<RuntimeDependencies["connectCdpPipe"]>;
   private readonly networkPolicy: BrowserNetworkPolicy;
   private readonly egressProxy: BrowserEgressProxy | null;
+  private readonly navigationStore: BrowserNavigationStore;
   private readonly now: () => number;
   private process: ChromeProcess | null = null;
   private browserClient: CdpClientLike | null = null;
@@ -375,6 +378,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private readonly threadPagePromises = new Map<string, Promise<ThreadPage>>();
   private readonly downloadOwners = new Map<string, ThreadPage>();
   private readonly downloadFinalizations = new Set<Promise<void>>();
+  private readonly navigationWrites = new Set<Promise<void>>();
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
   private stderrTail = "";
@@ -383,6 +387,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private browserVersion: string | null = null;
   private downloadQuarantine: string | null = null;
   private lastDownloadFailure: string | null = null;
+  private lastNavigationFailure: string | null = null;
   private detachedUnsubscribe: (() => void) | null = null;
   private targetCreatedUnsubscribe: (() => void) | null = null;
   private targetDestroyedUnsubscribe: (() => void) | null = null;
@@ -420,6 +425,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       ? null
       : new BrowserEgressProxy({ networkPolicy: this.networkPolicy });
     this.now = options.now ?? Date.now;
+    this.navigationStore = new BrowserNavigationStore({
+      browserRoot: context.roots.browserRoot,
+      installationId: context.installationId,
+      userId: context.userId,
+      now: this.now,
+    });
   }
 
   get targetId() {
@@ -459,6 +470,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       }
       if (this.lastDownloadFailure) {
         return { healthy: false, detail: `Chrome download routing failed: ${this.lastDownloadFailure}` };
+      }
+      if (this.lastNavigationFailure) {
+        return { healthy: false, detail: `Chrome navigation persistence failed: ${this.lastNavigationFailure}` };
       }
       const version = await this.browserClient.send<{ product: string }>("Browser.getVersion");
       const current = extractBrowserVersion(version.product);
@@ -527,6 +541,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
+    if (!result.isDownload) await this.persistNavigation(page, destination);
   }
 
   async dispatchInput(threadId: string, command: BrowserInputCommand) {
@@ -932,6 +947,10 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     let sessionId: string | null = null;
     let page: ThreadPage | null = null;
     try {
+      const restoredUrl = validateBrowserNavigationUrl(
+        await this.navigationStore.get(threadId) ?? "about:blank",
+      );
+      if (restoredUrl !== "about:blank") await this.networkPolicy.assertAllowed(restoredUrl);
       const created = await browser.send<{ targetId?: string }>("Target.createTarget", {
         url: "about:blank",
       });
@@ -958,6 +977,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         downloadsPath,
         downloads: new Map(),
         fetchUnsubscribe: null,
+        navigationUnsubscribe: null,
         downloadUnsubscribes: [],
         interceptedRequests: 0,
         closed: false,
@@ -969,6 +989,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       }, { sessionId });
       page.fetchUnsubscribe = browser.on("Fetch.requestPaused", (params) => {
         this.queueInterceptedRequest(page as ThreadPage, params);
+      }, { sessionId });
+      page.navigationUnsubscribe = browser.on("Page.frameNavigated", (params) => {
+        this.queueNavigationPersistence(page as ThreadPage, params);
       }, { sessionId });
       page.downloadUnsubscribes.push(
         browser.on("Page.downloadWillBegin", (params) => {
@@ -984,6 +1007,17 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
           { urlPattern: "https://*", requestStage: "Request" },
         ],
       }, { sessionId });
+      if (restoredUrl !== "about:blank") {
+        const restored = await browser.send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
+          url: restoredUrl,
+        }, { sessionId });
+        if (restored.errorText || restored.isDownload) {
+          throw new ChromeRuntimeError(
+            "CHROME_NAVIGATION_RECOVERY_FAILED",
+            boundedErrorText(restored.errorText ?? "Stored browser navigation became a download."),
+          );
+        }
+      }
       if (!this.running) {
         throw new ChromeRuntimeError("CHROME_NOT_RUNNING", "Chrome stopped while creating a thread target.");
       }
@@ -991,6 +1025,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       return page;
     } catch (error) {
       page?.fetchUnsubscribe?.();
+      page?.navigationUnsubscribe?.();
       for (const unsubscribe of page?.downloadUnsubscribes ?? []) unsubscribe();
       if (browser.isOpen) {
         if (sessionId) {
@@ -1049,6 +1084,34 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     }
   }
 
+  private async persistNavigation(page: ThreadPage, url: string) {
+    if (page.closed) return;
+    try {
+      await this.navigationStore.set(page.threadId, url);
+      if (!page.closed) this.lastNavigationFailure = null;
+    } catch (error) {
+      this.lastNavigationFailure = boundedErrorText(
+        error instanceof Error ? error.message : "Unknown navigation persistence failure.",
+      );
+      throw error;
+    }
+  }
+
+  private queueNavigationPersistence(page: ThreadPage, value: unknown) {
+    if (page.closed || !isRecord(value) || !isRecord(value.frame)) return;
+    const frame = value.frame;
+    if (frame.parentId !== undefined || typeof frame.url !== "string") return;
+    let url: string;
+    try {
+      url = validateBrowserNavigationUrl(frame.url);
+    } catch {
+      return;
+    }
+    const write = this.persistNavigation(page, url);
+    this.navigationWrites.add(write);
+    void write.finally(() => this.navigationWrites.delete(write)).catch(() => undefined);
+  }
+
   private handleDetachedTarget(value: unknown) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
     const detachedSessionId = (value as Record<string, unknown>).sessionId;
@@ -1060,6 +1123,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     if (this.threadPages.get(page.threadId) === page) this.threadPages.delete(page.threadId);
     page.fetchUnsubscribe?.();
     page.fetchUnsubscribe = null;
+    page.navigationUnsubscribe?.();
+    page.navigationUnsubscribe = null;
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
     const guids = [...page.downloads.keys()];
     page.downloads.clear();
@@ -1335,6 +1400,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     const child = this.process;
     await Promise.allSettled([...this.threadPagePromises.values()]);
     await Promise.allSettled([...this.downloadFinalizations]);
+    await Promise.allSettled([...this.navigationWrites]);
     await Promise.allSettled([...this.unownedTargetClosures]);
     const pages = [...this.threadPages.values()];
     const activeDownloadGuids = pages.flatMap((page) => [...page.downloads.keys()]);
@@ -1361,6 +1427,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     }
     await Promise.allSettled(pages.map((page) => this.closeThreadPage(page, browser)));
     await Promise.allSettled([...this.downloadFinalizations]);
+    await Promise.allSettled([...this.navigationWrites]);
     if (browser?.isOpen) await browser.send("Browser.close").catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);
     if (child && child.exitCode === null) {
@@ -1376,6 +1443,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.process = null;
     this.downloadQuarantine = null;
     this.lastDownloadFailure = null;
+    this.lastNavigationFailure = null;
     this.browserVersion = null;
   }
 
@@ -1383,6 +1451,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     page.closed = true;
     page.fetchUnsubscribe?.();
     page.fetchUnsubscribe = null;
+    page.navigationUnsubscribe?.();
+    page.navigationUnsubscribe = null;
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
     const activeDownloadGuids = [...page.downloads.keys()];
     if (browser?.isOpen) {

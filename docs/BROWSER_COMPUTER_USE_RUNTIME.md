@@ -26,7 +26,9 @@ symlinks.
 ├── profile/       # exclusive browser profile for this user
 ├── downloads/     # exclusive download root for this user
 ├── session.json   # private schemaVersion=1 lifecycle/download metadata
-└── .locks/        # cross-process state mutation locks
+├── navigation.json # private schemaVersion=1 last safe URL per thread
+├── .locks/        # cross-process lifecycle locks
+└── .navigation-locks/ # cross-process navigation projection locks
 ```
 
 `session.json` is written with mode `0600` using atomic temp/fsync/rename
@@ -35,6 +37,14 @@ installation/user binding, lifecycle invariants and download basenames. A
 corrupt, foreign, over-sized, hard-linked, permissive or symlinked state fails
 closed. Valid interrupted atomic writes can be recovered by the shared storage
 primitive.
+
+`navigation.json` is a separate typed, atomic projection because Chrome target
+IDs and CDP sessions are intentionally ephemeral. It stores only the last
+credential-free HTTP(S) URL or `about:blank` for each thread, is bound to the
+installation and user, and retains the 512 most recently updated threads by
+default. Eviction only removes restart convenience; it never deletes a thread,
+download or profile data. A recreated target revalidates the URL against the
+current network policy before navigation.
 
 The browser profile itself is intentionally opaque to AiBrain. Chrome receives
 only that employee's profile and download roots. Download metadata records only
@@ -106,6 +116,11 @@ creating unbounded processes or waiters.
 On a backend restart, a fresh registry detects durable active state, enters
 recovery, rotates the session binding and asks the adapter to start with
 `recovering=true`. Profiles and downloads remain user-specific and durable.
+When a thread next opens its target, the runtime restores that thread's last
+safe URL from the private navigation projection. Redirects and click-driven
+top-frame navigations update the same projection through target-scoped CDP
+events; persistence failure degrades runtime health instead of silently losing
+recovery state.
 
 The registry is process-local. The adapter closes a child with `Browser.close`
 and only escalates signals against the exact process it launched. A lost pipe or
@@ -165,7 +180,8 @@ The focused suite covers two-user root and state isolation, durable restart,
 thread-bound targets and downloads, takeover and heartbeat recovery,
 stale-session fencing, gateway token tampering/cross-user/thread/expiry checks,
 registry runtime exclusivity, private-pipe framing and EOF recovery, bounded
-backpressure, corruption and symlink rejection.
+backpressure, URL recovery per thread, navigation LRU retention, binding,
+hardlink/corruption and symlink rejection.
 
 The real two-profile test is opt-in because it launches three browser
 processes. Point it at a pinned Chrome for Testing/Chromium build:
