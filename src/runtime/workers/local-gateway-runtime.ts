@@ -161,6 +161,31 @@ function parseAppServerOutput(value: unknown): AppServerEvent["message"] {
   throw new Error("Codex App Server emitted an unsupported JSON-RPC message.");
 }
 
+type AppServerScope = { threadId: string; turnId: string | null };
+
+function appServerScope(message: AppServerEvent["message"]): AppServerScope | null {
+  if (message.kind === "rpc-response") return null;
+  const rawParams: unknown = message.rpc.params;
+  const params = isRecord(rawParams) ? rawParams : null;
+  if (!params || typeof params.threadId !== "string") return null;
+  let turnId = typeof params.turnId === "string" ? params.turnId : null;
+  if (!turnId && isRecord(params.turn) && typeof params.turn.id === "string") {
+    turnId = params.turn.id;
+  }
+  return { threadId: params.threadId, turnId };
+}
+
+function appServerScopeDigest(scope: AppServerScope) {
+  return sha256(JSON.stringify([scope.threadId, scope.turnId]));
+}
+
+function encodedResponseScopeDigest(clientRequestId: string) {
+  if (!clientRequestId.startsWith("server-response:")) return undefined;
+  const suffix = clientRequestId.slice(clientRequestId.lastIndexOf(":") + 1);
+  if (suffix === "unscoped") return null;
+  return SHA256.test(suffix) ? suffix : undefined;
+}
+
 class GatewayRequestLedger {
   private readonly journal: FileJournal<GatewayRequestRecord>;
 
@@ -279,6 +304,7 @@ export class PrivateWorkerGateway {
   private state: WorkerControllerHealth["state"] = "stopped";
   private lastError: string | null = null;
   private messageChain = Promise.resolve();
+  private readonly pendingResponseConfirmations = new Map<string, string>();
 
   constructor(options: PrivateWorkerGatewayOptions) {
     this.context = options.context;
@@ -533,6 +559,13 @@ export class PrivateWorkerGateway {
     const canonical = JSON.stringify(request);
     const accepted = await this.requests.accept(request.clientRequestId, sha256(canonical));
     if (accepted.existing && accepted.record.status === "accepted") {
+      if (request.kind === "rpc-response") {
+        const scopeDigest = await this.responseScopeDigest(request, true);
+        await this.dispatchAppServerInput(request);
+        if (scopeDigest) this.pendingResponseConfirmations.set(request.clientRequestId, scopeDigest);
+        else await this.completeUnscopedResponse(socket, request.clientRequestId);
+        return;
+      }
       this.send(socket, {
         protocolVersion: APP_SERVER_TRANSPORT_PROTOCOL_VERSION,
         type: "rejected",
@@ -545,16 +578,32 @@ export class PrivateWorkerGateway {
       });
       return;
     }
-    this.send(socket, {
-      protocolVersion: APP_SERVER_TRANSPORT_PROTOCOL_VERSION,
-      type: "accepted",
-      clientRequestId: request.clientRequestId,
-    });
-    if (accepted.existing && accepted.record.responseJson && request.kind === "rpc-request") {
-      await this.recordAppServerOutput(JSON.parse(accepted.record.responseJson));
+    if (accepted.existing) {
+      this.sendAccepted(socket, request.clientRequestId);
+      if (accepted.record.responseJson && request.kind === "rpc-request") {
+        await this.recordAppServerOutput(JSON.parse(accepted.record.responseJson));
+      }
       return;
     }
-    if (accepted.existing) return;
+    const responseScopeDigest = request.kind === "rpc-response"
+      ? await this.responseScopeDigest(request, false)
+      : undefined;
+    await this.dispatchAppServerInput(request);
+    if (request.kind === "rpc-response") {
+      if (responseScopeDigest) {
+        this.pendingResponseConfirmations.set(request.clientRequestId, responseScopeDigest);
+      } else {
+        await this.completeUnscopedResponse(socket, request.clientRequestId);
+      }
+      return;
+    }
+    if (request.kind === "rpc-notification") {
+      await this.requests.complete(request.clientRequestId, { id: request.clientRequestId, result: null });
+    }
+    this.sendAccepted(socket, request.clientRequestId);
+  }
+
+  private async dispatchAppServerInput(request: AppServerRequest) {
     const child = this.child;
     if (!child || child.stdin.destroyed || !child.stdin.writable) {
       throw new Error("Codex App Server input is unavailable.");
@@ -563,9 +612,38 @@ export class PrivateWorkerGateway {
     await new Promise<void>((resolve, reject) => {
       child.stdin.write(`${JSON.stringify(output)}\n`, (error) => error ? reject(error) : resolve());
     });
-    if (request.kind !== "rpc-request") {
-      await this.requests.complete(request.clientRequestId, { id: request.clientRequestId, result: null });
+  }
+
+  private sendAccepted(socket: WebSocket, clientRequestId: string) {
+    this.send(socket, {
+      protocolVersion: APP_SERVER_TRANSPORT_PROTOCOL_VERSION,
+      type: "accepted",
+      clientRequestId,
+    });
+  }
+
+  private async responseScopeDigest(request: Extract<AppServerRequest, { kind: "rpc-response" }>, replay: boolean) {
+    const encoded = encodedResponseScopeDigest(request.clientRequestId);
+    if (replay && encoded !== undefined) return encoded;
+    const matching = (await this.events.readEvents()).findLast((event) =>
+      event.message.kind === "rpc-request" && event.message.rpc.id === request.rpc.id);
+    const scope = matching ? appServerScope(matching.message) : null;
+    if (!matching) {
+      throw new Error("Server response does not match a durable scoped App Server request.");
     }
+    const actual = scope ? appServerScopeDigest(scope) : null;
+    if (encoded !== undefined && encoded !== actual) {
+      throw new Error("Server response clientRequestId does not match its durable request scope.");
+    }
+    return actual;
+  }
+
+  private async completeUnscopedResponse(socket: WebSocket, clientRequestId: string) {
+    await this.requests.complete(clientRequestId, {
+      id: clientRequestId,
+      result: { processedAfterEventId: null },
+    });
+    this.sendAccepted(socket, clientRequestId);
   }
 
   private async receiveAppServerLine(line: string) {
@@ -576,7 +654,9 @@ export class PrivateWorkerGateway {
     if (isRecord(value) && typeof value.id === "string" && ("result" in value || "error" in value)) {
       await this.requests.complete(value.id, value);
     }
-    await this.recordAppServerOutput(value);
+    const event = await this.recordAppServerOutput(value);
+    const scope = appServerScope(event.message);
+    if (scope) await this.confirmServerResponses(scope, event.eventId);
   }
 
   private async recordAppServerOutput(value: unknown) {
@@ -595,6 +675,21 @@ export class PrivateWorkerGateway {
         type: "event",
         event,
       });
+    }
+    return event;
+  }
+
+  private async confirmServerResponses(scope: AppServerScope, evidenceEventId: string) {
+    const actualScopeDigest = appServerScopeDigest(scope);
+    for (const [clientRequestId, expectedScopeDigest] of this.pendingResponseConfirmations) {
+      if (actualScopeDigest !== expectedScopeDigest) continue;
+      await this.requests.complete(clientRequestId, {
+        id: clientRequestId,
+        result: { processedAfterEventId: evidenceEventId },
+      });
+      this.pendingResponseConfirmations.delete(clientRequestId);
+      const socket = this.activeSocket;
+      if (socket) this.sendAccepted(socket, clientRequestId);
     }
   }
 

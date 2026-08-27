@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ClientNotification } from "../../../contracts/codex/0.149.1/types/ClientNotification";
 import type { ClientRequest } from "../../../contracts/codex/0.149.1/types/ClientRequest";
 import type { ServerNotification } from "../../../contracts/codex/0.149.1/types/ServerNotification";
@@ -58,6 +58,14 @@ function eventScope(rpc: ServerNotification | ServerRequest) {
     turnId = params.turn.id;
   }
   return { threadId: params.threadId, turnId };
+}
+
+function serverResponseClientRequestId(event: AppServerEvent, request: ServerRequest) {
+  const scope = eventScope(request);
+  const scopeDigest = scope
+    ? createHash("sha256").update(JSON.stringify([scope.threadId, scope.turnId])).digest("hex")
+    : "unscoped";
+  return `server-response:${event.eventId}:${scopeDigest}`;
 }
 
 function responseError(response: JsonRpcFailure) {
@@ -299,7 +307,7 @@ export class AppServerRpcRouter {
           },
         };
     await this.transport.send({
-      clientRequestId: `server-response:${randomUUID()}`,
+      clientRequestId: serverResponseClientRequestId(event, request),
       kind: "rpc-response",
       rpc: response,
     });
