@@ -52,7 +52,18 @@ El smoke App Server real se ejecutó previamente en el host Hetzner existente me
 
 ## Preview
 
-La publicación final debe ser un deployment **Preview**, nunca `--prod`. Registrar aquí deployment, URL, commit y checks protegidos después de publicar la rama de entrega.
+| Campo | Valor |
+| --- | --- |
+| Deployment | `dpl_4MTkfJPc77HFrmueB8PWv2qAGsd3` |
+| URL estable | `https://aibrain-workbench-preview.vercel.app` |
+| URL inmutable | `https://aibrain-workbench-olpddgjdg-arnautxus-projects.vercel.app` |
+| Inspector | `https://vercel.com/arnautxus-projects/aibrain-workbench/4MTkfJPc77HFrmueB8PWv2qAGsd3` |
+| Commit | `97eb769` |
+| Target / estado | Preview / Ready |
+
+La configuración `example-lab-preview` queda incluida de forma explícita en el trace serverless y Vercel recibe únicamente la ruta absoluta `/var/task/config/installations/vercel-preview.example.json`. La garantía backend de `InstallationConfig` obligatorio en producción no se relajó.
+
+Checks con Deployment Protection activa: `/login` `200` y contiene `Example Brain` / `Example Laboratory`; `/api/auth/session` `401` anónimo; `/api/health/live` `200`; logs de error vacíos. `/api/health/ready` devuelve `503` de forma intencional porque Vercel es la UI/Auth Preview y no aloja el runtime Codex persistente. No se usó `--prod`, no se desactivó protección y Production quedó intacta.
 
 ## Orden recomendado de integración
 
