@@ -538,3 +538,7 @@ npm run infra:validate
 - Pruebas locales del cambio: workers 11/11, runtime/turn 17/17, typecheck y
   lint verdes. Siguiente acción: build inmutable, despliegue y repetición del
   turn real desde David hasta respuesta terminal correcta.
+
+### Cierre de la incidencia
+
+[Installation-specific operational details omitted.]

@@ -52,12 +52,15 @@ services:
     image: "\${AIBRAIN_IMAGE}"
     labels:
       com.graphikai.aibrain.installation: "\${AIBRAIN_INSTALLATION_ID}"
-    ports:
-      - "127.0.0.1:\${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
     security_opt:
       - seccomp=./browser/seccomp_profile.json
     mem_limit: "\${AIBRAIN_MEMORY_LIMIT}"
     networks: [aibrain-internal]
+  ingress-gateway:
+    image: "\${AIBRAIN_EGRESS_IMAGE}"
+    ports:
+      - "127.0.0.1:\${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
+    networks: [aibrain-internal, aibrain-ingress]
   alert-dispatcher:
     image: "\${AIBRAIN_IMAGE}"
     networks: [aibrain-internal, aibrain-egress]
@@ -70,6 +73,8 @@ networks:
     internal: true
   aibrain-egress:
     name: "\${AIBRAIN_EGRESS_NETWORK_NAME}"
+  aibrain-ingress:
+    name: "\${AIBRAIN_INGRESS_NETWORK_NAME}"
 volumes:
   aibrain-data:
     name: "\${AIBRAIN_DATA_VOLUME_NAME}"
@@ -111,6 +116,7 @@ function composeEnvironment(root: string, activeConfigFile: string, options: {
     `AIBRAIN_REPLICA_STATE_HOST_PATH=${path.join(root, "host/replication")}`,
     "AIBRAIN_NETWORK_NAME=aibrain-company-qa-private",
     "AIBRAIN_EGRESS_NETWORK_NAME=aibrain-company-qa-egress",
+    "AIBRAIN_INGRESS_NETWORK_NAME=aibrain-company-qa-ingress",
     "AIBRAIN_DATA_VOLUME_NAME=aibrain-company-qa-data",
     "AIBRAIN_BACKUP_VOLUME_NAME=aibrain-company-qa-backups",
     "AIBRAIN_RESTORE_VOLUME_NAME=aibrain-company-qa-restores",
@@ -329,7 +335,7 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.seccomp.json`, "utf8")).toContain('"read"');
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","alert-dispatcher"');
+    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","ingress-gateway","alert-dispatcher"');
     expect(log).toContain('"{{.State.Health.Status}}"');
   }, 20_000);
 
