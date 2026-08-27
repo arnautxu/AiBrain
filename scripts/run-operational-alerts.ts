@@ -27,6 +27,7 @@ async function main() {
   );
   const input = await collectOperationalAlertInput({
     dataRoot: installation.paths.dataRoot,
+    publishWriteRoot: installation.paths.publishWriteRoot,
     readinessUrl: process.env.AIBRAIN_ALERT_READINESS_URL?.trim() || "http://127.0.0.1:3000/api/health/ready",
     restartCount15m: countArgument("--restart-count-15m"),
     preflightFailureCount15m: countArgument("--preflight-failure-count-15m"),

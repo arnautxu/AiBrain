@@ -74,6 +74,17 @@ Quan una acció necessiti aprovació, explica de forma concreta què vols fer i 
 }
 
 /**
+ * Generic App Server command, file-change and permission escalation requests
+ * are executable only when the immutable turn snapshot explicitly allows the
+ * canonical tools.execute rule. Human approval cannot override a DENY.
+ */
+export function permissionAllowsGenericToolExecution(permissions: ResolvedPermissions) {
+  const rule = permissions.rules.find((candidate) =>
+    candidate.ruleId === "tools.execute" && candidate.action === "execute");
+  return rule?.effect === "allow";
+}
+
+/**
  * Resolves and durably audits the effective policy for one authenticated turn.
  * Every identity field must come from the server-side session/thread context.
  */

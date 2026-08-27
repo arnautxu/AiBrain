@@ -24,9 +24,11 @@ describe("collectOperationalAlertInput", () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-alert-collector-"));
     roots.push(root);
     await mkdir(path.join(root, "data"));
+    await mkdir(path.join(root, "publish"));
     const requests: string[] = [];
     const input = await collectOperationalAlertInput({
       dataRoot: path.join(root, "data"),
+      publishWriteRoot: path.join(root, "publish"),
       readinessUrl: "http://127.0.0.1:3000/api/health/ready",
       restartCount15m: 2,
       preflightFailureCount15m: 1,
@@ -42,6 +44,7 @@ describe("collectOperationalAlertInput", () => {
       preflightFailureCount15m: 1,
       backupReceipt: receipt,
       diskUsedRatio: expect.any(Number),
+      publishDiskUsedRatio: expect.any(Number),
     });
     expect(requests).toEqual(["http://127.0.0.1:3000/api/health/ready"]);
   });
@@ -51,6 +54,7 @@ describe("collectOperationalAlertInput", () => {
     roots.push(root);
     await expect(collectOperationalAlertInput({
       dataRoot: root,
+      publishWriteRoot: root,
       readinessUrl: "http://localhost:3000/api/health/ready",
       restartCount15m: 0,
       preflightFailureCount15m: 0,
@@ -60,6 +64,7 @@ describe("collectOperationalAlertInput", () => {
 
     await expect(collectOperationalAlertInput({
       dataRoot: root,
+      publishWriteRoot: root,
       readinessUrl: "https://attacker.invalid/api/health/ready",
       restartCount15m: 0,
       preflightFailureCount15m: 0,

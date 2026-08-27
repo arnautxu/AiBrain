@@ -33,7 +33,7 @@ export async function GET(
     return new Response(contents, {
       headers: {
         "Content-Type": "image/png",
-        "Cache-Control": "private, max-age=31536000, immutable",
+        "Cache-Control": "private, no-store",
         "Content-Disposition": `inline; filename="imatge-${artifactId.slice(0, 8)}.png"`,
       },
     });

@@ -4,12 +4,18 @@ import type { OperationalAlertInput } from "@/operations/alerts";
 
 export type OperationalAlertCollectorOptions = {
   dataRoot: string;
+  publishWriteRoot: string;
   readinessUrl: string;
   restartCount15m: number;
   preflightFailureCount15m: number;
   readBackupReceipt: () => Promise<BackupVerificationReceipt | null>;
   timeoutMs?: number;
   fetchImplementation?: typeof fetch;
+  readFilesystemCapacity?: (root: string) => Promise<{
+    bavail: bigint;
+    bsize: bigint;
+    blocks: bigint;
+  }>;
 };
 
 function count(name: string, value: number) {
@@ -34,8 +40,11 @@ export async function collectOperationalAlertInput(
   const restartCount15m = count("restartCount15m", options.restartCount15m);
   const preflightFailureCount15m = count("preflightFailureCount15m", options.preflightFailureCount15m);
   const fetchImplementation = options.fetchImplementation ?? fetch;
-  const [capacity, backupReceipt, readiness] = await Promise.all([
-    statfs(options.dataRoot, { bigint: true }),
+  const readFilesystemCapacity = options.readFilesystemCapacity
+    ?? (async (root: string) => statfs(root, { bigint: true }));
+  const [capacity, publishCapacity, backupReceipt, readiness] = await Promise.all([
+    readFilesystemCapacity(options.dataRoot),
+    readFilesystemCapacity(options.publishWriteRoot),
     options.readBackupReceipt(),
     fetchImplementation(readinessUrl, {
       cache: "no-store",
@@ -47,9 +56,15 @@ export async function collectOperationalAlertInput(
   const total = capacity.blocks * capacity.bsize;
   const available = capacity.bavail * capacity.bsize;
   const diskUsedRatio = total === 0n ? null : Number(total - available) / Number(total);
+  const publishTotal = publishCapacity.blocks * publishCapacity.bsize;
+  const publishAvailable = publishCapacity.bavail * publishCapacity.bsize;
+  const publishDiskUsedRatio = publishTotal === 0n
+    ? null
+    : Number(publishTotal - publishAvailable) / Number(publishTotal);
   return {
     readiness,
     diskUsedRatio,
+    publishDiskUsedRatio,
     restartCount15m,
     preflightFailureCount15m,
     backupReceipt,

@@ -4,6 +4,7 @@ export type OperationalAlertSeverity = "warning" | "critical";
 export type OperationalAlertCode =
   | "READINESS_DEGRADED"
   | "DISK_PRESSURE"
+  | "PUBLISH_DISK_PRESSURE"
   | "RESTART_LOOP"
   | "BACKUP_UNVERIFIED"
   | "BACKUP_STALE"
@@ -26,6 +27,7 @@ export type OperationalAlertEvaluation = Readonly<{
 export type OperationalAlertInput = Readonly<{
   readiness: "ready" | "degraded";
   diskUsedRatio: number | null;
+  publishDiskUsedRatio: number | null;
   restartCount15m: number;
   preflightFailureCount15m: number;
   backupReceipt: BackupVerificationReceipt | null;
@@ -65,6 +67,7 @@ export function evaluateOperationalAlerts(
   count("restartCount15m", input.restartCount15m);
   count("preflightFailureCount15m", input.preflightFailureCount15m);
   if (input.diskUsedRatio !== null) ratio("diskUsedRatio", input.diskUsedRatio);
+  if (input.publishDiskUsedRatio !== null) ratio("publishDiskUsedRatio", input.publishDiskUsedRatio);
 
   const alerts: OperationalAlert[] = [];
   if (input.readiness !== "ready") {
@@ -76,6 +79,14 @@ export function evaluateOperationalAlerts(
       severity: input.diskUsedRatio >= diskCriticalRatio ? "critical" : "warning",
       value: input.diskUsedRatio,
       threshold: input.diskUsedRatio >= diskCriticalRatio ? diskCriticalRatio : diskWarningRatio,
+    });
+  }
+  if (input.publishDiskUsedRatio !== null && input.publishDiskUsedRatio >= diskWarningRatio) {
+    alerts.push({
+      code: "PUBLISH_DISK_PRESSURE",
+      severity: input.publishDiskUsedRatio >= diskCriticalRatio ? "critical" : "warning",
+      value: input.publishDiskUsedRatio,
+      threshold: input.publishDiskUsedRatio >= diskCriticalRatio ? diskCriticalRatio : diskWarningRatio,
     });
   }
   if (input.restartCount15m >= restartCriticalCount) {

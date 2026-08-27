@@ -61,6 +61,13 @@ además del mayor margen entre `AIBRAIN_MINIMUM_FREE_BYTES` y
 devuelve `429 Retry-After` y no persiste el body. Es backpressure operativo de
 la instalación, no una cuota de usuario.
 
+El volumen oficial `publishWriteRoot` se mide de forma independiente. Cada
+confirmación adquiere un gate global entre procesos y reserva el tamaño del
+candidato sobre el mayor suelo entre bytes y ratio libre. Si falta margen,
+responde `429 Retry-After`; si no puede medirse, responde `503`. En ambos casos
+la operación permanece pendiente y no se crea versión ni se toca el destino.
+Readiness y alertas evalúan también este volumen separado.
+
 Los restos de una caída se inspeccionan y recuperan con
 `aibrain-document-maintenance`; el modo predeterminado es dry-run y `--apply`
 solo elimina `.incoming`/`.work-*` sin lock vivo y fuera de la gracia. La
