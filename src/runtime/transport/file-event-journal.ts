@@ -47,6 +47,7 @@ const deliveryCursorSchema = defineVersionedSchema<DeliveryCursorRecord>({
 export type FileTransportEventJournalOptions = {
   filePath: string;
   lockManager: ResourceLockManager;
+  maxRetainedDeliveredEvents?: number;
 };
 
 /** Durable per-worker transport cursor and event log. */
@@ -55,11 +56,17 @@ export class FileTransportEventJournal implements TransportEventJournal {
   private readonly journal: FileJournal<AppServerEvent>;
   private readonly lockManager: ResourceLockManager;
   private readonly deliveryCursorPath: string;
+  private readonly maxRetainedDeliveredEvents: number;
 
   constructor(options: FileTransportEventJournalOptions) {
     this.filePath = path.resolve(options.filePath);
     this.lockManager = options.lockManager;
     this.deliveryCursorPath = `${this.filePath}.delivery.json`;
+    this.maxRetainedDeliveredEvents = options.maxRetainedDeliveredEvents ?? 256;
+    if (!Number.isSafeInteger(this.maxRetainedDeliveredEvents) ||
+        this.maxRetainedDeliveredEvents < 1 || this.maxRetainedDeliveredEvents > 65_536) {
+      throw new Error("Delivered event retention must be between 1 and 65536.");
+    }
     this.journal = new FileJournal({
       filePath: this.filePath,
       lockManager: options.lockManager,
@@ -95,7 +102,14 @@ export class FileTransportEventJournal implements TransportEventJournal {
   }
 
   async readEvents(afterSequence = 0, limit = Number.MAX_SAFE_INTEGER) {
-    return (await this.journal.read({ afterSequence, limit })).map((entry) => entry.payload);
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 ||
+        !Number.isSafeInteger(limit) || limit < 1) {
+      throw new Error("Transport event read bounds are invalid.");
+    }
+    return (await this.journal.read())
+      .map((entry) => entry.payload)
+      .filter((event) => event.sequence > afterSequence)
+      .slice(0, limit);
   }
 
   private async loadDeliveryCursor() {
@@ -112,7 +126,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
     return this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
       const cursor = await this.loadDeliveryCursor();
       if (cursor) {
-        const persisted = (await this.journal.read({ afterSequence: cursor.sequence - 1, limit: 1 }))[0]?.payload;
+        const persisted = (await this.readEvents(cursor.sequence - 1, 1))[0];
         if (!persisted || persisted.eventId !== cursor.eventId || persisted.sequence !== cursor.sequence) {
           throw new TransportProtocolError("Transport delivery cursor does not match the durable event journal.");
         }
@@ -132,7 +146,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
           `Transport delivery expected sequence ${expected}, received ${validated.sequence}.`,
         );
       }
-      const persisted = (await this.journal.read({ afterSequence: validated.sequence - 1, limit: 1 }))[0]?.payload;
+      const persisted = (await this.readEvents(validated.sequence - 1, 1))[0];
       if (!persisted || persisted.eventId !== validated.eventId || persisted.sequence !== validated.sequence) {
         throw new TransportProtocolError("Cannot acknowledge an event absent from the durable journal.");
       }
@@ -141,6 +155,13 @@ export class FileTransportEventJournal implements TransportEventJournal {
         eventId: validated.eventId,
         sequence: validated.sequence,
       }, deliveryCursorSchema, { mode: 0o600 });
+      const retainAfter = Math.max(0, validated.sequence - this.maxRetainedDeliveredEvents);
+      await this.journal.compact((entries) => {
+        if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
+        return entries
+          .map((entry) => entry.payload)
+          .filter((persisted) => persisted.sequence > retainAfter);
+      });
     });
   }
 

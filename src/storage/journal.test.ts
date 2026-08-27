@@ -157,4 +157,27 @@ describe("append-only file journal", () => {
       .rejects.toMatchObject({ code: "STORAGE_SYMLINK_REJECTED" });
     expect(await readFile(outside, "utf8")).toBe("");
   });
+
+  it("atomically compacts retained payloads and continues its internal sequence", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "discarded" });
+    await events.append({ schemaVersion: 1, label: "retained" });
+    await expect(events.compact((entries) => entries.slice(-1).map((entry) => entry.payload)))
+      .resolves.toEqual({ before: 2, after: 1, changed: true });
+    expect((await events.read()).map((entry) => entry.payload.label)).toEqual(["retained"]);
+    await events.append({ schemaVersion: 1, label: "after-compaction" });
+    expect((await events.read()).map((entry) => [entry.sequence, entry.payload.label])).toEqual([
+      [1, "retained"],
+      [2, "after-compaction"],
+    ]);
+  });
+
+  it("skips the atomic rewrite when compaction is not due", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "unchanged" });
+    const before = await readFile(journalPath, "utf8");
+    await expect(events.compact(() => undefined))
+      .resolves.toEqual({ before: 1, after: 1, changed: false });
+    expect(await readFile(journalPath, "utf8")).toBe(before);
+  });
 });

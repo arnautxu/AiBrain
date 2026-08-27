@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, open, readFile } from "node:fs/promises";
 import path from "node:path";
-import { fsyncDirectory } from "@/storage/atomic-file";
+import { atomicWriteFile, fsyncDirectory } from "@/storage/atomic-file";
 import { StorageCorruptionError, StorageError } from "@/storage/errors";
 import { ResourceLockManager } from "@/storage/resource-lock";
 import {
@@ -298,6 +298,43 @@ export class FileJournal<Payload> {
       return entries
         .filter((entry) => entry.sequence > afterSequence)
         .slice(0, limit);
+    });
+  }
+
+  /**
+   * Atomically rewrites a journal under its normal cross-process lock.
+   *
+   * This is intended only for operational ledgers whose authoritative cursor
+   * or projection is stored separately. The callback receives validated
+   * entries and returns the payloads that must remain, in their new order.
+   */
+  async compact(
+    retain: (entries: readonly JournalEntry<Payload>[]) => readonly Payload[] | undefined,
+  ) {
+    return this.lockManager.withLock(this.lockKey(), async () => {
+      await this.assertNotSymlink();
+      const { entries } = await this.readUnlocked(true);
+      const retained = retain(entries);
+      if (retained === undefined) {
+        return Object.freeze({ before: entries.length, after: entries.length, changed: false });
+      }
+      const payloads = retained.map((payload) =>
+        this.payloadSchema.parse(payload, `${this.filePath}:compaction`));
+      const compacted = payloads.map((payload, index) => this.entrySchema.parse({
+        schemaVersion: 1,
+        sequence: index + 1,
+        eventId: randomUUID(),
+        recordedAt: new Date(this.now()).toISOString(),
+        payload,
+      }));
+      await atomicWriteFile(
+        this.filePath,
+        compacted.length === 0
+          ? ""
+          : `${compacted.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+        { mode: 0o600 },
+      );
+      return Object.freeze({ before: entries.length, after: compacted.length, changed: true });
     });
   }
 

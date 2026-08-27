@@ -10,7 +10,7 @@ import {
 const HELP = `Usage: npm run test:soak -- [options]
 
 Options:
-  --duration-ms <ms>       Target duration, default 60000
+  --duration-ms <ms>       Target duration, default 120000
   --cycles <count>         Optional deterministic cycle limit
   --concurrency <count>    Concurrent isolated workers, default 4
   --restart-every <count>  Restart/replay cadence in cycles, default 20

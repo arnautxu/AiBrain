@@ -40,6 +40,7 @@ import {
 
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_STDIO_LINE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_RETAINED_COMPLETED_REQUESTS = 4_096;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -131,7 +132,16 @@ function parseAppServerOutput(value: unknown): AppServerEvent["message"] {
 class GatewayRequestLedger {
   private readonly journal: FileJournal<GatewayRequestRecord>;
 
-  constructor(filePath: string, lockManager: ResourceLockManager, private readonly now: () => number) {
+  constructor(
+    filePath: string,
+    lockManager: ResourceLockManager,
+    private readonly now: () => number,
+    private readonly maxRetainedCompletedRequests: number,
+  ) {
+    if (!Number.isSafeInteger(maxRetainedCompletedRequests) ||
+        maxRetainedCompletedRequests < 1 || maxRetainedCompletedRequests > 65_536) {
+      throw new Error("Completed request retention must be between 1 and 65536.");
+    }
     this.journal = new FileJournal({
       filePath,
       lockManager,
@@ -183,6 +193,22 @@ class GatewayRequestLedger {
       occurredAt: new Date(this.now()).toISOString(),
     };
     await this.journal.append(completed);
+    await this.journal.compact((entries) => {
+      if (entries.length <= this.maxRetainedCompletedRequests * 2) {
+        return undefined;
+      }
+      const latest = new Map<string, GatewayRequestRecord>();
+      for (const entry of entries) {
+        latest.delete(entry.payload.clientRequestId);
+        latest.set(entry.payload.clientRequestId, entry.payload);
+      }
+      const records = [...latest.values()];
+      const uncertain = records.filter((record) => record.status === "accepted");
+      const completedRecords = records
+        .filter((record) => record.status === "completed")
+        .slice(-this.maxRetainedCompletedRequests);
+      return [...uncertain, ...completedRecords];
+    });
     return completed;
   }
 }
@@ -191,6 +217,8 @@ export type PrivateWorkerGatewayOptions = {
   context: WorkerLaunchContext;
   processFactory?: (context: WorkerLaunchContext) => ChildProcessWithoutNullStreams;
   now?: () => number;
+  maxRetainedCompletedRequests?: number;
+  maxRetainedDeliveredEvents?: number;
 };
 
 /**
@@ -230,11 +258,13 @@ export class PrivateWorkerGateway {
     this.events = new FileTransportEventJournal({
       filePath: path.join(options.context.transportAudit, "gateway-events.jsonl"),
       lockManager: this.locks,
+      maxRetainedDeliveredEvents: options.maxRetainedDeliveredEvents,
     });
     this.requests = new GatewayRequestLedger(
       path.join(options.context.transportAudit, "gateway-requests.jsonl"),
       this.locks,
       this.now,
+      options.maxRetainedCompletedRequests ?? DEFAULT_RETAINED_COMPLETED_REQUESTS,
     );
     this.processFactory = options.processFactory ?? ((context) => spawn(/* turbopackIgnore: true */
       process.env.CODEX_BIN?.trim() || "codex",
@@ -453,6 +483,12 @@ export class PrivateWorkerGateway {
       if (typeof value.eventId !== "string" || !Number.isSafeInteger(value.sequence)) {
         throw new Error("Event acknowledgement is invalid.");
       }
+      const acknowledged = (await this.events.readEvents((value.sequence as number) - 1, 1))[0];
+      if (!acknowledged || acknowledged.sequence !== value.sequence ||
+          acknowledged.eventId !== value.eventId) {
+        throw new Error("Event acknowledgement does not match the durable gateway journal.");
+      }
+      await this.events.markDelivered(acknowledged);
       return;
     }
     if (value.type !== "request") throw new Error("Unsupported client frame.");
@@ -601,6 +637,8 @@ class DeferredAppServerTransport implements AppServerTransport {
 export type LocalGatewayWorkerRuntimeFactoryOptions = {
   processFactory?: PrivateWorkerGatewayOptions["processFactory"];
   now?: () => number;
+  maxRetainedCompletedRequests?: number;
+  maxRetainedDeliveredEvents?: number;
 };
 
 class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
@@ -618,6 +656,8 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
       context: this.context,
       processFactory: this.options.processFactory,
       now: this.options.now,
+      maxRetainedCompletedRequests: this.options.maxRetainedCompletedRequests,
+      maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,
     });
     await gateway.start();
     if (!gateway.endpoint) throw new Error("Worker gateway endpoint is unavailable.");
@@ -627,6 +667,7 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
     const journal = new FileTransportEventJournal({
       filePath: path.join(this.context.transportAudit, "client-events.jsonl"),
       lockManager: clientLocks,
+      maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,
     });
     this.transport.configure(new WebSocketAppServerTransport({
       endpoint: gateway.endpoint,

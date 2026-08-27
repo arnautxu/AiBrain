@@ -10,6 +10,10 @@ provide a `TransportEventJournal`, and production must use a durable adapter.
 `FileTransportEventJournal` is the local filesystem adapter. It stores a
 versioned JSONL record, verifies contiguous worker sequences, rejects event-id
 reuse and restores the replay cursor after a backend restart.
+Delivered history is compacted atomically to a bounded tail (256 events by
+default) while every undelivered event remains durable. Payload sequence and
+the delivery cursor stay authoritative across compaction and restart; the
+internal JSONL sequence is intentionally regenerable.
 
 The JSON-RPC payload types and runtime validators come from the generated Codex
 `0.149.1` bindings and JSON Schemas in `contracts/codex/0.149.1`. Unknown

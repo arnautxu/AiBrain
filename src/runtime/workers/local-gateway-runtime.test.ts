@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
@@ -105,9 +105,10 @@ describe("private per-user worker gateway", () => {
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  function gateway() {
+  function gateway(options: { maxRetainedCompletedRequests?: number } = {}) {
     return new PrivateWorkerGateway({
       context,
+      ...options,
       processFactory: () => spawn(process.execPath, [fakeServer], {
         cwd: context.workspace,
         env: { NODE_ENV: "test", ...context.environment },
@@ -210,6 +211,28 @@ describe("private per-user worker gateway", () => {
     } finally {
       await restartedClient.close();
       await restartedWorker.stop();
+    }
+  });
+
+  it("bounds completed request history while retaining uncertain outcomes", async () => {
+    const worker = gateway({ maxRetainedCompletedRequests: 2 });
+    await worker.start();
+    const client = transport(worker);
+    try {
+      await client.connect();
+      for (let index = 1; index <= 4; index += 1) {
+        await client.send(initializeRequest(`bounded-request-${index}`));
+        const received = await nextEvent(client);
+        if (!received.done) await client.acknowledge(received.value);
+      }
+      const lines = (await readFile(
+        path.join(context.transportAudit, "gateway-requests.jsonl"),
+        "utf8",
+      )).trim().split("\n");
+      expect(lines.length).toBeLessThanOrEqual(4);
+    } finally {
+      await client.close();
+      await worker.stop();
     }
   });
 });
