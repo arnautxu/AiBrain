@@ -260,8 +260,10 @@ Antes de un release, completa maintenance/drain, backup/verify, SBOM, scan y tes
 Promueve mediante el gestor transaccional. Este verifica que ambos digests
 existen localmente, que sus labels OCI coinciden con el commit, valida Compose,
 cambia `AIBRAIN_IMAGE` y `AIBRAIN_EGRESS_IMAGE` atómicamente, espera los dos
-healthchecks y registra `current`/`previous`. Si cualquiera falla, restaura
-ambos digests anteriores y exige que vuelvan a estar healthy:
+healthchecks, verifica la identidad de las imágenes realmente ejecutadas y
+registra `current`/`previous`. Si cualquiera falla, restaura ambos digests
+anteriores y exige que vuelvan a estar healthy. El journal recupera SIGKILL o
+reboot sin adivinar el estado; procedimiento y códigos: `docs/RELEASES.md`.
 
 ```bash
 node scripts/manage-release.mjs promote \

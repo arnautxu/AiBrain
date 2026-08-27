@@ -173,10 +173,16 @@ requireMatch(hostPreflight, /\.aibrain-owner\.json/u, "host preflight does not r
 requireMatch(hostPreflight, /AIBRAIN_BACKUP_VOLUME_NAME[\s\S]*AIBRAIN_RESTORE_VOLUME_NAME/u, "host preflight does not validate independent backup and restore volumes");
 requireMatch(hostPreflight, /existing Docker[\s\S]*not owned/u, "host preflight does not reject foreign Docker resources");
 requireMatch(hostPreflight, /must never address BGreenly/u, "host preflight does not fail closed on BGreenly paths");
+requireMatch(hostPreflight, /\/usr\/bin\/flock/u, "host preflight does not require OS release serialization on Linux");
 requireMatch(releaseManager, /@sha256:\[0-9a-f\]\{64\}/u, "release manager does not require immutable image digests");
 requireMatch(releaseManager, /org\.opencontainers\.image\.revision/u, "release manager does not verify the OCI source revision");
 requireMatch(releaseManager, /RELEASE_RECOVERED/u, "release manager does not recover the previous healthy image after failure");
 requireMatch(releaseManager, /writeAtomic\(options\.stateFile/u, "release manager does not persist current and previous releases atomically");
+requireMatch(releaseManager, /target-healthy[\s\S]*state-committed/u, "release manager lacks a durable promotion transaction");
+requireMatch(releaseManager, /RELEASE_DOCKER_TIMEOUT/u, "release manager does not bound Docker subprocesses");
+requireMatch(releaseManager, /\{\{\.Config\.Image\}\}/u, "release manager does not verify running container image identity");
+requireMatch(releaseManager, /\/usr\/bin\/flock/u, "release manager lacks OS advisory locking on Linux");
+requireMatch(releaseManager, /\/usr\/bin\/lockf/u, "release manager lacks OS advisory locking on macOS QA");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
 requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");
 forbidMatch(chromeRuntime, /--remote-debugging-(?:port|address)/u, "Chrome runtime reintroduces a network CDP endpoint");
