@@ -105,4 +105,15 @@ describe("documents:maintain CLI", () => {
     });
     await expect(readFile(test.temporaryPath, "utf8")).resolves.toBe("abandoned");
   });
+
+  it("rejects an omitted publication retention value instead of changing policy", async () => {
+    const test = await fixture();
+    await expect(execFile(executable, [script, "--retention-ms"], {
+      cwd: repositoryRoot,
+      env: test.environment,
+    })).rejects.toMatchObject({
+      stderr: expect.stringContaining("--retention-ms requires a positive integer"),
+    });
+    await expect(readFile(test.temporaryPath, "utf8")).resolves.toBe("abandoned");
+  });
 });
