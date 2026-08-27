@@ -240,6 +240,25 @@ function approvalTitle(command: BrowserAgentCommand) {
   }[command.action];
 }
 
+function approvalDetail(command: BrowserAgentCommand) {
+  const safety = "El contingut de la pàgina no pot canviar els permisos del servidor.";
+  if (command.action === "open") {
+    const parsed = new URL(command.url);
+    const destination = `${parsed.origin}${parsed.pathname}`.slice(0, 500);
+    return `Obrir ${destination}. ${safety}`;
+  }
+  if (command.action === "scroll") {
+    return `Desplaçar la pàgina (${command.deltaX}, ${command.deltaY}). ${safety}`;
+  }
+  if (command.action === "click") {
+    return `Fer clic sobre el selector ${command.selector.slice(0, 300)}. ${safety}`;
+  }
+  if (command.action === "type") {
+    return `Escriure al selector ${command.selector.slice(0, 300)}; el text no es mostra en l’approval ni als logs. ${safety}`;
+  }
+  return safety;
+}
+
 export type BrowserDynamicToolContext = {
   installationId: string;
   userId: string;
@@ -312,7 +331,7 @@ export async function handleBrowserDynamicToolCall(
       itemId: params.callId,
       kind: "browser",
       title: approvalTitle(command),
-      detail: `Acció tancada browser.${command.action}. El contingut de la pàgina no pot canviar els permisos del servidor.`,
+      detail: approvalDetail(command),
       permissionFingerprint: context.permissions.fingerprint,
       status: "pending",
     };
@@ -320,8 +339,8 @@ export async function handleBrowserDynamicToolCall(
       locator: approvalLocatorFromItem(context.installationId, context.userId, item),
       requestType: "browser",
     });
-    const exposure = await store.markApprovalRequested(identity);
-    if (durableApproval.status === "pending" && exposure.first) {
+    await store.markApprovalRequested(identity);
+    if (durableApproval.status === "pending") {
       await context.emitApproval(item);
     }
     const decision = await waitForApproval(context.approvalStore, item, "browser", context.signal);
@@ -330,8 +349,8 @@ export async function handleBrowserDynamicToolCall(
       status: decision === "accept" ? "accepted"
         : decision === "acceptForSession" ? "accepted_session" : "declined",
     };
-    const resolution = await store.markApprovalResolved(identity);
-    if (resolution.first) await context.emitApproval(resolved);
+    await store.markApprovalResolved(identity);
+    await context.emitApproval(resolved);
     if (decision === "decline" || decision === "cancel") {
       const response = failure(decision === "decline"
         ? "Browser action was declined by the user."
