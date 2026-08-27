@@ -1,6 +1,6 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
@@ -11,6 +11,7 @@ type NextProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 const processes = new Set<NextProcess>();
 let root = "";
+let applicationRoot = "";
 let configPath = "";
 let port = 0;
 let baseUrl = "";
@@ -62,12 +63,13 @@ async function startServer() {
   const child = spawn(process.execPath, [
     path.join(repositoryRoot, "node_modules/next/dist/bin/next"),
     "dev",
+    "--webpack",
     "--hostname",
     "127.0.0.1",
     "--port",
     String(port),
   ], {
-    cwd: repositoryRoot,
+    cwd: applicationRoot,
     env: {
       ...process.env,
       AIBRAIN_AUTH_MODE: "demo",
@@ -110,6 +112,19 @@ async function json(pathname: string, init: RequestInit = {}) {
 
 beforeAll(async () => {
   root = await mkdtemp(path.join(tmpdir(), "aibrain-http-e2e-"));
+  applicationRoot = path.join(root, "application");
+  await mkdir(applicationRoot, { recursive: true, mode: 0o700 });
+  await Promise.all([
+    "src",
+    "public",
+    "config",
+    "next.config.ts",
+    "next-env.d.ts",
+    "package.json",
+    "postcss.config.mjs",
+    "tsconfig.json",
+  ].map((entry) => cp(path.join(repositoryRoot, entry), path.join(applicationRoot, entry), { recursive: true })));
+  await symlink(path.join(repositoryRoot, "node_modules"), path.join(applicationRoot, "node_modules"), "dir");
   port = await availablePort();
   baseUrl = `http://127.0.0.1:${port}`;
   const dataRoot = path.join(root, "data");
