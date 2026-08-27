@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,8 +17,12 @@ const UPLOAD_A = "20000000-0000-4000-8000-000000000001";
 const UPLOAD_B = "20000000-0000-4000-8000-000000000002";
 const QUARANTINE_A = "30000000-0000-4000-8000-000000000001";
 const QUARANTINE_B = "30000000-0000-4000-8000-000000000002";
+const OPERATION_ID = "40000000-0000-4000-8000-000000000001";
+const TURN_ID = "50000000-0000-4000-8000-000000000001";
+const PREVIEW_ID = "60000000-0000-4000-8000-000000000001";
 const NOW = Date.parse("2026-08-27T12:00:00.000Z");
 const GRACE_MS = 60_000;
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 const roots: string[] = [];
@@ -45,7 +50,7 @@ async function fixture(userId = USER_A) {
     chmodPrivate(path.join(userRoot, "state", "document-previews", THREAD_ID)),
     chmodPrivate(previewDirectory),
   ]);
-  return { root, dataRoot, usersRoot, userRoot, incomingRoot, previewDirectory };
+  return { root, dataRoot, usersRoot, userRoot, userId, incomingRoot, previewDirectory };
 }
 
 async function chmodPrivate(target: string) {
@@ -78,9 +83,70 @@ function service(test: Fixture, lockManager?: ResourceLockManager) {
     dataRoot: test.dataRoot,
     usersRoot: test.usersRoot,
     gracePeriodMs: GRACE_MS,
+    publicationCandidateRetentionMs: RETENTION_MS,
+    installationId: "maintenance-qa",
     now: () => NOW,
     lockManager,
   });
+}
+
+async function publication(test: Fixture, options: {
+  status?: "awaiting_confirmation" | "declined";
+  updatedAtMs?: number;
+} = {}) {
+  const content = Buffer.from("frozen candidate");
+  const snapshotRelativePath = path.posix.join(
+    "candidates",
+    test.userId,
+    THREAD_ID,
+    OPERATION_ID,
+    "candidate.txt",
+  );
+  const publicationsRoot = path.join(test.userRoot, "state", "publications");
+  const candidatePath = path.join(publicationsRoot, snapshotRelativePath);
+  const operationPath = path.join(publicationsRoot, "operations", test.userId, `${OPERATION_ID}.json`);
+  await Promise.all([
+    mkdir(path.dirname(candidatePath), { recursive: true, mode: 0o700 }),
+    mkdir(path.dirname(operationPath), { recursive: true, mode: 0o700 }),
+  ]);
+  const updatedAt = new Date(options.updatedAtMs ?? NOW - RETENTION_MS - 1_000).toISOString();
+  const status = options.status ?? "declined";
+  const sha256 = createHash("sha256").update(content).digest("hex");
+  const operation = {
+    schemaVersion: 1,
+    operationId: OPERATION_ID,
+    installationId: "maintenance-qa",
+    userId: test.userId,
+    threadId: THREAD_ID,
+    turnId: TURN_ID,
+    targetRelativePath: "knowledge/report.txt",
+    status,
+    candidate: { fileName: "candidate.txt", size: content.byteLength, sha256, snapshotRelativePath },
+    preview: {
+      schemaVersion: 1,
+      previewId: PREVIEW_ID,
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      candidateSha256: sha256,
+      status: "ready",
+      artifacts: ["preview.pdf"],
+      createdAt: updatedAt,
+    },
+    original: { exists: false, size: null, sha256: null, mtimeMs: null },
+    confirmationTokenHash: "a".repeat(64),
+    confirmationExpiresAt: new Date(NOW + 60_000).toISOString(),
+    creationRequestHash: "b".repeat(64),
+    decisionRequestHash: status === "awaiting_confirmation" ? null : "c".repeat(64),
+    version: null,
+    result: null,
+    createdAt: updatedAt,
+    updatedAt,
+  };
+  await Promise.all([
+    writeFile(candidatePath, content, { mode: 0o600 }),
+    writeFile(operationPath, `${JSON.stringify(operation)}\n`, { mode: 0o600 }),
+  ]);
+  return { candidatePath, operationPath, publicationsRoot };
 }
 
 async function exists(target: string) {
@@ -250,5 +316,72 @@ describe("FileDocumentTemporaryMaintenance", () => {
       expect.objectContaining({ relativePath: USER_B, reason: "user root is not a private real directory" }),
     ]));
     await expect(readFile(path.join(outsideIncoming, `${UPLOAD_A}.upload`), "utf8")).resolves.toBe("outside");
+  });
+
+  it("removes only terminal frozen candidate bytes after 30 days and retains durable state", async () => {
+    const test = await fixture();
+    const terminal = await publication(test);
+    const durableReceipt = path.join(terminal.publicationsRoot, "requests", USER_A, `decision-${"d".repeat(64)}.json`);
+    const durableAudit = path.join(terminal.publicationsRoot, "audit", "maintenance-qa", "publication.jsonl");
+    await Promise.all([
+      mkdir(path.dirname(durableReceipt), { recursive: true, mode: 0o700 }),
+      mkdir(path.dirname(durableAudit), { recursive: true, mode: 0o700 }),
+    ]);
+    await Promise.all([
+      writeFile(durableReceipt, "receipt", { mode: 0o600 }),
+      writeFile(durableAudit, "audit", { mode: 0o600 }),
+    ]);
+
+    const dryRun = await service(test).run({ dryRun: true });
+    expect(dryRun.publicationCandidateRetentionMs).toBe(RETENTION_MS);
+    expect(dryRun.wouldRemove).toEqual([
+      expect.objectContaining({ kind: "publication-candidate" }),
+    ]);
+    await expect(readFile(terminal.candidatePath, "utf8")).resolves.toBe("frozen candidate");
+
+    const applied = await service(test).run({ dryRun: false });
+    expect(applied.removed).toEqual([
+      expect.objectContaining({ kind: "publication-candidate" }),
+    ]);
+    await expect(exists(terminal.candidatePath)).resolves.toBe(false);
+    await expect(Promise.all([
+      readFile(terminal.operationPath, "utf8"),
+      readFile(durableReceipt, "utf8"),
+      readFile(durableAudit, "utf8"),
+    ])).resolves.toEqual([expect.stringContaining(OPERATION_ID), "receipt", "audit"]);
+  });
+
+  it("retains pending and young publication candidates and preserves unsafe candidate state", async () => {
+    const pendingTest = await fixture();
+    const pending = await publication(pendingTest, { status: "awaiting_confirmation" });
+    const pendingReport = await service(pendingTest).run({ dryRun: false });
+    expect(pendingReport.removed).toEqual([]);
+    await expect(exists(pending.candidatePath)).resolves.toBe(true);
+
+    const youngTest = await fixture(USER_B);
+    const young = await publication(youngTest, { updatedAtMs: NOW - RETENTION_MS + 1_000 });
+    const youngReport = await service(youngTest).run({ dryRun: false });
+    expect(youngReport.removed).toEqual([]);
+    expect(youngReport.skippedYoung).toEqual([
+      expect.objectContaining({ kind: "publication-candidate" }),
+    ]);
+    await expect(exists(young.candidatePath)).resolves.toBe(true);
+
+    await writeFile(young.candidatePath, "wrong size", { mode: 0o600 });
+    const corruptReport = await new FileDocumentTemporaryMaintenance({
+      dataRoot: youngTest.dataRoot,
+      usersRoot: youngTest.usersRoot,
+      installationId: "maintenance-qa",
+      publicationCandidateRetentionMs: 1,
+      gracePeriodMs: GRACE_MS,
+      now: () => NOW,
+    }).run({ dryRun: false });
+    expect(corruptReport.skippedUnsafe).toEqual([
+      expect.objectContaining({
+        kind: "publication-candidate",
+        reason: "publication candidate size differs from versioned operation state",
+      }),
+    ]);
+    await expect(readFile(young.candidatePath, "utf8")).resolves.toBe("wrong size");
   });
 });

@@ -112,6 +112,21 @@ describe("streaming multipart document intake", () => {
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
 
+  it("rejects an invalid boundary before acquiring a temporary lease", async () => {
+    const request = new Request("http://localhost/upload", {
+      method: "POST",
+      headers: { "content-type": "multipart/form-data; boundary=" },
+      body: Buffer.from("invalid"),
+    });
+    await expect(parseStreamingDocumentUpload(request, root, locks)).rejects.toMatchObject({
+      code: "UPLOAD_MULTIPART_INVALID",
+    });
+    await expect(readdir(path.join(root, ".locks")).catch((error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return [];
+      throw error;
+    })).resolves.toEqual([]);
+  });
+
   it("rejects any third part instead of accepting fields beyond uploadId and file", async () => {
     const body = Buffer.concat([
       prefix(),

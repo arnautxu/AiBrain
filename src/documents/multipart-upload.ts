@@ -91,7 +91,6 @@ export async function parseStreamingDocumentUpload(
   };
 
   let parser: ReturnType<typeof Busboy>;
-  const temporaryLease = await lockManager.acquire(documentUploadTemporaryLockKey(temporaryPath));
   try {
     parser = Busboy({
       headers: { "content-type": contentType },
@@ -178,6 +177,7 @@ export async function parseStreamingDocumentUpload(
   // report an incomplete trailing file on the following microtask.
   parser.on("error", () => undefined);
 
+  const temporaryLease = await lockManager.acquire(documentUploadTemporaryLockKey(temporaryPath));
   try {
     const source = Readable.fromWeb(request.body as NodeReadableStream<Uint8Array>);
     await pipeline(source, new MultipartByteLimit(), parser, { signal: request.signal });

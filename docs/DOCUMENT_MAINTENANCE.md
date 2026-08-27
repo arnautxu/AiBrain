@@ -2,9 +2,10 @@
 
 Este mantenimiento elimina exclusivamente restos temporales creados por el
 parser de uploads (`staging/.incoming/<uuid>.upload`) y por el generador de
-previews (`state/document-previews/<thread>/<upload>/.work-XXXXXX`). No elimina
-uploads ya staged, previews terminadas, candidatos de publicación, versiones,
-recibos ni auditoría.
+previews (`state/document-previews/<thread>/<upload>/.work-XXXXXX`). También
+aplica la retención de 30 días exclusivamente a los bytes del candidato
+congelado de publicaciones ya terminadas. No elimina uploads ya staged,
+previews terminadas, operaciones, versiones, recibos ni auditoría.
 
 ## Política de retención
 
@@ -13,9 +14,12 @@ recibos ni auditoría.
 - Uploads staged y previews `ready`: activos duraderos ligados al thread. No se
   eliminan automáticamente porque un refresh, un turn posterior o la revisión
   humana pueden necesitarlos.
-- Publicaciones: candidatos congelados, operaciones, receipts, versiones y
-  auditoría se conservan para idempotencia, recuperación y trazabilidad. Este
-  recolector no tiene acceso al repositorio documental publicado.
+- Publicaciones pendientes o en curso: el candidato congelado se conserva sin
+  expiración automática. Tras `published`, `declined`, `expired` o `conflict`,
+  solo esos bytes de candidato son elegibles a los 30 días desde `updatedAt`.
+  Operaciones, receipts, versiones recuperables y auditoría se conservan para
+  idempotencia, recuperación y trazabilidad. Este recolector no tiene acceso al
+  repositorio documental publicado.
 - La instalación evita llenar el volumen mediante admisión previa por slots y
   margen libre, no borrando silenciosamente datos de empresa. Una política de
   borrado de datos duraderos requerirá una operación explícita de lifecycle con
@@ -49,6 +53,9 @@ La gracia puede fijarse en milisegundos con `--grace-ms <n>` o
 operativo permitido para un upload o una conversión. El CLI toma un lock global
 entre procesos; cada temporal activo usa además su lock documental canónico. Si
 ese lock está ocupado, el fichero se registra en `skippedLocked` y no se toca.
+La retención de candidatos terminados se fija con `--retention-ms <n>` o
+`AIBRAIN_PUBLICATION_CANDIDATE_RETENTION_MS`; el valor operativo aprobado es
+`2592000000` (30 días).
 
 Antes de borrar, cada candidato debe conservar nombre, ubicación, tipo, permisos
 privados e identidad de inodo. Los candidatos válidos se mueven atómicamente a

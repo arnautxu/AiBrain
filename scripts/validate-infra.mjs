@@ -265,6 +265,7 @@ const requiredRuntimeKeys = [
   "AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES",
   "AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS",
   "AIBRAIN_DOCUMENT_TEMP_GRACE_MS",
+  "AIBRAIN_PUBLICATION_CANDIDATE_RETENTION_MS",
 ];
 for (const key of requiredRuntimeKeys) requireMatch(runtimeEnv, new RegExp(`^${key}=`, "mu"), `runtime env example is missing ${key}`);
 forbidMatch(runtimeEnv, /SUPABASE_SECRET_KEY/u, "runtime env includes an unnecessary Supabase server key");
@@ -332,7 +333,7 @@ if (existsSync("/usr/local/bin/docker") || existsSync("/usr/bin/docker") || exis
       "compose",
       "--env-file", "compose.env.example",
       "-f", "compose.yaml",
-      "config", "--quiet",
+      "config", "--no-env-resolution", "--quiet",
     ], { cwd: relative("infra/hetzner"), stdio: "inherit" });
     process.stdout.write("docker compose config: PASS\n");
   } catch {

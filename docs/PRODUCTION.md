@@ -66,7 +66,9 @@ Los restos de una caída se inspeccionan y recuperan con
 solo elimina `.incoming`/`.work-*` sin lock vivo y fuera de la gracia. La
 política y los comandos exactos están en `docs/DOCUMENT_MAINTENANCE.md`. Los
 uploads, previews y registros de publicación duraderos no se purgan de forma
-implícita.
+implícita; solo los bytes congelados del candidato de una publicación ya
+terminada son elegibles tras 30 días, conservando operación, receipts, versión
+recuperable y auditoría.
 
 ## Gates P0 que requieren evidencia QA
 
