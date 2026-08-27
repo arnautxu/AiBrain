@@ -358,20 +358,24 @@ function deploy(options, release, deadline = performance.now() + options.healthT
   runDocker(options, composeArgs(options, "config", "--quiet"), remainingDockerTimeout(options, deadline));
   runDocker(
     options,
-    composeArgs(options, "up", "-d", "--no-deps", "egress-gateway", "app"),
+    composeArgs(options, "up", "-d", "--no-deps", "egress-gateway", "app", "alert-dispatcher"),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, "egress-gateway", deadline);
   waitUntilHealthy(options, "app", deadline);
+  waitUntilHealthy(options, "alert-dispatcher", deadline);
   verifyRunningService(options, "egress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, "app", release.image, release.revision, deadline);
+  verifyRunningService(options, "alert-dispatcher", release.image, release.revision, deadline);
 }
 
 function verifyCurrentDeployment(options, release, deadline = performance.now() + options.healthTimeoutMs) {
   waitUntilHealthy(options, "egress-gateway", deadline);
   waitUntilHealthy(options, "app", deadline);
+  waitUntilHealthy(options, "alert-dispatcher", deadline);
   verifyRunningService(options, "egress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, "app", release.image, release.revision, deadline);
+  verifyRunningService(options, "alert-dispatcher", release.image, release.revision, deadline);
 }
 
 function releaseRecord(image, egressImage, revision, promotedAt = new Date().toISOString()) {

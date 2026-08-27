@@ -581,6 +581,16 @@ export class FileBackupService {
       if (receipt.installationId !== this.installationId) {
         throw new BackupError("BACKUP_RECEIPT_MISMATCH", "Backup verification receipt belongs to another installation.");
       }
+      const snapshotRoot = path.join(this.backupsRoot, "snapshots", receipt.backupId);
+      try {
+        const snapshot = await lstat(snapshotRoot);
+        if (!snapshot.isDirectory() || snapshot.isSymbolicLink() || (snapshot.mode & 0o077) !== 0) {
+          throw new BackupError("BACKUP_RECEIPT_MISMATCH", "Verified backup snapshot root is unsafe.");
+        }
+      } catch (error) {
+        if (isNodeError(error, "ENOENT")) return null;
+        throw error;
+      }
       return receipt;
     } catch (error) {
       if (isNodeError(error, "ENOENT")) return null;

@@ -1,13 +1,17 @@
 import type { BackupVerificationReceipt } from "@/operations/backup";
+import type { BackupReplicaReceipt } from "@/operations/backup-replica";
 
 export type OperationalAlertSeverity = "warning" | "critical";
 export type OperationalAlertCode =
   | "READINESS_DEGRADED"
+  | "EGRESS_GATEWAY_DEGRADED"
   | "DISK_PRESSURE"
   | "PUBLISH_DISK_PRESSURE"
   | "RESTART_LOOP"
   | "BACKUP_UNVERIFIED"
   | "BACKUP_STALE"
+  | "REPLICA_UNVERIFIED"
+  | "REPLICA_STALE"
   | "PREFLIGHT_FAILURE";
 
 export type OperationalAlert = Readonly<{
@@ -26,11 +30,13 @@ export type OperationalAlertEvaluation = Readonly<{
 
 export type OperationalAlertInput = Readonly<{
   readiness: "ready" | "degraded";
+  egressGateway: "ready" | "degraded";
   diskUsedRatio: number | null;
   publishDiskUsedRatio: number | null;
   restartCount15m: number;
   preflightFailureCount15m: number;
   backupReceipt: BackupVerificationReceipt | null;
+  replicaReceipt: BackupReplicaReceipt | null;
 }>;
 
 export type OperationalAlertOptions = Readonly<{
@@ -73,6 +79,9 @@ export function evaluateOperationalAlerts(
   if (input.readiness !== "ready") {
     alerts.push({ code: "READINESS_DEGRADED", severity: "critical", value: null, threshold: null });
   }
+  if (input.egressGateway !== "ready") {
+    alerts.push({ code: "EGRESS_GATEWAY_DEGRADED", severity: "critical", value: null, threshold: null });
+  }
   if (input.diskUsedRatio !== null && input.diskUsedRatio >= diskWarningRatio) {
     alerts.push({
       code: "DISK_PRESSURE",
@@ -106,6 +115,29 @@ export function evaluateOperationalAlerts(
         code: "BACKUP_STALE",
         severity: "critical",
         value: Math.max(createdAge, verifiedAge),
+        threshold: maximumBackupAgeMs,
+      });
+    }
+  }
+  if (
+    !input.replicaReceipt
+    || !input.backupReceipt
+    || input.replicaReceipt.backupId !== input.backupReceipt.backupId
+    || input.replicaReceipt.sourceFingerprint !== input.backupReceipt.sourceFingerprint
+  ) {
+    alerts.push({ code: "REPLICA_UNVERIFIED", severity: "critical", value: null, threshold: maximumBackupAgeMs });
+  } else {
+    const replicatedAge = now() - Date.parse(input.replicaReceipt.replicatedAt);
+    const verifiedAge = now() - Date.parse(input.replicaReceipt.verifiedAt);
+    if (
+      !Number.isFinite(replicatedAge) || !Number.isFinite(verifiedAge)
+      || replicatedAge < 0 || verifiedAge < 0
+      || replicatedAge > maximumBackupAgeMs || verifiedAge > maximumBackupAgeMs
+    ) {
+      alerts.push({
+        code: "REPLICA_STALE",
+        severity: "critical",
+        value: Math.max(replicatedAge, verifiedAge),
         threshold: maximumBackupAgeMs,
       });
     }

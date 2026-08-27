@@ -27,6 +27,7 @@ const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
 const backupReplicate = read("infra/hetzner/app/backup-replicate.sh");
 const alerts = read("infra/hetzner/app/alerts.sh");
+const alertController = read("infra/hetzner/app/alert-controller.sh");
 const documentMaintenance = read("infra/hetzner/app/document-maintenance.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
@@ -36,6 +37,7 @@ const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const egressEnv = read("infra/hetzner/egress.env.example");
+const alertsEnv = read("infra/hetzner/alerts.env.example");
 const replicaEnv = read("infra/hetzner/replica.env.example");
 const egressGateway = read("infra/hetzner/egress/gateway.mts");
 const seccompProfile = JSON.parse(read("infra/hetzner/browser/seccomp_profile.json"));
@@ -47,7 +49,7 @@ const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
 const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -70,6 +72,7 @@ requireMatch(dockerfile, /scripts\/replicate-backup\.ts/u, "Dockerfile is missin
 requireMatch(dockerfile, /scripts\/run-operational-alerts\.ts/u, "Dockerfile is missing the operational alert collector CLI");
 requireMatch(dockerfile, /src\/operations\/alert-delivery\.ts/u, "Dockerfile is missing durable alert delivery");
 requireMatch(dockerfile, /infra\/hetzner\/app\/alerts\.sh/u, "Dockerfile is missing the operational alert launcher");
+requireMatch(dockerfile, /infra\/hetzner\/app\/alert-controller\.sh/u, "Dockerfile is missing the external alert controller");
 requireMatch(dockerfile, /scripts\/maintain-document-temporaries\.ts/u, "Dockerfile is missing the document maintenance CLI");
 requireMatch(dockerfile, /src\/documents\/maintenance\.ts/u, "Dockerfile is missing document maintenance logic");
 requireMatch(dockerfile, /infra\/hetzner\/app\/document-maintenance\.sh/u, "Dockerfile is missing the document maintenance launcher");
@@ -102,7 +105,14 @@ requireMatch(compose, /target: \/srv\/aibrain\/publish-rw/u, "server publisher m
 requireMatch(compose, /name: "\$\{AIBRAIN_NETWORK_NAME:\?/u, "network name is not required per installation");
 requireMatch(compose, /aibrain-internal:[\s\S]{0,180}internal: true/u, "application network is not Docker-internal");
 requireMatch(compose, /app:[\s\S]*?networks:\s*\n\s*- aibrain-internal[\s\S]*?healthcheck:/u, "app is not restricted to the internal network");
-requireMatch(compose, /egress-gateway:[\s\S]*?networks:\s*\n\s*- aibrain-internal\s*\n\s*- aibrain-egress/u, "egress gateway is not the sole dual-homed service");
+requireMatch(compose, /egress-gateway:[\s\S]*?networks:\s*\n\s*- aibrain-internal\s*\n\s*- aibrain-egress/u, "egress gateway is missing its explicit dual-homed boundary");
+requireMatch(compose, /alert-dispatcher:[\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-alert-controller\][\s\S]*?networks:\s*\n\s*- aibrain-internal\s*\n\s*- aibrain-egress/u, "Compose lacks the dedicated external alert dispatcher");
+forbidMatch(compose.match(/  alert-dispatcher:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /depends_on:[\s\S]*?condition: service_healthy/u, "alert dispatcher cannot wait for app health before reporting app failure");
+requireMatch(compose, /alert-dispatcher:[\s\S]*?target: \/var\/lib\/aibrain\/data\/backups\n\s*read_only: true[\s\S]*?target: \/srv\/aibrain\/publish-rw\n\s*read_only: true[\s\S]*?target: \/var\/lib\/aibrain-replication\n\s*read_only: true/u, "alert dispatcher does not keep evidence mounts read-only");
+forbidMatch(compose.match(/  alert-dispatcher:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "alert dispatcher publishes a host port");
+requireMatch(alertController, /AIBRAIN_ALERT_SINK[\s\S]{0,100}= webhook[\s\S]*aibrain-alerts[\s\S]*aibrain-alert-controller-heartbeat/u, "alert controller does not require webhook delivery and durable collection");
+requireMatch(alertsEnv, /^AIBRAIN_ALERT_WEBHOOK_URL=https:\/\//mu, "alert env example lacks an HTTPS external sink");
+requireMatch(alertsEnv, /^AIBRAIN_ALERT_EGRESS_READINESS_URL=http:\/\/egress-gateway:8080\/__aibrain_egress_health$/mu, "alert controller does not probe the private egress gateway");
 requireMatch(compose, /backup-replicator:[\s\S]*?profiles: \[backup\][\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-backup-replicate\]/u, "Compose lacks the explicit one-shot backup replicator profile");
 requireMatch(compose, /backup-replicator:[\s\S]*?target: \/var\/lib\/aibrain\/data\/backups\n\s*read_only: true/u, "backup replicator can write the verified snapshot volume");
 requireMatch(compose, /backup-replicator:[\s\S]*?source: aibrain-restores\n\s*target: \/var\/lib\/aibrain-restores/u, "backup replicator lacks the isolated restore drill volume");
@@ -202,6 +212,7 @@ requireMatch(releaseManager, /writeAtomic\(options\.stateFile/u, "release manage
 requireMatch(releaseManager, /target-healthy[\s\S]*state-committed/u, "release manager lacks a durable promotion transaction");
 requireMatch(releaseManager, /RELEASE_DOCKER_TIMEOUT/u, "release manager does not bound Docker subprocesses");
 requireMatch(releaseManager, /\{\{\.Config\.Image\}\}/u, "release manager does not verify running container image identity");
+requireMatch(releaseManager, /"alert-dispatcher"/u, "release manager does not promote and verify the alert dispatcher");
 requireMatch(releaseManager, /\/usr\/bin\/flock/u, "release manager lacks OS advisory locking on Linux");
 requireMatch(releaseManager, /\/usr\/bin\/lockf/u, "release manager lacks OS advisory locking on macOS QA");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
@@ -277,6 +288,7 @@ for (const key of [
   "AIBRAIN_REVISION",
   "AIBRAIN_EGRESS_IMAGE",
   "AIBRAIN_EGRESS_ENV_FILE",
+  "AIBRAIN_ALERTS_ENV_FILE",
   "AIBRAIN_EGRESS_NETWORK_NAME",
   "AIBRAIN_REPLICA_ENV_FILE",
   "AIBRAIN_REPLICA_STATE_HOST_PATH",

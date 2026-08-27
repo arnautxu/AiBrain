@@ -72,10 +72,10 @@ if (args[0] === "image" && args[1] === "inspect") {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(process.env.FAKE_RUNTIME_FILE, JSON.stringify({ app: image, egress: egressImage }));
   }
-  if (args.includes("ps")) process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : "c".repeat(64));
+  if (args.includes("ps")) process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
 } else if (args[0] === "inspect") {
   const runtime = JSON.parse(readFileSync(process.env.FAKE_RUNTIME_FILE, "utf8"));
-  const isApp = args.at(-1)?.startsWith("a");
+  const isApp = args.at(-1)?.startsWith("a") || args.at(-1)?.startsWith("d");
   const image = isApp ? runtime.app : runtime.egress;
   if (args[2].includes("Health.Status")) process.stdout.write("healthy");
   else if (args[2].includes("Config.Image")) {
@@ -179,7 +179,7 @@ describe("immutable release manager", () => {
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--no-deps","egress-gateway","app"');
+    expect(log).toContain('"up","-d","--no-deps","egress-gateway","app","alert-dispatcher"');
     expect(log).toContain('"{{.State.Health.Status}}"');
   }, 20_000);
 
