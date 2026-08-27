@@ -35,6 +35,11 @@ import {
 import { isUuid } from "@/workbench/types";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
 import { workerTurnIsActive } from "@/runtime/worker-runtime-service";
+import { LocalFileMemoryService } from "@/memory";
+import {
+  FileMemoryTurnAuditSink,
+  type WorkerTurnMemoryDependencies,
+} from "@/runtime/memory-turn";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -180,6 +185,7 @@ export async function POST(request: Request) {
   let turnPermissions: ResolvedPermissions | null = null;
   let approvalStore: FileApprovalStore | null = null;
   let turnProjectionStore: FileTurnProjectionStore | null = null;
+  let turnMemory: WorkerTurnMemoryDependencies | null = null;
   if (config.mode === "codex") {
     try {
       const installation = await loadInstallationConfig();
@@ -199,6 +205,14 @@ export async function POST(request: Request) {
         userId: session.user.id,
         usersRoot: installation.paths.usersRoot,
       });
+      turnMemory = {
+        memoryService: new LocalFileMemoryService({ config: installation }),
+        auditSink: new FileMemoryTurnAuditSink({
+          installationId: installation.installationId,
+          userId: session.user.id,
+          usersRoot: installation.paths.usersRoot,
+        }),
+      };
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error
         ? String(error.code)
@@ -325,8 +339,8 @@ export async function POST(request: Request) {
 
       try {
         if (config.mode === "codex") {
-          if (!turnPermissions || !approvalStore) {
-            throw new Error("La política o les aprovacions del torn no estan disponibles.");
+          if (!turnPermissions || !approvalStore || !turnMemory) {
+            throw new Error("La política, la memòria o les aprovacions del torn no estan disponibles.");
           }
           await runWorkerCodexTurn(
             body,
@@ -336,6 +350,7 @@ export async function POST(request: Request) {
             config,
             turnPermissions,
             approvalStore,
+            turnMemory,
             request.signal,
             emitCodex,
           );

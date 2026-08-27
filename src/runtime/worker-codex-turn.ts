@@ -30,6 +30,10 @@ import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
 } from "@/runtime/permission-turn";
+import {
+  prepareTurnMemory,
+  type WorkerTurnMemoryDependencies,
+} from "@/runtime/memory-turn";
 import { issueThreadToken } from "@/runtime/thread-token";
 import {
   registerWorkerTurnCancellation,
@@ -152,6 +156,7 @@ export async function runWorkerCodexTurn(
   runtimeConfig: RuntimeConfig,
   permissions: ResolvedPermissions,
   approvalStore: FileApprovalStore,
+  memory: WorkerTurnMemoryDependencies,
   signal: AbortSignal,
   emit: EmitEvent,
 ) {
@@ -165,6 +170,13 @@ export async function runWorkerCodexTurn(
     authenticatedUserId,
     permissions,
   );
+  const preparedMemory = await prepareTurnMemory(memory, {
+    installationId,
+    userId: authenticatedUserId,
+    projectId: chatRequest.projectId,
+    turnId: chatRequest.assistantMessageId,
+    permissionFingerprint: permissions.fingerprint,
+  });
 
   const runtime = await workerAppServerForUser(authenticatedUserId);
   if (runtime.config.installationId !== installationId) {
@@ -231,7 +243,10 @@ export async function runWorkerCodexTurn(
     approvalsReviewer: "user",
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
-    developerInstructions: buildCodexDeveloperInstructions(chatRequest, permissions),
+    developerInstructions: [
+      buildCodexDeveloperInstructions(chatRequest, permissions),
+      preparedMemory.developerInstructions,
+    ].join("\n\n"),
   };
   let recovered: RecoveredTurn | null = null;
   const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {

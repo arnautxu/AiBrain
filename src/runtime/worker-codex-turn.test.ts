@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatRequest } from "@/lib/chat-contract";
+import type { MemoryService } from "@/memory";
 import type { ResolvedPermissions } from "@/permissions";
+import type {
+  MemoryTurnAuditEvent,
+  WorkerTurnMemoryDependencies,
+} from "@/runtime/memory-turn";
 
 const mocked = vi.hoisted(() => ({ runtime: null as unknown }));
 vi.mock("server-only", () => ({}));
@@ -27,6 +32,34 @@ const threadId = "00000000-0000-4000-8000-000000000021";
 const userMessageId = "00000000-0000-4000-8000-000000000031";
 const assistantMessageId = "00000000-0000-4000-8000-000000000041";
 const fingerprint = "a".repeat(64);
+const memoryId = "00000000-0000-4000-8000-000000000051";
+
+function memoryDependencies(
+  overrides: {
+    buildPromptSnapshot?: MemoryService["buildPromptSnapshot"];
+    record?: (event: MemoryTurnAuditEvent) => Promise<MemoryTurnAuditEvent>;
+  } = {},
+): WorkerTurnMemoryDependencies {
+  return {
+    memoryService: {
+      buildPromptSnapshot: overrides.buildPromptSnapshot ?? (async () => ({
+        text: JSON.stringify({
+          schemaVersion: 1,
+          trust: "untrusted-data-only",
+          companyContext: [],
+          knowledgeIndex: { content: "" },
+          employeeContext: { profile: "Employee A", preferences: "Direct" },
+          explicitMemories: [{ memoryId, content: "Approved preference" }],
+        }),
+        memoryIds: [memoryId],
+        truncated: false,
+      })),
+    } as MemoryService,
+    auditSink: {
+      record: overrides.record ?? (async (event) => event),
+    },
+  };
+}
 
 function chatRequest(): ChatRequest {
   return {
@@ -176,6 +209,7 @@ describe("worker Codex turn", () => {
       },
       permissions(),
       {} as never,
+      memoryDependencies(),
       new AbortController().signal,
       async (event) => { events.push(event); },
     );
@@ -187,6 +221,13 @@ describe("worker Codex turn", () => {
       runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId)],
     });
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
+    const threadStart = calls.find((call) => call.method === "thread/start");
+    const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
+    expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
+    expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
+    expect(instructions).toContain("Approved preference");
+    expect(instructions.indexOf(`Policy fingerprint: ${fingerprint}`))
+      .toBeLessThan(instructions.indexOf("BEGIN AIBRAIN EXPLICIT MEMORY JSON DATA"));
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
@@ -272,6 +313,7 @@ describe("worker Codex turn", () => {
       },
       permissions(),
       {} as never,
+      memoryDependencies(),
       new AbortController().signal,
       async (event) => { events.push(event); },
     );
@@ -280,5 +322,35 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
     expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
     expect(events).toContainEqual({ type: "done" });
+  });
+
+  it("fails closed before contacting a worker when the memory store is unavailable", async () => {
+    let audited = false;
+    await expect(runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/unused",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      memoryDependencies({
+        buildPromptSnapshot: async () => { throw new Error("corrupt memory journal"); },
+        record: async (event) => { audited = true; return event; },
+      }),
+      new AbortController().signal,
+      async () => undefined,
+    )).rejects.toMatchObject({ code: "MEMORY_TURN_SNAPSHOT_UNAVAILABLE" });
+    expect(audited).toBe(false);
+    expect(mocked.runtime).toBeNull();
   });
 });

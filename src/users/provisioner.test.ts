@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -75,6 +75,7 @@ describe("UserProvisioner", () => {
       expect(await mode(path.join(root, "PROFILE.md"))).toBe(0o400);
       expect(await mode(path.join(root, "PERMISSIONS.md"))).toBe(0o400);
       expect(await mode(path.join(root, "PREFERENCES.md"))).toBe(0o600);
+      expect(await mode(path.join(root, "memory"))).toBe(0o700);
       expect(await mode(path.join(root, "password-change-required"))).toBe(0o600);
       expect(await lstat(path.join(root, "worker.json"))).toBeTruthy();
     }
@@ -87,6 +88,20 @@ describe("UserProvisioner", () => {
       scope: "installation",
     });
     expect(await mode(path.join(config.paths.companyContextRoot, "PERMISSIONS.md"))).toBe(0o400);
+    for (const fileName of [
+      "00_SYSTEM.md",
+      "10_IDENTITY.md",
+      "20_COMPANY.md",
+      "30_ORGANIZATION.md",
+      "40_WORKFLOWS.md",
+      "50_DOCUMENT_RULES.md",
+      "KNOWLEDGE_INDEX.md",
+    ]) {
+      expect(await mode(path.join(config.paths.companyContextRoot, fileName))).toBe(0o400);
+    }
+    for (const directory of ["departments", "procedures", "glossary", "sources"]) {
+      expect(await mode(path.join(config.paths.companyContextRoot, "knowledge", directory))).toBe(0o700);
+    }
   }, 20_000);
 
   it("is idempotent and never recreates a consumed initial-password marker", async () => {
@@ -98,13 +113,18 @@ describe("UserProvisioner", () => {
     };
     const first = await provisioner.provision(input);
     const marker = path.join(first.userRoot, "password-change-required");
+    const companyContext = path.join(config.paths.companyContextRoot, "20_COMPANY.md");
     await unlink(marker);
+    await chmod(companyContext, 0o600);
+    await writeFile(companyContext, "# Company context\n\nExplicit tenant content.\n");
 
     const second = await provisioner.provision(input);
     expect(second.created).toBe(false);
     await expect(lstat(marker)).rejects.toMatchObject({ code: "ENOENT" });
     expect(await readFile(path.join(config.paths.usersRoot, input.userId, "user.json"), "utf8"))
       .toContain("employee@example.test");
+    expect(await readFile(companyContext, "utf8")).toContain("Explicit tenant content");
+    expect(await mode(companyContext)).toBe(0o400);
   });
 
   it("fails closed for identity drift and symlink substitution", async () => {

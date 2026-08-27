@@ -131,6 +131,64 @@ const DEFAULT_PREFERENCES = [
   "",
 ].join("\n");
 
+function companyContextTemplates(config: Readonly<InstallationConfig>) {
+  return new Map<string, string>([
+    ["00_SYSTEM.md", [
+      "# AiBrain system context",
+      "",
+      `This is the dedicated AiBrain installation for ${config.companyName}.`,
+      "Treat this file as stable company context, not as employee-specific permissions.",
+      "",
+    ].join("\n")],
+    ["10_IDENTITY.md", [
+      "# Company identity",
+      "",
+      `- Company: ${config.companyName}`,
+      `- Installation: ${config.installationId}`,
+      `- Product: ${config.branding.productName}`,
+      "",
+    ].join("\n")],
+    ["20_COMPANY.md", [
+      "# Company context",
+      "",
+      "No additional company context has been recorded.",
+      "",
+    ].join("\n")],
+    ["30_ORGANIZATION.md", [
+      "# Organization",
+      "",
+      "No organization details have been recorded.",
+      "",
+    ].join("\n")],
+    ["40_WORKFLOWS.md", [
+      "# Company workflows",
+      "",
+      "No company workflows have been recorded.",
+      "",
+    ].join("\n")],
+    ["50_DOCUMENT_RULES.md", [
+      "# Document rules",
+      "",
+      "Documents are read from the server-approved source and staging paths.",
+      "Official documents are published only through the explicit server-side confirmation flow.",
+      "",
+    ].join("\n")],
+    ["KNOWLEDGE_INDEX.md", [
+      "# Knowledge index",
+      "",
+      "Company knowledge is explicit and source-backed. No source has been indexed yet.",
+      "",
+      "## Locations",
+      "",
+      "- `knowledge/departments/`",
+      "- `knowledge/procedures/`",
+      "- `knowledge/glossary/`",
+      "- `knowledge/sources/`",
+      "",
+    ].join("\n")],
+  ]);
+}
+
 async function assertPrivateDirectory(directory: string) {
   const metadata = await lstat(directory);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
@@ -214,6 +272,16 @@ export class UserProvisioner {
     return this.lockManager.withLock(`installation-policy:${this.config.installationId}`, async () => {
       await ensurePrivateDirectory(this.config.paths.dataRoot);
       await ensureDescendantTree(this.config.paths.dataRoot, this.config.paths.companyContextRoot);
+      const knowledgeRoot = path.join(this.config.paths.companyContextRoot, "knowledge");
+      await ensurePrivateDirectory(knowledgeRoot);
+      for (const directory of ["departments", "procedures", "glossary", "sources"]) {
+        await ensurePrivateDirectory(path.join(knowledgeRoot, directory));
+      }
+      for (const [fileName, contents] of companyContextTemplates(this.config)) {
+        const contextPath = path.join(this.config.paths.companyContextRoot, fileName);
+        await createFileOnce(contextPath, contents, 0o400);
+        await chmod(contextPath, 0o400);
+      }
       const policyPath = path.join(this.config.paths.companyContextRoot, "PERMISSIONS.md");
       const expected = installationPolicy(this.config);
       if (!await createFileOnce(policyPath, expected, 0o400)) {
@@ -262,6 +330,7 @@ export class UserProvisioner {
         }
 
         await this.workerProvisioner.provision(user.userId);
+        await ensurePrivateDirectory(path.join(userRoot, "memory"));
         await createFileOnce(path.join(userRoot, "PROFILE.md"), profile(user), 0o400);
         await createFileOnce(path.join(userRoot, "PREFERENCES.md"), DEFAULT_PREFERENCES, 0o600);
         const permissionsPath = path.join(userRoot, "PERMISSIONS.md");
