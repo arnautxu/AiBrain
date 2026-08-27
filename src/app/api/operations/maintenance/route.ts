@@ -1,10 +1,10 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { isSameOriginMutation } from "@/auth/request-security";
 import {
   MaintenanceDrainInterruptedError,
   MaintenanceDrainTimeoutError,
 } from "@/operations/maintenance";
+import { isOperatorAuthorized } from "@/operations/operator-auth";
 import {
   enterWorkerMaintenance,
   resumeWorkerMaintenance,
@@ -16,25 +16,6 @@ export const dynamic = "force-dynamic";
 
 const NO_STORE_HEADERS = Object.freeze({ "Cache-Control": "private, no-store" });
 const MAX_DRAIN_TIMEOUT_MS = 10 * 60_000;
-
-function configuredSecret() {
-  const secret = process.env.AIBRAIN_MAINTENANCE_SECRET?.trim() ?? "";
-  return secret.length >= 32 && secret.length <= 512 && !/\s/u.test(secret) ? secret : null;
-}
-
-function secureEqual(left: string, right: string) {
-  const leftHash = createHash("sha256").update(left).digest();
-  const rightHash = createHash("sha256").update(right).digest();
-  return timingSafeEqual(leftHash, rightHash);
-}
-
-function authorized(request: Request) {
-  const secret = configuredSecret();
-  if (!secret) return false;
-  const authorization = request.headers.get("authorization") ?? "";
-  const match = /^Bearer ([^\s]+)$/u.exec(authorization);
-  return Boolean(match && secureEqual(match[1], secret));
-}
 
 function unauthorized() {
   return NextResponse.json(
@@ -65,12 +46,12 @@ function parseCommand(value: unknown) {
 }
 
 export async function GET(request: Request) {
-  if (!authorized(request)) return unauthorized();
+  if (!isOperatorAuthorized(request)) return unauthorized();
   return NextResponse.json(await workerMaintenanceStatus(), { headers: NO_STORE_HEADERS });
 }
 
 export async function POST(request: Request) {
-  if (!authorized(request)) return unauthorized();
+  if (!isOperatorAuthorized(request)) return unauthorized();
   if (!await isSameOriginMutation(request)) {
     return NextResponse.json(
       { error: "Origin not authorized.", code: "ORIGIN_NOT_ALLOWED" },

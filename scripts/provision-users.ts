@@ -83,4 +83,8 @@ async function main() {
   }) + "\n");
 }
 
-await main();
+void main().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : "User provisioning failed.";
+  process.stderr.write(`${path.basename(process.argv[1] ?? "provision-users")}: ${message}\n`);
+  process.exitCode = 1;
+});

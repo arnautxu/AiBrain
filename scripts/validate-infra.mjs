@@ -140,6 +140,7 @@ requireMatch(nginx, /zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does
 requireMatch(nginx, /upstream aibrain___AIBRAIN_INSTANCE_TOKEN___backend/u, "Nginx does not isolate the upstream per installation");
 requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not rate-limit auth mutations");
 requireMatch(nginx, /location = \/api\/operations\/maintenance[\s\S]{0,80}return 404/u, "Nginx exposes the operator maintenance endpoint publicly");
+requireMatch(nginx, /location = \/api\/operations\/users[\s\S]{0,160}return 404/u, "Nginx exposes the operator user-lifecycle endpoint publicly");
 requireMatch(nginx, /return 301 https:\/\/__AIBRAIN_PUBLIC_HOST__\$request_uri/u, "Nginx redirect trusts the client Host header");
 requireMatch(nginxDefaultDeny, /listen 80 default_server[\s\S]*return 444/u, "Nginx lacks an HTTP default-deny virtual host");
 requireMatch(nginxDefaultDeny, /listen 443 ssl default_server[\s\S]*ssl_reject_handshake on/u, "Nginx lacks a TLS default-deny virtual host");
