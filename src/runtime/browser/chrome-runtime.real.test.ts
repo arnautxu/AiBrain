@@ -85,6 +85,39 @@ afterAll(async () => {
 });
 
 describe.runIf(enabled)("real Chrome per-user isolation", () => {
+  it("loads a public HTTPS page only through the pinned egress proxy", async () => {
+    if (!executablePath) {
+      throw new Error("AIBRAIN_REAL_CHROME_TEST requires a Chrome/Chromium executable.");
+    }
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-real-chrome-egress-"));
+    temporaryRoots.push(root);
+    const context = await runtimeContext(
+      root,
+      "0198b9f0-6631-7000-8000-000000000431",
+      "0198b9f0-6631-7000-8000-000000000432",
+    );
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath,
+      expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION,
+      startupTimeoutMs: 60_000,
+    });
+    try {
+      await runtime.start();
+      await runtime.agentNavigate(THREAD_A, "https://example.com/");
+      await eventually(async () => {
+        const page = await runtime.readPage(THREAD_A);
+        return page.title === "Example Domain" && page.text.includes("Example Domain");
+      }, 30_000);
+      await expect(runtime.health()).resolves.toMatchObject({
+        healthy: true,
+        detail: expect.stringContaining("pinned loopback egress"),
+      });
+      await expectNoTcpListener(runtime);
+    } finally {
+      await runtime.stop();
+    }
+  }, 90_000);
+
   it("isolates private pipes, profiles, cookies, tabs and downloads and reopens one profile", async () => {
     if (!executablePath) {
       throw new Error("AIBRAIN_REAL_CHROME_TEST requires a Chrome/Chromium executable.");
