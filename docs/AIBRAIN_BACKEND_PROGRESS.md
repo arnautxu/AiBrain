@@ -137,6 +137,7 @@ Ejecutar el runbook QA Docker en la red y volúmenes exclusivos de AiBrain del H
 - E2E HTTP real: 3/3 pruebas sobre Next dev aislado; branding, rechazo cross-origin, login/cookie, proyecto/thread, archive/pin, restart real, recuperación filesystem y logout/revocación.
 - Soak de 60,206 s: 4 workers, 612 requests, 612 eventos streaming, 28 replays, 28 restarts, 10,17 req/s, media 333,70 ms, p95 369,46 ms y máximo 817,40 ms; 0 fugas de handles, sockets, listeners o procesos; 1.398,98 bytes de journal/evento y 3 journals/worker.
 - Suite global final: typecheck y lint verdes; unit 274 pasados + 2 opt-in omitidos en 53 ficheros; integración 19 pasados + 1 matriz pesada omitida en 10 ficheros; contract 5/5; documentos reales 2/2; E2E 3/3; build Next 16.3.2 verde con 44 rutas listadas.
+- `npm test` agregado final: 64 ficheros pasados + 1 opt-in omitido; 298 pruebas pasadas + 3 opt-in omitidas, sin fallos.
 - La integración y la matriz documental real se ejecutaron simultáneamente tras aislar los perfiles LibreOffice: ambas verdes. No se ampliaron timeouts para ocultar la carrera.
 - `npm audit --omit=dev --audit-level=critical` y `npm audit --audit-level=critical`: 0 vulnerabilidades.
 - `npm run infra:validate`: fronteras Docker/Compose, CDP pipe privado, imágenes fijadas y snapshot Debian verdes; `docker compose config` no ejecutado porque no existe Docker CLI en este host.
