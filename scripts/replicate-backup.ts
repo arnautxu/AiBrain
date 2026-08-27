@@ -48,6 +48,6 @@ async function main() {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : "Backup replication failed."}\n`);
+  process.stderr.write("BACKUP_REPLICATION_FAILED: Backup replication failed; inspect protected service logs by code.\n");
   process.exitCode = 1;
 });

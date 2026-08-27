@@ -22,11 +22,15 @@ cp infra/hetzner/aibrain.env.example /etc/aibrain/<installation>/runtime.env
 cp infra/hetzner/egress.env.example /etc/aibrain/<installation>/egress.env
 cp infra/hetzner/alerts.env.example /etc/aibrain/<installation>/alerts.env
 cp infra/hetzner/replica.env.example /etc/aibrain/<installation>/replica.env
+cp infra/hetzner/backup-controller.env.example /etc/aibrain/<installation>/backup-controller.env
 cp infra/hetzner/installation.qa.example.json /etc/aibrain/<installation>/installation.json
+install -m 0600 infra/hetzner/compose.yaml \
+  /etc/aibrain/<installation>/release.json.active.compose.yaml
 install -m 0400 -o 10001 -g 10001 /dev/null /etc/aibrain/<installation>/restic-password
 chmod 0640 /etc/aibrain/<installation>/compose.env /etc/aibrain/<installation>/installation.json
 chmod 0600 /etc/aibrain/<installation>/runtime.env /etc/aibrain/<installation>/egress.env \
-  /etc/aibrain/<installation>/alerts.env /etc/aibrain/<installation>/replica.env
+  /etc/aibrain/<installation>/alerts.env /etc/aibrain/<installation>/replica.env \
+  /etc/aibrain/<installation>/backup-controller.env
 chown root:10001 /etc/aibrain/<installation>/installation.json
 ```
 
@@ -198,33 +202,38 @@ No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en 
 
 ## 5. Backup y restore QA reales
 
-El endpoint de operador no se publica por Nginx: solo responde en el puerto app ligado a loopback. Configura `AIBRAIN_MAINTENANCE_SECRET` independiente y usa el origen público exacto. Primero cierra admisión y espera los turns/arranques ya admitidos (el timeout deja el sistema cerrado):
+El endpoint de operador no se publica por Nginx: solo responde en el puerto app ligado a loopback. Configura `AIBRAIN_MAINTENANCE_SECRET` independiente y usa el origen público exacto. Instala el controlador y su recovery de boot desde el mismo commit revisado:
 
 ```bash
-curl --fail --silent --show-error \
-  --request POST \
-  --header 'Authorization: Bearer <maintenance-secret>' \
-  --header 'Origin: https://<public-host>' \
-  --header 'Content-Type: application/json' \
-  --data '{"action":"drain","timeoutMs":600000}' \
-  http://127.0.0.1:<qa-port>/api/operations/maintenance
+install -d -m 0755 /usr/local/lib/aibrain
+install -m 0555 scripts/orchestrate-backup.mjs /usr/local/lib/aibrain/orchestrate-backup.mjs
+install -m 0644 infra/hetzner/systemd/aibrain-backup-recovery@.service \
+  /etc/systemd/system/aibrain-backup-recovery@.service
+systemctl daemon-reload
+systemctl enable aibrain-backup-recovery@<installation>.service
 ```
 
-La respuesta debe ser `phase: maintenance` y `activeActivities: 0`. Después detén `app` para congelar también las mutaciones HTTP cortas y el filesystem completo:
+Completa `backup-controller.env` con las rutas exactas, puerto loopback y origen de esa instalación. El controlador toma el secreto directamente del `runtime.env` privado; nunca lo recibe por argumento ni lo imprime. Ejecuta:
 
 ```bash
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml stop app
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app aibrain-backup create
+node /usr/local/lib/aibrain/orchestrate-backup.mjs backup \
+  --installation-id <installation> \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  --compose-file /etc/aibrain/<installation>/release.json.active.compose.yaml \
+  --runtime-env /etc/aibrain/<installation>/runtime.env \
+  --state-file /etc/aibrain/<installation>/backup-operation.json \
+  --maintenance-url http://127.0.0.1:<qa-port>/api/operations/maintenance \
+  --origin https://<public-host>
 ```
 
-Si abortas el backup antes de detener la app, reabre admisión explícitamente con el mismo endpoint y `{"action":"resume"}`. Un restart de la app vuelve a `accepting`; no describas un drain como durable entre procesos.
-
-Anota `backupId`, `sourceFingerprint` y `fileCount`. Verifica el snapshot indicado por el comando:
-
-```bash
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app \
-  aibrain-backup verify --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id>
-```
+El controlador persiste `prepared → drained → app-stopped → snapshot-created →
+snapshot-verified → app-restarted → admission-resumed`, verifica identidad del
+snapshot y solo entonces emite un receipt `verified`. Cualquier error ejecuta
+recovery antes de salir y deja receipt `aborted` si no existe snapshot
+verificado. Tras `SIGKILL` o reboot, la unidad systemd revalida el journal,
+verifica un snapshot creado, arranca app, espera health y reabre admisión. Nunca
+borres el journal para desbloquear: ejecuta el comando `recover` exacto si la
+unidad falla y conserva su error.
 
 Restaura siempre al volumen separado, nunca sobre el root activo:
 

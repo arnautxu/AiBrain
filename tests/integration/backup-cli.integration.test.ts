@@ -114,7 +114,7 @@ describe("backup operational CLI", () => {
     });
     const createReceipt = JSON.parse(created.stdout) as {
       operation: string;
-      snapshotRoot: string;
+      backupId: string;
       sourceFingerprint: string;
       fileCount: number;
       components: Array<{ component: string; fileCount: number }>;
@@ -124,9 +124,9 @@ describe("backup operational CLI", () => {
       expect.objectContaining({ component: "product-data", fileCount: 1 }),
       expect.objectContaining({ component: "published-documents", fileCount: 1 }),
     ]);
-    expect(createReceipt.snapshotRoot).toContain(path.join(test.dataRoot, "backups", "snapshots"));
+    const snapshotRoot = path.join(test.dataRoot, "backups", "snapshots", createReceipt.backupId);
 
-    const verified = await execFile(executable, [script, "verify", "--snapshot", createReceipt.snapshotRoot], {
+    const verified = await execFile(executable, [script, "verify", "--snapshot", snapshotRoot], {
       cwd: repositoryRoot,
       env: test.environment,
     });
@@ -142,7 +142,7 @@ describe("backup operational CLI", () => {
       script,
       "restore",
       "--snapshot",
-      createReceipt.snapshotRoot,
+      snapshotRoot,
       "--data-destination",
       destination,
       "--publish-destination",
@@ -151,8 +151,6 @@ describe("backup operational CLI", () => {
     expect(JSON.parse(restored.stdout)).toMatchObject({
       operation: "restore",
       restored: true,
-      dataDestinationRoot: destination,
-      publishDestinationRoot: publishDestination,
       sourceFingerprint: createReceipt.sourceFingerprint,
     });
     expect(await readFile(path.join(destination, "company-context", "context.md"), "utf8"))
@@ -166,11 +164,11 @@ describe("backup operational CLI", () => {
     await expect(execFile(executable, [script, "invalid"], {
       cwd: repositoryRoot,
       env: test.environment,
-    })).rejects.toMatchObject({ stderr: expect.stringContaining("Expected create, verify or restore operation.") });
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("BACKUP_OPERATION_INVALID") });
     await expect(execFile(executable, [script, "verify"], {
       cwd: repositoryRoot,
       env: test.environment,
-    })).rejects.toMatchObject({ stderr: expect.stringContaining("--snapshot requires an absolute path.") });
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("BACKUP_ARGUMENT_INVALID") });
   });
 
   it("replicates a verified composite snapshot once and replays the durable receipt", async () => {
@@ -179,7 +177,8 @@ describe("backup operational CLI", () => {
       cwd: repositoryRoot,
       env: test.environment,
     });
-    const snapshotRoot = (JSON.parse(created.stdout) as { snapshotRoot: string }).snapshotRoot;
+    const createdReceipt = JSON.parse(created.stdout) as { backupId: string };
+    const snapshotRoot = path.join(test.dataRoot, "backups", "snapshots", createdReceipt.backupId);
     const first = await execFile(executable, [replicationScript, "--snapshot", snapshotRoot], {
       cwd: repositoryRoot,
       env: test.environment,

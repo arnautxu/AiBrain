@@ -2,11 +2,18 @@ import path from "node:path";
 import { loadInstallationConfig } from "../src/config/installation";
 import { FileBackupService } from "../src/operations/backup";
 
+class BackupCliError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = "BackupCliError";
+  }
+}
+
 function argument(name: string, required = true) {
   const index = process.argv.indexOf(name);
   const value = index >= 0 ? process.argv[index + 1] : undefined;
   if (required && (!value || !path.isAbsolute(value))) {
-    throw new Error(`${name} requires an absolute path.`);
+    throw new BackupCliError("BACKUP_ARGUMENT_INVALID", `${name} requires an absolute path.`);
   }
   return value ? path.resolve(value) : null;
 }
@@ -14,7 +21,7 @@ function argument(name: string, required = true) {
 async function main() {
   const operation = process.argv[2];
   if (operation !== "create" && operation !== "verify" && operation !== "restore") {
-    throw new Error("Expected create, verify or restore operation.");
+    throw new BackupCliError("BACKUP_OPERATION_INVALID", "Expected create, verify or restore operation.");
   }
   const installation = await loadInstallationConfig();
   const service = new FileBackupService(
@@ -31,7 +38,6 @@ async function main() {
       sourceFingerprint: result.manifest.sourceFingerprint,
       fileCount: result.manifest.files.length,
       components: result.manifest.components,
-      snapshotRoot: result.snapshotRoot,
     }) + "\n");
     return;
   }
@@ -62,8 +68,6 @@ async function main() {
       sourceFingerprint: result.manifest.sourceFingerprint,
       fileCount: result.manifest.files.length,
       components: result.manifest.components,
-      dataDestinationRoot: result.dataDestinationRoot,
-      publishDestinationRoot: result.publishDestinationRoot,
       restored: true,
     }) + "\n");
     return;
@@ -71,6 +75,8 @@ async function main() {
 }
 
 void main().catch((error: unknown) => {
-  process.stderr.write(`${error instanceof Error ? error.message : "Backup command failed."}\n`);
+  const code = error instanceof BackupCliError ? error.code : "BACKUP_COMMAND_FAILED";
+  const message = error instanceof BackupCliError ? error.message : "Backup command failed; inspect protected service logs by code.";
+  process.stderr.write(`${code}: ${message}\n`);
   process.exitCode = 1;
 });
