@@ -146,6 +146,7 @@ COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/backup-replicate.sh /usr/local/bin/aibrain-backup-replicate
 COPY --chown=root:root infra/hetzner/app/alerts.sh /usr/local/bin/aibrain-alerts
+COPY --chown=root:root infra/hetzner/app/alert-controller.sh /usr/local/bin/aibrain-alert-controller
 COPY --chown=root:root infra/hetzner/app/document-maintenance.sh /usr/local/bin/aibrain-document-maintenance
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
 COPY --chown=root:root infra/hetzner/app/configure-egress.mjs /usr/local/share/aibrain/configure-egress.mjs
@@ -161,6 +162,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-backup \
   /usr/local/bin/aibrain-backup-replicate \
   /usr/local/bin/aibrain-alerts \
+  /usr/local/bin/aibrain-alert-controller \
   /usr/local/bin/aibrain-document-maintenance \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \

@@ -27,10 +27,14 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const SINK_ID_PATTERN = /^[a-z][a-z0-9-]{1,62}$/;
 const ALERT_CODES = Object.freeze([
   "READINESS_DEGRADED",
+  "EGRESS_GATEWAY_DEGRADED",
   "DISK_PRESSURE",
+  "PUBLISH_DISK_PRESSURE",
   "RESTART_LOOP",
   "BACKUP_UNVERIFIED",
   "BACKUP_STALE",
+  "REPLICA_UNVERIFIED",
+  "REPLICA_STALE",
   "PREFLIGHT_FAILURE",
 ] as const satisfies readonly OperationalAlertCode[]);
 const ALERT_SEVERITIES = Object.freeze(["warning", "critical"] as const);

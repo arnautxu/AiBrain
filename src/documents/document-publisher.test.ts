@@ -7,6 +7,7 @@ import {
   FileDocumentPublisher,
   type FileDocumentPublisherOptions,
 } from "@/documents/document-publisher";
+import { FilePublicationCapacityGate } from "@/documents/publication-capacity";
 import type { PublicationPreviewMetadata } from "@/documents/publication-contract";
 import { ResourceLockManager } from "@/storage/resource-lock";
 
@@ -68,6 +69,7 @@ describe("server-side document publisher", () => {
       workerVisibleRoots: [stagingRoot, workerRoot],
       lockManager,
       confirmationSecret: SECRET,
+      capacityGate: { run: async (_requiredBytes, operation) => operation() },
       now: () => now,
       ...overrides,
     });
@@ -180,6 +182,44 @@ describe("server-side document publisher", () => {
     expect((await service.readAudit()).map((event) => event.eventType)).toEqual(["frozen", "declined"]);
     await expect(service.confirm({ ...decision, clientRequestId: "confirm-after-decline" }))
       .rejects.toMatchObject({ code: "PUBLICATION_ALREADY_DECIDED" });
+  });
+
+  it("rejects low publication-volume capacity before changing durable operation or target state", async () => {
+    const target = path.join(publishRoot, "knowledge/report.txt");
+    await writeFile(target, "official original");
+    const stages: string[] = [];
+    const capacityGate = new FilePublicationCapacityGate({
+      rootDirectory: path.join(root, "publication-capacity-locks"),
+      capacityRoot: publishRoot,
+      minimumFreeBytes: 1_000,
+      minimumFreeRatioPpm: 0,
+      readCapacity: async () => ({ bavail: 999n, bsize: 1n, blocks: 10_000n }),
+    });
+    const service = publisher({
+      capacityGate,
+      onStage: async (stage) => { stages.push(stage); },
+    });
+    const { frozen } = await freeze({ service });
+    stages.length = 0;
+
+    await expect(service.confirm({
+      operationId: OPERATION_ID,
+      clientRequestId: "confirm-with-full-volume",
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      confirmationToken: frozen.confirmationToken,
+    })).rejects.toMatchObject({
+      code: "PUBLICATION_STORAGE_BACKPRESSURE",
+      retryable: true,
+    });
+
+    expect(stages).toEqual([]);
+    await expect(service.getOperation({
+      operationId: OPERATION_ID,
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+    })).resolves.toMatchObject({ status: "awaiting_confirmation", version: null, result: null });
+    await expect(readFile(target, "utf8")).resolves.toBe("official original");
   });
 
   it("reconciles confirmation expiry durably at the exact TTL and rejects confirmation", async () => {

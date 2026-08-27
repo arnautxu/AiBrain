@@ -15,6 +15,17 @@ default) while every undelivered event remains durable. Payload sequence and
 the delivery cursor stay authoritative across compaction and restart; the
 internal JSONL sequence is intentionally regenerable.
 
+Client submissions are acknowledged only after the gateway has durably
+accepted their idempotency key and written them to App Server stdin. JSON-RPC
+responses to server-initiated requests are stricter: their
+`clientRequestId` is deterministically derived from the durable request event
+and a SHA-256 fingerprint of its thread/turn scope,
+and the gateway does not send `accepted` until App Server emits a later event
+for the same thread and turn. If the process dies in that window, the response
+stays uncertain and is replayed with the same identifier after worker restart.
+This avoids acknowledging an approval response merely because it reached an
+operating-system pipe.
+
 The JSON-RPC payload types and runtime validators come from the generated Codex
 `0.149.1` bindings and JSON Schemas in `contracts/codex/0.149.1`. Unknown
 envelope fields, unknown methods, malformed or method-incompatible params,
@@ -33,14 +44,16 @@ non-JSON payloads, sequence gaps and binary WebSocket frames fail closed.
   loopback additionally requires an explicit private-plaintext opt-in; use
   `wss://` whenever the connection crosses hosts.
 
-## Node WebSocket limitation
+## Node WebSocket composition
 
 Node's browser-compatible global `WebSocket` API does not expose a supported
 way to add an `Authorization` header. `StandardWebSocketFactory` therefore
-supports only the explicit subprotocol mode. A production composition that
-connects directly to Codex App Server must inject a server-side
-`WebSocketFactory` backed by a client that supports handshake headers. This
-repository does not add such a dependency in this checkpoint.
+supports only the explicit subprotocol mode. The server-side composition uses
+the pinned `ws` dependency through `NodeWebSocketFactory`, which supports the
+private gateway's bearer header. Next keeps `ws` in `serverExternalPackages`;
+bundling it into an API-route chunk can substitute framework WebSocket code and
+prevent the loopback client from connecting even though the gateway listener
+is healthy.
 
 Codex App Server `0.149.1` marks its WebSocket listener experimental and
 unsupported for production. The raw listener also does not provide AiBrain's

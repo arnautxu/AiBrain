@@ -195,4 +195,48 @@ describe("WebhookAlertSink", () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual(event);
     expect(() => new WebhookAlertSink({ endpoint: "http://alerts.example.test" })).toThrow(AlertDeliveryError);
   });
+
+  it.each([
+    [429, "unavailable"],
+    [503, "unavailable"],
+    [400, "rejected"],
+  ] as const)("classifies HTTP %i without exposing the remote response", async (status, code) => {
+    const sink = new WebhookAlertSink({
+      endpoint: "https://alerts.example.test/v1/aibrain",
+      fetchImplementation: async () => new Response("sensitive remote body", { status }),
+    });
+    await expect(sink.deliver({
+      schemaVersion: 1,
+      eventId: "b".repeat(64),
+      installationId: "alerts-qa",
+      code: "EGRESS_GATEWAY_DEGRADED",
+      eventType: "raised",
+      severity: "critical",
+      value: null,
+      threshold: null,
+      generation: 1,
+      evaluatedAt: "2026-08-27T12:00:00.000Z",
+      createdAt: "2026-08-27T12:00:00.000Z",
+    })).rejects.toMatchObject({ code, message: "Alert webhook rejected the delivery." });
+  });
+
+  it("classifies a timeout as retryable delivery failure", async () => {
+    const sink = new WebhookAlertSink({
+      endpoint: "https://alerts.example.test/v1/aibrain",
+      fetchImplementation: async () => { throw new DOMException("timed out", "TimeoutError"); },
+    });
+    await expect(sink.deliver({
+      schemaVersion: 1,
+      eventId: "c".repeat(64),
+      installationId: "alerts-qa",
+      code: "REPLICA_UNVERIFIED",
+      eventType: "raised",
+      severity: "critical",
+      value: null,
+      threshold: null,
+      generation: 1,
+      evaluatedAt: "2026-08-27T12:00:00.000Z",
+      createdAt: "2026-08-27T12:00:00.000Z",
+    })).rejects.toMatchObject({ code: "timeout" });
+  });
 });

@@ -18,6 +18,7 @@ import {
   type StoredPublicationOperation,
 } from "@/documents/publication-contract";
 import { publicationBarrierLock, publicationTargetLock } from "@/documents/publication-locks";
+import type { PublicationCapacityGate } from "@/documents/publication-capacity";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
 import { readRegularFileWithin, UnsafeFilePathError } from "@/security/safe-file";
 import { atomicWriteFile, atomicWriteJson } from "@/storage/atomic-file";
@@ -46,6 +47,7 @@ export type FileDocumentPublisherOptions = {
   lockManager: ResourceLockManager;
   targetLockManager?: ResourceLockManager;
   confirmationSecret: string | Uint8Array;
+  capacityGate: PublicationCapacityGate;
   maximumCandidateBytes?: number;
   confirmationTtlMs?: number;
   now?: () => number;
@@ -204,6 +206,7 @@ export class FileDocumentPublisher {
   readonly #lockManager: ResourceLockManager;
   readonly #targetLockManager: ResourceLockManager;
   readonly #confirmationSecret: Buffer;
+  readonly #capacityGate: PublicationCapacityGate;
   readonly #now: () => number;
   readonly #onStage?: FileDocumentPublisherOptions["onStage"];
   readonly #audit: FileJournal<PublicationAuditEvent>;
@@ -247,6 +250,9 @@ export class FileDocumentPublisher {
     if (!Number.isSafeInteger(confirmationTtlMs) || confirmationTtlMs < 1) {
       throw new StorageError("PUBLICATION_OPTIONS_INVALID", "confirmationTtlMs must be a positive safe integer.");
     }
+    if (!options.capacityGate || typeof options.capacityGate.run !== "function") {
+      throw new StorageError("PUBLICATION_OPTIONS_INVALID", "capacityGate is required.");
+    }
 
     this.installationId = options.installationId;
     this.userId = options.userId;
@@ -258,6 +264,7 @@ export class FileDocumentPublisher {
     this.#lockManager = options.lockManager;
     this.#targetLockManager = options.targetLockManager ?? options.lockManager;
     this.#confirmationSecret = secret;
+    this.#capacityGate = options.capacityGate;
     this.#now = options.now ?? Date.now;
     this.#onStage = options.onStage;
     this.#audit = new FileJournal({
@@ -752,27 +759,28 @@ export class FileDocumentPublisher {
           return this.#redact(operation);
         }
 
-        if (operation.status === "awaiting_confirmation") {
-          operation = {
-            ...operation,
-            status: "publishing",
-            decisionRequestHash: requestHash,
-            updatedAt: this.#timestamp(),
-          };
-          await this.#writeOperation(operation);
-          await this.#onStage?.("publishing-recorded", operationId);
-        }
+        return this.#capacityGate.run(operation.candidate.size, async () => {
+          if (operation.status === "awaiting_confirmation") {
+            operation = {
+              ...operation,
+              status: "publishing",
+              decisionRequestHash: requestHash,
+              updatedAt: this.#timestamp(),
+            };
+            await this.#writeOperation(operation);
+            await this.#onStage?.("publishing-recorded", operationId);
+          }
 
-        const candidateData = await readRegularFileWithin(
-          this.#stateRoot,
-          operation.candidate.snapshotRelativePath,
-          this.maximumCandidateBytes,
-        );
-        if (candidateData.byteLength !== operation.candidate.size || sha256(candidateData) !== operation.candidate.sha256) {
-          throw new StorageError("PUBLICATION_STATE_CORRUPT", "Frozen publication candidate failed integrity verification.");
-        }
+          const candidateData = await readRegularFileWithin(
+            this.#stateRoot,
+            operation.candidate.snapshotRelativePath,
+            this.maximumCandidateBytes,
+          );
+          if (candidateData.byteLength !== operation.candidate.size || sha256(candidateData) !== operation.candidate.sha256) {
+            throw new StorageError("PUBLICATION_STATE_CORRUPT", "Frozen publication candidate failed integrity verification.");
+          }
 
-        return this.#targetLockManager.withLock(publicationBarrierLock(this.installationId), () =>
+          return this.#targetLockManager.withLock(publicationBarrierLock(this.installationId), () =>
           this.#targetLockManager.withLock(this.#targetLock(operation.targetRelativePath), async () => {
           let current = await this.#readTarget(operation.targetRelativePath);
           const targetAlreadyContainsCandidate =
@@ -894,6 +902,7 @@ export class FileDocumentPublisher {
         await this.#onStage?.("published-recorded", operationId);
         return this.#redact(operation);
           }));
+        });
       });
     });
   }

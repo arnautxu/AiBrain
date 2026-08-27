@@ -672,6 +672,12 @@ Los items llegan en el stream como `{ "type": "approval", "item": ApprovalItem }
 
 Una aprobación ya no pendiente devuelve `404`; una decisión distinta concurrente puede devolver `409`; indisponibilidad del store, `503`. La espera de una aprobación pertenece solo a su turn y no bloquea otros turns. El backend persiste el record pendiente antes de emitirlo, por lo que una resolución inmediata de UI no puede adelantarse al store.
 
+Las solicitudes genéricas de comando, cambio de fichero o ampliación de
+permisos solo pueden crear un pendiente cuando el snapshot inmutable del turn
+contiene `tools.execute | execute | allow`. Ausencia o `deny` se rechaza
+server-side antes del store; la UI puede observar el item ya `declined`, pero no
+puede convertir esa denegación de `PERMISSIONS.md` en una concesión humana.
+
 Las herramientas browser mutantes (`open`, `scroll`, `click`, `type`) siempre
 generan una approval `kind: "browser"` ligada a user/thread/turn/call y al
 fingerprint de `PERMISSIONS.md`. `read`, `screenshot`, `tabs` y `downloads` son
@@ -727,7 +733,7 @@ type GeneratedArtifact = {
 };
 ```
 
-`GET /api/projects/{projectId}/artifacts/{artifactId}` responde bytes `image/png`, inline y privados. IDs inválidos o artefactos ajenos/inexistentes responden `400` o `404` sin revelar paths.
+`GET /api/projects/{projectId}/artifacts/{artifactId}` responde bytes `image/png`, inline, con `Cache-Control: private, no-store`. La URL se reautoriza en cada request; no debe reutilizarse desde caché tras logout o cambio de empleado. IDs inválidos o artefactos ajenos/inexistentes responden `400` o `404` sin revelar paths.
 
 Los documentos Office/PDF/texto/imagen no usan este contrato inline; usan la API de documentos siguiente.
 
@@ -982,7 +988,7 @@ auditoría.
 
 Confirmar vuelve a resolver `PERMISSIONS.md`. La escritura compara el original congelado, versiona el original si existe, escribe atómicamente y verifica el hash posterior. El lock del target es único por instalación y destino, incluso cuando dos empleados confirman operaciones desde estados privados distintos. `status: "conflict"` es un resultado válido si el original cambió. Repetir exactamente el mismo `clientRequestId` y decisión devuelve el resultado ya registrado; cambiar contenido o decisión devuelve `409`.
 
-Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `409` decisión previa o `clientRequestId` reutilizado con otra intención; `400` binding/path inseguro; `503` publicación no disponible. Un cambio del original detectado durante la confirmación normalmente es `200` con `operation.status: "conflict"`. La expiración ya reconciliada se representa como `status: "expired"`, no como `conflict` ni como un pendiente recuperable.
+Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `409` decisión previa o `clientRequestId` reutilizado con otra intención; `400` binding/path inseguro; `429` con `Retry-After`, `code: "PUBLICATION_STORAGE_BACKPRESSURE"` y `retryable: true` si el volumen oficial no conserva margen; `503` con `code: "PUBLICATION_STORAGE_CAPACITY_UNAVAILABLE"` y `retryable: true` si su capacidad no puede medirse. Ambos fallan antes de cambiar la operación a `publishing`, crear una versión o tocar el destino. Un cambio del original detectado durante la confirmación normalmente es `200` con `operation.status: "conflict"`. La expiración ya reconciliada se representa como `status: "expired"`, no como `conflict` ni como un pendiente recuperable.
 
 No hay hoy endpoints públicos para listar operaciones ni descargar/restaurar la versión anterior. Esas funciones existen en el publisher server-side, no en el contrato UI.
 
