@@ -66,6 +66,14 @@ type UiEventEnvelope = {
 - Offline o runtime no disponible mantienen el historial en lectura y bloquean el envío. El reintento es explícito y la vuelta online vuelve a consultar status antes de habilitar el composer.
 - Esta resiliencia local no se presenta como reconnect de turno: no deduplica eventos, no confirma cursores y no reanuda un stream App Server. Esas garantías continúan bloqueadas por checkpoints backend 7/10.
 
+## Adapter durable y smoke real del checkpoint UI 8
+
+- `src/ui/durable-chat-event-adapter.ts` implementa el envelope UI schema v1 documentado, preserva scope e IDs, exige secuencia contigua, deduplica, detecta gaps, solicita replay y falla cerrado. No está conectado a una URL inventada.
+- `src/ui/frame-event-dispatcher.ts` agrupa únicamente deltas adyacentes por frame y vacía el buffer antes de cualquier evento estructurado; así conserva ordering y reduce updates globales.
+- `playwright.real-runtime.config.ts` y `tests/integration/real-app-server.spec.ts` aíslan el smoke real del suite determinista. Sin `AIBRAIN_REAL_RUNTIME_BASE_URL`, el caso se omite explícitamente y nunca cae a demo como si fuera real.
+- El 2026-08-27 se validó en el host Hetzner existente, mediante un contenedor QA efímero y loopback, `mode: codex`, `ready: true`, `isolated: true`, primer turno, resume del mismo thread y cancelación. El contenedor y el túnel se retiraron al terminar.
+- Esta prueba confirma el pipeline real AiBrain → `/api/chat` → Codex App Server por `stdio`; no confirma el WebSocket durable, ACK o replay del gateway porque la ruta de producto del SHA backend fijado todavía no lo compone.
+
 ## Gaps reales, no simulables
 
 | Gap backend | Estado | Consecuencia UI |
@@ -74,7 +82,7 @@ type UiEventEnvelope = {
 | Stores de producto migrados a filesystem | En curso checkpoint 3 | Preview verifica recuperación local, no persistencia definitiva |
 | Provisionamiento y registry por empleado | Provisionamiento completo; factory/gateway en curso checkpoint 5 | No hay smoke multiusuario definitivo |
 | Proyectos/threads definitivos | En curso checkpoint 6 | Adapter conserva frontera y fixtures de test |
-| Streaming/steer/stop/approval/replay integrados end-to-end | Pendiente checkpoint 7 | Transporte está probado, integración de producto no |
+| Streaming/steer/stop/approval/replay integrados end-to-end | Streaming, resume y stop legacy verificados contra App Server real; gateway durable pendiente backend 7/10 | Adapter durable y fixtures cubiertos; ACK/replay/reconnect reales esperan composición del endpoint final |
 | Office/PDF/previews/publicador | Servicios backend checkpoint 8 en curso; `StagedDocument`, `DocumentPreview` y publicador v1 existen, pero faltan routes autorizadas y el preview real solo materializa página 1 | UI/adapter/fixtures cubren tipos y lifecycle; upload, paginación interactiva y confirmación real siguen bloqueados |
 | Browser/Computer Use aislado | Pendiente backend checkpoint 9; no existe gateway/viewer autenticado por usuario/thread | UI/adapter/fixtures cubren estados, captura, takeover representado, devolución, descarga, reconexión y cierre; ninguna acción declara una sesión real disponible |
 | Contrato final para rama UI | Pendiente checkpoint 10 | Este documento es propuesta de integración, no API final |
