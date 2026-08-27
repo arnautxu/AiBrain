@@ -32,6 +32,12 @@ server {
 
     client_max_body_size 2m;
 
+    # Operator maintenance is reachable only through the host-loopback app
+    # port. Never expose its bearer-authenticated control surface via TLS.
+    location = /api/operations/maintenance {
+        return 404;
+    }
+
     location / {
         proxy_pass http://aibrain___AIBRAIN_INSTANCE_TOKEN___backend;
         proxy_http_version 1.1;

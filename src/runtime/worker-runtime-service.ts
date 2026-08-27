@@ -3,6 +3,11 @@ import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRe
 import type { InstallationConfig } from "@/config/installation-schema";
 import { loadInstallationConfig } from "@/config/installation";
 import {
+  MaintenanceCoordinator,
+  type EnterMaintenanceOptions,
+  type MaintenanceActivityLease,
+} from "@/operations/maintenance";
+import {
   parseAccount,
   parseModels,
   parseRateLimit,
@@ -53,7 +58,10 @@ export class WorkerAppServerClient {
   private cachedConnection: CodexConnection | null = null;
   private cachedAt = 0;
 
-  constructor(readonly handle: WorkerRuntimeHandle) {
+  constructor(
+    readonly handle: WorkerRuntimeHandle,
+    private readonly maintenance: MaintenanceCoordinator | null = null,
+  ) {
     this.router = new AppServerRpcRouter(handle.transport);
   }
 
@@ -91,7 +99,9 @@ export class WorkerAppServerClient {
     purpose: string,
     timeoutMs = 30_000,
     beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
+    activityLease?: MaintenanceActivityLease,
   ) {
+    if (method === "turn/start") this.maintenance?.assertActiveLease(activityLease);
     await this.initialize();
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(purpose)) {
       throw new Error("Stable App Server request id is invalid.");
@@ -148,6 +158,7 @@ type RuntimeServiceState = {
   fingerprint: string;
   config: Readonly<InstallationConfig>;
   registry: WorkerRuntimeRegistry;
+  maintenance: MaintenanceCoordinator;
   clients: Map<string, WorkerAppServerClient>;
   activeTurnCancellations: Map<string, {
     runtimeThreadId: string;
@@ -178,13 +189,16 @@ async function serviceState(): Promise<RuntimeServiceState> {
         replaced.registry.close(),
       ]);
     }
+    const maintenance = new MaintenanceCoordinator();
     const state: RuntimeServiceState = {
       fingerprint,
       config,
       registry: new WorkerRuntimeRegistry({
         config,
         factory: new LocalGatewayWorkerRuntimeFactory(),
+        maintenance,
       }),
+      maintenance,
       clients: new Map(),
       activeTurnCancellations: new Map(),
     };
@@ -201,13 +215,17 @@ async function serviceState(): Promise<RuntimeServiceState> {
   }
 }
 
-export async function workerAppServerForUser(userId: string) {
+export async function workerAppServerForUser(
+  userId: string,
+  activityLease?: MaintenanceActivityLease,
+) {
   const state = await serviceState();
-  let handle = await state.registry.start(userId);
+  if (activityLease) state.maintenance.assertActiveLease(activityLease);
+  let handle = await state.registry.start(userId, activityLease);
   let client = state.clients.get(userId);
   if (!client || client.handle.transport !== handle.transport) {
     if (client) await client.close();
-    client = new WorkerAppServerClient(handle);
+    client = new WorkerAppServerClient(handle, state.maintenance);
     state.clients.set(userId, client);
   }
   try {
@@ -216,8 +234,8 @@ export async function workerAppServerForUser(userId: string) {
     await client.close().catch(() => undefined);
     state.clients.delete(userId);
     await state.registry.stop(userId).catch(() => undefined);
-    handle = await state.registry.start(userId);
-    client = new WorkerAppServerClient(handle);
+    handle = await state.registry.start(userId, activityLease);
+    client = new WorkerAppServerClient(handle, state.maintenance);
     state.clients.set(userId, client);
     try {
       await client.initialize();
@@ -227,6 +245,23 @@ export async function workerAppServerForUser(userId: string) {
     }
   }
   return { config: state.config, registry: state.registry, handle, client };
+}
+
+export async function acquireWorkerTurnActivity() {
+  const state = await serviceState();
+  return state.maintenance.acquire("turn");
+}
+
+export async function workerMaintenanceStatus() {
+  return (await serviceState()).maintenance.status();
+}
+
+export async function enterWorkerMaintenance(options: EnterMaintenanceOptions) {
+  return (await serviceState()).maintenance.enter(options);
+}
+
+export async function resumeWorkerMaintenance() {
+  return (await serviceState()).maintenance.resume();
 }
 
 export async function workerRuntimeHealth(userId: string) {

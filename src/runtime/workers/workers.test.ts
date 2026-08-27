@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseInstallationConfig, type InstallationConfig } from "@/config/installation-schema";
+import { MaintenanceCoordinator } from "@/operations/maintenance";
 import type {
   AppServerEvent,
   AppServerRequest,
@@ -254,6 +255,59 @@ describe("WorkerProvisioner", () => {
 });
 
 describe("WorkerRuntimeRegistry", () => {
+  it("drains admitted work and rejects new worker starts during maintenance", async () => {
+    const { config } = await fixture();
+    const maintenance = new MaintenanceCoordinator();
+    const factory = new RecordingFactory();
+    const registry = new WorkerRuntimeRegistry({ config, factory, maintenance });
+    const turnLease = maintenance.acquire("turn");
+    const draining = maintenance.enter({ timeoutMs: 1_000 });
+
+    const admitted = await registry.start(syntheticUser(1), turnLease);
+    expect(admitted.userId).toBe(syntheticUser(1));
+    await expect(registry.start(syntheticUser(2))).rejects.toMatchObject({
+      code: "MAINTENANCE_ACTIVE",
+      phase: "draining",
+    });
+    expect(maintenance.status()).toMatchObject({ phase: "draining", activeActivities: 1 });
+
+    turnLease.release();
+    await expect(draining).resolves.toMatchObject({ phase: "maintenance", activeActivities: 0 });
+    await expect(registry.start(syntheticUser(2))).rejects.toMatchObject({
+      code: "MAINTENANCE_ACTIVE",
+      phase: "maintenance",
+    });
+
+    maintenance.resume();
+    await expect(registry.start(syntheticUser(2))).resolves.toMatchObject({ userId: syntheticUser(2) });
+    await registry.close();
+  });
+
+  it("counts an in-flight worker start as drainable activity", async () => {
+    const { config } = await fixture();
+    const entered = deferred();
+    const release = deferred();
+    const maintenance = new MaintenanceCoordinator();
+    const factory = new RecordingFactory(0, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    const registry = new WorkerRuntimeRegistry({ config, factory, maintenance });
+    const starting = registry.start(syntheticUser(1));
+    await entered.promise;
+    const draining = maintenance.enter({ timeoutMs: 1_000 });
+
+    expect(maintenance.status()).toMatchObject({
+      phase: "draining",
+      activeActivities: 1,
+      activeByKind: { turn: 0, "worker-start": 1 },
+    });
+    release.resolve();
+    await starting;
+    await expect(draining).resolves.toMatchObject({ phase: "maintenance", activeActivities: 0 });
+    await registry.close();
+  });
+
   it("starts twenty users with bounded concurrency and keeps lifecycle isolated", async () => {
     const { config } = await fixture();
     const threeStartsEntered = deferred();

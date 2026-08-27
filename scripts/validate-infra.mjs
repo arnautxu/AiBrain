@@ -115,6 +115,7 @@ requireMatch(nginx, /\/documents\$[\s\S]*client_max_body_size 52m;[\s\S]*proxy_r
 requireMatch(nginx, /zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not isolate the auth limit zone per installation");
 requireMatch(nginx, /upstream aibrain___AIBRAIN_INSTANCE_TOKEN___backend/u, "Nginx does not isolate the upstream per installation");
 requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not rate-limit auth mutations");
+requireMatch(nginx, /location = \/api\/operations\/maintenance[\s\S]{0,80}return 404/u, "Nginx exposes the operator maintenance endpoint publicly");
 requireMatch(nginx, /return 301 https:\/\/__AIBRAIN_PUBLIC_HOST__\$request_uri/u, "Nginx redirect trusts the client Host header");
 requireMatch(nginxDefaultDeny, /listen 80 default_server[\s\S]*return 444/u, "Nginx lacks an HTTP default-deny virtual host");
 requireMatch(nginxDefaultDeny, /listen 443 ssl default_server[\s\S]*ssl_reject_handshake on/u, "Nginx lacks a TLS default-deny virtual host");
@@ -158,6 +159,7 @@ const requiredRuntimeKeys = [
   "AIBRAIN_AUTH_CHALLENGE_SECRET",
   "AIBRAIN_PUBLICATION_SECRET",
   "AIBRAIN_BROWSER_GATEWAY_SECRET",
+  "AIBRAIN_MAINTENANCE_SECRET",
   "NEXT_PUBLIC_SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
   "AIBRAIN_CHROME_EXPECTED_VERSION",

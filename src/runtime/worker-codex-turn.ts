@@ -45,6 +45,7 @@ import {
 } from "@/runtime/memory-turn";
 import { issueThreadToken } from "@/runtime/thread-token";
 import {
+  acquireWorkerTurnActivity,
   registerWorkerTurnCancellation,
   workerAppServerForUser,
 } from "@/runtime/worker-runtime-service";
@@ -58,6 +59,7 @@ import {
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
+import type { MaintenanceActivityLease } from "@/operations/maintenance";
 
 export type WorkerTurnProjection = {
   envelope: AppServerEvent;
@@ -175,7 +177,11 @@ export async function runWorkerCodexTurn(
   turnDocuments: readonly ResolvedTurnDocument[],
   signal: AbortSignal,
   emit: EmitEvent,
+  admittedMaintenanceActivity?: MaintenanceActivityLease,
 ) {
+  const ownsMaintenanceActivity = !admittedMaintenanceActivity;
+  const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
+  try {
   if (runtimeConfig.mode !== "codex") {
     throw new RuntimeNotReadyError("El runtime real de Codex no està activat.");
   }
@@ -194,7 +200,7 @@ export async function runWorkerCodexTurn(
     permissionFingerprint: permissions.fingerprint,
   });
 
-  const runtime = await workerAppServerForUser(authenticatedUserId);
+  const runtime = await workerAppServerForUser(authenticatedUserId, maintenanceActivity);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
   }
@@ -589,7 +595,7 @@ export async function runWorkerCodexTurn(
         runtimeTurnId = resolvedTurnId;
         registration.bindRuntimeTurn(resolvedTurnId);
         await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
-      });
+      }, maintenanceActivity);
       runtimeTurnId ??= extractTurnId(turnResult);
       if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
       registration.bindRuntimeTurn(runtimeTurnId);
@@ -621,5 +627,8 @@ export async function runWorkerCodexTurn(
     signal.removeEventListener("abort", forwardExternalAbort);
     unregisterCancellation();
     registration.dispose();
+  }
+  } finally {
+    if (ownsMaintenanceActivity) maintenanceActivity.release();
   }
 }

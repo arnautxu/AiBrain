@@ -10,7 +10,11 @@ import type {
   WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
 
-const mocked = vi.hoisted(() => ({ runtime: null as unknown }));
+const mocked = vi.hoisted(() => ({
+  runtime: null as unknown,
+  maintenanceReleases: 0,
+  maintenanceLease: null as unknown,
+}));
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({
   getSigningSecret: () => "test-signing-secret-with-at-least-thirty-two-bytes",
@@ -19,7 +23,20 @@ vi.mock("@/runtime/thread-token", () => ({
   issueThreadToken: () => "user-bound-runtime-thread-token",
 }));
 vi.mock("@/runtime/worker-runtime-service", () => ({
-  workerAppServerForUser: async () => mocked.runtime,
+  acquireWorkerTurnActivity: async () => {
+    const lease = {
+      activityId: "00000000-0000-4000-8000-000000000099",
+      kind: "turn",
+      acquiredAt: "2026-08-27T00:00:00.000Z",
+      release: () => { mocked.maintenanceReleases += 1; },
+    };
+    mocked.maintenanceLease = lease;
+    return lease;
+  },
+  workerAppServerForUser: async (_userId: string, lease: unknown) => {
+    if (lease !== mocked.maintenanceLease) throw new Error("Worker activity lease was not forwarded.");
+    return mocked.runtime;
+  },
   registerWorkerTurnCancellation: () => () => undefined,
 }));
 
@@ -99,7 +116,11 @@ function permissions(rules: ResolvedPermissions["rules"] = []): ResolvedPermissi
 }
 
 describe("worker Codex turn", () => {
-  beforeEach(() => { mocked.runtime = null; });
+  beforeEach(() => {
+    mocked.runtime = null;
+    mocked.maintenanceLease = null;
+    mocked.maintenanceReleases = 0;
+  });
 
   it("uses a user-scoped worker, stable client message id and routed turn events", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-turn-"));
@@ -285,6 +306,7 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
     expect(events).toContainEqual({ type: "done" });
+    expect(mocked.maintenanceReleases).toBe(1);
   });
 
   it("recovers a completed clientUserMessageId from thread history without starting it twice", async () => {
@@ -411,5 +433,6 @@ describe("worker Codex turn", () => {
     )).rejects.toMatchObject({ code: "MEMORY_TURN_SNAPSHOT_UNAVAILABLE" });
     expect(audited).toBe(false);
     expect(mocked.runtime).toBeNull();
+    expect(mocked.maintenanceReleases).toBe(1);
   });
 });

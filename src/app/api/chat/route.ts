@@ -34,7 +34,10 @@ import {
 } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
-import { workerTurnIsActive } from "@/runtime/worker-runtime-service";
+import {
+  acquireWorkerTurnActivity,
+  workerTurnIsActive,
+} from "@/runtime/worker-runtime-service";
 import { LocalFileMemoryService } from "@/memory";
 import {
   FileMemoryTurnAuditSink,
@@ -48,6 +51,10 @@ import {
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
+import {
+  MaintenanceModeError,
+  type MaintenanceActivityLease,
+} from "@/operations/maintenance";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -190,6 +197,34 @@ export async function POST(request: Request) {
     );
   }
 
+  let maintenanceActivity: MaintenanceActivityLease | null = null;
+  if (config.mode === "codex") {
+    try {
+      maintenanceActivity = await acquireWorkerTurnActivity();
+    } catch (error) {
+      if (error instanceof MaintenanceModeError) {
+        return NextResponse.json(
+          {
+            error: "El servei està en manteniment. Torna-ho a provar més tard.",
+            code: error.code,
+            retryAfterMs: error.retryAfterMs,
+          },
+          {
+            status: 503,
+            headers: {
+              "Cache-Control": "private, no-store",
+              "Retry-After": String(Math.max(1, Math.ceil(error.retryAfterMs / 1_000))),
+            },
+          },
+        );
+      }
+      return NextResponse.json(
+        { error: "No s’ha pogut verificar l’estat operatiu.", code: "MAINTENANCE_CHECK_FAILED" },
+        { status: 503, headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+  }
+
   let turnPermissions: ResolvedPermissions | null = null;
   let approvalStore: FileApprovalStore | null = null;
   let turnProjectionStore: FileTurnProjectionStore | null = null;
@@ -233,6 +268,7 @@ export async function POST(request: Request) {
         });
       }
     } catch (error) {
+      maintenanceActivity?.release();
       if (error instanceof TurnDocumentAttachmentError) {
         return NextResponse.json(
           { error: error.code === "TURN_DOCUMENT_PERMISSION_DENIED"
@@ -276,6 +312,7 @@ export async function POST(request: Request) {
       turnOutcome = begun.outcome;
       assistantMessage = begun.assistantMessage;
     } catch (error) {
+      maintenanceActivity?.release();
       return workbenchErrorResponse(error, "No s’ha pogut iniciar el torn persistent.");
     }
   }
@@ -283,6 +320,7 @@ export async function POST(request: Request) {
     try {
       assistantMessage = (await turnProjectionStore.initialize(body.threadId, assistantMessage)).message;
     } catch (error) {
+      maintenanceActivity?.release();
       assistantMessage = {
         ...assistantMessage,
         status: "error",
@@ -294,6 +332,7 @@ export async function POST(request: Request) {
   }
   if (turnOutcome === "existing") {
     if (assistantMessage.status !== "streaming" || !turnProjectionStore) {
+      maintenanceActivity?.release();
       return replayMessageResponse(assistantMessage);
     }
     if (runtimeThreadId && workerTurnIsActive(
@@ -301,6 +340,7 @@ export async function POST(request: Request) {
       runtimeThreadId,
       body.assistantMessageId,
     )) {
+      maintenanceActivity?.release();
       return followProjectedTurn(
         turnProjectionStore,
         body.threadId,
@@ -382,6 +422,7 @@ export async function POST(request: Request) {
             turnDocuments,
             request.signal,
             emitCodex,
+            maintenanceActivity ?? undefined,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
@@ -425,6 +466,7 @@ export async function POST(request: Request) {
             }
           }
         }
+        maintenanceActivity?.release();
         controller.close();
       }
     },

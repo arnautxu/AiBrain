@@ -25,7 +25,8 @@
     "backup:verify": "tsx scripts/backup.ts verify",
     "backup:restore": "tsx scripts/backup.ts restore",
     "infra:validate": "node scripts/validate-infra.mjs",
-    "infra:preflight": "node scripts/validate-host-preflight.mjs"
+    "infra:preflight": "node scripts/validate-host-preflight.mjs",
+    "release:manage": "node scripts/manage-release.mjs"
   },
   "dependencies": {
     "@phosphor-icons/react": "2.1.10",
