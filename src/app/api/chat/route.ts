@@ -24,7 +24,6 @@ import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileApprovalStore } from "@/runtime/approval-store";
 import { readThreadToken } from "@/runtime/thread-token";
-import { WorkbenchNotFoundError } from "@/workbench/errors";
 import { workbenchErrorResponse } from "@/workbench/http";
 import {
   beginThreadTurn,
@@ -169,12 +168,7 @@ export async function POST(request: Request) {
     workspaceKey: string;
     runtimeThreadToken: string | null;
   };
-  try {
-    context = await getThreadRuntimeContext(session, body.threadId);
-  } catch (error) {
-    if (!browserPreview || !(error instanceof WorkbenchNotFoundError)) {
-      return workbenchErrorResponse(error, "No s’ha pogut resoldre el fil persistent.");
-    }
+  if (browserPreview) {
     persistent = false;
     context = {
       projectId: body.projectId,
@@ -182,6 +176,12 @@ export async function POST(request: Request) {
       workspaceKey: "workspace",
       runtimeThreadToken: null,
     };
+  } else {
+    try {
+      context = await getThreadRuntimeContext(session, body.threadId);
+    } catch (error) {
+      return workbenchErrorResponse(error, "No s’ha pogut resoldre el fil persistent.");
+    }
   }
   if (context.projectId !== body.projectId) {
     return NextResponse.json({ error: "El fil no pertany a aquest projecte." }, { status: 403 });

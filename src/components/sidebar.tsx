@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   CaretDown,
@@ -41,6 +41,7 @@ type SidebarProps = {
   busy: boolean;
   onCloseMobile: () => void;
   onCloseDesktop: () => void;
+  onOpenDesktop: () => void;
   onOpenCommandPalette: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
@@ -82,13 +83,14 @@ function MenuButton({ icon, label, danger = false, onClick }: {
   );
 }
 
-function ItemActions({ kind, item, onAction }: {
+function ItemActions({ kind, item, onAction, onClose }: {
   kind: "project" | "thread";
   item: WorkbenchProject | WorkbenchThread;
   onAction: (action: ProjectMenuAction | ThreadMenuAction) => void;
+  onClose: () => void;
 }) {
   return (
-    <div role="menu" className="absolute right-1 top-8 z-20 w-40 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)]">
+    <div role="menu" className="menu-enter absolute right-1 top-8 z-20 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]" onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
       {item.status === "active" ? (
         <>
           <MenuButton icon={<NotePencil size={14} />} label="Renombrar" onClick={() => onAction("rename")} />
@@ -114,6 +116,7 @@ export function Sidebar({
   busy,
   onCloseMobile,
   onCloseDesktop,
+  onOpenDesktop,
   onOpenCommandPalette,
   onSelectProject,
   onSelectThread,
@@ -128,6 +131,10 @@ export function Sidebar({
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false);
   const [archivedThreadsOpen, setArchivedThreadsOpen] = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const railOpenButtonRef = useRef<HTMLButtonElement>(null);
+  const desktopCloseButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarRef = useModalFocus(mobileOpen, onCloseMobile);
   const activeProjects = useMemo(
     () => projects.filter((project) => project.status === "active").sort(byPriority),
@@ -148,7 +155,25 @@ export function Sidebar({
   const closeMenus = () => {
     setProjectMenuId(null);
     setThreadMenuId(null);
+    setProfileMenuOpen(false);
   };
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const closeProfileMenu = (event: PointerEvent) => {
+      if (profileMenuRef.current?.contains(event.target as Node)) return;
+      setProfileMenuOpen(false);
+    };
+    const closeProfileMenuOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeProfileMenu);
+    document.addEventListener("keydown", closeProfileMenuOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeProfileMenu);
+      document.removeEventListener("keydown", closeProfileMenuOnEscape);
+    };
+  }, [profileMenuOpen]);
   const selectProject = (id: string) => {
     closeMenus();
     onSelectProject(id);
@@ -170,11 +195,25 @@ export function Sidebar({
         role={mobileOpen ? "dialog" : undefined}
         aria-label={mobileOpen ? "Navegación" : undefined}
         data-testid="workbench-sidebar"
-        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col border-r border-[var(--border-subtle)] bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:static md:w-[260px] md:translate-x-0 md:pb-0 md:pt-0 ${desktopOpen ? "md:flex" : "md:hidden"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
+        data-desktop-state={desktopOpen ? "expanded" : "collapsed"}
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden border-r border-[var(--border-subtle)] bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between px-3">
+        <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
+          <button ref={railOpenButtonRef} aria-label="Mostrar barra lateral" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { onOpenDesktop(); requestAnimationFrame(() => desktopCloseButtonRef.current?.focus()); }}><SidebarSimple size={19} /></button>
+          <div className="mt-2 flex flex-col items-center gap-1">
+            <button disabled={!activeProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={onNewThread}><NotePencil size={18} /></button>
+            <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
+            <button aria-label="Mostrar proyectos" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}>{activeProject ? <FolderOpen size={18} weight="fill" /> : <Folder size={18} />}</button>
+          </div>
+          <div className="mt-auto flex flex-col items-center gap-1">
+            <button aria-label="Abrir preferencias" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}><GearSix size={18} /></button>
+            <button aria-label={`${session.user.name}. Mostrar cuenta`} className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}><UserCircle size={21} /></button>
+          </div>
+        </div>
+        <div aria-hidden={!(desktopOpen || mobileOpen)} inert={!(desktopOpen || mobileOpen) ? true : undefined} className={`flex h-full w-[min(280px,88vw)] shrink-0 flex-col transition-opacity duration-150 md:w-[260px] ${desktopOpen ? "md:opacity-100" : "md:pointer-events-none md:opacity-0"}`}>
+        <div className="flex h-[52px] shrink-0 items-center justify-between px-3">
           <BrandMark branding={branding} />
-          <button aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:block" onClick={onCloseDesktop}><SidebarSimple size={18} /></button>
+          <button ref={desktopCloseButtonRef} aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:block" onClick={() => { onCloseDesktop(); requestAnimationFrame(() => railOpenButtonRef.current?.focus()); }}><SidebarSimple size={18} /></button>
           <button aria-label="Cerrar menú" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>
         </div>
 
@@ -209,7 +248,7 @@ export function Sidebar({
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </button>
                     <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
-                    {menuOpen ? <ItemActions kind="project" item={project} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
+                    {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                   </div>
                 );
               })}
@@ -234,7 +273,7 @@ export function Sidebar({
                         {thread.pinned ? <PushPin size={10} weight="fill" /> : <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span>}
                       </button>
                       <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
-                      {menuOpen ? <ItemActions kind="thread" item={thread} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
+                      {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                     </div>
                   );
                 })}
@@ -242,7 +281,7 @@ export function Sidebar({
               {archivedThreads.length ? (
                 <div className="mt-1">
                   <button className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedThreadsOpen((open) => !open)}>{archivedThreadsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Archivadas · {archivedThreads.length}</button>
-                  {archivedThreadsOpen ? archivedThreads.map((thread) => <div key={thread.id} className="relative group/thread flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{thread.title}</span><button aria-label={`Acciones de ${thread.title}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover/thread:opacity-100 focus:opacity-100" onClick={() => setThreadMenuId(threadMenuId === thread.id ? null : thread.id)}><DotsThree size={14} /></button>{threadMenuId === thread.id ? <ItemActions kind="thread" item={thread} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}</div>) : null}
+                  {archivedThreadsOpen ? archivedThreads.map((thread) => <div key={thread.id} className="relative group/thread flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{thread.title}</span><button aria-label={`Acciones de ${thread.title}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover/thread:opacity-100 focus:opacity-100" onClick={() => setThreadMenuId(threadMenuId === thread.id ? null : thread.id)}><DotsThree size={14} /></button>{threadMenuId === thread.id ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}</div>) : null}
                 </div>
               ) : null}
             </section>
@@ -251,26 +290,30 @@ export function Sidebar({
           {archivedProjects.length ? (
             <section className="mt-4">
               <button className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedProjectsOpen((open) => !open)}>{archivedProjectsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Proyectos archivados · {archivedProjects.length}</button>
-              {archivedProjectsOpen ? archivedProjects.map((project) => <div key={project.id} className="relative group flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{project.name}</span><button aria-label={`Acciones de ${project.name}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => setProjectMenuId(projectMenuId === project.id ? null : project.id)}><DotsThree size={14} /></button>{projectMenuId === project.id ? <ItemActions kind="project" item={project} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}</div>) : null}
+              {archivedProjectsOpen ? archivedProjects.map((project) => <div key={project.id} className="relative group flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{project.name}</span><button aria-label={`Acciones de ${project.name}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => setProjectMenuId(projectMenuId === project.id ? null : project.id)}><DotsThree size={14} /></button>{projectMenuId === project.id ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}</div>) : null}
             </section>
           ) : null}
         </div>
 
-        <div className="shrink-0 border-t border-[var(--border-subtle)] p-2">
-          <div className="mb-1 flex items-center gap-1">
-            <button className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
-              <GearSix size={16} /><span className="truncate text-[12px] font-medium">Preferencias</span>
-            </button>
-            <ThemeToggle />
-          </div>
-          <div className="flex items-center gap-2.5 rounded-lg px-3 py-2.5 hover:bg-[var(--surface-hover)]">
-            <UserCircle size={20} className="shrink-0 text-[var(--text-subtle)]" />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</p>
-              <p className="mt-0.5 truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</p>
+        <div ref={profileMenuRef} className="relative shrink-0 p-2">
+          {profileMenuOpen ? (
+            <div role="menu" aria-label="Cuenta y preferencias" className="menu-enter absolute inset-x-2 bottom-[calc(100%-2px)] z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]">
+              <div className="flex items-center gap-2.5 px-3 py-2.5 text-[var(--text)]" role="presentation">
+                <UserCircle size={22} className="shrink-0 text-[var(--text-subtle)]" />
+                <div className="min-w-0"><p className="truncate text-[12px] font-semibold">{session.user.name}</p><p className="truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</p></div>
+              </div>
+              <div className="my-1 border-t border-[var(--border-subtle)]" />
+              <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { setProfileMenuOpen(false); onOpenCustomization(); }}><GearSix size={16} />Preferencias</button>
+              <div className="flex min-h-10 items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><span className="min-w-0 flex-1">Apariencia</span><ThemeToggle className="!size-8" /></div>
+              <div className="my-1 border-t border-[var(--border-subtle)]" />
+              <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={16} />Cerrar sesión</button>
             </div>
-            <button aria-label="Cerrar sesión" className="touch-target rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-selected)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={15} /></button>
-          </div>
+          ) : null}
+          <button aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-expanded={profileMenuOpen} className={`flex w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); setProfileMenuOpen((open) => !open); }}>
+            <UserCircle size={20} className="shrink-0 text-[var(--text-subtle)]" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
+          </button>
+        </div>
         </div>
       </aside>
     </>

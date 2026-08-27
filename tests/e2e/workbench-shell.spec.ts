@@ -35,13 +35,54 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("heading", { name: "Nuevo proyecto" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
 
+  const modePicker = page.getByRole("button", { name: "Modo del turno" });
+  await modePicker.click();
+  const modeMenu = page.getByRole("menu", { name: "Modo del turno" });
+  await expect(modeMenu).toBeVisible();
+  await modeMenu.getByRole("menuitemradio", { name: /Plan/ }).click();
+  await expect(modePicker).toContainText("Plan");
+
+  const addMenuButton = page.getByRole("button", { name: "Añadir al mensaje" });
+  await addMenuButton.click();
+  const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
+  await expect(addMenu).toBeVisible();
+  await expect(addMenu.getByRole("menuitemcheckbox", { name: /Buscar en la web/ })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(addMenu).toBeHidden();
+
+  const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
+  await accountButton.click();
+  const accountMenu = page.getByRole("menu", { name: "Cuenta y preferencias" });
+  await expect(accountMenu).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(accountMenu).toBeHidden();
+
   await page.keyboard.press("Meta+K");
   const search = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeVisible();
+  await expect(search.getByRole("option", { name: /Abrir Review/ })).toBeVisible();
+  await expect(search.getByRole("option", { name: /Abrir Computer Use/ })).toBeVisible();
   await search.getByRole("textbox").fill(primaryProject);
   await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(search).toBeHidden();
+
+  const sidebar = page.getByTestId("workbench-sidebar");
+  const sidebarWidth = () => sidebar.evaluate((element) => element.getBoundingClientRect().width);
+  await page.getByRole("button", { name: "Ocultar barra lateral" }).click();
+  await page.waitForTimeout(80);
+  const transitioningWidth = await sidebarWidth();
+  expect(transitioningWidth).toBeGreaterThan(52);
+  expect(transitioningWidth).toBeLessThan(260);
+  const rail = page.getByTestId("workbench-sidebar-rail");
+  await expect(rail).toBeVisible();
+  await expect(sidebar).toHaveAttribute("data-desktop-state", "collapsed");
+  await expect.poll(sidebarWidth).toBe(52);
+  await expect(rail.getByRole("button", { name: "Mostrar barra lateral" })).toBeFocused();
+  await rail.getByRole("button", { name: "Mostrar barra lateral" }).click();
+  await expect(sidebar).toHaveAttribute("data-desktop-state", "expanded");
+  await expect.poll(sidebarWidth).toBe(260);
+  await expect(page.getByRole("button", { name: "Ocultar barra lateral" })).toBeFocused();
   expect(pageErrors).toEqual([]);
 });
 

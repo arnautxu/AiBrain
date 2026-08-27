@@ -96,7 +96,7 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia("(max-width: 1279px)");
+    const query = window.matchMedia("(max-width: 767px)");
     const sync = () => setMobileOverlay(query.matches);
     sync();
     query.addEventListener("change", sync);
@@ -117,12 +117,12 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
       aria-modal={open && mobileOverlay ? "true" : undefined}
       role={open && mobileOverlay ? "dialog" : undefined}
       tabIndex={open && mobileOverlay ? -1 : undefined}
-      className={`review-panel fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-[var(--shadow-lg)] transition-transform duration-200 xl:static xl:w-[410px] xl:shrink-0 xl:pb-0 xl:pt-0 xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
+      className={`review-panel fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] shadow-[var(--shadow-lg)] transition-[transform,opacity] duration-200 md:inset-y-auto md:right-4 md:top-[60px] md:h-[min(680px,calc(100dvh-76px))] md:w-[300px] md:rounded-[24px] md:border md:pb-0 md:pt-0 ${open ? "translate-x-0 opacity-100" : "translate-x-full opacity-0 md:pointer-events-none md:translate-x-3"}`}
     >
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-[var(--border)] px-3.5">
+      <header className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <GitDiff size={15} className="shrink-0 text-[var(--text-secondary)]" />
-          <h2 className="truncate text-[11px] font-semibold text-[var(--text)]">Review del turno</h2>
+          <h2 aria-label="Review del turno" className="truncate text-[13px] font-semibold text-[var(--text)]">Resultados</h2>
           {pending > 0 ? <span className="rounded-md bg-[var(--warning-soft)] px-1.5 py-0.5 text-[8px] font-semibold text-[var(--warning)]">{pending} {pending === 1 ? "pendiente" : "pendientes"}</span> : null}
         </div>
         <button type="button" aria-label="Cerrar Review" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={15} /></button>

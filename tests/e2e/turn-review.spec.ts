@@ -57,7 +57,7 @@ test("plan, command, diff, Review and approval decisions consume the typed turn 
     { approvalId: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", decision: "decline" },
   ]);
 
-  await page.getByLabel("Abrir Review", { exact: true }).click();
+  await page.getByRole("button", { name: "Revisar cambios" }).click();
   await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
   const review = page.locator("aside.review-panel");
   await expect(review.getByText("resultado.txt", { exact: true }).first()).toBeVisible();

@@ -3,8 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 
 async function login(page: Page) {
-  await page.goto("/login");
-  const origin = new URL(page.url()).origin;
+  const origin = "http://127.0.0.1:3100";
   const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
     data: { userId: demoUserId },
     headers: { Origin: origin },
@@ -12,7 +11,14 @@ async function login(page: Page) {
   expect(loginResponse.ok()).toBe(true);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByText("Conectando con el servicio…")).toHaveCount(0, { timeout: 10_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
+}
+
+async function openMobileDrawerIfNeeded(page: Page) {
+  if ((page.viewportSize()?.width ?? 1440) >= 768) return;
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
 }
 
 test("employee shell light", async ({ page }) => {
@@ -24,6 +30,16 @@ test("employee shell dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   await expect(page).toHaveScreenshot("employee-shell-dark.png", { fullPage: true });
+});
+
+test("employee shell collapsed rail light", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "visual-desktop", "desktop-only sidebar state");
+  await login(page);
+  await page.getByRole("button", { name: "Ocultar barra lateral" }).click();
+  const sidebar = page.getByTestId("workbench-sidebar");
+  await expect(sidebar).toHaveAttribute("data-desktop-state", "collapsed");
+  await expect.poll(() => sidebar.evaluate((element) => element.getBoundingClientRect().width)).toBe(52);
+  await expect(page).toHaveScreenshot("employee-shell-collapsed-rail-light.png", { fullPage: true });
 });
 
 test("preferences dark", async ({ page }) => {
@@ -41,9 +57,47 @@ test("preferences dark", async ({ page }) => {
 test("guided actions dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
-  await page.getByRole("button", { name: "Abrir acciones guiadas" }).click();
+  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+  await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
   await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
   await expect(page).toHaveScreenshot("guided-actions-dark.png", { fullPage: true });
+});
+
+test("composer tools menu light", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+  await expect(page.getByRole("menu", { name: "Añadir al mensaje" })).toBeVisible();
+  await expect(page).toHaveScreenshot("composer-tools-menu-light.png", { fullPage: true });
+});
+
+test("composer mode menu light", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "Modo del turno" }).click();
+  await expect(page.getByRole("menu", { name: "Modo del turno" })).toBeVisible();
+  await expect(page).toHaveScreenshot("composer-mode-menu-light.png", { fullPage: true });
+});
+
+test("account menu light", async ({ page }) => {
+  await login(page);
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: new RegExp(`${demoUserId === "operations-user" ? "Taylor" : "Alex"}.*Abrir menú de cuenta`) }).click();
+  await expect(page.getByRole("menu", { name: "Cuenta y preferencias" })).toBeVisible();
+  await expect(page).toHaveScreenshot("account-menu-light.png", { fullPage: true });
+});
+
+test("command palette light", async ({ page }) => {
+  await login(page);
+  await page.keyboard.press("Meta+K");
+  await expect(page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" })).toBeVisible();
+  await expect(page).toHaveScreenshot("command-palette-light.png", { fullPage: true });
+});
+
+test("create project dialog light", async ({ page }) => {
+  await login(page);
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: "Crear proyecto" }).click();
+  await expect(page.getByRole("dialog", { name: "Nuevo proyecto" })).toBeVisible();
+  await expect(page).toHaveScreenshot("create-project-dialog-light.png", { fullPage: true });
 });
 
 test("employee shell mobile drawer", async ({ page }, testInfo) => {

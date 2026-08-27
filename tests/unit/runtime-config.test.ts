@@ -48,5 +48,10 @@ describe("runtime configuration", () => {
     vi.stubEnv("AIBRAIN_ENABLE_PREVIEW_DEMO", "1");
     vi.stubEnv("CHAT_RUNTIME", "demo");
     expect(readRuntimeConfig("example-company").mode).toBe("demo");
+
+    // Vercel may inherit CHAT_RUNTIME=codex from the deployment image. The
+    // explicit Preview demo gate remains authoritative and never affects prod.
+    vi.stubEnv("CHAT_RUNTIME", "codex");
+    expect(readRuntimeConfig("example-company").mode).toBe("demo");
   });
 });

@@ -3,22 +3,25 @@
 :root {
   color-scheme: light;
   --installation-accent: #315ee7;
-  --canvas: #f7f7f5;
+  --canvas: #ffffff;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-muted: #f1f1ee;
-  --surface-hover: #ebebe7;
-  --surface-selected: #e5e5e0;
-  --sidebar: #f1f1ee;
+  --surface-muted: #f4f4f4;
+  --surface-hover: #ececec;
+  --surface-selected: #e8e8e8;
+  --sidebar: #f9f9f9;
+  --header: #fcfcfc;
+  --user-message: #e8f3fe;
+  --user-message-text: #0c274a;
   --page: var(--canvas);
   --overlay: rgba(20, 20, 18, 0.38);
-  --text: #252522;
-  --text-secondary: #5f5d58;
-  --text-muted: #6f6d67;
-  --text-subtle: #6f6d67;
-  --border: #dfded9;
-  --border-subtle: #e7e6e1;
-  --border-strong: #c8c6bf;
+  --text: #0d0d0d;
+  --text-secondary: #5d5d5d;
+  --text-muted: #737373;
+  --text-subtle: #686868;
+  --border: rgba(0, 0, 0, 0.10);
+  --border-subtle: rgba(0, 0, 0, 0.05);
+  --border-strong: rgba(0, 0, 0, 0.14);
   --accent: var(--installation-accent);
   --accent-soft: color-mix(in srgb, var(--installation-accent) 10%, var(--surface));
   --accent-contrast: #ffffff;
@@ -32,6 +35,7 @@
   --shadow-sm: 0 1px 2px rgba(28, 27, 24, 0.06), 0 8px 24px -20px rgba(28, 27, 24, 0.28);
   --shadow-md: 0 20px 56px -34px rgba(28, 27, 24, 0.38), 0 3px 12px -8px rgba(28, 27, 24, 0.12);
   --shadow-lg: 0 26px 70px -34px rgba(28, 27, 24, 0.48), 0 8px 24px -16px rgba(28, 27, 24, 0.2);
+  --shadow-popover: 0 0 0 1px rgba(0, 0, 0, 0.025), 0 4px 16px rgba(0, 0, 0, 0.08), 0 12px 44px rgba(0, 0, 0, 0.05);
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -51,6 +55,9 @@
   --surface-hover: #30302e;
   --surface-selected: #353532;
   --sidebar: #1d1d1c;
+  --header: #20201f;
+  --user-message: #27384a;
+  --user-message-text: #e7f2ff;
   --overlay: rgba(0, 0, 0, 0.64);
   --text: #f1f0ec;
   --text-secondary: #b2afa8;
@@ -70,6 +77,7 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px -18px rgba(0, 0, 0, 0.72);
   --shadow-md: 0 24px 64px -36px rgba(0, 0, 0, 0.82), 0 3px 14px -8px rgba(0, 0, 0, 0.64);
   --shadow-lg: 0 30px 80px -34px rgba(0, 0, 0, 0.9), 0 10px 28px -16px rgba(0, 0, 0, 0.78);
+  --shadow-popover: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 8px 28px rgba(0, 0, 0, 0.38), 0 18px 54px rgba(0, 0, 0, 0.2);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -82,6 +90,9 @@
     --surface-hover: #30302e;
     --surface-selected: #353532;
     --sidebar: #1d1d1c;
+    --header: #20201f;
+    --user-message: #27384a;
+    --user-message-text: #e7f2ff;
     --text: #f1f0ec;
     --text-secondary: #b2afa8;
     --text-muted: #b2afa8;
@@ -105,7 +116,7 @@ body {
 }
 
 body {
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
@@ -154,8 +165,8 @@ button:disabled {
 
 .ui-brand-image {
   display: block;
-  width: 2rem;
-  height: 2rem;
+  width: 1.5rem;
+  height: 1.5rem;
   object-fit: cover;
 }
 
@@ -329,15 +340,57 @@ button:disabled {
 
 .composer-shadow {
   box-shadow:
-    var(--shadow-md),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 80%, transparent);
+    0 0 0 1px rgba(0, 0, 0, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.04),
+    0 4px 80px 8px rgba(0, 0, 0, 0.024);
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .composer-shadow:focus-within {
   box-shadow:
-    0 24px 60px -34px color-mix(in srgb, var(--text) 34%, transparent),
-    inset 0 1px 0 color-mix(in srgb, var(--surface) 88%, transparent);
+    0 0 0 1px rgba(0, 0, 0, 0.075),
+    0 2px 8px rgba(0, 0, 0, 0.05),
+    0 4px 80px 8px rgba(0, 0, 0, 0.035);
+}
+
+.composer-compact {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  padding: 6px;
+}
+
+.composer-compact .composer-controls,
+.composer-compact .composer-controls-start {
+  display: contents;
+}
+
+.composer-compact .composer-textarea {
+  order: 1;
+  width: auto;
+  min-width: 0;
+  min-height: 38px !important;
+  height: 38px !important;
+  flex: 1 1 auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  line-height: 24px;
+}
+
+.composer-compact .composer-add-button {
+  order: 0;
+}
+
+.composer-compact .composer-controls-start > .composer-picker {
+  order: 2;
+}
+
+.composer-compact .composer-controls-end {
+  order: 3;
+}
+
+.composer-compact .composer-hint {
+  display: none;
 }
 
 .markdown-body {
@@ -479,31 +532,34 @@ button:disabled {
   white-space: pre;
 }
 
-.composer-select,
+.composer-picker-button,
 .composer-tool {
-  height: 1.75rem;
+  height: 2rem;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
   color: var(--text-muted);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 500;
   transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
 }
 
-.composer-select {
-  max-width: 9.5rem;
-  padding: 0 1.55rem 0 0.55rem;
-  cursor: pointer;
+.composer-picker-button {
+  display: inline-flex;
+  max-width: 10rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0 0.6rem;
 }
 
-.composer-select:hover,
+.composer-picker-button:hover:not(:disabled),
+.composer-picker-button-active,
 .composer-tool:hover:not(:disabled) {
   background: var(--surface-muted);
   color: var(--text);
 }
 
-.composer-select:disabled,
+.composer-picker-button:disabled,
 .composer-tool:disabled {
   cursor: default;
   opacity: 0.42;
@@ -511,7 +567,7 @@ button:disabled {
 
 .composer-tool {
   display: inline-flex;
-  min-width: 1.75rem;
+  min-width: 2rem;
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
@@ -703,8 +759,17 @@ button:disabled {
   animation: panel-enter 320ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.dialog-enter {
+  animation: dialog-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 .palette-enter {
   animation: palette-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.menu-enter {
+  transform-origin: top;
+  animation: menu-enter 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 @keyframes shimmer {
@@ -748,10 +813,32 @@ button:disabled {
   }
 }
 
+@keyframes dialog-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 @keyframes palette-enter {
   from {
     opacity: 0;
     transform: translateY(-10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes menu-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
   }
   to {
     opacity: 1;
