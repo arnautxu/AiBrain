@@ -130,6 +130,10 @@ async function offlineCapture(page: Page, context: BrowserContext, viewport: { w
 
 for (const viewport of viewports) {
   test(`complete state matrix at ${viewport.width}x${viewport.height}`, async ({ page, context }) => {
+    let approvalRequestCount = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname.startsWith("/api/runtime/approvals")) approvalRequestCount += 1;
+    });
     await page.setViewportSize(viewport);
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
     await page.addInitScript(() => localStorage.removeItem("aibrain:theme"));
@@ -175,7 +179,8 @@ for (const viewport of viewports) {
     await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
     await screenshot(page, "review-light", viewport);
     await page.getByRole("button", { name: "Cerrar Review" }).click();
-    await page.getByRole("button", { name: "Permitir una vez" }).click();
+    await page.waitForTimeout(250);
+    expect(approvalRequestCount).toBe(0);
 
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara un documento sintético.");
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
@@ -186,13 +191,19 @@ for (const viewport of viewports) {
     await preview.evaluate((element) => element instanceof HTMLImageElement ? element.decode() : Promise.resolve());
     await centerArtifactInWorkbench(page, document);
     await expect(document).toBeInViewport();
+    expect(approvalRequestCount).toBe(0);
+    await page.waitForTimeout(250);
+    await expect(page.getByText("Esta aprobación ya no está pendiente.")).toBeHidden({ timeout: 6_000 });
     await screenshot(page, "document-light", viewport);
+    expect(approvalRequestCount).toBe(0);
 
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Abre una comprobación web sintética.");
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
+    const browserHeading = page.getByRole("heading", { name: "Sesión preparada" });
+    await expect(browserHeading).toBeVisible();
     const viewer = page.getByTitle("Sesión de navegador: Comprobación web sintética");
     await expect(viewer).toBeVisible();
-    await centerArtifactInWorkbench(page, viewer);
+    await centerArtifactInWorkbench(page, browserHeading);
     await expect(viewer).toBeInViewport();
     await expect(page.frameLocator('iframe[title="Sesión de navegador: Comprobación web sintética"]').getByText("Comprobación web")).toBeVisible();
     await screenshot(page, "browser-light", viewport);
