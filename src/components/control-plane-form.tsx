@@ -5,15 +5,13 @@ import Link from "next/link";
 import {
   ArrowLeft,
   Check,
-  EnvelopeSimple,
   FloppyDisk,
   SlidersHorizontal,
   UserPlus,
 } from "@phosphor-icons/react";
-import type { AuthSession, UserRole } from "@/auth/types";
+import type { AuthSession } from "@/auth/types";
 import type { BrainWindowId } from "@/config/brain";
 import type { ManifestEditorData } from "@/control-plane/types";
-import { AutomationGovernance } from "@/components/automation-governance";
 
 const windowCopy: Array<{ id: BrainWindowId; title: string; detail: string }> = [
   { id: "chat", title: "Workbench", detail: "Superfície principal obligatòria" },
@@ -39,16 +37,10 @@ export function ControlPlaneForm({
   const [manifest, setManifest] = useState(initial);
   const [state, setState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<UserRole>("member");
-  const [inviteJobTitle, setInviteJobTitle] = useState("");
-  const [inviteRoleSummary, setInviteRoleSummary] = useState("");
-  const [inviteResponsibilities, setInviteResponsibilities] = useState("");
-  const [inviteFirstMission, setInviteFirstMission] = useState("");
-  const [inviteState, setInviteState] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [inviteMessage, setInviteMessage] = useState<string | null>(null);
+  const editable = session.provider === "demo";
 
   function setField<Key extends keyof ManifestEditorData>(key: Key, value: ManifestEditorData[Key]) {
+    if (!editable) return;
     setState("idle");
     setManifest((current) => ({ ...current, [key]: value }));
   }
@@ -71,45 +63,6 @@ export function ControlPlaneForm({
     setMessage("Manifest desat. El workbench el carregarà a la pròxima obertura.");
   }
 
-  async function invite(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setInviteState("sending");
-    setInviteMessage(null);
-    const response = await fetch("/api/control-plane/invitations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email: inviteEmail,
-        role: inviteRole,
-        jobTitle: inviteRole === "member" ? inviteJobTitle : null,
-        roleSummary: inviteRole === "member" ? inviteRoleSummary : null,
-        responsibilities: inviteRole === "member"
-          ? inviteResponsibilities.split("\n").map((item) => item.trim()).filter(Boolean)
-          : [],
-        firstMission: inviteRole === "member" ? inviteFirstMission : null,
-      }),
-    });
-    const result: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      setInviteState("error");
-      setInviteMessage(result && typeof result === "object" && "error" in result && typeof result.error === "string" ? result.error : "No s’ha pogut convidar el membre.");
-      return;
-    }
-    const delivery = result && typeof result === "object" && "invitation" in result &&
-      result.invitation && typeof result.invitation === "object" && "delivery" in result.invitation
-      ? result.invitation.delivery
-      : null;
-    setInviteState("sent");
-    setInviteMessage(delivery === "existing_user"
-      ? `${inviteEmail} ja tenia identitat: l’hem afegit al tenant.`
-      : `Invitació enviada a ${inviteEmail}.`);
-    setInviteEmail("");
-    setInviteJobTitle("");
-    setInviteRoleSummary("");
-    setInviteResponsibilities("");
-    setInviteFirstMission("");
-  }
-
   return (
     <main className="min-h-[100dvh] bg-[#f3f3f0] text-[#292825]">
       <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-[#deddd8] bg-[#f9f9f7]/92 px-4 backdrop-blur md:px-8">
@@ -117,31 +70,32 @@ export function ControlPlaneForm({
           <Link href="/" aria-label="Tornar al workbench" className="rounded-lg p-2 text-[#77746e] hover:bg-[#ecebe7]"><ArrowLeft size={15} /></Link>
           <div><p className="text-[11px] font-semibold">Control plane</p><p className="text-[8px] text-[#96938d]">{session.tenant.name}</p></div>
         </div>
-        <button onClick={() => void save()} disabled={state === "saving"} className="flex items-center gap-2 rounded-lg bg-[#222320] px-3.5 py-2 text-[10px] font-semibold text-white disabled:opacity-50"><FloppyDisk size={13} />{state === "saving" ? "Desant…" : "Desa manifest"}</button>
+        {editable ? <button onClick={() => void save()} disabled={state === "saving"} className="flex items-center gap-2 rounded-lg bg-[#222320] px-3.5 py-2 text-[10px] font-semibold text-white disabled:opacity-50"><FloppyDisk size={13} />{state === "saving" ? "Desant…" : "Desa manifest"}</button> : null}
       </header>
 
       <div className="mx-auto grid max-w-[1060px] gap-5 px-5 py-8 lg:grid-cols-[.68fr_1.32fr] lg:px-8 lg:py-12">
         <aside className="h-fit rounded-2xl border border-[#deddd8] bg-[#222320] p-6 text-white lg:sticky lg:top-20">
           <span className="grid size-9 place-items-center rounded-xl bg-white/10"><SlidersHorizontal size={17} /></span>
           <h1 className="mt-8 text-[28px] font-semibold leading-[1.05] tracking-[-.045em]">Configura el producte, no el codi.</h1>
-          <p className="mt-4 text-[10px] leading-5 text-white/55">{session.provider === "supabase" ? "Cada desat crea una versió immutable i auditada del tenant." : "Aquesta capa escriu un overlay demo validat per tenant."} El runtime i el contracte Codex es mantenen compartits.</p>
+          <p className="mt-4 text-[10px] leading-5 text-white/55">{editable ? "Aquesta capa escriu un overlay demo validat per tenant." : "La configuració de producció és de només lectura i es publica com una release versionada per l’operador."} El runtime i el contracte Codex es mantenen compartits.</p>
           <dl className="mt-8 space-y-3 border-t border-white/10 pt-5 text-[9px]">
             <div className="flex justify-between gap-4"><dt className="text-white/45">Tenant</dt><dd>{session.tenant.id}</dd></div>
             <div className="flex justify-between gap-4"><dt className="text-white/45">Rol</dt><dd>Owner</dd></div>
-            <div className="flex justify-between gap-4"><dt className="text-white/45">Persistència</dt><dd>{session.provider === "supabase" ? "Postgres versionat" : "Filesystem demo"}</dd></div>
+            <div className="flex justify-between gap-4"><dt className="text-white/45">Persistència</dt><dd>{editable ? "Filesystem demo" : "Filesystem local"}</dd></div>
           </dl>
         </aside>
 
         <div className="space-y-5">
-          <section className="rounded-2xl border border-[#deddd8] bg-[#fbfbfa] p-5 md:p-7">
-            <h2 className="text-[12px] font-semibold">Identitat</h2>
-            <p className="mt-1 text-[9px] text-[#918e88]">Marca i veu base del tenant.</p>
-            <div className="mt-6 grid gap-5 sm:grid-cols-2">
-              <Field label="Nom del producte"><input maxLength={48} value={manifest.productName} onChange={(event) => setField("productName", event.target.value)} /></Field>
-              <Field label="Nom de l’agent"><input maxLength={32} value={manifest.assistantName} onChange={(event) => setField("assistantName", event.target.value)} /></Field>
-              <div className="sm:col-span-2"><Field label="Rol"><input maxLength={80} value={manifest.role} onChange={(event) => setField("role", event.target.value)} /></Field></div>
-            </div>
-          </section>
+          <fieldset disabled={!editable} className="contents disabled:opacity-70">
+            <section className="rounded-2xl border border-[#deddd8] bg-[#fbfbfa] p-5 md:p-7">
+              <h2 className="text-[12px] font-semibold">Identitat</h2>
+              <p className="mt-1 text-[9px] text-[#918e88]">Marca i veu base del tenant.</p>
+              <div className="mt-6 grid gap-5 sm:grid-cols-2">
+                <Field label="Nom del producte"><input maxLength={48} value={manifest.productName} onChange={(event) => setField("productName", event.target.value)} /></Field>
+                <Field label="Nom de l’agent"><input maxLength={32} value={manifest.assistantName} onChange={(event) => setField("assistantName", event.target.value)} /></Field>
+                <div className="sm:col-span-2"><Field label="Rol"><input maxLength={80} value={manifest.role} onChange={(event) => setField("role", event.target.value)} /></Field></div>
+              </div>
+            </section>
 
           <section className="rounded-2xl border border-[#deddd8] bg-[#fbfbfa] p-5 md:p-7">
             <h2 className="text-[12px] font-semibold">Entrada al workbench</h2>
@@ -176,53 +130,18 @@ export function ControlPlaneForm({
               </div>
             </div>
           </section>
+          </fieldset>
 
           <section className="rounded-2xl border border-[#deddd8] bg-[#fbfbfa] p-5 md:p-7">
             <div className="flex items-start gap-3">
               <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[#efefec] text-[#56534e]"><UserPlus size={17} /></span>
               <div>
-                <h2 className="text-[12px] font-semibold">Membres i invitacions</h2>
-                <p className="mt-1 text-[9px] leading-4 text-[#918e88]">L’alta és privada: Supabase crea la identitat i Postgres assigna tenant i rol en una operació auditada.</p>
+                <h2 className="text-[12px] font-semibold">Membres i provisionament</h2>
+                <p className="mt-1 text-[9px] leading-4 text-[#918e88]">Supabase crea només la identitat. L’operador provisiona després el UUID, rol i espais privats al filesystem local.</p>
               </div>
             </div>
-            {session.provider === "supabase" ? (
-              <form className="mt-6 space-y-5" onSubmit={(event) => void invite(event)}>
-                <div className="grid gap-4 sm:grid-cols-[1fr_180px]">
-                  <label className="block">
-                    <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Correu</span>
-                    <span className="flex items-center gap-2 rounded-lg border border-[#d9d7d2] bg-white px-3 focus-within:border-[#aaa7a1]">
-                      <EnvelopeSimple size={14} className="text-[#918e88]" />
-                      <input type="email" required maxLength={320} value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} className="min-w-0 flex-1 bg-transparent py-2.5 text-[10px] outline-none" placeholder="persona@empresa.cat" />
-                    </span>
-                  </label>
-                  <label className="block">
-                    <span className="mb-2 block text-[9px] font-semibold text-[#77746e]">Permís d’accés</span>
-                    <select value={inviteRole} onChange={(event) => setInviteRole(event.target.value as UserRole)} className="w-full rounded-lg border border-[#d9d7d2] bg-white px-3 py-2.5 text-[10px] outline-none focus:border-[#aaa7a1]">
-                      <option value="member">Membre</option>
-                      <option value="owner">Owner</option>
-                    </select>
-                  </label>
-                </div>
-                {inviteRole === "member" ? (
-                  <div className="rounded-xl border border-[#e1dfda] bg-[#f5f5f2] p-4 md:p-5">
-                    <div className="mb-5"><p className="text-[10px] font-semibold">Onboarding del membre</p><p className="mt-1 text-[9px] leading-4 text-[#918e88]">Defineix què s’espera d’aquesta persona. Ella podrà confirmar-ho i ajustar preferències, però no canviar permisos.</p></div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <Field label="Càrrec"><input required maxLength={80} value={inviteJobTitle} onChange={(event) => setInviteJobTitle(event.target.value)} placeholder="Responsable de màrqueting" /></Field>
-                      <div className="sm:col-span-2"><Field label="Objectiu del rol"><textarea required rows={2} maxLength={500} value={inviteRoleSummary} onChange={(event) => setInviteRoleSummary(event.target.value)} placeholder="Què coordina i quin resultat ha d’aconseguir." /></Field></div>
-                      <Field label="Responsabilitats · una per línia"><textarea required rows={5} maxLength={1288} value={inviteResponsibilities} onChange={(event) => setInviteResponsibilities(event.target.value)} placeholder={"Preparar el calendari editorial\nAnalitzar competidors\nCoordinar campanyes"} /></Field>
-                      <Field label="Primera missió"><textarea required rows={5} maxLength={400} value={inviteFirstMission} onChange={(event) => setInviteFirstMission(event.target.value)} placeholder="Prepara tres idees de contingut basades en la proposta de valor." /></Field>
-                    </div>
-                  </div>
-                ) : null}
-                <div className="flex justify-end"><button disabled={inviteState === "sending"} className="rounded-lg bg-[#222320] px-4 py-2.5 text-[10px] font-semibold text-white disabled:opacity-50">{inviteState === "sending" ? "Enviant…" : "Crea i convida"}</button></div>
-              </form>
-            ) : (
-              <p className="mt-5 rounded-xl bg-[#f1f1ee] px-4 py-3 text-[9px] leading-4 text-[#77746e]">En mode demo les identitats continuen sent una allowlist local. Les invitacions només s’activen amb auth Supabase.</p>
-            )}
-            {inviteMessage ? <p role="status" className={`mt-4 rounded-xl px-4 py-3 text-[10px] ${inviteState === "error" ? "bg-[#fff1ec] text-[#8d503c]" : "bg-[#eaf3eb] text-[#4a6c50]"}`}>{inviteMessage}</p> : null}
+            <p className="mt-5 rounded-xl bg-[#f1f1ee] px-4 py-3 text-[9px] leading-4 text-[#77746e]">Les altes no s’envien des d’aquesta pantalla. Després de crear l’usuari a Supabase Auth, l’operador executa <code>npm run users:provision -- --input /ruta/usuaris.json</code>. El procés és idempotent i no envia correus.</p>
           </section>
-
-          {session.provider === "supabase" ? <AutomationGovernance /> : null}
 
           {message ? <p role="status" className={`rounded-xl px-4 py-3 text-[10px] ${state === "error" ? "bg-[#fff1ec] text-[#8d503c]" : "bg-[#eaf3eb] text-[#4a6c50]"}`}>{message}</p> : null}
         </div>
