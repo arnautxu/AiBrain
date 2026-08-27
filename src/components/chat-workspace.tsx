@@ -80,6 +80,7 @@ type ChatWorkspaceProps = {
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onOpenCustomization: () => void;
+  onOpenProject: () => void;
   activeSideWindow: Exclude<BrainWindowId, "chat" | "runtime"> | null;
   canInspect: boolean;
   onInspectMessage: (messageId: string) => void;
@@ -339,6 +340,7 @@ export function ChatWorkspace({
   sidebarOpen,
   onToggleSidebar,
   onOpenCustomization,
+  onOpenProject,
   activeSideWindow,
   canInspect,
   onInspectMessage,
@@ -500,12 +502,12 @@ export function ChatWorkspace({
           <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
             <SidebarSimple size={17} />
           </button>
-          <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1">
+          <button type="button" disabled={standaloneConversation || !project} aria-label={standaloneConversation ? "Conversación sin proyecto" : `Abrir contexto de ${project?.name ?? "proyecto"}`} className="flex min-w-0 items-center gap-1.5 rounded-lg px-1 py-1 text-left transition hover:bg-[var(--surface-hover)] disabled:pointer-events-none" onClick={onOpenProject}>
             {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : <ChatCircleDots size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" />}
             {!standaloneConversation ? <span className="hidden max-w-36 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name ?? "Proyecto"}</span> : null}
             {thread && !standaloneConversation ? <CaretRight size={11} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" /> : null}
             <span className="max-w-[52vw] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread?.title ?? (project ? "Nueva conversación" : "Inicio")}</span>
-          </div>
+          </button>
         </div>
 
         <div className="flex items-center gap-1">

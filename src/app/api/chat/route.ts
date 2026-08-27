@@ -221,6 +221,9 @@ export async function POST(request: Request) {
     projectId: string;
     projectName: string;
     workspaceKey: string;
+    projectInstructions: string;
+    projectMemory: string;
+    projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
     runtimeThreadToken: string | null;
   };
   if (browserPreview) {
@@ -229,6 +232,9 @@ export async function POST(request: Request) {
       projectId: body.projectId,
       projectName: "Preview local",
       workspaceKey: "workspace",
+      projectInstructions: "",
+      projectMemory: "",
+      projectSources: [],
       runtimeThreadToken: null,
     };
   } else {
@@ -516,6 +522,7 @@ export async function POST(request: Request) {
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
+            context,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

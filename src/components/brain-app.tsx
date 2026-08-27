@@ -9,6 +9,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { MemoryPanel } from "@/components/memory-panel";
+import { ProjectPanel } from "@/components/project-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -250,6 +251,10 @@ function localProject(projects: WorkbenchProject[], name: string): WorkbenchProj
     slug,
     status: "active",
     pinned: false,
+    instructions: "",
+    sources: [],
+    memory: { enabled: true, notes: "", updatedAt: null },
+    sharing: { visibility: "private", members: [] },
     workspace: {
       id: crypto.randomUUID(),
       label: "Workspace principal",
@@ -327,6 +332,7 @@ export function BrainApp({
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [networkOnline, setNetworkOnline] = useState(true);
@@ -935,9 +941,8 @@ export function BrainApp({
       const updated: WorkbenchProject = initialWorkbench.persistence === "browser-preview"
         ? {
             ...project,
+            ...patch,
             ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
-            ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
-            ...(patch.status !== undefined ? { status: patch.status } : {}),
             updatedAt: new Date().toISOString(),
           }
         : await updateProjectRequest(project.id, patch);
@@ -1215,6 +1220,7 @@ export function BrainApp({
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
         onOpenCustomization={() => setCustomizationOpen(true)}
+        onOpenProject={() => setProjectOpen(true)}
         activeSideWindow={activeSideWindow}
         canInspect={inspectorEnabled}
         onInspectMessage={inspectMessage}
@@ -1258,6 +1264,14 @@ export function BrainApp({
       <MemoryPanel
         open={memoryOpen}
         onClose={() => setMemoryOpen(false)}
+      />
+
+      <ProjectPanel
+        key={`${activeProject?.id ?? "none"}:${activeProject?.updatedAt ?? "none"}`}
+        project={activeProject && activeProject.slug !== STANDALONE_PROJECT_SLUG ? activeProject : null}
+        open={projectOpen}
+        onClose={() => setProjectOpen(false)}
+        onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
       />
 
       <CommandPalette
