@@ -13,14 +13,23 @@ fail() {
 config_path=/etc/aibrain/installation.json
 [ -f "$config_path" ] && [ ! -L "$config_path" ] || fail "installation config is unavailable"
 
-publish_root=$(node -e '
+read_config_path() {
+  config_key=$1
+  node -e '
   const fs = require("node:fs");
   const path = require("node:path");
   const config = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-  const value = config?.paths?.publishWriteRoot;
-  if (typeof value !== "string" || !path.isAbsolute(value) || value === "/") process.exit(64);
+  const value = config?.paths?.[process.argv[2]];
+  if (typeof value !== "string" || !path.isAbsolute(value) || value === "/" || /[\0\r\n]/.test(value)) process.exit(64);
   process.stdout.write(path.resolve(value));
-' "$config_path") || fail "publishWriteRoot is invalid"
+' "$config_path" "$config_key"
+}
+
+data_root=$(read_config_path dataRoot) || fail "dataRoot is invalid"
+company_root=$(read_config_path companyContextRoot) || fail "companyContextRoot is invalid"
+users_root=$(read_config_path usersRoot) || fail "usersRoot is invalid"
+source_root=$(read_config_path sourceReadRoot) || fail "sourceReadRoot is invalid"
+publish_root=$(read_config_path publishWriteRoot) || fail "publishWriteRoot is invalid"
 
 workspace=$(pwd -P)
 user_root=$(dirname "$workspace")
@@ -30,6 +39,7 @@ artifacts_root=$user_root/artifacts
 transport_audit_root=$user_root/audit/transport
 
 [ "$workspace" = "$user_root/workspace" ] || fail "working directory is not the provisioned employee workspace"
+[ "$(dirname "$user_root")" = "$users_root" ] || fail "working directory is outside the configured users root"
 [ "${HOME:-}" = "$runtime_root/home" ] || fail "HOME is not bound to the provisioned employee"
 [ "${CODEX_HOME:-}" = "$runtime_root/codex-home" ] || fail "CODEX_HOME is not bound to the provisioned employee"
 [ "${XDG_CACHE_HOME:-}" = "$runtime_root/xdg/cache" ] || fail "XDG cache is not employee-private"
@@ -46,10 +56,35 @@ done
 
 [ -d "$publish_root" ] && [ ! -L "$publish_root" ] || fail "publish root is unavailable"
 [ "$(realpath "$publish_root")" = "$publish_root" ] || fail "publish root may not resolve through symlinks"
+[ -d "$data_root" ] && [ ! -L "$data_root" ] || fail "data root is unavailable"
+[ -d "$company_root" ] && [ ! -L "$company_root" ] || fail "company context root is unavailable"
+[ -d "$source_root" ] && [ ! -L "$source_root" ] || fail "source read root is unavailable"
+[ "$(realpath "$data_root")" = "$data_root" ] || fail "data root may not resolve through symlinks"
+[ "$(realpath "$company_root")" = "$company_root" ] || fail "company context root may not resolve through symlinks"
+[ "$(realpath "$source_root")" = "$source_root" ] || fail "source read root may not resolve through symlinks"
 
-# The container root is read-only. Only this employee's declared runtime roots
-# are rebound read-write. publish-rw is replaced by an empty read-only mount,
-# so Codex cannot read or mutate the official document repository.
+case "$company_root/" in
+  "$data_root"/*) ;;
+  *) fail "company context root is outside dataRoot" ;;
+esac
+case "$users_root/" in
+  "$data_root"/*) ;;
+  *) fail "users root is outside dataRoot" ;;
+esac
+case "$user_root/" in
+  "$users_root"/*) ;;
+  *) fail "employee root is outside usersRoot" ;;
+esac
+
+for private_context_file in PROFILE.md PREFERENCES.md PERMISSIONS.md; do
+  context_path=$user_root/$private_context_file
+  [ -f "$context_path" ] && [ ! -L "$context_path" ] || fail "employee context is unavailable: $private_context_file"
+done
+
+# The container root is read-only, then the complete product dataRoot is hidden.
+# Only company context, source-ro, this employee's explicit Markdown context and
+# declared writable roots are re-exposed. This prevents read-only credential
+# theft from browser profiles, local sessions, backups or sibling employees.
 exec /usr/bin/bwrap \
   --die-with-parent \
   --new-session \
@@ -62,6 +97,12 @@ exec /usr/bin/bwrap \
   --proc /proc \
   --tmpfs /tmp \
   --tmpfs /run \
+  --tmpfs "$data_root" \
+  --ro-bind "$company_root" "$company_root" \
+  --ro-bind "$source_root" "$source_root" \
+  --ro-bind "$user_root/PROFILE.md" "$user_root/PROFILE.md" \
+  --ro-bind "$user_root/PREFERENCES.md" "$user_root/PREFERENCES.md" \
+  --ro-bind "$user_root/PERMISSIONS.md" "$user_root/PERMISSIONS.md" \
   --tmpfs "$publish_root" \
   --remount-ro "$publish_root" \
   --bind "$runtime_root" "$runtime_root" \
