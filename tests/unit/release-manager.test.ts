@@ -165,7 +165,7 @@ async function fixture() {
   await writeFile(installationConfigC, installationConfigInput("C"));
   await writeFile(runtimeFile, JSON.stringify({ app: digestA, egress: egressDigestA }));
   await writeFile(dockerBin, `#!/usr/bin/env node
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
 if (process.env.FAKE_DELAY_MS) {
@@ -203,7 +203,13 @@ if (args[0] === "image" && args[1] === "inspect") {
   const runtime = JSON.parse(readFileSync(process.env.FAKE_RUNTIME_FILE, "utf8"));
   const isApp = args.at(-1)?.startsWith("a") || args.at(-1)?.startsWith("d");
   const image = isApp ? runtime.app : runtime.egress;
-  if (args[2].includes("Health.Status")) process.stdout.write("healthy");
+  if (args[2].includes("Health.Status")) {
+    const unhealthyCalls = Number(process.env.FAKE_TRANSIENT_UNHEALTHY_CALLS ?? "0");
+    let healthCall = 0;
+    try { healthCall = Number(readFileSync(process.env.FAKE_HEALTH_COUNTER_FILE, "utf8")); } catch {}
+    writeFileSync(process.env.FAKE_HEALTH_COUNTER_FILE, String(healthCall + 1));
+    process.stdout.write(healthCall < unhealthyCalls ? "running unhealthy" : "running healthy");
+  }
   else if (args[2].includes("Config.Image")) {
     process.stdout.write(process.env.FAKE_MISMATCH_TARGET === "1" && image === ${JSON.stringify(digestB)} ? ${JSON.stringify(digestA)} : image);
   } else if (args[2].includes("org.opencontainers.image.revision")) process.stdout.write(images[image]);
@@ -258,6 +264,7 @@ function environment(files: Awaited<ReturnType<typeof fixture>>, failImage = "")
     FAKE_DOCKER_LOG: files.logFile,
     FAKE_COMPOSE_ENV: files.envFile,
     FAKE_RUNTIME_FILE: files.runtimeFile,
+    FAKE_HEALTH_COUNTER_FILE: path.join(files.root, "health-counter"),
     FAKE_FAIL_IMAGE: failImage,
     FAKE_IMAGE_REVISIONS: JSON.stringify({
       [digestA]: revisionA,
@@ -336,7 +343,18 @@ describe("immutable release manager", () => {
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
     expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","ingress-gateway","alert-dispatcher"');
-    expect(log).toContain('"{{.State.Health.Status}}"');
+    expect(log).toContain('"{{.State.Status}} {{.State.Health.Status}}"');
+  }, 20_000);
+
+  it("allows a running service to recover from a transient unhealthy state", async () => {
+    const files = await fixture();
+    const promoted = await execFileAsync(process.execPath, commandArgs(files, "promote"), {
+      env: { ...environment(files), FAKE_TRANSIENT_UNHEALTHY_CALLS: "2" },
+    });
+    expect(JSON.parse(promoted.stdout)).toMatchObject({
+      current: { image: digestB, revision: revisionB },
+    });
+    expect(Number(await readFile(path.join(files.root, "health-counter"), "utf8"))).toBeGreaterThan(2);
   }, 20_000);
 
   it("automatically restores the previous healthy image after a failed promotion", async () => {
