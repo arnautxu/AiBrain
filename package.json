@@ -12,6 +12,7 @@
     "test:unit": "vitest run tests/unit src",
     "test:integration": "vitest run tests/integration",
     "test:documents:real": "AIBRAIN_REAL_DOCUMENT_MATRIX=1 vitest run tests/integration/document-preview.integration.test.ts",
+    "test:browser:real": "AIBRAIN_REAL_CHROME_TEST=1 vitest run src/runtime/browser/chrome-runtime.real.test.ts",
     "test:contract": "vitest run tests/contract",
     "test:e2e": "vitest run tests/e2e",
     "test:coverage": "vitest run --coverage",

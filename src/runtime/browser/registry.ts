@@ -4,6 +4,9 @@ import type {
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
   BrowserRuntimeHandle,
+  BrowserFrame,
+  BrowserInputCommand,
+  InteractiveManagedBrowserRuntime,
   ManagedBrowserRuntime,
 } from "@/runtime/browser/types";
 import { BrowserSessionStore } from "@/runtime/browser/state-store";
@@ -202,7 +205,7 @@ export class BrowserRuntimeRegistry {
 
   async health(userId: string) {
     const entry = this.entries.get(userId);
-    const state = await this.store.load(userId);
+    let state = await this.store.load(userId);
     if (!entry?.runtime || !entry.handle) return { healthy: false, state, runtime: null };
     if (state.browserSessionId !== entry.handle.browserSessionId) {
       return {
@@ -212,12 +215,42 @@ export class BrowserRuntimeRegistry {
       };
     }
     try {
+      if (state.heartbeatExpiresAt && Date.parse(state.heartbeatExpiresAt) <= Date.now()) {
+        state = await this.recoverExpired(userId);
+      }
       const health = await entry.runtime.health();
+      if (health.healthy && state.lifecycle === "ready" && state.controller === "agent") {
+        state = await this.store.heartbeat(userId, entry.handle.browserSessionId, "agent");
+      }
       return { healthy: health.healthy && state.lifecycle !== "degraded", state, runtime: health };
     } catch {
       await this.store.markDegraded(userId, entry.handle.browserSessionId);
       return { healthy: false, state: await this.store.load(userId), runtime: null };
     }
+  }
+
+  async captureFrame(userId: string): Promise<BrowserFrame> {
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertCurrentSession(userId, state);
+    if (state.lifecycle !== "ready" && state.lifecycle !== "human-control") {
+      throw new Error("Browser viewer is unavailable in the current lifecycle state.");
+    }
+    return runtime.captureFrame();
+  }
+
+  async navigate(userId: string, url: string) {
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertHumanControl(userId, state);
+    await runtime.navigate(url);
+  }
+
+  async dispatchInput(userId: string, command: BrowserInputCommand) {
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertHumanControl(userId, state);
+    await runtime.dispatchInput(command);
   }
 
   async stop(userId: string) {
@@ -305,6 +338,30 @@ export class BrowserRuntimeRegistry {
 
   private requireHandle(userId: string) {
     return this.requireEntry(userId).handle as BrowserRuntimeHandle;
+  }
+
+  private requireInteractiveRuntime(userId: string) {
+    const runtime = this.requireEntry(userId).runtime as ManagedBrowserRuntime;
+    if (!("captureFrame" in runtime) || typeof runtime.captureFrame !== "function" ||
+      !("navigate" in runtime) || typeof runtime.navigate !== "function" ||
+      !("dispatchInput" in runtime) || typeof runtime.dispatchInput !== "function") {
+      throw new Error("Browser runtime does not provide the interactive viewer contract.");
+    }
+    return runtime as InteractiveManagedBrowserRuntime;
+  }
+
+  private assertCurrentSession(userId: string, state: BrowserPersistentState) {
+    const handle = this.requireHandle(userId);
+    if (state.browserSessionId !== handle.browserSessionId) {
+      throw new Error("Browser runtime is fenced by a newer browser session.");
+    }
+  }
+
+  private assertHumanControl(userId: string, state: BrowserPersistentState) {
+    this.assertCurrentSession(userId, state);
+    if (state.lifecycle !== "human-control" || state.controller !== "human") {
+      throw new Error("Browser input requires an active human takeover.");
+    }
   }
 
   private async context(userId: string, state: BrowserPersistentState, recovering: boolean): Promise<BrowserRuntimeContext> {

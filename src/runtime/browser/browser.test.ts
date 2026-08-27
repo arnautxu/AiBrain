@@ -56,6 +56,8 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
   started = false;
   stopped = false;
   human = false;
+  navigations: string[] = [];
+  inputs: unknown[] = [];
 
   constructor(private readonly startBarrier?: Promise<void>, private readonly onStart?: () => void) {}
 
@@ -75,6 +77,20 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
   }
   async stop() {
     this.stopped = true;
+  }
+  async captureFrame() {
+    return {
+      schemaVersion: 1 as const,
+      mediaType: "image/png" as const,
+      dataBase64: Buffer.from("frame").toString("base64"),
+      capturedAt: "2026-08-27T00:00:00.000Z",
+    };
+  }
+  async navigate(url: string) {
+    this.navigations.push(url);
+  }
+  async dispatchInput(command: unknown) {
+    this.inputs.push(command);
   }
 }
 
@@ -309,6 +325,29 @@ describe("BrowserRuntimeRegistry", () => {
     (releaseStart as (() => void) | null)?.();
     await first;
     expect(factory.runtimes).toHaveLength(1);
+    await registry.close();
+  });
+
+  it("allows viewing while ready but fences navigation and input behind human takeover", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    await registry.start(USER_A);
+    await expect(registry.captureFrame(USER_A)).resolves.toMatchObject({
+      schemaVersion: 1,
+      mediaType: "image/png",
+    });
+    await expect(registry.navigate(USER_A, "https://example.test"))
+      .rejects.toThrow("requires an active human takeover");
+    await registry.takeOver(USER_A);
+    await registry.navigate(USER_A, "https://example.test");
+    await registry.dispatchInput(USER_A, {
+      kind: "key",
+      event: "keyDown",
+      key: "A",
+    });
+    expect(factory.runtimes[0].navigations).toEqual(["https://example.test"]);
+    expect(factory.runtimes[0].inputs).toHaveLength(1);
     await registry.close();
   });
 });

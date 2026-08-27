@@ -1,0 +1,244 @@
+import "server-only";
+
+import { createHash } from "node:crypto";
+import type { InstallationConfig } from "@/config/installation-schema";
+import { loadInstallationConfig } from "@/config/installation";
+import { getSigningSecret } from "@/auth/session";
+import { BrowserGatewayTokenService } from "@/runtime/browser/gateway-token";
+import { ChromeBrowserRuntimeFactory } from "@/runtime/browser/chrome-runtime";
+import {
+  BrowserRegistryBackpressureError,
+  BrowserRuntimeRegistry,
+} from "@/runtime/browser/registry";
+import { BrowserSessionStore } from "@/runtime/browser/state-store";
+import type {
+  BrowserGatewayCapability,
+  BrowserInputCommand,
+} from "@/runtime/browser/types";
+import { validateWorkerUserId } from "@/runtime/workers/provisioner";
+
+export class BrowserServiceError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status: number,
+    readonly retryable = false,
+  ) {
+    super(message);
+    this.name = "BrowserServiceError";
+  }
+}
+
+type BrowserServiceState = {
+  fingerprint: string;
+  config: Readonly<InstallationConfig>;
+  registry: BrowserRuntimeRegistry;
+  tokens: BrowserGatewayTokenService;
+};
+
+const browserGlobal = globalThis as typeof globalThis & {
+  __aibrainBrowserRuntimeService?: BrowserServiceState;
+  __aibrainBrowserRuntimeServicePromise?: Promise<BrowserServiceState>;
+};
+
+function installationFingerprint(config: Readonly<InstallationConfig>) {
+  return createHash("sha256").update(JSON.stringify({
+    schemaVersion: config.schemaVersion,
+    installationId: config.installationId,
+    usersRoot: config.paths.usersRoot,
+  })).digest("hex");
+}
+
+function gatewaySecret() {
+  const configured = process.env.AIBRAIN_BROWSER_GATEWAY_SECRET?.trim();
+  if (configured) return configured;
+  if (process.env.NODE_ENV === "production") {
+    throw new BrowserServiceError(
+      "BROWSER_GATEWAY_SECRET_REQUIRED",
+      "AIBRAIN_BROWSER_GATEWAY_SECRET is required in production.",
+      503,
+    );
+  }
+  return createHash("sha256").update(`browser-gateway:${getSigningSecret()}`).digest("hex");
+}
+
+async function serviceState(): Promise<BrowserServiceState> {
+  const config = await loadInstallationConfig();
+  const fingerprint = installationFingerprint(config);
+  const existing = browserGlobal.__aibrainBrowserRuntimeService;
+  if (existing?.fingerprint === fingerprint) return existing;
+  const inFlight = browserGlobal.__aibrainBrowserRuntimeServicePromise;
+  if (inFlight) {
+    const initialized = await inFlight;
+    return initialized.fingerprint === fingerprint ? initialized : serviceState();
+  }
+  const initialize = (async () => {
+    const replaced = browserGlobal.__aibrainBrowserRuntimeService;
+    if (replaced) await replaced.registry.close();
+    const state: BrowserServiceState = {
+      fingerprint,
+      config,
+      registry: new BrowserRuntimeRegistry({
+        store: new BrowserSessionStore({ config }),
+        factory: new ChromeBrowserRuntimeFactory({
+          executablePath: process.env.AIBRAIN_CHROME_BIN?.trim() || undefined,
+          expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION?.trim() || undefined,
+        }),
+        maxConcurrentStarts: Number(process.env.AIBRAIN_BROWSER_MAX_CONCURRENT_STARTS || 2),
+        maxPendingStarts: Number(process.env.AIBRAIN_BROWSER_MAX_PENDING_STARTS || 20),
+      }),
+      tokens: new BrowserGatewayTokenService({ secret: gatewaySecret() }),
+    };
+    browserGlobal.__aibrainBrowserRuntimeService = state;
+    return state;
+  })();
+  browserGlobal.__aibrainBrowserRuntimeServicePromise = initialize;
+  try {
+    return await initialize;
+  } finally {
+    if (browserGlobal.__aibrainBrowserRuntimeServicePromise === initialize) {
+      delete browserGlobal.__aibrainBrowserRuntimeServicePromise;
+    }
+  }
+}
+
+function ensureBinding(state: BrowserServiceState, installationId: string, userId: string) {
+  if (state.config.installationId !== installationId) {
+    throw new BrowserServiceError(
+      "BROWSER_INSTALLATION_MISMATCH",
+      "Authenticated installation does not own this browser runtime.",
+      403,
+    );
+  }
+  try {
+    validateWorkerUserId(userId);
+  } catch {
+    throw new BrowserServiceError("BROWSER_USER_INVALID", "Browser user is invalid.", 403);
+  }
+}
+
+async function currentHandle(state: BrowserServiceState, userId: string) {
+  const handle = state.registry.get(userId);
+  const persistent = await state.registry.state(userId);
+  if (!handle || !persistent.browserSessionId || handle.browserSessionId !== persistent.browserSessionId) {
+    throw new BrowserServiceError(
+      "BROWSER_RUNTIME_NOT_RUNNING",
+      "Browser runtime is not running in this server process.",
+      409,
+      true,
+    );
+  }
+  return { handle, persistent };
+}
+
+export async function browserStatus(installationId: string, userId: string) {
+  const state = await serviceState();
+  ensureBinding(state, installationId, userId);
+  const health = await state.registry.health(userId);
+  return {
+    healthy: health.healthy,
+    state: health.state,
+    runtime: health.runtime,
+    runningInProcess: state.registry.get(userId) !== null,
+  };
+}
+
+export async function controlBrowser(
+  installationId: string,
+  userId: string,
+  action: "start" | "stop" | "takeover" | "release" | "heartbeat",
+) {
+  const state = await serviceState();
+  ensureBinding(state, installationId, userId);
+  try {
+    if (action === "start") await state.registry.start(userId);
+    else if (action === "stop") await state.registry.stop(userId);
+    else if (action === "takeover") await state.registry.takeOver(userId);
+    else if (action === "release") await state.registry.releaseTakeover(userId);
+    else await state.registry.heartbeat(userId, "human");
+    return browserStatus(installationId, userId);
+  } catch (error) {
+    if (error instanceof BrowserRegistryBackpressureError) {
+      throw new BrowserServiceError(error.code, error.message, 429, true);
+    }
+    throw error;
+  }
+}
+
+export async function issueBrowserGatewayToken(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  capabilities: readonly BrowserGatewayCapability[];
+  ttlMs?: number;
+}) {
+  const state = await serviceState();
+  ensureBinding(state, input.installationId, input.userId);
+  const { handle, persistent } = await currentHandle(state, input.userId);
+  if (persistent.lifecycle !== "ready" && persistent.lifecycle !== "human-control") {
+    throw new BrowserServiceError("BROWSER_VIEWER_UNAVAILABLE", "Browser viewer is unavailable.", 409, true);
+  }
+  return {
+    token: state.tokens.issue({
+      installationId: input.installationId,
+      userId: input.userId,
+      browserSessionId: handle.browserSessionId,
+      authSessionId: input.authSessionId,
+      capabilities: input.capabilities,
+      ttlMs: input.ttlMs,
+    }),
+    browserSessionId: handle.browserSessionId,
+  };
+}
+
+async function authorizeGateway(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  token: string;
+  capability: BrowserGatewayCapability;
+}) {
+  const state = await serviceState();
+  ensureBinding(state, input.installationId, input.userId);
+  const { handle } = await currentHandle(state, input.userId);
+  state.tokens.verify(input.token, {
+    installationId: input.installationId,
+    userId: input.userId,
+    browserSessionId: handle.browserSessionId,
+    authSessionId: input.authSessionId,
+    requiredCapability: input.capability,
+  });
+  return state;
+}
+
+export async function captureBrowserFrame(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  token: string;
+}) {
+  const state = await authorizeGateway({ ...input, capability: "view" });
+  return state.registry.captureFrame(input.userId);
+}
+
+export async function sendBrowserViewerCommand(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  token: string;
+  command: { action: "navigate"; url: string } | { action: "input"; command: BrowserInputCommand };
+}) {
+  const state = await authorizeGateway({ ...input, capability: "control" });
+  if (input.command.action === "navigate") {
+    await state.registry.navigate(input.userId, input.command.url);
+  } else {
+    await state.registry.dispatchInput(input.userId, input.command.command);
+  }
+}
+
+export function resetBrowserServiceForTests() {
+  const current = browserGlobal.__aibrainBrowserRuntimeService;
+  delete browserGlobal.__aibrainBrowserRuntimeService;
+  delete browserGlobal.__aibrainBrowserRuntimeServicePromise;
+  return current?.registry.close();
+}
