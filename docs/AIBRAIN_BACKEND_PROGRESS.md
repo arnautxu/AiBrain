@@ -713,21 +713,30 @@ npm run infra:validate
 ## Continuación secuencial en un thread persistente — 2026-08-27
 
 - Incidencia real reproducida en el thread público
-  `d9f42d47-ac46-440c-8759-4344ac8d2e93`: el primer turno completaba, pero una
-  notificación del turno anterior que seguía en la cadena asíncrona podía
-  consultar el registro activo demasiado tarde y apropiarse del segundo turno.
-  El resultado visible era `Turn registration cannot be rebound to another
-  runtime turn.`
-- El router ahora fija el propietario usuario/thread/turn cuando recibe el
-  evento. Si ese registro ya fue retirado antes de procesarlo, el evento tardío
-  se descarta y nunca se entrega al siguiente turno local del mismo thread.
-  Las respuestas RPC, approvals y la concurrencia entre threads conservan sus
-  rutas y ACK ordenados.
-- Regresión permanente añadida: mantiene una notificación anterior bloqueada,
-  registra el siguiente turno en el mismo thread y demuestra que el evento
-  tardío no lo enlaza ni llega a sus handlers.
-- Validación local: router + worker 11/11, suite completa 116 ficheros pasados
-  y 1 omitido (552 tests pasados, 3 omitidos), E2E backend 4/4, typecheck y lint
+  `d9f42d47-ac46-440c-8759-4344ac8d2e93`: el primer turno completaba, pero tras
+  `thread/resume` Codex emitía un `thread/tokenUsage/updated` todavía asociado
+  al turno anterior antes de responder al nuevo `turn/start`. El router usaba
+  esa telemetría para enlazar implícitamente el registro nuevo con el turn
+  viejo. El resultado visible era `Turn registration cannot be rebound to
+  another runtime turn.`
+- El router ahora fija el propietario usuario/thread cuando recibe el evento y
+  solo enlaza el turn mediante el ID explícito de `turn/start` o de recovery.
+  Los eventos con turn que llegan antes esperan ese enlace: si el ID coincide
+  se entregan; si pertenecen al turno anterior se descartan. Si un registro ya
+  fue retirado, tampoco puede capturarlo el siguiente turno local. Las
+  respuestas RPC, approvals y la concurrencia entre threads conservan sus rutas
+  y ACK ordenados.
+- Regresiones permanentes añadidas: una cubre una notificación anterior
+  bloqueada en la cadena asíncrona y otra reproduce el orden real
+  resume→telemetría vieja→binding explícito→stream del turn nuevo.
+- La primera revisión `3a5f718` protegía el cambio de registro mientras un
+  evento ya estaba en cola, pero la aceptación pública demostró que seguía
+  faltando impedir el enlace implícito de la telemetría post-resume. Se conserva
+  como evidencia del diagnóstico intermedio y queda reemplazada por el binding
+  explícito.
+- Validación local final: router + worker 12/12, suite completa 116 ficheros
+  pasados y 1 omitido (553 tests pasados, 3 omitidos), E2E backend 4/4,
+  typecheck y lint
   verdes.
 - Siguiente acción concreta: construir y desplegar la revisión inmutable y
   aceptar al menos tres turnos reales consecutivos en un único thread público,
