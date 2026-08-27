@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `7655fb0` en
+- Último checkpoint backend publicado: `bfbe610` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -45,7 +45,7 @@
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
 | 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
-| 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`: staging queda server-only, Codex recibe inputs preparados sin paths y el lock físico de target es global por instalación; faltan retención/backpressure, sandbox del conversor y backup documental |
+| 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 y backup documental cerrados | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`: staging queda server-only, Codex recibe inputs preparados sin paths, el lock físico de target es global y el snapshot/restore V2 incluye `publishWriteRoot`; faltan retención/backpressure y sandbox reforzado del conversor |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8` y el contrato HTTP ejecutable en `7655fb0`. La siguiente acción concreta es cerrar el backup compuesto de estado privado más documental publicado, con manifest verificable y restore transaccional local antes de la réplica externa.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0` y el backup documental compuesto en `bfbe610`. La siguiente acción concreta es implementar el adapter probado de réplica cifrada off-host y dejar únicamente la conexión/credenciales externas como gate.
 
 ## Decisiones menores registradas
 
@@ -73,6 +73,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - El guard Auth-only rechaza imports SDK fuera del identity adapter, `.from/.rpc`, servicios `rest/graphql/storage/realtime`, clientes de producto y dependencias PostgREST/GraphQL directas.
 - Después del intercambio inicial con Supabase, sesión, workbench y logout no construyen un cliente remoto. El E2E corta el servidor de identidad, crea proyecto/thread, reinicia Next y conserva la cookie local; un nuevo login durante el corte devuelve `503`, no un falso `401`.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
+- Backup V2 captura `product-data` y `published-documents` bajo fingerprints por componente y global. Comparte una barrera física con el publicador para no cruzar una confirmación; restore preflight comprueba roots/espacio, prepara ambos árboles y revierte la primera promoción si falla la segunda.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -141,11 +142,10 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Ampliar backup/restore para incluir el árbol documental publicado mediante un
-snapshot compuesto coherente, sin seguir symlinks/hardlinks, con hashes por
-componente, preflight de permisos/espacio y restore transaccional a raíces QA
-vacías. Después se añadirá el adapter de réplica cifrada off-host y su runbook;
-la conexión efectiva al destino externo seguirá pendiente de credenciales.
+Implementar el adapter de réplica cifrada off-host sobre snapshots ya
+verificados, con ejecución sin shell, entorno mínimo, timeout, receipt durable,
+fixtures de proceso y runbook exacto. La conexión efectiva al repositorio
+externo y sus credenciales seguirán pendientes de autorización/configuración.
 
 ## Últimas validaciones
 
@@ -283,6 +283,14 @@ la conexión efectiva al destino externo seguirá pendiente de credenciales.
   producción verde con 38 rutas dinámicas.
 - Push verificado: `ae03868..7655fb0` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Backup compuesto `bfbe610`: manifest V2 con estado privado y documental,
+  fingerprints por componente, barrera contra publicación concurrente,
+  rechazo symlink/hardlink en ambos árboles, preflight de espacio y restore
+  transaccional a dos raíces. Focalizadas 23/23; suite completa 87 ficheros
+  pasados + 1 opt-in omitido, 395 pruebas pasadas + 3 omitidas; typecheck,
+  lint, validator infra y build de producción verdes.
+- Push verificado: `7655fb0..bfbe610` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -306,7 +314,7 @@ la conexión efectiva al destino externo seguirá pendiente de credenciales.
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
-| Backup/restore/recovery | Snapshots con manifest/hash y restore separado | 8 pruebas locales, incluidas corrupción, hardlink y recovery interrumpido; contenedor QA pendiente |
+| Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación y promoción dual con rollback | 10 pruebas locales + CLI multiproceso, incluidas corrupción, enlaces, publicación concurrente, restore real y recovery interrumpido; contenedor QA y réplica externa pendientes |
 | Operación/release/rollback | Compose, Nginx, health, logs, alertas, drain y release dual atómica | Release manager 5/5 y validator estático verde; ejecución Docker QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
