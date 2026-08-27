@@ -697,9 +697,17 @@ La UI debe habilitar selección/invocación según `models`, `skills` y `capabil
 
 ### 7.3 Superficies no publicadas
 
-V1 no publica rutas ni paneles de onboarding o control plane remoto. El panel de proyecto puede persistir roles declarativos simples y marcar miembros como `invited-local`, pero debe explicar que no se ha enviado nada y que la autorización efectiva sigue en la política server-side. No deben añadirse estados que simulen acceso remoto efectivo.
+AiBrain no envía invitaciones ni publica un control plane remoto. El panel de proyecto persiste miembros locales; cuando el correo coincide con una persona provisionada y habilitada de la misma instalación, el backend activa la visibilidad compartida según `viewer` o `editor`. Un correo sin identidad local sigue como `invited-local`, no obtiene acceso y la UI debe explicar que no se ha enviado nada. La autorización efectiva siempre se resuelve en servidor.
 
 Las automatizaciones programadas son locales y explícitas: `/api/automations` administra tareas privadas del empleado y el runner documentado en `docs/AUTOMATIONS.md` ejecuta sus prompts únicamente mientras ese proceso está vivo. La API y la UI muestran la señal real del worker; no prometen ejecución cloud, no envían mensajes externos por sí solas y conservan las aprobaciones normales del runtime.
+
+### Centro de administración del workspace
+
+`GET /api/admin` exige una sesión local del mismo tenant y un rol persistido con `canManageWorkspace=true`. Devuelve personas, estado observado de workers, uso interno, roles, grupos, políticas y los últimos eventos de auditoría. Nunca inicia un worker para calcular su estado.
+
+`PATCH /api/admin` exige además mismo origen. Admite comandos estrictos para cambiar rol/estado de una persona, crear/actualizar/eliminar grupos y provisionar un perfil local. Las políticas de rol y grupo cubren apps (`web-search`, `image-generation`, `skills`, `managed-browser`) y capacidades (`consult`, `respond`, `execute`, `publish`); un bloqueo de cualquier grupo prevalece. Los cambios se persisten por instalación y se registran con actor, destino, acción y fecha.
+
+`provision-local-member` reutiliza `UserProvisioner`: crea perfil, worker y workspace locales para un UUID que ya debe existir en el proveedor de identidad. La respuesta declara `emailSent:false` e `identityCreated:false`. AiBrain no finge una invitación, un alta de IdP ni un correo enviado.
 
 ## 8. Approvals
 

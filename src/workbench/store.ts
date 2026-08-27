@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import type { AuthSession } from "@/auth/types";
 import { isVercelPreviewDemoEnabled } from "@/auth/session";
 import type { ChatMessage } from "@/lib/chat-contract";
@@ -18,7 +19,7 @@ import {
   updateDemoThread,
   updateDemoMessageActivity,
 } from "@/workbench/demo-store";
-import { WorkbenchPersistenceError } from "@/workbench/errors";
+import { WorkbenchConflictError, WorkbenchPersistenceError, WorkbenchValidationError } from "@/workbench/errors";
 import {
   assertFilesystemWorkbenchId,
   FileWorkbenchStore,
@@ -30,11 +31,50 @@ import type {
   UpdateThreadInput,
   WorkbenchListQuery,
 } from "@/workbench/types";
+import {
+  loadSharedWorkbench,
+  normalizeProjectMembers,
+  resolveProjectAccess,
+  resolveThreadAccess,
+  threadSummary,
+} from "@/workbench/shared-access";
 
 function mode(session: AuthSession): "filesystem" | "demo" {
   if (session?.provider === "local") return "filesystem";
   if (session?.provider === "demo") return "demo";
   throw new WorkbenchPersistenceError("La sessió no té un adapter de producte autoritzat.");
+}
+
+function sharedPageFingerprint(scope: string, query: WorkbenchListQuery) {
+  return createHash("sha256").update(JSON.stringify({ scope, status: query.status, query: query.query ?? null }))
+    .digest("base64url").slice(0, 16);
+}
+
+function sharedPage<Item>(items: Item[], query: WorkbenchListQuery, scope: string) {
+  const fingerprint = sharedPageFingerprint(scope, query);
+  let offset = 0;
+  if (query.cursor) {
+    try {
+      const raw = Buffer.from(query.cursor, "base64url");
+      if (raw.toString("base64url") !== query.cursor || raw.byteLength > 128) throw new Error("cursor");
+      const value: unknown = JSON.parse(raw.toString("utf8"));
+      if (!value || typeof value !== "object" || Array.isArray(value) ||
+          Object.keys(value).length !== 3 || !("v" in value) || value.v !== 1 ||
+          !("offset" in value) || !Number.isSafeInteger(value.offset) || (value.offset as number) < 0 ||
+          !("fingerprint" in value) || value.fingerprint !== fingerprint) throw new Error("cursor");
+      offset = value.offset as number;
+    } catch (error) {
+      throw new WorkbenchValidationError("El cursor de paginació no és vàlid.", { cause: error });
+    }
+  }
+  const page = items.slice(offset, offset + query.limit);
+  const nextOffset = offset + page.length;
+  return {
+    items: page,
+    nextCursor: nextOffset < items.length
+      ? Buffer.from(JSON.stringify({ v: 1, offset: nextOffset, fingerprint }), "utf8").toString("base64url")
+      : null,
+  };
 }
 
 async function filesystemStore(session: AuthSession) {
@@ -54,7 +94,7 @@ export function isBrowserPreviewWorkbench() {
 
 export async function loadWorkbench(session: AuthSession) {
   if (mode(session) === "filesystem") {
-    return (await filesystemStore(session)).load(session.user.id);
+    return loadSharedWorkbench(session);
   }
   return loadDemoWorkbench(
     session,
@@ -63,12 +103,20 @@ export async function loadWorkbench(session: AuthSession) {
 }
 
 export async function listProjects(session: AuthSession, query: WorkbenchListQuery) {
-  return (await filesystemStore(session)).listProjects(session.user.id, query);
+  await filesystemStore(session);
+  const snapshot = await loadSharedWorkbench(session);
+  const needle = query.query?.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+  const items = snapshot.projects.filter((project) => project.slug !== "aibrain-standalone-chats")
+    .filter((project) => query.status === "all" || project.status === query.status)
+    .filter((project) => !needle || `${project.name} ${project.slug}`.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase().includes(needle))
+    .toSorted((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+  return sharedPage(items, query, `projects:${session.user.id}`);
 }
 
 export async function getProject(session: AuthSession, projectId: string) {
   assertFilesystemWorkbenchId(projectId);
-  return (await filesystemStore(session)).getProject(session.user.id, projectId);
+  const access = await resolveProjectAccess(session, projectId);
+  return access.store.getProject(access.ownerUserId, projectId);
 }
 
 export async function listThreads(
@@ -77,13 +125,27 @@ export async function listThreads(
   query: WorkbenchListQuery,
 ) {
   if (projectId !== null) assertFilesystemWorkbenchId(projectId);
-  return (await filesystemStore(session)).listThreads(session.user.id, projectId, query);
+  await filesystemStore(session);
+  const snapshot = projectId === null
+    ? await loadSharedWorkbench(session)
+    : await (async () => {
+        const access = await resolveProjectAccess(session, projectId);
+        return access.store.load(access.ownerUserId);
+      })();
+  const needle = query.query?.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+  const items = snapshot.threads.filter((thread) => projectId === null || thread.projectId === projectId)
+    .filter((thread) => query.status === "all" || thread.status === query.status)
+    .filter((thread) => !needle || thread.title.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase().includes(needle))
+    .map(threadSummary)
+    .toSorted((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+  return sharedPage(items, query, `threads:${session.user.id}:${projectId ?? "all"}`);
 }
 
 export async function getThread(session: AuthSession, threadId: string) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).getThread(session.user.id, threadId);
+    const access = await resolveThreadAccess(session, threadId);
+    return access.store.getThread(access.ownerUserId, threadId);
   }
   assertWorkbenchId(threadId);
   return getDemoThread(session, threadId);
@@ -103,7 +165,14 @@ export async function updateProject(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(projectId);
-    return (await filesystemStore(session)).updateProject(session.user.id, projectId, patch);
+    const access = await resolveProjectAccess(session, projectId);
+    if (access.role === "viewer" || (access.role !== "owner" && (patch.sharing !== undefined || patch.status !== undefined))) {
+      throw new WorkbenchConflictError("No tens permís per gestionar aquest projecte compartit.");
+    }
+    const normalized = patch.sharing
+      ? { ...patch, sharing: await normalizeProjectMembers(session, { ...access.project, sharing: patch.sharing }) }
+      : patch;
+    return access.store.updateProject(access.ownerUserId, projectId, normalized);
   }
   assertWorkbenchId(projectId);
   return updateDemoProject(session, projectId, patch);
@@ -116,7 +185,9 @@ export async function createThread(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(projectId);
-    return (await filesystemStore(session)).createThread(session.user.id, projectId, title);
+    const access = await resolveProjectAccess(session, projectId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.createThread(access.ownerUserId, projectId, title);
   }
   assertWorkbenchId(projectId);
   return createDemoThread(session, projectId, title);
@@ -129,7 +200,9 @@ export async function updateThread(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).updateThread(session.user.id, threadId, patch);
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.updateThread(access.ownerUserId, threadId, patch);
   }
   assertWorkbenchId(threadId);
   return updateDemoThread(session, threadId, patch);
@@ -142,7 +215,9 @@ export async function branchThread(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).branchThread(session.user.id, threadId, input);
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.branchThread(access.ownerUserId, threadId, input);
   }
   assertWorkbenchId(threadId);
   return branchDemoThread(session, threadId, input);
@@ -151,7 +226,8 @@ export async function branchThread(
 export async function getProjectRuntimeContext(session: AuthSession, projectId: string) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(projectId);
-    return (await filesystemStore(session)).getProjectRuntimeContext(session.user.id, projectId);
+    const access = await resolveProjectAccess(session, projectId);
+    return access.store.getProjectRuntimeContext(access.ownerUserId, projectId);
   }
   assertWorkbenchId(projectId);
   return getDemoProjectRuntimeContext(session, projectId);
@@ -160,7 +236,9 @@ export async function getProjectRuntimeContext(session: AuthSession, projectId: 
 export async function getThreadRuntimeContext(session: AuthSession, threadId: string) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).getThreadRuntimeContext(session.user.id, threadId);
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.getThreadRuntimeContext(access.ownerUserId, threadId);
   }
   assertWorkbenchId(threadId);
   return getDemoThreadRuntimeContext(session, threadId);
@@ -174,8 +252,10 @@ export async function beginThreadTurn(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).beginThreadTurn(
-      session.user.id,
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.beginThreadTurn(
+      access.ownerUserId,
       threadId,
       userMessage,
       assistantMessage,
@@ -193,8 +273,10 @@ export async function finishThreadTurn(
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
-    return (await filesystemStore(session)).finishThreadTurn(
-      session.user.id,
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.finishThreadTurn(
+      access.ownerUserId,
       threadId,
       assistantMessage,
       runtimeThreadToken,
@@ -218,8 +300,10 @@ export async function updateMessageActivity(
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
     assertFilesystemWorkbenchId(messageId);
-    return (await filesystemStore(session)).updateMessageActivity(
-      session.user.id,
+    const access = await resolveThreadAccess(session, threadId);
+    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    return access.store.updateMessageActivity(
+      access.ownerUserId,
       threadId,
       messageId,
       item,
