@@ -41,6 +41,9 @@ forbidMatch(compose, /^\s*external\s*:\s*true/mu, "Compose reuses an external ne
 
 requireMatch(dockerfile, /ARG CODEX_VERSION=0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
 requireMatch(dockerfile, /ARG NODE_IMAGE=node:24\.18\.1-bookworm-slim@sha256:[0-9a-f]{64}/u, "Dockerfile does not pin the reviewed Node 24 runtime digest");
+requireMatch(dockerfile, /ARG DEBIAN_SNAPSHOT=\d{8}T\d{6}Z/u, "Dockerfile does not pin an immutable Debian snapshot");
+requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile APT source is not the pinned Debian snapshot");
+requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian-security\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile security APT source is not the pinned Debian snapshot");
 requireMatch(dockerfile, /USER aibrain:aibrain/u, "Dockerfile final process is not non-root");
 requireMatch(dockerfile, /\bbubblewrap\b/u, "Dockerfile does not install the worker mount sandbox");
 for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium"]) {
@@ -81,7 +84,7 @@ requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypo
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
 requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/ready/u, "healthcheck does not verify socket absence and loopback readiness");
-requireMatch(productionRunbook, /Riesgos P0[\s\S]*namespace de red[\s\S]*reproducible bit a bit/u, "production runbook does not disclose browser network and build reproducibility gaps");
+requireMatch(productionRunbook, /Riesgos P0[\s\S]*namespace de red/u, "production runbook does not disclose the browser network gap");
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
   requireMatch(soffice, new RegExp(flag, "u"), `LibreOffice wrapper does not require ${flag}`);
@@ -132,7 +135,7 @@ if (failures.length > 0) {
 
 process.stdout.write("Static Docker/Compose boundary validation: PASS\n");
 process.stdout.write("P0 OPEN: browser/CDP still shares the app network namespace with workers\n");
-process.stdout.write("GAP OPEN: APT toolchain build is not artifact/checksum reproducible\n");
+process.stdout.write("Pinned base image, Debian snapshot and Node toolchain: PASS\n");
 if (existsSync("/usr/local/bin/docker") || existsSync("/usr/bin/docker") || existsSync("/opt/homebrew/bin/docker")) {
   try {
     execFileSync("docker", [
