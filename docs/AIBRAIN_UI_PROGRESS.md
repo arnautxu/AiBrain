@@ -32,7 +32,7 @@
 | 6. PDF/Office/image, preview, publish, Browser/Computer Use | Completado en la rebanada disponible | View models fail-closed, PDF/Office/image, lifecycle de preview/publicación/browser, viewer aislado, logout y evidencia desktop/mobile; routes reales bloqueadas por backend 8/9/10 |
 | 7. Responsive, temas, a11y, keyboard, motion, degraded | Completado | 7 viewports, temas claro/oscuro/sistema, focus traps, motion reducido, recuperación offline/runtime y evidencia checkpoint 07 |
 | 8. Integración, ordering, dedupe, replay, reconnect, performance | Completado en la rebanada disponible | E2E real stdio con primer turno/resume/cancel, adapter durable fail-closed, batching por frame y tests; conexión al gateway durable bloqueada por backend 7/10 |
-| 9. Comparación visual exhaustiva | Pendiente | — |
+| 9. Comparación visual exhaustiva | Completado | 7 viewports, 66 baselines nuevas, 101 PNG totales, umbral ≤0,005, cero overflow y revisión humana documentada |
 | 10. Regresiones, build, handoff, integración segura | Pendiente | — |
 
 ## Evidencia de pantalla
@@ -74,6 +74,16 @@
 | Host real: resume Codex | light | 1280×720 | `artifacts/ui-parity/checkpoint-08/real-app-server-resume-1280x720.png` | Primer turno y segundo turno reanudado en el mismo thread con datos sintéticos |
 | Host real: cancelación Codex | light | 1280×720 | `artifacts/ui-parity/checkpoint-08/real-app-server-cancelled-1280x720.png` | Turno real abortado y estado terminal `Torn aturat` |
 | Codex desktop | no capturado | — | restricción Computer Use | Bloqueo de referencia, no de implementación |
+| Matriz login | dark | 1024×768 | `artifacts/ui-parity/checkpoint-09/login-dark-1024x768.png` | Jerarquía white-label y contraste revisados |
+| Matriz shell | dark | 768×1024 | `artifacts/ui-parity/checkpoint-09/shell-dark-768x1024.png` | Sidebar, canvas y composer sin overflow |
+| Matriz Preferencias | dark | 600×900 | `artifacts/ui-parity/checkpoint-09/preferences-dark-600x900.png` | Body desplazable y footer fijo dentro del viewport |
+| Matriz drawer | dark | 375×812 | `artifacts/ui-parity/checkpoint-09/drawer-dark-375x812.png` | Navegación móvil, backdrop y safe area revisados |
+| Matriz offline | light | 1024×768 | `artifacts/ui-parity/checkpoint-09/shell-offline-light-1024x768.png` | Historial disponible y envío fail-closed |
+| Matriz aprobación | light | 768×1024 | `artifacts/ui-parity/checkpoint-09/turn-approval-light-768x1024.png` | Plan, actividad, tres decisiones, diff y resultado legibles |
+| Matriz Review | light | 600×900 | `artifacts/ui-parity/checkpoint-09/review-light-600x900.png` | Diff y navegación adaptados sin corte horizontal |
+| Matriz documento | light | 375×812 | `artifacts/ui-parity/checkpoint-09/document-light-375x812.png` | Metadata, preview y confirmación dentro del ancho móvil |
+| Matriz Browser | light | 375×812 | `artifacts/ui-parity/checkpoint-09/browser-light-375x812.png` | Viewer aislado y acciones responsive |
+| Matriz Browser | light | 1440×900 | `artifacts/ui-parity/checkpoint-09/browser-light-1440x900.png` | Viewer, navegación, resultado y composer en desktop |
 
 ## Contratos consumidos
 
@@ -198,6 +208,16 @@
 - Revisión visual humana: ambas capturas del runtime real se abrieron a resolución original; muestran exclusivamente prompts y respuestas sintéticas. El segundo screenshot confirma el estado terminal de cancelación.
 - La ruta real probada continúa siendo `/api/chat` NDJSON sobre App Server `stdio`. El gateway durable del backend no está compuesto en la ruta de producto: el adapter está listo y cubierto, pero no se conecta ni se simula hasta que backend checkpoints 7/10 publiquen el endpoint/envelope final.
 
+## Gates del checkpoint 9
+
+- `npm run typecheck`, `npm run lint` y `git diff --check`: verdes.
+- `npm run test:visual`: verde sin regeneración final, 36 tests y 1 skip intencional mobile-only en desktop.
+- La nueva matriz ejecuta 7/7 viewports exactos y conserva 66 baselines: login light/dark, shell dark, Preferencias dark, offline light, approval, Review, documento y browser; drawer adicional bajo 768 px.
+- Cada screenshot de la matriz falla si existe más de 1 px de overflow horizontal o si el diff supera `maxDiffPixelRatio: 0.005`. No usa masks.
+- Contenido, SVG documental, iframe, IDs y rutas son sintéticos. La preview se decodifica antes de capturar y el scroll se estabiliza durante 12 frames.
+- Revisión visual humana completada sobre diez evidencias representativas. Se corrigió una carrera entre autoscroll y carga de artefactos separando aprobación, documento y browser en turnos deterministas; el gate final pasó después sin relajar tolerancias.
+- La comparación directa con ChatGPT se limita a jerarquía y geometría de la única captura temporal segura. Codex Desktop no fue accesible a Computer Use; no se declara paridad píxel a píxel de una referencia no observada. El detalle queda en `docs/AIBRAIN_VISUAL_COMPARISON.md`.
+
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
@@ -210,8 +230,10 @@
 - `1bdd060 feat(ui): add honest capability artifact states` — checkpoint 6, PDF/Office/image, preview/publicación, Computer Use, seguridad del viewer y regresiones.
 - `909affb feat(ui): harden responsive themes and accessibility` — checkpoint 7, responsive, dark/system, teclado, focus, motion, degradación y regresiones.
 - `0906d9a feat(ui): add durable event integration boundary` — checkpoint 8, ordering, dedupe, gap/replay, cleanup, batching, performance y smoke App Server real.
+- `cc5ff4b test(ui): add exhaustive visual matrix` — checkpoint 9, siete viewports, 66 baselines deterministas, overflow y umbral visual estricto.
+- `67714ab test(ui): stabilize visual state captures` — checkpoint 9, turnos aislados, scroll reproducible y baselines sin avisos transitorios.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
-Completar el checkpoint 9: comparación visual exhaustiva de todos los estados y viewports, corrección iterativa y cierre de la regresión visual con evidencia reproducible.
+Completar el checkpoint 10: regresión final, builds Example/Northwind, Preview autorizado, handoff y plan de integración segura con el backend fijado.
