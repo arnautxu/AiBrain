@@ -2,52 +2,65 @@
 
 ## Decisió
 
-AiBrain és una capa de producte pròpia sobre Codex App Server. No personalitzem la UI tancada de Codex: reproduïm el seu model d’interacció útil sobre un protocol públic i mantenim tota la superfície de producte sota control nostre.
+AiBrain és un Company Brain white-label sobre Codex App Server. Codex continua
+sent el motor agentic; AiBrain controla identitat, configuració, permisos,
+persistència, concurrència, publicació i experiència. Cada empresa de producció
+té una instal·lació i servidor dedicats, però totes comparteixen el mateix codi.
 
 ## Capes
 
-1. **Identity boundary**: sessió, usuari, tenant i rol verificats al servidor.
-2. **Manifest registry**: marca, veu, sistema visual, comportament i finestres de cada producte.
-3. **Product shell**: fils, composer, activitat inline i finestres contextuals.
-4. **UI contract**: esdeveniments estables de thread, text, pla, activitat, aprovació i diff.
-5. **Runtime adapter**: traducció bidireccional entre NDJSON i Codex App Server.
-6. **Policy boundary**: workspace, `CODEX_HOME`, sandbox, model i aprovacions derivats del tenant.
-7. **Control plane**: edició owner-only d’overlays validats. El filesystem és la persistència del prototip; una base de dades serà necessària per al servei multiusuari.
+1. **Installation boundary**: `InstallationConfig` versionat defineix identitat,
+   domini, marca i arrels absolutes sense literals de client.
+2. **Identity boundary**: Supabase valida login, canvi inicial i recuperació;
+   després AiBrain emet una sessió local opaca, revocable i vinculada a l’usuari.
+3. **Filesystem product stores**: projectes, threads, turns, approvals,
+   documents, memòria i auditoria són locals, tipats, atòmics i recuperables.
+4. **Policy boundary**: `PERMISSIONS.md` es resol al servidor per turn i se
+   n’auditen versió i fingerprint.
+5. **Employee runtime**: cada UUID té worker calent, `CODEX_HOME`, workspace,
+   staging, artifacts, credencials, browser, perfil i descàrregues independents.
+6. **Private transport**: Next.js parla amb el worker per WebSocket autenticat
+   sobre loopback, amb heartbeat, replay, ACK, dedupe, backoff i idempotència.
+7. **Application contract**: la UI només consumeix DTOs i NDJSON d’AiBrain; no
+   rep connexions App Server/CDP, paths, credencials ni IDs interns.
+8. **Controlled publication**: Codex treballa en staging sobre `source-ro`; només
+   el publicador server-side pot escriure a `publish-rw` després de freeze, hash,
+   preview i confirmació explícita exactament una vegada.
 
 ```mermaid
 flowchart LR
-  SESSION["Sessió signada"] --> TENANT["Tenant + rol"]
-  TENANT --> MANIFEST["Manifest"]
-  TENANT --> POLICY["Runtime policy"]
-  MANIFEST --> UI["AiBrain shell"]
-  UI --> API["NDJSON API"]
-  API --> ADAPTER["Codex adapter"]
-  ADAPTER <--> APP["Codex App Server"]
-  POLICY --> ADAPTER
-  APP --> WORKSPACE["Tenant workspace"]
-  APP --> HOME["Tenant CODEX_HOME"]
+  AUTH["Supabase Auth"] --> SESSION["Sessió local opaca"]
+  SESSION --> API["API AiBrain"]
+  CONFIG["InstallationConfig"] --> API
+  POLICY["PERMISSIONS.md"] --> API
+  API <--> WS["WebSocket privat"]
+  WS <--> WORKER["Worker de l’empleat"]
+  WORKER <--> CODEX["Codex App Server"]
+  WORKER --> STAGING["Workspace + staging"]
+  API --> STORES["Stores filesystem"]
+  API --> PUBLISHER["Publicador confirmat"]
+  PUBLISHER --> OFFICIAL["publish-rw"]
 ```
 
 ## Aïllament
 
-- La sessió no accepta un `tenantId` del navegador; el deriva de la identitat allowlist.
-- Cada API torna a verificar sessió i rol.
-- `localStorage` utilitza claus amb el tenant com a namespace.
-- Els threads es persisteixen al navegador com a tokens HMAC opacs. El servidor valida tenant i caducitat abans de recuperar l’ID cru.
-- El registre d’aprovacions guarda el tenant i rebutja decisions creuades.
-- Workspace i `CODEX_HOME` es deriven d’arrels administrades, mai d’una ruta enviada pel client.
+- Instal·lació i usuari provenen de configuració i sessió, mai del body.
+- Els roots de cada empleat es provisionen amb permisos privats i sense
+  symlinks; el sandbox físic oculta altres usuaris i `publish-rw`.
+- Events, approvals i tools es correlacionen per usuari, thread, turn i item.
+- Cada thread del browser té target i descàrregues propis; CDP viatja per pipes
+  heretats i l’egress es resol i fixa abans d’obrir el socket.
+- No hi ha Postgres de producte, RLS de producte, Redis, Kubernetes, Mem0,
+  Cognee, pgvector ni OpenFGA.
 
-## Replicabilitat
+## Replicabilitat i operació
 
-El tenant canvia configuració, no codi. Un nou producte necessita una definició de tenant, un manifest i un workspace; comparteix auth adapter, contracte UI i runtime. Les finestres `chat`, `inspector` i `runtime` formen el primer registre extensible i es poden activar per manifest.
+Una segona empresa s’aixeca canviant configuració, secrets, branding, routes i
+recursos de servidor. CPU i RAM poden ampliar-se sense canviar codi. No existeix
+una quota comercial de treballadors, projectes, chats, turns o tokens; els
+registries apliquen backpressure i límits de saturació tècnics.
 
-## Límit d’auth
-
-Hi ha dos adaptadors explícits. `demo` és una allowlist signada, només local i desactivada en producció. `supabase` utilitza cookies SSR, `getClaims()` i memberships Postgres; si falta qualsevol valor públic, falla tancat. Els manifests passen a versions append-only i les polítiques RLS repeteixen l’aïllament de l’aplicació dins la base de dades. La secret key només existeix a la ruta owner-only d’invitacions.
-
-## Següent tall
-
-1. Provisionar Supabase hosted, aplicar la migració i validar auth/RLS/email live.
-2. Afegir lectura d’historial i rollback owner-only dels manifests ja versionats.
-3. Provisionar volums/credencials Codex per tenant en un host persistent.
-4. Executar i validar la imatge Docker sobre aquell host.
+Els contractes exactes són a `docs/UI_BACKEND_CONTRACT.md`. Les comprovacions,
+resultats i gates externs són a `docs/AIBRAIN_BACKEND_PROGRESS.md` i als runbooks
+d’operació. DNS, cutover, dades reals, NAS real i subscripcions requereixen una
+autorització separada.

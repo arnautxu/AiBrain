@@ -8,51 +8,68 @@ web
 
 ## Users
 
-AiBrain està pensat principalment per a treballadors que no necessiten conèixer IA, prompts, models, terminal ni Git. Els owners administren el tenant, conviden persones, defineixen el seu context de feina i governen les automatitzacions disponibles.
+AiBrain està pensat per empreses d’1 a 20 treballadors o més. El flux principal
+és per a persones que no necessiten conèixer prompts, models, terminal o Git;
+els owners governen identitat, context, permisos i accions sensibles.
 
 ## Product Purpose
 
-AiBrain converteix Codex en un entorn de treball guiat. L’usuari tria una acció comprensible, aporta només la informació necessària i rep un resultat verificable que pot revisar, aprovar, descarregar o recuperar.
+AiBrain converteix Codex en un entorn de treball guiat. L’usuari descriu la
+feina, aporta els documents necessaris i rep un resultat traçable que pot
+revisar, aprovar, descarregar, publicar o recuperar.
 
 ## Positioning
 
-Codex continua sent el motor agentic, però AiBrain controla l’experiència, la identitat, els permisos, els projectes, les aprovacions i les automatitzacions. La complexitat tècnica queda sota la superfície i només apareix en espais administratius o avançats.
+Codex és el motor agentic. AiBrain és la capa white-label que controla
+l’experiència, la sessió, els projectes, els permisos, la memòria explícita, els
+documents, les approvals i Browser/Computer Use. Una nova empresa canvia
+configuració i infraestructura, no el codi.
 
 ## Operating Context
 
-- Organització multi-tenant amb owners i members.
-- Projectes, workspaces, fils, missatges, resultats i automatitzacions.
+- Una instal·lació i servidor dedicats per empresa en producció.
+- Un worker calent i espais privats per empleat.
+- Projectes, threads, turns, resultats i memòria persistents en filesystem.
 - Ús des de navegador d’escriptori i mòbil.
-- Els treballadors poden tenir responsabilitats, una primera missió i preferències pròpies definides durant l’onboarding.
+- Backpressure tècnic sense quotes comercials artificials.
 
 ## Capabilities and Constraints
 
-- Auth i persistència hosted amb Supabase; RLS és una segona frontera d’autorització.
-- Codex App Server s’executa en un host Node persistent amb `CODEX_HOME` i workspace aïllats.
-- Vercel Preview valida UX i auth, però no és l’host persistent de Codex.
-- Les automatitzacions són executors registrats al servidor i governats per l’owner; el navegador no envia ordres arbitràries.
-- Terminal, Git i detalls de runtime no formen part del flux principal d’un treballador.
-- Producció externa continua pendent de quotes, backups, rotació i validació cross-tenant.
+- Supabase és exclusivament el proveïdor d’Auth; no emmagatzema dades de
+  producte.
+- Codex App Server s’executa al worker persistent de cada empleat i només es
+  connecta amb Next.js per transport privat autenticat.
+- `PERMISSIONS.md` es resol server-side i cada turn conserva el fingerprint.
+- Office, PDF, text i imatges passen per staging i preview aïllats.
+- Codex no pot escriure al repositori documental oficial; el publicador exigeix
+  confirmació explícita, hash, control de conflicte, versió i auditoria.
+- Browser/Computer Use separa perfil, targets, descàrregues, viewer i takeover
+  per usuari/thread.
+- App nativa, veu, vídeo i automatitzacions programades són fora de V1.
 
 ## Brand Commitments
 
-El producte es diu AiBrain. La veu és clara, directa, tranquil·la i no tècnica. Les accions expliquen què passarà i els errors indiquen com recuperar-se.
-
-## Evidence on Hand
-
-- Workbench funcional amb projectes, fils, streaming, plans, activitat, diffs i approvals.
-- Auth Supabase invite-only, SMTP i gates de rol validats.
-- Host privat d’aquest Mac amb Codex real i sessió persistent validada.
-- No hi ha testimonis, mètriques comercials ni claims públics aprovats; no se n’han d’inventar.
+La veu és clara, directa, tranquil·la i no tècnica. Les accions expliquen què
+passarà i els errors indiquen com recuperar-se. Identitat, domini, assets i
+accent provenen de `InstallationConfig`.
 
 ## Product Principles
 
-- L’usuari descriu la feina; AiBrain tradueix la intenció a Codex.
-- Una acció important sempre mostra què farà abans d’executar-se.
-- Els resultats han de ser visibles, reutilitzables i recuperables.
-- Els permisos es validen al servidor, no només a la interfície.
-- La complexitat tècnica queda disponible per a l’admin, però no interromp el treballador.
+- La UI no fabrica respostes ni estats de Codex.
+- Una acció sensible mostra què farà i espera aprovació explícita.
+- Els resultats són visibles, reutilitzables, recuperables i auditables.
+- Els permisos i límits de filesystem es validen al servidor.
+- La complexitat tècnica queda disponible per a l’operador sense interrompre el
+  treballador.
 
 ## Accessibility & Inclusion
 
-La interfície ha de funcionar amb teclat, tenir labels accessibles, contrast suficient i copy entenedor en català. Els fluxos no poden pressuposar coneixement d’IA o desenvolupament.
+La interfície ha de funcionar amb teclat, tenir labels accessibles, contrast
+suficient i copy entenedor. Els fluxos no pressuposen coneixement d’IA o
+desenvolupament.
+
+## External Gates
+
+La implementació local no demostra per si sola login real Codex/Supabase,
+DNS/TLS, NAS, backup offsite, alertes, deploy, reboot o rollback al servidor QA.
+Aquests gates s’executen amb credencials i autoritzacions separades.
