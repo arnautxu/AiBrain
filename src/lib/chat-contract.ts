@@ -70,11 +70,12 @@ export type ApprovalItem = {
   threadId: string;
   turnId: string;
   itemId: string;
-  kind: "command" | "file";
+  kind: "command" | "file" | "browser";
   title: string;
   detail: string;
   command?: string;
   cwd?: string;
+  permissionFingerprint?: string;
   status: "pending" | "accepted" | "accepted_session" | "declined";
 };
 
@@ -255,11 +256,13 @@ export function isApprovalItem(value: unknown): value is ApprovalItem {
     isOpaqueRuntimeId(value.threadId) &&
     isOpaqueRuntimeId(value.turnId) &&
     isOpaqueRuntimeId(value.itemId) &&
-    (value.kind === "command" || value.kind === "file") &&
+    (value.kind === "command" || value.kind === "file" || value.kind === "browser") &&
     typeof value.title === "string" &&
     typeof value.detail === "string" &&
     hasOptionalString(value, "command") &&
     hasOptionalString(value, "cwd") &&
+    (!("permissionFingerprint" in value) || value.permissionFingerprint === undefined ||
+      (typeof value.permissionFingerprint === "string" && /^[0-9a-f]{64}$/u.test(value.permissionFingerprint))) &&
     (value.status === "pending" ||
       value.status === "accepted" ||
       value.status === "accepted_session" ||

@@ -93,7 +93,7 @@ describe("PrivateCdpClient pipe transport", () => {
     const pending = harness.client.send("Browser.getVersion");
     await expect(harness.client.send("Page.enable"))
       .rejects.toMatchObject({ code: "CDP_BACKPRESSURE" });
-    await expect(harness.client.send("Runtime.evaluate" as PrivateCdpMethod))
+    await expect(harness.client.send("Network.getAllCookies" as PrivateCdpMethod))
       .rejects.toMatchObject({ code: "CDP_METHOD_REJECTED" });
     await expect(pending).rejects.toMatchObject({ code: "CDP_COMMAND_TIMEOUT" });
     await expect(harness.client.send("Page.navigate", { url: "https://example.test/".repeat(20) }))

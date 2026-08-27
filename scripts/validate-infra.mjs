@@ -31,6 +31,7 @@ const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
+const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
 const deployArtifacts = [dockerfile, compose, worker, backup, entrypoint, soffice, runtimeEnv, composeEnv].join("\n");
 
@@ -95,6 +96,16 @@ requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does n
 requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");
 forbidMatch(chromeRuntime, /--remote-debugging-(?:port|address)/u, "Chrome runtime reintroduces a network CDP endpoint");
 forbidMatch(chromeRuntime, /DevToolsActivePort/u, "Chrome runtime depends on the filesystem-discoverable DevTools endpoint");
+requireMatch(chromeRuntime, /new BrowserEgressProxy\(\{ networkPolicy: this\.networkPolicy \}\)/u, "Chrome runtime does not share its network policy with the pinned egress proxy");
+requireMatch(chromeRuntime, /await this\.egressProxy\.start\(\)[\s\S]{0,300}launchPipeWithBackoff/u, "Chrome runtime does not start pinned egress before Chrome");
+requireMatch(chromeRuntime, /"--proxy-bypass-list=<-loopback>"/u, "Chrome runtime permits Chrome's implicit loopback proxy bypass");
+requireMatch(chromeRuntime, /`--proxy-server=\$\{proxyUrl\}`/u, "Chrome runtime does not force browser traffic through its private proxy");
+requireMatch(chromeRuntime, /"--disable-quic"/u, "Chrome runtime does not disable direct QUIC egress");
+requireMatch(chromeRuntime, /"--force-webrtc-ip-handling-policy=disable_non_proxied_udp"/u, "Chrome runtime permits direct non-proxied WebRTC UDP egress");
+requireMatch(chromeRuntime, /finally \{[\s\S]{0,120}this\.egressProxy\?\.stop\(\)/u, "Chrome runtime does not stop pinned egress in its teardown guarantee");
+requireMatch(chromeRuntime, /await this\.egressProxy\.health\(\)/u, "Chrome health does not include pinned egress health");
+requireMatch(browserEgressProxy, /server\.listen\(\{ host: "127\.0\.0\.1", port: 0, exclusive: true \}\)/u, "Browser egress proxy is not an exclusive ephemeral loopback listener");
+requireMatch(browserEgressProxy, /this\.networkPolicy\.assertAllowed\(/u, "Browser egress proxy bypasses BrowserNetworkPolicy");
 requireMatch(productionRunbook, /canal CDP heredado[\s\S]*sin socket TCP/u, "production runbook does not document the private CDP process boundary");
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {

@@ -88,6 +88,30 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
       capturedAt: "2026-08-27T00:00:00.000Z",
     };
   }
+  async agentCaptureFrame(threadId: string) {
+    return this.captureFrame(threadId);
+  }
+  async readPage() {
+    return { schemaVersion: 1 as const, url: "about:blank", title: "", text: "" };
+  }
+  async listTabs(threadId: string) {
+    return [{ id: threadId, url: "about:blank", title: "", active: true as const }];
+  }
+  async listDownloads() {
+    return [];
+  }
+  async agentNavigate(threadId: string, url: string) {
+    this.navigations.push(`agent:${threadId}:${url}`);
+  }
+  async agentScroll(threadId: string, deltaX: number, deltaY: number) {
+    this.inputs.push({ threadId, command: { action: "scroll", deltaX, deltaY } });
+  }
+  async agentClick(threadId: string, selector: string) {
+    this.inputs.push({ threadId, command: { action: "click", selector } });
+  }
+  async agentType(threadId: string, selector: string, text: string, clear: boolean) {
+    this.inputs.push({ threadId, command: { action: "type", selector, text, clear } });
+  }
   async navigate(threadId: string, url: string) {
     this.navigations.push(`${threadId}:${url}`);
   }
@@ -358,6 +382,18 @@ describe("BrowserRuntimeRegistry", () => {
     await expect(registry.navigate(USER_A, THREAD_A, "https://example.test"))
       .rejects.toThrow("requires an active human takeover");
     await registry.takeOver(USER_A);
+    await expect(registry.agentCaptureFrame(USER_A, THREAD_A)).rejects.toThrow("unavailable during human takeover");
+    await expect(registry.readPage(USER_A, THREAD_A)).rejects.toThrow("unavailable during human takeover");
+    await expect(registry.listTabs(USER_A, THREAD_A)).rejects.toThrow("unavailable during human takeover");
+    await expect(registry.listDownloads(USER_A, THREAD_A)).rejects.toThrow("unavailable during human takeover");
+    await expect(registry.agentNavigate(USER_A, THREAD_A, "https://example.test"))
+      .rejects.toThrow("unavailable during human takeover");
+    await expect(registry.agentScroll(USER_A, THREAD_A, 0, 100))
+      .rejects.toThrow("unavailable during human takeover");
+    await expect(registry.agentClick(USER_A, THREAD_A, "button"))
+      .rejects.toThrow("unavailable during human takeover");
+    await expect(registry.agentType(USER_A, THREAD_A, "input", "secret", true))
+      .rejects.toThrow("unavailable during human takeover");
     await registry.navigate(USER_A, THREAD_A, "https://example.test");
     await registry.dispatchInput(USER_A, THREAD_B, {
       kind: "key",

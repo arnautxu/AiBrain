@@ -102,11 +102,38 @@ export type BrowserInputCommand =
     modifiers?: number;
   }>;
 
+export type BrowserPageSnapshot = Readonly<{
+  schemaVersion: 1;
+  url: string;
+  title: string;
+  text: string;
+}>;
+
+export type BrowserTabSnapshot = Readonly<{
+  id: string;
+  url: string;
+  title: string;
+  active: true;
+}>;
+
+export type BrowserDownloadSnapshot = Readonly<{
+  fileName: string;
+  sizeBytes: number;
+}>;
+
 /** Optional interactive surface implemented by the concrete private CDP adapter. */
 export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime {
   captureFrame(threadId: string): Promise<BrowserFrame>;
+  agentCaptureFrame(threadId: string): Promise<BrowserFrame>;
   navigate(threadId: string, url: string): Promise<void>;
   dispatchInput(threadId: string, command: BrowserInputCommand): Promise<void>;
+  readPage(threadId: string): Promise<BrowserPageSnapshot>;
+  listTabs(threadId: string): Promise<readonly BrowserTabSnapshot[]>;
+  listDownloads(threadId: string): Promise<readonly BrowserDownloadSnapshot[]>;
+  agentNavigate(threadId: string, url: string): Promise<void>;
+  agentScroll(threadId: string, deltaX: number, deltaY: number): Promise<void>;
+  agentClick(threadId: string, selector: string): Promise<void>;
+  agentType(threadId: string, selector: string, text: string, clear: boolean): Promise<void>;
 }
 
 export interface BrowserRuntimeFactory {

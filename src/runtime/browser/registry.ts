@@ -248,6 +248,70 @@ export class BrowserRuntimeRegistry {
     return runtime.captureFrame(threadId);
   }
 
+  async readPage(userId: string, threadId: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    return runtime.readPage(threadId);
+  }
+
+  async agentCaptureFrame(userId: string, threadId: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    return runtime.agentCaptureFrame(threadId);
+  }
+
+  async listTabs(userId: string, threadId: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    return runtime.listTabs(threadId);
+  }
+
+  async listDownloads(userId: string, threadId: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    return runtime.listDownloads(threadId);
+  }
+
+  async agentNavigate(userId: string, threadId: string, url: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    await runtime.agentNavigate(threadId, url);
+  }
+
+  async agentScroll(userId: string, threadId: string, deltaX: number, deltaY: number) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    await runtime.agentScroll(threadId, deltaX, deltaY);
+  }
+
+  async agentClick(userId: string, threadId: string, selector: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    await runtime.agentClick(threadId, selector);
+  }
+
+  async agentType(userId: string, threadId: string, selector: string, text: string, clear: boolean) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireAgentRuntime(userId);
+    const state = await this.store.load(userId);
+    this.assertAgentControl(userId, state);
+    await runtime.agentType(threadId, selector, text, clear);
+  }
+
   async navigate(userId: string, threadId: string, url: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
@@ -361,6 +425,22 @@ export class BrowserRuntimeRegistry {
     return runtime as InteractiveManagedBrowserRuntime;
   }
 
+  private requireAgentRuntime(userId: string) {
+    const runtime = this.requireInteractiveRuntime(userId);
+    if (
+      !("readPage" in runtime) || typeof runtime.readPage !== "function" ||
+      !("agentCaptureFrame" in runtime) || typeof runtime.agentCaptureFrame !== "function" ||
+      !("listTabs" in runtime) || typeof runtime.listTabs !== "function" ||
+      !("listDownloads" in runtime) || typeof runtime.listDownloads !== "function" ||
+      !("agentNavigate" in runtime) || typeof runtime.agentNavigate !== "function" ||
+      !("agentScroll" in runtime) || typeof runtime.agentScroll !== "function" ||
+      !("agentClick" in runtime) || typeof runtime.agentClick !== "function" ||
+      !("agentType" in runtime) || typeof runtime.agentType !== "function") {
+      throw new Error("Browser runtime does not provide the closed agent tool contract.");
+    }
+    return runtime;
+  }
+
   private assertCurrentSession(userId: string, state: BrowserPersistentState) {
     const handle = this.requireHandle(userId);
     if (state.browserSessionId !== handle.browserSessionId) {
@@ -372,6 +452,13 @@ export class BrowserRuntimeRegistry {
     this.assertCurrentSession(userId, state);
     if (state.lifecycle !== "human-control" || state.controller !== "human") {
       throw new Error("Browser input requires an active human takeover.");
+    }
+  }
+
+  private assertAgentControl(userId: string, state: BrowserPersistentState) {
+    this.assertCurrentSession(userId, state);
+    if (state.lifecycle !== "ready" || state.controller !== "agent") {
+      throw new Error("Browser agent action is unavailable during human takeover or recovery.");
     }
   }
 

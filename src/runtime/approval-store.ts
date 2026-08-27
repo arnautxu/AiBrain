@@ -23,7 +23,7 @@ const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const DEFAULT_APPROVAL_TTL_MS = 5 * 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 75;
 
-export type ApprovalRequestType = "command" | "file" | "permissions";
+export type ApprovalRequestType = "command" | "file" | "permissions" | "browser";
 export type ApprovalStatus = "pending" | "resolved" | "cancelled" | "expired";
 
 export type ApprovalLocator = {
@@ -129,7 +129,7 @@ export const approvalRecordSchema = defineVersionedSchema<ApprovalRecord>({
       ...parseLocator(record, context),
       requestType: expectOneOf(
         record.requestType,
-        ["command", "file", "permissions"] as const,
+        ["command", "file", "permissions", "browser"] as const,
         context.at("requestType"),
       ),
       status: expectOneOf(
@@ -188,7 +188,7 @@ export const approvalJournalEventSchema: StorageSchema<ApprovalJournalEvent> = {
       ),
       requestType: expectOneOf(
         record.requestType,
-        ["command", "file", "permissions"] as const,
+        ["command", "file", "permissions", "browser"] as const,
         context.at("requestType"),
       ),
       decision: parseNullableDecision(record.decision, context.at("decision")),

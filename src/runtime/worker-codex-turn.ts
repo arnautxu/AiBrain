@@ -25,7 +25,16 @@ import {
   type LegacyServerRequest,
 } from "@/runtime/codex-app-server";
 import type { RuntimeConfig } from "@/runtime/config";
-import { waitForApproval, type FileApprovalStore } from "@/runtime/approval-store";
+import {
+  approvalLocatorFromItem,
+  waitForApproval,
+  type FileApprovalStore,
+} from "@/runtime/approval-store";
+import {
+  BROWSER_DYNAMIC_TOOLS,
+  handleBrowserDynamicToolCall,
+} from "@/runtime/browser/dynamic-tools";
+import { executeBrowserAgentCommand } from "@/runtime/browser/server-service";
 import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
@@ -305,6 +314,7 @@ export async function runWorkerCodexTurn(
       }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
     : await runtime.client.request("thread/start", {
         ...commonThreadParams,
+        dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
         ephemeral: false,
         serviceName: "aibrain_workbench",
         projectId: chatRequest.projectId,
@@ -442,23 +452,53 @@ export async function runWorkerCodexTurn(
         }
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
+        if (request.method === "item/tool/call") {
+          if (!runtimeTurnId) throw new Error("Browser tool call arrived before the turn was bound.");
+          return await handleBrowserDynamicToolCall(request.params, {
+            installationId,
+            userId: authenticatedUserId,
+            runtimeThreadId: threadId,
+            runtimeTurnId,
+            browserThreadId: chatRequest.threadId,
+            permissions,
+            approvalStore,
+            signal: turnSignal,
+            emitApproval: async (item) => {
+              await emit(
+                { type: "approval", item },
+                { envelope, key: `approval:${item.status}:${item.id}` },
+              );
+            },
+            execute: executeBrowserAgentCommand,
+          }) as JsonValue;
+        }
         const approval = approvalFromRequest(legacyServerRequest(request));
         if (!approval || approval.item.threadId !== threadId ||
             (runtimeTurnId && approval.item.turnId !== runtimeTurnId)) {
           throw new Error(`AiBrain encara no admet ${request.method}.`);
         }
-        await emit(
-          { type: "approval", item: approval.item },
-          { envelope, key: `approval:pending:${approval.item.id}` },
-        );
+        const permissionBoundItem = {
+          ...approval.item,
+          permissionFingerprint: permissions.fingerprint,
+        };
+        const durableApproval = await approvalStore.createPending({
+          locator: approvalLocatorFromItem(installationId, authenticatedUserId, permissionBoundItem),
+          requestType: approval.requestType,
+        });
+        if (durableApproval.status === "pending") {
+          await emit(
+            { type: "approval", item: permissionBoundItem },
+            { envelope, key: `approval:pending:${approval.item.id}` },
+          );
+        }
         const decision = await waitForApproval(
           approvalStore,
-          approval.item,
+          permissionBoundItem,
           approval.requestType,
           turnSignal,
         );
         await emit(
-          { type: "approval", item: resolvedApproval(approval.item, decision) },
+          { type: "approval", item: resolvedApproval(permissionBoundItem, decision) },
           { envelope, key: `approval:resolved:${approval.item.id}` },
         );
         return approval.response(decision) as JsonValue;
