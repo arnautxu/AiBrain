@@ -26,6 +26,17 @@ function documentErrorResponse(error: unknown) {
   if (code === "STORAGE_STAGING_ID_CONFLICT" || code === "DOCUMENT_PREVIEW_CONFLICT") {
     return NextResponse.json({ error: "Aquest uploadId ja identifica un altre document." }, { status: 409 });
   }
+  if (code === "DOCUMENT_CONVERSION_BACKPRESSURE") {
+    const retryAfterMs = error && typeof error === "object" && "retryAfterMs" in error &&
+      typeof error.retryAfterMs === "number" ? error.retryAfterMs : 1_000;
+    return NextResponse.json(
+      { error: "La conversió de documents està ocupada. Torna-ho a provar." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) },
+      },
+    );
+  }
   if (code.startsWith("UPLOAD_") || code === "STORAGE_STAGING_ID_INVALID") {
     return NextResponse.json({ error: "El document no supera la validació de seguretat." }, { status: 400 });
   }

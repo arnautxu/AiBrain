@@ -270,6 +270,7 @@ export async function POST(request: Request) {
             stagingRoot: documentServices.manifest.roots.staging,
             previews: documentServices.previews,
             pdftotext: documentServices.toolchain.pdftotext,
+            conversionGate: documentServices.conversionGate,
           }),
         });
       }
@@ -287,6 +288,17 @@ export async function POST(request: Request) {
         ? String(error.code)
         : "PERMISSION_PREFLIGHT_FAILED";
       operationalLogger.warn("permissions.preflight_rejected", { code });
+      if (code === "DOCUMENT_CONVERSION_BACKPRESSURE") {
+        const retryAfterMs = error && typeof error === "object" && "retryAfterMs" in error &&
+          typeof error.retryAfterMs === "number" ? error.retryAfterMs : 1_000;
+        return NextResponse.json(
+          { error: "La conversió de documents està ocupada. Torna-ho a provar." },
+          {
+            status: 429,
+            headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) },
+          },
+        );
+      }
       return NextResponse.json(
         { error: "No s’ha pogut verificar la política d’aquest torn." },
         { status: 503 },

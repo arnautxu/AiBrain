@@ -40,7 +40,14 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 /srv/aibrain/publish-rw/               destino oficial, escritura solo server-side confirmada
 ```
 
-Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador protegen frente a saturación. No son cuotas comerciales de empleados, proyectos, chats, turns o tokens; se amplían cambiando recursos/configuración, no código.
+Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador
+protegen frente a saturación. `AIBRAIN_DOCUMENT_MAX_CONVERSIONS` limita los
+conversores nativos simultáneos en toda la instalación mediante slots
+filesystem compartidos entre procesos y empleados; si están ocupados se
+devuelve `429 Retry-After` antes de arrancar otro binario. Los slots tienen
+heartbeat y se recuperan tras la caída de su proceso propietario. Estos límites
+no son cuotas comerciales de empleados, proyectos, chats, turns o tokens; se
+amplían cambiando recursos/configuración, no código.
 
 ## Gates P0 que requieren evidencia QA
 

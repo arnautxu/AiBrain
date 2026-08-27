@@ -42,13 +42,14 @@ function uploadRequest(uploadId: string, file: File) {
 
 describe("authenticated document routes", () => {
   let root: string;
+  let dataRoot: string;
   let previousConfig: string | undefined;
   let threadId: string;
 
   beforeAll(async () => {
     previousConfig = process.env.AIBRAIN_INSTALLATION_CONFIG;
     root = await mkdtemp(path.join(tmpdir(), "aibrain-document-routes-"));
-    const dataRoot = path.join(root, "data");
+    dataRoot = path.join(root, "data");
     const configPath = path.join(root, "installation.json");
     await mkdir(dataRoot, { recursive: true, mode: 0o700 });
     await writeFile(configPath, `${JSON.stringify({
@@ -142,5 +143,49 @@ describe("authenticated document routes", () => {
     );
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
+  });
+
+  it("returns retry metadata before starting a conversion when shared capacity is saturated", async () => {
+    const previousMaximum = process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS;
+    const previousRetry = process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS;
+    process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS = "1";
+    process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS = "2500";
+    const { FileDocumentConversionGate } = await import("@/documents/conversion-gate");
+    const gate = new FileDocumentConversionGate({
+      rootDirectory: path.join(dataRoot, "locks", "document-conversions"),
+      maxConcurrent: 1,
+    });
+    let release!: () => void;
+    let admitted!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { admitted = resolve; });
+    const active = gate.run(async () => {
+      admitted();
+      await held;
+    });
+    await started;
+    try {
+      const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+      auth.session = session(USER_A);
+      const response = await uploadRoute.POST(
+        uploadRequest(
+          "0198b9f0-6631-7000-8000-000000000513",
+          new File(["%PDF-1.7\n%%EOF\n"], "queued.pdf", { type: "application/pdf" }),
+        ),
+        { params: Promise.resolve({ threadId }) },
+      );
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("3");
+      expect(await response.json()).toEqual({
+        error: "La conversió de documents està ocupada. Torna-ho a provar.",
+      });
+    } finally {
+      release();
+      await active;
+      if (previousMaximum === undefined) delete process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS;
+      else process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS = previousMaximum;
+      if (previousRetry === undefined) delete process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS;
+      else process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS = previousRetry;
+    }
   });
 });

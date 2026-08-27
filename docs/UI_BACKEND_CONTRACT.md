@@ -789,7 +789,12 @@ Respuesta `201`:
 }
 ```
 
-`relativePath` es metadata opaca; la UI no debe enviarla de vuelta como authority. `409` para `uploadId` reutilizado con otro contenido; `413` por tamaño; `400` validación de seguridad; `503` toolchain/store no disponible.
+`relativePath` es metadata opaca; la UI no debe enviarla de vuelta como
+authority. `409` para `uploadId` reutilizado con otro contenido; `413` por
+tamaño; `400` validación de seguridad; `429` con `Retry-After` cuando todos los
+slots compartidos de conversión están ocupados; `503` si toolchain/store no
+está disponible. El `429` ocurre antes de arrancar LibreOffice/Poppler y la UI
+puede reintentar el mismo `uploadId` después del intervalo indicado.
 
 Para adjuntar el documento a un turn, la UI envía únicamente su `uploadId` en
 `options.documentUploadIds` del `POST /api/chat`, después de recibir el `201`.
@@ -1285,7 +1290,7 @@ parte del cliente UI.
 | `409` | Conflicto/idempotency mismatch/turn terminal/original cambiado | Recargar entidad; conservar evidencia; usar IDs nuevos solo para una intención nueva |
 | `410` + `FEATURE_OUT_OF_SCOPE` | Superficie retirada de V1 | Ocultar permanentemente en V1 |
 | `413` | Upload/request demasiado grande | Pedir otro fichero; no reintentar igual |
-| `429` | Backpressure de arranque browser | Respetar `Retry-After`; no lanzar starts paralelos |
+| `429` | Backpressure de arranque browser o conversión documental | Respetar `Retry-After`; no lanzar starts/conversiones paralelos |
 | `502` | Contrato de runtime incoherente | Mostrar degradado y permitir refresh/retry explícito |
 | `503` | Provider, filesystem, permisos, toolchain o runtime no disponible | Backoff acotado; no asumir que una mutación no ocurrió |
 | stream `{ "type": "error" }` | Turn terminó con error o persistencia final falló | Conservar IDs y recuperar repitiendo el mismo request |
