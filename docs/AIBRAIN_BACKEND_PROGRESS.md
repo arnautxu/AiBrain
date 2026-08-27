@@ -468,3 +468,20 @@ npm run infra:validate
 - Mantener cursores/IDs de instalación+usuario+thread+turn+item, deduplicar eventos y representar estados `pending`, `degraded`, `reconnecting`, `conflict` y recuperables según contrato.
 - Abrir un runtime thread nuevo cuando se habiliten browser dynamic tools; approvals y takeover se resuelven por las rutas documentadas y nunca desde estado global de cliente.
 - La rama backend no ha hecho merge/rebase/reset ni reescritura masiva de `codex/aibrain-ui-parity`; la integración debe hacerse mediante commit/PR normal después de sus propias pruebas visuales.
+
+## Despliegue integrado Hetzner — 2026-08-27
+
+[Installation-specific operational details omitted.]
+
+### Integración futura con Arnau
+
+1. Arnau continúa commits pequeños en `codex/aibrain-ui-parity`; backend
+   continúa en `codex/aibrain-backend-definitivo`.
+2. Antes de cada QA, actualizar ambas ramas remotas y fusionarlas mediante
+   commits normales en `codex/aibrain-integrated-qa`; nunca copiar carpetas,
+   rebasar/destruir la rama del otro ni trabajar sobre `main`.
+3. Resolver conflictos únicamente en la rama integrada, ejecutar typecheck,
+   lint, contratos, E2E y build, y desplegar una imagen con revisión OCI y
+   digest nuevos.
+4. Cuando la rama integrada esté aceptada visual y funcionalmente, abrir PR a
+   `main`; el merge sigue siendo una acción separada y no se ha realizado.
