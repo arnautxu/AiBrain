@@ -74,7 +74,7 @@ for (const writable of ["runtime_root", "workspace", "staging_root", "artifacts_
 forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-rw as a real writable bind");
 requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypoint does not fail closed when worker isolation is unavailable");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
-requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/live/u, "healthcheck does not verify socket absence and loopback liveness");
+requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/ready/u, "healthcheck does not verify socket absence and loopback readiness");
 requireMatch(productionRunbook, /Riesgos P0[\s\S]*namespace de red[\s\S]*reproducible bit a bit/u, "production runbook does not disclose browser network and build reproducibility gaps");
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
