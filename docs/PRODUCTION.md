@@ -71,6 +71,16 @@ toolchain LibreOffice/Poppler/QPDF. No crea workers ni browsers. Un estado
 backups sin réplica reciente o errores `preflight failed` deben alertar al
 operador. El runbook muestra los comandos de diagnóstico sin imprimir secretos.
 
+Cada `backup:verify` correcto escribe atómicamente
+`backups/verification/latest.json` con installation, backup ID, fingerprint,
+fecha de creación y fecha de verificación. El evaluator local
+`evaluateOperationalAlerts` produce códigos tipados para readiness degradado,
+disco >=80/90 %, tres reinicios en 15 minutos, fallos de preflight y backup
+ausente o con más de 26 horas. Verificar hoy un snapshot antiguo no reinicia su
+edad. El adaptador que recoge reinicios del host y entrega estas alertas al
+canal externo es configuración pendiente por instalación; no requiere acceso a
+`docker.sock` dentro de AiBrain.
+
 Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
 
 ## Gates de producción

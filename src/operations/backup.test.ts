@@ -103,6 +103,14 @@ describe("FileBackupService", () => {
     expect((await lstat(created.snapshotRoot)).mode & 0o777).toBe(0o500);
     expect((await lstat(path.join(created.snapshotRoot, "manifest.json"))).mode & 0o777).toBe(0o400);
     await expect(service.verify(created.snapshotRoot)).resolves.toEqual(created.manifest);
+    await expect(service.readVerificationReceipt()).resolves.toMatchObject({
+      schemaVersion: 1,
+      installationId: "synthetic-company-qa",
+      backupId: created.manifest.backupId,
+      sourceFingerprint: created.manifest.sourceFingerprint,
+      backupCreatedAt: created.manifest.createdAt,
+      verifiedAt: "2026-08-27T12:34:56.000Z",
+    });
 
     await writeFile(path.join(dataRoot, "users", "user-one", "state", "project.json"), "project-v2\n");
     const restoreRoot = path.join(root, "restored-data");

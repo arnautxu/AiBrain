@@ -20,6 +20,7 @@ import {
   expectString,
   fsyncDirectory,
   parseJson,
+  readValidatedJson,
   ResourceLockManager,
   type ValidationContext,
 } from "@/storage";
@@ -58,6 +59,37 @@ export type BackupManifest = {
   sourceFingerprint: string;
   files: BackupManifestEntry[];
 };
+
+export type BackupVerificationReceipt = {
+  schemaVersion: 1;
+  installationId: string;
+  backupId: string;
+  sourceFingerprint: string;
+  backupCreatedAt: string;
+  verifiedAt: string;
+};
+
+export const backupVerificationReceiptSchema = defineVersionedSchema<BackupVerificationReceipt>({
+  name: "BackupVerificationReceipt",
+  schemaVersion: 1,
+  keys: ["installationId", "backupId", "sourceFingerprint", "backupCreatedAt", "verifiedAt"],
+  parse(record, context) {
+    return {
+      schemaVersion: 1,
+      installationId: expectString(record.installationId, context.at("installationId"), {
+        minLength: 2, maxLength: 63, pattern: INSTALLATION_ID_PATTERN,
+      }),
+      backupId: expectString(record.backupId, context.at("backupId"), {
+        minLength: 53, maxLength: 53, pattern: BACKUP_ID_PATTERN,
+      }),
+      sourceFingerprint: expectString(record.sourceFingerprint, context.at("sourceFingerprint"), {
+        minLength: 64, maxLength: 64, pattern: HASH_PATTERN,
+      }),
+      backupCreatedAt: expectIsoDate(record.backupCreatedAt, context.at("backupCreatedAt")),
+      verifiedAt: expectIsoDate(record.verifiedAt, context.at("verifiedAt")),
+    };
+  },
+});
 
 function parseEntry(value: unknown, context: ValidationContext): BackupManifestEntry {
   const record = expectStrictRecord(value, ["path", "size", "sha256", "mode"], context);
@@ -358,7 +390,31 @@ export class FileBackupService {
     if (sourceFingerprint(manifest.files) !== manifest.sourceFingerprint) {
       throw new BackupError("BACKUP_INTEGRITY_FAILED", "Snapshot manifest fingerprint is invalid.");
     }
+    const receipt: BackupVerificationReceipt = {
+      schemaVersion: 1,
+      installationId: this.installationId,
+      backupId: manifest.backupId,
+      sourceFingerprint: manifest.sourceFingerprint,
+      backupCreatedAt: manifest.createdAt,
+      verifiedAt: new Date(this.now()).toISOString(),
+    };
+    await this.lockManager.withLock(`backup-verification:${this.installationId}`, async () => {
+      await atomicWriteJson(this.verificationReceiptPath(), receipt, backupVerificationReceiptSchema, { mode: 0o600 });
+    });
     return manifest;
+  }
+
+  async readVerificationReceipt() {
+    try {
+      const receipt = await readValidatedJson(this.verificationReceiptPath(), backupVerificationReceiptSchema);
+      if (receipt.installationId !== this.installationId) {
+        throw new BackupError("BACKUP_RECEIPT_MISMATCH", "Backup verification receipt belongs to another installation.");
+      }
+      return receipt;
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
   }
 
   async restore(snapshotRoot: string, destinationRoot: string) {
@@ -398,6 +454,10 @@ export class FileBackupService {
         cause: error,
       });
     }
+  }
+
+  private verificationReceiptPath() {
+    return path.join(this.backupsRoot, "verification", "latest.json");
   }
 }
 
