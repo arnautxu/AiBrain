@@ -9,7 +9,6 @@ services:
       args:
         AIBRAIN_UID: "${AIBRAIN_UID:-10001}"
         AIBRAIN_GID: "${AIBRAIN_GID:-10001}"
-        CODEX_VERSION: "${AIBRAIN_CODEX_VERSION:-0.149.1}"
     env_file:
       - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
     environment:
@@ -19,12 +18,16 @@ services:
       AIBRAIN_PDFINFO_BIN: /usr/bin/pdfinfo
       AIBRAIN_PDFTOPPM_BIN: /usr/bin/pdftoppm
       AIBRAIN_QPDF_BIN: /usr/bin/qpdf
+      AIBRAIN_CODEX_EXPECTED_VERSION: "0.149.1"
       CHAT_RUNTIME: codex
       CODEX_BIN: /usr/local/bin/aibrain-codex-worker
       CODEX_APPROVAL_POLICY: on-request
       CODEX_SANDBOX: workspace-write
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
     user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
     read_only: true
     cap_drop:
@@ -33,7 +36,7 @@ services:
       - no-new-privileges:true
       - seccomp=./browser/seccomp_profile.json
     ports:
-      - "${AIBRAIN_BIND_ADDRESS:-127.0.0.1}:${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
+      - "127.0.0.1:${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
     restart: unless-stopped
     stop_grace_period: 45s
     pids_limit: ${AIBRAIN_PIDS_LIMIT:-768}
@@ -97,11 +100,23 @@ networks:
     name: "${AIBRAIN_NETWORK_NAME:?set a unique AIBRAIN_NETWORK_NAME}"
     driver: bridge
     attachable: false
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
 
 volumes:
   aibrain-data:
     name: "${AIBRAIN_DATA_VOLUME_NAME:?set a unique AIBRAIN_DATA_VOLUME_NAME}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
   aibrain-backups:
     name: "${AIBRAIN_BACKUP_VOLUME_NAME:?set a unique AIBRAIN_BACKUP_VOLUME_NAME}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
   aibrain-restores:
     name: "${AIBRAIN_RESTORE_VOLUME_NAME:?set a unique AIBRAIN_RESTORE_VOLUME_NAME}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
