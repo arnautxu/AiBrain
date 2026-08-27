@@ -168,6 +168,7 @@ const exactNames = new Map([
   ["AIBRAIN_COMPOSE_PROJECT_NAME", prefix],
   ["AIBRAIN_NETWORK_NAME", `${prefix}-private`],
   ["AIBRAIN_EGRESS_NETWORK_NAME", `${prefix}-egress`],
+  ["AIBRAIN_INGRESS_NETWORK_NAME", `${prefix}-ingress`],
   ["AIBRAIN_DATA_VOLUME_NAME", `${prefix}-data`],
   ["AIBRAIN_BACKUP_VOLUME_NAME", `${prefix}-backups`],
   ["AIBRAIN_RESTORE_VOLUME_NAME", `${prefix}-restores`],

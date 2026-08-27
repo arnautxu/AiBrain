@@ -60,6 +60,7 @@ async function fixture(installationId = "company-alpha") {
     AIBRAIN_COMPOSE_PROJECT_NAME: `aibrain-${installationId}`,
     AIBRAIN_NETWORK_NAME: `aibrain-${installationId}-private`,
     AIBRAIN_EGRESS_NETWORK_NAME: `aibrain-${installationId}-egress`,
+    AIBRAIN_INGRESS_NETWORK_NAME: `aibrain-${installationId}-ingress`,
     AIBRAIN_IMAGE: `registry.example.test/aibrain@sha256:${"a".repeat(64)}`,
     AIBRAIN_EGRESS_IMAGE: `registry.example.test/aibrain-egress@sha256:${"b".repeat(64)}`,
     AIBRAIN_DATA_VOLUME_NAME: `aibrain-${installationId}-data`,
