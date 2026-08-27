@@ -304,6 +304,48 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(targetA).not.toBe(targetB);
     expect(sessionA).not.toBe(sessionB);
     expect(frameA.dataBase64).not.toBe(frameB.dataBase64);
+    expect(client.commands.filter((command) => command.method === "Fetch.enable"))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ params: expect.objectContaining({ handleAuthRequests: true }) }),
+      ]));
+    client.emitEvent("Fetch.authRequired", {
+      requestId: "proxy-auth-a",
+      authChallenge: {
+        source: "Proxy",
+        origin: proxyUrl,
+        scheme: "basic",
+        realm: "aibrain-browser",
+      },
+    }, sessionA);
+    client.emitEvent("Fetch.authRequired", {
+      requestId: "server-auth-b",
+      authChallenge: {
+        source: "Server",
+        origin: "https://b.example.test",
+        scheme: "basic",
+        realm: "target-server",
+      },
+    }, sessionB);
+    await eventually(() => client.commands.filter((command) =>
+      command.method === "Fetch.continueWithAuth").length === 2);
+    const proxyAuth = client.commands.find((command) =>
+      command.method === "Fetch.continueWithAuth" && command.params.requestId === "proxy-auth-a");
+    expect(proxyAuth).toMatchObject({
+      sessionId: sessionA,
+      params: {
+        authChallengeResponse: {
+          response: "ProvideCredentials",
+          username: "aibrain-browser",
+          password: expect.stringMatching(/^[A-Za-z0-9_-]{32,256}$/u),
+        },
+      },
+    });
+    expect(client.commands.find((command) =>
+      command.method === "Fetch.continueWithAuth" && command.params.requestId === "server-auth-b"))
+      .toMatchObject({ params: { authChallengeResponse: { response: "CancelAuth" } } });
+    expect(spawnedArgs.join("\n")).not.toContain(String(
+      (proxyAuth?.params.authChallengeResponse as Record<string, unknown>)?.password,
+    ));
 
     await expect(runtime.navigate(THREAD_A, "https://a.example.test/path"))
       .rejects.toMatchObject({ code: "CHROME_TAKEOVER_REQUIRED" });

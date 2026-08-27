@@ -39,7 +39,8 @@ Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador
 
 El canal CDP ya no cruza el namespace de red: existe únicamente entre Next.js
 y el proceso Chrome exacto mediante descriptores heredados. El worker aislado
-no recibe esos descriptores ni puede descubrir un puerto. El egress físico está
+no recibe esos descriptores; aunque descubriera el puerto loopback efímero, no
+recibe su secreto aleatorio ni puede autenticarse. El egress físico está
 cerrado localmente: `app` solo pertenece a una red Docker interna y el sidecar
 propio, autenticado por canal, es el único servicio dual-homed. Browser entrega
 una IP global ya fijada; worker/server resuelven una vez y conectan a esa IP,

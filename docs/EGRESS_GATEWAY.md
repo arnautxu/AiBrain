@@ -60,8 +60,11 @@ journals o ficheros del usuario.
 
 Integración de conectores:
 
-- Browser: el proxy loopback por usuario envía al sidecar el Bearer de browser y
-  `X-AiBrain-Pinned-IP`; nunca acepta `Proxy-Authorization` del navegador.
+- Browser: el proxy loopback por usuario exige Basic con un secreto aleatorio
+  por runtime que Chrome recibe solo mediante `Fetch.authRequired` sobre el pipe
+  CDP heredado. Después elimina ese header y envía al sidecar el Bearer de
+  browser y `X-AiBrain-Pinned-IP`. Un worker no recibe el secreto y no puede
+  usar el proxy para ampliar su allowlist.
 - Worker: construir server-side
   `http://aibrain:<percent-encoded-worker-token>@egress-gateway:8080` para
   `HTTP_PROXY`, `HTTPS_PROXY` y `ALL_PROXY`; `NO_PROXY=127.0.0.1,localhost,::1`.

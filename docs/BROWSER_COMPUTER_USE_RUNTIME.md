@@ -166,6 +166,15 @@ Only TCP 80 and 443 are allowed by default for absolute HTTP and CONNECT; a
 different bounded server-side allowlist must be explicit and is never chosen
 by the browser/UI.
 
+The loopback proxy is not an unauthenticated local capability. It generates a
+new 256-bit password per runtime and returns a Basic challenge. Chrome receives
+that credential only through the target-scoped inherited CDP pipe via
+`Fetch.authRequired`; it is absent from command-line arguments, child
+environment and URLs. Only the exact proxy origin, scheme and realm receive
+credentials. Target-server challenges are cancelled. A Codex worker therefore
+cannot widen its exact egress allowlist by scanning the shared loopback
+namespace for a browser proxy.
+
 CDP target discovery closes popups, service workers and pages not owned by the
 active thread creation. Production launches Chrome inside the employee bwrap
 filesystem namespace, masking other profiles, source and publish roots. The
@@ -201,4 +210,5 @@ npm run test:browser:real
 It proves no Chrome TCP listener or `DevToolsActivePort`, separate targets,
 profiles, cookies and download roots for two employees, same-user thread target
 and download routing, forced pipe EOF recovery, and reopening one profile with
-its persistent cookie without exposing the other employee's state.
+its persistent cookie without exposing the other employee's state. It also
+proves authenticated proxy navigation with a fresh runtime credential.
