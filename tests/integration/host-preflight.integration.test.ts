@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, link, mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -120,5 +120,9 @@ describe("Hetzner host preflight", () => {
     const hardLinked = await fixture();
     await link(path.join(hardLinked.configRoot, "egress.env"), path.join(hardLinked.configRoot, "egress-copy.env"));
     await expect(run(hardLinked.envFile)).rejects.toThrow();
+
+    const misplacedSecret = await fixture();
+    await writeFile(misplacedSecret.envFile, `${await readFile(misplacedSecret.envFile, "utf8")}AIBRAIN_SESSION_SECRET=must-not-live-here\n`);
+    await expect(run(misplacedSecret.envFile)).rejects.toThrow();
   });
 });

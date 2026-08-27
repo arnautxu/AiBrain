@@ -213,6 +213,9 @@ requireMatch(releaseManager, /target-healthy[\s\S]*state-committed/u, "release m
 requireMatch(releaseManager, /RELEASE_DOCKER_TIMEOUT/u, "release manager does not bound Docker subprocesses");
 requireMatch(releaseManager, /\{\{\.Config\.Image\}\}/u, "release manager does not verify running container image identity");
 requireMatch(releaseManager, /"alert-dispatcher"/u, "release manager does not promote and verify the alert dispatcher");
+requireMatch(releaseManager, /installationConfigSha256[\s\S]*composeSha256[\s\S]*environmentSha256/u, "release manager does not version config, Compose and environment hashes");
+requireMatch(releaseManager, /active\.compose\.yaml/u, "release manager does not materialize the exact versioned Compose input");
+requireMatch(releaseManager, /--force-recreate/u, "release manager does not recreate services for config-only releases");
 requireMatch(releaseManager, /\/usr\/bin\/flock/u, "release manager lacks OS advisory locking on Linux");
 requireMatch(releaseManager, /\/usr\/bin\/lockf/u, "release manager lacks OS advisory locking on macOS QA");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
