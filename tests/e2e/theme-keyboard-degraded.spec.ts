@@ -14,6 +14,7 @@ test("system theme follows the OS and reduced motion removes decorative animatio
   await login(page);
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
   await page.getByRole("button", { name: /Tema del sistema/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.getByRole("button", { name: /Tema claro/ }).click();
@@ -64,7 +65,7 @@ test("mobile Review behaves as a focus-trapped dialog and restores its opener", 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("heading", { name: "Resultado sintético" })).toBeVisible();
 
-  const opener = page.getByLabel("Abrir Review", { exact: true });
+  const opener = page.getByRole("button", { name: "Revisar cambios" });
   await opener.click();
   const review = page.getByRole("dialog", { name: "Review del turno" });
   await expect(review).toBeVisible();

@@ -35,6 +35,9 @@ Viewport lógico: 1280×720, DPR 2.
 | Sombra composer | ring 1 px a 4%; 0 2px 8px a 4%; 0 4px 80px 8px a 2.4% |
 | Menú d'eines | mateixa amplada del composer; superfície adjunta amb 8 px de separació i radio aproximat de 20 px |
 | Menús petits | 224 px; radio 20 px; padding vertical 10 px; mateixa ombra del composer |
+| Menú de perfil | 248 px aproximadament; ancorat damunt del perfil; radio 20 px; separadors fins; files de 40 px |
+| Selector de model | píndola dins del composer; popover de 224 px; opcions amb selecció visible i detall secundari |
+| Cerca global | superfície modal ampla, camp principal de 16 px, grups i selecció de teclat |
 | Bombolla usuari | `rgb(232,243,254)`; text `rgb(12,39,74)`; radio 22 px; padding 10×16 px |
 | Panell Resultats | 300 px d'ample; x=949; y=52; radio 24 px; border 5%; ombra 0 4px 16px a 5% |
 | Activitat | estat inicial `En procés`; després temps `Treballant des de fa …`; resum plegable; stop passa per `Aturant` i acaba en `Pensament interromput` |
@@ -67,6 +70,10 @@ La referencia MIT confirma de forma independiente una conversación de 768 px, r
 4. La bombolla d'usuari usa el blau, text, radio i padding observats en Work.
 5. Review es presenta com una targeta flotant de 300 px en desktop i continua sent un dialog segur en mobile.
 6. La tipografia, els neutres, el radi, l'ombra i l'activitat amb shimmer segueixen les mesures vives i la referència MIT.
+7. Els selectors natius de mode, model, esforç i skill s'han substituït per popovers de 224 px que mantenen els mateixos callbacks i estats.
+8. El perfil s'ha convertit en un menú flotant ancorat amb preferències, aparença i logout reals.
+9. Els menús contextuals, la cerca i els diàlegs comparteixen radis de 20–24 px, ombra de popover i entrada curta amb `prefers-reduced-motion` respectat.
+10. Review, Computer Use i la drecera de cerca no ocupen la capçalera: Review continua al resultat del torn i totes dues eines són accessibles des de la cerca global.
 
 ## Diferències deliberades pendents
 
