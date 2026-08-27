@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `f35edc3` en
+- Último checkpoint backend publicado: `b77dc7f` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -48,12 +48,12 @@
 | 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 y backup documental cerrados | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`: staging queda server-only, Codex recibe inputs preparados sin paths, el lock físico de target es global y el snapshot/restore V2 incluye `publishWriteRoot`; faltan retención/backpressure y sandbox reforzado del conversor |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`: backup compuesto, réplica Restic y alertas durables cerrados localmente; faltan build reproducible en Docker y recovery transaccional de releases/host |
+| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`: backup compuesto, réplica Restic, alertas y recovery transaccional de release cerrados localmente; falta evidencia Docker/host QA real |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0`, el backup documental compuesto en `bfbe610`, la réplica cifrada off-host en `5cae93c` y el delivery durable de alertas en `f35edc3`. La siguiente acción concreta es endurecer el release manager contra timeout, caída entre promoción y commit de estado, lock huérfano y recuperación tras reboot.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0`, el backup documental compuesto en `bfbe610`, la réplica cifrada off-host en `5cae93c`, el delivery durable de alertas en `f35edc3` y el release recovery en `b77dc7f`. La siguiente acción concreta vuelve al checkpoint documental: retención/backpressure y confinamiento reforzado del conversor Office/PDF.
 
 ## Decisiones menores registradas
 
@@ -76,6 +76,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Backup V2 captura `product-data` y `published-documents` bajo fingerprints por componente y global. Comparte una barrera física con el publicador para no cruzar una confirmación; restore preflight comprueba roots/espacio, prepara ambos árboles y revierte la primera promoción si falla la segunda.
 - La réplica off-host es un proceso Restic one-shot separado: recibe snapshots read-only, password read-only y estado de receipts independiente; reusa tags exactos tras crash, verifica readback+repository, no ejecuta shell y solo reenvía variables de proveedor allowlisted. No inicializa, poda ni borra el remoto.
 - Las alertas operativas separan evaluación, outbox y sink. El estado file-backed genera transiciones `raised/updated/resolved`, deduplica por código+severidad+umbral, conserva generations y receipts, aplica backoff y falla por backpressure antes de una reconciliación parcial. El colector no monta `docker.sock`: readiness, disco y backup se leen dentro del contenedor y los contadores de supervisor son argumentos host obligatorios.
+- Una release une app+gateway y usa journal durable por fases. Antes de mutar, verifica estado, env, imágenes y contenedores actuales; después valida health, digest y revisión realmente ejecutados. `flock`/`lockf` serializa operadores, el lock local vincula PID+inicio+boot, los Docker subprocesses están acotados y recovery recibe un deadline independiente.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -151,10 +152,9 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Endurecer `manage-release.mjs` con timeout real de subprocess, journal de
-transacción, detección segura de lock huérfano y reconciliación después de una
-caída entre promoción de Compose y persistencia del estado. Añadir pruebas en
-procesos separados sin ejecutar Docker real.
+Cerrar retención/backpressure de uploads, previews, candidatos y artefactos, y
+reforzar el confinamiento del proceso LibreOffice/Poppler sin exponer staging,
+source o publish. Añadir regresiones de saturación, cleanup y crash recovery.
 
 ## Últimas validaciones
 
@@ -316,6 +316,14 @@ procesos separados sin ejecutar Docker real.
   validator infra y build Next 16.3.2 verdes.
 - Push verificado: `5cae93c..f35edc3` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Release recovery `b77dc7f`: journal exacto por fases, hashes env/estado,
+  timeout de subprocess, deadline monotónico, verificación de digest+revisión
+  de los contenedores, fallback transaccional, PID+start/boot, advisory lock del
+  SO y rechazo de drift sin overwrite. Release+preflight 19/19; suite completa
+  91 ficheros pasados + 1 opt-in omitido, 423 pruebas pasadas + 3 omitidas;
+  typecheck, lint, validator infra y build Next 16.3.2 verdes.
+- Push verificado: `886747b..b77dc7f` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -340,7 +348,7 @@ procesos separados sin ejecutar Docker real.
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
 | Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación, promoción dual y Restic off-host one-shot | 10 pruebas backup + CLI/proceso Restic sintético, incluidas corrupción, enlaces, publicación concurrente, restore, crash/replay y secretos; contenedor QA y proveedor externo pendientes |
-| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual atómica | Alertas 13/13, release manager 5/5 y validator estático verde; recovery transaccional adicional y ejecución Docker QA pendientes |
+| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual atómica con journal | Alertas 13/13, release/preflight 19/19 y validator estático verde; ejecución Docker/reboot QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
 
