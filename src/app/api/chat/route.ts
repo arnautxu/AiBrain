@@ -266,6 +266,7 @@ export async function POST(request: Request) {
           threadId: body.threadId,
           uploadIds: documentUploadIds,
           permissions: turnPermissions,
+          signal: request.signal,
           inputResolver: new ServerTurnDocumentInputResolver({
             stagingRoot: documentServices.manifest.roots.staging,
             previews: documentServices.previews,

@@ -771,7 +771,7 @@ Respuesta `201`:
     "createdAt": "2026-08-27T10:00:00.000Z"
   },
   "preview": {
-    "schemaVersion": 1,
+    "schemaVersion": 2,
     "uploadId": "0198b9f0-6631-7000-8000-000000000511",
     "threadId": "0198b9f0-6631-7000-8000-000000000302",
     "sourceSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -781,6 +781,13 @@ Respuesta `201`:
       {
         "name": "preview.txt",
         "url": "/api/threads/0198b9f0-6631-7000-8000-000000000302/documents/0198b9f0-6631-7000-8000-000000000511/preview/preview.txt"
+      }
+    ],
+    "artifacts": [
+      {
+        "fileName": "preview.txt",
+        "size": 17,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     ],
     "pages": null,
@@ -795,6 +802,13 @@ tamaño; `400` validación de seguridad; `429` con `Retry-After` cuando todos lo
 slots compartidos de conversión están ocupados; `503` si toolchain/store no
 está disponible. El `429` ocurre antes de arrancar LibreOffice/Poppler y la UI
 puede reintentar el mismo `uploadId` después del intervalo indicado.
+
+`preview.schemaVersion: 2` atesta cada artefacto mediante `fileName`, tamaño y
+SHA-256. El backend vuelve a verificar los bytes antes de reutilizar un preview
+`ready`; si falta o cambia un fichero regular lo reconstruye desde el upload
+staged validado. Un symlink o metadata corrupta falla cerrado. La UI puede usar
+`artifacts` como evidencia informativa, pero las URLs server-side siguen siendo
+la única autoridad de lectura.
 
 Para adjuntar el documento a un turn, la UI envía únicamente su `uploadId` en
 `options.documentUploadIds` del `POST /api/chat`, después de recibir el `201`.
@@ -879,7 +893,7 @@ type PublicationOperation = {
   threadId: string;
   turnId: string;
   targetRelativePath: string;
-  status: "awaiting_confirmation" | "publishing" | "published" | "declined" | "conflict";
+  status: "awaiting_confirmation" | "publishing" | "published" | "declined" | "expired" | "conflict";
   candidate: { fileName: string; size: number; sha256: string };
   preview: {
     schemaVersion: 1;
@@ -911,6 +925,12 @@ type PublicationOperation = {
 ```
 
 El token de confirmación solo se entrega en este receipt y se liga a instalación, usuario, thread, turn, operación y expiración. La UI debe mantenerlo en memoria hasta decidir; no debe registrarlo.
+
+Al llegar a `confirmationExpiresAt`, el backend reconcilia la operación bajo su
+lock a `status: "expired"`. Es un estado terminal, durable y auditable; su
+`updatedAt` coincide exactamente con `confirmationExpiresAt`, aunque el primer
+acceso posterior ocurra más tarde. La UI debe retirar las acciones de
+confirmación y mostrar que hace falta congelar un candidato nuevo.
 
 ### 12.2 Confirmar o rechazar
 
@@ -951,9 +971,15 @@ Body estricto:
 
 El ejemplo omite los campos de identidad/preview ya definidos en `PublicationOperation`; la respuesta real incluye la operación completa. En `decline`, `permissionFingerprint` es `null` y el fichero oficial no se modifica.
 
+Si el TTL ya venció, `confirm` devuelve `403` y nunca inicia la escritura. Un
+`decline` posterior funciona como acuse de cierre idempotente: devuelve la
+operación terminal `expired`, con `permissionFingerprint: null`, sin cambiar el
+target ni convertirla en `declined`. Repetir ese cierre no duplica el evento de
+auditoría.
+
 Confirmar vuelve a resolver `PERMISSIONS.md`. La escritura compara el original congelado, versiona el original si existe, escribe atómicamente y verifica el hash posterior. El lock del target es único por instalación y destino, incluso cuando dos empleados confirman operaciones desde estados privados distintos. `status: "conflict"` es un resultado válido si el original cambió. Repetir exactamente el mismo `clientRequestId` y decisión devuelve el resultado ya registrado; cambiar contenido o decisión devuelve `409`.
 
-Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `409` decisión previa o `clientRequestId` reutilizado con otra intención; `400` binding/path inseguro; `503` publicación no disponible. Un cambio del original detectado durante la confirmación normalmente es `200` con `operation.status: "conflict"`.
+Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `409` decisión previa o `clientRequestId` reutilizado con otra intención; `400` binding/path inseguro; `503` publicación no disponible. Un cambio del original detectado durante la confirmación normalmente es `200` con `operation.status: "conflict"`. La expiración ya reconciliada se representa como `status: "expired"`, no como `conflict` ni como un pendiente recuperable.
 
 No hay hoy endpoints públicos para listar operaciones ni descargar/restaurar la versión anterior. Esas funciones existen en el publisher server-side, no en el contrato UI.
 

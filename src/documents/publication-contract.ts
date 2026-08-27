@@ -24,6 +24,7 @@ export type PublicationStatus =
   | "publishing"
   | "published"
   | "declined"
+  | "expired"
   | "conflict";
 
 export type PublicationPreviewMetadata = {
@@ -103,7 +104,7 @@ export type PublicationFreezeReceipt = {
   createdAt: string;
 };
 
-export type PublicationAuditEventType = "frozen" | "declined" | "conflict" | "published";
+export type PublicationAuditEventType = "frozen" | "declined" | "expired" | "conflict" | "published";
 
 export type PublicationAuditEvent = {
   schemaVersion: 1;
@@ -264,7 +265,7 @@ export const publicationOperationSchema = defineVersionedSchema<StoredPublicatio
       turnId: expectString(record.turnId, context.at("turnId"), { pattern: PUBLICATION_UUID }),
       targetRelativePath: parseSafeRelativePath(record.targetRelativePath, context.at("targetRelativePath")),
       status: expectOneOf(record.status, [
-        "awaiting_confirmation", "publishing", "published", "declined", "conflict",
+        "awaiting_confirmation", "publishing", "published", "declined", "expired", "conflict",
       ] as const, context.at("status")),
       candidate: parseCandidate(record.candidate, context.at("candidate")),
       preview: parsePreview(record.preview, context.at("preview")),
@@ -302,8 +303,8 @@ export const publicationOperationSchema = defineVersionedSchema<StoredPublicatio
     if (operation.status !== "awaiting_confirmation" && operation.decisionRequestHash === null) {
       context.at("decisionRequestHash").fail("a decided publication requires a decision request");
     }
-    if (operation.status === "declined" && operation.version) {
-      context.at("version").fail("declined publication cannot have a recovery version");
+    if ((operation.status === "declined" || operation.status === "expired") && operation.version) {
+      context.at("version").fail("declined or expired publication cannot have a recovery version");
     }
     if (Date.parse(operation.updatedAt) < Date.parse(operation.createdAt)) {
       context.at("updatedAt").fail("must not precede createdAt");
@@ -339,7 +340,7 @@ export const publicationAuditSchema = defineVersionedSchema<PublicationAuditEven
     const event: PublicationAuditEvent = {
       schemaVersion: 1,
       auditKey: expectString(record.auditKey, context.at("auditKey"), { pattern: PUBLICATION_SHA256 }),
-      eventType: expectOneOf(record.eventType, ["frozen", "declined", "conflict", "published"] as const, context.at("eventType")),
+      eventType: expectOneOf(record.eventType, ["frozen", "declined", "expired", "conflict", "published"] as const, context.at("eventType")),
       operationId: expectString(record.operationId, context.at("operationId"), { pattern: PUBLICATION_UUID }),
       installationId: expectString(record.installationId, context.at("installationId"), { pattern: PUBLICATION_INSTALLATION_ID }),
       userId: expectString(record.userId, context.at("userId"), { pattern: PUBLICATION_UUID }),

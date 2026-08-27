@@ -27,6 +27,9 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
   exige headless/safe mode, perfil privado, `--norestore` y seguridad de macros
   `Very High`; los uploads OOXML con macros ya se rechazan antes de convertir.
   El entrypoint prueba esta frontera con los cinco launchers y falla cerrado.
+  La cancelación HTTP se propaga al proceso nativo con terminación forzada;
+  `--die-with-parent` elimina su árbol, el `finally` borra el work privado y
+  libera el slot compartido.
 - Los logs Docker tienen rotación y buffer no bloqueante. No se debe ejecutar `docker compose config` sin `--quiet` en registros compartidos porque puede materializar variables del `env_file`.
 
 ## Persistencia

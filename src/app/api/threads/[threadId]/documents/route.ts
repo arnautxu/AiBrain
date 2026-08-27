@@ -79,7 +79,7 @@ export async function POST(request: Request, context: RouteContext) {
       validated,
       sourcePath: parsedUpload.temporaryPath,
     });
-    const preview = await services.previews.create(document);
+    const preview = await services.previews.create(document, { signal: request.signal });
     return NextResponse.json({
       document,
       preview: {

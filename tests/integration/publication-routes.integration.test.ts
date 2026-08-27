@@ -12,6 +12,7 @@ const TURN_ID = "0198b9f0-6631-7000-8000-000000000612";
 const UPLOAD_ID = "0198b9f0-6631-7000-8000-000000000613";
 const DECLINE_OPERATION = "0198b9f0-6631-7000-8000-000000000614";
 const PUBLISH_OPERATION = "0198b9f0-6631-7000-8000-000000000615";
+const EXPIRED_OPERATION = "0198b9f0-6631-7000-8000-000000000616";
 const auth = vi.hoisted(() => ({ session: null as AuthSession | null }));
 
 vi.mock("server-only", () => ({}));
@@ -236,5 +237,47 @@ describe("server-side publication routes", () => {
     });
     expect(await replay.json()).toMatchObject({ operation: { status: "published" } });
     expect(await readFile(targetPath, "utf8")).toBe("approved candidate");
+  });
+
+  it("rejects an expired confirmation and closes it idempotently as expired", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-27T12:00:00.000Z"));
+      auth.session = session(USER_A);
+      const targetBefore = await readFile(targetPath, "utf8");
+      const frozen = await freeze(EXPIRED_OPERATION, "freeze-expired");
+      const receipt = await frozen.json() as { confirmationToken: string };
+      vi.advanceTimersByTime(24 * 60 * 60 * 1_000);
+
+      const decision = await import("@/app/api/threads/[threadId]/publications/[operationId]/route");
+      const confirmation = await decision.POST(mutation("http://localhost/decision", {
+        action: "confirm",
+        clientRequestId: "confirm-expired",
+        turnId: TURN_ID,
+        confirmationToken: receipt.confirmationToken,
+      }), { params: Promise.resolve({ threadId, operationId: EXPIRED_OPERATION }) });
+      expect(confirmation.status).toBe(403);
+
+      const declineBody = {
+        action: "decline",
+        clientRequestId: "close-expired",
+        turnId: TURN_ID,
+        confirmationToken: receipt.confirmationToken,
+      };
+      const closed = await decision.POST(mutation("http://localhost/decision", declineBody), {
+        params: Promise.resolve({ threadId, operationId: EXPIRED_OPERATION }),
+      });
+      expect(await closed.json()).toMatchObject({
+        operation: { status: "expired" },
+        permissionFingerprint: null,
+      });
+      const replay = await decision.POST(mutation("http://localhost/decision", declineBody), {
+        params: Promise.resolve({ threadId, operationId: EXPIRED_OPERATION }),
+      });
+      expect(await replay.json()).toMatchObject({ operation: { status: "expired" } });
+      expect(await readFile(targetPath, "utf8")).toEqual(targetBefore);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

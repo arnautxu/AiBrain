@@ -53,18 +53,23 @@ con acceso a `publish-rw`.
    `frozen`.
 5. Devuelve el registro público y un token HMAC con expiración. Solo el hash del
    token queda en disco.
-6. `decline` consume el token/request y pasa a `declined`; no crea versión ni
-   toca el target.
-7. `confirm` pasa primero a `publishing`, vuelve a comprobar el original, crea
+6. Al alcanzar `confirmationExpiresAt`, el siguiente acceso bloqueado reconcilia
+   de forma durable a `expired`, con timestamp y clave de auditoría derivados
+   de la operación. `confirm` queda cerrado y `decline` actúa como acuse
+   idempotente del cierre.
+7. Antes del vencimiento, `decline` consume el token/request y pasa a
+   `declined`; no crea versión ni toca el target.
+8. `confirm` pasa primero a `publishing`, vuelve a comprobar el original, crea
    una versión recuperable si existía y escribe mediante
    temp + fsync + rename + fsync del directorio.
-8. Verifica los bytes publicados, añade el evento `published` y por último
+9. Verifica los bytes publicados, añade el evento `published` y por último
    persiste `published`.
 
 Estados válidos:
 
 ```text
 awaiting_confirmation -> declined
+awaiting_confirmation -> expired
 awaiting_confirmation -> publishing -> published
 awaiting_confirmation -> publishing -> conflict
 ```
@@ -129,6 +134,14 @@ segunda decisión distinta es un conflicto. El token no permite publicar otro
 candidato ni otro destino porque su HMAC incluye instalación, usuario, thread,
 turn, operación y expiración.
 
+El TTL vence en el instante `confirmationExpiresAt` (comparación inclusiva).
+La reconciliación es lazy-on-access: `getOperation`, una repetición de freeze o
+una decisión toman el lock de operación, persisten `expired` y garantizan un
+único evento `expired`, fechado exactamente en el vencimiento. Un crash entre
+el JSON terminal y el journal se repara en el siguiente acceso. Confirmar una
+operación expirada devuelve `PUBLICATION_TOKEN_EXPIRED`; rechazarla devuelve el
+mismo estado `expired` cuantas veces se repita y nunca toca el fichero oficial.
+
 ## Persistencia y auditoría
 
 Layout interno v1:
@@ -145,7 +158,9 @@ stateRoot/
 Los JSON pasan por schemas estrictos y escrituras atómicas. El journal es
 append-only, secuenciado, fsync y deduplica por `auditKey`. Los eventos incluyen
 identidad de instalación/usuario/thread/turn, hashes de target/candidato/
-original/resultado, request hash y recovery flag. No guardan contenido, token,
+original/resultado, request hash y recovery flag. La expiración usa un request
+hash sintético y estable derivado exclusivamente del scope y TTL, por lo que no
+depende del request que la descubra. No guardan contenido, token,
 secret, raíz de publicación ni target en claro.
 
 `readRecoveryVersion` devuelve la versión anterior solo tras volver a validar
@@ -199,7 +214,8 @@ La prueba focalizada cubre preview obligatorio, snapshot inmutable, rechazo sin
 publicar, confirmación exactamente una vez, idempotencia, versión recuperable,
 conflicto del original, crash/restart, aislamiento usuario/thread, publicación
 concurrente entre dos usuarios sobre un mismo target físico, traversal,
-symlinks y frontera worker/publish.
+symlinks, frontera worker/publish, expiración durable en el límite exacto,
+confirmación expirada y cierre idempotente sin auditoría duplicada.
 
 Las pruebas usan únicamente directorios temporales locales y datos sintéticos.
 No simulan ni afirman haber validado un NAS. Quedan como validaciones de

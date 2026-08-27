@@ -182,6 +182,80 @@ describe("server-side document publisher", () => {
       .rejects.toMatchObject({ code: "PUBLICATION_ALREADY_DECIDED" });
   });
 
+  it("reconciles confirmation expiry durably at the exact TTL and rejects confirmation", async () => {
+    const target = path.join(publishRoot, "knowledge/report.txt");
+    await writeFile(target, "official original");
+    const service = publisher({ confirmationTtlMs: 60_000 });
+    const { frozen } = await freeze({ service });
+    const expiresAt = frozen.operation.confirmationExpiresAt;
+    now = Date.parse(expiresAt);
+
+    const expired = await service.getOperation({
+      operationId: OPERATION_ID,
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+    });
+    expect(expired).toMatchObject({
+      status: "expired",
+      updatedAt: expiresAt,
+      version: null,
+      result: null,
+    });
+    await expect(service.confirm({
+      operationId: OPERATION_ID,
+      clientRequestId: "confirm-expired-request",
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      confirmationToken: frozen.confirmationToken,
+    })).rejects.toMatchObject({ code: "PUBLICATION_TOKEN_EXPIRED" });
+    expect(await readFile(target, "utf8")).toBe("official original");
+
+    const audit = await service.readAudit();
+    expect(audit.map((event) => event.eventType)).toEqual(["frozen", "expired"]);
+    expect(audit[1]).toMatchObject({
+      eventType: "expired",
+      occurredAt: expiresAt,
+      resultSha256: null,
+      recoveredAfterInterruption: false,
+    });
+
+    const restarted = publisher({ confirmationTtlMs: 60_000 });
+    expect((await restarted.getOperation({
+      operationId: OPERATION_ID,
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+    })).status).toBe("expired");
+    expect((await restarted.readAudit()).filter((event) => event.eventType === "expired"))
+      .toHaveLength(1);
+  });
+
+  it("treats decline after automatic expiry as an idempotent close acknowledgement", async () => {
+    const service = publisher({ confirmationTtlMs: 1_000 });
+    const { frozen } = await freeze({ service });
+    now = Date.parse(frozen.operation.confirmationExpiresAt) + 10_000;
+    const decision = {
+      operationId: OPERATION_ID,
+      clientRequestId: "decline-expired-request",
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      confirmationToken: frozen.confirmationToken,
+    };
+
+    const first = await service.decline(decision);
+    const replay = await service.decline(decision);
+    const laterAcknowledgement = await service.decline({
+      ...decision,
+      clientRequestId: "decline-expired-request-later",
+    });
+
+    expect(first).toEqual(replay);
+    expect(laterAcknowledgement).toEqual(first);
+    expect(first.status).toBe("expired");
+    expect(first.updatedAt).toBe(frozen.operation.confirmationExpiresAt);
+    expect((await service.readAudit()).filter((event) => event.eventType === "expired"))
+      .toHaveLength(1);
+  });
+
   it("confirms exactly once, is idempotent for the same request and retains a verified recovery version", async () => {
     const target = path.join(publishRoot, "knowledge/report.txt");
     await writeFile(target, "official original");
