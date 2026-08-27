@@ -43,8 +43,7 @@
 | Approval route | Runtime approval registry | A pending App Server request resolves after a user decision |
 | Workbench state | Stream contract and tenant repository | Demo and real events produce the same visible states and reload durable messages |
 | Workbench UI | Workbench state and design tokens | Browser verification at desktop and mobile widths |
-| Tenant boundary | Signed session, manifest registry and runtime roots | Cross-tenant API and browser checks |
-| Control plane | Owner role and validated manifest overlay | Owner save plus member `403` |
+| Installation boundary | Signed local session, versioned installation config and runtime roots | Cross-installation API and browser checks |
 
 ## Reference slice
 

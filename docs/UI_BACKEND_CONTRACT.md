@@ -63,12 +63,11 @@ No existe hoy una ruta HTTP pública de branding. Browser/Computer Use sí tiene
 
 ```ts
 type AuthSession = {
-  provider: "demo" | "local" | "supabase";
+  provider: "demo" | "local";
   user: {
     id: string;       // UUID
     name: string;
     email: string;
-    role: "owner" | "member";
   };
   tenant: {
     id: string;       // installationId en sesión local
@@ -227,7 +226,7 @@ type PublicInstallationBranding = {
 
 La rama UI debe conservar ese límite o acordar una ruta nueva antes de intentar `fetch('/api/installation')`; esa ruta no existe.
 
-`/api/control-plane/manifest` no es el contrato de branding de producción. En sesión local todos los usuarios se proyectan como `member`, por lo que esa ruta owner-only responde `403`; su persistencia editable está limitada al modo demo.
+No existen roles de producto, onboarding, invitaciones ni control plane HTTP. La identidad local provisionada y `PERMISSIONS.md` son las únicas fuentes server-side de perfil y permiso. El workbench recibe también `logoPath`, por lo que login y aplicación muestran la marca de la instalación sin una rama por empresa.
 
 ## 5. Proyectos y threads
 
@@ -627,11 +626,9 @@ Ejemplo degradado válido con HTTP `200`:
 
 La UI debe habilitar selección/invocación según `models`, `skills` y `capabilities` de esta respuesta, no según el manifest visual.
 
-### 7.3 Automatizaciones manuales actuales
+### 7.3 Superficies no publicadas
 
-`GET /api/automations` devuelve `{ "automations": AutomationDefinition[] }`. Para sesiones locales devuelve hoy `[]` de forma deliberada hasta conectar este adapter con `PERMISSIONS.md`.
-
-Solo existen internamente `workspace-inventory` y `runtime-diagnostics`, ambas `mutates: false`. `POST /api/automations` acepta `{ "projectId": uuid, "automationId": "workspace-inventory" | "runtime-diagnostics" }`, pero una sesión local recibe `403` mientras no esté autorizada por el adapter. Las automatizaciones programadas de `/api/control-plane/automations` están fuera de V1 y responden `410 FEATURE_OUT_OF_SCOPE`.
+V1 no publica rutas ni paneles de onboarding, invitaciones, roles, control plane o automatizaciones programadas. No deben añadirse clientes, estados vacíos ni fallbacks que simulen esas capacidades.
 
 ## 8. Approvals
 

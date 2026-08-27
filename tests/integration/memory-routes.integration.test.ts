@@ -21,7 +21,6 @@ function session(userId: string): AuthSession {
       id: userId,
       name: `Memory User ${userId.slice(-3)}`,
       email: `${userId.slice(-3)}@example.test`,
-      role: "member",
     },
     tenant: { id: "memory-routes-lab", name: "Memory Routes Lab" },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),

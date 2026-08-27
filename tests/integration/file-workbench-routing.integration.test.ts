@@ -61,7 +61,6 @@ async function fixture() {
       id: USER_ID,
       name: "Synthetic User",
       email: "synthetic@example.test",
-      role: "member",
     },
     tenant: { id: "synthetic-lab", name: "Synthetic Lab" },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),

@@ -12,14 +12,13 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({ getSession: vi.fn(async () => auth.session) }));
 vi.mock("@/auth/request-security", () => ({ isSameOriginMutation: vi.fn(async () => true) }));
 
-function session(userId: string, provider: AuthSession["provider"] = "local"): AuthSession {
+function session(userId: string): AuthSession {
   return {
-    provider,
+    provider: "local",
     user: {
       id: userId,
       name: `User ${userId.slice(-3)}`,
       email: `${userId.slice(-3)}@example.test`,
-      role: "member",
     },
     tenant: { id: "route-lab", name: "Route Lab" },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -185,7 +184,7 @@ describe("filesystem workbench lifecycle routes", () => {
       { params: Promise.resolve({ threadId: createdThread.id }) },
     )).status).toBe(404);
 
-    auth.session = session(USER_A, "supabase");
+    auth.session = { ...session(USER_A), provider: "unsupported" } as unknown as AuthSession;
     expect((await projectsRoute.GET(request("http://localhost/api/projects"))).status).toBe(503);
   });
 

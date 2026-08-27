@@ -76,7 +76,7 @@ async function startServer() {
       AIBRAIN_INSTALLATION_CONFIG: configPath,
       AIBRAIN_SESSION_SECRET: "e2e-session-secret-0123456789abcdef0123456789abcdef",
       CHAT_RUNTIME: "demo",
-      CONTROL_PLANE_DATA_DIR: path.join(root, "control-plane"),
+      AIBRAIN_DEMO_DATA_DIR: path.join(root, "demo-data"),
       NEXT_TELEMETRY_DISABLED: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -176,7 +176,7 @@ describe("real Next HTTP workbench lifecycle", () => {
     const rejected = await json("/api/auth/login", {
       method: "POST",
       headers: { Origin: "https://attacker.invalid" },
-      body: JSON.stringify({ userId: "example-owner" }),
+      body: JSON.stringify({ userId: "example-user" }),
     });
     expect(rejected.status).toBe(403);
   });
@@ -185,7 +185,7 @@ describe("real Next HTTP workbench lifecycle", () => {
     const login = await json("/api/auth/login", {
       method: "POST",
       headers: { Origin: baseUrl },
-      body: JSON.stringify({ userId: "example-owner" }),
+      body: JSON.stringify({ userId: "example-user" }),
     });
     expect(login.status).toBe(200);
     cookie = cookieFrom(login);

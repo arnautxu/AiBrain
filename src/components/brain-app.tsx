@@ -7,8 +7,6 @@ import { ChatWorkspace } from "@/components/chat-workspace";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
-import { RuntimePanel } from "@/components/runtime-panel";
-import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -54,7 +52,7 @@ import {
   type WorkbenchThread,
 } from "@/workbench/types";
 
-type SideWindowId = Exclude<BrainWindowId, "chat">;
+type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
 
 type BrainStyle = CSSProperties & {
   "--brain-accent": string;
@@ -261,20 +259,14 @@ export function BrainApp({
   manifest,
   session,
   initialWorkbench,
-  memberPreferences,
+  logoPath,
 }: {
   manifest: BrainManifest;
   session: AuthSession;
   initialWorkbench: WorkbenchSnapshot;
-  memberPreferences: {
-    language: "ca" | "es" | "en";
-    tone: "direct" | "balanced" | "detailed";
-  } | null;
+  logoPath: string;
 }) {
-  const defaultPreferences = useMemo(() => ({
-    ...preferencesFromManifest(manifest),
-    ...(memberPreferences ? { tone: memberPreferences.tone } : {}),
-  }), [manifest, memberPreferences]);
+  const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.workbench.preview.v1`;
   const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
@@ -300,7 +292,6 @@ export function BrainApp({
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
-  const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
@@ -326,11 +317,7 @@ export function BrainApp({
     setThreads(snapshot.threads);
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
-    const completedOnboarding = new URLSearchParams(window.location.search)
-      .get("onboarding") === "complete";
-    setPreferences(completedOnboarding
-      ? defaultPreferences
-      : loadPreferences(preferencesKey, defaultPreferences));
+    setPreferences(loadPreferences(preferencesKey, defaultPreferences));
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
@@ -367,19 +354,6 @@ export function BrainApp({
     const timeout = window.setTimeout(() => setNotice(null), 4200);
     return () => window.clearTimeout(timeout);
   }, [notice]);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    const params = new URLSearchParams(window.location.search);
-    const starter = params.get("starter")?.trim();
-    if (starter) setPrompt(starter.slice(0, 400));
-    if (params.get("onboarding") === "complete") {
-      setNotice("Onboarding completat. La teva primera missió ja està preparada.");
-    }
-    if (starter || params.has("onboarding")) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
-  }, [hydrated]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
@@ -596,7 +570,7 @@ export function BrainApp({
           ...(visibleContent !== runtimeContent ? { displayMessage: visibleContent } : {}),
           preferences: {
             tone: preferences.tone,
-            language: memberPreferences?.language ?? manifest.identity.language,
+            language: manifest.identity.language,
             showActivity: preferences.showActivityPanel,
           },
           options: {
@@ -638,7 +612,7 @@ export function BrainApp({
       abortRef.current = null;
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, memberPreferences?.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
   const stopActiveTurn = useCallback(async () => {
     const controller = abortRef.current;
@@ -898,9 +872,8 @@ export function BrainApp({
   );
 
   const enabledWindows = manifest.windows.filter((window) =>
-    window.enabled && (session.user.role === "owner" || window.id === "chat"));
+    window.enabled && window.id !== "runtime");
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-  const runtimeEnabled = enabledWindows.some((window) => window.id === "runtime");
 
   const openSideWindow = useCallback((windowId: SideWindowId) => {
     setActiveSideWindow((current) => current === windowId ? null : windowId);
@@ -935,7 +908,6 @@ export function BrainApp({
       }
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
-      else if (automationsOpen) setAutomationsOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
@@ -948,7 +920,6 @@ export function BrainApp({
     actionBusy,
     activeProject,
     activeSideWindow,
-    automationsOpen,
     commandPaletteOpen,
     confirmDialog,
     customizationOpen,
@@ -970,9 +941,9 @@ export function BrainApp({
     <div style={style} className="flex h-[100dvh] overflow-hidden bg-[#f7f7f6] font-sans text-[#20201f]">
       <Sidebar
         productName={manifest.identity.productName}
+        logoPath={logoPath}
         session={session}
         runtimeStatus={runtimeStatus}
-        persistence={initialWorkbench.persistence}
         projects={projects}
         threads={threads}
         activeProjectId={activeProjectId}
@@ -990,12 +961,6 @@ export function BrainApp({
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
         onOpenCustomization={() => setCustomizationOpen(true)}
-        onOpenAutomations={() => {
-          setActiveSideWindow(null);
-          setCustomizationOpen(false);
-          setCommandPaletteOpen(false);
-          setAutomationsOpen(true);
-        }}
       />
 
       <ChatWorkspace
@@ -1037,7 +1002,7 @@ export function BrainApp({
         onResolveApproval={resolveApproval}
         onCreateVersion={(message) => void createVersionFromMessage(message)}
         onResultAction={persistResultAction}
-        showAdvancedControls={session.user.role === "owner"}
+        showAdvancedControls
       />
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
@@ -1051,15 +1016,6 @@ export function BrainApp({
         />
       ) : null}
 
-      {session.user.role === "owner" && runtimeEnabled && activeSideWindow === "runtime" ? (
-        <RuntimePanel
-          manifest={manifest}
-          session={session}
-          status={runtimeStatus}
-          onClose={() => setActiveSideWindow(null)}
-        />
-      ) : null}
-
       <CustomizationPanel
         productName={manifest.identity.productName}
         open={customizationOpen}
@@ -1069,12 +1025,6 @@ export function BrainApp({
         onClose={() => setCustomizationOpen(false)}
       />
 
-      <AutomationsPanel
-        projectId={activeProject?.id ?? null}
-        open={automationsOpen}
-        onClose={() => setAutomationsOpen(false)}
-      />
-
       <CommandPalette
         open={commandPaletteOpen}
         busy={actionBusy || sending}
@@ -1082,14 +1032,12 @@ export function BrainApp({
         threads={threads}
         activeProjectId={activeProjectId}
         inspectorEnabled={inspectorEnabled}
-        runtimeEnabled={runtimeEnabled}
         onClose={() => setCommandPaletteOpen(false)}
         onNewThread={startNewThread}
         onNewProject={() => setTextDialog({ kind: "create-project" })}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onOpenInspector={() => setActiveSideWindow("inspector")}
-        onOpenRuntime={() => setActiveSideWindow("runtime")}
         onOpenCustomization={() => setCustomizationOpen(true)}
       />
 

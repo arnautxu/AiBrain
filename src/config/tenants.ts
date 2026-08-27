@@ -28,24 +28,22 @@ const tenants: Record<string, TenantDefinition> = {
 
 const demoAccounts: DemoAccount[] = [
   {
-    id: "example-owner",
+    id: "example-user",
     name: "Alex Example",
     email: "alex@example.invalid",
-    role: "owner",
     tenantId: "studio",
     tenantName: tenants.studio.name,
     productName: tenants.studio.manifest.identity.productName,
-    description: "Propietari · pot editar el manifest i les finestres",
+    description: "Entorn de desenvolupament amb marca i workbench propis",
   },
   {
-    id: "ops-member",
+    id: "operations-user",
     name: "Equip Ops",
     email: "equip@operations.demo",
-    role: "member",
     tenantId: "operations",
     tenantName: tenants.operations.name,
     productName: tenants.operations.manifest.identity.productName,
-    description: "Membre · experiència operativa sense accés al control plane",
+    description: "Segona instal·lació sintètica amb configuració independent",
   },
 ];
 

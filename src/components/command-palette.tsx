@@ -6,7 +6,6 @@ import {
   ChatCircleDots,
   Command,
   Folder,
-  HardDrives,
   ListChecks,
   MagnifyingGlass,
   Plus,
@@ -32,14 +31,12 @@ type CommandPaletteProps = {
   threads: WorkbenchThread[];
   activeProjectId: string | null;
   inspectorEnabled: boolean;
-  runtimeEnabled: boolean;
   onClose: () => void;
   onNewThread: () => void;
   onNewProject: () => void;
   onSelectProject: (projectId: string) => void;
   onSelectThread: (threadId: string) => void;
   onOpenInspector: () => void;
-  onOpenRuntime: () => void;
   onOpenCustomization: () => void;
 };
 
@@ -57,14 +54,12 @@ export function CommandPalette({
   threads,
   activeProjectId,
   inspectorEnabled,
-  runtimeEnabled,
   onClose,
   onNewThread,
   onNewProject,
   onSelectProject,
   onSelectThread,
   onOpenInspector,
-  onOpenRuntime,
   onOpenCustomization,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
@@ -104,15 +99,6 @@ export function CommandPalette({
         keywords: "review inspector canvis diff activitat aprovacions",
         run: onOpenInspector,
       }] : []),
-      ...(runtimeEnabled ? [{
-        id: "action:runtime",
-        group: "Accions" as const,
-        label: "Obre Runtime",
-        detail: "Model, workspace i política d’execució",
-        icon: <HardDrives size={16} />,
-        keywords: "runtime model workspace sandbox entorn",
-        run: onOpenRuntime,
-      }] : []),
       {
         id: "action:customize",
         group: "Accions",
@@ -151,11 +137,9 @@ export function CommandPalette({
     onNewThread,
     onOpenCustomization,
     onOpenInspector,
-    onOpenRuntime,
     onSelectProject,
     onSelectThread,
     projects,
-    runtimeEnabled,
     threads,
   ]);
 

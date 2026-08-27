@@ -28,7 +28,6 @@ function session(userId: string): AuthSession {
       id: userId,
       name: `User ${userId.slice(-3)}`,
       email: `${userId.slice(-3)}@example.test`,
-      role: "member",
     },
     tenant: { id: "publication-lab", name: "Publication Lab" },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),

@@ -106,7 +106,6 @@ function demoSession(payload: DemoSessionPayload): AuthSession | null {
       id: account.id,
       name: account.name,
       email: account.email,
-      role: account.role,
     },
     tenant: { id: tenant.id, name: tenant.name },
     expiresAt: new Date(payload.expiresAt).toISOString(),
@@ -128,10 +127,6 @@ async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
       id: user.userId,
       name: user.displayName,
       email: user.email,
-      // Roles are no longer an authentication concern. This compatibility
-      // value keeps the existing employee shell stable until the rejected
-      // owner/control surfaces are removed.
-      role: "member",
     },
     tenant: {
       id: installation.installationId,

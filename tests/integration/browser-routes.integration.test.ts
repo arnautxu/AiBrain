@@ -52,7 +52,6 @@ function localSession(userId: string): AuthSession {
       id: userId,
       name: "Browser User",
       email: "browser@example.test",
-      role: "member",
     },
     tenant: { id: "browser-lab", name: "Browser Lab" },
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
