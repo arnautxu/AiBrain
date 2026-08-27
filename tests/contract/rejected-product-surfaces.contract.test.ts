@@ -14,16 +14,14 @@ async function exists(relativePath: string) {
 }
 
 describe("rejected product surfaces", () => {
-  it("does not compile routes or panels for roles, onboarding, control plane or automations", async () => {
+  it("does not compile routes or panels for roles, onboarding or a remote control plane", async () => {
     for (const relativePath of [
       "src/app/control/page.tsx",
       "src/app/onboarding/page.tsx",
-      "src/app/api/automations/route.ts",
       "src/app/api/control-plane/automations/route.ts",
       "src/app/api/control-plane/invitations/route.ts",
       "src/app/api/control-plane/manifest/route.ts",
       "src/app/api/onboarding/member/route.ts",
-      "src/components/automations-panel.tsx",
       "src/components/control-plane-form.tsx",
       "src/components/member-onboarding.tsx",
       "src/components/runtime-panel.tsx",
@@ -38,7 +36,8 @@ describe("rejected product surfaces", () => {
     const contract = await readFile(path.join(root, "docs/UI_BACKEND_CONTRACT.md"), "utf8");
     expect(authTypes).not.toMatch(/UserRole|owner|member/u);
     expect(session).not.toMatch(/user\.role|account\.role/u);
-    expect(contract).not.toMatch(/role:\s*"owner"|\/api\/control-plane|\/api\/automations/u);
-    expect(contract).toContain("V1 no publica rutas ni paneles de onboarding");
+    expect(contract).not.toMatch(/\/api\/control-plane/u);
+    expect(contract).toContain("V1 no publica rutas ni paneles de onboarding o control plane remoto");
+    expect(contract).toContain("Las automatizaciones programadas son locales");
   });
 });

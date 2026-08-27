@@ -45,7 +45,7 @@ configuració i infraestructura, no el codi.
   confirmació explícita, hash, control de conflicte, versió i auditoria.
 - Browser/Computer Use separa perfil, targets, descàrregues, viewer i takeover
   per usuari/thread.
-- App nativa, veu, vídeo i automatitzacions programades són fora de V1.
+- App nativa, veu i vídeo són fora de V1. Les automatitzacions programades s'ofereixen només mitjançant el worker local explícit, sense promesa d'execució cloud.
 
 ## Brand Commitments
 
