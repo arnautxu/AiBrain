@@ -526,3 +526,66 @@ npm run infra:validate
 - Mantener cursores/IDs de instalación+usuario+thread+turn+item, deduplicar eventos y representar estados `pending`, `degraded`, `reconnecting`, `conflict` y recuperables según contrato.
 - Abrir un runtime thread nuevo cuando se habiliten browser dynamic tools; approvals y takeover se resuelven por las rutas documentadas y nunca desde estado global de cliente.
 - La rama backend no ha hecho merge/rebase/reset ni reescritura masiva de `codex/aibrain-ui-parity`; la integración debe hacerse mediante commit/PR normal después de sus propias pruebas visuales.
+
+## Despliegue integrado Hetzner — 2026-08-27
+
+- Rama de integración: `codex/aibrain-integrated-qa`, creada desde
+  `codex/aibrain-ui-parity` y combinada sin conflictos con
+  `codex/aibrain-backend-definitivo`. Checkpoint desplegado:
+  `d325fe8b75a7cf5ed78796cf29605c0c526080b3`.
+- URL pública de QA: `https://aibrain-hetzner.tailf44d1a.ts.net/`, protegida
+  por Auth Supabase y Origin/CSRF. Un Origin ajeno devuelve 403 y el Origin
+  exacto alcanza Auth (401 con credenciales sintéticas inválidas).
+- Recursos exclusivos: proyecto, tres redes, tres volúmenes, paths de host,
+  registro local e imágenes `aibrain-company-qa-*`; no se comparte red,
+  volumen ni socket Docker con BGreenly. La aplicación solo se une a la red
+  interna y no publica puertos ni tiene salida directa.
+- Frontera de red: gateway de salida autenticado con allowlist exacta para
+  Supabase/Auth y Codex; gateway TCP de entrada mínimo entre loopback y la red
+  privada. Tailscale Funnel publica únicamente el loopback 3100 mediante HTTPS.
+- Hardening real del host: AppArmor dedicado, seccomp fail-closed, rootfs RO,
+  usuario 10001, capacidades eliminadas y preflights Bubblewrap efectivos para
+  worker, browser y conversión documental. El ajuste `systempaths=unconfined`
+  se limita al contenedor no-root/cap-drop para permitir un procfs nuevo dentro
+  de cada PID namespace; no modifica sysctls globales.
+- Imágenes construidas desde cero y fijadas por digest; revisión OCI exacta
+  `d325fe8...`; Codex CLI `0.149.1`; Chromium `151.0.7922.137`; Compose y host
+  preflight verdes.
+- Salud medida tras cutover: app, ingress y egress `healthy`, cero restarts;
+  `/api/health/live` y `/api/health/ready` verdes. Readiness confirma data,
+  backups, contexto, usuarios, source-ro, publish-rw, ausencia de docker.sock,
+  capacidad de disco y toolchains Codex/browser/documentos.
+- Usuario Supabase real de Arnau provisionado una vez en el volumen nuevo, con
+  CODEX_HOME, workspace, staging, artefactos, browser y contexto propios. Solo
+  se migraron sus ficheros de autenticación Codex, con modo 0600; no se copió
+  historial ni estado SQLite del despliegue anterior.
+- Validación Codex real tras el gateway: `Logged in using ChatGPT`; un turno
+  contra la suscripción devolvió exactamente `AIBRAIN_CODEX_OK`. La primera
+  ejecución confirmó que la cuenta ChatGPT usa `chatgpt.com`; se añadió ese
+  hostname exacto a la allowlist junto a `api.openai.com` y el replay quedó
+  verde.
+- Pruebas locales de la rama integrada: instalación limpia, typecheck, lint,
+  build Next, contratos 15/15 e integración de host 3/3 verdes. La suite
+  agregada registró 115 ficheros pasados + 1 omitido y 529 pruebas pasadas + 3
+  omitidas; la suite de release presenta tres timeouts solo bajo contención del
+  host local y pasa aislada en el baseline backend.
+- Rollback inmediato conservado: el contenedor AiBrain anterior sigue intacto
+  en loopback 3000; el cutover reversible es únicamente el proxy Tailscale al
+  nuevo ingress 3100. No se borraron releases, imágenes, datos ni backups.
+- Acción de prueba humana pendiente: iniciar sesión en la URL con el usuario y
+  contraseña Supabase de Arnau y recorrer el workbench UI. Recuperación de
+  contraseña usa el flujo Supabase ya implementado; no se almacenan
+  credenciales de usuario en el repo ni en este documento.
+
+### Integración futura con Arnau
+
+1. Arnau continúa commits pequeños en `codex/aibrain-ui-parity`; backend
+   continúa en `codex/aibrain-backend-definitivo`.
+2. Antes de cada QA, actualizar ambas ramas remotas y fusionarlas mediante
+   commits normales en `codex/aibrain-integrated-qa`; nunca copiar carpetas,
+   rebasar/destruir la rama del otro ni trabajar sobre `main`.
+3. Resolver conflictos únicamente en la rama integrada, ejecutar typecheck,
+   lint, contratos, E2E y build, y desplegar una imagen con revisión OCI y
+   digest nuevos.
+4. Cuando la rama integrada esté aceptada visual y funcionalmente, abrir PR a
+   `main`; el merge sigue siendo una acción separada y no se ha realizado.
