@@ -606,14 +606,14 @@ export function ChatWorkspace({
           </div>
         ) : (
           <section className="mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(8rem,26vh,12rem)] text-center md:px-8">
-            <h1 className="text-balance text-[24px] font-normal leading-7 tracking-[-.02em] text-[var(--text)]">¿En qué trabajamos?</h1>
+            <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">¿En qué trabajamos?</h1>
             <div className="mt-[clamp(14rem,27vh,16rem)] flex w-full flex-wrap justify-center gap-1.5 md:mt-[clamp(15rem,27vh,17rem)]">
               {[
                 ["Analizar información", "Encuentra riesgos, claves y próximos pasos"],
                 ["Crear un documento", "Prepara un primer borrador listo para revisar"],
                 ["Resumir contenido", "Quédate con decisiones, fechas y acciones"],
               ].map(([label, detail]) => (
-                <button key={label} type="button" title={detail} className="min-h-9 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[10px] font-medium text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)]" onClick={() => { onPromptChange(`${label}: `); }}>
+                <button key={label} type="button" title={detail} className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2 text-[12px] font-medium text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)]" onClick={() => { onPromptChange(`${label}: `); }}>
                   {label}
                 </button>
               ))}
@@ -624,7 +624,7 @@ export function ChatWorkspace({
 
       <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "!absolute inset-x-0 top-[clamp(15.6rem,42vh,21.25rem)] z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
-        <div className={`relative mx-auto ${hasMessages ? "max-w-[610px]" : "max-w-[768px]"}`}>
+        <div className="relative mx-auto max-w-[768px]">
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
@@ -689,11 +689,11 @@ export function ChatWorkspace({
                   <ComposerPicker
                     ariaLabel="Modo del turno"
                     value={composerMode}
-                    valueLabel={{ agent: "Agent", plan: "Plan", ask: "Pregunta" }[composerMode]}
+                    valueLabel={{ agent: "Trabajar", plan: "Planificar", ask: "Preguntar" }[composerMode]}
                     options={[
-                      ...(manifest.composer.modes.includes("agent") ? [{ value: "agent", label: "Agent", detail: "Ejecuta el trabajo" }] : []),
-                      ...(manifest.composer.modes.includes("plan") ? [{ value: "plan", label: "Plan", detail: "Prepara los pasos" }] : []),
-                      ...(manifest.composer.modes.includes("ask") ? [{ value: "ask", label: "Pregunta", detail: "Responde sin ejecutar" }] : []),
+                      ...(manifest.composer.modes.includes("agent") ? [{ value: "agent", label: "Trabajar", detail: "Prepara y ejecuta el trabajo" }] : []),
+                      ...(manifest.composer.modes.includes("plan") ? [{ value: "plan", label: "Planificar", detail: "Propone los pasos antes de actuar" }] : []),
+                      ...(manifest.composer.modes.includes("ask") ? [{ value: "ask", label: "Preguntar", detail: "Responde sin ejecutar acciones" }] : []),
                     ]}
                     open={composerPickerOpen === "mode"}
                     placement={hasMessages ? "above" : "below"}
@@ -706,8 +706,8 @@ export function ChatWorkspace({
                   <ComposerPicker
                     ariaLabel="Skill"
                     value={selectedSkill ?? ""}
-                    valueLabel={runtimeStatus.skills.find((skill) => skill.id === selectedSkill)?.label ?? "Sin skill"}
-                    options={[{ value: "", label: "Sin skill" }, ...runtimeStatus.skills.map((skill) => ({ value: skill.id, label: skill.label, icon: <Wrench size={12} /> }))]}
+                    valueLabel={runtimeStatus.skills.find((skill) => skill.id === selectedSkill)?.label ?? "Sin herramienta"}
+                    options={[{ value: "", label: "Sin herramienta" }, ...runtimeStatus.skills.map((skill) => ({ value: skill.id, label: skill.label, icon: <Wrench size={12} /> }))]}
                     open={composerPickerOpen === "skill"}
                     placement={hasMessages ? "above" : "below"}
                     className="hidden sm:block"
@@ -750,7 +750,7 @@ export function ChatWorkspace({
                     onSelect={(value) => onComposerEffortChange((value || null) as RuntimeReasoningEffort | null)}
                   />
                 ) : null}
-                <span className="composer-hint hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
+                <span className="composer-hint hidden text-[11px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 <VoiceDictationControl
                   value={prompt}
                   disabled={!project || sending || documentUploading}

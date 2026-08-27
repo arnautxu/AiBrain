@@ -55,7 +55,7 @@ describe("CustomizationPanel", () => {
       onClose={vi.fn()}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Apps y herramientas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Herramientas" }));
     expect(await screen.findByText("Búsqueda web")).toBeInTheDocument();
     expect(screen.getByText("Internet público")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Activar Búsqueda web" }));
