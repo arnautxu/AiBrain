@@ -414,6 +414,7 @@ type ChatRequest = {
     imageGeneration: boolean;
     skill: string | null;      // máximo 100
     attachments: ChatInputAttachment[];
+    documentUploadIds?: string[]; // máximo 10 UUID ya staged en este thread
   };
 };
 ```
@@ -435,7 +436,8 @@ Ejemplo:
     "webSearch": false,
     "imageGeneration": false,
     "skill": null,
-    "attachments": []
+    "attachments": [],
+    "documentUploadIds": ["0198b9f0-6631-7000-8000-000000000511"]
   }
 }
 ```
@@ -700,8 +702,8 @@ Acciones: `approved`, `pending`, `undo_waiting`, `undo_complete`. Respuesta: `{ 
 type ChatAttachment = {
   id: string;       // UUID
   name: string;     // 1..120
-  mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-  size: number;     // 1..2.000.000
+  mimeType: string; // whitelist de imagen o documento soportado
+  size: number;     // imagen inline <=2 MB; staged <=50 MiB
 };
 
 type ChatInputAttachment = ChatAttachment & {
@@ -709,7 +711,10 @@ type ChatInputAttachment = ChatAttachment & {
 };
 ```
 
-Máximo 3 imágenes y 5.000.000 bytes declarados en total. El `dataUrl` solo viaja en el request; el mensaje persistido conserva metadata, no base64.
+Máximo 3 imágenes y 5.000.000 bytes reales en total. El backend decodifica
+base64, compara tamaño y firma PNG/JPEG/WebP/GIF con el MIME; no confía solo en
+la metadata declarada. El `dataUrl` solo viaja en el request; el mensaje
+persistido conserva metadata, no base64.
 
 ### 10.2 Imágenes generadas
 
@@ -786,6 +791,24 @@ Respuesta `201`:
 ```
 
 `relativePath` es metadata opaca; la UI no debe enviarla de vuelta como authority. `409` para `uploadId` reutilizado con otro contenido; `413` por tamaño; `400` validación de seguridad; `503` toolchain/store no disponible.
+
+Para adjuntar el documento a un turn, la UI envía únicamente su `uploadId` en
+`options.documentUploadIds` del `POST /api/chat`, después de recibir el `201`.
+No reenvía `relativePath`, paths absolutos, MIME, hash ni nombre. El backend:
+
+- exige `documents.read | consult | allow` en el fingerprint de ese turn;
+- vuelve a verificar user, thread, fichero regular, tamaño y SHA-256;
+- deriva el path absoluto bajo el staging privado del empleado;
+- expone staging como root runtime de lectura, manteniendo writable solo el
+  workspace del proyecto;
+- entrega imágenes como `localImage` y Office/PDF/texto como menciones de path,
+  acompañadas de una instrucción server-side que los trata como datos no
+  confiables y prohíbe modificarlos o publicarlos.
+
+Máximo 10 documentos y 200 MiB verificados por turn como protección de
+saturación. Los metadatos seguros se guardan en `ChatMessage.attachments`; los
+paths no se devuelven a la UI. Un ID de otro thread/empleado, un contenido
+alterado o un permiso denegado falla antes de iniciar el turn de Codex.
 
 El backend consume el multipart por streaming y escribe un temporal privado;
 no materializa el request ni el fichero completo en RAM. Para OOXML compara
