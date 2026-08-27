@@ -169,6 +169,7 @@ export async function issueBrowserGatewayToken(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
+  threadId: string;
   capabilities: readonly BrowserGatewayCapability[];
   ttlMs?: number;
 }) {
@@ -182,6 +183,7 @@ export async function issueBrowserGatewayToken(input: {
     token: state.tokens.issue({
       installationId: input.installationId,
       userId: input.userId,
+      threadId: input.threadId,
       browserSessionId: handle.browserSessionId,
       authSessionId: input.authSessionId,
       capabilities: input.capabilities,
@@ -195,6 +197,7 @@ async function authorizeGateway(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
+  threadId: string;
   token: string;
   capability: BrowserGatewayCapability;
 }) {
@@ -204,6 +207,7 @@ async function authorizeGateway(input: {
   state.tokens.verify(input.token, {
     installationId: input.installationId,
     userId: input.userId,
+    threadId: input.threadId,
     browserSessionId: handle.browserSessionId,
     authSessionId: input.authSessionId,
     requiredCapability: input.capability,
@@ -215,24 +219,26 @@ export async function captureBrowserFrame(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
+  threadId: string;
   token: string;
 }) {
   const state = await authorizeGateway({ ...input, capability: "view" });
-  return state.registry.captureFrame(input.userId);
+  return state.registry.captureFrame(input.userId, input.threadId);
 }
 
 export async function sendBrowserViewerCommand(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
+  threadId: string;
   token: string;
   command: { action: "navigate"; url: string } | { action: "input"; command: BrowserInputCommand };
 }) {
   const state = await authorizeGateway({ ...input, capability: "control" });
   if (input.command.action === "navigate") {
-    await state.registry.navigate(input.userId, input.command.url);
+    await state.registry.navigate(input.userId, input.threadId, input.command.url);
   } else {
-    await state.registry.dispatchInput(input.userId, input.command.command);
+    await state.registry.dispatchInput(input.userId, input.threadId, input.command.command);
   }
 }
 

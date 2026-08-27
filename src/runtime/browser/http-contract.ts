@@ -8,13 +8,14 @@ export type BrowserControlRequest = Readonly<{
 }>;
 
 export type BrowserGatewayTokenRequest = Readonly<{
+  threadId: string;
   capabilities: BrowserGatewayCapability[];
   ttlMs?: number;
 }>;
 
 export type BrowserViewerCommand =
-  | Readonly<{ action: "navigate"; url: string }>
-  | Readonly<{ action: "input"; command: BrowserInputCommand }>;
+  | Readonly<{ threadId: string; action: "navigate"; url: string }>
+  | Readonly<{ threadId: string; action: "input"; command: BrowserInputCommand }>;
 
 const CONTROL_ACTIONS = ["start", "stop", "takeover", "release", "heartbeat"] as const;
 const CAPABILITIES = ["view", "control", "heartbeat", "takeover"] as const;
@@ -45,6 +46,11 @@ function optionalString(value: unknown, maximum: number) {
   );
 }
 
+function canonicalUuid(value: unknown): value is string {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value);
+}
+
 export function parseBrowserControlRequest(value: unknown): BrowserControlRequest | null {
   const record = exactRecord(value, ["action"]);
   return record && typeof record.action === "string" &&
@@ -54,14 +60,15 @@ export function parseBrowserControlRequest(value: unknown): BrowserControlReques
 }
 
 export function parseBrowserGatewayTokenRequest(value: unknown): BrowserGatewayTokenRequest | null {
-  const record = exactRecord(value, ["capabilities"], ["ttlMs"]);
+  const record = exactRecord(value, ["threadId", "capabilities"], ["ttlMs"]);
   if (!record || !Array.isArray(record.capabilities) || record.capabilities.length < 1 ||
     record.capabilities.length > CAPABILITIES.length ||
     record.capabilities.some((item) => typeof item !== "string" ||
       !CAPABILITIES.includes(item as BrowserGatewayCapability)) ||
     new Set(record.capabilities).size !== record.capabilities.length ||
-    !optionalInteger(record.ttlMs, 1_000, 5 * 60_000)) return null;
+    !optionalInteger(record.ttlMs, 1_000, 5 * 60_000) || !canonicalUuid(record.threadId)) return null;
   return {
+    threadId: record.threadId,
     capabilities: [...record.capabilities].sort() as BrowserGatewayCapability[],
     ...(record.ttlMs === undefined ? {} : { ttlMs: record.ttlMs as number }),
   };
@@ -95,28 +102,40 @@ function parseKeyCommand(value: unknown): BrowserInputCommand | null {
 }
 
 export function parseBrowserViewerCommand(value: unknown): BrowserViewerCommand | null {
-  const navigation = exactRecord(value, ["action", "url"]);
+  const navigation = exactRecord(value, ["threadId", "action", "url"]);
   if (navigation?.action === "navigate" && typeof navigation.url === "string" &&
+    canonicalUuid(navigation.threadId) &&
     navigation.url.length > 0 && navigation.url.length <= 2_048 &&
     navigation.url.trim() === navigation.url && !/\p{C}/u.test(navigation.url)) {
     try {
       const url = new URL(navigation.url);
       if ((url.protocol === "http:" || url.protocol === "https:") && !url.username && !url.password) {
-        return { action: "navigate", url: url.href };
+        return { threadId: navigation.threadId, action: "navigate", url: url.href };
       }
     } catch {
-      if (navigation.url === "about:blank") return { action: "navigate", url: "about:blank" };
+      if (navigation.url === "about:blank") {
+        return { threadId: navigation.threadId, action: "navigate", url: "about:blank" };
+      }
     }
-    if (navigation.url === "about:blank") return { action: "navigate", url: "about:blank" };
+    if (navigation.url === "about:blank") {
+      return { threadId: navigation.threadId, action: "navigate", url: "about:blank" };
+    }
     return null;
   }
-  const input = exactRecord(value, ["action", "command"]);
-  if (input?.action !== "input") return null;
+  const input = exactRecord(value, ["threadId", "action", "command"]);
+  if (input?.action !== "input" || !canonicalUuid(input.threadId)) return null;
   const commandRecord = input.command && typeof input.command === "object" && !Array.isArray(input.command)
     ? input.command as Record<string, unknown>
     : null;
   const command = commandRecord?.kind === "mouse"
     ? parseMouseCommand(input.command)
     : parseKeyCommand(input.command);
-  return command ? { action: "input", command } : null;
+  return command ? { threadId: input.threadId, action: "input", command } : null;
+}
+
+export function parseBrowserViewerThreadQuery(searchParams: URLSearchParams) {
+  if ([...searchParams.keys()].some((key) => key !== "threadId") ||
+    searchParams.getAll("threadId").length !== 1) return null;
+  const threadId = searchParams.get("threadId");
+  return canonicalUuid(threadId) ? threadId : null;
 }

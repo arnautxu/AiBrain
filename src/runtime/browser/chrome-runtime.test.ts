@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CdpSessionScope } from "@/runtime/browser/cdp-client";
 import type { BrowserRuntimeContext } from "@/runtime/browser/types";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 import {
@@ -11,18 +12,22 @@ import {
   ChromeBrowserRuntimeFactory,
   ChromeCdpRuntime,
   ChromeRuntimeError,
-  parseDevToolsActivePort,
   validateBrowserNavigationUrl,
   type CdpClientLike,
 } from "@/runtime/browser/chrome-runtime";
 
 const roots: string[] = [];
+const THREAD_A = "0198b9f0-6631-7000-8000-000000000411";
+const THREAD_B = "0198b9f0-6631-7000-8000-000000000412";
 
 class FakeChromeProcess extends EventEmitter {
   readonly pid = 42_001;
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
   readonly stderr = new PassThrough();
+  readonly requestPipe = new PassThrough();
+  readonly responsePipe = new PassThrough();
+  readonly stdio = [null, null, this.stderr, this.requestPipe, this.responsePipe] as const;
   readonly signals: NodeJS.Signals[] = [];
 
   kill(signal: NodeJS.Signals = "SIGTERM") {
@@ -33,52 +38,107 @@ class FakeChromeProcess extends EventEmitter {
   }
 
   exit() {
+    if (this.exitCode !== null || this.signalCode !== null) return;
     this.exitCode = 0;
     this.emit("exit", 0, null);
   }
 }
 
+type FakeCommand = {
+  method: string;
+  params: Record<string, unknown>;
+  sessionId: string | null;
+};
+
 class FakeCdpClient implements CdpClientLike {
   isOpen = true;
-  readonly commands: Array<{ method: string; params: Record<string, unknown> }> = [];
+  readonly commands: FakeCommand[] = [];
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
+  private readonly targetUrls = new Map<string, string>();
+  private readonly sessionTargets = new Map<string, string>();
+  private nextTarget = 1;
+  private nextSession = 1;
 
   constructor(
-    private readonly kind: "browser" | "page",
     private readonly onBrowserClose: () => void,
+    private readonly versionFailure?: Error,
   ) {}
 
-  async send<Result = unknown>(method: string, params: Record<string, unknown> = {}) {
-    this.commands.push({ method, params });
-    if (method === "Browser.getVersion") return { product: "HeadlessChrome/140.0.0.0" } as Result;
+  async send<Result = unknown>(
+    method: string,
+    params: Record<string, unknown> = {},
+    scope: CdpSessionScope = {},
+  ) {
+    const scopedSessionId = scope.sessionId ?? null;
+    this.commands.push({ method, params, sessionId: scopedSessionId });
+    if (method === "Browser.getVersion") {
+      if (this.versionFailure) throw this.versionFailure;
+      return { product: "HeadlessChrome/140.0.0.0" } as Result;
+    }
     if (method === "Browser.close") {
       this.onBrowserClose();
       return {} as Result;
     }
-    if (method === "Page.captureScreenshot") {
-      return { data: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString("base64") } as Result;
+    if (method === "Target.createTarget") {
+      const targetId = `target-${this.nextTarget++}`;
+      this.targetUrls.set(targetId, "about:blank");
+      return { targetId } as Result;
+    }
+    if (method === "Target.attachToTarget") {
+      const targetId = String(params.targetId);
+      const sessionId = `session-${this.nextSession++}`;
+      this.sessionTargets.set(sessionId, targetId);
+      return { sessionId } as Result;
+    }
+    if (method === "Target.detachFromTarget") {
+      const sessionId = String(params.sessionId);
+      this.sessionTargets.delete(sessionId);
+      this.emitEvent("Target.detachedFromTarget", { sessionId });
+      return {} as Result;
+    }
+    if (method === "Target.closeTarget") {
+      this.targetUrls.delete(String(params.targetId));
+      return { success: true } as Result;
     }
     if (method === "Target.getTargets") {
       return {
-        targetInfos: [{ targetId: "page-1", type: "page", url: "https://example.test/" }],
+        targetInfos: [...this.targetUrls].map(([targetId, url]) => ({ targetId, type: "page", url })),
       } as Result;
     }
-    if (this.kind === "page" || this.kind === "browser") return {} as Result;
-    throw new Error("unexpected client");
+    if (method === "Page.captureScreenshot") {
+      return {
+        data: Buffer.concat([
+          Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+          Buffer.from(scopedSessionId ?? "browser"),
+        ]).toString("base64"),
+      } as Result;
+    }
+    if (method === "Page.navigate" && scopedSessionId) {
+      const targetId = this.sessionTargets.get(scopedSessionId);
+      if (targetId) this.targetUrls.set(targetId, String(params.url));
+      return {} as Result;
+    }
+    return {} as Result;
   }
 
-  on(method: string, listener: (params: unknown) => void) {
-    const listeners = this.listeners.get(method) ?? new Set<(params: unknown) => void>();
-    listeners.add(listener);
-    this.listeners.set(method, listeners);
+  on(method: string, listener: (params: unknown) => void, scope: CdpSessionScope = {}) {
+    const key = `${scope.sessionId ?? "<browser>"}\u0000${method}`;
+    const current = this.listeners.get(key) ?? new Set<(params: unknown) => void>();
+    current.add(listener);
+    this.listeners.set(key, current);
     return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0) this.listeners.delete(method);
+      current.delete(listener);
+      if (current.size === 0) this.listeners.delete(key);
     };
   }
 
-  emitEvent(method: string, params: unknown) {
-    for (const listener of this.listeners.get(method) ?? []) listener(params);
+  emitEvent(method: string, params: unknown, sessionId?: string) {
+    const key = `${sessionId ?? "<browser>"}\u0000${method}`;
+    for (const listener of this.listeners.get(key) ?? []) listener(params);
+  }
+
+  sessionForTarget(targetId: string) {
+    return [...this.sessionTargets].find(([, candidate]) => candidate === targetId)?.[0] ?? null;
   }
 
   async close() {
@@ -92,10 +152,10 @@ function publicNetworkPolicy() {
   });
 }
 
-async function eventually(check: () => boolean, timeoutMs = 1_000) {
+async function eventually(check: () => boolean | Promise<boolean>, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (check()) return;
+    if (await check()) return;
     await new Promise<void>((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("condition did not become true");
@@ -132,185 +192,179 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("ChromeCdpRuntime", () => {
-  it("launches loopback ephemeral CDP, validates version and implements the interactive lifecycle", async () => {
+describe("ChromeCdpRuntime private pipe", () => {
+  it("launches fd3/fd4 CDP, isolates thread sessions and preserves network, downloads and takeover", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
     let spawnedArgs: readonly string[] = [];
-    let browserClient: FakeCdpClient;
-    let pageClient: FakeCdpClient;
+    let spawnedStdio: unknown;
+    let connectedRequest: unknown;
+    let connectedResponse: unknown;
     const runtime = new ChromeCdpRuntime(context, {
       executablePath: "/bin/sh",
       expectedVersion: "140.0.0.0",
       startupTimeoutMs: 2_000,
       shutdownTimeoutMs: 100,
-      spawnProcess: (_executable, args) => {
+      spawnProcess: (_executable, args, options) => {
         spawnedArgs = args;
-        void writeFile(
-          path.join(context.roots.profile, "DevToolsActivePort"),
-          "49152\n/devtools/browser/browser-1\n",
-          { mode: 0o600 },
-        );
+        spawnedStdio = options.stdio;
         return child;
       },
-      fetchJson: async (_port, resource) => resource === "/json/version"
-        ? {
-          Browser: "HeadlessChrome/140.0.0.0",
-          webSocketDebuggerUrl: "ws://localhost:49152/devtools/browser/browser-1",
-        }
-        : [{
-          id: "page-1",
-          type: "page",
-          webSocketDebuggerUrl: "ws://localhost:49152/devtools/page/page-1",
-        }],
-      connectCdp: async (endpoint) => {
-        if (endpoint.includes("/browser/")) {
-          browserClient = new FakeCdpClient("browser", () => child.exit());
-          return browserClient;
-        }
-        pageClient = new FakeCdpClient("page", () => child.exit());
-        return pageClient;
+      connectCdpPipe: (request, response) => {
+        connectedRequest = request;
+        connectedResponse = response;
+        return client;
       },
       networkPolicy: publicNetworkPolicy(),
     });
 
     await runtime.start();
-    expect(spawnedArgs).toContain("--remote-debugging-address=127.0.0.1");
-    expect(spawnedArgs).toContain("--remote-debugging-port=0");
+    expect(spawnedArgs).toContain("--remote-debugging-pipe");
+    expect(spawnedArgs.some((argument) => argument.startsWith("--remote-debugging-port"))).toBe(false);
+    expect(spawnedArgs.some((argument) => argument.startsWith("--remote-debugging-address"))).toBe(false);
     expect(spawnedArgs).toContain(`--user-data-dir=${context.roots.profile}`);
     expect(spawnedArgs).not.toContain("--no-sandbox");
-    expect(spawnedArgs.join(" ")).not.toContain("docker.sock");
-    expect(runtime.debuggingPort).toBe(49_152);
+    expect(spawnedStdio).toEqual(["ignore", "ignore", "pipe", "pipe", "pipe"]);
+    expect(connectedRequest).toBe(child.requestPipe);
+    expect(connectedResponse).toBe(child.responsePipe);
     await expect(runtime.health()).resolves.toMatchObject({ healthy: true });
-    await expect(runtime.captureFrame()).resolves.toMatchObject({
-      schemaVersion: 1,
-      mediaType: "image/png",
-    });
-    await expect(runtime.navigate("https://example.test"))
+
+    const [frameA, frameB] = await Promise.all([
+      runtime.captureFrame(THREAD_A),
+      runtime.captureFrame(THREAD_B),
+    ]);
+    const targetA = runtime.targetIdFor(THREAD_A) as string;
+    const targetB = runtime.targetIdFor(THREAD_B) as string;
+    const sessionA = client.sessionForTarget(targetA) as string;
+    const sessionB = client.sessionForTarget(targetB) as string;
+    expect(targetA).not.toBe(targetB);
+    expect(sessionA).not.toBe(sessionB);
+    expect(frameA.dataBase64).not.toBe(frameB.dataBase64);
+
+    await expect(runtime.navigate(THREAD_A, "https://a.example.test/path"))
       .rejects.toMatchObject({ code: "CHROME_TAKEOVER_REQUIRED" });
     await runtime.takeOver();
-    await runtime.navigate("https://example.test");
-    await expect(runtime.navigate("http://169.254.169.254/latest/meta-data/"))
+    await Promise.all([
+      runtime.navigate(THREAD_A, "https://a.example.test/path"),
+      runtime.navigate(THREAD_B, "https://b.example.test/path"),
+      runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "A" }),
+      runtime.dispatchInput(THREAD_B, { kind: "key", event: "keyDown", key: "B" }),
+    ]);
+    await expect(runtime.navigate(THREAD_A, "http://169.254.169.254/latest/meta-data/"))
       .rejects.toMatchObject({ code: "BROWSER_NETWORK_PRIVATE_DESTINATION" });
-    expect(pageClient!.commands.filter((command) => command.method === "Page.navigate")).toHaveLength(1);
-    pageClient!.emitEvent("Fetch.requestPaused", {
-      requestId: "allowed-1",
-      request: { url: "https://cdn.example.test/app.js" },
-    });
-    pageClient!.emitEvent("Fetch.requestPaused", {
-      requestId: "blocked-1",
+    await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://a.example.test/path");
+    await expect(runtime.currentUrl(THREAD_B)).resolves.toBe("https://b.example.test/path");
+
+    client.emitEvent("Fetch.requestPaused", {
+      requestId: "allowed-a",
+      request: { url: "https://a.example.test/app.js" },
+    }, sessionA);
+    client.emitEvent("Fetch.requestPaused", {
+      requestId: "blocked-b",
       request: { url: "http://127.0.0.1/private" },
-      redirectedRequestId: "allowed-1",
-    });
-    await eventually(() => pageClient!.commands.some((command) =>
-      command.method === "Fetch.continueRequest" && command.params.requestId === "allowed-1") &&
-      pageClient!.commands.some((command) =>
-        command.method === "Fetch.failRequest" && command.params.requestId === "blocked-1"));
-    await runtime.dispatchInput({
-      kind: "mouse",
-      event: "mousePressed",
-      x: 100,
-      y: 200,
-      button: "left",
-      clickCount: 1,
-    });
-    await runtime.dispatchInput({ kind: "key", event: "keyDown", key: "A", code: "KeyA" });
-    await expect(runtime.currentUrl()).resolves.toBe("https://example.test/");
-    await runtime.releaseTakeover();
+    }, sessionB);
+    await eventually(() => client.commands.some((command) =>
+      command.method === "Fetch.continueRequest" && command.params.requestId === "allowed-a" &&
+      command.sessionId === sessionA) && client.commands.some((command) =>
+      command.method === "Fetch.failRequest" && command.params.requestId === "blocked-b" &&
+      command.sessionId === sessionB));
+    expect(client.commands.some((command) =>
+      command.params.requestId === "blocked-b" && command.sessionId === sessionA)).toBe(false);
+
+    await Promise.all([
+      writeFile(path.join(context.roots.browserRoot, "download-quarantine", "guid-a"), "A"),
+      writeFile(path.join(context.roots.browserRoot, "download-quarantine", "guid-b"), "B"),
+    ]);
+    client.emitEvent("Page.downloadWillBegin", { guid: "guid-a", suggestedFilename: "same.txt" }, sessionA);
+    client.emitEvent("Page.downloadWillBegin", { guid: "guid-b", suggestedFilename: "same.txt" }, sessionB);
+    client.emitEvent("Page.downloadProgress", { guid: "guid-a", state: "completed" }, sessionA);
+    client.emitEvent("Page.downloadProgress", { guid: "guid-b", state: "completed" }, sessionB);
+    const downloadA = path.join(context.roots.downloads, THREAD_A, "same.txt");
+    const downloadB = path.join(context.roots.downloads, THREAD_B, "same.txt");
+    await eventually(async () => Promise.all([
+      readFile(downloadA, "utf8").then((value) => value === "A").catch(() => false),
+      readFile(downloadB, "utf8").then((value) => value === "B").catch(() => false),
+    ]).then((values) => values.every(Boolean)));
+
+    await expect(runtime.captureFrame("0198b9f0-6631-7000-8000-000000000413"))
+      .resolves.toMatchObject({ mediaType: "image/png" });
     await runtime.stop();
     expect(child.exitCode).toBe(0);
-    expect(browserClient!.commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: "Browser.setDownloadBehavior" }),
+    expect(client.commands).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Target.attachToTarget" }),
+      expect.objectContaining({ method: "Target.detachFromTarget" }),
+      expect.objectContaining({ method: "Target.closeTarget" }),
       expect.objectContaining({ method: "Browser.close" }),
     ]));
-    expect(pageClient!.commands).toEqual(expect.arrayContaining([
-      expect.objectContaining({ method: "Page.navigate" }),
-      expect.objectContaining({ method: "Fetch.enable" }),
-      expect.objectContaining({ method: "Fetch.continueRequest" }),
-      expect.objectContaining({ method: "Fetch.failRequest" }),
-      expect.objectContaining({ method: "Input.dispatchMouseEvent" }),
-      expect.objectContaining({ method: "Input.dispatchKeyEvent" }),
-    ]));
+    expect(client.isOpen).toBe(false);
   });
 
-  it("closes a validated orphan through private CDP before reusing the same profile", async () => {
+  it("applies target backpressure and recreates only a detached thread session", async () => {
     const { context } = await contextFixture();
-    await writeFile(
-      path.join(context.roots.profile, "DevToolsActivePort"),
-      "48111\n/devtools/browser/orphan-1\n",
-      { mode: 0o600 },
-    );
     const child = new FakeChromeProcess();
-    let orphanAlive = true;
-    let spawned = false;
-    let orphanClosed = false;
+    const client = new FakeCdpClient(() => child.exit());
     const runtime = new ChromeCdpRuntime(context, {
       executablePath: "/bin/sh",
       expectedVersion: "140.0.0.0",
-      startupTimeoutMs: 2_000,
-      shutdownTimeoutMs: 100,
-      spawnProcess: () => {
-        spawned = true;
-        void writeFile(
-          path.join(context.roots.profile, "DevToolsActivePort"),
-          "49153\n/devtools/browser/new-1\n",
-          { mode: 0o600 },
-        );
-        return child;
-      },
-      fetchJson: async (port, resource) => {
-        if (port === 48_111) {
-          if (!orphanAlive) throw new Error("orphan stopped");
-          return {
-            Browser: "HeadlessChrome/139.0.0.0",
-            webSocketDebuggerUrl: "ws://127.0.0.1:48111/devtools/browser/orphan-1",
-          };
-        }
-        return resource === "/json/version"
-          ? {
-            Browser: "HeadlessChrome/140.0.0.0",
-            webSocketDebuggerUrl: "ws://127.0.0.1:49153/devtools/browser/new-1",
-          }
-          : [{
-            id: "page-new",
-            type: "page",
-            webSocketDebuggerUrl: "ws://127.0.0.1:49153/devtools/page/page-new",
-          }];
-      },
-      connectCdp: async (endpoint) => {
-        if (endpoint.includes("orphan-1")) {
-          return new FakeCdpClient("browser", () => {
-            orphanClosed = true;
-            orphanAlive = false;
-          });
-        }
-        return new FakeCdpClient(
-          endpoint.includes("/browser/") ? "browser" : "page",
-          () => child.exit(),
-        );
-      },
+      maxThreadTargets: 2,
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
       networkPolicy: publicNetworkPolicy(),
     });
     await runtime.start();
-    expect(orphanClosed).toBe(true);
-    expect(spawned).toBe(true);
-    expect(runtime.debuggingPort).toBe(49_153);
+    await Promise.all([runtime.captureFrame(THREAD_A), runtime.captureFrame(THREAD_B)]);
+    await expect(runtime.captureFrame("0198b9f0-6631-7000-8000-000000000413"))
+      .rejects.toMatchObject({ code: "CHROME_TARGET_BACKPRESSURE" });
+    const oldTargetA = runtime.targetIdFor(THREAD_A) as string;
+    const sessionA = client.sessionForTarget(oldTargetA) as string;
+    client.emitEvent("Target.detachedFromTarget", { sessionId: sessionA });
+    await runtime.captureFrame(THREAD_A);
+    expect(runtime.targetIdFor(THREAD_A)).not.toBe(oldTargetA);
+    expect(runtime.targetIdFor(THREAD_B)).not.toBeNull();
+    await expect(runtime.captureFrame("not-a-thread"))
+      .rejects.toMatchObject({ code: "CHROME_THREAD_INVALID" });
     await runtime.stop();
   });
 
-  it("validates markers, navigation schemes, launch arguments and production version pinning", async () => {
+  it("retries a failed pipe handshake with bounded child cleanup instead of reconnecting", async () => {
     const { context } = await contextFixture();
-    expect(parseDevToolsActivePort("9222\n/devtools/browser/abc-123\n")).toEqual({
-      port: 9_222,
-      webSocketPath: "/devtools/browser/abc-123",
+    const children = [new FakeChromeProcess(), new FakeChromeProcess()];
+    const clients = [
+      new FakeCdpClient(() => children[0].exit(), new Error("pipe startup race")),
+      new FakeCdpClient(() => children[1].exit()),
+    ];
+    let spawnCount = 0;
+    let connectCount = 0;
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      startupTimeoutMs: 1_000,
+      shutdownTimeoutMs: 50,
+      spawnProcess: () => children[spawnCount++],
+      connectCdpPipe: () => clients[connectCount++],
+      networkPolicy: publicNetworkPolicy(),
     });
-    expect(() => parseDevToolsActivePort("9222\nhttp://outside\n")).toThrow(ChromeRuntimeError);
+    await runtime.start();
+    expect(spawnCount).toBe(2);
+    expect(connectCount).toBe(2);
+    expect(children[0].signals).toContain("SIGTERM");
+    expect(clients[0].isOpen).toBe(false);
+    await runtime.stop();
+  });
+
+  it("validates navigation, pipe launch arguments and production version pinning", async () => {
+    const { context } = await contextFixture();
     expect(validateBrowserNavigationUrl("about:blank")).toBe("about:blank");
     expect(validateBrowserNavigationUrl("https://example.test/a")).toBe("https://example.test/a");
     expect(() => validateBrowserNavigationUrl("file:///etc/passwd")).toThrow(ChromeRuntimeError);
     expect(() => validateBrowserNavigationUrl("https://user:pass@example.test"))
       .toThrow(ChromeRuntimeError);
-    expect(buildChromeArguments(context)).not.toContain("--no-sandbox");
+    const args = buildChromeArguments(context);
+    expect(args).toContain("--remote-debugging-pipe");
+    expect(args.some((argument) => argument.includes("remote-debugging-port"))).toBe(false);
+    expect(args.some((argument) => argument.includes("remote-debugging-address"))).toBe(false);
+    expect(args).not.toContain("--no-sandbox");
     vi.stubEnv("NODE_ENV", "production");
     expect(() => new ChromeBrowserRuntimeFactory()).toThrowError(
       expect.objectContaining({ code: "CHROME_VERSION_REQUIRED" }),
@@ -321,5 +375,29 @@ describe("ChromeCdpRuntime", () => {
     })).toThrowError(expect.objectContaining({
       code: "BROWSER_NETWORK_PRODUCTION_OVERRIDE_FORBIDDEN",
     }));
+  });
+
+  it("rejects unsafe stale quarantine entries before spawning Chrome", async () => {
+    const { root, context } = await contextFixture();
+    const quarantine = path.join(context.roots.browserRoot, "download-quarantine");
+    const outside = path.join(root, "outside-download");
+    await mkdir(quarantine, { mode: 0o700 });
+    await writeFile(outside, "do-not-delete", { mode: 0o600 });
+    await symlink(outside, path.join(quarantine, "unsafe-link"));
+    let spawned = false;
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => {
+        spawned = true;
+        return new FakeChromeProcess();
+      },
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await expect(runtime.start()).rejects.toMatchObject({
+      code: "CHROME_DOWNLOAD_QUARANTINE_UNSAFE",
+    });
+    expect(spawned).toBe(false);
+    await expect(readFile(outside, "utf8")).resolves.toBe("do-not-delete");
   });
 });

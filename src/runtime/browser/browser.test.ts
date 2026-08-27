@@ -17,6 +17,8 @@ import { StorageCorruptionError } from "@/storage";
 
 const USER_A = "0198b9f0-6631-7000-8000-000000000301";
 const USER_B = "0198b9f0-6631-7000-8000-000000000302";
+const THREAD_A = "0198b9f0-6631-7000-8000-000000000303";
+const THREAD_B = "0198b9f0-6631-7000-8000-000000000304";
 const roots: string[] = [];
 
 function installation(root: string): Readonly<InstallationConfig> {
@@ -78,19 +80,19 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
   async stop() {
     this.stopped = true;
   }
-  async captureFrame() {
+  async captureFrame(threadId: string) {
     return {
       schemaVersion: 1 as const,
       mediaType: "image/png" as const,
-      dataBase64: Buffer.from("frame").toString("base64"),
+      dataBase64: Buffer.from(`frame:${threadId}`).toString("base64"),
       capturedAt: "2026-08-27T00:00:00.000Z",
     };
   }
-  async navigate(url: string) {
-    this.navigations.push(url);
+  async navigate(threadId: string, url: string) {
+    this.navigations.push(`${threadId}:${url}`);
   }
-  async dispatchInput(command: unknown) {
-    this.inputs.push(command);
+  async dispatchInput(threadId: string, command: unknown) {
+    this.inputs.push({ threadId, command });
   }
 }
 
@@ -209,10 +211,12 @@ describe("BrowserGatewayTokenService", () => {
       now: () => now,
     });
     const browserSessionId = "0198b9f0-6631-7000-8000-000000000399";
+    const threadId = "0198b9f0-6631-7000-8000-000000000398";
     const authSessionId = "opaque-local-auth-session-00000000000000000001";
     const token = service.issue({
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId,
       capabilities: ["view", "heartbeat"],
@@ -222,6 +226,7 @@ describe("BrowserGatewayTokenService", () => {
     expect(service.verify(token, {
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId,
       requiredCapability: "heartbeat",
@@ -229,6 +234,7 @@ describe("BrowserGatewayTokenService", () => {
     expect(() => service.verify(token, {
       installationId: "browser-lab",
       userId: USER_B,
+      threadId,
       browserSessionId,
       authSessionId,
       requiredCapability: "view",
@@ -236,6 +242,7 @@ describe("BrowserGatewayTokenService", () => {
     expect(() => service.verify(token, {
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId: "different-local-auth-session-000000000000000001",
       requiredCapability: "heartbeat",
@@ -243,6 +250,7 @@ describe("BrowserGatewayTokenService", () => {
     expect(() => service.verify(token, {
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId,
       requiredCapability: "takeover",
@@ -250,14 +258,24 @@ describe("BrowserGatewayTokenService", () => {
     expect(() => service.verify(`${token.slice(0, -1)}x`, {
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId,
       requiredCapability: "view",
     })).toThrow(BrowserGatewayTokenError);
+    expect(() => service.verify(token, {
+      installationId: "browser-lab",
+      userId: USER_A,
+      threadId: "0198b9f0-6631-7000-8000-000000000397",
+      browserSessionId,
+      authSessionId,
+      requiredCapability: "view",
+    })).toThrowError(expect.objectContaining({ code: "BROWSER_GATEWAY_BINDING_INVALID" }));
     now += 2_001;
     expect(() => service.verify(token, {
       installationId: "browser-lab",
       userId: USER_A,
+      threadId,
       browserSessionId,
       authSessionId,
       requiredCapability: "view",
@@ -333,21 +351,23 @@ describe("BrowserRuntimeRegistry", () => {
     const factory = new FakeBrowserFactory();
     const registry = new BrowserRuntimeRegistry({ store, factory });
     await registry.start(USER_A);
-    await expect(registry.captureFrame(USER_A)).resolves.toMatchObject({
+    await expect(registry.captureFrame(USER_A, THREAD_A)).resolves.toMatchObject({
       schemaVersion: 1,
       mediaType: "image/png",
     });
-    await expect(registry.navigate(USER_A, "https://example.test"))
+    await expect(registry.navigate(USER_A, THREAD_A, "https://example.test"))
       .rejects.toThrow("requires an active human takeover");
     await registry.takeOver(USER_A);
-    await registry.navigate(USER_A, "https://example.test");
-    await registry.dispatchInput(USER_A, {
+    await registry.navigate(USER_A, THREAD_A, "https://example.test");
+    await registry.dispatchInput(USER_A, THREAD_B, {
       kind: "key",
       event: "keyDown",
       key: "A",
     });
-    expect(factory.runtimes[0].navigations).toEqual(["https://example.test"]);
-    expect(factory.runtimes[0].inputs).toHaveLength(1);
+    expect(factory.runtimes[0].navigations).toEqual([`${THREAD_A}:https://example.test`]);
+    expect(factory.runtimes[0].inputs).toEqual([
+      expect.objectContaining({ threadId: THREAD_B }),
+    ]);
     await registry.close();
   });
 });

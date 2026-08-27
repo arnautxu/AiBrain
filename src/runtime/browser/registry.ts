@@ -12,6 +12,14 @@ import type {
 import { BrowserSessionStore } from "@/runtime/browser/state-store";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 
+const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+function validateBrowserThreadId(threadId: string) {
+  if (!THREAD_ID_PATTERN.test(threadId)) {
+    throw new Error("Browser threadId must be a canonical lowercase UUID.");
+  }
+}
+
 export class BrowserRegistryBackpressureError extends Error {
   readonly code = "BROWSER_START_BACKPRESSURE";
   readonly retryable = true;
@@ -229,28 +237,31 @@ export class BrowserRuntimeRegistry {
     }
   }
 
-  async captureFrame(userId: string): Promise<BrowserFrame> {
+  async captureFrame(userId: string, threadId: string): Promise<BrowserFrame> {
+    validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
     const state = await this.store.load(userId);
     this.assertCurrentSession(userId, state);
     if (state.lifecycle !== "ready" && state.lifecycle !== "human-control") {
       throw new Error("Browser viewer is unavailable in the current lifecycle state.");
     }
-    return runtime.captureFrame();
+    return runtime.captureFrame(threadId);
   }
 
-  async navigate(userId: string, url: string) {
+  async navigate(userId: string, threadId: string, url: string) {
+    validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
     const state = await this.store.load(userId);
     this.assertHumanControl(userId, state);
-    await runtime.navigate(url);
+    await runtime.navigate(threadId, url);
   }
 
-  async dispatchInput(userId: string, command: BrowserInputCommand) {
+  async dispatchInput(userId: string, threadId: string, command: BrowserInputCommand) {
+    validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
     const state = await this.store.load(userId);
     this.assertHumanControl(userId, state);
-    await runtime.dispatchInput(command);
+    await runtime.dispatchInput(threadId, command);
   }
 
   async stop(userId: string) {
