@@ -15,6 +15,8 @@ import {
   extractThreadId,
   extractTurnId,
   itemActivity,
+  itemSources,
+  itemToolResult,
   notificationDelta,
   notificationItemId,
   planFromNotification,
@@ -192,6 +194,27 @@ async function persistGeneratedImage(
   }, { envelope, key: `artifact:${String(item.id ?? artifactId)}` });
 }
 
+async function projectItemEvidence(
+  params: unknown,
+  completed: boolean,
+  envelope: AppServerEvent,
+  emit: EmitEvent,
+) {
+  for (const source of itemSources(params)) {
+    await emit(
+      { type: "source", item: source },
+      { envelope, key: `source:${source.id}` },
+    );
+  }
+  const result = itemToolResult(params, completed, envelope.occurredAt);
+  if (result) {
+    await emit(
+      { type: "toolResult", item: result },
+      { envelope, key: `tool-result:${completed ? "completed" : "started"}:${result.id}` },
+    );
+  }
+}
+
 /**
  * Runs one UI turn through the authenticated per-employee private WebSocket
  * gateway. The router owns events by runtime thread and turn, so concurrent
@@ -343,6 +366,7 @@ export async function runWorkerCodexTurn(
           emit,
         );
       }
+      await projectItemEvidence({ item }, true, envelope, emit);
       const activity = itemActivity({ item }, true);
       if (activity) {
         activities.set(activity.id, activity);
@@ -429,6 +453,7 @@ export async function runWorkerCodexTurn(
               emit,
             );
           }
+          await projectItemEvidence(params, method === "item/completed", envelope, emit);
           const activity = itemActivity(params, method === "item/completed");
           if (activity) {
             await upsertActivity(activity, {

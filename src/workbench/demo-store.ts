@@ -156,6 +156,14 @@ async function readState(session: AuthSession) {
             Object.assign(message, { artifacts: [] });
             upgraded = true;
           }
+          if (message && typeof message === "object" && !("sources" in message)) {
+            Object.assign(message, { sources: [] });
+            upgraded = true;
+          }
+          if (message && typeof message === "object" && !("toolResults" in message)) {
+            Object.assign(message, { toolResults: [] });
+            upgraded = true;
+          }
         }
       }
     }

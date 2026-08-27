@@ -8,11 +8,13 @@ import {
   GitDiff,
   ListChecks,
   ShieldCheck,
+  Globe,
   X,
 } from "@phosphor-icons/react";
 import type { ApprovalDecision, ApprovalItem, ChatMessage } from "@/lib/chat-contract";
 import { TurnActivity } from "@/components/turn-activity";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { TurnSourceList } from "@/components/turn-sources";
 
 type DetailsPanelProps = {
   message: ChatMessage | null;
@@ -76,7 +78,7 @@ function DiffCode({ content }: { content: string }) {
 
 export function DetailsPanel({ message, open, onClose, onResolveApproval }: DetailsPanelProps) {
   const files = useMemo(() => parseDiff(message?.diff ?? ""), [message?.diff]);
-  const [tab, setTab] = useState<"changes" | "activity">("changes");
+  const [tab, setTab] = useState<"changes" | "activity" | "sources">("changes");
   const [activeFile, setActiveFile] = useState(0);
   const [copied, setCopied] = useState(false);
   const [mobileOverlay, setMobileOverlay] = useState(false);
@@ -135,6 +137,9 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
         <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
           Actividad {message?.activity.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.activity.length}</span> : null}
         </button>
+        <button type="button" aria-pressed={tab === "sources"} className={`review-tab ${tab === "sources" ? "review-tab-active" : ""}`} onClick={() => setTab("sources")}>
+          Fuentes {message?.sources?.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.sources.length}</span> : null}
+        </button>
       </div>
 
       {!message ? (
@@ -144,6 +149,11 @@ export function DetailsPanel({ message, open, onClose, onResolveApproval }: Deta
             <p className="mt-3 text-[11px] font-semibold text-[var(--text)]">Selecciona una respuesta</p>
             <p className="mt-1.5 text-[9px] leading-4 text-[var(--text)]">Review muestra los cambios, la actividad y las aprobaciones del turno.</p>
           </div>
+        </div>
+      ) : tab === "sources" ? (
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
+          <div className="mb-3 flex items-center gap-2 px-1 text-[11px] font-semibold text-[var(--text)]"><Globe size={14} />Fuentes entregadas por el runtime</div>
+          <TurnSourceList sources={message.sources ?? []} />
         </div>
       ) : tab === "changes" ? (
         files.length ? (

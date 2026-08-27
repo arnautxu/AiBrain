@@ -166,7 +166,7 @@ function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
 }
 
 function isStrictChatMessage(value: unknown): value is ChatMessage {
-  if (!hasExactKeys(value, MESSAGE_KEYS) || !isChatMessage(value)) return false;
+  if (!hasExactKeys(value, MESSAGE_KEYS, ["sources", "toolResults"]) || !isChatMessage(value)) return false;
   if (!isUuid(value.id)) return false;
   if (!isCanonicalIsoDate(value.createdAt)) return false;
   if (!value.activity.every((item) =>
@@ -180,6 +180,10 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
     ))) return false;
   if (!value.attachments.every((item) =>
     hasExactKeys(item, ["id", "name", "mimeType", "size"]))) return false;
+  if (!(value.sources ?? []).every((item) =>
+    hasExactKeys(item, ["id", "kind", "title", "url", "domain", "snippet", "publishedAt"]))) return false;
+  if (!(value.toolResults ?? []).every((item) =>
+    hasExactKeys(item, ["id", "kind", "title", "status", "summary", "output", "sourceIds", "createdAt"]))) return false;
   return value.artifacts.every(hasExactArtifactKeys);
 }
 
