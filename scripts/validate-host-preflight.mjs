@@ -1,0 +1,163 @@
+import { execFileSync, spawnSync } from "node:child_process";
+import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import net from "node:net";
+import path from "node:path";
+import process from "node:process";
+
+const OWNER_FILE = ".aibrain-owner.json";
+const LABEL_PRODUCT = "com.graphikai.aibrain.product";
+const LABEL_INSTALLATION = "com.graphikai.aibrain.installation";
+
+function fail(message) {
+  process.stderr.write(`AiBrain host preflight failed: ${message}\n`);
+  process.exit(78);
+}
+
+function parseArgs(argv) {
+  const result = {};
+  for (let index = 0; index < argv.length; index += 2) {
+    const key = argv[index];
+    const value = argv[index + 1];
+    if (!key?.startsWith("--") || value === undefined) fail("expected --env-file path --installation id");
+    if (key !== "--env-file" && key !== "--installation") fail(`unknown argument ${key}`);
+    if (result[key]) fail(`duplicate argument ${key}`);
+    result[key] = value;
+  }
+  if (!result["--env-file"] || !result["--installation"]) fail("--env-file and --installation are required");
+  return { envFile: path.resolve(result["--env-file"]), installationId: result["--installation"] };
+}
+
+function parseEnv(contents) {
+  const values = new Map();
+  for (const [index, rawLine] of contents.split(/\r?\n/u).entries()) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separator = line.indexOf("=");
+    if (separator <= 0) fail(`invalid env line ${index + 1}`);
+    const key = line.slice(0, separator);
+    const value = line.slice(separator + 1);
+    if (!/^[A-Z][A-Z0-9_]*$/u.test(key) || values.has(key)) fail(`invalid or duplicate env key at line ${index + 1}`);
+    if (/[\r\n\0]/u.test(value)) fail(`invalid env value for ${key}`);
+    values.set(key, value);
+  }
+  return values;
+}
+
+function required(env, key) {
+  const value = env.get(key);
+  if (!value) fail(`${key} is required`);
+  return value;
+}
+
+function assertRegularNoSymlink(target, description) {
+  const info = lstatSync(target, { throwIfNoEntry: false });
+  if (!info?.isFile() || info.isSymbolicLink()) fail(`${description} must be a regular non-symlink file: ${target}`);
+  return realpathSync(target);
+}
+
+function assertDirectoryNoSymlink(target, description) {
+  const info = lstatSync(target, { throwIfNoEntry: false });
+  if (!info?.isDirectory() || info.isSymbolicLink()) fail(`${description} must be a directory and not a symlink: ${target}`);
+  return realpathSync(target);
+}
+
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative !== "" && relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+function assertOwner(root, installationId) {
+  const markerPath = path.join(root, OWNER_FILE);
+  assertRegularNoSymlink(markerPath, "ownership marker");
+  let marker;
+  try {
+    marker = JSON.parse(readFileSync(markerPath, "utf8"));
+  } catch {
+    fail(`ownership marker is not valid JSON: ${markerPath}`);
+  }
+  if (marker?.schemaVersion !== 1 || marker?.product !== "aibrain" || marker?.installationId !== installationId) {
+    fail(`ownership marker does not belong to ${installationId}: ${markerPath}`);
+  }
+}
+
+function inspectExistingDockerResource(kind, name, installationId) {
+  const list = spawnSync("docker", [kind, "ls", "--filter", `name=^${name}$`, "--format", "{{.Name}}"], { encoding: "utf8" });
+  if (list.status !== 0) fail(`cannot list Docker ${kind} resources`);
+  const exact = list.stdout.split(/\r?\n/u).filter(Boolean).includes(name);
+  if (!exact) return;
+  let labels;
+  try {
+    labels = JSON.parse(execFileSync("docker", [kind, "inspect", name, "--format", "{{json .Labels}}"], { encoding: "utf8" }));
+  } catch {
+    fail(`cannot inspect existing Docker ${kind} ${name}`);
+  }
+  if (labels?.[LABEL_PRODUCT] !== "aibrain" || labels?.[LABEL_INSTALLATION] !== installationId) {
+    fail(`existing Docker ${kind} ${name} is not owned by ${installationId}`);
+  }
+}
+
+async function assertPortAvailable(port) {
+  await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+    server.once("error", reject);
+    server.listen({ host: "127.0.0.1", port, exclusive: true }, () => server.close(resolve));
+  }).catch(() => fail(`loopback port ${port} is already occupied`));
+}
+
+const { envFile, installationId } = parseArgs(process.argv.slice(2));
+if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u.test(installationId)) fail("installation id is invalid");
+const envFileReal = assertRegularNoSymlink(envFile, "compose env file");
+const env = parseEnv(readFileSync(envFileReal, "utf8"));
+if (required(env, "AIBRAIN_INSTALLATION_ID") !== installationId) fail("installation id does not match compose env");
+
+const prefix = `aibrain-${installationId}`;
+const exactNames = new Map([
+  ["AIBRAIN_COMPOSE_PROJECT_NAME", prefix],
+  ["AIBRAIN_NETWORK_NAME", `${prefix}-private`],
+  ["AIBRAIN_DATA_VOLUME_NAME", `${prefix}-data`],
+  ["AIBRAIN_BACKUP_VOLUME_NAME", `${prefix}-backups`],
+  ["AIBRAIN_RESTORE_VOLUME_NAME", `${prefix}-restores`],
+]);
+for (const [key, expected] of exactNames) {
+  if (required(env, key) !== expected) fail(`${key} must equal ${expected}`);
+}
+const resourceNames = [...exactNames.values()];
+if (new Set(resourceNames).size !== resourceNames.length) fail("project, network and volume names must be distinct");
+
+const configFile = assertRegularNoSymlink(required(env, "AIBRAIN_INSTALLATION_CONFIG_HOST"), "installation config");
+const runtimeEnv = assertRegularNoSymlink(required(env, "AIBRAIN_RUNTIME_ENV_FILE"), "runtime env");
+const configRoot = realpathSync(path.dirname(configFile));
+if (path.dirname(runtimeEnv) !== configRoot) fail("installation config and runtime env must share one owned config root");
+assertOwner(configRoot, installationId);
+
+const hostRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_HOST_ROOT"), "installation host root");
+const sourceRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_SOURCE_HOST_PATH"), "source root");
+const publishRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_PUBLISH_HOST_PATH"), "publish root");
+assertOwner(hostRoot, installationId);
+if (!isInside(hostRoot, sourceRoot) || !isInside(hostRoot, publishRoot)) fail("source and publish roots must be children of the owned host root");
+if (sourceRoot === publishRoot || isInside(sourceRoot, publishRoot) || isInside(publishRoot, sourceRoot)) fail("source and publish roots must not overlap");
+
+for (const target of [envFileReal, configRoot, hostRoot, sourceRoot, publishRoot]) {
+  if (/(?:^|[\\/])bgreenly(?:[\\/]|$)/iu.test(target)) fail("an AiBrain path must never address BGreenly");
+}
+
+const portText = required(env, "AIBRAIN_HTTP_PORT");
+if (!/^[0-9]+$/u.test(portText)) fail("AIBRAIN_HTTP_PORT must be numeric");
+const port = Number(portText);
+if (!Number.isSafeInteger(port) || port < 1024 || port > 65535) fail("AIBRAIN_HTTP_PORT must be between 1024 and 65535");
+
+const offline = process.env.AIBRAIN_PREFLIGHT_ALLOW_OFFLINE === "1";
+if (offline) {
+  process.stdout.write("WARNING: Docker ownership and port availability skipped in explicit offline test mode\n");
+} else {
+  const docker = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8" });
+  if (docker.status !== 0 || !docker.stdout.trim()) fail("Docker daemon is unavailable");
+  inspectExistingDockerResource("network", required(env, "AIBRAIN_NETWORK_NAME"), installationId);
+  for (const key of ["AIBRAIN_DATA_VOLUME_NAME", "AIBRAIN_BACKUP_VOLUME_NAME", "AIBRAIN_RESTORE_VOLUME_NAME"]) {
+    inspectExistingDockerResource("volume", required(env, key), installationId);
+  }
+  await assertPortAvailable(port);
+}
+
+process.stdout.write(`AiBrain host preflight: PASS (${installationId})\n`);

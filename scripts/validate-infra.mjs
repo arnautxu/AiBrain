@@ -27,8 +27,10 @@ const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
 const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
+const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
+const hostPreflight = read("scripts/validate-host-preflight.mjs");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
@@ -42,7 +44,8 @@ forbidMatch(compose, /^\s*privileged\s*:/mu, "Compose enables privileged mode");
 forbidMatch(compose, /^\s*network_mode\s*:/mu, "Compose joins another network namespace");
 forbidMatch(compose, /^\s*external\s*:\s*true/mu, "Compose reuses an external network or volume");
 
-requireMatch(dockerfile, /ARG CODEX_VERSION=0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
+requireMatch(dockerfile, /@openai\/codex@0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
+forbidMatch(dockerfile, /ARG CODEX_VERSION/u, "Dockerfile permits the App Server contract version to be overridden");
 requireMatch(dockerfile, /ARG NODE_IMAGE=node:24\.18\.1-bookworm-slim@sha256:[0-9a-f]{64}/u, "Dockerfile does not pin the reviewed Node 24 runtime digest");
 requireMatch(dockerfile, /ARG DEBIAN_SNAPSHOT=\d{8}T\d{6}Z/u, "Dockerfile does not pin an immutable Debian snapshot");
 requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile APT source is not the pinned Debian snapshot");
@@ -69,8 +72,11 @@ requireMatch(compose, /target: \/srv\/aibrain\/source-ro[\s\S]{0,120}read_only: 
 requireMatch(compose, /target: \/srv\/aibrain\/publish-rw/u, "server publisher mount is missing");
 requireMatch(compose, /name: "\$\{AIBRAIN_NETWORK_NAME:\?/u, "network name is not required per installation");
 requireMatch(compose, /name: "\$\{AIBRAIN_DATA_VOLUME_NAME:\?/u, "data volume name is not required per installation");
+requireMatch(compose, /name: "\$\{AIBRAIN_BACKUP_VOLUME_NAME:\?/u, "backup volume name is not required per installation");
 requireMatch(compose, /name: "\$\{AIBRAIN_RESTORE_VOLUME_NAME:\?/u, "restore volume name is not required per installation");
-requireMatch(compose, /127\.0\.0\.1/u, "default HTTP binding is not loopback");
+requireMatch(compose, /com\.graphikai\.aibrain\.installation:[^\n]*AIBRAIN_INSTALLATION_ID/u, "Compose resources are not labelled by installation");
+requireMatch(compose, /- "127\.0\.0\.1:\$\{AIBRAIN_HTTP_PORT:\?/u, "HTTP binding is not fixed to loopback");
+forbidMatch(compose, /AIBRAIN_BIND_ADDRESS/u, "Compose permits the loopback binding to be overridden");
 requireMatch(compose, /test: \[CMD, node, \/usr\/local\/share\/aibrain\/healthcheck\.mjs\]/u, "Compose does not use the storage-aware healthcheck");
 
 requireMatch(worker, /--ro-bind \/ \/[\s\S]*--tmpfs "\$publish_root"[\s\S]*--remount-ro "\$publish_root"/u, "worker does not mask publish-rw behind a read-only mount");
@@ -86,12 +92,22 @@ forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-
 requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypoint does not fail closed when worker isolation is unavailable");
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
+requireMatch(entrypoint, /codex-real --version[\s\S]*actual_codex_version[\s\S]*generated App Server contracts/u, "entrypoint does not enforce the contract-pinned Codex version");
 requireMatch(healthcheck, /docker\.sock[\s\S]*127\.0\.0\.1:3000\/api\/health\/ready/u, "healthcheck does not verify socket absence and loopback readiness");
 requireMatch(nginx, /server 127\.0\.0\.1:__AIBRAIN_HTTP_PORT__/u, "Nginx upstream is not constrained to the installation loopback port");
 requireMatch(nginx, /location = \/api\/chat[\s\S]*proxy_buffering off;[\s\S]*X-Accel-Buffering no/u, "Nginx buffers the streaming chat response");
 requireMatch(nginx, /\/documents\$[\s\S]*client_max_body_size 52m;[\s\S]*proxy_request_buffering off;/u, "Nginx does not stream bounded document uploads");
-requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain_auth/u, "Nginx does not rate-limit auth mutations");
+requireMatch(nginx, /zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not isolate the auth limit zone per installation");
+requireMatch(nginx, /upstream aibrain___AIBRAIN_INSTANCE_TOKEN___backend/u, "Nginx does not isolate the upstream per installation");
+requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain___AIBRAIN_INSTANCE_TOKEN___auth/u, "Nginx does not rate-limit auth mutations");
+requireMatch(nginx, /return 301 https:\/\/__AIBRAIN_PUBLIC_HOST__\$request_uri/u, "Nginx redirect trusts the client Host header");
+requireMatch(nginxDefaultDeny, /listen 80 default_server[\s\S]*return 444/u, "Nginx lacks an HTTP default-deny virtual host");
+requireMatch(nginxDefaultDeny, /listen 443 ssl default_server[\s\S]*ssl_reject_handshake on/u, "Nginx lacks a TLS default-deny virtual host");
 forbidMatch(nginx, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for/u, "Nginx trusts a client-supplied forwarding chain");
+requireMatch(hostPreflight, /\.aibrain-owner\.json/u, "host preflight does not require ownership markers");
+requireMatch(hostPreflight, /AIBRAIN_BACKUP_VOLUME_NAME[\s\S]*AIBRAIN_RESTORE_VOLUME_NAME/u, "host preflight does not validate independent backup and restore volumes");
+requireMatch(hostPreflight, /existing Docker[\s\S]*not owned/u, "host preflight does not reject foreign Docker resources");
+requireMatch(hostPreflight, /must never address BGreenly/u, "host preflight does not fail closed on BGreenly paths");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
 requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");
 forbidMatch(chromeRuntime, /--remote-debugging-(?:port|address)/u, "Chrome runtime reintroduces a network CDP endpoint");
@@ -123,6 +139,12 @@ const requiredRuntimeKeys = [
 ];
 for (const key of requiredRuntimeKeys) requireMatch(runtimeEnv, new RegExp(`^${key}=`, "mu"), `runtime env example is missing ${key}`);
 forbidMatch(runtimeEnv, /SUPABASE_SECRET_KEY/u, "runtime env includes an unnecessary Supabase server key");
+for (const key of [
+  "AIBRAIN_INSTALLATION_ID",
+  "AIBRAIN_HOST_ROOT",
+  "AIBRAIN_BACKUP_VOLUME_NAME",
+  "AIBRAIN_RESTORE_VOLUME_NAME",
+]) requireMatch(composeEnv, new RegExp(`^${key}=`, "mu"), `compose env example is missing ${key}`);
 
 const expectedPaths = {
   dataRoot: "/var/lib/aibrain/data",

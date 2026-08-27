@@ -24,14 +24,39 @@ chmod 0600 /etc/aibrain/<installation>/runtime.env
 chown root:10001 /etc/aibrain/<installation>/installation.json
 ```
 
-En `compose.env`, usa nombres únicos para proyecto, red y los tres volúmenes, un puerto loopback libre, rutas host exclusivas y el tag `aibrain-<installation>:<git-sha>`. Usa paths absolutos para los dos ficheros montados. En `installation.json`, cambia identidad, branding y `publicUrl`, pero conserva exactamente los seis paths internos del ejemplo: son el contrato de mounts del contenedor.
+Antes de arrancar, crea en los dos roots exclusivos (`/etc/aibrain/<installation>`
+y `/srv/aibrain-<installation>`) un `.aibrain-owner.json` regular, no symlink,
+con permisos de root y este contenido, cambiando únicamente el identificador:
 
-Renderiza `infra/hetzner/nginx/aibrain.conf.example` en un fichero exclusivo de
-la instalación, sustituyendo `__AIBRAIN_HTTP_PORT__` y
-`__AIBRAIN_PUBLIC_HOST__`. Valida con `nginx -t` antes de recargar. El template
-desactiva buffering para chat y uploads, sobrescribe los headers de IP del
-cliente y aplica rate limiting únicamente a las mutaciones de autenticación;
-no publica CDP, workers ni viewers internos.
+```json
+{"schemaVersion":1,"product":"aibrain","installationId":"company-qa"}
+```
+
+En `compose.env`, usa la convención exacta `aibrain-<installation>` para el
+proyecto, red y los tres volúmenes, un puerto loopback libre, rutas host
+exclusivas y el tag `aibrain-<installation>:<git-sha>`. Usa paths absolutos para
+los dos ficheros montados. En `installation.json`, cambia identidad, branding y
+`publicUrl`, pero conserva exactamente los seis paths internos del ejemplo: son
+el contrato de mounts del contenedor.
+
+Instala `infra/hetzner/nginx/default-deny.conf` una sola vez en el host. Renderiza
+después un fichero exclusivo por instalación con el renderer estricto, que crea
+un fichero nuevo y se niega a sobrescribir o seguir symlinks:
+
+```sh
+node scripts/render-nginx-config.mjs \
+  --installation company-qa \
+  --host brain.example.com \
+  --port 3100 \
+  --output /tmp/aibrain-company-qa.conf
+```
+
+Mueve el candidato a la ruta de Nginx mediante una operación atómica controlada
+por el administrador y ejecuta `nginx -t` antes de recargar. El token de
+instalación separa upstream y rate-limit zone, por lo que dos empresas pueden
+convivir sin colisiones. El template desactiva buffering para chat y uploads,
+fija el Host público, sobrescribe los headers de IP del cliente y no publica
+CDP, workers ni viewers internos.
 
 Genera cuatro secretos distintos. No pegues el resultado en terminales grabadas, tickets o commits:
 
@@ -43,6 +68,21 @@ openssl rand -base64 48
 Completa `runtime.env` con Supabase Auth y los secretos. No añadas `SUPABASE_SECRET_KEY`.
 
 ## 2. Validación estática y build inmutable
+
+Ejecuta primero el preflight de host. Es de solo lectura salvo por reservar y
+liberar brevemente el puerto loopback para comprobar exclusividad; no crea, une,
+reinicia ni elimina recursos. Si encuentra una red o volumen ya existente, solo
+lo acepta cuando sus labels pertenecen a la misma instalación:
+
+```sh
+npm run infra:preflight -- \
+  --env-file /etc/aibrain/company-qa/compose.env \
+  --installation company-qa
+```
+
+No continúes si falla. En particular, el preflight rechaza symlinks, roots
+solapados, nombres fuera de convención, ownership ajeno y cualquier ruta que
+apunte a BGreenly.
 
 Desde el release:
 

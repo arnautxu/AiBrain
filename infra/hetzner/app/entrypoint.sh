@@ -39,6 +39,7 @@ require_secret AIBRAIN_BROWSER_GATEWAY_SECRET
 require_value NEXT_PUBLIC_SUPABASE_URL
 require_value NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
 require_value AIBRAIN_CHROME_EXPECTED_VERSION
+[ "${AIBRAIN_CODEX_EXPECTED_VERSION:-}" = 0.149.1 ] || fail "AIBRAIN_CODEX_EXPECTED_VERSION must be the contract-pinned version 0.149.1"
 
 node -e '
   const value = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -106,6 +107,9 @@ done
 
 actual_chrome_version=$(/usr/bin/chromium --version | sed -n 's/^[^0-9]*\([0-9][0-9.]*\).*$/\1/p')
 [ "$actual_chrome_version" = "$AIBRAIN_CHROME_EXPECTED_VERSION" ] || fail "Chromium does not match AIBRAIN_CHROME_EXPECTED_VERSION"
+
+actual_codex_version=$(/usr/local/bin/codex-real --version | sed -n 's/^codex-cli \([0-9][0-9.]*\)$/\1/p')
+[ "$actual_codex_version" = "$AIBRAIN_CODEX_EXPECTED_VERSION" ] || fail "Codex does not match the generated App Server contracts"
 
 # Fail closed when the host cannot create the worker mount namespace, hide the
 # product data root, selectively re-expose an approved read root, or mask the
