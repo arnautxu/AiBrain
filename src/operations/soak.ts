@@ -12,7 +12,8 @@ import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 
 const MEBIBYTE = 1024 * 1024;
-const DEFAULT_DURATION_MS = 60_000;
+const DEFAULT_DURATION_MS = 120_000;
+const MIN_SLOPE_WINDOW_MS = 90_000;
 const MAX_DURATION_MS = 7 * 24 * 60 * 60 * 1_000;
 const MAX_CONCURRENCY = 100;
 const MAX_LATENCY_SAMPLES = 4_096;
@@ -37,13 +38,20 @@ export type SoakThresholds = Readonly<{
   maxRssGrowthBytes: number;
   maxHeapGrowthBytes: number;
   maxExternalGrowthBytes: number;
+  maxRssSlopeBytesPerMinute: number;
+  maxHeapSlopeBytesPerMinute: number;
+  maxExternalSlopeBytesPerMinute: number;
   maxActiveHandleLeak: number;
+  maxActiveResourceLeak: number;
+  maxResourceTypeLeak: number;
   maxSocketLeak: number;
   maxListenerLeak: number;
   maxChildProcessLeak: number;
   maxProcessListenerLeak: number;
   maxHandleListenerLeak: number;
   maxJournalBytesPerEvent: number;
+  maxJournalBytesPerWorker: number;
+  maxJournalRecordsPerWorker: number;
   maxJournalFilesPerWorker: number;
 }>;
 
@@ -106,6 +114,7 @@ export type SoakFailure = Readonly<{
   code: string;
   actual: number;
   limit: number;
+  resource?: string;
 }>;
 
 export type SoakReport = Readonly<{
@@ -145,13 +154,20 @@ export type SoakReport = Readonly<{
     steadyRssBytes: number;
     steadyHeapUsedBytes: number;
     steadyExternalBytes: number;
+    rssSlopeBytesPerMinute: number;
+    heapSlopeBytesPerMinute: number;
+    externalSlopeBytesPerMinute: number;
     leakedActiveHandles: number;
+    leakedActiveResources: number;
+    leakedResourcesByType: Readonly<Record<string, number>>;
     leakedSockets: number;
     leakedListeners: number;
     leakedChildProcesses: number;
     leakedProcessListeners: number;
     leakedHandleListeners: number;
     journalBytesPerEvent: number;
+    journalBytesPerWorker: number;
+    journalRecordsPerWorker: number;
     journalFilesPerWorker: number;
   }>;
   failures: readonly SoakFailure[];
@@ -216,13 +232,20 @@ function configuredThresholds(overrides: Partial<SoakThresholds> = {}): SoakThre
     maxRssGrowthBytes: overrides.maxRssGrowthBytes ?? 128 * MEBIBYTE,
     maxHeapGrowthBytes: overrides.maxHeapGrowthBytes ?? 64 * MEBIBYTE,
     maxExternalGrowthBytes: overrides.maxExternalGrowthBytes ?? 32 * MEBIBYTE,
+    maxRssSlopeBytesPerMinute: overrides.maxRssSlopeBytesPerMinute ?? 32 * MEBIBYTE,
+    maxHeapSlopeBytesPerMinute: overrides.maxHeapSlopeBytesPerMinute ?? 16 * MEBIBYTE,
+    maxExternalSlopeBytesPerMinute: overrides.maxExternalSlopeBytesPerMinute ?? 8 * MEBIBYTE,
     maxActiveHandleLeak: overrides.maxActiveHandleLeak ?? 0,
+    maxActiveResourceLeak: overrides.maxActiveResourceLeak ?? 0,
+    maxResourceTypeLeak: overrides.maxResourceTypeLeak ?? 0,
     maxSocketLeak: overrides.maxSocketLeak ?? 0,
     maxListenerLeak: overrides.maxListenerLeak ?? 0,
     maxChildProcessLeak: overrides.maxChildProcessLeak ?? 0,
     maxProcessListenerLeak: overrides.maxProcessListenerLeak ?? 0,
     maxHandleListenerLeak: overrides.maxHandleListenerLeak ?? 0,
     maxJournalBytesPerEvent: overrides.maxJournalBytesPerEvent ?? 16 * 1024,
+    maxJournalBytesPerWorker: overrides.maxJournalBytesPerWorker ?? 8 * MEBIBYTE,
+    maxJournalRecordsPerWorker: overrides.maxJournalRecordsPerWorker ?? 1_024,
     maxJournalFilesPerWorker: overrides.maxJournalFilesPerWorker ?? 3,
   };
   for (const [name, value] of Object.entries(values)) thresholdOption(name, value);
@@ -333,21 +356,44 @@ async function collectJournalCounts(root: string): Promise<JournalCounts> {
   let bytes = 0;
   let records = 0;
   const visit = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true });
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      // Runtime lock directories are intentionally short lived. A directory
+      // enumerated by the sampler may disappear before it is traversed.
+      if (isNodeError(error, "ENOENT")) return;
+      throw error;
+    }
     for (const entry of entries) {
       const item = path.join(directory, entry.name);
       if (entry.isSymbolicLink()) throw new Error("Soak state contains an unexpected symbolic link.");
       if (entry.isDirectory()) await visit(item);
       else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-        const metadata = await stat(item);
+        let metadata;
+        try {
+          metadata = await stat(item);
+        } catch (error) {
+          if (isNodeError(error, "ENOENT")) continue;
+          throw error;
+        }
         files += 1;
         bytes += metadata.size;
-        records += await countNewlines(item);
+        try {
+          records += await countNewlines(item);
+        } catch (error) {
+          if (!isNodeError(error, "ENOENT")) throw error;
+        }
       }
     }
   };
   await visit(root);
   return Object.freeze({ files, bytes, records });
+}
+
+function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
+  return Boolean(error && typeof error === "object" && "code" in error
+    && (error as NodeJS.ErrnoException).code === code);
 }
 
 async function sampleResources(runRoot: string, startedAt: number, now: () => number): Promise<SoakResourceSample> {
@@ -476,13 +522,48 @@ function positiveGrowth(current: number, baseline: number) {
   return Math.max(0, current - baseline);
 }
 
+function positiveSlopePerMinute(
+  samples: readonly SoakResourceSample[],
+  select: (sample: SoakResourceSample) => number,
+) {
+  if (samples.length < 4) return 0;
+  const firstElapsed = samples[0].elapsedMs;
+  const elapsed = samples.map((sample) => sample.elapsedMs - firstElapsed);
+  // V8 heap sizing and JIT warmup dominate short samples. Absolute growth is
+  // still gated for every run; a temporal leak slope is only meaningful once
+  // the steady workload has covered at least ninety seconds.
+  if ((elapsed.at(-1) ?? 0) < MIN_SLOPE_WINDOW_MS) return 0;
+  const values = samples.map(select);
+  const meanElapsed = elapsed.reduce((sum, value) => sum + value, 0) / elapsed.length;
+  const meanValue = values.reduce((sum, value) => sum + value, 0) / values.length;
+  let numerator = 0;
+  let denominator = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    const centeredElapsed = elapsed[index] - meanElapsed;
+    numerator += centeredElapsed * (values[index] - meanValue);
+    denominator += centeredElapsed ** 2;
+  }
+  if (denominator === 0) return 0;
+  return round(Math.max(0, numerator / denominator) * 60_000);
+}
+
+function resourceTypeGrowth(current: ResourceCounts, baseline: ResourceCounts) {
+  const growth: Record<string, number> = {};
+  for (const [resource, count] of Object.entries(current.resourcesByType)) {
+    const leaked = positiveGrowth(count, baseline.resourcesByType[resource] ?? 0);
+    if (leaked > 0) growth[resource] = leaked;
+  }
+  return Object.freeze(Object.fromEntries(Object.entries(growth).sort()));
+}
+
 function addFailure(
   failures: SoakFailure[],
   code: string,
   actual: number,
   limit: number,
+  resource?: string,
 ) {
-  if (actual > limit) failures.push(Object.freeze({ code, actual, limit }));
+  if (actual > limit) failures.push(Object.freeze({ code, actual, limit, ...(resource ? { resource } : {}) }));
 }
 
 export async function runWorkerReplaySoak(options: SoakOptions): Promise<SoakReport> {
@@ -511,6 +592,8 @@ export async function runWorkerReplaySoak(options: SoakOptions): Promise<SoakRep
   samples.push(beforeStart);
   const latencies = new BoundedLatencySamples();
   const factory = new LocalGatewayWorkerRuntimeFactory({
+    maxRetainedCompletedRequests: 64,
+    maxRetainedDeliveredEvents: 64,
     processFactory(context) {
       return spawn(process.execPath, ["-e", FIXTURE_APP_SERVER], {
         cwd: context.workspace,
@@ -602,30 +685,49 @@ export async function runWorkerReplaySoak(options: SoakOptions): Promise<SoakRep
   if (!steadyStart || !beforeClose) throw new Error("Soak did not reach a steady workload state.");
 
   const duration = Math.max(1, Math.round(performance.now() - startedAt));
+  const steadySamples = samples.filter((sample) =>
+    sample.elapsedMs >= steadyStart.elapsedMs && sample.elapsedMs <= beforeClose.elapsedMs);
+  const leakedResourcesByType = resourceTypeGrowth(afterClose.resources, beforeStart.resources);
   const growth = Object.freeze({
     steadyRssBytes: positiveGrowth(beforeClose.memory.rssBytes, steadyStart.memory.rssBytes),
     steadyHeapUsedBytes: positiveGrowth(beforeClose.memory.heapUsedBytes, steadyStart.memory.heapUsedBytes),
     steadyExternalBytes: positiveGrowth(beforeClose.memory.externalBytes, steadyStart.memory.externalBytes),
+    rssSlopeBytesPerMinute: positiveSlopePerMinute(steadySamples, (sample) => sample.memory.rssBytes),
+    heapSlopeBytesPerMinute: positiveSlopePerMinute(steadySamples, (sample) => sample.memory.heapUsedBytes),
+    externalSlopeBytesPerMinute: positiveSlopePerMinute(steadySamples, (sample) => sample.memory.externalBytes),
     leakedActiveHandles: positiveGrowth(afterClose.resources.activeHandles, beforeStart.resources.activeHandles),
+    leakedActiveResources: positiveGrowth(afterClose.resources.activeResources, beforeStart.resources.activeResources),
+    leakedResourcesByType,
     leakedSockets: positiveGrowth(afterClose.resources.sockets, beforeStart.resources.sockets),
     leakedListeners: positiveGrowth(afterClose.resources.listeners, beforeStart.resources.listeners),
     leakedChildProcesses: positiveGrowth(afterClose.resources.childProcesses, beforeStart.resources.childProcesses),
     leakedProcessListeners: positiveGrowth(afterClose.resources.processListeners, beforeStart.resources.processListeners),
     leakedHandleListeners: positiveGrowth(afterClose.resources.handleListeners, beforeStart.resources.handleListeners),
     journalBytesPerEvent: streamedEvents === 0 ? 0 : round(afterClose.journals.bytes / streamedEvents),
+    journalBytesPerWorker: round(afterClose.journals.bytes / concurrency),
+    journalRecordsPerWorker: round(afterClose.journals.records / concurrency),
     journalFilesPerWorker: round(afterClose.journals.files / concurrency),
   });
   const failures: SoakFailure[] = [];
   addFailure(failures, "RSS_GROWTH_EXCEEDED", growth.steadyRssBytes, thresholds.maxRssGrowthBytes);
   addFailure(failures, "HEAP_GROWTH_EXCEEDED", growth.steadyHeapUsedBytes, thresholds.maxHeapGrowthBytes);
   addFailure(failures, "EXTERNAL_GROWTH_EXCEEDED", growth.steadyExternalBytes, thresholds.maxExternalGrowthBytes);
+  addFailure(failures, "RSS_SLOPE_EXCEEDED", growth.rssSlopeBytesPerMinute, thresholds.maxRssSlopeBytesPerMinute);
+  addFailure(failures, "HEAP_SLOPE_EXCEEDED", growth.heapSlopeBytesPerMinute, thresholds.maxHeapSlopeBytesPerMinute);
+  addFailure(failures, "EXTERNAL_SLOPE_EXCEEDED", growth.externalSlopeBytesPerMinute, thresholds.maxExternalSlopeBytesPerMinute);
   addFailure(failures, "ACTIVE_HANDLE_LEAK", growth.leakedActiveHandles, thresholds.maxActiveHandleLeak);
+  addFailure(failures, "ACTIVE_RESOURCE_LEAK", growth.leakedActiveResources, thresholds.maxActiveResourceLeak);
+  for (const [resource, leaked] of Object.entries(growth.leakedResourcesByType)) {
+    addFailure(failures, "RESOURCE_TYPE_LEAK", leaked, thresholds.maxResourceTypeLeak, resource);
+  }
   addFailure(failures, "SOCKET_LEAK", growth.leakedSockets, thresholds.maxSocketLeak);
   addFailure(failures, "LISTENER_LEAK", growth.leakedListeners, thresholds.maxListenerLeak);
   addFailure(failures, "CHILD_PROCESS_LEAK", growth.leakedChildProcesses, thresholds.maxChildProcessLeak);
   addFailure(failures, "PROCESS_LISTENER_LEAK", growth.leakedProcessListeners, thresholds.maxProcessListenerLeak);
   addFailure(failures, "HANDLE_LISTENER_LEAK", growth.leakedHandleListeners, thresholds.maxHandleListenerLeak);
   addFailure(failures, "JOURNAL_GROWTH_EXCEEDED", growth.journalBytesPerEvent, thresholds.maxJournalBytesPerEvent);
+  addFailure(failures, "JOURNAL_BYTES_EXCEEDED", growth.journalBytesPerWorker, thresholds.maxJournalBytesPerWorker);
+  addFailure(failures, "JOURNAL_RECORDS_EXCEEDED", growth.journalRecordsPerWorker, thresholds.maxJournalRecordsPerWorker);
   addFailure(failures, "JOURNAL_FILE_LEAK", growth.journalFilesPerWorker, thresholds.maxJournalFilesPerWorker);
 
   const report: SoakReport = Object.freeze({

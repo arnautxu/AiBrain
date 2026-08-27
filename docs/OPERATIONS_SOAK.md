@@ -10,14 +10,16 @@ El workload valida de forma concurrente:
 - reenvío idempotente del mismo request después del restart;
 - ausencia de eventos antiguos o cruzados en ciclos posteriores;
 - cierre de procesos, listeners, sockets, handles y listeners de handles;
-- crecimiento de RSS, heap, memoria externa y journals;
+- crecimiento absoluto y pendiente temporal de RSS, heap y memoria externa;
+- retorno al baseline de recursos activos y de cada tipo de recurso;
+- compacción atómica y límites absolutos de bytes/records de journals por worker;
 - latencia mínima, media, p50, p95 y máxima con una muestra acotada.
 
-## Ejecución corta
+## Gate local por defecto
 
 ```bash
 npm run --silent test:soak -- \
-  --duration-ms 60000 \
+  --duration-ms 120000 \
   --concurrency 4 \
   --restart-every 20 \
   --sample-ms 1000
@@ -43,10 +45,13 @@ El perfil QA dura ocho horas, usa veinte workers, toma muestras cada treinta seg
 
 - cero procesos, listeners, sockets, handles o listeners retenidos respecto al baseline;
 - crecimiento steady-state máximo de 128 MiB RSS, 64 MiB heap y 32 MiB externa;
+- pendiente máxima de 32 MiB/min RSS, 16 MiB/min heap y 8 MiB/min externa cuando existen al menos noventa segundos de muestras estables; los ensayos más cortos siguen aplicando los límites absolutos, pero no confunden el calentamiento de V8 con una fuga temporal;
+- cero crecimiento residual de recursos activos o de cualquier tipo de recurso después del cierre;
 - máximo de tres journals JSONL por worker;
 - máximo de 16 KiB de journal por evento streaming medido.
+- máximo de 8 MiB y 1.024 records de journal por worker.
 
-Los límites de memoria son guardrails absolutos, no una cuota comercial. El informe conserva baseline, inicio estable, pico agregado, estado antes del cierre y estado después del cierre para distinguir capacidad activa de una fuga. Los bytes de journal aumentan con eventos durables por diseño; el gate limita su coste por evento y el número de archivos para detectar crecimiento no acotado de estructura.
+Los límites son guardrails operativos, no cuotas comerciales. El informe conserva baseline, inicio estable, pico agregado, estado antes del cierre y estado después del cierre para distinguir capacidad activa de una fuga. Producción conserva por defecto un tail durable de 256 eventos entregados y 4.096 requests completadas, más todos los pendientes/resultados inciertos. El harness usa ventanas de 64 para forzar y verificar compacción incluso en el ensayo corto. La compacción mantiene secuencia/cursor fuera del fichero regenerable y usa sustitución atómica bajo lock. Así, bytes y records alcanzan un plateau en vez de crecer indefinidamente, sin perder replay pendiente ni resultados inciertos.
 
 ## Prueba automatizada
 

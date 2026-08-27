@@ -17,6 +17,16 @@ async function createJournal() {
   });
 }
 
+async function createCompactJournal(retained: number) {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-transport-compact-"));
+  roots.push(root);
+  return new FileTransportEventJournal({
+    filePath: path.join(root, "transport", "events.jsonl"),
+    lockManager: new ResourceLockManager({ rootDirectory: path.join(root, "locks") }),
+    maxRetainedDeliveredEvents: retained,
+  });
+}
+
 function event(sequence: number, eventId = `event-${sequence}`): AppServerEvent {
   return {
     eventId,
@@ -69,5 +79,18 @@ describe("file transport event journal", () => {
     expect(await restarted.readUndelivered(10)).toEqual([event(2)]);
     await restarted.markDelivered(event(2));
     expect(await restarted.readUndelivered(10)).toEqual([]);
+  });
+
+  it("bounds delivered event history without losing sequence or restart recovery", async () => {
+    const journal = await createCompactJournal(2);
+    for (let sequence = 1; sequence <= 5; sequence += 1) {
+      await journal.append(event(sequence));
+      await journal.markDelivered(event(sequence));
+    }
+    expect(await journal.readEvents()).toEqual([event(4), event(5)]);
+    expect(await journal.loadCursor()).toEqual({ eventId: "event-5", sequence: 5 });
+    expect(await journal.readUndelivered(10)).toEqual([]);
+    expect(await journal.append(event(6))).toBe(true);
+    expect(await journal.readUndelivered(10)).toEqual([event(6)]);
   });
 });

@@ -78,13 +78,18 @@ describe("worker replay soak harness", () => {
       restartEveryCycles: 10,
       sampleIntervalMs: 10,
       cycleDelayMs: 0,
-      thresholds: { maxJournalFilesPerWorker: 2 },
+      thresholds: { maxJournalFilesPerWorker: 2, maxJournalRecordsPerWorker: 0 },
     });
     expect(report.status).toBe("fail");
     expect(report.failures).toContainEqual({
       code: "JOURNAL_FILE_LEAK",
       actual: 3,
       limit: 2,
+    });
+    expect(report.failures).toContainEqual({
+      code: "JOURNAL_RECORDS_EXCEEDED",
+      actual: expect.any(Number),
+      limit: 0,
     });
   }, 30_000);
 });
