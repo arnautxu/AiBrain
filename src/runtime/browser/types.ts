@@ -75,6 +75,40 @@ export interface ManagedBrowserRuntime {
   stop(): Promise<void>;
 }
 
+export type BrowserFrame = Readonly<{
+  schemaVersion: 1;
+  mediaType: "image/png";
+  dataBase64: string;
+  capturedAt: string;
+}>;
+
+export type BrowserInputCommand =
+  | Readonly<{
+    kind: "mouse";
+    event: "mouseMoved" | "mousePressed" | "mouseReleased" | "mouseWheel";
+    x: number;
+    y: number;
+    button?: "none" | "left" | "middle" | "right";
+    clickCount?: number;
+    deltaX?: number;
+    deltaY?: number;
+  }>
+  | Readonly<{
+    kind: "key";
+    event: "keyDown" | "keyUp" | "char";
+    key: string;
+    code?: string;
+    text?: string;
+    modifiers?: number;
+  }>;
+
+/** Optional interactive surface implemented by the concrete private CDP adapter. */
+export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime {
+  captureFrame(): Promise<BrowserFrame>;
+  navigate(url: string): Promise<void>;
+  dispatchInput(command: BrowserInputCommand): Promise<void>;
+}
+
 export interface BrowserRuntimeFactory {
   create(context: BrowserRuntimeContext): ManagedBrowserRuntime | Promise<ManagedBrowserRuntime>;
 }
@@ -87,7 +121,7 @@ export type BrowserRuntimeHandle = Readonly<{
   roots: BrowserRoots;
 }>;
 
-export type BrowserGatewayCapability = "view" | "heartbeat" | "takeover";
+export type BrowserGatewayCapability = "view" | "control" | "heartbeat" | "takeover";
 
 export type BrowserGatewayClaims = Readonly<{
   version: 1;

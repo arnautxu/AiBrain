@@ -7,7 +7,7 @@ import type {
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const HASH_PATTERN = /^[0-9a-f]{64}$/;
-const CAPABILITIES = ["view", "heartbeat", "takeover"] as const;
+const CAPABILITIES = ["view", "control", "heartbeat", "takeover"] as const;
 
 export class BrowserGatewayTokenError extends Error {
   constructor(readonly code: string, message: string) {
