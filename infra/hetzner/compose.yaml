@@ -94,6 +94,70 @@ services:
         mode: non-blocking
         max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
 
+  backup-replicator:
+    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
+    profiles: [backup]
+    entrypoint: [/usr/bin/tini, --, /usr/local/bin/aibrain-backup-replicate]
+    env_file:
+      - "${AIBRAIN_REPLICA_ENV_FILE:?set AIBRAIN_REPLICA_ENV_FILE}"
+    environment:
+      AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
+      AIBRAIN_RESTIC_BINARY: /usr/bin/restic
+      AIBRAIN_RESTIC_PASSWORD_FILE: /run/secrets/aibrain-restic-password
+      AIBRAIN_REPLICA_STATE_ROOT: /var/lib/aibrain-replication
+      NODE_ENV: production
+      TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.component: backup-replicator
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
+    user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    pids_limit: 128
+    cpus: 0.5
+    mem_limit: 512m
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=128m,mode=0700,uid=${AIBRAIN_UID:-10001},gid=${AIBRAIN_GID:-10001}
+    volumes:
+      - type: bind
+        source: "${AIBRAIN_INSTALLATION_CONFIG_HOST:?set AIBRAIN_INSTALLATION_CONFIG_HOST}"
+        target: /etc/aibrain/installation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: aibrain-backups
+        target: /var/lib/aibrain/data/backups
+        read_only: true
+      - type: volume
+        source: aibrain-restores
+        target: /var/lib/aibrain-restores
+      - type: bind
+        source: "${AIBRAIN_REPLICA_STATE_HOST_PATH:?set AIBRAIN_REPLICA_STATE_HOST_PATH}"
+        target: /var/lib/aibrain-replication
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AIBRAIN_RESTIC_PASSWORD_FILE_HOST:?set AIBRAIN_RESTIC_PASSWORD_FILE_HOST}"
+        target: /run/secrets/aibrain-restic-password
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      - aibrain-egress
+    logging:
+      driver: json-file
+      options:
+        max-size: "${AIBRAIN_LOG_MAX_SIZE:-10m}"
+        max-file: "${AIBRAIN_LOG_MAX_FILES:-5}"
+        mode: non-blocking
+        max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
+
   egress-gateway:
     image: "${AIBRAIN_EGRESS_IMAGE:?set AIBRAIN_EGRESS_IMAGE to an immutable image digest}"
     env_file:

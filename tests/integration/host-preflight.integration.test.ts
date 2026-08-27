@@ -14,7 +14,13 @@ async function fixture(installationId = "company-alpha") {
   const hostRoot = path.join(root, `aibrain-${installationId}`);
   const sourceRoot = path.join(hostRoot, "source-ro");
   const publishRoot = path.join(hostRoot, "publish-rw");
-  await Promise.all([mkdir(configRoot, { recursive: true }), mkdir(sourceRoot, { recursive: true }), mkdir(publishRoot, { recursive: true })]);
+  const replicaStateRoot = path.join(hostRoot, "replication");
+  await Promise.all([
+    mkdir(configRoot, { recursive: true }),
+    mkdir(sourceRoot, { recursive: true }),
+    mkdir(publishRoot, { recursive: true }),
+    mkdir(replicaStateRoot, { recursive: true }),
+  ]);
   const marker = JSON.stringify({ schemaVersion: 1, product: "aibrain", installationId });
   await Promise.all([
     writeFile(path.join(configRoot, ".aibrain-owner.json"), marker),
@@ -29,6 +35,13 @@ async function fixture(installationId = "company-alpha") {
       "AIBRAIN_EGRESS_SUPABASE_ORIGIN=https://project-ref.supabase.co",
       "",
     ].join("\n")),
+    writeFile(path.join(configRoot, "replica.env"), [
+      "AIBRAIN_RESTIC_REPOSITORY=s3:https://backup.example.test/company-alpha",
+      "AWS_ACCESS_KEY_ID=synthetic",
+      "AWS_SECRET_ACCESS_KEY=synthetic",
+      "",
+    ].join("\n"), { mode: 0o600 }),
+    writeFile(path.join(configRoot, "restic-password"), "synthetic-password\n", { mode: 0o600 }),
   ]);
   const envFile = path.join(root, "compose.env");
   const values = {
@@ -44,9 +57,12 @@ async function fixture(installationId = "company-alpha") {
     AIBRAIN_INSTALLATION_CONFIG_HOST: path.join(configRoot, "installation.json"),
     AIBRAIN_RUNTIME_ENV_FILE: path.join(configRoot, "runtime.env"),
     AIBRAIN_EGRESS_ENV_FILE: path.join(configRoot, "egress.env"),
+    AIBRAIN_REPLICA_ENV_FILE: path.join(configRoot, "replica.env"),
+    AIBRAIN_RESTIC_PASSWORD_FILE_HOST: path.join(configRoot, "restic-password"),
     AIBRAIN_HOST_ROOT: hostRoot,
     AIBRAIN_SOURCE_HOST_PATH: sourceRoot,
     AIBRAIN_PUBLISH_HOST_PATH: publishRoot,
+    AIBRAIN_REPLICA_STATE_HOST_PATH: replicaStateRoot,
     AIBRAIN_HTTP_PORT: "43100",
   };
   await writeFile(envFile, `${Object.entries(values).map(([key, value]) => `${key}=${value}`).join("\n")}\n`);

@@ -9,6 +9,7 @@ const execFile = promisify(execFileCallback);
 const repositoryRoot = process.cwd();
 const executable = path.join(repositoryRoot, "node_modules", ".bin", "tsx");
 const script = path.join(repositoryRoot, "scripts", "backup.ts");
+const replicationScript = path.join(repositoryRoot, "scripts", "replicate-backup.ts");
 const roots: string[] = [];
 
 async function fixture() {
@@ -29,6 +30,30 @@ async function fixture() {
   ]);
   await writeFile(path.join(companyContextRoot, "context.md"), "Company context v1\n", { mode: 0o600 });
   await writeFile(path.join(publishWriteRoot, "published.txt"), "Published document v1\n", { mode: 0o600 });
+  const replicaRepository = path.join(root, "fake-restic-repository");
+  const replicaPasswordFile = path.join(root, "restic-password");
+  const fakeRestic = path.join(root, "fake-restic.mjs");
+  await mkdir(replicaRepository, { mode: 0o700 });
+  await writeFile(replicaPasswordFile, "synthetic-restic-password\n", { mode: 0o600 });
+  await writeFile(fakeRestic, `#!${process.execPath}
+import { appendFile, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+const repository = process.env.RESTIC_REPOSITORY;
+if (!repository?.startsWith("local:")) process.exit(70);
+const root = repository.slice("local:".length);
+await appendFile(path.join(root, "calls.jsonl"), JSON.stringify(process.argv.slice(2)) + "\\n");
+const state = path.join(root, "snapshot.json");
+const command = process.argv[2];
+if (command === "snapshots") {
+  try { process.stdout.write(await readFile(state, "utf8")); }
+  catch { process.stdout.write("[]"); }
+} else if (command === "backup") {
+  const id = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+  const tags = process.argv.flatMap((value, index, all) => all[index - 1] === "--tag" ? [value] : []);
+  await writeFile(state, JSON.stringify([{ id, tags }]));
+  process.stdout.write(JSON.stringify({ message_type: "summary", snapshot_id: id }) + "\\n");
+} else if (command !== "check") process.exit(64);
+`, { mode: 0o700 });
   const configPath = path.join(root, "installation.json");
   await writeFile(configPath, `${JSON.stringify({
     schemaVersion: 1,
@@ -47,12 +72,16 @@ async function fixture() {
   const environment: NodeJS.ProcessEnv = {
     ...process.env,
     AIBRAIN_INSTALLATION_CONFIG: configPath,
+    AIBRAIN_RESTIC_BINARY: fakeRestic,
+    AIBRAIN_RESTIC_PASSWORD_FILE: replicaPasswordFile,
+    AIBRAIN_RESTIC_REPOSITORY: `local:${replicaRepository}`,
     NODE_ENV: "test",
   };
   return {
     root,
     dataRoot,
     publishWriteRoot,
+    replicaRepository,
     configPath,
     environment,
   };
@@ -142,5 +171,32 @@ describe("backup operational CLI", () => {
       cwd: repositoryRoot,
       env: test.environment,
     })).rejects.toMatchObject({ stderr: expect.stringContaining("--snapshot requires an absolute path.") });
+  });
+
+  it("replicates a verified composite snapshot once and replays the durable receipt", async () => {
+    const test = await fixture();
+    const created = await execFile(executable, [script, "create"], {
+      cwd: repositoryRoot,
+      env: test.environment,
+    });
+    const snapshotRoot = (JSON.parse(created.stdout) as { snapshotRoot: string }).snapshotRoot;
+    const first = await execFile(executable, [replicationScript, "--snapshot", snapshotRoot], {
+      cwd: repositoryRoot,
+      env: test.environment,
+    });
+    const firstReceipt = JSON.parse(first.stdout) as { remoteSnapshotId: string; repositoryFingerprint: string };
+    expect(firstReceipt).toMatchObject({
+      remoteSnapshotId: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+      repositoryFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+
+    const replay = await execFile(executable, [replicationScript, "--snapshot", snapshotRoot], {
+      cwd: repositoryRoot,
+      env: test.environment,
+    });
+    expect(JSON.parse(replay.stdout)).toEqual(JSON.parse(first.stdout));
+    const calls = (await readFile(path.join(test.replicaRepository, "calls.jsonl"), "utf8"))
+      .trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(calls.map((arguments_) => arguments_[0])).toEqual(["snapshots", "backup", "snapshots", "check"]);
   });
 });

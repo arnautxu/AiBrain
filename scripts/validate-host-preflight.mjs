@@ -57,6 +57,15 @@ function assertRegularNoSymlink(target, description) {
   return realpathSync(target);
 }
 
+function assertPrivateFile(target, description) {
+  const canonical = assertRegularNoSymlink(target, description);
+  const info = lstatSync(canonical);
+  if (info.nlink !== 1 || (info.mode & 0o077) !== 0) {
+    fail(`${description} must have one link and no group/world permissions: ${target}`);
+  }
+  return canonical;
+}
+
 function assertDirectoryNoSymlink(target, description) {
   const info = lstatSync(target, { throwIfNoEntry: false });
   if (!info?.isDirectory() || info.isSymbolicLink()) fail(`${description} must be a directory and not a symlink: ${target}`);
@@ -131,9 +140,12 @@ if (new Set(resourceNames).size !== resourceNames.length) fail("project, network
 const configFile = assertRegularNoSymlink(required(env, "AIBRAIN_INSTALLATION_CONFIG_HOST"), "installation config");
 const runtimeEnv = assertRegularNoSymlink(required(env, "AIBRAIN_RUNTIME_ENV_FILE"), "runtime env");
 const egressEnv = assertRegularNoSymlink(required(env, "AIBRAIN_EGRESS_ENV_FILE"), "egress env");
+const replicaEnv = assertPrivateFile(required(env, "AIBRAIN_REPLICA_ENV_FILE"), "replica env");
+const resticPassword = assertPrivateFile(required(env, "AIBRAIN_RESTIC_PASSWORD_FILE_HOST"), "Restic password file");
 const configRoot = realpathSync(path.dirname(configFile));
-if (path.dirname(runtimeEnv) !== configRoot || path.dirname(egressEnv) !== configRoot) {
-  fail("installation config, runtime env and egress env must share one owned config root");
+if (path.dirname(runtimeEnv) !== configRoot || path.dirname(egressEnv) !== configRoot
+  || path.dirname(replicaEnv) !== configRoot || path.dirname(resticPassword) !== configRoot) {
+  fail("installation config and all secret env/password files must share one owned config root");
 }
 assertOwner(configRoot, installationId);
 
@@ -168,15 +180,32 @@ const runtimePolicy = parseEnv(readFileSync(runtimeEnv, "utf8"));
 if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origin) {
   fail("Supabase auth URL and server egress origin must match exactly");
 }
+const replicaPolicy = parseEnv(readFileSync(replicaEnv, "utf8"));
+const resticRepository = required(replicaPolicy, "AIBRAIN_RESTIC_REPOSITORY");
+if (!/^(?:s3:https:\/\/|rest:https:\/\/|b2:|azure:|gs:)/u.test(resticRepository)) {
+  fail("Restic repository must use an approved off-host encrypted backend");
+}
 
 const hostRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_HOST_ROOT"), "installation host root");
 const sourceRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_SOURCE_HOST_PATH"), "source root");
 const publishRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_PUBLISH_HOST_PATH"), "publish root");
+const replicaStateRoot = assertDirectoryNoSymlink(required(env, "AIBRAIN_REPLICA_STATE_HOST_PATH"), "replica state root");
 assertOwner(hostRoot, installationId);
-if (!isInside(hostRoot, sourceRoot) || !isInside(hostRoot, publishRoot)) fail("source and publish roots must be children of the owned host root");
-if (sourceRoot === publishRoot || isInside(sourceRoot, publishRoot) || isInside(publishRoot, sourceRoot)) fail("source and publish roots must not overlap");
+if (!isInside(hostRoot, sourceRoot) || !isInside(hostRoot, publishRoot) || !isInside(hostRoot, replicaStateRoot)) {
+  fail("source, publish and replica state roots must be children of the owned host root");
+}
+const isolatedRoots = [sourceRoot, publishRoot, replicaStateRoot];
+for (let left = 0; left < isolatedRoots.length; left += 1) {
+  for (let right = left + 1; right < isolatedRoots.length; right += 1) {
+    if (isolatedRoots[left] === isolatedRoots[right]
+      || isInside(isolatedRoots[left], isolatedRoots[right])
+      || isInside(isolatedRoots[right], isolatedRoots[left])) {
+      fail("source, publish and replica state roots must not overlap");
+    }
+  }
+}
 
-for (const target of [envFileReal, runtimeEnv, egressEnv, configRoot, hostRoot, sourceRoot, publishRoot]) {
+for (const target of [envFileReal, runtimeEnv, egressEnv, replicaEnv, resticPassword, configRoot, hostRoot, sourceRoot, publishRoot, replicaStateRoot]) {
   if (/(?:^|[\\/])bgreenly(?:[\\/]|$)/iu.test(target)) fail("an AiBrain path must never address BGreenly");
 }
 

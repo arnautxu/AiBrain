@@ -89,6 +89,7 @@ RUN printf '%s\n' \
     libreoffice-writer \
     poppler-utils \
     qpdf \
+    restic \
     tini \
   && rm -rf /var/lib/apt/lists/* \
   && npm install --global --omit=dev "@openai/codex@0.149.1" "tsx@4.20.6" \
@@ -115,8 +116,10 @@ COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=root:root /app/scripts/backup.ts ./scripts/backup.ts
+COPY --from=builder --chown=root:root /app/scripts/replicate-backup.ts ./scripts/replicate-backup.ts
 COPY --from=builder --chown=root:root /app/src/config/installation.ts /app/src/config/installation-schema.ts ./src/config/
-COPY --from=builder --chown=root:root /app/src/operations/backup.ts ./src/operations/backup.ts
+COPY --from=builder --chown=root:root /app/src/documents/publication-locks.ts ./src/documents/publication-locks.ts
+COPY --from=builder --chown=root:root /app/src/operations/backup.ts /app/src/operations/backup-replica.ts ./src/operations/
 COPY --from=builder --chown=root:root /app/src/security/safe-file.ts ./src/security/safe-file.ts
 COPY --from=builder --chown=root:root \
   /app/src/storage/atomic-file.ts \
@@ -132,6 +135,7 @@ COPY --chown=root:root infra/hetzner/app/worker-sandbox.sh /usr/local/bin/aibrai
 COPY --chown=root:root infra/hetzner/app/browser-sandbox.sh /usr/local/bin/aibrain-chrome
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-soffice
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
+COPY --chown=root:root infra/hetzner/app/backup-replicate.sh /usr/local/bin/aibrain-backup-replicate
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
 COPY --chown=root:root infra/hetzner/app/configure-egress.mjs /usr/local/share/aibrain/configure-egress.mjs
 RUN chmod 0755 \
@@ -140,6 +144,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
+  /usr/local/bin/aibrain-backup-replicate \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
   && chmod -R a-w /app /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex

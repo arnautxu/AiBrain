@@ -25,6 +25,7 @@ const composeBuild = read("infra/hetzner/compose.build.yaml");
 const worker = read("infra/hetzner/app/worker-sandbox.sh");
 const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
+const backupReplicate = read("infra/hetzner/app/backup-replicate.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
@@ -33,6 +34,7 @@ const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const egressEnv = read("infra/hetzner/egress.env.example");
+const replicaEnv = read("infra/hetzner/replica.env.example");
 const egressGateway = read("infra/hetzner/egress/gateway.mts");
 const seccompProfile = JSON.parse(read("infra/hetzner/browser/seccomp_profile.json"));
 const hostPreflight = read("scripts/validate-host-preflight.mjs");
@@ -43,7 +45,7 @@ const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
 const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, egressGateway].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -60,7 +62,10 @@ requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNA
 requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian-security\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile security APT source is not the pinned Debian snapshot");
 requireMatch(dockerfile, /USER aibrain:aibrain/u, "Dockerfile final process is not non-root");
 requireMatch(dockerfile, /\bbubblewrap\b/u, "Dockerfile does not install the worker mount sandbox");
-for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium"]) {
+requireMatch(dockerfile, /src\/documents\/publication-locks\.ts/u, "Dockerfile backup CLI is missing the shared publication barrier contract");
+requireMatch(dockerfile, /src\/operations\/backup-replica\.ts/u, "Dockerfile is missing the encrypted backup replica adapter");
+requireMatch(dockerfile, /scripts\/replicate-backup\.ts/u, "Dockerfile is missing the backup replica CLI");
+for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium", "restic"]) {
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
@@ -86,6 +91,12 @@ requireMatch(compose, /name: "\$\{AIBRAIN_NETWORK_NAME:\?/u, "network name is no
 requireMatch(compose, /aibrain-internal:[\s\S]{0,180}internal: true/u, "application network is not Docker-internal");
 requireMatch(compose, /app:[\s\S]*?networks:\s*\n\s*- aibrain-internal[\s\S]*?healthcheck:/u, "app is not restricted to the internal network");
 requireMatch(compose, /egress-gateway:[\s\S]*?networks:\s*\n\s*- aibrain-internal\s*\n\s*- aibrain-egress/u, "egress gateway is not the sole dual-homed service");
+requireMatch(compose, /backup-replicator:[\s\S]*?profiles: \[backup\][\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-backup-replicate\]/u, "Compose lacks the explicit one-shot backup replicator profile");
+requireMatch(compose, /backup-replicator:[\s\S]*?target: \/var\/lib\/aibrain\/data\/backups\n\s*read_only: true/u, "backup replicator can write the verified snapshot volume");
+requireMatch(compose, /backup-replicator:[\s\S]*?source: aibrain-restores\n\s*target: \/var\/lib\/aibrain-restores/u, "backup replicator lacks the isolated restore drill volume");
+requireMatch(compose, /backup-replicator:[\s\S]*?target: \/var\/lib\/aibrain-replication[\s\S]*?target: \/run\/secrets\/aibrain-restic-password\n\s*read_only: true/u, "backup replicator lacks separate receipt state or a read-only password file");
+requireMatch(compose, /backup-replicator:[\s\S]*?networks:\s*\n\s*- aibrain-egress/u, "backup replicator is not isolated to the egress-only network");
+forbidMatch(compose.match(/  backup-replicator:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "backup replicator publishes a host port");
 requireMatch(compose, /aibrain-egress:[\s\S]{0,180}name: "\$\{AIBRAIN_EGRESS_NETWORK_NAME:\?/u, "egress network name is not required per installation");
 requireMatch(compose, /AIBRAIN_EGRESS_PROXY_URL: http:\/\/egress-gateway:8080/u, "app lacks the private gateway endpoint");
 requireMatch(compose, /egress-gateway:[\s\S]*?expose:\s*\n\s*- "8080"/u, "egress gateway is not exposed only inside Compose");
@@ -208,7 +219,11 @@ for (const key of [
   "AIBRAIN_EGRESS_IMAGE",
   "AIBRAIN_EGRESS_ENV_FILE",
   "AIBRAIN_EGRESS_NETWORK_NAME",
+  "AIBRAIN_REPLICA_ENV_FILE",
+  "AIBRAIN_REPLICA_STATE_HOST_PATH",
+  "AIBRAIN_RESTIC_PASSWORD_FILE_HOST",
 ]) requireMatch(composeEnv, new RegExp(`^${key}=`, "mu"), `compose env example is missing ${key}`);
+requireMatch(replicaEnv, /^AIBRAIN_RESTIC_REPOSITORY=(?:s3:https:\/\/|rest:https:\/\/|b2:|azure:|gs:)/mu, "replica env does not use an approved off-host Restic backend");
 for (const key of [
   "AIBRAIN_EGRESS_BROWSER_TOKEN",
   "AIBRAIN_EGRESS_WORKER_TOKEN",
