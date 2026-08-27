@@ -62,7 +62,7 @@ export type RuntimeStatus = {
 export const initialRuntimeStatus: RuntimeStatus = {
   tenantId: "",
   projectId: null,
-  projectName: "Projecte",
+  projectName: "Proyecto",
   mode: "codex",
   codex: "checking",
   isolated: false,

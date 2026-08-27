@@ -20,6 +20,26 @@ test("employee shell dark", async ({ page }) => {
   await expect(page).toHaveScreenshot("employee-shell-dark.png", { fullPage: true });
 });
 
+test("preferences dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  await page.getByRole("button", { name: "Abrir preferencias" }).click();
+  const preferences = page.getByRole("dialog", { name: /Preferencias de/ });
+  await expect(preferences).toBeVisible();
+  await preferences.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  await expect(page).toHaveScreenshot("preferences-dark.png", { fullPage: true });
+});
+
+test("guided actions dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  await page.getByRole("button", { name: "Abrir acciones guiadas" }).click();
+  await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
+  await expect(page).toHaveScreenshot("guided-actions-dark.png", { fullPage: true });
+});
+
 test("employee shell mobile drawer", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "visual-mobile", "mobile-only interaction");
   await login(page);
@@ -48,4 +68,20 @@ test("completed conversation", async ({ page }) => {
   });
   await expect(page.getByRole("button", { name: "Volver al final" })).toBeVisible();
   await expect(page).toHaveScreenshot("conversation-start.png", { fullPage: true });
+});
+
+test("completed conversation dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
+  await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
+  const scroller = page.locator(".workbench-main > .scrollbar-thin");
+  await scroller.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await expect(page).toHaveScreenshot("completed-conversation-dark.png", { fullPage: true });
 });

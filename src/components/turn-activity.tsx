@@ -100,35 +100,34 @@ function ApprovalCard({
     : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";
 
   return (
-    <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[#deddd9] bg-[#fbfbfa]" role="group" aria-label={`Aprobación: ${title}`}>
+    <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface-raised)]" role="group" aria-label={`Aprobación: ${title}`}>
       <div className="flex items-start gap-3 px-3.5 py-3">
-        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[#f0efec] text-[#464541]">
+        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text)]">
           <ShieldCheck size={15} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[#282725]">{title}</p>
-          <p className="mt-1 text-[10px] leading-4 text-[#44413d]">{explanation}</p>
+          <p className="text-[11px] font-semibold text-[var(--text)]">{title}</p>
+          <p className="mt-1 text-[10px] leading-4 text-[var(--text)]">{explanation}</p>
           <details className="mt-2">
-            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#44413d]">Ver por qué necesita permiso</summary>
-            <div className="mt-2 rounded-lg bg-[#f1f0ed] px-3 py-2 text-[9px] leading-4 text-[#66625d]">
+            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver por qué necesita permiso</summary>
+            <div className="mt-2 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[9px] leading-4 text-[var(--text)]">
               <p>{approval.detail}</p>
-              {approval.command ? <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[8px] text-[#77736d]">{approval.command}</pre> : null}
-              {approval.cwd ? <p className="mt-1 truncate font-mono text-[8px] text-[#999691]">{approval.cwd}</p> : null}
+              {approval.command ? <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[8px] text-[var(--text)]">{approval.command}</pre> : null}
             </div>
           </details>
         </div>
       </div>
 
       {pending ? (
-        <div className="flex flex-wrap justify-end gap-2 border-t border-[#e6e5e1] bg-white px-3 py-2.5">
-          <button type="button" className="rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[#44413d] hover:bg-[#f2f1ee]" onClick={() => onResolve("decline")}>Rechazar</button>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5">
+          <button type="button" className="min-h-10 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
           {approval.kind === "command" ? (
-            <button type="button" className="rounded-lg border border-[#deddd9] px-2.5 py-1.5 text-[10px] font-medium text-[#4e4c48] hover:bg-[#f6f5f2]" onClick={() => onResolve("acceptForSession")}>Permitir durante esta tarea</button>
+            <button type="button" className="min-h-10 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("acceptForSession")}>Permitir durante esta tarea</button>
           ) : null}
-          <button type="button" className="rounded-lg bg-[color-mix(in_srgb,var(--brain-accent)_55%,#000)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir una vez</button>
+          <button type="button" className="min-h-10 rounded-lg bg-[var(--brain-accent-strong)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir una vez</button>
         </div>
       ) : (
-        <div className="border-t border-[#e6e5e1] px-3.5 py-2 text-[9px] font-medium text-[#44413d]" role="status">{result}</div>
+        <div className="border-t border-[var(--border-subtle)] px-3.5 py-2 text-[9px] font-medium text-[var(--text)]" role="status">{result}</div>
       )}
     </div>
   );
@@ -142,19 +141,19 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 ? (
         <section>
-          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[#44413d]">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[var(--text)]">
             <ListChecks size={13} />
             Plan
           </div>
           <ol className="space-y-1.5">
             {message.plan.map((step, index) => (
-              <li key={`${step.step}-${index}`} className="flex items-start gap-2 text-[10px] leading-4 text-[#44413d]">
+              <li key={`${step.step}-${index}`} className="flex items-start gap-2 text-[10px] leading-4 text-[var(--text)]">
                 <span className={`mt-[3px] grid size-3.5 shrink-0 place-items-center rounded-full ${
                   step.status === "completed"
-                    ? "bg-[#e8eee8] text-[#51705a]"
+                    ? "bg-[var(--positive-soft)] text-[var(--positive)]"
                     : step.status === "in_progress"
-                      ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent)]"
-                      : "text-[#aaa7a2]"
+                      ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]"
+                      : "text-[var(--text-muted)]"
                 }`}>
                   {step.status === "completed" ? <Check size={8} weight="bold" /> : step.status === "in_progress" ? <SpinnerGap size={8} className="motion-safe:animate-spin" /> : <Circle size={8} />}
                 </span>
@@ -166,20 +165,20 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ) : null}
 
       {message.activity.length > 0 ? (
-        <section className="overflow-hidden rounded-[var(--brain-radius)] border border-[#e2e1dd] bg-[#f9f9f8]">
+        <section className="overflow-hidden rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)]">
           {message.activity.map((item, index) => (
-            <div key={item.id} className={`flex items-start gap-2.5 px-3 py-2.5 ${index > 0 ? "border-t border-[#e8e7e3]" : ""}`}>
+            <div key={item.id} className={`flex items-start gap-2.5 px-3 py-2.5 ${index > 0 ? "border-t border-[var(--border-subtle)]" : ""}`}>
               <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md ${
-                item.status === "failed" ? "bg-[#f8eae6] text-[#9d4f3a]" : "bg-white text-[#6d6a65]"
+                item.status === "failed" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--text)]"
               }`}>
                 <ActivityIcon item={item} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-medium text-[#4b4945]">{friendlyActivity(item)}</p>
-                {item.detail ? <p className="mt-0.5 text-[9px] leading-4 text-[#44413d]">{item.detail}</p> : null}
+                <p className="text-[10px] font-medium text-[var(--text)]">{friendlyActivity(item)}</p>
+                {item.detail ? <p className="mt-0.5 text-[9px] leading-4 text-[var(--text)]">{item.detail}</p> : null}
                 {item.output ? (
                   <details className="mt-2">
-                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[#44413d]">Ver salida</summary>
+                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
                     <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
                   </details>
                 ) : null}
@@ -194,9 +193,9 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ))}
 
       {message.diff && showDiff ? (
-        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[#dde3dd] bg-[#f5f8f5] px-3.5 py-3 text-[#324b38]">
-          <GitDiff size={14} className="mt-0.5 shrink-0" />
-          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-1 text-[9px] leading-4 text-[#3f4f44]">Puedes revisar el diff desde el botón “Abrir Review”.</p></div>
+        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[var(--positive)] bg-[var(--positive-soft)] px-3.5 py-3 text-[var(--text)]">
+          <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--positive)]" />
+          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-1 text-[9px] leading-4">Puedes revisar el diff desde el botón “Abrir Review”.</p></div>
         </section>
       ) : null}
     </div>
