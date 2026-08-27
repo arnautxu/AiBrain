@@ -44,6 +44,9 @@ describe("PrivateCdpClient", () => {
     const event = client.waitForEvent<{ timestamp: number }>("Page.loadEventFired");
     await expect(client.send<{ product: string }>("Browser.getVersion"))
       .resolves.toEqual({ product: "Chrome/140.0.0.0" });
+    await expect(client.send("Fetch.enable", {
+      patterns: [{ urlPattern: "https://*", requestStage: "Request" }],
+    })).resolves.toEqual({ product: "Chrome/140.0.0.0" });
     await expect(event).resolves.toEqual({ timestamp: 123 });
     await client.close();
   });
