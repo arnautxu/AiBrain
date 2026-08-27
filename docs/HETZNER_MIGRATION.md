@@ -223,13 +223,31 @@ La copia cifrada fuera del servidor, sus credenciales y la prueba del proveedor 
 
 ## 6. Release y rollback
 
-Antes de un release, completa backup/verify y conserva el tag anterior. Construye el nuevo commit con un tag nuevo, ejecuta `node scripts/validate-infra.mjs`, `config --quiet`, smoke y tests. Cambia solo `AIBRAIN_IMAGE` en `compose.env` y recrea `app`:
+Antes de un release, completa maintenance/drain, backup/verify, SBOM, scan y tests. Construye con `compose.build.yaml` y `AIBRAIN_REVISION=<git-sha>`, publica la imagen en el registry aprobado y resuelve su digest `sha256`. El Compose runtime no contiene `build:` y nunca acepta un tag mutable.
+
+Promueve mediante el gestor transaccional. Este verifica que el digest existe localmente, que la label OCI coincide con el commit, valida Compose, cambia `AIBRAIN_IMAGE` atómicamente, espera health y registra `current`/`previous`. Si el health falla, restaura el digest anterior y exige que vuelva a estar healthy:
 
 ```bash
-docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps app
+node scripts/manage-release.mjs promote \
+  --image registry.example/aibrain@sha256:<64-hex> \
+  --revision <git-sha> \
+  --installation-id <installation> \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  --compose-file /opt/aibrain-<installation>/releases/<git-sha>/infra/hetzner/compose.yaml \
+  --state-file /etc/aibrain/<installation>/release.json
 ```
 
-Para rollback de código, repón el tag anterior en `AIBRAIN_IMAGE` y repite el mismo comando. No borres imágenes, releases, volúmenes ni backups. Si el release migró datos incompatibles, detén `app`, valida el snapshot y arranca una instalación QA aislada sobre el restore antes de cambiar cualquier ruta activa.
+Rollback usa únicamente el digest previo firmado en el estado durable y vuelve a verificar su label/health:
+
+```bash
+node scripts/manage-release.mjs rollback \
+  --installation-id <installation> \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  --compose-file /opt/aibrain-<installation>/current/infra/hetzner/compose.yaml \
+  --state-file /etc/aibrain/<installation>/release.json
+```
+
+No borres imágenes, releases, volúmenes ni backups. Si el release migró datos incompatibles, detén `app`, valida el snapshot y arranca una instalación QA aislada sobre el restore antes de cambiar cualquier ruta activa.
 
 ## 7. Gates externos pendientes
 

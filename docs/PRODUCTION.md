@@ -104,3 +104,9 @@ La imagen base se fija por digest, Codex/Node packages por versión y APT contra
 el snapshot inmutable `20260820T000000Z` de Debian. Cambiar ese snapshot es una
 actualización de release revisable: requiere build limpio, SBOM, scan y matriz
 Office/PDF/Chromium antes de promover la nueva imagen.
+
+El Compose de runtime exige `AIBRAIN_IMAGE` resuelta a `@sha256`; el build vive
+en `infra/hetzner/compose.build.yaml` y exige la revisión Git exacta, registrada
+como label OCI. `scripts/manage-release.mjs` verifica digest+revisión, conserva
+estado atómico `current`/`previous`, espera readiness y recupera automáticamente
+la imagen anterior si una promoción no llega a healthy.

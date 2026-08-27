@@ -21,6 +21,7 @@ function read(file) {
 
 const dockerfile = read("Dockerfile");
 const compose = read("infra/hetzner/compose.yaml");
+const composeBuild = read("infra/hetzner/compose.build.yaml");
 const worker = read("infra/hetzner/app/worker-sandbox.sh");
 const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
@@ -33,6 +34,7 @@ const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const seccompProfile = JSON.parse(read("infra/hetzner/browser/seccomp_profile.json"));
 const hostPreflight = read("scripts/validate-host-preflight.mjs");
+const releaseManager = read("scripts/manage-release.mjs");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
@@ -59,6 +61,7 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
+requireMatch(dockerfile, /org\.opencontainers\.image\.revision="\$\{AIBRAIN_REVISION\}"/u, "Docker image does not record its exact source revision");
 
 for (const marker of [
   "read_only: true",
@@ -81,6 +84,9 @@ requireMatch(compose, /com\.graphikai\.aibrain\.installation:[^\n]*AIBRAIN_INSTA
 requireMatch(compose, /- "127\.0\.0\.1:\$\{AIBRAIN_HTTP_PORT:\?/u, "HTTP binding is not fixed to loopback");
 forbidMatch(compose, /AIBRAIN_BIND_ADDRESS/u, "Compose permits the loopback binding to be overridden");
 requireMatch(compose, /test: \[CMD, node, \/usr\/local\/share\/aibrain\/healthcheck\.mjs\]/u, "Compose does not use the storage-aware healthcheck");
+forbidMatch(compose, /^\s*build\s*:/mu, "runtime Compose permits an implicit mutable image build");
+requireMatch(composeBuild, /AIBRAIN_REVISION: "\$\{AIBRAIN_REVISION:\?/u, "build override does not require an exact source revision");
+requireMatch(composeBuild, /context: \.\.\/\.\./u, "build override does not use the reviewed repository context");
 
 requireMatch(worker, /--ro-bind \/ \/[\s\S]*--tmpfs "\$publish_root"[\s\S]*--remount-ro "\$publish_root"/u, "worker does not mask publish-rw behind a read-only mount");
 requireMatch(worker, /--tmpfs "\$data_root"[\s\S]*--ro-bind "\$company_root" "\$company_root"[\s\S]*--ro-bind "\$source_root" "\$source_root"/u, "worker does not hide product data before re-exposing approved read roots");
@@ -117,6 +123,10 @@ requireMatch(hostPreflight, /\.aibrain-owner\.json/u, "host preflight does not r
 requireMatch(hostPreflight, /AIBRAIN_BACKUP_VOLUME_NAME[\s\S]*AIBRAIN_RESTORE_VOLUME_NAME/u, "host preflight does not validate independent backup and restore volumes");
 requireMatch(hostPreflight, /existing Docker[\s\S]*not owned/u, "host preflight does not reject foreign Docker resources");
 requireMatch(hostPreflight, /must never address BGreenly/u, "host preflight does not fail closed on BGreenly paths");
+requireMatch(releaseManager, /@sha256:\[0-9a-f\]\{64\}/u, "release manager does not require immutable image digests");
+requireMatch(releaseManager, /org\.opencontainers\.image\.revision/u, "release manager does not verify the OCI source revision");
+requireMatch(releaseManager, /RELEASE_RECOVERED/u, "release manager does not recover the previous healthy image after failure");
+requireMatch(releaseManager, /writeAtomic\(options\.stateFile/u, "release manager does not persist current and previous releases atomically");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
 requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");
 forbidMatch(chromeRuntime, /--remote-debugging-(?:port|address)/u, "Chrome runtime reintroduces a network CDP endpoint");
@@ -159,6 +169,7 @@ for (const key of [
   "AIBRAIN_HOST_ROOT",
   "AIBRAIN_BACKUP_VOLUME_NAME",
   "AIBRAIN_RESTORE_VOLUME_NAME",
+  "AIBRAIN_REVISION",
 ]) requireMatch(composeEnv, new RegExp(`^${key}=`, "mu"), `compose env example is missing ${key}`);
 
 const expectedPaths = {
