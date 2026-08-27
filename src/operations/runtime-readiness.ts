@@ -57,9 +57,10 @@ export function runtimeReadinessProbes(
   const expectedChrome = environment.AIBRAIN_CHROME_EXPECTED_VERSION?.trim() || "";
   const documentExecutables = [
     environment.AIBRAIN_SOFFICE_BIN?.trim() || "/usr/local/bin/aibrain-soffice",
-    environment.AIBRAIN_PDFINFO_BIN?.trim() || "/usr/bin/pdfinfo",
-    environment.AIBRAIN_PDFTOPPM_BIN?.trim() || "/usr/bin/pdftoppm",
-    environment.AIBRAIN_QPDF_BIN?.trim() || "/usr/bin/qpdf",
+    environment.AIBRAIN_PDFINFO_BIN?.trim() || "/usr/local/bin/aibrain-pdfinfo",
+    environment.AIBRAIN_PDFTOPPM_BIN?.trim() || "/usr/local/bin/aibrain-pdftoppm",
+    environment.AIBRAIN_PDFTOTEXT_BIN?.trim() || "/usr/local/bin/aibrain-pdftotext",
+    environment.AIBRAIN_QPDF_BIN?.trim() || "/usr/local/bin/aibrain-qpdf",
   ];
 
   return Object.freeze([

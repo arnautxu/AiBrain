@@ -32,6 +32,10 @@ require_secret() {
 [ "${CODEX_BIN:-}" = /usr/local/bin/aibrain-codex-worker ] || fail "CODEX_BIN must use the worker filesystem sandbox"
 [ "${AIBRAIN_CHROME_BIN:-}" = /usr/local/bin/aibrain-chrome ] || fail "AIBRAIN_CHROME_BIN must use the employee browser filesystem sandbox"
 [ "${AIBRAIN_SOFFICE_BIN:-}" = /usr/local/bin/aibrain-soffice ] || fail "LibreOffice must use the safe headless wrapper"
+[ "${AIBRAIN_PDFINFO_BIN:-}" = /usr/local/bin/aibrain-pdfinfo ] || fail "pdfinfo must use the document filesystem sandbox"
+[ "${AIBRAIN_PDFTOPPM_BIN:-}" = /usr/local/bin/aibrain-pdftoppm ] || fail "pdftoppm must use the document filesystem sandbox"
+[ "${AIBRAIN_PDFTOTEXT_BIN:-}" = /usr/local/bin/aibrain-pdftotext ] || fail "pdftotext must use the document filesystem sandbox"
+[ "${AIBRAIN_QPDF_BIN:-}" = /usr/local/bin/aibrain-qpdf ] || fail "qpdf must use the document filesystem sandbox"
 
 require_secret AIBRAIN_SESSION_SECRET
 require_secret AIBRAIN_AUTH_CHALLENGE_SECRET
@@ -108,12 +112,17 @@ for executable in \
   /usr/local/bin/aibrain-codex-worker \
   /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
+  /usr/local/bin/aibrain-pdfinfo \
+  /usr/local/bin/aibrain-pdftoppm \
+  /usr/local/bin/aibrain-pdftotext \
+  /usr/local/bin/aibrain-qpdf \
   /usr/local/bin/aibrain-backup \
   /usr/local/bin/aibrain-backup-replicate \
   /usr/local/bin/aibrain-alerts \
   /usr/local/share/aibrain/configure-egress.mjs \
   /usr/bin/bwrap \
   /usr/bin/chromium \
+  /usr/bin/soffice \
   /usr/bin/pdfinfo \
   /usr/bin/pdftoppm \
   /usr/bin/pdftotext \
@@ -150,6 +159,33 @@ trap 'rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"' EXIT INT TERM
     "$boundary_marker" /srv/aibrain/publish-rw/worker-write-test \
   >/dev/null 2>&1 || fail "bubblewrap worker isolation is unavailable on this host"
 rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"
+trap - EXIT INT TERM
+
+# Exercise the exact document launcher. Conversion must see only its private
+# work directory; product state and the official publisher mount stay hidden.
+document_test_user=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
+document_test_thread=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
+document_test_upload=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
+document_test_user_root=/var/lib/aibrain/data/users/$document_test_user
+document_preview_root=$document_test_user_root/state/document-previews/$document_test_thread/$document_test_upload
+mkdir -p "$document_preview_root"
+document_work=$(mktemp -d "$document_preview_root/.work-XXXXXX")
+document_hidden_marker=$(mktemp /var/lib/aibrain/data/.aibrain-document-hidden.XXXXXX)
+document_publish_marker=$(mktemp /srv/aibrain/publish-rw/.aibrain-document-publish.XXXXXX)
+trap 'rm -rf "$document_test_user_root"; rm -f "$document_hidden_marker" "$document_publish_marker"' EXIT INT TERM
+for document_launcher in soffice pdfinfo pdftoppm pdftotext qpdf; do
+  (
+    cd "$document_work"
+    AIBRAIN_DOCUMENT_SANDBOX_PREFLIGHT=entrypoint-boundary-v1 \
+    AIBRAIN_DOCUMENT_PREFLIGHT_HIDDEN=$document_hidden_marker \
+    AIBRAIN_DOCUMENT_PREFLIGHT_PUBLISH=$document_publish_marker \
+      /usr/local/bin/aibrain-$document_launcher --aibrain-preflight
+  ) >/dev/null 2>&1 || fail "bubblewrap document isolation is unavailable for $document_launcher"
+  [ -f "$document_work/preflight-aibrain-$document_launcher-ok" ] \
+    || fail "document isolation did not preserve the $document_launcher private work directory"
+done
+rm -rf "$document_test_user_root"
+rm -f "$document_hidden_marker" "$document_publish_marker"
 trap - EXIT INT TERM
 
 # Exercise the exact browser launcher too. A synthetic employee marker must be

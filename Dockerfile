@@ -56,9 +56,10 @@ ENV NODE_ENV=production \
     AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json \
     AIBRAIN_CHROME_BIN=/usr/local/bin/aibrain-chrome \
     AIBRAIN_SOFFICE_BIN=/usr/local/bin/aibrain-soffice \
-    AIBRAIN_PDFINFO_BIN=/usr/bin/pdfinfo \
-    AIBRAIN_PDFTOPPM_BIN=/usr/bin/pdftoppm \
-    AIBRAIN_QPDF_BIN=/usr/bin/qpdf \
+    AIBRAIN_PDFINFO_BIN=/usr/local/bin/aibrain-pdfinfo \
+    AIBRAIN_PDFTOPPM_BIN=/usr/local/bin/aibrain-pdftoppm \
+    AIBRAIN_PDFTOTEXT_BIN=/usr/local/bin/aibrain-pdftotext \
+    AIBRAIN_QPDF_BIN=/usr/local/bin/aibrain-qpdf \
     AIBRAIN_CODEX_EXPECTED_VERSION=0.149.1 \
     HOME=/var/lib/aibrain/data/app-home \
     XDG_CACHE_HOME=/var/lib/aibrain/data/server/xdg/cache \
@@ -136,6 +137,10 @@ COPY --chown=root:root infra/hetzner/app/entrypoint.sh /usr/local/bin/aibrain-en
 COPY --chown=root:root infra/hetzner/app/worker-sandbox.sh /usr/local/bin/aibrain-codex-worker
 COPY --chown=root:root infra/hetzner/app/browser-sandbox.sh /usr/local/bin/aibrain-chrome
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-soffice
+COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-pdfinfo
+COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-pdftoppm
+COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-pdftotext
+COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-qpdf
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/backup-replicate.sh /usr/local/bin/aibrain-backup-replicate
 COPY --chown=root:root infra/hetzner/app/alerts.sh /usr/local/bin/aibrain-alerts
@@ -146,6 +151,10 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-codex-worker \
   /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
+  /usr/local/bin/aibrain-pdfinfo \
+  /usr/local/bin/aibrain-pdftoppm \
+  /usr/local/bin/aibrain-pdftotext \
+  /usr/local/bin/aibrain-qpdf \
   /usr/local/bin/aibrain-backup \
   /usr/local/bin/aibrain-backup-replicate \
   /usr/local/bin/aibrain-alerts \

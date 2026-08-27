@@ -19,7 +19,14 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
   sin socket TCP, discovery URL ni `DevToolsActivePort`; perfiles, targets y
   descargas se aíslan por empleado y thread. No se publican puertos CDP o
   viewers internos.
-- LibreOffice se ejecuta en headless/safe mode, con perfil desechable y seguridad de macros `Very High`; uploads OOXML con macros ya son rechazados antes de conversión. Poppler y QPDF forman parte de la imagen.
+- LibreOffice, Poppler y QPDF se ejecutan siempre mediante launchers `bubblewrap`
+  sin red ni capabilities y con PID/IPC/UTS privados. El namespace oculta
+  configuración, estado de producto, `source-ro` y `publish-rw`, y reexpone
+  únicamente el directorio desechable de esa conversión como `/work`. El
+  launcher rechaza rutas absolutas externas y traversal. LibreOffice además
+  exige headless/safe mode, perfil privado, `--norestore` y seguridad de macros
+  `Very High`; los uploads OOXML con macros ya se rechazan antes de convertir.
+  El entrypoint prueba esta frontera con los cinco launchers y falla cerrado.
 - Los logs Docker tienen rotación y buffer no bloqueante. No se debe ejecutar `docker compose config` sin `--quiet` en registros compartidos porque puede materializar variables del `env_file`.
 
 ## Persistencia
