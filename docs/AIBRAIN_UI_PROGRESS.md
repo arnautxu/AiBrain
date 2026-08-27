@@ -255,8 +255,18 @@
 - `cc5ff4b test(ui): add exhaustive visual matrix` — checkpoint 9, siete viewports, 66 baselines deterministas, overflow y umbral visual estricto.
 - `67714ab test(ui): stabilize visual state captures` — checkpoint 9, turnos aislados, scroll reproducible y baselines sin avisos transitorios.
 - `c172950 docs(ui): finalize parity handoff` — checkpoint 10, contrato backend actualizado, Preview, regresión final, gaps y plan de integración segura.
+- `68317c3 feat(ui): integrate definitive backend contracts` — merge revisado de UI con backend `812e20c`, adapters reales, shimmer Codex y regresión completa.
+- `97eb769 fix(preview): bundle installation config` — configuración white-label Preview incluida en el trace serverless sin relajar el fail-closed productivo.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
-Abrir, cuando se autorice, una rama de integración desde `codex/aibrain-backend-definitivo@6bc7bc2`, aplicar manualmente la capa visual y tests de esta rama y ejecutar los gates end-to-end descritos en `AIBRAIN_UI_PARITY_HANDOFF.md`. No hacer merge automático ni tocar Production.
+Revisar el handoff y la Preview `https://aibrain-workbench-preview.vercel.app`. La siguiente fase ya no es integrar ramas: es QA operativa con una identidad sintética sobre una instalación persistente y, solo con autorización separada, el proceso de aceptación de Production. No mergear `main` automáticamente.
+
+## Cierre Preview final
+
+- Deployment `dpl_4MTkfJPc77HFrmueB8PWv2qAGsd3`, target Preview, estado Ready, commit `97eb769`.
+- Alias estable `https://aibrain-workbench-preview.vercel.app`; URL inmutable `https://aibrain-workbench-olpddgjdg-arnautxus-projects.vercel.app`.
+- Login `200` y branding Example verificado; sesión anónima `401`; live `200`; logs de error vacíos.
+- Readiness `503` es el límite correcto: Vercel no se hace pasar por el host Codex persistente.
+- Production no se desplegó, promovió ni modificó.
