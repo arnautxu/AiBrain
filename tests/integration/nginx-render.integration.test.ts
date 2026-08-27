@@ -24,6 +24,10 @@ describe("per-installation Nginx rendering", () => {
     expect(alpha).toContain("upstream aibrain_company_alpha_backend");
     expect(alpha).toContain("server 127.0.0.1:3100");
     expect(alpha).toContain("return 301 https://alpha.example.com$request_uri");
+    expect(alpha).toContain("location ^~ /.well-known/acme-challenge/");
+    expect(alpha).toContain("root /var/www/aibrain-acme");
+    expect(alpha).toContain('location ~ "^/api/threads/[0-9a-f-]{36}/documents$"');
+    expect(alpha).toContain("http2 on;");
     expect(beta).toContain("zone=aibrain_company_beta_auth:10m");
     expect(beta).toContain("upstream aibrain_company_beta_backend");
     expect(beta).not.toContain("aibrain_company_alpha");

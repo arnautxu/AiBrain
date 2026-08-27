@@ -11,12 +11,24 @@ server {
     listen 80;
     listen [::]:80;
     server_name __AIBRAIN_PUBLIC_HOST__;
-    return 301 https://__AIBRAIN_PUBLIC_HOST__$request_uri;
+
+    # Keep certificate renewal available on HTTP. Every other request is
+    # redirected to the canonical HTTPS origin.
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/aibrain-acme;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        return 301 https://__AIBRAIN_PUBLIC_HOST__$request_uri;
+    }
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name __AIBRAIN_PUBLIC_HOST__;
 
     ssl_certificate /etc/letsencrypt/live/__AIBRAIN_PUBLIC_HOST__/fullchain.pem;
@@ -73,7 +85,7 @@ server {
         proxy_send_timeout 1h;
     }
 
-    location ~ ^/api/threads/[0-9a-f-]{36}/documents$ {
+    location ~ "^/api/threads/[0-9a-f-]{36}/documents$" {
         client_max_body_size 52m;
         proxy_pass http://aibrain___AIBRAIN_INSTANCE_TOKEN___backend;
         proxy_http_version 1.1;
