@@ -132,6 +132,47 @@ describe("FileWorkbenchStore", () => {
     )).rejects.toBeInstanceOf(WorkbenchConflictError);
   });
 
+  it("persists approval fingerprints produced by projected runtime events", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Approval project");
+    const thread = await store.createThread(USER_A, project.id, "Approval thread");
+    const userMessage = message("user", "complete");
+    const assistantMessage: ChatMessage = {
+      ...message("assistant", "streaming"),
+      artifacts: [{
+        id: randomUUID(),
+        type: "browser",
+        name: "Private browser",
+        status: "ready",
+        control: "agent",
+        viewerUrl: null,
+        captureUrl: null,
+        downloadUrl: null,
+        error: null,
+      }],
+      approvals: [{
+        id: "approval-1",
+        threadId: "runtime-thread-1",
+        turnId: "runtime-turn-1",
+        itemId: "runtime-item-1",
+        kind: "browser",
+        title: "Open page",
+        detail: "Open an external page in the isolated browser.",
+        permissionFingerprint: "a".repeat(64),
+        status: "accepted",
+      }],
+    };
+
+    await store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage);
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    await expect(restarted.load(USER_A)).resolves.toMatchObject({
+      threads: [expect.objectContaining({
+        id: thread.id,
+        messages: [userMessage, assistantMessage],
+      })],
+    });
+  });
+
   it("provisions the hidden standalone-chat workspace and persists projects, threads, turns, activity and runtime token across restart", async () => {
     const { usersRoot, store } = await fixture();
     const initial = await store.load(USER_A);
