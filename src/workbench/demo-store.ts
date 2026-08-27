@@ -17,6 +17,7 @@ import {
   isUuid,
   isWorkbenchProject,
   isWorkbenchThread,
+  STANDALONE_PROJECT_SLUG,
   type UpdateProjectInput,
   type UpdateThreadInput,
   type WorkbenchPersistence,
@@ -91,6 +92,7 @@ export function seedDemoState(tenantId: string, tenantName: string): DemoState {
   return {
     version: 1,
     projects: [
+      seededProject("Conversaciones", STANDALONE_PROJECT_SLUG, STANDALONE_PROJECT_SLUG),
       seededProject(primaryName, primarySlug, "workspace"),
       seededProject(secondaryName, secondarySlug, secondarySlug),
     ],
@@ -151,6 +153,14 @@ async function readState(session: AuthSession) {
     }
     if (!isDemoState(decoded)) {
       throw new WorkbenchPersistenceError("L’estat persistent del workbench no és vàlid.");
+    }
+    if (!decoded.projects.some((project) => project.slug === STANDALONE_PROJECT_SLUG)) {
+      decoded.projects.unshift(seededProject(
+        "Conversaciones",
+        STANDALONE_PROJECT_SLUG,
+        STANDALONE_PROJECT_SLUG,
+      ));
+      upgraded = true;
     }
     if (upgraded) await writeState(session.tenant.id, decoded);
     return decoded;

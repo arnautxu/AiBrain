@@ -148,7 +148,13 @@ an arbitrary thread. Metadata retains at most 1,000 recent records per user by
 default, evicting only the oldest terminal records; if all retained entries are
 active it applies backpressure and deletes no user file. The adapter validates
 PNG signatures/sizes, URL schemes and input dimensions. Network CDP flags,
-`--no-sandbox`, shell execution and `docker.sock` are forbidden.
+application-supplied `--no-sandbox`, shell execution and `docker.sock` are
+forbidden. The root-owned production launcher adds `--no-sandbox` only after
+it has established the stronger outer boundary: the non-root/no-capabilities/
+no-new-privileges container plus private bwrap PID, IPC, UTS and filesystem
+namespaces. Chromium's nested setuid/user-namespace sandbox cannot initialize
+below that boundary and otherwise aborts before opening the inherited CDP
+pipes.
 
 Production requires `AIBRAIN_CHROME_EXPECTED_VERSION` with all four version
 components. Use a pinned Chrome for Testing/Chromium artifact rather than a

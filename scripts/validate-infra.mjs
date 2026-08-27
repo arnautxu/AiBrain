@@ -103,6 +103,8 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
+requireMatch(browserSandbox, /set -- \/usr\/bin\/chromium --no-sandbox "\$@"[\s\S]*exec \/usr\/bin\/bwrap/u, "Browser launcher does not disable only Chromium's nested sandbox before the mandatory bwrap boundary");
+requireMatch(chromeRuntime, /args\.includes\("--no-sandbox"\)[\s\S]*CHROME_ARGUMENTS_UNSAFE/u, "Chrome runtime accepts application-supplied sandbox bypass arguments");
 for (const tool of ["soffice", "pdfinfo", "pdftoppm", "pdftotext", "qpdf"]) {
   requireMatch(dockerfile, new RegExp(`COPY --chown=root:root infra/hetzner/app/soffice-safe\\.sh /usr/local/bin/aibrain-${tool}`, "u"), `Dockerfile does not install the sandboxed ${tool} launcher`);
 }

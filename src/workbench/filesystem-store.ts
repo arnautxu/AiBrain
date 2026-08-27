@@ -36,6 +36,7 @@ import {
   isUpdateThreadInput,
   isWorkbenchProject,
   isWorkbenchThread,
+  STANDALONE_PROJECT_SLUG,
   WORKBENCH_MAX_CURSOR_LENGTH,
   WORKBENCH_MAX_PAGE_SIZE,
   WORKBENCH_MAX_QUERY_LENGTH,
@@ -611,7 +612,15 @@ export class FileWorkbenchStore {
   }
 
   async load(userId: string): Promise<WorkbenchSnapshot> {
-    return snapshot(await this.read(userId));
+    let state = await this.read(userId);
+    if (!state.projects.some((project) => project.slug === STANDALONE_PROJECT_SLUG)) {
+      await this.mutate(userId, (current) => {
+        if (current.projects.some((project) => project.slug === STANDALONE_PROJECT_SLUG)) return;
+        current.projects.push(newProject("Conversaciones", STANDALONE_PROJECT_SLUG));
+      });
+      state = await this.read(userId);
+    }
+    return snapshot(state);
   }
 
   async listProjects(
@@ -622,6 +631,7 @@ export class FileWorkbenchStore {
     const state = await this.read(userId);
     const needle = query.query ? normalizeSearchText(query.query) : null;
     const projects = state.projects
+      .filter((project) => project.slug !== STANDALONE_PROJECT_SLUG)
       .filter((project) => query.status === "all" || project.status === query.status)
       .filter((project) => !needle ||
         normalizeSearchText(project.name).includes(needle) ||
@@ -686,6 +696,9 @@ export class FileWorkbenchStore {
     return this.mutate(userId, (state) => {
       const project = state.projects.find((candidate) => candidate.id === projectId);
       if (!project) throw new WorkbenchNotFoundError("Projecte no trobat.");
+      if (project.slug === STANDALONE_PROJECT_SLUG) {
+        throw new WorkbenchConflictError("El projecte intern de converses no es pot modificar.");
+      }
       if (patch.name !== undefined) {
         project.name = patch.name.trim();
         project.workspace.label = project.name;

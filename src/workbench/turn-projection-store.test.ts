@@ -125,4 +125,27 @@ describe("turn projection store", () => {
       { type: "delta", value: "blocked" },
     )).rejects.toThrow("seqüència");
   });
+
+  it("compacts ordered streaming deltas into one durable projection batch", async () => {
+    const workbench = new FileWorkbenchStore({ installationId, usersRoot });
+    const project = await workbench.createProject(userId, "Streaming");
+    const thread = await workbench.createThread(userId, project.id, "Fast stream");
+    const assistantId = "00000000-0000-4000-8000-000000000022";
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    await projections.initialize(thread.id, assistant(assistantId));
+
+    const batch = [
+      { envelope: envelope(1), projectionKey: "delta:one", event: { type: "delta" as const, value: "Uno " } },
+      { envelope: envelope(2), projectionKey: "delta:two", event: { type: "delta" as const, value: "dos " } },
+      { envelope: envelope(3), projectionKey: "delta:three", event: { type: "delta" as const, value: "tres." } },
+      { envelope: envelope(3), projectionKey: "turn:done", event: { type: "done" as const } },
+    ];
+    const first = await projections.applyTransportEvents(thread.id, assistantId, batch);
+    expect(first.applied).toEqual([true, true, true, true]);
+    expect(first.projection.message).toMatchObject({ content: "Uno dos tres.", status: "complete" });
+
+    const replay = await projections.applyTransportEvents(thread.id, assistantId, batch);
+    expect(replay.applied).toEqual([false, false, false, false]);
+    expect(replay.projection.message.content).toBe("Uno dos tres.");
+  });
 });

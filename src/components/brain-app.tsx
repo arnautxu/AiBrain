@@ -55,6 +55,7 @@ import {
 } from "@/lib/workbench-api-client";
 import {
   isWorkbenchSnapshot,
+  STANDALONE_PROJECT_SLUG,
   type UpdateProjectInput,
   type UpdateThreadInput,
   type WorkbenchProject,
@@ -503,7 +504,15 @@ export function BrainApp({
 
   const startNewThread = useCallback(() => {
     if (sending || documentUploading) return;
+    const standaloneProject = projects.find((project) =>
+      project.slug === STANDALONE_PROJECT_SLUG && project.status === "active");
+    if (!standaloneProject) {
+      setNotice("No se ha podido preparar el espacio de conversaciones.");
+      return;
+    }
     if (activeProjectId) delete threadByProjectRef.current[activeProjectId];
+    delete threadByProjectRef.current[standaloneProject.id];
+    setActiveProjectId(standaloneProject.id);
     setActiveThreadId(null);
     setSelectedMessageId(null);
     setPrompt("");
@@ -512,7 +521,7 @@ export function BrainApp({
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, documentUploading, sending]);
+  }, [activeProjectId, documentUploading, projects, sending]);
 
   const createVersionFromMessage = useCallback(async (message: ChatMessage) => {
     if (!activeProject || sending || actionBusy || !message.content.trim()) return;
@@ -1099,7 +1108,7 @@ export function BrainApp({
         setCommandPaletteOpen((current) => !current);
         return;
       }
-      if (modifier && key === "n" && activeProject && !sending) {
+      if (modifier && key === "n" && !sending) {
         event.preventDefault();
         startNewThread();
         return;
@@ -1238,6 +1247,9 @@ export function BrainApp({
         productName={branding.productName}
         open={customizationOpen}
         preferences={preferences}
+        runtimeStatus={runtimeStatus}
+        selectedSkill={selectedSkill}
+        onSelectedSkillChange={setSelectedSkill}
         onChange={changePreference}
         onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}

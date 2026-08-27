@@ -12,7 +12,11 @@ import {
   WorkbenchValidationError,
 } from "@/workbench/errors";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
-import { parseWorkbenchListQuery, type WorkbenchListQuery } from "@/workbench/types";
+import {
+  parseWorkbenchListQuery,
+  STANDALONE_PROJECT_SLUG,
+  type WorkbenchListQuery,
+} from "@/workbench/types";
 
 const INSTALLATION_ID = "synthetic-lab";
 const USER_A = "0198b9f0-6631-7000-8000-000000000101";
@@ -84,13 +88,14 @@ describe("FileWorkbenchStore", () => {
     )).rejects.toBeInstanceOf(WorkbenchConflictError);
   });
 
-  it("starts empty and persists projects, threads, turns, activity and runtime token across restart", async () => {
+  it("provisions the hidden standalone-chat workspace and persists projects, threads, turns, activity and runtime token across restart", async () => {
     const { usersRoot, store } = await fixture();
-    await expect(store.load(USER_A)).resolves.toEqual({
-      persistence: "filesystem",
-      projects: [],
-      threads: [],
-    });
+    const initial = await store.load(USER_A);
+    expect(initial).toMatchObject({ persistence: "filesystem", threads: [] });
+    expect(initial.projects).toEqual([
+      expect.objectContaining({ name: "Conversaciones", slug: STANDALONE_PROJECT_SLUG }),
+    ]);
+    await expect(store.listProjects(USER_A, ACTIVE_QUERY)).resolves.toMatchObject({ items: [] });
 
     const project = await store.createProject(USER_A, "Client Operations");
     const thread = await store.createThread(USER_A, project.id, "First delivery");
@@ -116,15 +121,16 @@ describe("FileWorkbenchStore", () => {
       "runtime-thread-synthetic-001",
     );
     await store.updateProject(USER_A, project.id, { name: "Client Ops", pinned: true, status: "archived" });
-    expect((await store.load(USER_A)).projects[0].status).toBe("archived");
+    expect((await store.load(USER_A)).projects.find((item) => item.id === project.id)?.status).toBe("archived");
     await store.updateProject(USER_A, project.id, { status: "active" });
     await store.updateThread(USER_A, thread.id, { title: "Delivered", pinned: true, status: "archived" });
 
     const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
     const snapshot = await restarted.load(USER_A);
-    expect(snapshot.projects).toEqual([
+    expect(snapshot.projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
       expect.objectContaining({ id: project.id, name: "Client Ops", pinned: true }),
-    ]);
+    ]));
     expect(snapshot.threads).toEqual([
       expect.objectContaining({
         id: thread.id,
@@ -158,14 +164,16 @@ describe("FileWorkbenchStore", () => {
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
     await expect(store.listThreads(USER_A, projectB.id, ACTIVE_QUERY))
       .rejects.toBeInstanceOf(WorkbenchNotFoundError);
-    expect(await store.load(USER_A)).toMatchObject({
-      projects: [{ id: projectA.id }],
-      threads: [],
-    });
-    expect(await store.load(USER_B)).toMatchObject({
-      projects: [{ id: projectB.id }],
-      threads: [{ id: threadB.id }],
-    });
+    expect((await store.load(USER_A)).projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
+      expect.objectContaining({ id: projectA.id }),
+    ]));
+    expect((await store.load(USER_A)).threads).toEqual([]);
+    expect((await store.load(USER_B)).projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
+      expect.objectContaining({ id: projectB.id }),
+    ]));
+    expect((await store.load(USER_B)).threads).toEqual([expect.objectContaining({ id: threadB.id })]);
   });
 
   it("serializes concurrent mutations across independent store instances", async () => {
@@ -178,12 +186,12 @@ describe("FileWorkbenchStore", () => {
     expect(new Set(projects.map((project) => project.id))).toHaveLength(32);
     expect(new Set(projects.map((project) => project.slug))).toHaveLength(32);
     const snapshot = await stores[0].load(USER_A);
-    expect(snapshot.projects).toHaveLength(32);
+    expect(snapshot.projects).toHaveLength(33);
     const raw = JSON.parse(await readFile(
       path.join(usersRoot, USER_A, "state", "workbench.json"),
       "utf8",
     )) as { revision: number };
-    expect(raw.revision).toBe(32);
+    expect(raw.revision).toBe(33);
   });
 
   it("fails closed on foreign, corrupt and symbolic-link state instead of reseeding", async () => {
