@@ -7,6 +7,8 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
+- Último checkpoint backend publicado: `c95f820` en
+  `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
 
@@ -47,7 +49,7 @@
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`: contrato UI versionado para auth, branding, workbench, streaming, approvals, memoria, documentos, publicación, browser tools, takeover, recovery, readiness y errores |
 | 11. Compose y operación | Completado localmente; pendiente evidencia Docker QA | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: Compose aislado, mounts/bwrap fail-closed, preflight por instalación, readiness, logs redactados, Nginx, backup, drain/mantenimiento, releases duales atómicas con rollback y gateway de salida físico; Docker/Compose/host/reboot siguen pendientes en QA |
-| 12. Hardening y suite completa | Completado localmente; pendiente ejecución Docker/host QA | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: raíces sin solape, runtime/egress fail-closed, rate limit, contratos Codex inmutables, E2E HTTP, LibreOffice aislado, backup adversarial, journals y browser stores acotados, recuperación privada y matriz local completa; Docker/Compose, restore/reboot/rollback y login Codex/Supabase QA siguen como evidencia externa restringida |
+| 12. Hardening y suite completa | Completado localmente; pendiente ejecución Docker/host QA | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: raíces sin solape, runtime/egress fail-closed, rate limit, contratos Codex inmutables, E2E HTTP, LibreOffice aislado, backup adversarial, journals y browser stores acotados, recuperación privada, Supabase estrictamente Auth-only y matriz local completa; Docker/Compose, restore/reboot/rollback y login Codex/Supabase QA siguen como evidencia externa restringida |
 
 ## Decisiones menores registradas
 
@@ -121,10 +123,11 @@
 
 ## Siguiente acción concreta
 
-Subir el checkpoint local verde de esta rama. Después, con autorización de
-operación sobre el Hetzner QA y Docker disponible, ejecutar el handoff externo
-en redes, volúmenes y puertos exclusivos de AiBrain, abortando ante cualquier
-referencia o conexión a BGreenly.
+Con autorización de operación sobre el Hetzner QA y Docker disponible, ejecutar
+el handoff externo en redes, volúmenes y puertos exclusivos de AiBrain,
+abortando ante cualquier referencia o conexión a BGreenly. No queda una
+validación Docker/host equivalente que pueda ejecutarse en este Mac sin ampliar
+las acciones externas autorizadas.
 
 ## Últimas validaciones
 
@@ -215,6 +218,8 @@ referencia o conexión a BGreenly.
 - Ejecución agregada posterior a ese cambio: 79 ficheros pasados + 1 opt-in
   omitido, 367 pruebas pasadas + 3 opt-in omitidas; build de producción verde
   con las 44 rutas API/UI previstas.
+- Push verificado: `a0e7045..c95f820` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
