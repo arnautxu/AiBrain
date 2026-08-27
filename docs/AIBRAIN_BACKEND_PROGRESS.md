@@ -9,8 +9,8 @@
 - Remoto: `origin` (`arnautxu/AiBrain`)
 - Último checkpoint backend publicado: `bded0b6` en
   `origin/codex/aibrain-backend-definitivo`.
-- Último checkpoint backend local: `78d1f22`; push retenido hasta cerrar el
-  siguiente gate verde de release/rollback.
+- Último checkpoint backend local: `326c5bd`; push retenido hasta cerrar el
+  siguiente gate verde de backup/recovery.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
 
@@ -50,7 +50,7 @@
 | 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`, `eff6edc`, `42c7539`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, retención terminal de candidato, gates separados de data/publish y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`: alert-dispatcher desplegado, health independiente, webhook durable, gateway/data/publish/snapshot/réplica monitorizados y preflight de ownership/permisos endurecido; falta versionar Compose/config en rollback y evidencia Docker/host QA real |
+| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`: alert-dispatcher externo y rollback V3 de imágenes+env+Compose+InstallationConfig cerrados; falta orquestación durable de backup y evidencia Docker/host QA real |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`: CI protegida y reproducible, denegación física de tools, artefactos no cacheables y capacidad independiente de publicación cerrados; aún quedan gaps operativos locales del checkpoint 11 |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
@@ -80,6 +80,11 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Las alertas operativas separan evaluación, outbox y sink. El estado file-backed genera transiciones `raised/updated/resolved`, deduplica por código+severidad+umbral, conserva generations y receipts, aplica backoff y falla por backpressure antes de una reconciliación parcial. `alert-dispatcher` no depende de la salud de app, no monta `docker.sock`, lee app/gateway, data/publish, snapshot y receipt off-host desde mounts mínimos y entrega por webhook HTTPS con token dedicado.
 - El preflight host exige env secretos privados y de un solo enlace, config/compose owner-controlled, password Restic read-only del UID de servicio y raíces source/publish/replica con ownership y modos compatibles con sus mounts. Rechaza antes de Docker cualquier symlink, hardlink, owner o permiso inseguro.
 - Una release une app+gateway y usa journal durable por fases. Antes de mutar, verifica estado, env, imágenes y contenedores actuales; después valida health, digest y revisión realmente ejecutados. `flock`/`lockf` serializa operadores, el lock local vincula PID+inicio+boot, los Docker subprocesses están acotados y recovery recibe un deadline independiente.
+- Release V3 conserva en estado privado los bytes y SHA-256 no secretos de env,
+  Compose e InstallationConfig para `current` y `previous`. Rollback no acepta
+  paths alternativos del operador: restaura los tres inputs con metadata
+  preservada, fuerza recreación, valida tres servicios y falla antes de Docker
+  ante drift, symlink, hardlink, owner o modo inseguro.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -184,9 +189,9 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Corregir el P0 operativo restante: hacer que rollback restaure Compose y
-configuración exactos. Después cerrar la orquestación durable de backup y
-restore antes de repetir la matriz total.
+Cerrar la orquestación durable de drain/stop/backup/verify/restart y restore;
+el P0 de restauración exacta de Compose/config quedó cerrado en `326c5bd`.
+Después repetir la matriz total.
 
 ## Últimas validaciones
 
@@ -207,6 +212,12 @@ restore antes de repetir la matriz total.
   ausente/stale/mismatch, snapshot realmente presente, secretos expuestos,
   hardlinks y roots con permisos/ownership cerrados. Docker Compose real no se
   ejecutó porque el CLI no existe en este host.
+- Release V3 `326c5bd`: 22/22 pruebas release+preflight verdes. A→B→A restaura
+  imágenes, revisión, env, Compose con límites distintos e InstallationConfig;
+  una release config-only recrea servicios; recovery cubre caída, estado
+  comprometido y fallback; drift, secreto mal ubicado, symlink, hardlink y modo
+  inseguro fallan cerrados. Typecheck, lint e infra estática verdes; Docker real
+  sigue siendo gate QA externo.
 
 - `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
 - `npm run lint`: verde, sin warnings.
