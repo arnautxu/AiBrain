@@ -41,7 +41,14 @@ El email debe estar normalizado y coincidir con la identidad verificada. Para fo
 - Idle timeout: 7 días. Límite absoluto: 30 días. La actividad renueva el idle como máximo una vez cada 24 horas y nunca amplía el límite absoluto.
 - Los challenges de cambio inicial viven en `<dataRoot>/auth-challenges`, caducan a los 15 minutos y se consumen exactamente una vez. Las credenciales efímeras del proveedor se cifran con AES-256-GCM y metadata autenticada; no aparecen en claro en el filesystem ni en la cookie.
 - Logout elimina el registro local y ambas cookies. Marcar `enabled:false` revoca todas las sesiones del usuario en la siguiente comprobación; el provisionador puede llamar además a `revokeUser` para revocación inmediata.
-- Los directorios de sesiones y challenges deben formar parte del volumen persistente y de la política de backup cifrado, pero nunca publicarse ni montarse en el worker.
+- Los directorios de sesiones, challenges y rate limits forman parte del volumen
+  runtime activo, nunca se publican ni se montan en el worker y se excluyen de
+  los snapshots de producto. Un restore obliga a volver a autenticar y no
+  revive cookies, credenciales temporales ni buckets antiguos.
+- Login se limita a 30 intentos por cliente y 10 por email cada 15 minutos;
+  reset a 10/cliente y 3/email por hora; recovery y cambio inicial combinan
+  20/cliente y 10/prueba por hora. Las claves persistidas son HMAC y no contienen
+  IP, email, token, código ni challenge crudos.
 
 ## Validación sin credenciales reales
 
