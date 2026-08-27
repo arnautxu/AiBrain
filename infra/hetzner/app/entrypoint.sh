@@ -51,6 +51,15 @@ node -e '
   }
 ' || fail "NEXT_PUBLIC_SUPABASE_URL must be a credential-free HTTPS origin"
 
+server_proxy_url=$(node /usr/local/share/aibrain/configure-egress.mjs) \
+  || fail "authenticated egress policy is invalid"
+export NODE_USE_ENV_PROXY=1
+export HTTP_PROXY=$server_proxy_url
+export HTTPS_PROXY=$server_proxy_url
+export ALL_PROXY=$server_proxy_url
+export NO_PROXY=127.0.0.1,localhost,::1
+unset server_proxy_url
+
 printf %s "$AIBRAIN_CHROME_EXPECTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' \
   || fail "AIBRAIN_CHROME_EXPECTED_VERSION must be an exact four-part version"
 
@@ -100,6 +109,7 @@ for executable in \
   /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
+  /usr/local/share/aibrain/configure-egress.mjs \
   /usr/bin/bwrap \
   /usr/bin/chromium \
   /usr/bin/pdfinfo \

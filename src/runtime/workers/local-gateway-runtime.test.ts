@@ -8,6 +8,7 @@ import { FileTransportEventJournal, WebSocketAppServerTransport } from "@/runtim
 import {
   NodeWebSocketFactory,
   PrivateWorkerGateway,
+  workerEgressEnvironment,
 } from "@/runtime/workers/local-gateway-runtime";
 import type { WorkerLaunchContext } from "@/runtime/workers/types";
 import { ResourceLockManager } from "@/storage";
@@ -16,6 +17,48 @@ vi.mock("server-only", () => ({}));
 
 const USER_ID = "11111111-1111-4111-8111-111111111111";
 const roots: string[] = [];
+
+describe("worker egress environment", () => {
+  it("exposes only the restricted worker channel through standard proxy variables", () => {
+    const token = "worker_token_000000000000000000000000000000000";
+    const environment = workerEgressEnvironment({
+      NODE_ENV: "production",
+      AIBRAIN_EGRESS_PROXY_URL: "http://egress-gateway:8080",
+      AIBRAIN_EGRESS_WORKER_TOKEN: token,
+      AIBRAIN_EGRESS_BROWSER_TOKEN: "browser-secret-must-not-leak",
+      AIBRAIN_EGRESS_SERVER_TOKEN: "server-secret-must-not-leak",
+    });
+    expect(environment).toMatchObject({
+      NO_PROXY: "127.0.0.1,localhost,::1",
+      HTTP_PROXY: expect.any(String),
+      HTTPS_PROXY: expect.any(String),
+      ALL_PROXY: expect.any(String),
+    });
+    const proxy = new URL(environment.HTTPS_PROXY);
+    expect(proxy).toMatchObject({
+      protocol: "http:",
+      hostname: "egress-gateway",
+      port: "8080",
+      username: "aibrain",
+      password: token,
+    });
+    expect(JSON.stringify(environment)).not.toContain("browser-secret");
+    expect(JSON.stringify(environment)).not.toContain("server-secret");
+  });
+
+  it("fails closed in production and rejects partial or credential-bearing configuration", () => {
+    expect(() => workerEgressEnvironment({ NODE_ENV: "production" })).toThrow(/required/u);
+    expect(() => workerEgressEnvironment({
+      NODE_ENV: "test",
+      AIBRAIN_EGRESS_PROXY_URL: "http://egress-gateway:8080",
+    })).toThrow(/required/u);
+    expect(() => workerEgressEnvironment({
+      NODE_ENV: "test",
+      AIBRAIN_EGRESS_PROXY_URL: "http://attacker:password@egress-gateway:8080",
+      AIBRAIN_EGRESS_WORKER_TOKEN: "worker_token_000000000000000000000000000000000",
+    })).toThrow(/credential-free/u);
+  });
+});
 
 function initializeRequest(clientRequestId = "initialize-request-1") {
   return {

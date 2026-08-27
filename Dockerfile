@@ -11,6 +11,28 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
+FROM ${NODE_IMAGE} AS egress-gateway
+
+ARG AIBRAIN_EGRESS_UID=10002
+ARG AIBRAIN_EGRESS_GID=10002
+ARG AIBRAIN_REVISION=development
+
+LABEL org.opencontainers.image.title="AiBrain Egress Gateway" \
+      org.opencontainers.image.vendor="GraphikAI" \
+      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
+
+RUN groupadd --system --gid "${AIBRAIN_EGRESS_GID}" aibrain-egress \
+  && useradd --system --uid "${AIBRAIN_EGRESS_UID}" --gid aibrain-egress \
+    --home-dir /nonexistent --no-create-home aibrain-egress \
+  && install -d -m 0755 -o root -g root /usr/local/share/aibrain
+
+COPY --chown=root:root infra/hetzner/egress/gateway.mts /usr/local/share/aibrain/egress-gateway.mts
+RUN chmod 0444 /usr/local/share/aibrain/egress-gateway.mts
+
+USER aibrain-egress:aibrain-egress
+EXPOSE 8080
+ENTRYPOINT ["node", "/usr/local/share/aibrain/egress-gateway.mts"]
+
 FROM ${NODE_IMAGE} AS runtime
 
 ARG AIBRAIN_UID=10001
@@ -111,6 +133,7 @@ COPY --chown=root:root infra/hetzner/app/browser-sandbox.sh /usr/local/bin/aibra
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-soffice
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
+COPY --chown=root:root infra/hetzner/app/configure-egress.mjs /usr/local/share/aibrain/configure-egress.mjs
 RUN chmod 0755 \
   /usr/local/bin/aibrain-entrypoint \
   /usr/local/bin/aibrain-codex-worker \
@@ -118,6 +141,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \
+  && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
   && chmod -R a-w /app /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
 
 USER aibrain:aibrain

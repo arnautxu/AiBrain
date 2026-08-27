@@ -9,6 +9,8 @@ const execFileAsync = promisify(execFile);
 const manager = path.join(process.cwd(), "scripts/manage-release.mjs");
 const digestA = `registry.example.test/aibrain@sha256:${"a".repeat(64)}`;
 const digestB = `registry.example.test/aibrain@sha256:${"b".repeat(64)}`;
+const egressDigestA = `registry.example.test/aibrain-egress@sha256:${"c".repeat(64)}`;
+const egressDigestB = `registry.example.test/aibrain-egress@sha256:${"d".repeat(64)}`;
 const revisionA = "1".repeat(40);
 const revisionB = "2".repeat(40);
 
@@ -23,9 +25,10 @@ async function fixture() {
     "AIBRAIN_INSTALLATION_ID=company-qa",
     "AIBRAIN_COMPOSE_PROJECT_NAME=aibrain-company-qa",
     `AIBRAIN_IMAGE=${digestA}`,
+    `AIBRAIN_EGRESS_IMAGE=${egressDigestA}`,
     "",
   ].join("\n"));
-  await writeFile(composeFile, "services:\n  app:\n    image: ${AIBRAIN_IMAGE}\n");
+  await writeFile(composeFile, "services:\n  app:\n    image: ${AIBRAIN_IMAGE}\n  egress-gateway:\n    image: ${AIBRAIN_EGRESS_IMAGE}\n");
   await writeFile(dockerBin, `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from "node:fs";
 const args = process.argv.slice(2);
@@ -39,7 +42,8 @@ if (args[0] === "image" && args[1] === "inspect") {
 } else if (args[0] === "compose") {
   const envFile = args[args.indexOf("--env-file") + 1];
   const image = readFileSync(envFile, "utf8").match(/^AIBRAIN_IMAGE=(.+)$/m)?.[1];
-  if (args.includes("up") && image === process.env.FAKE_FAIL_IMAGE) process.exit(3);
+  const egressImage = readFileSync(envFile, "utf8").match(/^AIBRAIN_EGRESS_IMAGE=(.+)$/m)?.[1];
+  if (args.includes("up") && (image === process.env.FAKE_FAIL_IMAGE || egressImage === process.env.FAKE_FAIL_IMAGE)) process.exit(3);
   if (args.includes("ps")) process.stdout.write("a".repeat(64));
 } else if (args[0] === "inspect") {
   process.stdout.write("healthy");
@@ -56,7 +60,7 @@ function commandArgs(files: Awaited<ReturnType<typeof fixture>>, command: "promo
   return [
     manager,
     command,
-    ...(command === "promote" ? ["--image", digestB, "--revision", revisionB] : []),
+    ...(command === "promote" ? ["--image", digestB, "--egress-image", egressDigestB, "--revision", revisionB] : []),
     "--installation-id", "company-qa",
     "--env-file", files.envFile,
     "--compose-file", files.composeFile,
@@ -71,7 +75,12 @@ function environment(files: Awaited<ReturnType<typeof fixture>>, failImage = "")
     ...process.env,
     FAKE_DOCKER_LOG: files.logFile,
     FAKE_FAIL_IMAGE: failImage,
-    FAKE_IMAGE_REVISIONS: JSON.stringify({ [digestA]: revisionA, [digestB]: revisionB }),
+    FAKE_IMAGE_REVISIONS: JSON.stringify({
+      [digestA]: revisionA,
+      [egressDigestA]: revisionA,
+      [digestB]: revisionB,
+      [egressDigestB]: revisionB,
+    }),
   };
 }
 
@@ -82,24 +91,26 @@ describe("immutable release manager", () => {
       env: environment(files),
     });
     expect(JSON.parse(promoted.stdout)).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       installationId: "company-qa",
-      current: { image: digestB, revision: revisionB },
-      previous: { image: digestA, revision: revisionA },
+      current: { image: digestB, egressImage: egressDigestB, revision: revisionB },
+      previous: { image: digestA, egressImage: egressDigestA, revision: revisionA },
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestB}`);
+    expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestB}`);
 
     const rolledBack = await execFileAsync(process.execPath, commandArgs(files, "rollback"), {
       env: environment(files),
     });
     expect(JSON.parse(rolledBack.stdout)).toMatchObject({
-      current: { image: digestA, revision: revisionA },
-      previous: { image: digestB, revision: revisionB },
+      current: { image: digestA, egressImage: egressDigestA, revision: revisionA },
+      previous: { image: digestB, egressImage: egressDigestB, revision: revisionB },
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
+    expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--no-deps","app"');
+    expect(log).toContain('"up","-d","--no-deps","egress-gateway","app"');
     expect(log).toContain('"{{.State.Health.Status}}"');
   });
 
@@ -111,9 +122,23 @@ describe("immutable release manager", () => {
       stderr: expect.stringContaining("RELEASE_RECOVERED"),
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
+    expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
     await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const log = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(log.filter((args) => args.includes("up"))).toHaveLength(2);
+  });
+
+  it("restores both images when the egress gateway promotion fails", async () => {
+    const files = await fixture();
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), {
+      env: environment(files, egressDigestB),
+    })).rejects.toMatchObject({
+      stderr: expect.stringContaining("RELEASE_RECOVERED"),
+    });
+    const env = await readFile(files.envFile, "utf8");
+    expect(env).toContain(`AIBRAIN_IMAGE=${digestA}`);
+    expect(env).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
+    await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("rejects mutable image tags before invoking Docker", async () => {

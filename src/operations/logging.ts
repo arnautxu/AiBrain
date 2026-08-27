@@ -50,6 +50,7 @@ function sanitizeString(value: string) {
     : value;
   return bounded
     .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [REDACTED]")
+    .replace(/\b(https?:\/\/)[^\s/@]+:[^\s/@]+@/giu, `$1${REDACTED}@`)
     .replace(/aibrain\.auth\.[^.\s]+\.[^\s,;]+/giu, "aibrain.auth.[REDACTED]")
     .replace(/\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}(?:\.[A-Za-z0-9_-]{12,})?\b/gu, REDACTED)
     .replace(/([?&](?:access_token|api_key|key|password|secret|token)=)[^&#\s]+/giu, `$1${REDACTED}`)

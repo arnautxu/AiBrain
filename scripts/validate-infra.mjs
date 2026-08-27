@@ -32,6 +32,8 @@ const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
 const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
+const egressEnv = read("infra/hetzner/egress.env.example");
+const egressGateway = read("infra/hetzner/egress/gateway.mts");
 const seccompProfile = JSON.parse(read("infra/hetzner/browser/seccomp_profile.json"));
 const hostPreflight = read("scripts/validate-host-preflight.mjs");
 const releaseManager = read("scripts/manage-release.mjs");
@@ -39,7 +41,7 @@ const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, entrypoint, soffice, runtimeEnv, composeEnv].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, egressGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -62,6 +64,8 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
 requireMatch(dockerfile, /org\.opencontainers\.image\.revision="\$\{AIBRAIN_REVISION\}"/u, "Docker image does not record its exact source revision");
+requireMatch(dockerfile, /FROM \$\{NODE_IMAGE\} AS egress-gateway/u, "Dockerfile lacks the first-party egress gateway target on the pinned Node base");
+requireMatch(dockerfile, /USER aibrain-egress:aibrain-egress[\s\S]*ENTRYPOINT \["node", "\/usr\/local\/share\/aibrain\/egress-gateway\.mts"\]/u, "egress gateway image is not an unprivileged first-party Node target");
 
 for (const marker of [
   "read_only: true",
@@ -77,6 +81,13 @@ for (const marker of [
 requireMatch(compose, /target: \/srv\/aibrain\/source-ro[\s\S]{0,120}read_only: true/u, "source-ro is not a read-only bind mount");
 requireMatch(compose, /target: \/srv\/aibrain\/publish-rw/u, "server publisher mount is missing");
 requireMatch(compose, /name: "\$\{AIBRAIN_NETWORK_NAME:\?/u, "network name is not required per installation");
+requireMatch(compose, /aibrain-internal:[\s\S]{0,180}internal: true/u, "application network is not Docker-internal");
+requireMatch(compose, /app:[\s\S]*?networks:\s*\n\s*- aibrain-internal[\s\S]*?healthcheck:/u, "app is not restricted to the internal network");
+requireMatch(compose, /egress-gateway:[\s\S]*?networks:\s*\n\s*- aibrain-internal\s*\n\s*- aibrain-egress/u, "egress gateway is not the sole dual-homed service");
+requireMatch(compose, /aibrain-egress:[\s\S]{0,180}name: "\$\{AIBRAIN_EGRESS_NETWORK_NAME:\?/u, "egress network name is not required per installation");
+requireMatch(compose, /AIBRAIN_EGRESS_PROXY_URL: http:\/\/egress-gateway:8080/u, "app lacks the private gateway endpoint");
+requireMatch(compose, /egress-gateway:[\s\S]*?expose:\s*\n\s*- "8080"/u, "egress gateway is not exposed only inside Compose");
+forbidMatch(compose.match(/  egress-gateway:[\s\S]*?(?=\nnetworks:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "egress gateway publishes a host port");
 requireMatch(compose, /name: "\$\{AIBRAIN_DATA_VOLUME_NAME:\?/u, "data volume name is not required per installation");
 requireMatch(compose, /name: "\$\{AIBRAIN_BACKUP_VOLUME_NAME:\?/u, "backup volume name is not required per installation");
 requireMatch(compose, /name: "\$\{AIBRAIN_RESTORE_VOLUME_NAME:\?/u, "restore volume name is not required per installation");
@@ -87,6 +98,19 @@ requireMatch(compose, /test: \[CMD, node, \/usr\/local\/share\/aibrain\/healthch
 forbidMatch(compose, /^\s*build\s*:/mu, "runtime Compose permits an implicit mutable image build");
 requireMatch(composeBuild, /AIBRAIN_REVISION: "\$\{AIBRAIN_REVISION:\?/u, "build override does not require an exact source revision");
 requireMatch(composeBuild, /context: \.\.\/\.\./u, "build override does not use the reviewed repository context");
+requireMatch(composeBuild, /egress-gateway:[\s\S]*target: egress-gateway/u, "build override does not build the reviewed egress target");
+
+requireMatch(egressGateway, /headers\["proxy-authorization"\][\s\S]{0,500}value\.startsWith\("Bearer "\)[\s\S]{0,500}value\.startsWith\("Basic "\)/u, "egress gateway lacks authenticated Bearer and Basic channels");
+requireMatch(egressGateway, /timingSafeEqual/u, "egress gateway does not compare channel tokens safely");
+requireMatch(egressGateway, /scheme === "basic" && channel === "browser"/u, "egress gateway does not reserve Basic auth for standard worker/server clients");
+requireMatch(egressGateway, /x-aibrain-pinned-ip/u, "browser channel does not require the upstream DNS pin");
+requireMatch(egressGateway, /port !== 80 && port !== 443/u, "browser channel is not limited to ports 80 and 443");
+requireMatch(egressGateway, /port !== 443/u, "worker/server channels are not limited to HTTPS");
+requireMatch(egressGateway, /!this\.config\.workerHosts\.has\(hostname\)/u, "worker channel does not enforce an exact hostname allowlist");
+requireMatch(egressGateway, /hostname !== this\.config\.supabaseHostname/u, "server channel is not restricted to configured Supabase");
+requireMatch(egressGateway, /DNS returned a non-global or mixed destination/u, "gateway does not fail closed on private or mixed DNS answers");
+requireMatch(egressGateway, /const selected = results\[0\]![\s\S]{0,160}address: selected\.address/u, "worker/server connection is not pinned to one approved DNS result");
+forbidMatch(egressGateway, /console\.(?:log|error)|process\.env\[["']AIBRAIN_EGRESS_.*TOKEN/u, "gateway risks logging or dynamically exposing channel tokens");
 
 requireMatch(worker, /--ro-bind \/ \/[\s\S]*--tmpfs "\$publish_root"[\s\S]*--remount-ro "\$publish_root"/u, "worker does not mask publish-rw behind a read-only mount");
 requireMatch(worker, /--tmpfs "\$data_root"[\s\S]*--ro-bind "\$company_root" "\$company_root"[\s\S]*--ro-bind "\$source_root" "\$source_root"/u, "worker does not hide product data before re-exposing approved read roots");
@@ -173,7 +197,18 @@ for (const key of [
   "AIBRAIN_BACKUP_VOLUME_NAME",
   "AIBRAIN_RESTORE_VOLUME_NAME",
   "AIBRAIN_REVISION",
+  "AIBRAIN_EGRESS_IMAGE",
+  "AIBRAIN_EGRESS_ENV_FILE",
+  "AIBRAIN_EGRESS_NETWORK_NAME",
 ]) requireMatch(composeEnv, new RegExp(`^${key}=`, "mu"), `compose env example is missing ${key}`);
+for (const key of [
+  "AIBRAIN_EGRESS_BROWSER_TOKEN",
+  "AIBRAIN_EGRESS_WORKER_TOKEN",
+  "AIBRAIN_EGRESS_SERVER_TOKEN",
+  "AIBRAIN_EGRESS_WORKER_HOSTS",
+  "AIBRAIN_EGRESS_SUPABASE_ORIGIN",
+]) requireMatch(egressEnv, new RegExp(`^${key}=`, "mu"), `egress env example is missing ${key}`);
+forbidMatch(compose, /^\s*(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)\s*:/mu, "Compose broadly injects proxy credentials instead of channel-specific runtime wiring");
 
 const expectedPaths = {
   dataRoot: "/var/lib/aibrain/data",

@@ -35,22 +35,28 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 
 Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador protegen frente a saturación. No son cuotas comerciales de empleados, proyectos, chats, turns o tokens; se amplían cambiando recursos/configuración, no código.
 
-## Riesgos P0 aún abiertos
+## Gates P0 que requieren evidencia QA
 
 El canal CDP ya no cruza el namespace de red: existe únicamente entre Next.js
 y el proceso Chrome exacto mediante descriptores heredados. El worker aislado
-no recibe esos descriptores ni puede descubrir un puerto. El riesgo browser que
-queda abierto es el egress: la autorización de un hostname y la conexión deben
-usar la misma resolución fijada para impedir DNS rebinding, y esa frontera debe
-validarse dentro de la imagen QA junto con los bloqueos de red privada,
-loopback, link-local y metadata. Browser/Computer Use no se considera listo
-para producción hasta cerrar y probar ese gate.
+no recibe esos descriptores ni puede descubrir un puerto. El egress físico está
+cerrado localmente: `app` solo pertenece a una red Docker interna y el sidecar
+propio, autenticado por canal, es el único servicio dual-homed. Browser entrega
+una IP global ya fijada; worker/server resuelven una vez y conectan a esa IP,
+rechazando respuestas mixtas, red privada, loopback, link-local y metadata. La
+imagen QA todavía debe demostrar esta frontera con el Compose y kernel reales;
+consulta `docs/EGRESS_GATEWAY.md`.
 
-La imagen base Node está fijada por versión y digest, pero Chromium, LibreOffice, Poppler y QPDF se resuelven desde APT durante el build. `AIBRAIN_CHROME_EXPECTED_VERSION` detecta cambios y bloquea un arranque que no coincida, pero no vuelve reproducible el build. Falta fijar snapshots/artifacts y checksums de esas herramientas o adoptar una imagen interna inmutable escaneada. Cada build QA debe registrar versiones, digest y SBOM; no debe describirse como reproducible bit a bit.
+La imagen base Node está fijada por versión y digest, y Chromium, LibreOffice,
+Poppler y QPDF se resuelven contra el snapshot Debian inmutable
+`20260820T000000Z`. `AIBRAIN_CHROME_EXPECTED_VERSION` bloquea un arranque que
+no coincida. Cada build QA debe registrar versiones, digest y SBOM; para una
+verificación independiente bit a bit también deben conservarse checksums de
+los paquetes o una imagen interna inmutable ya escaneada.
 
 ## Variables obligatorias
 
-Los valores de Compose, no secretos, parten de `infra/hetzner/compose.env.example`. Los secretos de runtime parten de `infra/hetzner/aibrain.env.example` y deben vivir fuera del checkout con modo `0600`.
+Los valores de Compose, no secretos, parten de `infra/hetzner/compose.env.example`. Los secretos de runtime parten de `infra/hetzner/aibrain.env.example` y la política/tokens de salida de `infra/hetzner/egress.env.example`; ambos deben vivir fuera del checkout con modo `0600`. La separación física y operación están en `docs/EGRESS_GATEWAY.md`.
 
 Secretos independientes, cada uno con al menos 32 bytes:
 
@@ -58,6 +64,12 @@ Secretos independientes, cada uno con al menos 32 bytes:
 - `AIBRAIN_AUTH_CHALLENGE_SECRET`
 - `AIBRAIN_PUBLICATION_SECRET`
 - `AIBRAIN_BROWSER_GATEWAY_SECRET`
+- `AIBRAIN_MAINTENANCE_SECRET`
+
+La frontera de red usa otros tres tokens fuertes, distintos entre sí y de los
+anteriores: `AIBRAIN_EGRESS_BROWSER_TOKEN`, `AIBRAIN_EGRESS_WORKER_TOKEN` y
+`AIBRAIN_EGRESS_SERVER_TOKEN`. Se guardan en `egress.env`, nunca en
+`runtime.env` ni en la configuración versionada.
 
 Supabase solo requiere su URL y publishable key para Auth. No se inyecta service-role/secret key ni se usa Postgres de producto. `AIBRAIN_CHROME_EXPECTED_VERSION` debe coincidir exactamente con Chromium en la imagen inmutable.
 
@@ -97,7 +109,8 @@ Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa
 8. réplica de backup cifrada fuera del servidor y alertas conectadas;
 9. soak operativo corto verde en cada release y perfil QA largo verde antes del primer cutover, siguiendo `docs/OPERATIONS_SOAK.md`.
 10. revisión de capacidad/egress y hardening del host;
-11. canal CDP heredado sin sockets, egress browser fijado por DNS y build reproducible de la toolchain;
+11. canal CDP heredado sin sockets, egress browser fijado por DNS y build
+    inmutable verificado de la toolchain;
 12. autorización separada para DNS y producción.
 
 La imagen base se fija por digest, Codex/Node packages por versión y APT contra
@@ -105,8 +118,9 @@ el snapshot inmutable `20260820T000000Z` de Debian. Cambiar ese snapshot es una
 actualización de release revisable: requiere build limpio, SBOM, scan y matriz
 Office/PDF/Chromium antes de promover la nueva imagen.
 
-El Compose de runtime exige `AIBRAIN_IMAGE` resuelta a `@sha256`; el build vive
+El Compose de runtime exige `AIBRAIN_IMAGE` y `AIBRAIN_EGRESS_IMAGE` resueltas
+a `@sha256`; el build vive
 en `infra/hetzner/compose.build.yaml` y exige la revisión Git exacta, registrada
 como label OCI. `scripts/manage-release.mjs` verifica digest+revisión, conserva
 estado atómico `current`/`previous`, espera readiness y recupera automáticamente
-la imagen anterior si una promoción no llega a healthy.
+las dos imágenes anteriores si una promoción no llega a healthy.

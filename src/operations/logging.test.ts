@@ -17,6 +17,7 @@ describe("operational structured logging", () => {
         password: "hunter2",
         message: "failed with Bearer bearer-secret and token=query-secret",
         url: "https://example.test/?access_token=url-secret&safe=yes",
+        proxy: "http://aibrain:proxy-password@egress-gateway:8080/",
       },
       error: Object.assign(new Error("token=error-secret"), { code: "EFAIL" }),
       circular,
@@ -29,6 +30,7 @@ describe("operational structured logging", () => {
     expect(serialized).not.toContain("bearer-secret");
     expect(serialized).not.toContain("query-secret");
     expect(serialized).not.toContain("url-secret");
+    expect(serialized).not.toContain("proxy-password");
     expect(serialized).not.toContain("error-secret");
     expect(serialized).not.toContain("logging.test.ts");
     expect(attributes).toMatchObject({
