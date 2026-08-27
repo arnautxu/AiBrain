@@ -532,7 +532,7 @@ npm run infra:validate
 - Rama de integración: `codex/aibrain-integrated-qa`, creada desde
   `codex/aibrain-ui-parity` y combinada sin conflictos con
   `codex/aibrain-backend-definitivo`. Checkpoint desplegado:
-  `d325fe8b75a7cf5ed78796cf29605c0c526080b3`.
+  `c3001de8fee96f2b5b788a3a372c32d90c8c2152`.
 - URL pública de QA: `https://aibrain-hetzner.tailf44d1a.ts.net/`, protegida
   por Auth Supabase y Origin/CSRF. Un Origin ajeno devuelve 403 y el Origin
   exacto alcanza Auth (401 con credenciales sintéticas inválidas).
@@ -549,7 +549,7 @@ npm run infra:validate
   se limita al contenedor no-root/cap-drop para permitir un procfs nuevo dentro
   de cada PID namespace; no modifica sysctls globales.
 - Imágenes construidas desde cero y fijadas por digest; revisión OCI exacta
-  `d325fe8...`; Codex CLI `0.149.1`; Chromium `151.0.7922.137`; Compose y host
+  `c3001de...`; Codex CLI `0.149.1`; Chromium `151.0.7922.137`; Compose y host
   preflight verdes.
 - Salud medida tras cutover: app, ingress y egress `healthy`, cero restarts;
   `/api/health/live` y `/api/health/ready` verdes. Readiness confirma data,
@@ -564,6 +564,10 @@ npm run infra:validate
   ejecución confirmó que la cuenta ChatGPT usa `chatgpt.com`; se añadió ese
   hostname exacto a la allowlist junto a `api.openai.com` y el replay quedó
   verde.
+- Corrección final de login en producción: la página ya no serializa ni muestra
+  las instalaciones sintéticas `AiBrain Studio`/`AiBrain Operations`; esas
+  cuentas quedan restringidas al modo demo. Verificación pública: `/login` 200,
+  ningún marcador demo, Origin ajeno 403 y Origin público exacto alcanzando Auth.
 - Pruebas locales de la rama integrada: instalación limpia, typecheck, lint,
   build Next, contratos 15/15 e integración de host 3/3 verdes. La suite
   agregada registró 115 ficheros pasados + 1 omitido y 529 pruebas pasadas + 3
