@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `9d0500c` en
+- Último checkpoint backend publicado: `016f708` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -40,7 +40,7 @@
 | 0. Baseline, rama y protección | Completado | `e2b571e` |
 | 1. InstallationConfig + segunda instalación | Completado | `a2255ef`; 8/8 tests, lint, typecheck, dos builds y smoke HTTP QA verdes |
 | 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y continuidad offline; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
-| 3. Stores file-backed resilientes | Reabierto por auditoría estricta | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`, `368aec0`, `4487ef2`: schemas estrictos, atomic write/fsync, journals e índices; falta cerrar la carrera stale de lock y probar exclusión en procesos hijos reales |
+| 3. Stores file-backed resilientes | Completado localmente | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`, `368aec0`, `4487ef2`, `016f708`: schemas estrictos, atomic write/fsync, journals, índices y locks con recovery verificado entre procesos reales; owner local vivo no se roba aunque el timestamp parezca stale |
 | 4. Provisionamiento idempotente + 20 usuarios | Completado localmente | `75316e1`, `545948a`, `323243b`, `d74a800`: alta real de 20 empleados, baja/reactivación/recuperación idempotentes, revocación de sesiones, parada selectiva de worker/browser, receipts y auditoría sin datos sensibles |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2` y ambas fronteras documentales P0 en `9d0500c`. La siguiente acción concreta es cerrar la carrera stale de locks y demostrar exclusión real entre procesos hijos.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c` y la exclusión/recovery multiproceso de locks en `016f708`. La siguiente acción concreta es construir la aceptación WebSocket conjunta 2 usuarios × 2 threads con approval, stop y crash/reconnect.
 
 ## Decisiones menores registradas
 
@@ -74,6 +74,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
 - Los locks filesystem mantienen la exclusión entre procesos y añaden una cola FIFO abortable dentro del proceso para evitar thundering herd sin ampliar timeouts.
+- La recuperación stale de locks falla cerrada ante un PID local vivo, valida hash del recurso e inode/mtime/ctime antes de cuarentena y vuelve a verificar el inode/mtime después del rename. La aceptación usa dos procesos Node reales y cubre serialización, heartbeat y recovery tras `SIGKILL`.
 - Cada delta, snapshot, actividad, approval y terminal de un turn se proyecta atómicamente antes de confirmar su secuencia de transporte; el workbench recompone mensajes aún activos tras refresh o restart.
 - Las peticiones de App Server usan IDs estables por operación y mensaje UI. Un retry inspecciona el historial del thread mediante `clientUserMessageId` y no emite un segundo `turn/start` cuando Codex ya conoce el turn.
 - Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
@@ -249,6 +250,12 @@ las acciones externas autorizadas.
   inputs de turn sin path; build Next 16.3.2 verde con 38 rutas dinámicas.
 - Push verificado: `a229f86..9d0500c` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Checkpoint stores `016f708`: typecheck y lint verdes; 10/10 pruebas
+  focalizadas, incluida exclusión entre procesos reales y recovery tras
+  `SIGKILL`; suite completa 84 ficheros pasados + 1 opt-in omitido, 385 pruebas
+  pasadas + 3 omitidas; build Next 16.3.2 verde.
+- Push verificado: `04801ee..016f708` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -263,7 +270,7 @@ las acciones externas autorizadas.
 | WebSocket privado resiliente | Gateway loopback autenticado, journal, ACK/replay/dedupe/backoff | 20 pruebas gateway/router, crash/restart y soak con 28 replays |
 | Concurrencia sin mezcla | Routing por instalación+usuario+thread+turn+item | Tests concurrentes, approval pendiente y stop aislado |
 | Supabase solo Auth | Identity provider único; estado de producto filesystem y contrato sin modo de persistencia Supabase | Contract test 6/6 y continuidad workbench con provider offline |
-| Persistencia tras refresh/restart | Stores versionados, atomic/fsync, locks, journal e índices | E2E HTTP con proceso Next reiniciado y tests de recovery |
+| Persistencia tras refresh/restart | Stores versionados, atomic/fsync, locks, journal e índices | E2E HTTP reiniciado, 10/10 locks focalizadas y tres escenarios en procesos hijos reales |
 | `PERMISSIONS.md` server-side | Provider Markdown read-only y fingerprint por turn | 31 tests focalizados y auditoría durable |
 | Office/PDF/texto/imagen | Staging validado, LibreOffice/Poppler/QPDF configurable | Matriz real 2/2 y suites de OOXML/bomb/MIME/macros |
 | Codex sin staging ni `publish-rw` | Sandbox bwrap con upload server-only, solo `staging/tmp` y mount vacío RO para `publish-rw` | Validator infra, turn DOCX real sin path y pruebas de frontera/symlink |
