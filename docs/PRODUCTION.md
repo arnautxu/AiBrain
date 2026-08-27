@@ -63,7 +63,13 @@ Supabase solo requiere su URL y publishable key para Auth. No se inyecta service
 
 ## Health, logs y alertas
 
-El healthcheck interno consulta Next.js por loopback cada 15 segundos, con período inicial de 45 segundos. Un estado `unhealthy`, reinicios repetidos, presión de disco mayor al 80 %, volumen de backups sin réplica reciente o errores `preflight failed` deben alertar al operador. El runbook muestra los comandos de diagnóstico sin imprimir secretos.
+El healthcheck interno consulta Next.js por loopback cada 15 segundos, con
+período inicial de 45 segundos. Readiness exige stores/mounts seguros, 20 % y
+1 GiB libres, ausencia de `docker.sock`, Codex 0.149.1, Chromium exacto y la
+toolchain LibreOffice/Poppler/QPDF. No crea workers ni browsers. Un estado
+`unhealthy`, reinicios repetidos, presión de disco mayor al 80 %, volumen de
+backups sin réplica reciente o errores `preflight failed` deben alertar al
+operador. El runbook muestra los comandos de diagnóstico sin imprimir secretos.
 
 Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
 

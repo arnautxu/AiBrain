@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadInstallationConfig } from "@/config/installation";
 import { checkInstallationReadiness } from "@/operations/readiness";
+import { runtimeReadinessProbes } from "@/operations/runtime-readiness";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,8 @@ export async function GET() {
     const config = await loadInstallationConfig();
     const report = await checkInstallationReadiness(config, {
       minimumFreeBytes: configuredNonNegativeInteger("AIBRAIN_MINIMUM_FREE_BYTES", 1024 * 1024 * 1024),
-      minimumFreeRatio: configuredRatio("AIBRAIN_MINIMUM_FREE_RATIO", 0.05),
+      minimumFreeRatio: configuredRatio("AIBRAIN_MINIMUM_FREE_RATIO", 0.20),
+      componentProbes: runtimeReadinessProbes(),
     });
     return NextResponse.json(report, {
       status: report.status === "ready" ? 200 : 503,
