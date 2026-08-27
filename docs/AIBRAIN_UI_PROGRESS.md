@@ -30,7 +30,7 @@
 | 4. Conversación, composer, attachments, streaming, stop, recovery | Completado en la rebanada disponible | Markdown/GFM, adapter NDJSON fail-closed, imágenes, stop, recovery y scroll largo; replay definitivo bloqueado por backend 7/10 |
 | 5. Plan, actividad, tools, diffs, Review, approvals, errores | Completado en la rebanada disponible | Presentación employee-first, permisos aceptar/rechazar, diff, salida y error de red; integración App Server definitiva sigue bloqueada por backend 7/10 |
 | 6. PDF/Office/image, preview, publish, Browser/Computer Use | Completado en la rebanada disponible | View models fail-closed, PDF/Office/image, lifecycle de preview/publicación/browser, viewer aislado, logout y evidencia desktop/mobile; routes reales bloqueadas por backend 8/9/10 |
-| 7. Responsive, temas, a11y, keyboard, motion, degraded | Pendiente | — |
+| 7. Responsive, temas, a11y, keyboard, motion, degraded | Completado | 7 viewports, temas claro/oscuro/sistema, focus traps, motion reducido, recuperación offline/runtime y evidencia checkpoint 07 |
 | 8. Integración, ordering, dedupe, replay, reconnect, performance | Pendiente | — |
 | 9. Comparación visual exhaustiva | Pendiente | — |
 | 10. Regresiones, build, handoff, integración segura | Pendiente | — |
@@ -62,6 +62,15 @@
 | Example preview documental mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-06/example-document-preview-light-390x844.png` | Preview adaptada y metadata sin ruta interna |
 | Example Computer Use | light | 1440×900 | `artifacts/ui-parity/checkpoint-06/example-browser-viewer-light-1440x900.png` | Viewer sandboxed sintético, estado activo y datos aislados |
 | Example Computer Use mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-06/example-browser-viewer-light-390x844.png` | Viewer responsive y acciones posteriores legibles |
+| Example shell | dark | 1440×900 | `artifacts/ui-parity/checkpoint-07/example-shell-dark-1440x900.png` | Tema oscuro completo con contraste semántico |
+| Example Preferencias | dark | 1440×900 | `artifacts/ui-parity/checkpoint-07/example-preferences-dark-1440x900.png` | Modal, scroll interno y controles de tema legibles |
+| Example Preferencias mobile | dark | 390×844 | `artifacts/ui-parity/checkpoint-07/example-preferences-dark-390x844.png` | Panel dentro del viewport, safe area y acciones accesibles |
+| Example acciones guiadas | dark | 1440×900 | `artifacts/ui-parity/checkpoint-07/example-guided-actions-dark-1440x900.png` | Flujo employee-first traducido y responsive |
+| Example acciones guiadas mobile | dark | 390×844 | `artifacts/ui-parity/checkpoint-07/example-guided-actions-dark-390x844.png` | Plantillas y acciones táctiles sin overflow horizontal |
+| Example conversación | dark, mobile | 390×844 | `artifacts/ui-parity/checkpoint-07/example-conversation-dark-390x844.png` | Acciones, tabla y composer con safe area y objetivos de 44 px |
+| Example Review | dark, mobile | 390×844 | `artifacts/ui-parity/checkpoint-07/example-review-dark-390x844.png` | Diálogo a viewport completo, diff y focus trap |
+| Example documento | dark, mobile | 390×844 | `artifacts/ui-parity/checkpoint-07/example-document-dark-390x844.png` | Preview, volver al final en flujo y composer sin solapamiento |
+| Example Computer Use | dark | 1440×900 | `artifacts/ui-parity/checkpoint-07/example-browser-dark-1440x900.png` | Viewer aislado y estados legibles en tema oscuro |
 | Codex desktop | no capturado | — | restricción Computer Use | Bloqueo de referencia, no de implementación |
 
 ## Contratos consumidos
@@ -160,6 +169,20 @@
 - Axe detectó inicialmente seis contrastes insuficientes entre 3,45:1 y 4,10:1. Se corrigieron los textos de estado y el gate completo pasó después sin excepciones.
 - El backend fijado aporta generación de imagen real y servicios documentales v1, pero no routes de upload/preview/publicación ni gateway de Browser/Computer Use. La rama UI no inventa esas routes: input Office/PDF, paginación más allá de la página 1, confirmación/takeover reales y smoke App Server permanecen como bloqueos verificables de backend checkpoints 8/9/10.
 
+## Gates del checkpoint 7
+
+- `npm run lint` y `npm run typecheck`: verdes, 0 errores y 0 warnings.
+- `npm run test:unit`: verde, 4 ficheros y 11 tests; `npm run test:adapter`: verde, 1 fichero y 2 tests.
+- `npm run test:component`: verde, 5 ficheros y 22 tests; incluye foco inicial, ciclo de Tab/Shift+Tab, Escape y restauración al opener.
+- `npm run test:e2e`: verde, 21/21 en Example y 21/21 en Northwind. La matriz responsive cubre 1440×900, 1280×800, 1024×768, 768×1024, 600×900, 390×844 y 375×812, sin overflow horizontal.
+- Los E2E verifican objetivos táctiles de 44 px, Preferencias y drawer dentro del viewport, Review móvil como diálogo, tema del sistema, claro y oscuro, `prefers-reduced-motion`, estado offline fail-closed, runtime 503 con reintento explícito y recuperación al volver online.
+- `npm run test:visual`: verde sin regeneración, 29 tests y 1 skip intencional mobile-only en desktop. Se añadieron baselines dark de conversación, approval, Review, documento, browser, Preferencias y acciones guiadas.
+- `npm run test:a11y`: verde, 5/5; shell light/dark, Preferencias, acciones guiadas, conversación, approval, Review, documento y browser sin violaciones critical/serious de axe.
+- `npm run build`: verde y secuencial en Example y Northwind, Next.js 16.3.2; ambas instalaciones generan las 17 páginas estáticas previstas y el mismo conjunto de routes.
+- Revisión visual humana: nueve capturas sintéticas abiertas a resolución original; no contienen historial, rutas internas ni datos privados.
+- Axe detectó durante la pasada contraste insuficiente en textos oscuros y en el estado activo de Review (mínimo 2,74:1). Se corrigieron los tokens semánticos y se reejecutó el gate completo sin excepciones.
+- El estado degradado no inventa continuidad: cuando el runtime falla u offline, el historial sigue visible pero enviar queda bloqueado; al recuperar conectividad se revalida el status antes de habilitar el composer.
+
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
@@ -170,8 +193,9 @@
 - `dc19cf5 feat(ui): complete conversation streaming slice` — checkpoint 4, Markdown/GFM, adapter NDJSON, attachments, stop, recovery, scroll y regresiones.
 - `72e7d17 feat(ui): complete turn review and approvals` — checkpoint 5, plan, actividad, comandos, permisos, Review, diff, error de red y regresiones.
 - `1bdd060 feat(ui): add honest capability artifact states` — checkpoint 6, PDF/Office/image, preview/publicación, Computer Use, seguridad del viewer y regresiones.
+- `909affb feat(ui): harden responsive themes and accessibility` — checkpoint 7, responsive, dark/system, teclado, focus, motion, degradación y regresiones.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
 
-Completar el checkpoint 7: responsive en toda la matriz de viewports, temas claro/oscuro/sistema, teclado/focus, motion reducido y estados degradados. Corregir durante esta pasada el solapamiento móvil del control flotante de scroll observado en previews largas.
+Completar el checkpoint 8: integrar el contrato durable definitivo solo donde exista, y verificar ordering, dedupe, replay, reconnect, lifecycle y performance sin simular garantías ausentes del backend.
