@@ -1,8 +1,11 @@
-import { lstat, chmod, mkdir, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
+import { lstat, chmod, mkdir, open, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import {
   atomicWriteJson,
+  atomicWriteFile,
   readValidatedJson,
   ResourceLockManager,
   defineVersionedSchema,
@@ -21,6 +24,8 @@ import {
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const MAX_CODEX_AUTH_BYTES = 1024 * 1024;
 const ROOT_KEYS = [
   "userRoot",
   "runtimeRoot",
@@ -172,6 +177,69 @@ const workerManifestSchema: StorageSchema<WorkerProvisioningManifest> = defineVe
   },
 });
 
+type SharedCodexAuthReceipt = {
+  schemaVersion: 1;
+  scope: "shared-qa";
+  userId: string;
+  credentialFingerprint: string;
+  synchronizedAt: string;
+};
+
+const sharedCodexAuthReceiptSchema: StorageSchema<SharedCodexAuthReceipt> = defineVersionedSchema({
+  name: "SharedCodexAuthReceipt",
+  schemaVersion: 1,
+  keys: ["scope", "userId", "credentialFingerprint", "synchronizedAt"],
+  parse(record, context) {
+    return {
+      schemaVersion: 1,
+      scope: expectString(record.scope, context.at("scope"), {
+        minLength: 9,
+        maxLength: 9,
+        pattern: /^shared-qa$/,
+      }) as "shared-qa",
+      userId: expectString(record.userId, context.at("userId"), {
+        minLength: 36,
+        maxLength: 36,
+        pattern: USER_ID_PATTERN,
+      }),
+      credentialFingerprint: expectString(
+        record.credentialFingerprint,
+        context.at("credentialFingerprint"),
+        { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN },
+      ),
+      synchronizedAt: expectIsoDate(record.synchronizedAt, context.at("synchronizedAt")),
+    };
+  },
+});
+
+export type SharedCodexAuth = Readonly<{
+  scope: "shared-qa";
+  sourcePath: string;
+}>;
+
+function configuredSharedCodexAuth(
+  environment: NodeJS.ProcessEnv = process.env,
+): SharedCodexAuth | null {
+  const scope = environment.AIBRAIN_CODEX_AUTH_SCOPE?.trim() || "per-user";
+  const sourcePath = environment.AIBRAIN_SHARED_CODEX_AUTH_SOURCE?.trim() || null;
+  if (scope === "per-user") {
+    if (sourcePath) {
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_CONFIG_INVALID",
+        "Shared Codex auth source requires AIBRAIN_CODEX_AUTH_SCOPE=shared-qa.",
+      );
+    }
+    return null;
+  }
+  if (scope !== "shared-qa" || !sourcePath || !path.isAbsolute(sourcePath)) {
+    throw new WorkerProvisioningError(
+      "WORKER_SHARED_AUTH_CONFIG_INVALID",
+      "Shared QA Codex auth requires an absolute source path.",
+    );
+  }
+  return Object.freeze({ scope, sourcePath });
+}
+
 async function assertDirectory(directory: string) {
   const metadata = await lstat(directory);
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
@@ -240,6 +308,7 @@ export type WorkerProvisionerOptions = {
   config: Readonly<InstallationConfig>;
   lockManager?: ResourceLockManager;
   now?: () => number;
+  sharedCodexAuth?: SharedCodexAuth | null;
 };
 
 export class WorkerProvisioner {
@@ -247,6 +316,7 @@ export class WorkerProvisioner {
   readonly lockManager: ResourceLockManager;
   private readonly now: () => number;
   private readonly lockRoot: string;
+  private readonly sharedCodexAuth: SharedCodexAuth | null;
 
   constructor(options: WorkerProvisionerOptions) {
     this.config = options.config;
@@ -255,6 +325,9 @@ export class WorkerProvisioner {
       rootDirectory: this.lockRoot,
     });
     this.now = options.now ?? Date.now;
+    this.sharedCodexAuth = options.sharedCodexAuth === undefined
+      ? configuredSharedCodexAuth()
+      : options.sharedCodexAuth;
   }
 
   async provision(userId: string): Promise<WorkerProvisioningManifest> {
@@ -275,6 +348,7 @@ export class WorkerProvisioner {
         for (const directory of directories) {
           await ensureDescendantTree(roots.userRoot, directory);
         }
+        await this.synchronizeSharedCodexAuth(roots, userId);
 
         const expected = {
           schemaVersion: WORKER_PROVISIONING_SCHEMA_VERSION,
@@ -303,6 +377,104 @@ export class WorkerProvisioner {
         await chmod(roots.manifest, 0o600);
         return created;
       },
+    );
+  }
+
+  private async synchronizeSharedCodexAuth(roots: WorkerRoots, userId: string) {
+    const shared = this.sharedCodexAuth;
+    if (!shared) return;
+    const dataRoot = path.resolve(this.config.paths.dataRoot);
+    const sourcePath = path.resolve(/* turbopackIgnore: true */ shared.sourcePath);
+    if (
+      path.basename(sourcePath) !== "auth.json"
+      || sourcePath === dataRoot
+      || !inside(dataRoot, sourcePath)
+    ) {
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+        "Shared Codex auth source must be a private auth.json inside dataRoot.",
+      );
+    }
+
+    let canonicalDataRoot: string;
+    let canonicalSource: string;
+    try {
+      [canonicalDataRoot, canonicalSource] = await Promise.all([
+        realpath(dataRoot),
+        realpath(sourcePath),
+      ]);
+    } catch (error) {
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_SOURCE_UNAVAILABLE",
+        "Shared Codex auth source is unavailable.",
+        { cause: error },
+      );
+    }
+    if (!inside(canonicalDataRoot, canonicalSource)) {
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+        "Shared Codex auth source resolves outside dataRoot.",
+      );
+    }
+
+    let handle: Awaited<ReturnType<typeof open>> | null = null;
+    let authBytes: Buffer;
+    try {
+      handle = await open(sourcePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+      const metadata = await handle.stat();
+      const effectiveUid = typeof process.geteuid === "function" ? process.geteuid() : null;
+      if (
+        !metadata.isFile()
+        || metadata.nlink !== 1
+        || (metadata.mode & 0o077) !== 0
+        || (effectiveUid !== null && metadata.uid !== effectiveUid)
+        || metadata.size < 2
+        || metadata.size > MAX_CODEX_AUTH_BYTES
+      ) {
+        throw new WorkerProvisioningError(
+          "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+          "Shared Codex auth source must be a private owner-controlled regular file.",
+        );
+      }
+      authBytes = await handle.readFile();
+    } catch (error) {
+      if (error instanceof WorkerProvisioningError) throw error;
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+        "Shared Codex auth source could not be read safely.",
+        { cause: error },
+      );
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+
+    try {
+      const parsed: unknown = JSON.parse(authBytes.toString("utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    } catch (error) {
+      throw new WorkerProvisioningError(
+        "WORKER_SHARED_AUTH_SOURCE_INVALID",
+        "Shared Codex auth source is not a valid JSON object.",
+        { cause: error },
+      );
+    }
+
+    const targetPath = path.join(roots.codexHome, "auth.json");
+    if (path.resolve(targetPath) !== sourcePath) {
+      await atomicWriteFile(targetPath, authBytes, { mode: 0o600 });
+    }
+    await chmod(targetPath, 0o600);
+    await atomicWriteJson(
+      path.join(roots.auditRoot, "codex-auth-scope.json"),
+      {
+        schemaVersion: 1,
+        scope: shared.scope,
+        userId,
+        credentialFingerprint: createHash("sha256").update(authBytes).digest("hex"),
+        synchronizedAt: new Date(this.now()).toISOString(),
+      },
+      sharedCodexAuthReceiptSchema,
+      { mode: 0o600 },
     );
   }
 }
