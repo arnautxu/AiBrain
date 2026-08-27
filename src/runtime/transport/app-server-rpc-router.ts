@@ -38,6 +38,11 @@ type TurnRegistrationState = {
   handlers: AppServerTurnHandlers;
 };
 
+type ReceivedTurnOwner = {
+  threadId: string;
+  state: TurnRegistrationState;
+};
+
 function safeError(error: unknown) {
   return new Error((error instanceof Error ? error.message : "App Server routing failed.")
     .replace(/Bearer\s+\S+/giu, "Bearer [REDACTED]")
@@ -219,8 +224,9 @@ export class AppServerRpcRouter {
   private dispatch(event: AppServerEvent) {
     this.nextAcknowledgementSequence ??= event.sequence;
     const key = this.scopeKey(event);
+    const receivedTurnOwner = this.turnOwnerAtReceipt(event);
     const previous = key ? this.scopeChains.get(key) ?? Promise.resolve() : Promise.resolve();
-    const routed = previous.then(() => this.route(event));
+    const routed = previous.then(() => this.route(event, receivedTurnOwner));
     if (key) {
       this.scopeChains.set(key, routed);
       void routed.finally(() => {
@@ -235,6 +241,20 @@ export class AppServerRpcRouter {
     this.inFlightEvents.add(completed);
     void completed.finally(() => this.inFlightEvents.delete(completed));
     return completed;
+  }
+
+  /**
+   * Event routing can be delayed behind another event for the same runtime
+   * turn. Capture the active registration when the event is received so a
+   * delayed notification from a disposed turn can never attach itself to the
+   * next local turn registered on the same thread.
+   */
+  private turnOwnerAtReceipt(event: AppServerEvent): ReceivedTurnOwner | null {
+    if (event.message.kind === "rpc-response") return null;
+    const scope = eventScope(event.message.rpc);
+    if (!scope) return null;
+    const state = this.turns.get(scope.threadId);
+    return state ? { threadId: scope.threadId, state } : null;
   }
 
   private async queueAcknowledgement(event: AppServerEvent) {
@@ -252,7 +272,7 @@ export class AppServerRpcRouter {
     await flush;
   }
 
-  private async route(event: AppServerEvent) {
+  private async route(event: AppServerEvent, receivedTurnOwner: ReceivedTurnOwner | null) {
     if (event.message.kind === "rpc-response") {
       const response = event.message.rpc;
       const pending = this.pending.get(response.id);
@@ -275,7 +295,10 @@ export class AppServerRpcRouter {
     if (event.message.kind === "rpc-notification") {
       const notification = event.message.rpc;
       const scope = eventScope(notification);
-      const turn = scope ? this.turns.get(scope.threadId) : null;
+      const turn = scope && receivedTurnOwner?.threadId === scope.threadId &&
+          this.turns.get(scope.threadId) === receivedTurnOwner.state
+        ? receivedTurnOwner.state
+        : null;
       if (turn && scope?.turnId) {
         if (turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId) return;
         turn.runtimeTurnId ??= scope.turnId;
@@ -286,7 +309,10 @@ export class AppServerRpcRouter {
 
     const request = event.message.rpc;
     const scope = eventScope(request);
-    const turn = scope ? this.turns.get(scope.threadId) : null;
+    const turn = scope && receivedTurnOwner?.threadId === scope.threadId &&
+        this.turns.get(scope.threadId) === receivedTurnOwner.state
+      ? receivedTurnOwner.state
+      : null;
     let turnScopeMismatch = false;
     if (turn && scope?.turnId) {
       turnScopeMismatch = Boolean(turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId);

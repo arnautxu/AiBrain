@@ -709,3 +709,27 @@ npm run infra:validate
   `ingress-gateway` y su red exclusiva. Resultado final local: 116 ficheros
   pasados, 1 omitido; 551 tests pasados, 3 omitidos; typecheck, lint,
   contratos fijados e infraestructura estática verdes.
+
+## Continuación secuencial en un thread persistente — 2026-08-27
+
+- Incidencia real reproducida en el thread público
+  `d9f42d47-ac46-440c-8759-4344ac8d2e93`: el primer turno completaba, pero una
+  notificación del turno anterior que seguía en la cadena asíncrona podía
+  consultar el registro activo demasiado tarde y apropiarse del segundo turno.
+  El resultado visible era `Turn registration cannot be rebound to another
+  runtime turn.`
+- El router ahora fija el propietario usuario/thread/turn cuando recibe el
+  evento. Si ese registro ya fue retirado antes de procesarlo, el evento tardío
+  se descarta y nunca se entrega al siguiente turno local del mismo thread.
+  Las respuestas RPC, approvals y la concurrencia entre threads conservan sus
+  rutas y ACK ordenados.
+- Regresión permanente añadida: mantiene una notificación anterior bloqueada,
+  registra el siguiente turno en el mismo thread y demuestra que el evento
+  tardío no lo enlaza ni llega a sus handlers.
+- Validación local: router + worker 11/11, suite completa 116 ficheros pasados
+  y 1 omitido (552 tests pasados, 3 omitidos), E2E backend 4/4, typecheck y lint
+  verdes.
+- Siguiente acción concreta: construir y desplegar la revisión inmutable y
+  aceptar al menos tres turnos reales consecutivos en un único thread público,
+  verificando persistencia terminal, métricas, healthchecks y aislamiento de
+  BGreenly.

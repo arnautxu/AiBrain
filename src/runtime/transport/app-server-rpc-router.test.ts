@@ -16,6 +16,7 @@ class EventQueue implements AsyncIterable<AppServerEvent> {
     if (waiter) waiter({ done: false, value });
     else this.values.push(value);
   }
+  get pending() { return this.values.length; }
   [Symbol.asyncIterator](): AsyncIterator<AppServerEvent> {
     return {
       next: () => {
@@ -225,6 +226,64 @@ describe("AppServerRpcRouter", () => {
       kind: "rpc-response",
       rpc: { id: "approval-wrong-turn", error: { code: -32602, message: expect.stringContaining("does not own") } },
     });
+    await router.close();
+  });
+
+  it("does not rebind a new local turn to a delayed notification from the previous runtime turn", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    await router.start();
+    let releasePrevious!: () => void;
+    const previousGate = new Promise<void>((resolve) => { releasePrevious = resolve; });
+    const previousNotification = vi.fn(async () => previousGate);
+    const previous = router.registerTurn("thread-sequential", "local-old", {
+      onNotification: previousNotification,
+      onServerRequest: vi.fn(),
+      onFailure: vi.fn(),
+    });
+    previous.bindRuntimeTurn("turn-old");
+
+    transport.queue.push(event(1, {
+      kind: "rpc-notification",
+      rpc: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-sequential",
+          turnId: "turn-old",
+          itemId: "item-old-1",
+          delta: "old",
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(previousNotification).toHaveBeenCalledOnce());
+    transport.queue.push(event(2, {
+      kind: "rpc-notification",
+      rpc: {
+        method: "item/agentMessage/delta",
+        params: {
+          threadId: "thread-sequential",
+          turnId: "turn-old",
+          itemId: "item-old-2",
+          delta: "late-old",
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(transport.queue.pending).toBe(0));
+
+    previous.dispose();
+    const currentNotification = vi.fn();
+    const current = router.registerTurn("thread-sequential", "local-new", {
+      onNotification: currentNotification,
+      onServerRequest: vi.fn(),
+      onFailure: vi.fn(),
+    });
+    releasePrevious();
+    await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1, 2]));
+
+    expect(previousNotification).toHaveBeenCalledOnce();
+    expect(currentNotification).not.toHaveBeenCalled();
+    expect(() => current.bindRuntimeTurn("turn-new")).not.toThrow();
+    current.dispose();
     await router.close();
   });
 
