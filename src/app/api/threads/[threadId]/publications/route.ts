@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { loadInstallationConfig } from "@/config/installation";
@@ -24,7 +25,7 @@ function mayPublish(rules: readonly { ruleId: string; action: string; effect: st
 
 function publicationErrorResponse(error: unknown) {
   const code = error instanceof StorageError ? error.code : "PUBLICATION_UNAVAILABLE";
-  console.error("AiBrain publication freeze rejected", { code });
+  operationalLogger.warn("publication.freeze_rejected", { code });
   if (code.includes("CONFLICT") || code === "PUBLICATION_TARGET_PARENT_MISSING") {
     return NextResponse.json({ error: "El candidat o destí ha canviat i cal revisar-lo." }, { status: 409 });
   }

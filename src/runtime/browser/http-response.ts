@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { operationalLogger } from "@/operations/server-logger";
 import { BrowserGatewayTokenError } from "@/runtime/browser/gateway-token";
 import { BrowserServiceError } from "@/runtime/browser/server-service";
 
@@ -27,7 +28,7 @@ export function browserRuntimeError(error: unknown, fallback: string) {
   const code = error && typeof error === "object" && "code" in error
     ? String(error.code)
     : "BROWSER_RUNTIME_UNAVAILABLE";
-  console.error("AiBrain browser runtime request failed", { code });
+  operationalLogger.warn("browser.request_failed", { code });
   return NextResponse.json(
     { error: fallback, code, retryable: true },
     { status: 503 },

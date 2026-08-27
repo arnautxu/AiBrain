@@ -47,6 +47,7 @@ import {
   turnDocumentChatAttachments,
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
+import { operationalLogger } from "@/operations/server-logger";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -243,7 +244,7 @@ export async function POST(request: Request) {
       const code = error && typeof error === "object" && "code" in error
         ? String(error.code)
         : "PERMISSION_PREFLIGHT_FAILED";
-      console.error("AiBrain permission preflight rejected", { code });
+      operationalLogger.warn("permissions.preflight_rejected", { code });
       return NextResponse.json(
         { error: "No s’ha pogut verificar la política d’aquest torn." },
         { status: 503 },
@@ -418,7 +419,7 @@ export async function POST(request: Request) {
               runtimeThreadToken,
             );
           } catch (error) {
-            console.error("AiBrain thread persistence failed", error);
+            operationalLogger.error("thread.persistence_failed", { error });
             if (!request.signal.aborted) {
               await emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
             }
