@@ -1,7 +1,12 @@
 import { createServer as createHttpServer, request as httpRequest } from "node:http";
 import { connect as netConnect, createServer as createNetServer, type AddressInfo, type Server as NetServer, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BrowserEgressProxy, BrowserEgressProxyError, type BrowserPinnedConnection } from "@/runtime/browser/egress-proxy";
+import {
+  BrowserEgressProxy,
+  BrowserEgressProxyError,
+  browserDnsLookupFromEnvironment,
+  type BrowserPinnedConnection,
+} from "@/runtime/browser/egress-proxy";
 import { BrowserNetworkPolicy, type BrowserDnsLookup } from "@/runtime/browser/network-policy";
 
 const proxies = new Set<BrowserEgressProxy>();
@@ -140,6 +145,30 @@ function rawProxyResponse(proxy: URL, requestText: string) {
 }
 
 describe("BrowserEgressProxy lifecycle", () => {
+  it("uses the authenticated isolated gateway as the production DNS resolver", async () => {
+    let authorization = "";
+    let requestedPath = "";
+    const server = createHttpServer((request, response) => {
+      authorization = String(request.headers["proxy-authorization"] ?? "");
+      requestedPath = request.url ?? "";
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        schemaVersion: 1,
+        hostname: "public.example",
+        addresses: [{ address: "93.184.216.34", family: 4 }],
+      }));
+    });
+    const port = await listen(server);
+    vi.stubEnv("AIBRAIN_EGRESS_PROXY_URL", `http://127.0.0.1:${port}`);
+    vi.stubEnv("AIBRAIN_EGRESS_BROWSER_TOKEN", "browser-token-0000000000000000000000000000");
+
+    const lookup = browserDnsLookupFromEnvironment();
+    await expect(lookup?.("public.example", { all: true, verbatim: true }))
+      .resolves.toEqual([{ address: "93.184.216.34", family: 4 }]);
+    expect(requestedPath).toBe("/__aibrain_egress_resolve?hostname=public.example");
+    expect(authorization).toBe("Bearer browser-token-0000000000000000000000000000");
+  });
+
   it("binds only an ephemeral IPv4 loopback port and starts/stops idempotently", async () => {
     const proxy = new BrowserEgressProxy({ networkPolicy: publicPolicy(), connect: localConnector() });
     proxies.add(proxy);

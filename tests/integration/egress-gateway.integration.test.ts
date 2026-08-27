@@ -170,6 +170,41 @@ describe("physical egress gateway", () => {
     expect(receivedHeaders.host).toBe("browser.example");
   });
 
+  it("resolves browser DNS only through the authenticated isolated gateway", async () => {
+    const lookup = vi.fn(async () => [
+      { address: "93.184.216.34", family: 4 as const },
+      { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 as const },
+    ]);
+    const gateway = new EgressGateway({ config: config(), lookup });
+    gateways.push(gateway);
+    const proxyUrl = await gateway.start();
+
+    const resolved = await proxyHttp(
+      proxyUrl,
+      "/__aibrain_egress_resolve?hostname=browser.example",
+      { "proxy-authorization": bearer(BROWSER_TOKEN) },
+    );
+
+    expect(resolved.status).toBe(200);
+    expect(JSON.parse(resolved.body)).toEqual({
+      schemaVersion: 1,
+      hostname: "browser.example",
+      addresses: [
+        { address: "93.184.216.34", family: 4 },
+        { address: "2606:2800:220:1:248:1893:25c8:1946", family: 6 },
+      ],
+    });
+    expect(lookup).toHaveBeenCalledWith("browser.example", { all: true, verbatim: true });
+    expect((await proxyHttp(
+      proxyUrl,
+      "/__aibrain_egress_resolve?hostname=browser.example",
+      { "proxy-authorization": bearer(WORKER_TOKEN) },
+    )).status).toBe(403);
+    expect((await proxyHttp(proxyUrl, "/__aibrain_egress_resolve?hostname=localhost", {
+      "proxy-authorization": bearer(BROWSER_TOKEN),
+    })).status).toBe(403);
+  });
+
   it("accepts standard Basic proxy auth only for worker/server and pins one worker DNS decision", async () => {
     const echo = createNetServer((socket) => socket.pipe(socket));
     servers.push(echo);
