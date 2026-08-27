@@ -16,6 +16,11 @@ FROM ${NODE_IMAGE} AS runtime
 ARG AIBRAIN_UID=10001
 ARG AIBRAIN_GID=10001
 ARG DEBIAN_SNAPSHOT=20260820T000000Z
+ARG AIBRAIN_REVISION=development
+
+LABEL org.opencontainers.image.title="AiBrain Company Brain" \
+      org.opencontainers.image.vendor="GraphikAI" \
+      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
 
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \

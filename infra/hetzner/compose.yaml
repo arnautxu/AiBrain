@@ -2,13 +2,7 @@ name: "${AIBRAIN_COMPOSE_PROJECT_NAME:?set AIBRAIN_COMPOSE_PROJECT_NAME}"
 
 services:
   app:
-    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable QA tag}"
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-      args:
-        AIBRAIN_UID: "${AIBRAIN_UID:-10001}"
-        AIBRAIN_GID: "${AIBRAIN_GID:-10001}"
+    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
     env_file:
       - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
     environment:

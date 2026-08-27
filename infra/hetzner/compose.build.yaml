@@ -1,0 +1,9 @@
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        AIBRAIN_UID: "${AIBRAIN_UID:-10001}"
+        AIBRAIN_GID: "${AIBRAIN_GID:-10001}"
+        AIBRAIN_REVISION: "${AIBRAIN_REVISION:?set AIBRAIN_REVISION to the exact git commit}"
