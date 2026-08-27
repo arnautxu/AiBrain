@@ -9,8 +9,8 @@
 - Remoto: `origin` (`arnautxu/AiBrain`)
 - Último checkpoint backend publicado: `bded0b6` en
   `origin/codex/aibrain-backend-definitivo`.
-- Último checkpoint backend local: `e765eb0`; push retenido hasta cerrar la
-  reaudit de artefactos efectivos de release.
+- Último checkpoint backend local: `9cd0d6d`; push retenido hasta repetir la
+  matriz total después del cierre de los gaps locales de transporte/E2E.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
 
@@ -50,8 +50,8 @@
 | 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`, `eff6edc`, `42c7539`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, retención terminal de candidato, gates separados de data/publish y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`, `e765eb0`: alert-dispatcher externo, rollback V3 y backup durable con recovery systemd cerrados; quedan P1 de atestado efectivo/candidate env/config schema y evidencia Docker/host QA real |
-| 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`: CI protegida y reproducible, denegación física de tools, artefactos no cacheables y capacidad independiente de publicación cerrados; aún quedan gaps operativos locales del checkpoint 11 |
+| 11. Compose y operación | Completado localmente; evidencia Docker/host QA externa pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`, `e765eb0`, `9cd0d6d`: alert-dispatcher externo, backup/recovery systemd, release V3 con env/Compose/seccomp/config exactos y rollback sin depender de carpetas antiguas; Docker/reboot QA siguen fuera del host local |
+| 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`, `9cd0d6d`: CI protegida y reproducible, denegación física de tools, artefactos no cacheables, capacidad independiente de publicación y release inputs atestados cerrados; quedan la ruta HTTP→worker/App Server real, la ventana de confirmación RPC y soak ampliado |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
@@ -80,11 +80,13 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Las alertas operativas separan evaluación, outbox y sink. El estado file-backed genera transiciones `raised/updated/resolved`, deduplica por código+severidad+umbral, conserva generations y receipts, aplica backoff y falla por backpressure antes de una reconciliación parcial. `alert-dispatcher` no depende de la salud de app, no monta `docker.sock`, lee app/gateway, data/publish, snapshot y receipt off-host desde mounts mínimos y entrega por webhook HTTPS con token dedicado.
 - El preflight host exige env secretos privados y de un solo enlace, config/compose owner-controlled, password Restic read-only del UID de servicio y raíces source/publish/replica con ownership y modos compatibles con sus mounts. Rechaza antes de Docker cualquier symlink, hardlink, owner o permiso inseguro.
 - Una release une app+gateway y usa journal durable por fases. Antes de mutar, verifica estado, env, imágenes y contenedores actuales; después valida health, digest y revisión realmente ejecutados. `flock`/`lockf` serializa operadores, el lock local vincula PID+inicio+boot, los Docker subprocesses están acotados y recovery recibe un deadline independiente.
-- Release V3 conserva en estado privado los bytes y SHA-256 no secretos de env,
-  Compose e InstallationConfig para `current` y `previous`. Rollback no acepta
-  paths alternativos del operador: restaura los tres inputs con metadata
-  preservada, fuerza recreación, valida tres servicios y falla antes de Docker
-  ante drift, symlink, hardlink, owner o modo inseguro.
+- Release V3 conserva en estado privado bytes y SHA-256 de env, Compose fuente,
+  Compose efectivo, seccomp e InstallationConfig para `current` y `previous`.
+  El Compose efectivo apunta a un seccomp gestionado junto al estado y no a una
+  carpeta de release antigua. Rollback no acepta paths alternativos: restaura
+  los inputs, fuerza recreación, valida tres servicios y falla ante drift,
+  symlink, hardlink, owner o modo inseguro. El env candidato permite tunear
+  recursos pero no migrar identidad, rutas, puertos, redes, volúmenes o UIDs.
 - El backup host usa un journal privado por fases y lock advisory del SO. Ante
   fallo recupera app+admisión antes de salir; tras SIGKILL/reboot, la unidad
   systemd verifica un snapshot ya creado, espera health y solo emite receipt
@@ -194,10 +196,11 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Cerrar los P1 encontrados en la reaudit de release: atestar el seccomp efectivo,
-aceptar un `compose.env` candidato no secreto, validar InstallationConfig contra
-instalación/paths y dar diagnóstico/procedimiento V2→V3. Después repetir la
-matriz total.
+Cerrar los gaps locales restantes de la auditoría de seguridad: ejecutar la
+ruta HTTP real de chat hasta un App Server sintético a través del worker y su
+WebSocket privado, eliminar la ventana de pérdida entre escritura RPC y
+confirmación de procesamiento, y ampliar el soak para incluir HTTP/documentos/
+browser. Después repetir la matriz total y publicar los checkpoints verdes.
 
 ## Últimas validaciones
 
@@ -229,6 +232,13 @@ matriz total.
   `SIGKILL` durante verify, recovery de snapshot y app, secreto runtime privado
   y receipts `verified/aborted`; typecheck, lint e infra estática verdes. La
   unidad systemd de boot queda pendiente de ejecución real en Hetzner QA.
+- Atestación de release `9cd0d6d`: 29/29 pruebas release+preflight verdes. El
+  gestor versiona env candidato, Compose fuente/efectivo, seccomp y config;
+  valida el YAML contra servicios/redes/volúmenes propios, permite RAM/CPU sin
+  migrar recursos, recupera A→B→A exacto y rechaza BGreenly, red no revisada,
+  config de otra instalación, drift seccomp y estado V2 con diagnóstico
+  recuperable. Typecheck, lint, auditoría producción e infra estática verdes;
+  Docker real permanece correctamente como `NOT RUN`.
 
 - `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
 - `npm run lint`: verde, sin warnings.
@@ -444,7 +454,7 @@ matriz total.
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
 | Backup/restore/recovery | Manifest V2 compuesto, controlador durable drain/stop/create/verify/start/resume, recovery systemd y Restic off-host one-shot | Pruebas backup + 7 integraciones CLI/controlador, incluidos corrupción, enlaces, publicación concurrente, SIGKILL, receipt verified/aborted y recovery; contenedor QA y proveedor externo pendientes |
-| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual atómica con journal | Alertas 13/13, release/preflight 19/19 y validator estático verde; ejecución Docker/reboot QA pendiente |
+| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual transaccional con env/Compose/seccomp/config atestados | Alertas 13/13, release/preflight 29/29 y validator estático verde; ejecución Docker/reboot QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
 
