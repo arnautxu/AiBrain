@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, realpath } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { DynamicToolCallResponse } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
 import {
@@ -13,7 +13,7 @@ import {
   expectOneOf,
   expectString,
   expectStrictRecord,
-  readValidatedJson,
+  recoverAtomicJsonFile,
   type StorageSchema,
 } from "@/storage";
 
@@ -21,6 +21,9 @@ const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const TOOL_PATTERN = /^(open|read|screenshot|scroll|click|type|tabs|downloads)$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const MAX_AUDIT_EVENTS = 100_000;
+const DEFAULT_MAX_RECORDS = 100_000;
+const DEFAULT_MAX_RECORD_BYTES = 2 * 1024 * 1024 * 1024;
+const RECORD_FILE = /^[0-9a-f]{64}\.json$/u;
 
 export type BrowserToolCallIdentity = {
   installationId: string;
@@ -220,8 +223,15 @@ export class BrowserToolCallStore {
   private readonly locks: ResourceLockManager;
   private readonly audit: FileJournal<BrowserToolAuditEvent>;
   private readonly now: () => number;
+  private readonly maxRecords: number;
+  private readonly maxRecordBytes: number;
 
-  constructor(options: { userRoot: string; now?: () => number }) {
+  constructor(options: {
+    userRoot: string;
+    now?: () => number;
+    maxRecords?: number;
+    maxRecordBytes?: number;
+  }) {
     if (!path.isAbsolute(options.userRoot)) {
       throw new BrowserToolCallStoreError("BROWSER_TOOL_PATH_UNSAFE", "Browser tool user root must be absolute.");
     }
@@ -236,6 +246,13 @@ export class BrowserToolCallStore {
       now: options.now,
     });
     this.now = options.now ?? Date.now;
+    this.maxRecords = options.maxRecords ?? DEFAULT_MAX_RECORDS;
+    this.maxRecordBytes = options.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES;
+    if (!Number.isSafeInteger(this.maxRecords) || this.maxRecords < 1 || this.maxRecords > 1_000_000 ||
+      !Number.isSafeInteger(this.maxRecordBytes) || this.maxRecordBytes < 4_096 ||
+      this.maxRecordBytes > 16 * 1024 * 1024 * 1024) {
+      throw new BrowserToolCallStoreError("BROWSER_TOOL_CAPACITY_INVALID", "Browser tool storage capacity is invalid.");
+    }
   }
 
   private async prepare() {
@@ -300,11 +317,12 @@ export class BrowserToolCallStore {
   private async readUnlocked(identity: BrowserToolCallIdentity) {
     const recordPath = this.recordPath(identity);
     try {
+      const recovered = await recoverAtomicJsonFile(recordPath, browserToolCallRecordSchema);
       const metadata = await lstat(recordPath);
       if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || (metadata.mode & 0o077) !== 0) {
         throw new BrowserToolCallStoreError("BROWSER_TOOL_PATH_UNSAFE", "Browser tool record is unsafe.");
       }
-      const record = await readValidatedJson(recordPath, browserToolCallRecordSchema);
+      const record = recovered.value;
       if (!sameIdentity(record, identity)) {
         throw new BrowserToolCallStoreError("BROWSER_TOOL_REPLAY_CONFLICT", "Browser tool call identity changed during replay.");
       }
@@ -313,6 +331,60 @@ export class BrowserToolCallStore {
       if (isNodeError(error, "ENOENT")) return null;
       throw error;
     }
+  }
+
+  private async capacityUsage() {
+    let records = 0;
+    let bytes = 0;
+    for (const entry of await readdir(this.recordsRoot, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.isSymbolicLink() || /[\\/\u0000-\u001f\u007f]/u.test(entry.name)) {
+        throw new BrowserToolCallStoreError("BROWSER_TOOL_PATH_UNSAFE", "Browser tool record directory contains an unsafe entry.");
+      }
+      const metadata = await lstat(path.join(this.recordsRoot, entry.name));
+      const wrongOwner = typeof process.getuid === "function" && metadata.uid !== process.getuid();
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+        wrongOwner || (metadata.mode & 0o077) !== 0) {
+        throw new BrowserToolCallStoreError("BROWSER_TOOL_PATH_UNSAFE", "Browser tool record storage is unsafe.");
+      }
+      if (RECORD_FILE.test(entry.name)) records += 1;
+      bytes += metadata.size;
+      if (!Number.isSafeInteger(bytes)) {
+        throw new BrowserToolCallStoreError("BROWSER_TOOL_CAPACITY", "Browser tool storage size is invalid.");
+      }
+    }
+    return { records, bytes };
+  }
+
+  private async writeRecord(record: BrowserToolCallRecord, existing: boolean) {
+    const recordPath = this.recordPath(record);
+    const nextBytes = Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`, "utf8");
+    await this.locks.withLock("browser-tool:capacity", async () => {
+      const usage = await this.capacityUsage();
+      let previousBytes = 0;
+      let present = false;
+      try {
+        const metadata = await lstat(recordPath);
+        present = true;
+        previousBytes = metadata.size;
+      } catch (error) {
+        if (!isNodeError(error, "ENOENT")) throw error;
+      }
+      if (present !== existing) {
+        throw new BrowserToolCallStoreError(
+          present ? "BROWSER_TOOL_REPLAY_CONFLICT" : "BROWSER_TOOL_NOT_FOUND",
+          "Browser tool record changed during its capacity transaction.",
+        );
+      }
+      const recordCount = usage.records + (present ? 0 : 1);
+      const byteCount = usage.bytes - previousBytes + nextBytes;
+      if (recordCount > this.maxRecords || byteCount > this.maxRecordBytes) {
+        throw new BrowserToolCallStoreError(
+          "BROWSER_TOOL_CAPACITY",
+          "Browser tool storage reached its safe capacity and requires archival.",
+        );
+      }
+      await atomicWriteJson(recordPath, record, browserToolCallRecordSchema, { mode: 0o600 });
+    });
   }
 
   async begin(identity: BrowserToolCallIdentity) {
@@ -335,7 +407,7 @@ export class BrowserToolCallStore {
         createdAt: now,
         updatedAt: now,
       });
-      await atomicWriteJson(this.recordPath(identity), record, browserToolCallRecordSchema, { mode: 0o600 });
+      await this.writeRecord(record, false);
       await this.repairAudit(record);
       return record;
     });
@@ -355,7 +427,7 @@ export class BrowserToolCallStore {
         approvalRequestedAt: new Date(this.now()).toISOString(),
         updatedAt: new Date(this.now()).toISOString(),
       });
-      await atomicWriteJson(this.recordPath(identity), requested, browserToolCallRecordSchema, { mode: 0o600 });
+      await this.writeRecord(requested, true);
       await this.repairAudit(requested);
       return { record: requested, first: true } as const;
     });
@@ -378,7 +450,7 @@ export class BrowserToolCallStore {
         approvalResolvedAt: new Date(this.now()).toISOString(),
         updatedAt: new Date(this.now()).toISOString(),
       });
-      await atomicWriteJson(this.recordPath(identity), resolved, browserToolCallRecordSchema, { mode: 0o600 });
+      await this.writeRecord(resolved, true);
       await this.repairAudit(resolved);
       return { record: resolved, first: true } as const;
     });
@@ -400,7 +472,7 @@ export class BrowserToolCallStore {
         executingAt: now,
         updatedAt: now,
       });
-      await atomicWriteJson(this.recordPath(identity), executing, browserToolCallRecordSchema, { mode: 0o600 });
+      await this.writeRecord(executing, true);
       await this.repairAudit(executing);
       return { record: executing, acquired: true } as const;
     });
@@ -424,7 +496,7 @@ export class BrowserToolCallStore {
         response,
         updatedAt: new Date(this.now()).toISOString(),
       });
-      await atomicWriteJson(this.recordPath(identity), completed, browserToolCallRecordSchema, { mode: 0o600 });
+      await this.writeRecord(completed, true);
       await this.repairAudit(completed);
       return completed;
     });

@@ -34,6 +34,14 @@ Su `ApprovalItem` incluye `kind: "browser"` y el fingerprint de permisos del
 turn. Un store separado bajo `browser/tool-calls/` deduplica cada call y conserva
 un journal acotado solo con hashes, tool, estado, fingerprint, resultado booleano
 y timestamps; no audita URL, selector, texto escrito ni contenido de página.
+Los records completos se recuperan tras una escritura atómica interrumpida y
+están protegidos por capacidad global por usuario: 100.000 calls o 2 GiB por
+defecto, configurables con `AIBRAIN_BROWSER_TOOL_MAX_RECORDS` y
+`AIBRAIN_BROWSER_TOOL_MAX_BYTES`. El límite es backpressure de disco, no una
+cuota comercial: un replay ya existente sigue siendo legible, una call nueva
+falla cerrada y no se elimina historial idempotente de forma automática. Antes
+de ampliar el límite, el operador debe verificar disco/backup y conservar o
+exportar los records según la política documental de la instalación.
 
 Body de decisión:
 
