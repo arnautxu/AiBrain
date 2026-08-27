@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "installationId": "company-qa",
+  "companyName": "Company QA",
+  "companySlug": "company-qa",
+  "publicUrl": "https://brain.company.example",
+  "branding": {
+    "productName": "Company Brain",
+    "logoPath": "/branding/company-qa/logo.svg",
+    "faviconPath": "/branding/company-qa/favicon.svg",
+    "accentColor": "#315ee7"
+  },
+  "paths": {
+    "dataRoot": "/var/lib/aibrain/data",
+    "companyContextRoot": "/var/lib/aibrain/data/company-context",
+    "usersRoot": "/var/lib/aibrain/data/users",
+    "sourceReadRoot": "/srv/aibrain/source-ro",
+    "publishWriteRoot": "/srv/aibrain/publish-rw",
+    "backupsRoot": "/var/lib/aibrain/data/backups"
+  }
+}

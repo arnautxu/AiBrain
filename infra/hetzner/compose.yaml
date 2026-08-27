@@ -1,43 +1,107 @@
-name: aibrain
+name: "${AIBRAIN_COMPOSE_PROJECT_NAME:?set AIBRAIN_COMPOSE_PROJECT_NAME}"
 
 services:
   app:
+    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable QA tag}"
     build:
       context: ../..
       dockerfile: Dockerfile
+      args:
+        AIBRAIN_UID: "${AIBRAIN_UID:-10001}"
+        AIBRAIN_GID: "${AIBRAIN_GID:-10001}"
+        CODEX_VERSION: "${AIBRAIN_CODEX_VERSION:-0.149.1}"
     env_file:
-      - /etc/aibrain/aibrain.env
+      - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
     environment:
-      CODEX_HOME_ROOT: /var/lib/aibrain/codex
-      CODEX_WORKSPACE_ROOT: /var/lib/aibrain/workspaces
-      CONTROL_PLANE_DATA_DIR: /var/lib/aibrain/control-plane
-    init: true
-    ports:
-      - "127.0.0.1:3000:3000"
-    restart: unless-stopped
+      AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
+      AIBRAIN_CHROME_BIN: /usr/bin/chromium
+      AIBRAIN_SOFFICE_BIN: /usr/local/bin/aibrain-soffice
+      AIBRAIN_PDFINFO_BIN: /usr/bin/pdfinfo
+      AIBRAIN_PDFTOPPM_BIN: /usr/bin/pdftoppm
+      AIBRAIN_QPDF_BIN: /usr/bin/qpdf
+      CHAT_RUNTIME: codex
+      CODEX_BIN: /usr/local/bin/aibrain-codex-worker
+      CODEX_APPROVAL_POLICY: on-request
+      CODEX_SANDBOX: workspace-write
+      NODE_ENV: production
+      TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+    user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
+    read_only: true
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
-    stop_grace_period: 30s
-    volumes:
-      - /etc/aibrain/installation.json:/etc/aibrain/installation.json:ro
-      - /var/lib/aibrain:/var/lib/aibrain
-
-  browser-studio:
-    build:
-      context: ../..
-      dockerfile: infra/hetzner/browser/Dockerfile
-    environment:
-      SCREEN_SIZE: 1440x900
-    ports:
-      - "127.0.0.1:6080:6080"
-      - "127.0.0.1:9222:9223"
-    restart: unless-stopped
-    security_opt:
       - seccomp=./browser/seccomp_profile.json
-    shm_size: 1gb
+    ports:
+      - "${AIBRAIN_BIND_ADDRESS:-127.0.0.1}:${AIBRAIN_HTTP_PORT:?set AIBRAIN_HTTP_PORT}:3000"
+    restart: unless-stopped
+    stop_grace_period: 45s
+    pids_limit: ${AIBRAIN_PIDS_LIMIT:-768}
+    cpus: ${AIBRAIN_CPU_LIMIT:-2.0}
+    mem_limit: "${AIBRAIN_MEMORY_LIMIT:-4g}"
+    mem_reservation: "${AIBRAIN_MEMORY_RESERVATION:-1g}"
+    shm_size: "${AIBRAIN_SHM_SIZE:-1g}"
+    ulimits:
+      nofile:
+        soft: ${AIBRAIN_NOFILE_SOFT:-8192}
+        hard: ${AIBRAIN_NOFILE_HARD:-16384}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=${AIBRAIN_TMP_SIZE:-512m},mode=1777
+      - /run:rw,nosuid,nodev,noexec,size=16m,mode=0755
+      - /app/.next/cache:rw,nosuid,nodev,noexec,size=${AIBRAIN_NEXT_CACHE_SIZE:-256m},mode=0700,uid=${AIBRAIN_UID:-10001},gid=${AIBRAIN_GID:-10001}
     volumes:
-      - /var/lib/aibrain/computer/studio/profile:/home/browser/profile
+      - type: bind
+        source: "${AIBRAIN_INSTALLATION_CONFIG_HOST:?set AIBRAIN_INSTALLATION_CONFIG_HOST}"
+        target: /etc/aibrain/installation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: aibrain-data
+        target: /var/lib/aibrain/data
+      - type: volume
+        source: aibrain-backups
+        target: /var/lib/aibrain/data/backups
+      - type: volume
+        source: aibrain-restores
+        target: /var/lib/aibrain-restores
+      - type: bind
+        source: "${AIBRAIN_SOURCE_HOST_PATH:?set AIBRAIN_SOURCE_HOST_PATH}"
+        target: /srv/aibrain/source-ro
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AIBRAIN_PUBLISH_HOST_PATH:?set AIBRAIN_PUBLISH_HOST_PATH}"
+        target: /srv/aibrain/publish-rw
+        bind:
+          create_host_path: false
+    networks:
+      - aibrain-private
+    healthcheck:
+      test: [CMD, node, /usr/local/share/aibrain/healthcheck.mjs]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${AIBRAIN_LOG_MAX_SIZE:-10m}"
+        max-file: "${AIBRAIN_LOG_MAX_FILES:-5}"
+        mode: non-blocking
+        max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
 
 networks:
-  default:
-    name: aibrain-private
+  aibrain-private:
+    name: "${AIBRAIN_NETWORK_NAME:?set a unique AIBRAIN_NETWORK_NAME}"
+    driver: bridge
+    attachable: false
+
+volumes:
+  aibrain-data:
+    name: "${AIBRAIN_DATA_VOLUME_NAME:?set a unique AIBRAIN_DATA_VOLUME_NAME}"
+  aibrain-backups:
+    name: "${AIBRAIN_BACKUP_VOLUME_NAME:?set a unique AIBRAIN_BACKUP_VOLUME_NAME}"
+  aibrain-restores:
+    name: "${AIBRAIN_RESTORE_VOLUME_NAME:?set a unique AIBRAIN_RESTORE_VOLUME_NAME}"
