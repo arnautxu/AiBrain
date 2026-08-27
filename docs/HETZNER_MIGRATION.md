@@ -110,9 +110,11 @@ docker compose \
   'test "$(id -u)" -ne 0 && test ! -w /srv/aibrain/source-ro && test -w /srv/aibrain/publish-rw && test ! -S /var/run/docker.sock'
 ```
 
-El único puerto publicado debe ser `<bind-address>:<qa-port>->3000`. CDP usa puertos loopback efímeros dentro del contenedor y no debe aparecer en `docker compose ps`.
-
-Esto evita exposición al host, pero todavía no aísla CDP de los workers: Chrome y App Server comparten el namespace de red del contenedor. Trátalo como P0. No habilites Browser/Computer Use para usuarios reales hasta mover cada browser a un namespace/contenedor de red por empleado con gateway autenticado; no montes `docker.sock` para conseguirlo.
+El único puerto publicado debe ser `<bind-address>:<qa-port>->3000`. CDP no usa
+red: cada Chrome recibe un canal privado heredado por descriptores 3/4 y
+`--remote-debugging-pipe`. No debe existir listener CDP, URL de discovery ni
+`DevToolsActivePort` dentro del contenedor. Verifícalo además de comprobar
+`docker compose ps`; no montes `docker.sock` para administrar browsers.
 
 ## 4. Diagnóstico seguro
 
@@ -189,7 +191,9 @@ Para rollback de código, repón el tag anterior en `AIBRAIN_IMAGE` y repite el 
 
 - Docker build y Compose deben ejecutarse en el host QA; Docker no está disponible en el Mac de desarrollo actual.
 - El kernel/daemon del host debe pasar el preflight real de `bubblewrap`, seccomp y sandbox de Chromium.
-- Browser/CDP sigue necesitando una frontera de red por empleado; loopback compartido con App Server no satisface aislamiento cross-user.
+- El canal CDP heredado y sin socket debe repetirse en la imagen QA con dos
+  empleados. Sigue pendiente validar en el host la política de egress del
+  browser, incluido pinning DNS y bloqueo de destinos privados/metadata.
 - La base, el snapshot Debian y los paquetes Node están fijados. Falta ejecutar build limpio, SBOM y scan sobre la imagen resultante en el host QA antes de considerarla promovible.
 - Faltan credenciales reales de Supabase Auth y login de una suscripción Codex dedicada.
 - La réplica cifrada fuera del servidor y el canal de alertas deben configurarse y probarse.

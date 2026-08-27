@@ -2,10 +2,13 @@
 
 ## Scope
 
-This module launches an isolated headless Chrome/Chromium process per employee,
-keeps CDP on an ephemeral loopback port and exposes only an authenticated,
-same-origin PNG viewer and bounded input contract. The browser client never
-receives a CDP endpoint.
+This module launches one persistent headless Chrome/Chromium process per
+employee. Chrome DevTools Protocol is carried only over the process's inherited
+file descriptors 3 and 4 using `--remote-debugging-pipe`: there is no CDP TCP
+listener, discovery URL or `DevToolsActivePort` file. The web application
+exposes only an authenticated, same-origin PNG viewer and bounded input
+contract. The browser client and employee App Server never receive a CDP
+endpoint or file descriptor.
 
 The implementation lives in `src/runtime/browser`, is installation-aware,
 user-scoped and filesystem-backed, and is wired through
@@ -75,6 +78,7 @@ minute lifetime by default. Claims are bound to:
 - installation ID;
 - user UUID;
 - current browser session UUID;
+- owned workbench thread UUID;
 - SHA-256 binding of the opaque local auth session;
 - explicit `view`, `control`, `heartbeat` and/or `takeover` capabilities;
 - issue and expiry timestamps.
@@ -104,22 +108,30 @@ recovery, rotates the session binding and asks the adapter to start with
 `recovering=true`. Profiles and downloads remain user-specific and durable.
 
 The registry is process-local. The adapter closes a child with `Browser.close`
-and only escalates signals against the exact process it launched. On restart it
-validates the private `DevToolsActivePort`, version and loopback endpoint, closes
-the prior orphan through CDP, waits for profile release and then starts a new
-process. It never kills a PID recovered from disk.
+and only escalates signals against the exact process it launched. A lost pipe or
+child causes the owned runtime to be fenced and relaunched against the same
+private profile; it never discovers or kills a PID recovered from disk.
 
 ## Chrome/CDP boundary
 
-`ChromeCdpRuntime` uses an allowlisted CDP client with bounded frames, pending
-commands, listeners and timeouts. It validates the PNG signature/size, URL
-schemes and input dimensions. Launch arguments bind remote debugging to
-`127.0.0.1` with port `0`; `--no-sandbox`, shell execution and `docker.sock` are
-forbidden.
+`ChromeCdpRuntime` uses a NUL-framed, strict-UTF-8, allowlisted CDP client over
+the inherited pipe. Frames, pending commands, listeners and timeouts are
+bounded. Responses and events are routed by CDP `sessionId`. Each workbench
+thread receives its own attached page target (up to the configured per-user
+backpressure limit); the browser profile and cookies remain intentionally
+shared only between threads of that same employee.
+
+Downloads first land under a GUID in a private per-user quarantine. Target-
+scoped Page events bind the GUID to an owned thread, after which the completed
+file is atomically promoted to that thread's private download directory. A
+restart cleans bounded orphan quarantine entries rather than assigning them to
+an arbitrary thread. The adapter validates PNG signatures/sizes, URL schemes
+and input dimensions. Network CDP flags, `--no-sandbox`, shell execution and
+`docker.sock` are forbidden.
 
 Production requires `AIBRAIN_CHROME_EXPECTED_VERSION` with all four version
 components. Use a pinned Chrome for Testing/Chromium artifact rather than a
-user's auto-updating desktop Chrome. `AIBRAIN_CHROME_BIN` selects the server
+user's auto-updating desktop Chrome. `AIBRAIN_CHROME_EXECUTABLE` selects the server
 executable. `AIBRAIN_BROWSER_GATEWAY_SECRET` must be a dedicated secret of at
 least 32 bytes.
 
@@ -128,14 +140,13 @@ least 32 bytes.
 The browser checkpoint stays open until these plan requirements are added and
 validated:
 
-1. bind gateway tokens and page targets to an owned thread;
-2. route each target's downloads into that thread's staging and validate them;
-3. add the closed agent tool and durable approvals for sensitive external acts;
-4. block private, loopback and cloud-metadata destinations in production;
-5. add target/tab lifecycle operations without exposing arbitrary CDP;
-6. place each browser service behind the dedicated private container/network
-   boundary and prove it cannot see another employee's roots;
-7. add crash-loop, memory and CPU operational probes.
+1. add the closed agent tool and durable approvals for sensitive external acts;
+2. proxy browser egress through a DNS-pinned policy boundary so hostname
+   validation and the connection cannot diverge;
+3. expose only the required target/tab lifecycle operations without arbitrary
+   CDP;
+4. add durable browser action/recovery audit records;
+5. add crash-loop, memory and CPU operational probes.
 
 ## Focused validation
 
@@ -148,9 +159,10 @@ npx eslint src/runtime/browser
 ```
 
 The focused suite covers two-user root and state isolation, durable restart,
-download state, takeover and heartbeat recovery, stale-session fencing,
-gateway token tampering/cross-user/expiry checks, registry runtime exclusivity,
-restart recovery, bounded start backpressure, corruption and symlink rejection.
+thread-bound targets and downloads, takeover and heartbeat recovery,
+stale-session fencing, gateway token tampering/cross-user/thread/expiry checks,
+registry runtime exclusivity, private-pipe framing and EOF recovery, bounded
+backpressure, corruption and symlink rejection.
 
 The real two-profile test is opt-in because it launches three browser
 processes. Point it at a pinned Chrome for Testing/Chromium build:
@@ -161,6 +173,7 @@ AIBRAIN_CHROME_EXPECTED_VERSION=152.0.7977.64 \
 npm run test:browser:real
 ```
 
-It proves different loopback ports, targets, profiles, cookies and download
-roots for two employees, then reopens one profile and verifies its persistent
-cookie without exposing the other employee's state.
+It proves no Chrome TCP listener or `DevToolsActivePort`, separate targets,
+profiles, cookies and download roots for two employees, same-user thread target
+and download routing, forced pipe EOF recovery, and reopening one profile with
+its persistent cookie without exposing the other employee's state.

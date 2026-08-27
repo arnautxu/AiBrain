@@ -30,6 +30,7 @@ const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
+const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
 const deployArtifacts = [dockerfile, compose, worker, backup, entrypoint, soffice, runtimeEnv, composeEnv].join("\n");
 
@@ -90,7 +91,11 @@ requireMatch(nginx, /location = \/api\/chat[\s\S]*proxy_buffering off;[\s\S]*X-A
 requireMatch(nginx, /\/documents\$[\s\S]*client_max_body_size 52m;[\s\S]*proxy_request_buffering off;/u, "Nginx does not stream bounded document uploads");
 requireMatch(nginx, /location ~ \^\/api\/auth\/[\s\S]*limit_req zone=aibrain_auth/u, "Nginx does not rate-limit auth mutations");
 forbidMatch(nginx, /proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for/u, "Nginx trusts a client-supplied forwarding chain");
-requireMatch(productionRunbook, /Riesgos P0[\s\S]*namespace de red/u, "production runbook does not disclose the browser network gap");
+requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
+requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");
+forbidMatch(chromeRuntime, /--remote-debugging-(?:port|address)/u, "Chrome runtime reintroduces a network CDP endpoint");
+forbidMatch(chromeRuntime, /DevToolsActivePort/u, "Chrome runtime depends on the filesystem-discoverable DevTools endpoint");
+requireMatch(productionRunbook, /canal CDP heredado[\s\S]*sin socket TCP/u, "production runbook does not document the private CDP process boundary");
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
   requireMatch(soffice, new RegExp(flag, "u"), `LibreOffice wrapper does not require ${flag}`);
@@ -140,7 +145,7 @@ if (failures.length > 0) {
 }
 
 process.stdout.write("Static Docker/Compose boundary validation: PASS\n");
-process.stdout.write("P0 OPEN: browser/CDP still shares the app network namespace with workers\n");
+process.stdout.write("Private inherited Chrome CDP pipe (no TCP endpoint): PASS\n");
 process.stdout.write("Pinned base image, Debian snapshot and Node toolchain: PASS\n");
 if (existsSync("/usr/local/bin/docker") || existsSync("/usr/bin/docker") || existsSync("/opt/homebrew/bin/docker")) {
   try {

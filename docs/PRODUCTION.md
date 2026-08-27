@@ -11,7 +11,10 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 - `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only y `dataRoot` queda oculto. Solo se reexponen el contexto corporativo/documental de lectura, los tres Markdown privados del empleado y sus raíces runtime/workspace/staging/artifacts/audit. Perfiles Chromium, sesiones, backups y carpetas de otros empleados no son legibles; `publish-rw` se reemplaza por un mount vacío read-only.
 - El arranque falla si el host no puede crear ese namespace o si `source-ro` es writable. No hay fallback de worker sin aislamiento.
 - No se monta `docker.sock`, no se usan redes/volúmenes externos y todos sus nombres son obligatoriamente únicos por instalación.
-- Chromium usa CDP en loopback dentro del mismo contenedor y perfiles/descargas por empleado. No se publican puertos CDP o noVNC.
+- Chromium usa un canal CDP heredado por proceso (`--remote-debugging-pipe`),
+  sin socket TCP, discovery URL ni `DevToolsActivePort`; perfiles, targets y
+  descargas se aíslan por empleado y thread. No se publican puertos CDP o
+  viewers internos.
 - LibreOffice se ejecuta en headless/safe mode, con perfil desechable y seguridad de macros `Very High`; uploads OOXML con macros ya son rechazados antes de conversión. Poppler y QPDF forman parte de la imagen.
 - Los logs Docker tienen rotación y buffer no bloqueante. No se debe ejecutar `docker compose config` sin `--quiet` en registros compartidos porque puede materializar variables del `env_file`.
 
@@ -30,7 +33,14 @@ Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador
 
 ## Riesgos P0 aún abiertos
 
-El Chrome actual comparte el namespace de red del proceso Next.js. Aunque CDP solo escucha en loopback y no se publica al host, los App Servers también necesitan red y hoy comparten ese loopback: un worker comprometido podría intentar descubrir el puerto CDP efímero de otro empleado. El sandbox de filesystem no corrige esta frontera. Antes de producción, browser/CDP debe ejecutarse en un namespace o contenedor de red por empleado y aceptar únicamente un canal autenticado desde el servidor, sin `docker.sock` y sin exponer CDP al worker. Hasta validar esa arquitectura, browser/Computer Use y el checkpoint operativo no están completos.
+El canal CDP ya no cruza el namespace de red: existe únicamente entre Next.js
+y el proceso Chrome exacto mediante descriptores heredados. El worker aislado
+no recibe esos descriptores ni puede descubrir un puerto. El riesgo browser que
+queda abierto es el egress: la autorización de un hostname y la conexión deben
+usar la misma resolución fijada para impedir DNS rebinding, y esa frontera debe
+validarse dentro de la imagen QA junto con los bloqueos de red privada,
+loopback, link-local y metadata. Browser/Computer Use no se considera listo
+para producción hasta cerrar y probar ese gate.
 
 La imagen base Node está fijada por versión y digest, pero Chromium, LibreOffice, Poppler y QPDF se resuelven desde APT durante el build. `AIBRAIN_CHROME_EXPECTED_VERSION` detecta cambios y bloquea un arranque que no coincida, pero no vuelve reproducible el build. Falta fijar snapshots/artifacts y checksums de esas herramientas o adoptar una imagen interna inmutable escaneada. Cada build QA debe registrar versiones, digest y SBOM; no debe describirse como reproducible bit a bit.
 
@@ -66,7 +76,7 @@ Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa
 7. backup, restore a volumen separado, reboot recovery, release y rollback medidos;
 8. réplica de backup cifrada fuera del servidor y alertas conectadas;
 9. revisión de capacidad/egress y hardening del host;
-10. separación de red browser/CDP por empleado y build reproducible de la toolchain;
+10. canal CDP heredado sin sockets, egress browser fijado por DNS y build reproducible de la toolchain;
 11. autorización separada para DNS y producción.
 
 La imagen base se fija por digest, Codex/Node packages por versión y APT contra
