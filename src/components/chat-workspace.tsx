@@ -43,6 +43,7 @@ import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
+import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-controls";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 
@@ -210,6 +211,7 @@ function ResultActions({ message, onCreateVersion, onRegenerate, onResultAction 
       <button type="button" title={approved ? "Resultado aprobado" : "Aprobar resultado"} aria-label={approved ? "Resultado aprobado" : "Aprobar resultado"} disabled={busy} aria-pressed={approved} className={`result-action ${approved ? "text-[var(--positive)]" : ""}`} onClick={() => void review()}><CheckCircle size={14} weight={approved ? "fill" : "regular"} /></button>
       <button type="button" title="Copiar resultado" aria-label="Copiar resultado" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
       <button type="button" title="Descargar resultado" aria-label="Descargar resultado" className="result-action" onClick={downloadResult}><DownloadSimple size={14} /></button>
+      <ReadAloudControl text={message.content} />
       <button type="button" title="Regenerar respuesta" aria-label="Regenerar respuesta" className="result-action" onClick={onRegenerate}><ArrowClockwise size={14} /></button>
       <button type="button" title="Crear rama desde aquí" aria-label="Crear rama desde aquí" className="result-action" onClick={onCreateVersion}><GitBranch size={14} /></button>
       {message.diff ? <button type="button" title="Deshacer cambios" aria-label="Deshacer cambios" className="result-action text-[var(--danger)]" onClick={() => void onResultAction("undo")}><ArrowUp size={14} className="rotate-[-90deg]" /></button> : null}
@@ -749,6 +751,13 @@ export function ChatWorkspace({
                   />
                 ) : null}
                 <span className="composer-hint hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
+                <VoiceDictationControl
+                  value={prompt}
+                  disabled={!project || sending || documentUploading}
+                  language={manifest.identity.language === "ca" ? "ca-ES" : manifest.identity.language === "en" ? "en-US" : "es-ES"}
+                  onChange={onPromptChange}
+                  onNotice={onComposerNotice}
+                />
                 {sending ? (
                   <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-8 sm:rounded-full" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
