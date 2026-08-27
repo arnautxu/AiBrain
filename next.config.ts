@@ -5,6 +5,9 @@ const scriptSource = process.env.NODE_ENV === "development"
   : "script-src 'self' 'unsafe-inline'";
 
 const nextConfig: NextConfig = {
+  outputFileTracingIncludes: {
+    "/*": ["./config/installations/vercel-preview.example.json"],
+  },
   // Vercel owns the framework build output. The standalone bundle is only for
   // the persistent Docker/host target where Codex App Server can run.
   ...(process.env.VERCEL === "1" ? {} : { output: "standalone" as const }),
