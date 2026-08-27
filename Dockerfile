@@ -22,7 +22,8 @@ RUN groupadd --system --gid "${AIBRAIN_EGRESS_GID}" aibrain-egress \
   && install -d -m 0755 -o root -g root /usr/local/share/aibrain
 
 COPY --chown=root:root infra/hetzner/egress/gateway.mts /usr/local/share/aibrain/egress-gateway.mts
-RUN chmod 0444 /usr/local/share/aibrain/egress-gateway.mts
+COPY --chown=root:root infra/hetzner/ingress/gateway.mts /usr/local/share/aibrain/ingress-gateway.mts
+RUN chmod 0444 /usr/local/share/aibrain/egress-gateway.mts /usr/local/share/aibrain/ingress-gateway.mts
 
 ARG AIBRAIN_REVISION=development
 LABEL org.opencontainers.image.title="AiBrain Egress Gateway" \
