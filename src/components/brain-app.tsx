@@ -308,7 +308,9 @@ export function BrainApp({
   const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [composerModel, setComposerModel] = useState<string | null>(null);
   const [composerEffort, setComposerEffort] = useState<RuntimeReasoningEffort | null>("low");
-  const [webSearch, setWebSearch] = useState(false);
+  // Keep the hosted Codex web tool available by default, matching Codex's
+  // normal agent behavior. The employee can still opt out per page session.
+  const [webSearch, setWebSearch] = useState(() => manifest.composer.webSearch);
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatInputAttachment[]>([]);
@@ -434,8 +436,10 @@ export function BrainApp({
     void fetch(`/api/runtime/status${query}`, { signal: controller.signal, cache: "no-store" })
       .then((response) => response.ok ? response.json() : null)
       .then((status: unknown) => {
-        if (isRuntimeStatus(status)) setRuntimeStatus(status);
-        else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+        if (isRuntimeStatus(status)) {
+          setRuntimeStatus(status);
+          if (status.mode === "codex" && !status.capabilities.webSearch) setWebSearch(false);
+        } else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
       })
       .catch(() => {
         if (!controller.signal.aborted) {

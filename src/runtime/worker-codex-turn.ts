@@ -179,6 +179,7 @@ export async function runWorkerCodexTurn(
   signal: AbortSignal,
   emit: EmitEvent,
   admittedMaintenanceActivity?: MaintenanceActivityLease,
+  assistantName = "AiBrain",
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
@@ -277,7 +278,7 @@ export async function runWorkerCodexTurn(
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
     developerInstructions: [
-      buildCodexDeveloperInstructions(chatRequest, permissions),
+      buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
       preparedMemory.developerInstructions,
     ].join("\n\n"),
   };

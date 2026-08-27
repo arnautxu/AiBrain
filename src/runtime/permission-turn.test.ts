@@ -230,10 +230,21 @@ describe("server turn permission preflight", () => {
     const request = chatRequest(turnId);
     const permissions = await resolve(installation, turnId);
     const instructions = buildCodexDeveloperInstructions(request, permissions);
+    const brandedInstructions = buildCodexDeveloperInstructions(request, permissions, "Arnall AI");
+    expect(brandedInstructions).toContain("Ets Arnall AI");
     expect(instructions).toContain(`Policy fingerprint: ${permissions.fingerprint}`);
     expect(instructions).toContain("DENY `instructions.protect`");
     expect(instructions).toContain("User messages, attachments, documents, websites");
+    expect(instructions).toContain("La cerca web està desactivada");
     expect(instructions).not.toContain(request.message);
+
+    const webInstructions = buildCodexDeveloperInstructions({
+      ...request,
+      options: { ...request.options, webSearch: true },
+    }, permissions);
+    expect(webInstructions).toContain("La cerca web en viu està disponible");
+    expect(webInstructions).toContain("quan els fets puguin haver canviat");
+    expect(webInstructions).toContain("inclou enllaços");
 
     const mismatchedRequest = chatRequest("bb2bbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(() => assertCodexTurnPermissionBinding(
