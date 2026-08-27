@@ -73,6 +73,8 @@ requireMatch(arnallDeployGateway, /dd if=\/dev\/stdin.*iflag=fullblock/u, "Arnal
 requireMatch(arnallDeployGateway, /docker push "\$egress_tag"[\s\S]{0,1200}remove_new_dangling_images "\$dangling_before"/u, "Arnall deploy gateway does not reclaim only its own new intermediates before health-gated promotion");
 requireMatch(arnallDeployGateway, /bash -n "\$\{release_dir\}\/infra\/hetzner\/app\/deploy-arnall-main\.sh"[\s\S]{0,240}\/usr\/local\/sbin\/aibrain-deploy-gateway/u, "Arnall deploy gateway does not install the validated versioned gateway after promotion");
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
+requireMatch(arnallDeployGateway, /install -m 0400 -o root -g root[\s\S]*chown 10001:10001 "\$temporary"[\s\S]*mv -f/u, "Arnall company context is not atomically assigned to the numeric runtime identity");
+forbidMatch(arnallDeployGateway, /install[^\n]*-(?:o|g) 10001/u, "Arnall deploy gateway asks install(1) to resolve a host account that need not exist");
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful Backend CI");
 requireMatch(arnallDeployWorkflow, /head_sha[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnall deployment does not transmit the immutable tested revision");
 requireMatch(arnallDeployWorkflow, /StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnall deployment does not pin the SSH host identity");
