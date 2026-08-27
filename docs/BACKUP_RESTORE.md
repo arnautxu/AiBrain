@@ -14,6 +14,11 @@ npm run backup:create
 npm run backup:verify -- --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id>
 ```
 
+Una verificación correcta actualiza de forma atómica el receipt no sensible
+`/var/lib/aibrain/data/backups/verification/latest.json`. Contiene ID,
+fingerprint y timestamps, nunca contenido, credenciales ni paths de usuario; el
+evaluator de alertas usa tanto la edad de creación como la de verificación.
+
 Conservar `backupId`, `sourceFingerprint`, número de ficheros y resultado del verify en el registro de release. El volumen de backups debe usar cifrado en reposo y una copia fuera del servidor con acceso separado; este command no sube ni elimina copias.
 
 ## Restaurar sin sobrescribir
