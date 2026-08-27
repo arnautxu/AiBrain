@@ -27,6 +27,7 @@ export const PRIVATE_CDP_METHODS = [
   "Target.createTarget",
   "Target.detachFromTarget",
   "Target.getTargets",
+  "Target.setDiscoverTargets",
 ] as const;
 
 export type PrivateCdpMethod = typeof PRIVATE_CDP_METHODS[number];

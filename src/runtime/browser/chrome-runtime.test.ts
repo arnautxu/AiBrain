@@ -269,6 +269,18 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(connectedResponse).toBe(child.responsePipe);
     await expect(runtime.health()).resolves.toMatchObject({ healthy: true });
 
+    client.emitEvent("Target.targetCreated", {
+      targetInfo: { targetId: "popup-unowned", type: "page", url: "https://popup.example.test", openerId: "external" },
+    });
+    client.emitEvent("Target.targetCreated", {
+      targetInfo: { targetId: "worker-unowned", type: "service_worker", url: "https://popup.example.test/sw.js" },
+    });
+    client.emitEvent("Target.targetCreated", {
+      targetInfo: { targetId: "page-unowned", type: "page", url: "about:blank" },
+    });
+    await eventually(() => ["popup-unowned", "worker-unowned", "page-unowned"].every((targetId) =>
+      client.commands.some((command) => command.method === "Target.closeTarget" && command.params.targetId === targetId)));
+
     const [frameA, frameB] = await Promise.all([
       runtime.captureFrame(THREAD_A),
       runtime.captureFrame(THREAD_B),
