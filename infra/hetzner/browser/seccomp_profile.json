@@ -51,11 +51,15 @@
 	],
 	"syscalls": [
 		{
-			"comment": "Allow create user namespaces",
+			"comment": "Allow Bubblewrap namespace setup; mount capabilities remain confined to the new user namespace",
 			"names": [
 				"clone",
+				"mount",
+				"pivot_root",
 				"setns",
-				"unshare"
+				"unshare",
+				"umount",
+				"umount2"
 			],
 			"action": "SCMP_ACT_ALLOW",
 			"args": [],
