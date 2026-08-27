@@ -20,6 +20,7 @@ async function main() {
   const service = new FileBackupService(
     installation.paths.dataRoot,
     installation.paths.backupsRoot,
+    installation.paths.publishWriteRoot,
     installation.installationId,
   );
   if (operation === "create") {
@@ -29,6 +30,7 @@ async function main() {
       backupId: result.manifest.backupId,
       sourceFingerprint: result.manifest.sourceFingerprint,
       fileCount: result.manifest.files.length,
+      components: result.manifest.components,
       snapshotRoot: result.snapshotRoot,
     }) + "\n");
     return;
@@ -41,20 +43,27 @@ async function main() {
       backupId: result.backupId,
       sourceFingerprint: result.sourceFingerprint,
       fileCount: result.files.length,
+      components: result.components,
       verified: true,
     }) + "\n");
     return;
   }
   if (operation === "restore") {
     const snapshot = argument("--snapshot")!;
-    const destination = argument("--destination")!;
-    const result = await service.restore(snapshot, destination);
+    const dataDestination = argument("--data-destination")!;
+    const publishDestination = argument("--publish-destination")!;
+    const result = await service.restore(snapshot, {
+      dataRoot: dataDestination,
+      publishWriteRoot: publishDestination,
+    });
     process.stdout.write(JSON.stringify({
       operation,
       backupId: result.manifest.backupId,
       sourceFingerprint: result.manifest.sourceFingerprint,
       fileCount: result.manifest.files.length,
-      destinationRoot: result.destinationRoot,
+      components: result.manifest.components,
+      dataDestinationRoot: result.dataDestinationRoot,
+      publishDestinationRoot: result.publishDestinationRoot,
       restored: true,
     }) + "\n");
     return;
