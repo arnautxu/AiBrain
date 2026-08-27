@@ -40,6 +40,7 @@ Ejemplo de error:
 | `GET`, `POST` | `/api/projects/{projectId}/threads` | Lista y creación de threads del proyecto |
 | `GET` | `/api/threads` | Lista/búsqueda global de threads |
 | `GET`, `PATCH` | `/api/threads/{threadId}` | Lectura, renombrado, pin y archivo/restauración |
+| `GET`, `PATCH` | `/api/task-center` | Historial derivado de turns, lectura y preferencias de avisos |
 | `POST` | `/api/chat` | Turn persistente y stream NDJSON |
 | `POST` | `/api/runtime/turns/control` | Steering o stop idempotente |
 | `POST` | `/api/runtime/approvals` | Resolución durable de aprobación |
@@ -401,6 +402,12 @@ type WorkbenchSnapshot = {
 ```
 
 Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia es `filesystem`. Supabase no es un valor válido de persistencia: participa únicamente durante los flujos de identidad anteriores a la emisión de la sesión local.
+
+### 5.5 Centro de tareas
+
+`GET /api/task-center` reconstruye el historial desde los mensajes durables del usuario y devuelve estados `running`, `needs_attention`, `completed` o `failed`, junto con `readTaskIds`, preferencias de avisos y `continuity: "worker_required"`. La última señal impide que la UI prometa ejecución cloud si el servidor o el worker no están activos.
+
+`PATCH /api/task-center` marca ids como leídos o guarda las preferencias `inApp` y `desktop`. El backend persiste ese estado dentro de la raíz del usuario autenticado; no acepta tenant ni user en el body. Los avisos Web requieren además permiso explícito en el navegador y nunca se solicitan al cargar la página. Véase [`TASK_CENTER.md`](TASK_CENTER.md).
 
 ## 6. Mensajes, turns y streaming
 

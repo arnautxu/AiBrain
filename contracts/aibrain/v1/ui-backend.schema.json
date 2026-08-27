@@ -246,6 +246,50 @@
         }
       }
     },
+    "TaskCenterResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks", "readTaskIds", "preferences", "continuity"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "threadId", "projectId", "threadTitle", "projectName", "status", "title", "detail", "createdAt", "updatedAt", "unread"],
+            "properties": {
+              "id": { "type": "string", "pattern": "^[0-9a-f-]{36}\\.[0-9a-f-]{36}$" },
+              "threadId": { "$ref": "#/$defs/Uuid" },
+              "projectId": { "$ref": "#/$defs/Uuid" },
+              "threadTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+              "projectName": { "type": ["string", "null"] },
+              "status": { "enum": ["running", "needs_attention", "completed", "failed"] },
+              "title": { "type": "string", "minLength": 1, "maxLength": 92 },
+              "detail": { "type": "string" },
+              "createdAt": { "$ref": "#/$defs/IsoDate" },
+              "updatedAt": { "$ref": "#/$defs/IsoDate" },
+              "unread": { "type": "boolean" }
+            }
+          }
+        },
+        "readTaskIds": {
+          "type": "array",
+          "maxItems": 5000,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[0-9a-f-]{36}\\.[0-9a-f-]{36}$" }
+        },
+        "preferences": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["inApp", "desktop"],
+          "properties": {
+            "inApp": { "type": "boolean" },
+            "desktop": { "type": "boolean" }
+          }
+        },
+        "continuity": { "const": "worker_required" }
+      }
+    },
     "RuntimeStatus": {
       "type": "object",
       "additionalProperties": false,
@@ -557,6 +601,10 @@
     {
       "schema": "WorkbenchResponse",
       "value": { "workbench": { "persistence": "filesystem", "projects": [], "threads": [] } }
+    },
+    {
+      "schema": "TaskCenterResponse",
+      "value": { "tasks": [], "readTaskIds": [], "preferences": { "inApp": true, "desktop": false }, "continuity": "worker_required" }
     },
     {
       "schema": "RuntimeStatus",

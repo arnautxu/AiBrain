@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
+  Bell,
   Books,
   CaretDown,
   CaretRight,
@@ -49,11 +50,13 @@ type SidebarProps = {
   desktopOpen: boolean;
   busy: boolean;
   threadActivityById: Record<string, ThreadActivity>;
+  taskSummary: { unread: number; running: number; needsAttention: number };
   onCloseMobile: () => void;
   onCloseDesktop: () => void;
   onOpenDesktop: () => void;
   onOpenCommandPalette: () => void;
   onOpenLibrary: () => void;
+  onOpenTaskCenter: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
   onNewThread: () => void;
@@ -181,11 +184,13 @@ export function Sidebar({
   desktopOpen,
   busy,
   threadActivityById,
+  taskSummary,
   onCloseMobile,
   onCloseDesktop,
   onOpenDesktop,
   onOpenCommandPalette,
   onOpenLibrary,
+  onOpenTaskCenter,
   onSelectProject,
   onSelectThread,
   onNewThread,
@@ -284,6 +289,10 @@ export function Sidebar({
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={onNewThread}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
             <button aria-label="Mostrar proyectos" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}>{activeProject ? <FolderOpen size={18} weight="fill" /> : <Folder size={18} />}</button>
+            <button aria-label={taskSummary.unread ? `Tareas, ${taskSummary.unread} sin leer` : "Tareas"} className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+              <Bell size={18} weight={taskSummary.needsAttention ? "fill" : "regular"} />
+              {taskSummary.unread ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 grid min-w-4 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[8px] font-bold leading-4 text-[var(--brain-contrast)]">{taskSummary.unread > 9 ? "9+" : taskSummary.unread}</span> : taskSummary.running ? <span aria-hidden="true" className="absolute right-1 top-1 size-2 rounded-full bg-[var(--text-subtle)]" /> : null}
+            </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-1">
             <button aria-label="Abrir preferencias" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}><GearSix size={18} /></button>
@@ -309,6 +318,12 @@ export function Sidebar({
           <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenLibrary}>
             <Books size={17} />
             <span className="min-w-0 flex-1 text-[13px]">Biblioteca</span>
+          </button>
+          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+            <Bell size={17} weight={taskSummary.needsAttention ? "fill" : "regular"} />
+            <span className="min-w-0 flex-1 text-[13px]">Tareas</span>
+            {taskSummary.running ? <SpinnerGap aria-label={`${taskSummary.running} ${taskSummary.running === 1 ? "tarea en curso" : "tareas en curso"}`} size={13} className="motion-safe:animate-spin" /> : null}
+            {taskSummary.unread ? <span aria-label={`${taskSummary.unread} ${taskSummary.unread === 1 ? "tarea sin leer" : "tareas sin leer"}`} className="grid min-w-5 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[9px] font-bold leading-5 text-[var(--brain-contrast)]">{taskSummary.unread > 99 ? "99+" : taskSummary.unread}</span> : null}
           </button>
         </nav>
 
