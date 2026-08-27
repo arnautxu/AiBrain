@@ -1,0 +1,20 @@
+[Unit]
+Description=Recover interrupted AiBrain backup for %i
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+EnvironmentFile=/etc/aibrain/%i/backup-controller.env
+ExecStart=/usr/bin/node /usr/local/lib/aibrain/orchestrate-backup.mjs recover --installation-id %i --env-file ${AIBRAIN_BACKUP_COMPOSE_ENV} --compose-file ${AIBRAIN_BACKUP_COMPOSE_FILE} --runtime-env ${AIBRAIN_BACKUP_RUNTIME_ENV} --state-file ${AIBRAIN_BACKUP_STATE_FILE} --maintenance-url ${AIBRAIN_BACKUP_MAINTENANCE_URL} --origin ${AIBRAIN_BACKUP_ORIGIN} --drain-timeout-ms ${AIBRAIN_BACKUP_DRAIN_TIMEOUT_MS} --docker-timeout-ms ${AIBRAIN_BACKUP_DOCKER_TIMEOUT_MS} --health-timeout-ms ${AIBRAIN_BACKUP_HEALTH_TIMEOUT_MS}
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/etc/aibrain/%i
+
+[Install]
+WantedBy=multi-user.target
