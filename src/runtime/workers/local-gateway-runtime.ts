@@ -571,6 +571,9 @@ class DeferredAppServerTransport implements AppServerTransport {
   async connect() { return (await this.ready()).connect(); }
   async send(message: AppServerRequest) { return (await this.ready()).send(message); }
   async *events() { for await (const event of (await this.ready()).events()) yield event; }
+  async acknowledge(event: AppServerEvent) {
+    return (await this.ready()).acknowledge?.(event);
+  }
   async health(): Promise<TransportHealth> {
     if (!this.inner) {
       return {
