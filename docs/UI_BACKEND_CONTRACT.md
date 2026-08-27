@@ -30,6 +30,8 @@ Ejemplo de error:
 | `POST` | `/api/auth/password/change-initial` | Cambio inicial mediante challenge en cookie |
 | `POST` | `/api/auth/password/reset/request` | Solicitud de recuperación, respuesta no enumerable |
 | `POST` | `/api/auth/password/recovery` | Completa recuperación y crea sesión local |
+| `GET`, `POST` | `/api/memory` | Lista o crea memoria explícita privada del empleado |
+| `POST` | `/api/memory/{memoryId}/revoke` | Revoca memoria explícita con trazabilidad |
 | `GET` | `/api/workbench` | Snapshot completo de proyectos y threads |
 | `GET`, `POST` | `/api/projects` | Lista/búsqueda y creación |
 | `GET`, `PATCH` | `/api/projects/{projectId}` | Lectura, renombrado, pin y archivo/restauración |
@@ -52,7 +54,7 @@ Ejemplo de error:
 | `POST` | `/api/runtime/browser/viewer/input` | Navegación y input durante takeover humano |
 | `GET` | `/api/health/live` | Liveness del proceso, sin autenticación |
 
-No existe hoy una ruta HTTP pública de branding. Browser/Computer Use sí tiene un contrato de viewer privado y acotado; las capacidades y límites exactos están en la sección 13.
+No existe hoy una ruta HTTP pública de branding. Browser/Computer Use sí tiene un contrato de viewer privado y acotado; las capacidades y límites exactos están en la sección 14.
 
 ## 3. Auth y sesión
 
@@ -113,7 +115,10 @@ Modo demo, disponible solo bajo las condiciones de desarrollo/preview del backen
 
 Su respuesta es `{ "session": AuthSession }`. La UI no debe asumir esta forma en producción.
 
-Errores relevantes: `400` input inválido, `401` credenciales incorrectas, `403` origen o usuario demo no autorizado, `503` proveedor no configurado/no disponible.
+Errores relevantes: `400` input inválido, `401` credenciales incorrectas,
+`403` origen o usuario demo no autorizado, `429` límite temporal con
+`Retry-After`, y `503` proveedor o rate limiter no disponible. Login se limita
+por cliente y email (30/cliente y 10/email cada 15 minutos).
 
 ### 3.3 Cambio inicial y recuperación
 
@@ -134,7 +139,10 @@ La contraseña debe tener 12–128 caracteres, al menos una letra y un número. 
 { "email": "employee@example.com" }
 ```
 
-Éxito no enumerable: `202 { "accepted": true }`, tanto si la cuenta existe como si no. Solo una indisponibilidad conocida del proveedor devuelve `503`.
+Respuesta siempre no enumerable: `202 { "accepted": true }`, tanto si la
+cuenta existe como si no, si el proveedor está inaccesible o si se alcanzó el
+límite (10/cliente y 3/email por hora). No incluye `Retry-After` ni revela qué
+componente rechazó la operación.
 
 `POST /api/auth/password/recovery`
 
@@ -148,7 +156,10 @@ Debe incluir exactamente una prueba, `code` o `tokenHash`, además de las contra
 }
 ```
 
-Éxito: `{ "authenticated": true }`; `400` contrato/password inválido, `401` prueba inválida/caducada, `503` proveedor inaccesible.
+Éxito: `{ "authenticated": true }`; `400` contrato/password inválido, `401`
+prueba inválida/caducada, `429` límite por cliente+prueba con `Retry-After`, y
+`503` proveedor o limiter inaccesible. Cambio inicial y recovery se limitan
+antes de consumir el challenge/code/token.
 
 ### 3.4 Lectura y cierre
 
@@ -767,6 +778,12 @@ Respuesta `201`:
 
 `relativePath` es metadata opaca; la UI no debe enviarla de vuelta como authority. `409` para `uploadId` reutilizado con otro contenido; `413` por tamaño; `400` validación de seguridad; `503` toolchain/store no disponible.
 
+El backend consume el multipart por streaming y escribe un temporal privado;
+no materializa el request ni el fichero completo en RAM. Para OOXML compara
+headers central/local, rangos, CRC, tamaño y ratio reales mientras descomprime.
+El staging publica sin overwrite y un retry solo recupera el orphan exacto si
+hash y tamaño coinciden.
+
 ### 11.2 Leer preview
 
 Usar exactamente cada `preview.files[].url`. La respuesta es el fichero, con MIME derivado del nombre, `Content-Disposition: inline`, `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store` y CSP sandbox. La ruta verifica sesión, usuario, thread, upload y whitelist de fichero; otro usuario obtiene `404`.
@@ -898,13 +915,79 @@ Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `4
 
 No hay hoy endpoints públicos para listar operaciones ni descargar/restaurar la versión anterior. Esas funciones existen en el publisher server-side, no en el contrato UI.
 
-## 13. Browser y Computer Use
+## 13. Memoria explícita
+
+La memoria V1 no aprende automáticamente. Solo una acción explícita del
+empleado crea o revoca un registro. El backend deriva instalación, actor y
+sujeto de la sesión local; la UI nunca envía `userId`, paths ni timestamps de
+captura.
+
+`GET /api/memory?status=active|revoked|all&kind=recollection|decision&limit=1..100`
+devuelve `200` y `Cache-Control: private, no-store`:
+
+```ts
+type ExplicitMemory = {
+  schemaVersion: 1;
+  memoryId: string;
+  installationId: string;
+  subjectUserId: string;
+  kind: "recollection" | "decision";
+  content: string;
+  provenance: {
+    sourceType: "manual" | "thread" | "project" | "document" | "decision";
+    sourceId: string;
+    sourceExcerpt: string;
+    capturedAt: string;
+  };
+  explicit: true;
+  createdBy: string;
+  createdAt: string;
+  status: "active" | "revoked";
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  idempotencyKey: string;
+};
+```
+
+`POST /api/memory` acepta un body estricto:
+
+```json
+{
+  "explicit": true,
+  "kind": "decision",
+  "content": "Publicar únicamente tras confirmación explícita.",
+  "sourceExcerpt": "El empleado pidió recordar esta regla.",
+  "clientRequestId": "0198b9f0-6631-7000-8000-000000000711"
+}
+```
+
+Devuelve `201 { "memory": ExplicitMemory, "created": true }`. Repetir el mismo
+UUID y contenido devuelve `200` con `created: false`; reutilizarlo para otra
+memoria devuelve `409`.
+
+`POST /api/memory/{memoryId}/revoke`:
+
+```json
+{
+  "explicit": true,
+  "reason": "La decisión fue sustituida.",
+  "clientRequestId": "0198b9f0-6631-7000-8000-000000000712"
+}
+```
+
+La revocación es durable e idempotente. Errores: `400` contrato/consulta,
+`401` sesión, `404` memoria ajena o inexistente, `409` clave idempotente en
+conflicto y `503` store corrupto/no disponible. Cada turn registra el
+fingerprint e IDs de la memoria inyectada, nunca su contenido en auditoría.
+
+## 14. Browser y Computer Use
 
 El contrato público actual es un viewer browser propio: Chrome headless aislado por usuario, CDP privado en loopback, frames PNG y comandos de navegación/teclado/ratón. No es una conexión del navegador cliente a CDP y no es noVNC.
 
 Todas las rutas requieren una sesión `local`. Tenant, user y sesión opaca se derivan server-side; ningún body acepta `userId`, `installationId`, perfil o path.
 
-### 13.1 Estado y lifecycle
+### 14.1 Estado y lifecycle
 
 `GET /api/runtime/browser`
 
@@ -989,7 +1072,7 @@ La respuesta es el mismo `BrowserStatus` actualizado. Flujo de UI:
 
 `GET` también recupera un takeover con heartbeat caducado antes de calcular health. Tras un restart del proceso, un `start` sobre estado persistido no detenido inicia recuperación y cerca la sesión anterior.
 
-### 13.2 Token privado del viewer
+### 14.2 Token privado del viewer
 
 `POST /api/runtime/browser/token`
 
@@ -997,6 +1080,7 @@ Body estricto:
 
 ```json
 {
+  "threadId": "0198b9f0-6631-7000-8000-000000000302",
   "capabilities": ["view", "control"],
   "ttlMs": 30000
 }
@@ -1013,11 +1097,17 @@ Respuesta:
 }
 ```
 
-El token HMAC está ligado a instalación, user, browser session y hash de la sesión local opaca. Un logout, cambio de sesión local, nueva browser session o expiración lo invalida. En el contrato HTTP actual `view` protege frames y `control` protege input; `heartbeat` y `takeover` están reservadas en el token, pero lifecycle sigue usando la cookie y `/api/runtime/browser`.
+El token HMAC está ligado a instalación, user, thread, browser session y hash
+de la sesión local opaca. El backend comprueba que el thread pertenece a la
+sesión antes de emitirlo. Un logout, cambio de sesión local, cambio de thread,
+nueva browser session o expiración lo invalida. En el contrato HTTP actual
+`view` protege frames y `control` protege input; `heartbeat` y `takeover` están
+reservadas en el token, pero lifecycle sigue usando la cookie y
+`/api/runtime/browser`.
 
-### 13.3 Frames
+### 14.3 Frames
 
-`GET /api/runtime/browser/viewer/frame`
+`GET /api/runtime/browser/viewer/frame?threadId={uuid}`
 
 Cabecera requerida:
 
@@ -1037,7 +1127,7 @@ Content-Security-Policy: default-src 'none'; sandbox
 
 La captura está permitida en `ready` y `human-control`. La UI puede hacer polling acotado; no existe stream de vídeo o WebSocket de frames.
 
-### 13.4 Navegación y Computer Use humano
+### 14.4 Navegación y Computer Use humano
 
 `POST /api/runtime/browser/viewer/input`, con `Authorization: Bearer <token-con-control>`. Solo se acepta durante takeover humano activo.
 
@@ -1045,6 +1135,7 @@ Navegación:
 
 ```json
 {
+  "threadId": "0198b9f0-6631-7000-8000-000000000302",
   "action": "navigate",
   "url": "https://example.com/path"
 }
@@ -1056,6 +1147,7 @@ Ratón:
 
 ```ts
 {
+  threadId: string;
   action: "input";
   command: {
     kind: "mouse";
@@ -1088,7 +1180,7 @@ Teclado:
 
 Éxito: `{ "ok": true }`. Cada objeto es estricto; campos adicionales se rechazan.
 
-### 13.5 Errores y límites actuales
+### 14.5 Errores y límites actuales
 
 Los errores browser añaden metadatos:
 
@@ -1107,11 +1199,16 @@ Los errores browser añaden metadatos:
 - `503`: Chrome/CDP/store no disponible, normalmente `retryable: true`;
 - `400`: body, URL o input inválido, sin ejecutar el comando.
 
-No existen hoy endpoints para listar pestañas, leer URL/título actual, abrir/cerrar tabs, descargar ficheros, entregar noVNC o exponer CDP. `state.downloads` ya está tipado y aislado, pero la UI debe tratarlo como estado de solo lectura hasta que exista una API de descargas explícita.
+Cada thread obtiene un target CDP propio y su token no puede controlar otro.
+Las descargas completadas se enrutan desde una cuarentena GUID al directorio
+privado del thread; `state.downloads` sigue siendo metadata de solo lectura
+para la UI hasta que exista una API de descarga explícita. No existen endpoints
+que expongan CDP, discovery, noVNC ni métodos arbitrarios; Chrome usa un pipe
+heredado sin listener TCP.
 
-## 14. Estados degradados y errores recuperables
+## 15. Estados degradados y errores recuperables
 
-### 14.1 Mapa de respuesta UI
+### 15.1 Mapa de respuesta UI
 
 | Señal | Interpretación | Acción UI segura |
 | --- | --- | --- |
@@ -1129,7 +1226,7 @@ No existen hoy endpoints para listar pestañas, leer URL/título actual, abrir/c
 | `RuntimeStatus.ready=false` | Worker no listo aunque HTTP responda `200` | Deshabilitar envío y mostrar estado de conexión |
 | publicación `status="conflict"` | Original cambió desde freeze | Exigir nueva revisión/freeze; no confirmar de nuevo con IDs distintos a ciegas |
 
-### 14.2 Liveness
+### 15.2 Liveness
 
 `GET /api/health/live` no prueba filesystem, Codex, Supabase ni document toolchain. Solo confirma que el proceso HTTP está vivo:
 
@@ -1144,7 +1241,7 @@ No existen hoy endpoints para listar pestañas, leer URL/título actual, abrir/c
 
 Para readiness de usuario/proyecto, usar `/api/runtime/status`.
 
-## 15. Reglas de integración para la rama UI
+## 16. Reglas de integración para la rama UI
 
 1. Obtener la sesión con `/api/auth/session`; no leer cookies ni tokens directamente.
 2. Consumir branding mediante los props server-side existentes hasta que haya un endpoint acordado.
@@ -1157,9 +1254,10 @@ Para readiness de usuario/proyecto, usar `/api/runtime/status`.
 9. Mantener `confirmationToken` de publicación fuera de logs/URLs y usar el mismo `clientRequestId` al reintentar la misma decisión.
 10. Implementar browser solo con `/api/runtime/browser*`: takeover antes de input, heartbeat mientras controla el humano y tokens cortos fuera de logs/URLs.
 
-## 16. Fuentes de implementación
+## 17. Fuentes de implementación
 
 - Auth: [`src/auth/types.ts`](../src/auth/types.ts), [`src/auth/session.ts`](../src/auth/session.ts), [`src/auth/auth-service.ts`](../src/auth/auth-service.ts), [`src/app/api/auth`](../src/app/api/auth).
+- Memoria explícita: [`src/memory`](../src/memory), [`src/app/api/memory`](../src/app/api/memory), [`tests/integration/memory-routes.integration.test.ts`](../tests/integration/memory-routes.integration.test.ts).
 - Instalación: [`src/config/installation-schema.ts`](../src/config/installation-schema.ts), [`src/config/installation-branding.ts`](../src/config/installation-branding.ts).
 - Workbench: [`src/workbench/types.ts`](../src/workbench/types.ts), [`src/app/api/projects`](../src/app/api/projects), [`src/app/api/threads`](../src/app/api/threads).
 - Chat/runtime: [`src/lib/chat-contract.ts`](../src/lib/chat-contract.ts), [`src/lib/runtime-status.ts`](../src/lib/runtime-status.ts), [`src/app/api/chat/route.ts`](../src/app/api/chat/route.ts), [`src/app/api/runtime`](../src/app/api/runtime).
