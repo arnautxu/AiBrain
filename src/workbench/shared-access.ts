@@ -33,13 +33,19 @@ function memberRole(project: WorkbenchProject, email: string): SharedAccessRole 
 }
 
 export async function resolveProjectAccess(session: AuthSession, projectId: string) {
-  const { installation, users: provisioned } = await users(session);
+  const installation = await installationForSession(session);
   const store = FileWorkbenchStore.fromInstallation(installation);
+  const own = await store.load(session.user.id);
+  const ownProject = own.projects.find((item) => item.id === projectId);
+  if (ownProject) {
+    return { store, ownerUserId: session.user.id, role: "owner" as const, project: ownProject };
+  }
+  const { users: provisioned } = await users(session);
   for (const user of provisioned) {
+    if (user.userId === session.user.id) continue;
     const snapshot = await store.load(user.userId);
     const project = snapshot.projects.find((item) => item.id === projectId);
     if (!project) continue;
-    if (user.userId === session.user.id) return { store, ownerUserId: user.userId, role: "owner" as const, project };
     const role = memberRole(project, session.user.email);
     if (role) return { store, ownerUserId: user.userId, role, project };
   }
@@ -47,15 +53,24 @@ export async function resolveProjectAccess(session: AuthSession, projectId: stri
 }
 
 export async function resolveThreadAccess(session: AuthSession, threadId: string) {
-  const { installation, users: provisioned } = await users(session);
+  const installation = await installationForSession(session);
   const store = FileWorkbenchStore.fromInstallation(installation);
+  const own = await store.load(session.user.id);
+  const ownThread = own.threads.find((item) => item.id === threadId);
+  if (ownThread) {
+    const ownProject = own.projects.find((item) => item.id === ownThread.projectId);
+    if (ownProject) {
+      return { store, ownerUserId: session.user.id, role: "owner" as const, project: ownProject, thread: ownThread };
+    }
+  }
+  const { users: provisioned } = await users(session);
   for (const user of provisioned) {
+    if (user.userId === session.user.id) continue;
     const snapshot = await store.load(user.userId);
     const thread = snapshot.threads.find((item) => item.id === threadId);
     if (!thread) continue;
     const project = snapshot.projects.find((item) => item.id === thread.projectId);
     if (!project) continue;
-    if (user.userId === session.user.id) return { store, ownerUserId: user.userId, role: "owner" as const, project, thread };
     const role = memberRole(project, session.user.email);
     if (role) return { store, ownerUserId: user.userId, role, project, thread };
   }
