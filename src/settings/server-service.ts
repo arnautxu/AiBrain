@@ -3,6 +3,8 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { AuthSession } from "@/auth/types";
+import { isWorkspaceAdmin } from "@/admin/server-service";
+import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { loadInstallationConfig } from "@/config/installation";
 import { MarkdownPermissionProvider } from "@/permissions";
 import type { PermissionAction } from "@/permissions/types";
@@ -20,13 +22,6 @@ import { FileSettingsStore } from "@/settings/preferences-store";
 
 const ACTIONS: PermissionAction[] = ["consult", "respond", "execute", "publish"];
 
-function isSettingsAdmin(userId: string) {
-  return (process.env.AIBRAIN_USAGE_ADMIN_USER_IDS ?? "").split(",")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .includes(userId);
-}
-
 async function context(session: AuthSession) {
   const installation = await loadInstallationConfig();
   if (installation.installationId !== session.tenant.id) {
@@ -35,13 +30,14 @@ async function context(session: AuthSession) {
   return {
     installation,
     store: new FileSettingsStore(installation.paths.dataRoot, installation.paths.usersRoot),
-    isAdmin: isSettingsAdmin(session.user.id),
+    isAdmin: await isWorkspaceAdmin(session),
   };
 }
 
 async function permissionsForSession(session: AuthSession): Promise<PermissionSummary[]> {
   const installation = await loadInstallationConfig();
   try {
+    const workspacePolicy = await workspacePolicyForIdentity(installation.installationId, session.user.id);
     const provider = new MarkdownPermissionProvider({
       installations: [{
         installationId: installation.installationId,
@@ -69,6 +65,13 @@ async function permissionsForSession(session: AuthSession): Promise<PermissionSu
         effect: rule.effect,
         instruction: rule.instruction,
       }));
+      if (!workspacePolicy.policy.capabilities[action]) {
+        rules.push({
+          ruleId: "workspace.group-policy",
+          effect: "deny",
+          instruction: "Bloqueado por la política efectiva del rol o de un grupo del workspace.",
+        });
+      }
       return {
         action,
         effect: rules.some((rule) => rule.effect === "deny")
@@ -113,11 +116,15 @@ function controlledApp(
 
 async function appCatalogue(session: AuthSession, isAdmin: boolean) {
   const { installation, store } = await context(session);
-  const [user, company] = await Promise.all([store.readUser(session.user.id), store.readInstallation()]);
+  const [user, company, workspacePolicy] = await Promise.all([
+    store.readUser(session.user.id),
+    store.readInstallation(),
+    workspacePolicyForIdentity(session.tenant.id, session.user.id),
+  ]);
   const runtime = readRuntimeConfig(installation.installationId);
   const runtimeConfigured = runtime.mode === "codex";
   const switches = Object.fromEntries(CONTROLLABLE_APP_IDS.map((id) => [id, {
-    installation: company.apps[id],
+    installation: company.apps[id] && workspacePolicy.policy.apps[id],
     user: user.apps[id],
   }])) as Record<ControllableAppId, { installation: boolean; user: boolean }>;
 
@@ -210,13 +217,14 @@ async function appCatalogue(session: AuthSession, isAdmin: boolean) {
 
 export async function featurePolicyForUser(session: AuthSession) {
   const { store } = await context(session);
-  const [user, installation] = await Promise.all([
+  const [user, installation, workspacePolicy] = await Promise.all([
     store.readUser(session.user.id),
     store.readInstallation(),
+    workspacePolicyForIdentity(session.tenant.id, session.user.id),
   ]);
   return Object.fromEntries(CONTROLLABLE_APP_IDS.map((id) => [
     id,
-    user.apps[id] && installation.apps[id],
+    user.apps[id] && installation.apps[id] && workspacePolicy.policy.apps[id],
   ])) as Record<ControllableAppId, boolean>;
 }
 
@@ -226,10 +234,14 @@ export async function featurePolicyForIdentity(installationId: string, userId: s
     throw new Error("Authenticated installation does not match feature policy storage.");
   }
   const store = new FileSettingsStore(installation.paths.dataRoot, installation.paths.usersRoot);
-  const [user, company] = await Promise.all([store.readUser(userId), store.readInstallation()]);
+  const [user, company, workspacePolicy] = await Promise.all([
+    store.readUser(userId),
+    store.readInstallation(),
+    workspacePolicyForIdentity(installationId, userId),
+  ]);
   return Object.fromEntries(CONTROLLABLE_APP_IDS.map((id) => [
     id,
-    user.apps[id] && company.apps[id],
+    user.apps[id] && company.apps[id] && workspacePolicy.policy.apps[id],
   ])) as Record<ControllableAppId, boolean>;
 }
 
