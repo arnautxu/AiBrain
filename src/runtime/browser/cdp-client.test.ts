@@ -1,80 +1,139 @@
-import { once } from "node:events";
-import { afterEach, describe, expect, it } from "vitest";
-import { WebSocketServer } from "ws";
+import { PassThrough } from "node:stream";
+import { describe, expect, it } from "vitest";
 import {
-  CdpClientError,
-  normalizePrivateDevToolsWebSocket,
   PrivateCdpClient,
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
 
-const servers: WebSocketServer[] = [];
+type PipeHarness = {
+  request: PassThrough;
+  response: PassThrough;
+  client: PrivateCdpClient;
+  commands: Array<Record<string, unknown>>;
+};
 
-async function server(
-  handler: (message: Record<string, unknown>, send: (value: unknown) => void) => void,
-) {
-  const instance = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-  servers.push(instance);
-  await once(instance, "listening");
-  instance.on("connection", (socket) => {
-    socket.on("message", (raw) => {
-      const message = JSON.parse(raw.toString("utf8")) as Record<string, unknown>;
-      handler(message, (value) => socket.send(JSON.stringify(value)));
-    });
+function pipeHarness(options: Parameters<typeof PrivateCdpClient.connect>[2] = {}): PipeHarness {
+  const request = new PassThrough();
+  const response = new PassThrough();
+  const commands: Array<Record<string, unknown>> = [];
+  let buffered = Buffer.alloc(0);
+  request.on("data", (chunk: Buffer) => {
+    buffered = Buffer.concat([buffered, chunk]);
+    for (;;) {
+      const separator = buffered.indexOf(0);
+      if (separator === -1) break;
+      commands.push(JSON.parse(buffered.subarray(0, separator).toString("utf8")) as Record<string, unknown>);
+      buffered = buffered.subarray(separator + 1);
+    }
   });
-  const address = instance.address();
-  if (!address || typeof address === "string") throw new Error("unexpected WebSocket address");
-  return `ws://127.0.0.1:${address.port}/devtools/page/synthetic-page`;
+  return {
+    request,
+    response,
+    client: PrivateCdpClient.connect(request, response, options),
+    commands,
+  };
 }
 
-afterEach(async () => {
-  await Promise.all(servers.splice(0).map((instance) => new Promise<void>((resolve) => {
-    for (const client of instance.clients) client.terminate();
-    instance.close(() => resolve());
-  })));
-});
+function frame(value: unknown) {
+  return Buffer.from(`${JSON.stringify(value)}\u0000`, "utf8");
+}
 
-describe("PrivateCdpClient", () => {
-  it("sends allowlisted commands and delivers bounded private events", async () => {
-    const endpoint = await server((message, send) => {
-      send({ id: message.id, result: { product: "Chrome/140.0.0.0" } });
-      send({ method: "Page.loadEventFired", params: { timestamp: 123 } });
-    });
-    const client = await PrivateCdpClient.connect(endpoint);
-    const event = client.waitForEvent<{ timestamp: number }>("Page.loadEventFired");
-    await expect(client.send<{ product: string }>("Browser.getVersion"))
-      .resolves.toEqual({ product: "Chrome/140.0.0.0" });
-    await expect(client.send("Fetch.enable", {
-      patterns: [{ urlPattern: "https://*", requestStage: "Request" }],
-    })).resolves.toEqual({ product: "Chrome/140.0.0.0" });
-    await expect(event).resolves.toEqual({ timestamp: 123 });
-    await client.close();
+async function eventually(check: () => boolean, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition did not become true");
+}
+
+describe("PrivateCdpClient pipe transport", () => {
+  it("frames fragmented responses and routes concurrent flat sessions without crossing events", async () => {
+    const harness = pipeHarness();
+    const eventA: unknown[] = [];
+    const eventB: unknown[] = [];
+    const rootEvents: unknown[] = [];
+    harness.client.on("Fetch.requestPaused", (value) => eventA.push(value), { sessionId: "session-a" });
+    harness.client.on("Fetch.requestPaused", (value) => eventB.push(value), { sessionId: "session-b" });
+    harness.client.on("Target.attachedToTarget", (value) => rootEvents.push(value));
+
+    const commandA = harness.client.send<{ value: string }>("Page.enable", {}, { sessionId: "session-a" });
+    const commandB = harness.client.send<{ value: string }>("Network.enable", {}, { sessionId: "session-b" });
+    await eventually(() => harness.commands.length === 2);
+    expect(harness.commands).toEqual([
+      expect.objectContaining({ id: 1, method: "Page.enable", sessionId: "session-a" }),
+      expect.objectContaining({ id: 2, method: "Network.enable", sessionId: "session-b" }),
+    ]);
+
+    const combined = Buffer.concat([
+      frame({ id: 2, sessionId: "session-b", result: { value: "B" } }),
+      frame({ method: "Fetch.requestPaused", sessionId: "session-a", params: { requestId: "a" } }),
+      frame({ method: "Fetch.requestPaused", sessionId: "session-b", params: { requestId: "b" } }),
+      frame({ method: "Target.attachedToTarget", params: { sessionId: "session-a" } }),
+      frame({ id: 1, sessionId: "session-a", result: { value: "A" } }),
+    ]);
+    harness.response.write(combined.subarray(0, 7));
+    harness.response.write(combined.subarray(7, combined.length - 3));
+    harness.response.write(combined.subarray(combined.length - 3));
+
+    await expect(commandA).resolves.toEqual({ value: "A" });
+    await expect(commandB).resolves.toEqual({ value: "B" });
+    expect(eventA).toEqual([{ requestId: "a" }]);
+    expect(eventB).toEqual([{ requestId: "b" }]);
+    expect(rootEvents).toEqual([{ sessionId: "session-a" }]);
+    await harness.client.close();
   });
 
-  it("rejects non-loopback endpoints, non-allowlisted methods and saturated commands", async () => {
-    await expect(PrivateCdpClient.connect("ws://192.0.2.1:9222/devtools/page/x"))
-      .rejects.toMatchObject({ code: "CDP_ENDPOINT_NOT_PRIVATE" });
-    const endpoint = await server(() => undefined);
-    const client = await PrivateCdpClient.connect(endpoint, {
-      commandTimeoutMs: 50,
+  it("enforces allowlists, command size, pending backpressure and timeouts", async () => {
+    const harness = pipeHarness({
+      commandTimeoutMs: 30,
       maxPendingCommands: 1,
+      maxCommandBytes: 128,
     });
-    const pending = client.send("Browser.getVersion");
-    await expect(client.send("Page.enable")).rejects.toMatchObject({ code: "CDP_BACKPRESSURE" });
-    await expect(client.send("Runtime.evaluate" as PrivateCdpMethod))
+    const pending = harness.client.send("Browser.getVersion");
+    await expect(harness.client.send("Page.enable"))
+      .rejects.toMatchObject({ code: "CDP_BACKPRESSURE" });
+    await expect(harness.client.send("Runtime.evaluate" as PrivateCdpMethod))
       .rejects.toMatchObject({ code: "CDP_METHOD_REJECTED" });
     await expect(pending).rejects.toMatchObject({ code: "CDP_COMMAND_TIMEOUT" });
-    await client.close();
+    await expect(harness.client.send("Page.navigate", { url: "https://example.test/".repeat(20) }))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_TOO_LARGE" });
+    await harness.client.close();
   });
 
-  it("normalizes Chrome-reported localhost endpoints to a literal loopback binding", () => {
-    expect(normalizePrivateDevToolsWebSocket(
-      "ws://localhost:49152/devtools/browser/abc-123",
-      49_152,
-    )).toBe("ws://127.0.0.1:49152/devtools/browser/abc-123");
-    expect(() => normalizePrivateDevToolsWebSocket(
-      "ws://example.com:49152/devtools/browser/abc-123",
-      49_152,
-    )).toThrow(CdpClientError);
+  it("fails closed on mismatched sessions, malformed UTF-8 JSON and oversized frames", async () => {
+    const mismatched = pipeHarness();
+    const pending = mismatched.client.send("Page.enable", {}, { sessionId: "session-a" });
+    await eventually(() => mismatched.commands.length === 1);
+    mismatched.response.write(frame({ id: 1, sessionId: "session-b", result: {} }));
+    await expect(pending).rejects.toMatchObject({ code: "CDP_PROTOCOL_ERROR" });
+    expect(mismatched.client.isOpen).toBe(false);
+
+    const malformed = pipeHarness();
+    const malformedPending = malformed.client.send("Browser.getVersion");
+    malformed.response.write(Buffer.from([0xc3, 0x28, 0x00]));
+    await expect(malformedPending).rejects.toMatchObject({ code: "CDP_PROTOCOL_ERROR" });
+    expect(malformed.client.isOpen).toBe(false);
+
+    const oversized = pipeHarness({ maxFrameBytes: 32 });
+    const oversizedPending = oversized.client.send("Browser.getVersion");
+    oversized.response.write(Buffer.alloc(33, 0x61));
+    await expect(oversizedPending).rejects.toMatchObject({ code: "CDP_PROTOCOL_ERROR" });
+    expect(oversized.client.isOpen).toBe(false);
+  });
+
+  it("rejects every pending command on EOF and incomplete terminal frames", async () => {
+    const eof = pipeHarness();
+    const first = eof.client.send("Browser.getVersion");
+    const second = eof.client.send("Target.getTargets");
+    eof.response.end();
+    await expect(first).rejects.toMatchObject({ code: "CDP_PIPE_EOF" });
+    await expect(second).rejects.toMatchObject({ code: "CDP_PIPE_EOF" });
+
+    const incomplete = pipeHarness();
+    const pending = incomplete.client.send("Browser.getVersion");
+    incomplete.response.write("{\"id\":1");
+    incomplete.response.end();
+    await expect(pending).rejects.toMatchObject({ code: "CDP_PROTOCOL_ERROR" });
   });
 });

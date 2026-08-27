@@ -104,9 +104,9 @@ export type BrowserInputCommand =
 
 /** Optional interactive surface implemented by the concrete private CDP adapter. */
 export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime {
-  captureFrame(): Promise<BrowserFrame>;
-  navigate(url: string): Promise<void>;
-  dispatchInput(command: BrowserInputCommand): Promise<void>;
+  captureFrame(threadId: string): Promise<BrowserFrame>;
+  navigate(threadId: string, url: string): Promise<void>;
+  dispatchInput(threadId: string, command: BrowserInputCommand): Promise<void>;
 }
 
 export interface BrowserRuntimeFactory {
@@ -124,11 +124,12 @@ export type BrowserRuntimeHandle = Readonly<{
 export type BrowserGatewayCapability = "view" | "control" | "heartbeat" | "takeover";
 
 export type BrowserGatewayClaims = Readonly<{
-  version: 1;
+  version: 2;
   audience: "aibrain-browser-gateway";
   tokenId: string;
   installationId: string;
   userId: string;
+  threadId: string;
   browserSessionId: string;
   authSessionHash: string;
   capabilities: BrowserGatewayCapability[];

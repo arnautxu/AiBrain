@@ -3,6 +3,8 @@ import type { AuthSession } from "@/auth/types";
 
 const USER_A = "0198b9f0-6631-7000-8000-000000000601";
 const USER_B = "0198b9f0-6631-7000-8000-000000000602";
+const THREAD_A = "0198b9f0-6631-7000-8000-000000000611";
+const THREAD_B = "0198b9f0-6631-7000-8000-000000000612";
 const auth = vi.hoisted(() => ({
   value: null as { session: AuthSession; authSessionId: string } | null,
 }));
@@ -16,6 +18,17 @@ const browser = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/request-security", () => ({ isSameOriginMutation: vi.fn(async () => true) }));
+vi.mock("@/workbench/store", async () => {
+  const { WorkbenchNotFoundError } = await import("@/workbench/errors");
+  return {
+    getThreadRuntimeContext: vi.fn(async (session: AuthSession, threadId: string) => {
+      if (session.user.id !== USER_A || threadId !== THREAD_A) {
+        throw new WorkbenchNotFoundError("Thread not found.");
+      }
+      return { threadId, projectId: "0198b9f0-6631-7000-8000-000000000613" };
+    }),
+  };
+});
 vi.mock("@/runtime/browser/route-security", () => ({
   getLocalBrowserRequestAuth: vi.fn(async () => auth.value ?? { error: "unauthenticated" }),
   readBrowserBearerToken: vi.fn((request: Request) => {
@@ -99,6 +112,7 @@ describe("authenticated browser runtime routes", () => {
   it("binds viewer tokens to the opaque local auth session", async () => {
     const route = await import("@/app/api/runtime/browser/token/route");
     const response = await route.POST(request("/api/runtime/browser/token", {
+      threadId: THREAD_A,
       capabilities: ["view", "control"],
       ttlMs: 30_000,
     }));
@@ -107,6 +121,7 @@ describe("authenticated browser runtime routes", () => {
       installationId: "browser-lab",
       userId: USER_A,
       authSessionId: "opaque-local-auth-session-00000000000000000001",
+      threadId: THREAD_A,
       capabilities: ["control", "view"],
       ttlMs: 30_000,
     });
@@ -115,10 +130,10 @@ describe("authenticated browser runtime routes", () => {
   it("requires the private bearer binding for frames and human input", async () => {
     const frameRoute = await import("@/app/api/runtime/browser/viewer/frame/route");
     const inputRoute = await import("@/app/api/runtime/browser/viewer/input/route");
-    expect((await frameRoute.GET(request("/api/runtime/browser/viewer/frame"))).status).toBe(401);
+    expect((await frameRoute.GET(request(`/api/runtime/browser/viewer/frame?threadId=${THREAD_A}`))).status).toBe(401);
 
     const frame = await frameRoute.GET(request(
-      "/api/runtime/browser/viewer/frame",
+      `/api/runtime/browser/viewer/frame?threadId=${THREAD_A}`,
       undefined,
       "payload.signature",
     ));
@@ -128,19 +143,28 @@ describe("authenticated browser runtime routes", () => {
     expect(browser.frame).toHaveBeenCalledWith(expect.objectContaining({
       installationId: "browser-lab",
       userId: USER_A,
+      threadId: THREAD_A,
       token: "payload.signature",
     }));
 
     const input = await inputRoute.POST(request(
       "/api/runtime/browser/viewer/input",
-      { action: "navigate", url: "https://example.test/path" },
+      { threadId: THREAD_A, action: "navigate", url: "https://example.test/path" },
       "payload.signature",
     ));
     expect(input.status).toBe(200);
     expect(browser.command).toHaveBeenCalledWith(expect.objectContaining({
       userId: USER_A,
       token: "payload.signature",
-      command: { action: "navigate", url: "https://example.test/path" },
+      threadId: THREAD_A,
+      command: { threadId: THREAD_A, action: "navigate", url: "https://example.test/path" },
     }));
+
+    const foreign = await inputRoute.POST(request(
+      "/api/runtime/browser/viewer/input",
+      { threadId: THREAD_B, action: "navigate", url: "https://example.test" },
+      "payload.signature",
+    ));
+    expect(foreign.status).toBe(404);
   });
 });

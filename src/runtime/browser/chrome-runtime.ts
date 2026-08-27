@@ -1,6 +1,7 @@
 import { constants } from "node:fs";
-import { access, chmod, lstat, mkdir, realpath, unlink } from "node:fs/promises";
+import { access, chmod, link, lstat, mkdir, readdir, realpath, unlink } from "node:fs/promises";
 import { spawn, type SpawnOptions } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import path from "node:path";
 import type {
   BrowserFrame,
@@ -11,20 +12,18 @@ import type {
   InteractiveManagedBrowserRuntime,
 } from "@/runtime/browser/types";
 import {
-  normalizePrivateDevToolsWebSocket,
   PrivateCdpClient,
+  type CdpSessionScope,
   type PrivateCdpClientOptions,
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
-import { readRegularFileWithin, UnsafeFilePathError } from "@/security/safe-file";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/u;
-const DEVTOOLS_PATH_PATTERN = /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u;
-const PAGE_PATH_PATTERN = /^\/devtools\/page\/[A-Za-z0-9._-]{1,256}$/u;
-const MAX_HTTP_JSON_BYTES = 2 * 1024 * 1024;
-const MAX_SCREENSHOT_BYTES = 25 * 1024 * 1024;
+const MAX_SCREENSHOT_BYTES = 20 * 1024 * 1024;
 const MAX_INTERCEPTED_REQUESTS = 64;
+const MAX_QUARANTINE_ENTRIES = 1_024;
+const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class ChromeRuntimeError extends Error {
@@ -39,6 +38,7 @@ type ChromeProcess = {
   readonly exitCode: number | null;
   readonly signalCode: NodeJS.Signals | null;
   readonly stderr: null | { on(event: "data", listener: (chunk: Buffer | string) => void): unknown };
+  readonly stdio: readonly unknown[];
   kill(signal?: NodeJS.Signals): boolean;
   once(event: "error", listener: (error: Error) => void): unknown;
   once(event: "exit", listener: (code: number | null, signal: NodeJS.Signals | null) => void): unknown;
@@ -46,15 +46,22 @@ type ChromeProcess = {
 
 export type CdpClientLike = {
   readonly isOpen: boolean;
-  send<Result = unknown>(method: PrivateCdpMethod, params?: Record<string, unknown>): Promise<Result>;
-  on(method: string, listener: (params: unknown) => void): () => void;
+  send<Result = unknown>(
+    method: PrivateCdpMethod,
+    params?: Record<string, unknown>,
+    scope?: CdpSessionScope,
+  ): Promise<Result>;
+  on(method: string, listener: (params: unknown) => void, scope?: CdpSessionScope): () => void;
   close(): Promise<void>;
 };
 
 type RuntimeDependencies = {
   spawnProcess?: (executable: string, args: readonly string[], options: SpawnOptions) => ChromeProcess;
-  fetchJson?: (port: number, resource: "/json/version" | "/json/list", timeoutMs: number) => Promise<unknown>;
-  connectCdp?: (endpoint: string, options: PrivateCdpClientOptions) => Promise<CdpClientLike>;
+  connectCdpPipe?: (
+    requestPipe: Writable,
+    responsePipe: Readable,
+    options: PrivateCdpClientOptions,
+  ) => CdpClientLike;
   networkPolicy?: BrowserNetworkPolicy;
   now?: () => number;
 };
@@ -65,13 +72,27 @@ export type ChromeCdpRuntimeOptions = RuntimeDependencies & {
   startupTimeoutMs?: number;
   commandTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  maxThreadTargets?: number;
   allowPrivateNetwork?: boolean;
 };
 
 export type ChromeBrowserRuntimeFactoryOptions = Pick<
   ChromeCdpRuntimeOptions,
-  "allowPrivateNetwork" | "executablePath" | "expectedVersion" | "startupTimeoutMs"
+  "allowPrivateNetwork" | "executablePath" | "expectedVersion" | "startupTimeoutMs" |
+  "maxThreadTargets"
 >;
+
+type ThreadPage = {
+  readonly threadId: string;
+  readonly targetId: string;
+  readonly sessionId: string;
+  readonly downloadsPath: string;
+  readonly downloads: Map<string, string>;
+  fetchUnsubscribe: (() => void) | null;
+  downloadUnsubscribes: Array<() => void>;
+  interceptedRequests: number;
+  closed: boolean;
+};
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
@@ -128,22 +149,6 @@ async function ensurePrivateSubdirectory(browserRoot: string, relativePath: stri
   return current;
 }
 
-export function parseDevToolsActivePort(contents: string) {
-  if (Buffer.byteLength(contents, "utf8") > 1_024 || /\u0000/u.test(contents)) {
-    throw new ChromeRuntimeError("CHROME_DEVTOOLS_MARKER_INVALID", "DevToolsActivePort is invalid.");
-  }
-  const lines = contents.split(/\r?\n/u);
-  if (lines.at(-1) === "") lines.pop();
-  if (lines.length !== 2 || !/^\d{1,5}$/u.test(lines[0]) || !DEVTOOLS_PATH_PATTERN.test(lines[1])) {
-    throw new ChromeRuntimeError("CHROME_DEVTOOLS_MARKER_INVALID", "DevToolsActivePort has an invalid shape.");
-  }
-  const port = Number(lines[0]);
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    throw new ChromeRuntimeError("CHROME_DEVTOOLS_MARKER_INVALID", "DevToolsActivePort contains an invalid port.");
-  }
-  return Object.freeze({ port, webSocketPath: lines[1] });
-}
-
 export function validateBrowserNavigationUrl(value: string) {
   if (value === "about:blank") return value;
   if (value.length > 8_192) {
@@ -191,8 +196,7 @@ function validateExpectedVersion(expectedVersion: string | undefined) {
 export function buildChromeArguments(context: BrowserRuntimeContext) {
   const args = [
     "--headless=new",
-    "--remote-debugging-address=127.0.0.1",
-    "--remote-debugging-port=0",
+    "--remote-debugging-pipe",
     `--user-data-dir=${context.roots.profile}`,
     "--no-first-run",
     "--no-default-browser-check",
@@ -212,37 +216,6 @@ export function buildChromeArguments(context: BrowserRuntimeContext) {
     throw new ChromeRuntimeError("CHROME_ARGUMENTS_UNSAFE", "Unsafe Chrome launch arguments are forbidden.");
   }
   return Object.freeze(args);
-}
-
-async function defaultFetchJson(
-  port: number,
-  resource: "/json/version" | "/json/list",
-  timeoutMs: number,
-) {
-  if (!Number.isSafeInteger(port) || port < 1 || port > 65_535) {
-    throw new ChromeRuntimeError("CHROME_CDP_PORT_INVALID", "Chrome CDP port is invalid.");
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}${resource}`, {
-      method: "GET",
-      redirect: "error",
-      signal: controller.signal,
-      headers: { Accept: "application/json" },
-    });
-    if (!response.ok) throw new ChromeRuntimeError("CHROME_CDP_HTTP_FAILED", "Chrome CDP discovery failed.");
-    const text = await response.text();
-    if (Buffer.byteLength(text, "utf8") > MAX_HTTP_JSON_BYTES) {
-      throw new ChromeRuntimeError("CHROME_CDP_HTTP_TOO_LARGE", "Chrome CDP discovery response is too large.");
-    }
-    return JSON.parse(text) as unknown;
-  } catch (error) {
-    if (error instanceof ChromeRuntimeError) throw error;
-    throw new ChromeRuntimeError("CHROME_CDP_HTTP_FAILED", "Chrome CDP discovery failed.", { cause: error });
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 async function resolveChromeExecutable(configured: string | undefined) {
@@ -313,6 +286,16 @@ function validateInput(command: BrowserInputCommand) {
   }
 }
 
+function validateThreadId(threadId: string) {
+  if (!THREAD_ID_PATTERN.test(threadId)) {
+    throw new ChromeRuntimeError(
+      "CHROME_THREAD_INVALID",
+      "Browser threadId must be a canonical lowercase UUID.",
+    );
+  }
+  return threadId;
+}
+
 async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -323,26 +306,27 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   readonly startupTimeoutMs: number;
   readonly commandTimeoutMs: number;
   readonly shutdownTimeoutMs: number;
+  readonly maxThreadTargets: number;
   private readonly configuredExecutable: string | undefined;
   private readonly spawnProcess: NonNullable<RuntimeDependencies["spawnProcess"]>;
-  private readonly fetchJson: NonNullable<RuntimeDependencies["fetchJson"]>;
-  private readonly connectCdp: NonNullable<RuntimeDependencies["connectCdp"]>;
+  private readonly connectCdpPipe: NonNullable<RuntimeDependencies["connectCdpPipe"]>;
   private readonly networkPolicy: BrowserNetworkPolicy;
   private readonly now: () => number;
   private process: ChromeProcess | null = null;
   private browserClient: CdpClientLike | null = null;
-  private pageClient: CdpClientLike | null = null;
+  private readonly threadPages = new Map<string, ThreadPage>();
+  private readonly threadPagePromises = new Map<string, Promise<ThreadPage>>();
+  private readonly downloadOwners = new Map<string, ThreadPage>();
+  private readonly downloadFinalizations = new Set<Promise<void>>();
   private startPromise: Promise<void> | null = null;
   private stopPromise: Promise<void> | null = null;
-  private spawnFailure: Error | null = null;
   private stderrTail = "";
   private running = false;
   private takenOver = false;
   private browserVersion: string | null = null;
-  private port: number | null = null;
-  private pageTargetId: string | null = null;
-  private fetchUnsubscribe: (() => void) | null = null;
-  private interceptedRequests = 0;
+  private downloadQuarantine: string | null = null;
+  private lastDownloadFailure: string | null = null;
+  private detachedUnsubscribe: (() => void) | null = null;
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
     validateRuntimeContext(context);
@@ -357,27 +341,31 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.startupTimeoutMs = positiveInteger("startupTimeoutMs", options.startupTimeoutMs ?? 20_000, 60_000);
     this.commandTimeoutMs = positiveInteger("commandTimeoutMs", options.commandTimeoutMs ?? 10_000, 60_000);
     this.shutdownTimeoutMs = positiveInteger("shutdownTimeoutMs", options.shutdownTimeoutMs ?? 3_000, 30_000);
+    this.maxThreadTargets = positiveInteger("maxThreadTargets", options.maxThreadTargets ?? 32, 512);
     this.spawnProcess = options.spawnProcess ?? ((executable, args, spawnOptions) =>
-      spawn(executable, [...args], spawnOptions));
-    this.fetchJson = options.fetchJson ?? defaultFetchJson;
-    this.connectCdp = options.connectCdp ?? ((endpoint, clientOptions) =>
-      PrivateCdpClient.connect(endpoint, clientOptions));
+      spawn(executable, [...args], spawnOptions) as ChromeProcess);
+    this.connectCdpPipe = options.connectCdpPipe ?? ((requestPipe, responsePipe, clientOptions) =>
+      PrivateCdpClient.connect(requestPipe, responsePipe, clientOptions));
     this.networkPolicy = options.networkPolicy ?? new BrowserNetworkPolicy({
       allowPrivateNetwork: options.allowPrivateNetwork,
     });
     this.now = options.now ?? Date.now;
   }
 
-  get debuggingPort() {
-    return this.port;
+  get targetId() {
+    return this.threadPages.size === 1
+      ? this.threadPages.values().next().value?.targetId ?? null
+      : null;
   }
 
-  get targetId() {
-    return this.pageTargetId;
+  targetIdFor(threadId: string) {
+    validateThreadId(threadId);
+    return this.threadPages.get(threadId)?.targetId ?? null;
   }
 
   async start() {
-    if (this.running) return;
+    if (this.running && this.process?.exitCode === null && this.browserClient?.isOpen) return;
+    if (this.running) await this.stop();
     if (this.startPromise) return this.startPromise;
     const promise = this.startOnce();
     this.startPromise = promise;
@@ -393,24 +381,27 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       return { healthy: false, detail: "Chrome process or private CDP connection is not running." };
     }
     try {
+      if (this.lastDownloadFailure) {
+        return { healthy: false, detail: `Chrome download routing failed: ${this.lastDownloadFailure}` };
+      }
       const version = await this.browserClient.send<{ product: string }>("Browser.getVersion");
       const current = extractBrowserVersion(version.product);
       if (current !== this.browserVersion) {
         return { healthy: false, detail: "Chrome version changed during the runtime session." };
       }
-      return { healthy: true, detail: `Chrome ${current} on private loopback CDP.` };
+      return { healthy: true, detail: `Chrome ${current} on a private inherited CDP pipe.` };
     } catch {
       return { healthy: false, detail: "Chrome private CDP health check failed." };
     }
   }
 
-  async captureFrame(): Promise<BrowserFrame> {
-    const page = this.requirePage();
-    const result = await page.send<{ data: string }>("Page.captureScreenshot", {
+  async captureFrame(threadId: string): Promise<BrowserFrame> {
+    const page = await this.requireThreadPage(threadId);
+    const result = await this.requireBrowser().send<{ data: string }>("Page.captureScreenshot", {
       format: "png",
       fromSurface: true,
       captureBeyondViewport: false,
-    });
+    }, { sessionId: page.sessionId });
     if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
       throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
     }
@@ -427,23 +418,26 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     });
   }
 
-  async navigate(url: string) {
+  async navigate(threadId: string, url: string) {
     this.assertHumanControl();
     const destination = validateBrowserNavigationUrl(url);
     await this.networkPolicy.assertAllowed(destination);
-    const result = await this.requirePage().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
+    const page = await this.requireThreadPage(threadId);
+    const result = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
       url: destination,
-    });
+    }, { sessionId: page.sessionId });
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
   }
 
-  async dispatchInput(command: BrowserInputCommand) {
+  async dispatchInput(threadId: string, command: BrowserInputCommand) {
     this.assertHumanControl();
     validateInput(command);
+    const page = await this.requireThreadPage(threadId);
+    const browser = this.requireBrowser();
     if (command.kind === "mouse") {
-      await this.requirePage().send("Input.dispatchMouseEvent", {
+      await browser.send("Input.dispatchMouseEvent", {
         type: command.event,
         x: command.x,
         y: command.y,
@@ -451,16 +445,16 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         clickCount: command.clickCount ?? 0,
         deltaX: command.deltaX ?? 0,
         deltaY: command.deltaY ?? 0,
-      });
+      }, { sessionId: page.sessionId });
       return;
     }
-    await this.requirePage().send("Input.dispatchKeyEvent", {
+    await browser.send("Input.dispatchKeyEvent", {
       type: command.event,
       key: command.key,
       code: command.code ?? "",
       text: command.text ?? "",
       modifiers: command.modifiers ?? 0,
-    });
+    }, { sessionId: page.sessionId });
   }
 
   async takeOver() {
@@ -483,12 +477,15 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     }
   }
 
-  async currentUrl() {
+  async currentUrl(threadId?: string) {
     const browser = this.requireBrowser();
+    const page = threadId === undefined
+      ? this.singleThreadPage()
+      : await this.requireThreadPage(threadId);
     const result = await browser.send<{
       targetInfos: Array<{ targetId: string; type: string; url: string }>;
     }>("Target.getTargets");
-    const current = result.targetInfos?.find((target) => target.targetId === this.pageTargetId);
+    const current = result.targetInfos?.find((target) => target.targetId === page.targetId);
     if (!current || current.type !== "page" || typeof current.url !== "string") {
       throw new ChromeRuntimeError("CHROME_PAGE_STATE_INVALID", "Chrome did not report the current page URL.");
     }
@@ -498,7 +495,11 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private async startOnce() {
     await this.assertRoots();
     const executable = await resolveChromeExecutable(this.configuredExecutable);
-    await this.removeStaleMarker();
+    this.downloadQuarantine = await ensurePrivateSubdirectory(
+      this.context.roots.browserRoot,
+      "download-quarantine",
+    );
+    await this.cleanupDownloadQuarantine();
     const runtimeTmp = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "runtime-tmp");
     const xdgConfig = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "xdg/config");
     const xdgCache = await ensurePrivateSubdirectory(this.context.roots.browserRoot, "xdg/cache");
@@ -513,60 +514,26 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       LC_ALL: process.env.LC_ALL,
       TZ: process.env.TZ ?? "UTC",
     };
-    this.process = this.spawnProcess(executable, args, {
-      cwd: this.context.roots.browserRoot,
-      env: environment,
-      detached: false,
-      shell: false,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    this.spawnFailure = null;
-    this.process.once("error", (error) => {
-      this.spawnFailure = error instanceof Error ? error : new Error("Chrome spawn failed.");
-    });
-    this.process.stderr?.on("data", (chunk: Buffer | string) => {
-      this.stderrTail = boundedErrorText(`${this.stderrTail}${chunk.toString()}`);
-    });
     try {
-      const marker = await this.waitForDevToolsMarker();
-      this.port = marker.port;
-      const versionDocument = await this.fetchJson(marker.port, "/json/version", this.commandTimeoutMs);
-      const versionRecord = this.parseVersionDocument(versionDocument, marker.port, marker.webSocketPath);
-      this.browserClient = await this.connectCdp(versionRecord.webSocketUrl, {
-        commandTimeoutMs: this.commandTimeoutMs,
-      });
-      const cdpVersion = await this.browserClient.send<{ product: string }>("Browser.getVersion");
-      const version = extractBrowserVersion(cdpVersion.product);
-      if (version !== versionRecord.version || (this.expectedVersion && version !== this.expectedVersion)) {
+      const version = await this.launchPipeWithBackoff(executable, args, environment);
+      if (this.expectedVersion && version !== this.expectedVersion) {
         throw new ChromeRuntimeError(
           "CHROME_VERSION_MISMATCH",
           `Chrome version ${version} does not match the required version.`,
         );
       }
       this.browserVersion = version;
-      await this.browserClient.send("Browser.setDownloadBehavior", {
-        behavior: "allow",
-        downloadPath: this.context.roots.downloads,
+      const browser = this.browserClient as CdpClientLike;
+      this.detachedUnsubscribe = browser.on("Target.detachedFromTarget", (params) => {
+        this.handleDetachedTarget(params);
+      });
+      // Page.setDownloadBehavior delegates to this same browser-context policy in
+      // Chromium. Use GUID names in a private quarantine and route completed files
+      // from target-scoped Page events instead of racing a path between threads.
+      await browser.send("Browser.setDownloadBehavior", {
+        behavior: "allowAndName",
+        downloadPath: this.downloadQuarantine,
         eventsEnabled: true,
-      });
-      const page = await this.resolvePage(marker.port);
-      this.pageTargetId = page.id;
-      this.pageClient = await this.connectCdp(page.webSocketUrl, {
-        commandTimeoutMs: this.commandTimeoutMs,
-      });
-      await this.pageClient.send("Page.enable");
-      await this.pageClient.send("Network.enable", {
-        maxTotalBufferSize: 1_048_576,
-        maxResourceBufferSize: 262_144,
-      });
-      this.fetchUnsubscribe = this.pageClient.on("Fetch.requestPaused", (params) => {
-        this.queueInterceptedRequest(params);
-      });
-      await this.pageClient.send("Fetch.enable", {
-        patterns: [
-          { urlPattern: "http://*", requestStage: "Request" },
-          { urlPattern: "https://*", requestStage: "Request" },
-        ],
       });
       this.running = true;
       this.takenOver = false;
@@ -588,160 +555,198 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     ]);
   }
 
-  private async removeStaleMarker() {
-    const markerPath = path.join(this.context.roots.profile, "DevToolsActivePort");
-    try {
-      const contents = await this.readDevToolsMarker();
-      const marker = parseDevToolsActivePort(contents);
-      try {
-        const active = this.parseVersionDocument(
-          await this.fetchJson(marker.port, "/json/version", 500),
-          marker.port,
-          marker.webSocketPath,
-          false,
-        );
-        await this.closeOrphanBrowser(marker.port, active.webSocketUrl);
-      } catch (error) {
-        if (error instanceof ChromeRuntimeError && error.code === "CHROME_ORPHAN_CLOSE_FAILED") throw error;
-        if (error instanceof ChromeRuntimeError && error.code !== "CHROME_CDP_HTTP_FAILED") throw error;
-      }
-      await unlink(markerPath).catch((error: unknown) => {
-        if (!isNodeError(error, "ENOENT")) throw error;
-      });
-    } catch (error) {
-      if (isNodeError(error, "ENOENT")) return;
-      throw error;
-    }
-  }
-
-  private async closeOrphanBrowser(port: number, webSocketUrl: string) {
-    let client: CdpClientLike;
-    try {
-      client = await this.connectCdp(webSocketUrl, {
-        commandTimeoutMs: Math.min(this.commandTimeoutMs, this.shutdownTimeoutMs),
-      });
-    } catch (error) {
-      throw new ChromeRuntimeError(
-        "CHROME_ORPHAN_CLOSE_FAILED",
-        "The existing private Chrome endpoint could not be authenticated for recovery.",
-        { cause: error },
-      );
-    }
-    try {
-      await client.send("Browser.close").catch(() => undefined);
-    } finally {
-      await client.close().catch(() => undefined);
-    }
-
-    const deadline = this.now() + this.shutdownTimeoutMs;
-    while (this.now() < deadline) {
-      try {
-        await this.fetchJson(port, "/json/version", Math.min(250, this.shutdownTimeoutMs));
-      } catch {
-        return;
-      }
-      await wait(25);
-    }
-    throw new ChromeRuntimeError(
-      "CHROME_ORPHAN_CLOSE_FAILED",
-      "Existing Chrome did not release the private profile after Browser.close.",
-    );
-  }
-
-  private async waitForDevToolsMarker() {
+  private async launchPipeWithBackoff(
+    executable: string,
+    args: readonly string[],
+    environment: NodeJS.ProcessEnv,
+  ) {
     const deadline = this.now() + this.startupTimeoutMs;
+    let attempt = 0;
+    let lastError: unknown;
     while (this.now() < deadline) {
-      if (this.spawnFailure) {
-        throw new ChromeRuntimeError("CHROME_SPAWN_FAILED", "Chrome process could not start.", { cause: this.spawnFailure });
-      }
-      if (this.process?.exitCode !== null) {
-        throw new ChromeRuntimeError(
-          "CHROME_EXITED_DURING_START",
-          `Chrome exited before CDP was ready. ${this.stderrTail}`.trim(),
-        );
-      }
+      this.stderrTail = "";
+      let spawnFailure: Error | null = null;
+      const child = this.spawnProcess(executable, args, {
+        cwd: this.context.roots.browserRoot,
+        env: environment,
+        detached: false,
+        shell: false,
+        stdio: ["ignore", "ignore", "pipe", "pipe", "pipe"],
+      });
+      this.process = child;
+      child.once("error", (error) => {
+        spawnFailure = error instanceof Error ? error : new Error("Chrome spawn failed.");
+      });
+      child.stderr?.on("data", (chunk: Buffer | string) => {
+        this.stderrTail = boundedErrorText(`${this.stderrTail}${chunk.toString()}`);
+      });
+      let client: CdpClientLike | null = null;
       try {
-        return parseDevToolsActivePort(await this.readDevToolsMarker());
+        const { requestPipe, responsePipe } = this.pipeStreams(child);
+        const remaining = Math.max(1, deadline - this.now());
+        client = this.connectCdpPipe(requestPipe, responsePipe, {
+          commandTimeoutMs: Math.min(this.commandTimeoutMs, remaining),
+        });
+        this.browserClient = client;
+        const cdpVersion = await client.send<{ product: string }>("Browser.getVersion");
+        return extractBrowserVersion(cdpVersion.product);
       } catch (error) {
-        const transientMarker = error instanceof UnsafeFilePathError ||
-          (error instanceof ChromeRuntimeError && error.code === "CHROME_DEVTOOLS_MARKER_INVALID");
-        if (!isNodeError(error, "ENOENT") && !transientMarker) throw error;
+        lastError = spawnFailure ?? error;
+        this.browserClient = null;
+        if (client) await client.close().catch(() => undefined);
+        await this.stopFailedLaunch(child);
+        this.process = null;
+        if (this.now() >= deadline) break;
+        await wait(Math.min(25 * (2 ** attempt), 500));
+        attempt += 1;
       }
-      await wait(25);
     }
     throw new ChromeRuntimeError(
       "CHROME_START_TIMEOUT",
-      `Chrome did not publish DevToolsActivePort in time. ${this.stderrTail}`.trim(),
+      `Chrome private CDP pipe did not become ready. ${this.stderrTail}`.trim(),
+      { cause: lastError },
     );
   }
 
-  private async readDevToolsMarker() {
-    const markerPath = path.join(this.context.roots.profile, "DevToolsActivePort");
-    const metadata = await lstat(markerPath);
-    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
-      metadata.size > 1_024 || (metadata.mode & 0o022) !== 0) {
+  private pipeStreams(child: ChromeProcess) {
+    const requestPipe = child.stdio[3];
+    const responsePipe = child.stdio[4];
+    if (!requestPipe || typeof (requestPipe as Writable).write !== "function" ||
+      typeof (requestPipe as Writable).destroy !== "function" ||
+      !responsePipe || typeof (responsePipe as Readable).on !== "function" ||
+      typeof (responsePipe as Readable).destroy !== "function") {
       throw new ChromeRuntimeError(
-        "CHROME_DEVTOOLS_MARKER_INVALID",
-        "DevToolsActivePort must be a private regular file.",
+        "CHROME_CDP_PIPE_UNAVAILABLE",
+        "Chrome did not expose its inherited CDP request and response pipes.",
       );
     }
-    return (await readRegularFileWithin(
-      this.context.roots.profile,
-      "DevToolsActivePort",
-      1_024,
-    )).toString("utf8");
+    return {
+      requestPipe: requestPipe as Writable,
+      responsePipe: responsePipe as Readable,
+    };
   }
 
-  private parseVersionDocument(
-    value: unknown,
-    port: number,
-    expectedPath: string,
-    enforceExpectedVersion = true,
-  ) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new ChromeRuntimeError("CHROME_CDP_DISCOVERY_INVALID", "Chrome version document is invalid.");
+  private async stopFailedLaunch(child: ChromeProcess) {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.kill("SIGTERM");
+    if (!await this.waitForExit(child, Math.min(this.shutdownTimeoutMs, 500))) {
+      child.kill("SIGKILL");
+      await this.waitForExit(child, Math.min(this.shutdownTimeoutMs, 500));
     }
-    const record = value as Record<string, unknown>;
-    const version = extractBrowserVersion(record.Browser);
-    if (typeof record.webSocketDebuggerUrl !== "string") {
-      throw new ChromeRuntimeError("CHROME_CDP_DISCOVERY_INVALID", "Chrome version document lacks its WebSocket URL.");
-    }
-    const webSocketUrl = normalizePrivateDevToolsWebSocket(record.webSocketDebuggerUrl, port);
-    if (new URL(webSocketUrl).pathname !== expectedPath) {
-      throw new ChromeRuntimeError("CHROME_CDP_DISCOVERY_INVALID", "Chrome CDP marker and endpoint do not match.");
-    }
-    if (enforceExpectedVersion && this.expectedVersion && version !== this.expectedVersion) {
-      throw new ChromeRuntimeError(
-        "CHROME_VERSION_MISMATCH",
-        `Chrome version ${version} does not match required ${this.expectedVersion}.`,
-      );
-    }
-    return { version, webSocketUrl };
   }
 
-  private async resolvePage(port: number) {
-    const value = await this.fetchJson(port, "/json/list", this.commandTimeoutMs);
-    if (!Array.isArray(value) || value.length > 100) {
-      throw new ChromeRuntimeError("CHROME_TARGETS_INVALID", "Chrome target list is invalid.");
-    }
-    const page = value.find((target) => target && typeof target === "object" &&
-      (target as Record<string, unknown>).type === "page") as Record<string, unknown> | undefined;
-    if (!page || typeof page.id !== "string" || page.id.length > 256 ||
-      typeof page.webSocketDebuggerUrl !== "string") {
-      throw new ChromeRuntimeError("CHROME_PAGE_NOT_FOUND", "Chrome did not expose a page target.");
-    }
-    const webSocketUrl = normalizePrivateDevToolsWebSocket(page.webSocketDebuggerUrl, port);
-    if (!PAGE_PATH_PATTERN.test(new URL(webSocketUrl).pathname)) {
-      throw new ChromeRuntimeError("CHROME_TARGETS_INVALID", "Chrome page target endpoint is invalid.");
-    }
-    return { id: page.id, webSocketUrl };
-  }
-
-  private requirePage() {
-    if (!this.running || !this.pageClient?.isOpen || this.process?.exitCode !== null) {
+  private async requireThreadPage(threadId: string) {
+    validateThreadId(threadId);
+    if (!this.running || this.process?.exitCode !== null) {
       throw new ChromeRuntimeError("CHROME_NOT_RUNNING", "Chrome page is not available.");
     }
-    return this.pageClient;
+    const current = this.threadPages.get(threadId);
+    if (current && !current.closed && this.browserClient?.isOpen) return current;
+    if (current) {
+      this.threadPages.delete(threadId);
+      await this.closeThreadPage(current);
+    }
+    const pending = this.threadPagePromises.get(threadId);
+    if (pending) return pending;
+    if (this.threadPages.size + this.threadPagePromises.size >= this.maxThreadTargets) {
+      throw new ChromeRuntimeError(
+        "CHROME_TARGET_BACKPRESSURE",
+        "Browser target capacity is saturated; close an inactive thread target and retry.",
+      );
+    }
+    const promise = this.createThreadPage(threadId);
+    this.threadPagePromises.set(threadId, promise);
+    try {
+      return await promise;
+    } finally {
+      if (this.threadPagePromises.get(threadId) === promise) {
+        this.threadPagePromises.delete(threadId);
+      }
+    }
+  }
+
+  private singleThreadPage() {
+    if (this.threadPages.size !== 1) {
+      throw new ChromeRuntimeError(
+        "CHROME_THREAD_REQUIRED",
+        "A threadId is required unless exactly one browser thread target exists.",
+      );
+    }
+    return this.threadPages.values().next().value as ThreadPage;
+  }
+
+  private async createThreadPage(threadId: string) {
+    const browser = this.requireBrowser();
+    const created = await browser.send<{ targetId?: string }>("Target.createTarget", {
+      url: "about:blank",
+    });
+    if (typeof created.targetId !== "string" ||
+      !/^[A-Za-z0-9._-]{1,256}$/u.test(created.targetId)) {
+      throw new ChromeRuntimeError("CHROME_TARGETS_INVALID", "Chrome returned an invalid page target ID.");
+    }
+    const targetId = created.targetId;
+    let sessionId: string | null = null;
+    let page: ThreadPage | null = null;
+    try {
+      const downloadsPath = await this.ensureThreadDownloadsPath(threadId);
+      const attached = await browser.send<{ sessionId?: string }>("Target.attachToTarget", {
+        targetId,
+        flatten: true,
+      });
+      if (typeof attached.sessionId !== "string" ||
+        !/^[A-Za-z0-9._-]{1,256}$/u.test(attached.sessionId)) {
+        throw new ChromeRuntimeError("CHROME_SESSION_INVALID", "Chrome returned an invalid target session ID.");
+      }
+      sessionId = attached.sessionId;
+      page = {
+        threadId,
+        targetId,
+        sessionId,
+        downloadsPath,
+        downloads: new Map(),
+        fetchUnsubscribe: null,
+        downloadUnsubscribes: [],
+        interceptedRequests: 0,
+        closed: false,
+      };
+      await browser.send("Page.enable", {}, { sessionId });
+      await browser.send("Network.enable", {
+        maxTotalBufferSize: 1_048_576,
+        maxResourceBufferSize: 262_144,
+      }, { sessionId });
+      page.fetchUnsubscribe = browser.on("Fetch.requestPaused", (params) => {
+        this.queueInterceptedRequest(page as ThreadPage, params);
+      }, { sessionId });
+      page.downloadUnsubscribes.push(
+        browser.on("Page.downloadWillBegin", (params) => {
+          this.registerDownload(page as ThreadPage, params);
+        }, { sessionId }),
+        browser.on("Page.downloadProgress", (params) => {
+          this.updateDownload(page as ThreadPage, params);
+        }, { sessionId }),
+      );
+      await browser.send("Fetch.enable", {
+        patterns: [
+          { urlPattern: "http://*", requestStage: "Request" },
+          { urlPattern: "https://*", requestStage: "Request" },
+        ],
+      }, { sessionId });
+      if (!this.running) {
+        throw new ChromeRuntimeError("CHROME_NOT_RUNNING", "Chrome stopped while creating a thread target.");
+      }
+      this.threadPages.set(threadId, page);
+      return page;
+    } catch (error) {
+      page?.fetchUnsubscribe?.();
+      for (const unsubscribe of page?.downloadUnsubscribes ?? []) unsubscribe();
+      if (browser.isOpen) {
+        if (sessionId) {
+          await browser.send("Target.detachFromTarget", { sessionId }).catch(() => undefined);
+        }
+        await browser.send("Target.closeTarget", { targetId }).catch(() => undefined);
+      }
+      throw error;
+    }
   }
 
   private requireBrowser() {
@@ -751,27 +756,70 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     return this.browserClient;
   }
 
+  private async ensureThreadDownloadsPath(threadId: string) {
+    const candidate = path.join(this.context.roots.downloads, threadId);
+    try {
+      await mkdir(candidate, { mode: 0o700 });
+    } catch (error) {
+      if (!isNodeError(error, "EEXIST")) throw error;
+    }
+    await assertPrivateDirectory(this.context.roots.browserRoot, candidate, "thread downloads root");
+    const [downloadsRoot, canonicalCandidate] = await Promise.all([
+      realpath(this.context.roots.downloads),
+      realpath(candidate),
+    ]);
+    if (!inside(downloadsRoot, canonicalCandidate)) {
+      throw new ChromeRuntimeError(
+        "CHROME_ROOT_ESCAPE",
+        "Thread downloads root resolves outside the user downloads root.",
+      );
+    }
+    return candidate;
+  }
+
   private assertHumanControl() {
     if (!this.takenOver) {
       throw new ChromeRuntimeError("CHROME_TAKEOVER_REQUIRED", "Browser mutation requires active takeover.");
     }
   }
 
-  private queueInterceptedRequest(value: unknown) {
-    const page = this.pageClient;
-    if (!page?.isOpen) return;
+  private handleDetachedTarget(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const detachedSessionId = (value as Record<string, unknown>).sessionId;
+    if (typeof detachedSessionId !== "string") return;
+    const page = [...this.threadPages.values()].find((candidate) =>
+      candidate.sessionId === detachedSessionId);
+    if (!page) return;
+    page.closed = true;
+    if (this.threadPages.get(page.threadId) === page) this.threadPages.delete(page.threadId);
+    page.fetchUnsubscribe?.();
+    page.fetchUnsubscribe = null;
+    for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
+    const guids = [...page.downloads.keys()];
+    page.downloads.clear();
+    for (const guid of guids) this.downloadOwners.delete(guid);
+    const browser = this.browserClient;
+    if (browser?.isOpen) {
+      void browser.send("Target.closeTarget", { targetId: page.targetId }).catch(() => undefined);
+    }
+    void Promise.allSettled(guids.map((guid) => this.removeQuarantinedDownload(guid)));
+  }
+
+  private queueInterceptedRequest(page: ThreadPage, value: unknown) {
+    const browser = this.browserClient;
+    if (page.closed || !browser?.isOpen) return;
     const requestId = this.interceptedRequestId(value);
     if (requestId === null) return;
-    if (this.interceptedRequests >= MAX_INTERCEPTED_REQUESTS) {
-      void page.send("Fetch.failRequest", {
+    if (page.interceptedRequests >= MAX_INTERCEPTED_REQUESTS) {
+      void browser.send("Fetch.failRequest", {
         requestId,
         errorReason: "BlockedByClient",
-      }).catch(() => undefined);
+      }, { sessionId: page.sessionId }).catch(() => undefined);
       return;
     }
-    this.interceptedRequests += 1;
+    page.interceptedRequests += 1;
     void this.handleInterceptedRequest(page, requestId, value).finally(() => {
-      this.interceptedRequests -= 1;
+      page.interceptedRequests -= 1;
     });
   }
 
@@ -783,7 +831,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       : null;
   }
 
-  private async handleInterceptedRequest(page: CdpClientLike, requestId: string, value: unknown) {
+  private async handleInterceptedRequest(page: ThreadPage, requestId: string, value: unknown) {
     let allowed = false;
     try {
       const request = (value as Record<string, unknown>).request;
@@ -797,25 +845,191 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     } catch {
       allowed = false;
     }
-    if (!page.isOpen) return;
-    await page.send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", allowed
+    const browser = this.browserClient;
+    if (page.closed || !browser?.isOpen) return;
+    await browser.send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", allowed
       ? { requestId }
-      : { requestId, errorReason: "BlockedByClient" }).catch(() => undefined);
+      : { requestId, errorReason: "BlockedByClient" }, { sessionId: page.sessionId })
+      .catch(() => undefined);
+  }
+
+  private registerDownload(page: ThreadPage, value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    const guid = record.guid;
+    if (typeof guid !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(guid)) return;
+    const fileName = this.safeDownloadFileName(record.suggestedFilename, guid);
+    const existing = this.downloadOwners.get(guid);
+    if (existing && existing !== page) {
+      existing.downloads.delete(guid);
+      this.downloadOwners.delete(guid);
+      void this.removeQuarantinedDownload(guid);
+      return;
+    }
+    page.downloads.set(guid, fileName);
+    this.downloadOwners.set(guid, page);
+  }
+
+  private updateDownload(page: ThreadPage, value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const record = value as Record<string, unknown>;
+    const guid = record.guid;
+    if (typeof guid !== "string" || !/^[A-Za-z0-9._-]{1,128}$/u.test(guid) ||
+      this.downloadOwners.get(guid) !== page) return;
+    const state = record.state;
+    if (state !== "completed" && state !== "canceled") return;
+    const fileName = page.downloads.get(guid);
+    page.downloads.delete(guid);
+    this.downloadOwners.delete(guid);
+    const finalization = state === "completed" && fileName
+      ? this.promoteQuarantinedDownload(page, guid, fileName)
+      : this.removeQuarantinedDownload(guid);
+    this.downloadFinalizations.add(finalization);
+    void finalization.finally(() => this.downloadFinalizations.delete(finalization))
+      .catch((error: unknown) => {
+        this.lastDownloadFailure = boundedErrorText(
+          error instanceof Error ? error.message : "Unknown download routing failure.",
+        );
+      });
+  }
+
+  private safeDownloadFileName(value: unknown, guid: string) {
+    if (typeof value !== "string") return `download-${guid}`;
+    const normalized = value.normalize("NFC");
+    if (normalized === "." || normalized === ".." || normalized.length < 1 ||
+      Buffer.byteLength(normalized, "utf8") > 180 || path.basename(normalized) !== normalized ||
+      /[\\/\u0000-\u001f\u007f]/u.test(normalized)) {
+      return `download-${guid}`;
+    }
+    return normalized;
+  }
+
+  private async promoteQuarantinedDownload(page: ThreadPage, guid: string, fileName: string) {
+    const quarantine = this.downloadQuarantine;
+    if (!quarantine) return;
+    const source = path.join(quarantine, guid);
+    let metadata: Awaited<ReturnType<typeof lstat>> | null = null;
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      try {
+        metadata = await lstat(source);
+        break;
+      } catch (error) {
+        if (!isNodeError(error, "ENOENT")) throw error;
+      }
+      await wait(25);
+    }
+    const wrongOwner = metadata && typeof process.getuid === "function" && metadata.uid !== process.getuid();
+    if (!metadata || !metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+      wrongOwner || (metadata.mode & 0o022) !== 0) {
+      await unlink(source).catch(() => undefined);
+      throw new ChromeRuntimeError(
+        "CHROME_DOWNLOAD_INVALID",
+        "Completed Chrome download is not a private regular quarantine file.",
+      );
+    }
+    await assertPrivateDirectory(this.context.roots.browserRoot, page.downloadsPath, "thread downloads root");
+    const parsed = path.parse(fileName);
+    const alternatives = [
+      fileName,
+      `${parsed.name}-${guid.slice(0, 16)}${parsed.ext}`,
+    ];
+    for (const candidate of alternatives) {
+      const destination = path.join(page.downloadsPath, candidate);
+      try {
+        await link(source, destination);
+        await chmod(destination, 0o600);
+        await unlink(source);
+        return;
+      } catch (error) {
+        if (isNodeError(error, "EEXIST")) continue;
+        throw error;
+      }
+    }
+    await unlink(source).catch(() => undefined);
+    throw new ChromeRuntimeError(
+      "CHROME_DOWNLOAD_CONFLICT",
+      "Thread download destination already exists.",
+    );
+  }
+
+  private async removeQuarantinedDownload(guid: string) {
+    if (!this.downloadQuarantine) return;
+    const candidate = path.join(this.downloadQuarantine, guid);
+    let metadata: Awaited<ReturnType<typeof lstat>>;
+    try {
+      metadata = await lstat(candidate);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return;
+      throw error;
+    }
+    const wrongOwner = typeof process.getuid === "function" && metadata.uid !== process.getuid();
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+      wrongOwner || (metadata.mode & 0o022) !== 0) {
+      throw new ChromeRuntimeError(
+        "CHROME_DOWNLOAD_QUARANTINE_UNSAFE",
+        "Chrome download quarantine entry is not a private regular file.",
+      );
+    }
+    await unlink(candidate);
+  }
+
+  private async cleanupDownloadQuarantine() {
+    const quarantine = this.downloadQuarantine;
+    if (!quarantine) return;
+    const entries = await readdir(quarantine);
+    if (entries.length > MAX_QUARANTINE_ENTRIES) {
+      throw new ChromeRuntimeError(
+        "CHROME_DOWNLOAD_QUARANTINE_UNSAFE",
+        "Chrome download quarantine contains too many stale entries.",
+      );
+    }
+    for (const entry of entries) {
+      if (entry.length < 1 || Buffer.byteLength(entry, "utf8") > 255 ||
+        entry === "." || entry === ".." || /[\\/\u0000-\u001f\u007f]/u.test(entry)) {
+        throw new ChromeRuntimeError(
+          "CHROME_DOWNLOAD_QUARANTINE_UNSAFE",
+          "Chrome download quarantine contains an invalid entry name.",
+        );
+      }
+      const candidate = path.join(quarantine, entry);
+      const metadata = await lstat(candidate);
+      const wrongOwner = typeof process.getuid === "function" && metadata.uid !== process.getuid();
+      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 ||
+        wrongOwner || (metadata.mode & 0o022) !== 0) {
+        throw new ChromeRuntimeError(
+          "CHROME_DOWNLOAD_QUARANTINE_UNSAFE",
+          "Chrome download quarantine contains a non-private or non-regular entry.",
+        );
+      }
+      await unlink(candidate);
+    }
   }
 
   private async stopOnce() {
     this.running = false;
     this.takenOver = false;
     const browser = this.browserClient;
-    const page = this.pageClient;
     const child = this.process;
-    this.fetchUnsubscribe?.();
-    this.fetchUnsubscribe = null;
+    await Promise.allSettled([...this.threadPagePromises.values()]);
+    await Promise.allSettled([...this.downloadFinalizations]);
+    const pages = [...this.threadPages.values()];
+    const activeDownloadGuids = pages.flatMap((page) => [...page.downloads.keys()]);
+    this.threadPages.clear();
+    this.threadPagePromises.clear();
+    this.downloadOwners.clear();
+    this.detachedUnsubscribe?.();
+    this.detachedUnsubscribe = null;
     this.browserClient = null;
-    this.pageClient = null;
-    if (page?.isOpen) await page.send("Fetch.disable").catch(() => undefined);
+    if (browser?.isOpen) {
+      await browser.send("Browser.setDownloadBehavior", {
+        behavior: "deny",
+        eventsEnabled: false,
+      }).catch(() => undefined);
+    }
+    await Promise.allSettled(pages.map((page) => this.closeThreadPage(page, browser)));
+    await Promise.allSettled([...this.downloadFinalizations]);
     if (browser?.isOpen) await browser.send("Browser.close").catch(() => undefined);
-    await Promise.allSettled([page?.close(), browser?.close()].filter(Boolean) as Promise<void>[]);
+    if (browser) await browser.close().catch(() => undefined);
     if (child && child.exitCode === null) {
       if (!await this.waitForExit(child, this.shutdownTimeoutMs)) {
         child.kill("SIGTERM");
@@ -825,10 +1039,29 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         }
       }
     }
+    await Promise.allSettled(activeDownloadGuids.map((guid) => this.removeQuarantinedDownload(guid)));
     this.process = null;
-    this.port = null;
-    this.pageTargetId = null;
+    this.downloadQuarantine = null;
+    this.lastDownloadFailure = null;
     this.browserVersion = null;
+  }
+
+  private async closeThreadPage(page: ThreadPage, browser = this.browserClient) {
+    page.closed = true;
+    page.fetchUnsubscribe?.();
+    page.fetchUnsubscribe = null;
+    for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
+    const activeDownloadGuids = [...page.downloads.keys()];
+    if (browser?.isOpen) {
+      await browser.send("Fetch.disable", {}, { sessionId: page.sessionId }).catch(() => undefined);
+      await browser.send("Target.detachFromTarget", { sessionId: page.sessionId }).catch(() => undefined);
+      await browser.send("Target.closeTarget", { targetId: page.targetId }).catch(() => undefined);
+    }
+    await Promise.all(activeDownloadGuids.map((guid) => {
+      this.downloadOwners.delete(guid);
+      return this.removeQuarantinedDownload(guid);
+    }));
+    page.downloads.clear();
   }
 
   private async waitForExit(child: ChromeProcess, timeoutMs: number) {

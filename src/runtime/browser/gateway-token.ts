@@ -52,6 +52,7 @@ function parseClaims(value: unknown): BrowserGatewayClaims {
     "tokenId",
     "installationId",
     "userId",
+    "threadId",
     "browserSessionId",
     "authSessionHash",
     "capabilities",
@@ -62,12 +63,13 @@ function parseClaims(value: unknown): BrowserGatewayClaims {
     throw new BrowserGatewayTokenError("BROWSER_GATEWAY_TOKEN_INVALID", "Gateway token payload is invalid.");
   }
   if (
-    value.version !== 1 ||
+    value.version !== 2 ||
     value.audience !== "aibrain-browser-gateway" ||
     !isCanonicalUuid(value.tokenId) ||
     typeof value.installationId !== "string" ||
     !INSTALLATION_ID_PATTERN.test(value.installationId) ||
     !isCanonicalUuid(value.userId) ||
+    !isCanonicalUuid(value.threadId) ||
     !isCanonicalUuid(value.browserSessionId) ||
     typeof value.authSessionHash !== "string" ||
     !HASH_PATTERN.test(value.authSessionHash) ||
@@ -87,6 +89,7 @@ function parseClaims(value: unknown): BrowserGatewayClaims {
 export type IssueBrowserGatewayTokenInput = {
   installationId: string;
   userId: string;
+  threadId: string;
   browserSessionId: string;
   authSessionId: string;
   capabilities: readonly BrowserGatewayCapability[];
@@ -123,6 +126,7 @@ export class BrowserGatewayTokenService {
   issue(input: IssueBrowserGatewayTokenInput) {
     if (!INSTALLATION_ID_PATTERN.test(input.installationId) ||
       !isCanonicalUuid(input.userId) ||
+      !isCanonicalUuid(input.threadId) ||
       !isCanonicalUuid(input.browserSessionId)) {
       throw new BrowserGatewayTokenError("BROWSER_GATEWAY_BINDING_INVALID", "Gateway token binding is invalid.");
     }
@@ -132,11 +136,12 @@ export class BrowserGatewayTokenService {
     }
     const issuedAt = this.now();
     const claims: BrowserGatewayClaims = {
-      version: 1,
+      version: 2,
       audience: "aibrain-browser-gateway",
       tokenId: randomUUID(),
       installationId: input.installationId,
       userId: input.userId,
+      threadId: input.threadId,
       browserSessionId: input.browserSessionId,
       authSessionHash: authSessionHash(input.authSessionId),
       capabilities: normalizeCapabilities(input.capabilities),
@@ -179,6 +184,7 @@ export class BrowserGatewayTokenService {
     if (
       claims.installationId !== expected.installationId ||
       claims.userId !== expected.userId ||
+      claims.threadId !== expected.threadId ||
       claims.browserSessionId !== expected.browserSessionId ||
       claims.authSessionHash !== authSessionHash(expected.authSessionId) ||
       !claims.capabilities.includes(expected.requiredCapability)

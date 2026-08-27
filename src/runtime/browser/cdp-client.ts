@@ -1,4 +1,5 @@
-import WebSocket, { type RawData } from "ws";
+import type { Readable, Writable } from "node:stream";
+import { TextDecoder } from "node:util";
 
 export const PRIVATE_CDP_METHODS = [
   "Browser.close",
@@ -16,11 +17,15 @@ export const PRIVATE_CDP_METHODS = [
   "Page.enable",
   "Page.navigate",
   "Target.activateTarget",
+  "Target.attachToTarget",
+  "Target.closeTarget",
   "Target.createTarget",
+  "Target.detachFromTarget",
   "Target.getTargets",
 ] as const;
 
 export type PrivateCdpMethod = typeof PRIVATE_CDP_METHODS[number];
+export type CdpSessionScope = Readonly<{ sessionId?: string }>;
 
 export class CdpClientError extends Error {
   constructor(
@@ -35,6 +40,7 @@ export class CdpClientError extends Error {
 
 type PendingCommand = {
   method: PrivateCdpMethod;
+  sessionId: string | null;
   timer: ReturnType<typeof setTimeout>;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
@@ -44,13 +50,15 @@ type EventListener = (params: unknown) => void;
 
 export type PrivateCdpClientOptions = {
   commandTimeoutMs?: number;
-  connectTimeoutMs?: number;
-  closeTimeoutMs?: number;
   maxPendingCommands?: number;
   maxCommandBytes?: number;
   maxFrameBytes?: number;
   maxListenersPerEvent?: number;
 };
+
+const EVENT_PATTERN = /^([A-Za-z]+\.)+[A-Za-z]+$/u;
+const SESSION_ID_PATTERN = /^[A-Za-z0-9._-]{1,256}$/u;
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 
 function positiveInteger(name: string, value: number) {
   if (!Number.isSafeInteger(value) || value < 1) {
@@ -59,41 +67,17 @@ function positiveInteger(name: string, value: number) {
   return value;
 }
 
-function privateCdpUrl(value: string) {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new CdpClientError("CDP_ENDPOINT_INVALID", "CDP endpoint is not an absolute URL.");
+function sessionId(scope: CdpSessionScope = {}) {
+  const value = scope.sessionId;
+  if (value === undefined) return null;
+  if (!SESSION_ID_PATTERN.test(value)) {
+    throw new CdpClientError("CDP_SESSION_INVALID", "CDP sessionId is invalid.");
   }
-  if (
-    parsed.protocol !== "ws:" ||
-    parsed.hostname !== "127.0.0.1" ||
-    !parsed.port ||
-    parsed.username ||
-    parsed.password ||
-    parsed.search ||
-    parsed.hash ||
-    !/^\/devtools\/(browser|page)\/[A-Za-z0-9._-]{1,256}$/u.test(parsed.pathname)
-  ) {
-    throw new CdpClientError(
-      "CDP_ENDPOINT_NOT_PRIVATE",
-      "CDP endpoint must be an uncredentialed loopback DevTools WebSocket.",
-    );
-  }
-  return parsed.toString();
+  return value;
 }
 
-function rawDataBytes(data: RawData) {
-  if (Buffer.isBuffer(data)) return data.byteLength;
-  if (data instanceof ArrayBuffer) return data.byteLength;
-  return data.reduce((total, part) => total + part.byteLength, 0);
-}
-
-function rawDataText(data: RawData) {
-  if (Buffer.isBuffer(data)) return data.toString("utf8");
-  if (data instanceof ArrayBuffer) return Buffer.from(data).toString("utf8");
-  return Buffer.concat(data).toString("utf8");
+function listenerKey(method: string, value: string | null) {
+  return `${value ?? "<browser>"}\u0000${method}`;
 }
 
 function safeProtocolMessage(value: unknown) {
@@ -101,10 +85,12 @@ function safeProtocolMessage(value: unknown) {
   return value.replace(/[\u0000-\u001f\u007f]/gu, " ").slice(0, 500) || "CDP command failed.";
 }
 
+/**
+ * Bounded Chrome DevTools Protocol client over --remote-debugging-pipe.
+ * Chrome reads NUL-delimited JSON from child fd 3 and writes it to child fd 4.
+ */
 export class PrivateCdpClient {
-  private readonly socket: WebSocket;
   private readonly commandTimeoutMs: number;
-  private readonly closeTimeoutMs: number;
   private readonly maxPendingCommands: number;
   private readonly maxCommandBytes: number;
   private readonly maxFrameBytes: number;
@@ -112,72 +98,75 @@ export class PrivateCdpClient {
   private readonly pending = new Map<number, PendingCommand>();
   private readonly listeners = new Map<string, Set<EventListener>>();
   private nextId = 1;
+  private buffered = Buffer.alloc(0);
   private closed = false;
 
-  private constructor(socket: WebSocket, options: PrivateCdpClientOptions) {
-    this.socket = socket;
+  private constructor(
+    private readonly requestPipe: Writable,
+    private readonly responsePipe: Readable,
+    options: PrivateCdpClientOptions,
+  ) {
     this.commandTimeoutMs = positiveInteger("commandTimeoutMs", options.commandTimeoutMs ?? 10_000);
-    this.closeTimeoutMs = positiveInteger("closeTimeoutMs", options.closeTimeoutMs ?? 2_000);
     this.maxPendingCommands = positiveInteger("maxPendingCommands", options.maxPendingCommands ?? 64);
     this.maxCommandBytes = positiveInteger("maxCommandBytes", options.maxCommandBytes ?? 1_048_576);
     this.maxFrameBytes = positiveInteger("maxFrameBytes", options.maxFrameBytes ?? 32 * 1024 * 1024);
     this.maxListenersPerEvent = positiveInteger("maxListenersPerEvent", options.maxListenersPerEvent ?? 16);
-    socket.on("message", (data, isBinary) => this.receive(data, isBinary));
-    socket.on("close", () => this.failAll(new CdpClientError("CDP_CLOSED", "CDP connection closed.")));
-    socket.on("error", (error) => this.failAll(new CdpClientError("CDP_SOCKET_ERROR", "CDP connection failed.", { cause: error })));
+    responsePipe.on("data", this.handleData);
+    responsePipe.once("end", this.handleEnd);
+    responsePipe.once("close", this.handleClose);
+    responsePipe.once("error", this.handleResponseError);
+    requestPipe.once("close", this.handleClose);
+    requestPipe.once("error", this.handleRequestError);
   }
 
-  static async connect(endpoint: string, options: PrivateCdpClientOptions = {}) {
-    const url = privateCdpUrl(endpoint);
-    const connectTimeoutMs = positiveInteger("connectTimeoutMs", options.connectTimeoutMs ?? 5_000);
-    return new Promise<PrivateCdpClient>((resolve, reject) => {
-      const socket = new WebSocket(url, {
-        handshakeTimeout: connectTimeoutMs,
-        maxPayload: options.maxFrameBytes ?? 32 * 1024 * 1024,
-        perMessageDeflate: false,
-      });
-      const timer = setTimeout(() => {
-        socket.terminate();
-        reject(new CdpClientError("CDP_CONNECT_TIMEOUT", "CDP connection timed out."));
-      }, connectTimeoutMs);
-      socket.once("open", () => {
-        clearTimeout(timer);
-        resolve(new PrivateCdpClient(socket, options));
-      });
-      socket.once("error", (error) => {
-        clearTimeout(timer);
-        reject(new CdpClientError("CDP_CONNECT_FAILED", "CDP connection failed.", { cause: error }));
-      });
-    });
+  static connect(
+    requestPipe: Writable,
+    responsePipe: Readable,
+    options: PrivateCdpClientOptions = {},
+  ) {
+    if (!requestPipe || typeof requestPipe.write !== "function" ||
+      !responsePipe || typeof responsePipe.on !== "function") {
+      throw new CdpClientError("CDP_PIPE_INVALID", "Chrome CDP pipe streams are unavailable.");
+    }
+    return new PrivateCdpClient(requestPipe, responsePipe, options);
   }
 
   get isOpen() {
-    return !this.closed && this.socket.readyState === WebSocket.OPEN;
+    return !this.closed && !this.requestPipe.destroyed && !this.responsePipe.destroyed;
   }
 
-  async send<Result = unknown>(method: PrivateCdpMethod, params: Record<string, unknown> = {}) {
+  async send<Result = unknown>(
+    method: PrivateCdpMethod,
+    params: Record<string, unknown> = {},
+    scope: CdpSessionScope = {},
+  ) {
     if (!PRIVATE_CDP_METHODS.includes(method)) {
       throw new CdpClientError("CDP_METHOD_REJECTED", "CDP method is not in the private adapter allowlist.");
     }
-    if (!this.isOpen) throw new CdpClientError("CDP_CLOSED", "CDP connection is not open.");
+    if (!this.isOpen) throw new CdpClientError("CDP_CLOSED", "CDP pipe is not open.");
     if (this.pending.size >= this.maxPendingCommands) {
       throw new CdpClientError("CDP_BACKPRESSURE", "CDP command capacity is saturated.");
     }
     if (!params || typeof params !== "object" || Array.isArray(params)) {
       throw new CdpClientError("CDP_PARAMS_INVALID", "CDP params must be an object.");
     }
-    const id = this.nextId;
-    this.nextId += 1;
-    if (!Number.isSafeInteger(this.nextId)) this.nextId = 1;
+    const scopedSessionId = sessionId(scope);
+    const id = this.nextCommandId();
     let payload: string;
     try {
-      payload = JSON.stringify({ id, method, params });
+      payload = JSON.stringify({
+        id,
+        method,
+        params,
+        ...(scopedSessionId ? { sessionId: scopedSessionId } : {}),
+      });
     } catch (error) {
       throw new CdpClientError("CDP_PARAMS_INVALID", "CDP params are not serializable.", { cause: error });
     }
     if (Buffer.byteLength(payload, "utf8") > this.maxCommandBytes) {
       throw new CdpClientError("CDP_COMMAND_TOO_LARGE", "CDP command exceeds the safe size limit.");
     }
+    const frame = Buffer.from(`${payload}\u0000`, "utf8");
     return new Promise<Result>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
@@ -185,38 +174,44 @@ export class PrivateCdpClient {
       }, this.commandTimeoutMs);
       this.pending.set(id, {
         method,
+        sessionId: scopedSessionId,
         timer,
         resolve: (value) => resolve(value as Result),
         reject,
       });
-      this.socket.send(payload, (error) => {
+      this.requestPipe.write(frame, (error) => {
         if (!error) return;
         const pending = this.pending.get(id);
         if (!pending) return;
         clearTimeout(pending.timer);
         this.pending.delete(id);
-        reject(new CdpClientError("CDP_SEND_FAILED", "CDP command could not be sent.", { cause: error }));
+        reject(new CdpClientError("CDP_SEND_FAILED", "CDP command could not be written to Chrome.", { cause: error }));
       });
     });
   }
 
-  on(method: string, listener: EventListener) {
-    if (!/^([A-Za-z]+\.)+[A-Za-z]+$/u.test(method)) {
+  on(method: string, listener: EventListener, scope: CdpSessionScope = {}) {
+    if (!EVENT_PATTERN.test(method)) {
       throw new CdpClientError("CDP_EVENT_INVALID", "CDP event name is invalid.");
     }
-    const current = this.listeners.get(method) ?? new Set<EventListener>();
+    const key = listenerKey(method, sessionId(scope));
+    const current = this.listeners.get(key) ?? new Set<EventListener>();
     if (current.size >= this.maxListenersPerEvent) {
       throw new CdpClientError("CDP_LISTENER_BACKPRESSURE", "CDP event listener capacity is saturated.");
     }
     current.add(listener);
-    this.listeners.set(method, current);
+    this.listeners.set(key, current);
     return () => {
       current.delete(listener);
-      if (current.size === 0) this.listeners.delete(method);
+      if (current.size === 0) this.listeners.delete(key);
     };
   }
 
-  waitForEvent<Result = unknown>(method: string, timeoutMs = this.commandTimeoutMs) {
+  waitForEvent<Result = unknown>(
+    method: string,
+    timeoutMs = this.commandTimeoutMs,
+    scope: CdpSessionScope = {},
+  ) {
     positiveInteger("eventTimeoutMs", timeoutMs);
     return new Promise<Result>((resolve, reject) => {
       let unsubscribe: () => void = () => undefined;
@@ -228,51 +223,110 @@ export class PrivateCdpClient {
         clearTimeout(timer);
         unsubscribe();
         resolve(params as Result);
-      });
+      }, scope);
     });
   }
 
   async close() {
     if (this.closed) return;
     this.closed = true;
-    this.failAll(new CdpClientError("CDP_CLOSED", "CDP client closed."));
-    if (this.socket.readyState === WebSocket.CLOSED) return;
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => {
-        this.socket.terminate();
-        resolve();
-      }, this.closeTimeoutMs);
-      this.socket.once("close", () => {
-        clearTimeout(timer);
-        resolve();
-      });
-      this.socket.close(1000, "client closing");
-    });
+    this.detachStreams();
+    this.failAll(new CdpClientError("CDP_CLOSED", "CDP pipe closed."));
+    this.buffered = Buffer.alloc(0);
+    this.requestPipe.destroy();
+    this.responsePipe.destroy();
   }
 
-  private receive(data: RawData, isBinary: boolean) {
-    if (isBinary || rawDataBytes(data) > this.maxFrameBytes) {
-      this.protocolFailure("CDP frame is binary or exceeds the safe size limit.");
+  private nextCommandId() {
+    for (let attempts = 0; attempts < Number.MAX_SAFE_INTEGER; attempts += 1) {
+      const id = this.nextId;
+      this.nextId = this.nextId === Number.MAX_SAFE_INTEGER ? 1 : this.nextId + 1;
+      if (!this.pending.has(id)) return id;
+    }
+    throw new CdpClientError("CDP_BACKPRESSURE", "CDP command identifiers are exhausted.");
+  }
+
+  private readonly handleData = (chunk: Buffer | string) => {
+    if (this.closed) return;
+    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, "utf8");
+    let offset = 0;
+    while (offset < bytes.byteLength && !this.closed) {
+      const separator = bytes.indexOf(0, offset);
+      const end = separator === -1 ? bytes.byteLength : separator;
+      const segment = bytes.subarray(offset, end);
+      if (this.buffered.byteLength + segment.byteLength > this.maxFrameBytes) {
+        this.protocolFailure("CDP pipe frame exceeds the safe size limit.");
+        return;
+      }
+      if (segment.byteLength > 0) {
+        this.buffered = this.buffered.byteLength === 0
+          ? Buffer.from(segment)
+          : Buffer.concat([this.buffered, segment]);
+      }
+      if (separator === -1) return;
+      if (this.buffered.byteLength === 0) {
+        this.protocolFailure("CDP pipe contains an empty frame.");
+        return;
+      }
+      const frame = this.buffered;
+      this.buffered = Buffer.alloc(0);
+      this.receive(frame);
+      offset = separator + 1;
+    }
+  };
+
+  private readonly handleEnd = () => {
+    if (this.buffered.byteLength > 0) {
+      this.protocolFailure("CDP pipe ended with an incomplete frame.");
       return;
     }
+    this.transportFailure(new CdpClientError("CDP_PIPE_EOF", "Chrome closed the CDP response pipe."));
+  };
+
+  private readonly handleClose = () => {
+    this.transportFailure(new CdpClientError("CDP_CLOSED", "Chrome CDP pipe closed."));
+  };
+
+  private readonly handleResponseError = (error: Error) => {
+    this.transportFailure(new CdpClientError("CDP_PIPE_READ_FAILED", "Chrome CDP response pipe failed.", { cause: error }));
+  };
+
+  private readonly handleRequestError = (error: Error) => {
+    this.transportFailure(new CdpClientError("CDP_PIPE_WRITE_FAILED", "Chrome CDP request pipe failed.", { cause: error }));
+  };
+
+  private receive(frame: Buffer) {
     let message: unknown;
     try {
-      message = JSON.parse(rawDataText(data));
+      message = JSON.parse(STRICT_UTF8.decode(frame));
     } catch {
-      this.protocolFailure("CDP frame is not valid JSON.");
+      this.protocolFailure("CDP pipe frame is not strict UTF-8 JSON.");
       return;
     }
     if (!message || typeof message !== "object" || Array.isArray(message)) {
-      this.protocolFailure("CDP frame is not an object.");
+      this.protocolFailure("CDP pipe frame is not an object.");
       return;
     }
     const record = message as Record<string, unknown>;
     if (Number.isSafeInteger(record.id)) {
       const pending = this.pending.get(record.id as number);
       if (!pending) return;
+      const receivedSessionId = record.sessionId === undefined
+        ? null
+        : typeof record.sessionId === "string" && SESSION_ID_PATTERN.test(record.sessionId)
+          ? record.sessionId
+          : undefined;
+      if (receivedSessionId === undefined || receivedSessionId !== pending.sessionId) {
+        this.protocolFailure("CDP response sessionId does not match its command.");
+        return;
+      }
       clearTimeout(pending.timer);
       this.pending.delete(record.id as number);
-      if (record.error && typeof record.error === "object") {
+      if (record.error !== undefined) {
+        if (!record.error || typeof record.error !== "object" || Array.isArray(record.error)) {
+          this.protocolFailure("CDP response error has an invalid shape.");
+          return;
+        }
         const error = record.error as Record<string, unknown>;
         pending.reject(new CdpClientError(
           "CDP_COMMAND_FAILED",
@@ -283,8 +337,17 @@ export class PrivateCdpClient {
       }
       return;
     }
-    if (typeof record.method === "string") {
-      for (const listener of this.listeners.get(record.method) ?? []) {
+    if (typeof record.method === "string" && EVENT_PATTERN.test(record.method)) {
+      const receivedSessionId = record.sessionId === undefined
+        ? null
+        : typeof record.sessionId === "string" && SESSION_ID_PATTERN.test(record.sessionId)
+          ? record.sessionId
+          : undefined;
+      if (receivedSessionId === undefined) {
+        this.protocolFailure("CDP event sessionId is invalid.");
+        return;
+      }
+      for (const listener of this.listeners.get(listenerKey(record.method, receivedSessionId)) ?? []) {
         try {
           listener(record.params ?? {});
         } catch {
@@ -293,41 +356,37 @@ export class PrivateCdpClient {
       }
       return;
     }
-    this.protocolFailure("CDP frame is neither a response nor an event.");
+    this.protocolFailure("CDP pipe frame is neither a response nor an event.");
   }
 
   private protocolFailure(message: string) {
-    const error = new CdpClientError("CDP_PROTOCOL_ERROR", message);
+    this.transportFailure(new CdpClientError("CDP_PROTOCOL_ERROR", message));
+  }
+
+  private transportFailure(error: CdpClientError) {
+    if (this.closed) return;
+    this.closed = true;
+    this.detachStreams();
     this.failAll(error);
-    this.socket.close(1002, "protocol error");
+    this.buffered = Buffer.alloc(0);
+    this.requestPipe.destroy();
+    this.responsePipe.destroy();
+  }
+
+  private detachStreams() {
+    this.responsePipe.off("data", this.handleData);
+    this.responsePipe.off("end", this.handleEnd);
+    this.responsePipe.off("close", this.handleClose);
+    this.responsePipe.off("error", this.handleResponseError);
+    this.requestPipe.off("close", this.handleClose);
+    this.requestPipe.off("error", this.handleRequestError);
   }
 
   private failAll(error: Error) {
-    if (this.closed && this.pending.size === 0) return;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       pending.reject(error);
     }
     this.pending.clear();
-    if (this.socket.readyState === WebSocket.CLOSED) this.closed = true;
   }
-}
-
-export function normalizePrivateDevToolsWebSocket(endpoint: string, expectedPort: number) {
-  let parsed: URL;
-  try {
-    parsed = new URL(endpoint);
-  } catch {
-    throw new CdpClientError("CDP_ENDPOINT_INVALID", "DevTools WebSocket URL is invalid.");
-  }
-  if (
-    parsed.protocol !== "ws:" ||
-    !["127.0.0.1", "localhost", "[::1]"].includes(parsed.hostname) ||
-    Number(parsed.port) !== expectedPort ||
-    parsed.username || parsed.password || parsed.search || parsed.hash ||
-    !/^\/devtools\/(browser|page)\/[A-Za-z0-9._-]{1,256}$/u.test(parsed.pathname)
-  ) {
-    throw new CdpClientError("CDP_ENDPOINT_NOT_PRIVATE", "DevTools WebSocket binding is not private or expected.");
-  }
-  return `ws://127.0.0.1:${expectedPort}${parsed.pathname}`;
 }
