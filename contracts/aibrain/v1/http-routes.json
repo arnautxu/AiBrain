@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "operations": {
     "DELETE /api/automations/{taskId}": "JsonObject",
+    "GET /api/admin": "JsonObject",
     "GET /api/auth/session": "AuthSessionResponse",
     "GET /api/automations": "JsonObject",
     "GET /api/automations/{taskId}/runs": "JsonObject",
@@ -30,6 +31,7 @@
     "GET /api/usage/company": "CompanyUsageResponse",
     "GET /api/usage/me": "PersonalUsageResponse",
     "GET /api/workbench": "WorkbenchResponse",
+    "PATCH /api/admin": "JsonObject",
     "PATCH /api/automations/{taskId}": "JsonObject",
     "PATCH /api/projects/{projectId}": "JsonObject",
     "PATCH /api/settings": "JsonObject",

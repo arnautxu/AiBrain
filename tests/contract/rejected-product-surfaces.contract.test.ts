@@ -14,7 +14,7 @@ async function exists(relativePath: string) {
 }
 
 describe("rejected product surfaces", () => {
-  it("does not compile routes or panels for roles, onboarding or a remote control plane", async () => {
+  it("does not compile routes or panels for onboarding or a remote control plane", async () => {
     for (const relativePath of [
       "src/app/control/page.tsx",
       "src/app/onboarding/page.tsx",
@@ -37,7 +37,8 @@ describe("rejected product surfaces", () => {
     expect(authTypes).not.toMatch(/UserRole|owner|member/u);
     expect(session).not.toMatch(/user\.role|account\.role/u);
     expect(contract).not.toMatch(/\/api\/control-plane/u);
-    expect(contract).toContain("V1 no publica rutas ni paneles de onboarding o control plane remoto");
+    expect(contract).toContain("AiBrain no envía invitaciones ni publica un control plane remoto.");
     expect(contract).toContain("Las automatizaciones programadas son locales");
+    expect(contract).toContain("### Centro de administración del workspace");
   });
 });
