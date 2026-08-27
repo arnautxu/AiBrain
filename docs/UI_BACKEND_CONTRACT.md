@@ -795,17 +795,23 @@ No reenvía `relativePath`, paths absolutos, MIME, hash ni nombre. El backend:
 
 - exige `documents.read | consult | allow` en el fingerprint de ese turn;
 - vuelve a verificar user, thread, fichero regular, tamaño y SHA-256;
-- deriva el path absoluto bajo el staging privado del empleado;
-- expone staging como root runtime de lectura, manteniendo writable solo el
-  workspace del proyecto;
-- entrega imágenes como `localImage` y Office/PDF/texto como menciones de path,
-  acompañadas de una instrucción server-side que los trata como datos no
-  confiables y prohíbe modificarlos o publicarlos.
+- mantiene el path absoluto y todo staging bajo autoridad exclusiva del
+  servidor; el worker solo ve su `staging/tmp` privado;
+- para texto valida UTF-8; para Office/PDF usa exclusivamente el PDF atestado
+  por preview, extrae texto acotado con Poppler y, si existe, incorpora la
+  primera página renderizada; para imagen incorpora bytes validados como data
+  URL;
+- entrega esos inputs preparados como datos no confiables dentro del request
+  App Server. Nunca usa `mention`, `localImage`, `localAudio` ni otra referencia
+  a un path staged.
 
 Máximo 10 documentos y 200 MiB verificados por turn como protección de
-saturación. Los metadatos seguros se guardan en `ChatMessage.attachments`; los
-paths no se devuelven a la UI. Un ID de otro thread/empleado, un contenido
-alterado o un permiso denegado falla antes de iniciar el turn de Codex.
+saturación. El contenido preparado se limita además a 2 MiB de texto por
+documento, 4 MiB de texto y 20 MiB de imágenes codificadas por turn. Los
+metadatos seguros se guardan en `ChatMessage.attachments`; los paths no se
+devuelven a la UI ni al worker. Un ID de otro thread/empleado, un contenido
+alterado, un preview no atestado o un permiso denegado falla antes de iniciar el
+turn de Codex.
 
 El backend consume el multipart por streaming y escribe un temporal privado;
 no materializa el request ni el fichero completo en RAM. Para OOXML compara
@@ -938,7 +944,7 @@ Body estricto:
 
 El ejemplo omite los campos de identidad/preview ya definidos en `PublicationOperation`; la respuesta real incluye la operación completa. En `decline`, `permissionFingerprint` es `null` y el fichero oficial no se modifica.
 
-Confirmar vuelve a resolver `PERMISSIONS.md`. La escritura compara el original congelado, versiona el original si existe, escribe atómicamente y verifica el hash posterior. `status: "conflict"` es un resultado válido si el original cambió. Repetir exactamente el mismo `clientRequestId` y decisión devuelve el resultado ya registrado; cambiar contenido o decisión devuelve `409`.
+Confirmar vuelve a resolver `PERMISSIONS.md`. La escritura compara el original congelado, versiona el original si existe, escribe atómicamente y verifica el hash posterior. El lock del target es único por instalación y destino, incluso cuando dos empleados confirman operaciones desde estados privados distintos. `status: "conflict"` es un resultado válido si el original cambió. Repetir exactamente el mismo `clientRequestId` y decisión devuelve el resultado ya registrado; cambiar contenido o decisión devuelve `409`.
 
 Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `409` decisión previa o `clientRequestId` reutilizado con otra intención; `400` binding/path inseguro; `503` publicación no disponible. Un cambio del original detectado durante la confirmación normalmente es `200` con `operation.status: "conflict"`.
 

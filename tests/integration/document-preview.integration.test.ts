@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { DocumentPreviewService } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
+import { ServerTurnDocumentInputResolver } from "@/documents/turn-attachments";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { ResourceLockManager } from "@/storage/resource-lock";
 
@@ -15,6 +16,7 @@ const tools = {
   soffice: "/opt/homebrew/bin/soffice",
   pdfinfo: "/opt/homebrew/bin/pdfinfo",
   pdftoppm: "/opt/homebrew/bin/pdftoppm",
+  pdftotext: "/opt/homebrew/bin/pdftotext",
 };
 const hasToolchain = Object.values(tools).every(existsSync);
 const runFullMatrix = hasToolchain && process.env.AIBRAIN_REAL_DOCUMENT_MATRIX === "1";
@@ -66,6 +68,22 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
   expect((await readFile(path.join(previewDirectory, "document.pdf"))).subarray(0, 5).toString("ascii")).toBe("%PDF-");
   expect((await readFile(path.join(previewDirectory, "page-1.png"))).subarray(0, 8))
     .toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const turnInputs = await new ServerTurnDocumentInputResolver({
+    stagingRoot,
+    previews: new DocumentPreviewService({
+      stagingRoot,
+      previewRoot: path.join(root, "previews"),
+      lockManager: locks,
+      tools,
+      requireQpdf: false,
+    }),
+    pdftotext: tools.pdftotext,
+  }).resolve(staged);
+  expect(turnInputs).toEqual([
+    expect.objectContaining({ type: "text", text: expect.stringContaining("AiBrain document preview integration") }),
+    expect.objectContaining({ type: "image", url: expect.stringMatching(/^data:image\/png;base64,/u) }),
+  ]);
+  expect(JSON.stringify(turnInputs)).not.toContain(stagingRoot);
 }, 90_000);
 
 it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with the real toolchain", async () => {

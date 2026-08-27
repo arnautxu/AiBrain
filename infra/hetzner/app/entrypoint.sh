@@ -114,6 +114,7 @@ for executable in \
   /usr/bin/chromium \
   /usr/bin/pdfinfo \
   /usr/bin/pdftoppm \
+  /usr/bin/pdftotext \
   /usr/bin/qpdf; do
   [ -x "$executable" ] || fail "required executable is unavailable: $executable"
 done

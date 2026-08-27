@@ -83,7 +83,8 @@ done
 
 # The container root is read-only, then the complete product dataRoot is hidden.
 # Only company context, source-ro, this employee's explicit Markdown context and
-# declared writable roots are re-exposed. This prevents read-only credential
+# declared writable roots are re-exposed. Staged uploads remain server-only;
+# the worker receives only server-prepared turn inputs. This prevents credential
 # theft from browser profiles, local sessions, backups or sibling employees.
 exec /usr/bin/bwrap \
   --die-with-parent \
@@ -107,7 +108,7 @@ exec /usr/bin/bwrap \
   --remount-ro "$publish_root" \
   --bind "$runtime_root" "$runtime_root" \
   --bind "$workspace" "$workspace" \
-  --bind "$staging_root" "$staging_root" \
+  --bind "$staging_root/tmp" "$staging_root/tmp" \
   --bind "$artifacts_root" "$artifacts_root" \
   --bind "$transport_audit_root" "$transport_audit_root" \
   --chdir "$workspace" \

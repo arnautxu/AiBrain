@@ -377,6 +377,89 @@ describe("server-side document publisher", () => {
     expect((await service.readAudit()).filter((event) => event.eventType === "published")).toHaveLength(1);
   });
 
+  it("serializes one official target across two users with separate private state and lock roots", async () => {
+    const target = path.join(publishRoot, "knowledge/report.txt");
+    await writeFile(target, "shared original");
+    const otherStaging = path.join(root, "staging-user-two");
+    const otherState = path.join(root, "publisher-state-user-two");
+    await Promise.all([
+      mkdir(otherStaging, { recursive: true, mode: 0o700 }),
+      mkdir(otherState, { recursive: true, mode: 0o700 }),
+    ]);
+    const otherLocks = new ResourceLockManager({
+      rootDirectory: path.join(root, "locks-user-two"),
+      retryDelayMs: 1,
+      maxRetryDelayMs: 4,
+      jitterRatio: 0,
+    });
+    const sharedTargetLockRoot = path.join(root, "global-publication-target-locks");
+    const first = publisher({
+      targetLockManager: new ResourceLockManager({
+        rootDirectory: sharedTargetLockRoot,
+        retryDelayMs: 1,
+        maxRetryDelayMs: 4,
+        jitterRatio: 0,
+      }),
+    });
+    const second = publisher({
+      userId: OTHER_USER_ID,
+      stagingRoot: otherStaging,
+      stateRoot: otherState,
+      lockManager: otherLocks,
+      targetLockManager: new ResourceLockManager({
+        rootDirectory: sharedTargetLockRoot,
+        retryDelayMs: 1,
+        maxRetryDelayMs: 4,
+        jitterRatio: 0,
+      }),
+      workerVisibleRoots: [otherStaging, workerRoot],
+    });
+    const firstCandidate = await stagedCandidate("first user candidate", `threads/${THREAD_ID}/first-user.txt`);
+    const secondRelativePath = `threads/${THREAD_ID}/second-user.txt`;
+    const secondAbsolutePath = path.join(otherStaging, secondRelativePath);
+    await mkdir(path.dirname(secondAbsolutePath), { recursive: true, mode: 0o700 });
+    const secondData = Buffer.from("second user candidate");
+    await writeFile(secondAbsolutePath, secondData, { mode: 0o600 });
+    const firstFrozen = await first.freezeCandidate({
+      operationId: OPERATION_ID,
+      clientRequestId: "freeze-user-one",
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      candidateRelativePath: firstCandidate.relativePath,
+      targetRelativePath: "knowledge/report.txt",
+      preview: preview(firstCandidate.data),
+    });
+    const secondFrozen = await second.freezeCandidate({
+      operationId: SECOND_OPERATION_ID,
+      clientRequestId: "freeze-user-two",
+      threadId: THREAD_ID,
+      turnId: TURN_ID,
+      candidateRelativePath: secondRelativePath,
+      targetRelativePath: "knowledge/report.txt",
+      preview: preview(secondData, { previewId: "99999999-9999-4999-8999-999999999999" }),
+    });
+
+    const [firstResult, secondResult] = await Promise.all([
+      first.confirm({
+        operationId: OPERATION_ID,
+        clientRequestId: "confirm-user-one",
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        confirmationToken: firstFrozen.confirmationToken,
+      }),
+      second.confirm({
+        operationId: SECOND_OPERATION_ID,
+        clientRequestId: "confirm-user-two",
+        threadId: THREAD_ID,
+        turnId: TURN_ID,
+        confirmationToken: secondFrozen.confirmationToken,
+      }),
+    ]);
+
+    expect([firstResult.status, secondResult.status].sort()).toEqual(["conflict", "published"]);
+    expect(["first user candidate", "second user candidate"]).toContain(await readFile(target, "utf8"));
+  });
+
   it("rejects traversal and symbolic links in staging and publication paths", async () => {
     const service = publisher();
     const candidate = await stagedCandidate("candidate");

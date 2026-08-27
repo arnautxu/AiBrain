@@ -346,7 +346,7 @@ export function buildWorkerLaunchContext(
         expectedRoots.home,
         expectedRoots.xdgRoot,
         expectedRoots.workspace,
-        expectedRoots.staging,
+        expectedRoots.stagingTemp,
         expectedRoots.artifacts,
         expectedRoots.transportAudit,
       ]),

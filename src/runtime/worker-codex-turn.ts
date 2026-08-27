@@ -270,7 +270,7 @@ export async function runWorkerCodexTurn(
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
-    runtimeWorkspaceRoots: [projectWorkspace, runtime.handle.roots.staging],
+    runtimeWorkspaceRoots: [projectWorkspace],
     approvalPolicy: runtimeConfig.approvalPolicy,
     approvalsReviewer: "user",
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
@@ -583,7 +583,7 @@ export async function runWorkerCodexTurn(
         })),
       ],
       cwd: projectWorkspace,
-      runtimeWorkspaceRoots: [projectWorkspace, runtime.handle.roots.staging],
+      runtimeWorkspaceRoots: [projectWorkspace],
       approvalPolicy: runtimeConfig.approvalPolicy,
       approvalsReviewer: "user",
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
