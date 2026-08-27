@@ -64,10 +64,14 @@ forbidMatch(compose, /^\s*privileged\s*:/mu, "Compose enables privileged mode");
 forbidMatch(compose, /^\s*network_mode\s*:/mu, "Compose joins another network namespace");
 forbidMatch(compose, /^\s*external\s*:\s*true/mu, "Compose reuses an external network or volume");
 forbidMatch(arnallDeployGateway, /(?:docker\s+(?:system|builder|image)\s+prune|docker\s+volume\s+(?:rm|prune)|docker\s+network\s+(?:rm|prune)|BGreenly)/iu, "Arnall deploy gateway contains a broad cleanup or foreign tenant reference");
+forbidMatch(arnallDeployGateway, /--no-same-permissions/u, "Arnall deploy gateway strips reviewed Git archive read permissions");
 requireMatch(arnallDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,120}\^deploy\\ \(\[0-9a-f\]\{40\}\)\$/u, "Arnall deploy gateway does not constrain the forced SSH command to one immutable revision");
 requireMatch(arnallDeployGateway, /AIBRAIN_INSTALLATION_ID=\$\{INSTALLATION_ID\}[\s\S]{0,250}AIBRAIN_COMPOSE_PROJECT_NAME=\$\{COMPOSE_PROJECT\}/u, "Arnall deploy gateway does not verify the exact installation and Compose project");
 requireMatch(arnallDeployGateway, /validate_archive[\s\S]{0,1500}source archive contains links or special files/u, "Arnall deploy gateway does not validate the source archive before root extraction");
+requireMatch(arnallDeployGateway, /tar --extract.*--no-same-owner/u, "Arnall deploy gateway does not retain reviewed modes while refusing archive ownership");
 requireMatch(arnallDeployGateway, /dd if=\/dev\/stdin.*iflag=fullblock/u, "Arnall deploy gateway can truncate a streamed archive on short pipe reads");
+requireMatch(arnallDeployGateway, /docker push "\$egress_tag"[\s\S]{0,1200}remove_new_dangling_images "\$dangling_before"/u, "Arnall deploy gateway does not reclaim only its own new intermediates before health-gated promotion");
+requireMatch(arnallDeployGateway, /bash -n "\$\{release_dir\}\/infra\/hetzner\/app\/deploy-arnall-main\.sh"[\s\S]{0,240}\/usr\/local\/sbin\/aibrain-deploy-gateway/u, "Arnall deploy gateway does not install the validated versioned gateway after promotion");
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful Backend CI");
 requireMatch(arnallDeployWorkflow, /head_sha[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnall deployment does not transmit the immutable tested revision");
@@ -102,6 +106,7 @@ for (const tool of ["soffice", "pdfinfo", "pdftoppm", "pdftotext", "qpdf"]) {
 }
 requireMatch(dockerfile, /org\.opencontainers\.image\.revision="\$\{AIBRAIN_REVISION\}"/u, "Docker image does not record its exact source revision");
 requireMatch(dockerfile, /FROM \$\{NODE_IMAGE\} AS egress-gateway/u, "Dockerfile lacks the first-party egress gateway target on the pinned Node base");
+requireMatch(dockerfile, /FROM \$\{NODE_IMAGE\} AS egress-gateway[\s\S]*FROM \$\{NODE_IMAGE\} AS dependencies/u, "egress target follows the expensive application builder under the legacy server builder");
 requireMatch(dockerfile, /USER aibrain-egress:aibrain-egress[\s\S]*ENTRYPOINT \["node", "\/usr\/local\/share\/aibrain\/egress-gateway\.mts"\]/u, "egress gateway image is not an unprivileged first-party Node target");
 
 for (const marker of [
