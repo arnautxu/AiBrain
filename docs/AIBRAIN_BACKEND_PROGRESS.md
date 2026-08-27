@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `40c94b8` en
+- Último checkpoint backend publicado: `7655fb0` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -47,13 +47,13 @@
 | 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
 | 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`: staging queda server-only, Codex recibe inputs preparados sin paths y el lock físico de target es global por instalación; faltan retención/backpressure, sandbox del conversor y backup documental |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
-| 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`: Auth/contrato role-free, superficies rechazadas retiradas y schemas Codex 0.149.1 regenerados/comparados byte a byte; falta hacer ejecutables los schemas/ejemplos HTTP propios restantes |
+| 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8` y el guard/regeneración de contratos fijados en `40c94b8`. La siguiente acción concreta es convertir el contrato HTTP propio en schemas ejecutables contra las routes.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8` y el contrato HTTP ejecutable en `7655fb0`. La siguiente acción concreta es cerrar el backup compuesto de estado privado más documental publicado, con manifest verificable y restore transaccional local antes de la réplica externa.
 
 ## Decisiones menores registradas
 
@@ -65,6 +65,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Los fixtures `example-lab-dev` y `northwind-qa` son sintéticos y prueban que la misma base arranca con empresa, dominio, marca, assets y rutas distintos.
 - Los eventos del transporte se aceptan únicamente tras persistencia JSONL y se reanudan con cursor durable; no existe journal in-memory implícito en la composición WebSocket.
 - Los payloads RPC se validan en runtime con los JSON Schemas generados por Codex 0.149.1, además del tipado estático.
+- El contrato UI V1 tiene dos artefactos versionados: un inventario de método+ruta que debe coincidir exactamente con los exports reales de Next y un bundle JSON Schema compilado. Sus ejemplos, fixtures TypeScript y respuestas HTTP reales de sesión/workbench/runtime se validan en CI local; añadir o retirar una ruta rompe `test:contract` hasta actualizar el contrato deliberadamente.
 - Las credenciales efímeras usadas durante el cambio inicial se cifran en disco con AES-256-GCM; la cookie de sesión contiene 256 bits aleatorios y el store conserva solo su SHA-256.
 - `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en el App Server privado y registra fingerprint/versiones en un journal durable por usuario.
 - El worker se ejecuta bajo `bubblewrap`: oculta todo `dataRoot`, reexpone únicamente sus raíces declaradas y sustituye `publishWriteRoot` por un mount vacío read-only. El preflight del contenedor falla si esa frontera no existe.
@@ -140,11 +141,11 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Con autorización de operación sobre el Hetzner QA y Docker disponible, ejecutar
-el handoff externo en redes, volúmenes y puertos exclusivos de AiBrain,
-abortando ante cualquier referencia o conexión a BGreenly. No queda una
-validación Docker/host equivalente que pueda ejecutarse en este Mac sin ampliar
-las acciones externas autorizadas.
+Ampliar backup/restore para incluir el árbol documental publicado mediante un
+snapshot compuesto coherente, sin seguir symlinks/hardlinks, con hashes por
+componente, preflight de permisos/espacio y restore transaccional a raíces QA
+vacías. Después se añadirá el adapter de réplica cifrada off-host y su runbook;
+la conexión efectiva al destino externo seguirá pendiente de credenciales.
 
 ## Últimas validaciones
 
@@ -274,6 +275,14 @@ las acciones externas autorizadas.
   temporal y confirmó igualdad byte a byte.
 - Push verificado: `ed2ba70..40c94b8` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Contrato UI ejecutable `7655fb0`: typecheck y lint verdes; `test:contract`
+  13/13 con paridad exacta de 39 operaciones, schemas y ejemplos compilados;
+  E2E 4/4 validando respuestas Next reales, incluido provider Auth caído y
+  restart; suite completa 87 ficheros pasados + 1 opt-in omitido, 393 pruebas
+  pasadas + 3 omitidas; Codex 0.149.1 regenerado byte a byte y build de
+  producción verde con 38 rutas dinámicas.
+- Push verificado: `ae03868..7655fb0` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -295,7 +304,7 @@ las acciones externas autorizadas.
 | Publicación confirmada | Freeze+hash+preview+HMAC+conflicto+versión+atomic write+lock global por target | Focalizadas, carrera concurrente entre dos usuarios y 28/28 de la selección documental/runtime |
 | Browser/Computer Use aislado | CDP pipe autenticado, perfil/targets/navegación/descargas/viewer por usuario/thread | Chrome real 2/2 y matriz browser focalizada 50/50 |
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
-| Contratos UI reales | Schemas HTTP/eventos/tools/errores en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | Contract tests y regeneración/compare byte a byte de Codex 0.149.1; schemas HTTP propios aún en curso |
+| Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
 | Backup/restore/recovery | Snapshots con manifest/hash y restore separado | 8 pruebas locales, incluidas corrupción, hardlink y recovery interrumpido; contenedor QA pendiente |
 | Operación/release/rollback | Compose, Nginx, health, logs, alertas, drain y release dual atómica | Release manager 5/5 y validator estático verde; ejecución Docker QA pendiente |
@@ -311,6 +320,7 @@ npm run lint
 npm run test:unit
 npm run test:integration
 npm run test:contract
+npm run contracts:verify
 npm run test:e2e
 npm run test:documents:real
 AIBRAIN_REAL_CHROME_TEST=1 AIBRAIN_CHROME_EXECUTABLE=/ruta/chrome-headless-shell AIBRAIN_CHROME_EXPECTED_VERSION=152.0.7977.64 npm run test:browser:real
