@@ -18,6 +18,10 @@ const project: WorkbenchProject = {
   slug: "synthetic-project",
   status: "active",
   pinned: false,
+  instructions: "",
+  sources: [],
+  memory: { enabled: true, notes: "", updatedAt: null },
+  sharing: { visibility: "private", members: [] },
   workspace: {
     id: WORKSPACE_ID,
     label: "Synthetic Project",

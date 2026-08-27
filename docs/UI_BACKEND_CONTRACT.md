@@ -228,7 +228,7 @@ type PublicInstallationBranding = {
 
 La rama UI debe conservar ese límite o acordar una ruta nueva antes de intentar `fetch('/api/installation')`; esa ruta no existe.
 
-No existen roles de producto, onboarding, invitaciones ni control plane HTTP. La identidad local provisionada y `PERMISSIONS.md` son las únicas fuentes server-side de perfil y permiso. El workbench recibe también `logoPath`, por lo que login y aplicación muestran la marca de la instalación sin una rama por empresa.
+No existe todavía un control plane remoto de onboarding o invitaciones. La identidad local provisionada y `PERMISSIONS.md` siguen siendo las únicas fuentes server-side de autorización efectiva. Los miembros guardados en un proyecto son metadatos locales explícitos: no crean cuentas, no envían correo y no amplían permisos del runtime. El workbench recibe también `logoPath`, por lo que login y aplicación muestran la marca de la instalación sin una rama por empresa.
 
 ## 5. Proyectos y threads
 
@@ -243,12 +243,40 @@ type WorkbenchWorkspace = {
   isPrimary: boolean;
 };
 
+type ProjectSource = {
+  id: string;
+  kind: "file" | "link" | "note";
+  name: string;
+  url: string | null;
+  mimeType: string | null;
+  size: number | null;
+  excerpt: string | null; // texto persistido, máximo 32.000
+  status: "ready" | "pending-index";
+  createdAt: string;
+};
+
+type ProjectMember = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: "owner" | "editor" | "viewer";
+  status: "active" | "invited-local";
+  addedAt: string;
+};
+
 type WorkbenchProject = {
   id: string;
   name: string;       // 1–80 caracteres no vacíos
   slug: string;
   status: "active" | "archived";
   pinned: boolean;
+  instructions: string; // máximo 16.000; se inyecta como instrucción persistente
+  sources: ProjectSource[]; // máximo 100
+  memory: { enabled: boolean; notes: string; updatedAt: string | null };
+  sharing: {
+    visibility: "private" | "shared";
+    members: ProjectMember[]; // acceso declarado local, no invitación remota
+  };
   workspace: WorkbenchWorkspace;
   createdAt: string;
   updatedAt: string;
@@ -330,13 +358,16 @@ Threads listados usan `WorkbenchThreadSummary` y la clave `threads`.
 
 `GET /api/projects/{projectId}` → `{ "project": WorkbenchProject }`.
 
-`PATCH /api/projects/{projectId}` acepta uno o varios de:
+`PATCH /api/projects/{projectId}` acepta uno o varios de `name`, `pinned`, `status`, `instructions`, `sources`, `memory` y `sharing`:
 
 ```json
 {
   "name": "Renamed Operations",
   "pinned": true,
-  "status": "archived"
+  "status": "active",
+  "instructions": "Responde en español y cita las fuentes del proyecto.",
+  "memory": { "enabled": true, "notes": "El cliente prefiere entregas los viernes.", "updatedAt": "2026-08-28T09:00:00.000Z" },
+  "sharing": { "visibility": "private", "members": [] }
 }
 ```
 
@@ -630,7 +661,7 @@ La UI debe habilitar selección/invocación según `models`, `skills` y `capabil
 
 ### 7.3 Superficies no publicadas
 
-V1 no publica rutas ni paneles de onboarding, invitaciones, roles, control plane o automatizaciones programadas. No deben añadirse clientes, estados vacíos ni fallbacks que simulen esas capacidades.
+V1 no publica rutas de onboarding, envío de invitaciones, control plane remoto o automatizaciones programadas. El panel de proyecto puede persistir roles declarativos simples y marcar miembros como `invited-local`, pero debe explicar que no se ha enviado nada y que la autorización efectiva sigue en la política server-side. No deben añadirse estados que simulen acceso remoto efectivo.
 
 ## 8. Approvals
 

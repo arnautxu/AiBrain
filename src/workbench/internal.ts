@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import type { ProjectSource, WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 
 export type StoredProject = WorkbenchProject & {
   workspaceKey: string;
@@ -14,6 +14,9 @@ export type ThreadRuntimeContext = {
   projectId: string;
   projectName: string;
   workspaceKey: string;
+  projectInstructions: string;
+  projectMemory: string;
+  projectSources: Pick<ProjectSource, "kind" | "name" | "url" | "excerpt" | "status">[];
   runtimeThreadToken: string | null;
 };
 

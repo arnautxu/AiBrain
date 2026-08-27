@@ -60,6 +60,50 @@ afterEach(async () => {
 });
 
 describe("FileWorkbenchStore", () => {
+  it("persists project instructions, sources, memory and local sharing in runtime context", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Company handbook");
+    const sourceId = randomUUID();
+    const memberId = randomUUID();
+    const updatedAt = new Date().toISOString();
+    await store.updateProject(USER_A, project.id, {
+      instructions: "Responde en español y cita las fuentes del proyecto.",
+      sources: [{
+        id: sourceId,
+        kind: "note",
+        name: "Política comercial",
+        url: null,
+        mimeType: "text/plain",
+        size: 26,
+        excerpt: "Descuento máximo autorizado: 10%.",
+        status: "ready",
+        createdAt: updatedAt,
+      }],
+      memory: { enabled: true, notes: "El cliente prefiere entregas los viernes.", updatedAt },
+      sharing: {
+        visibility: "shared",
+        members: [{
+          id: memberId,
+          email: "ana@example.com",
+          name: null,
+          role: "editor",
+          status: "invited-local",
+          addedAt: updatedAt,
+        }],
+      },
+    });
+
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    await expect(restarted.getProjectRuntimeContext(USER_A, project.id)).resolves.toMatchObject({
+      projectInstructions: "Responde en español y cita las fuentes del proyecto.",
+      projectMemory: "El cliente prefiere entregas los viernes.",
+      projectSources: [{ name: "Política comercial", status: "ready" }],
+    });
+    await expect(restarted.getProject(USER_A, project.id)).resolves.toMatchObject({
+      sharing: { visibility: "shared", members: [{ email: "ana@example.com", role: "editor" }] },
+    });
+  });
+
   it("treats an identical retried turn as idempotent and rejects divergent reuse", async () => {
     const { store } = await fixture();
     const project = await store.createProject(USER_A, "Retry project");

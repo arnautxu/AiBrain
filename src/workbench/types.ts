@@ -5,6 +5,11 @@ export type ProjectStatus = "active" | "archived";
 export type ThreadStatus = "active" | "archived";
 export type WorkspaceStatus = "ready" | "pending" | "unavailable";
 export type WorkbenchPersistence = "filesystem" | "filesystem-demo" | "browser-preview";
+export type ProjectVisibility = "private" | "shared";
+export type ProjectMemberRole = "owner" | "editor" | "viewer";
+export type ProjectMemberStatus = "active" | "invited-local";
+export type ProjectSourceKind = "file" | "link" | "note";
+export type ProjectSourceStatus = "ready" | "pending-index";
 
 /** Internal per-user workspace backing chats that are not filed in a project. */
 export const STANDALONE_PROJECT_SLUG = "aibrain-standalone-chats";
@@ -17,12 +22,48 @@ export type WorkbenchWorkspace = {
   isPrimary: boolean;
 };
 
+export type ProjectSource = {
+  id: string;
+  kind: ProjectSourceKind;
+  name: string;
+  url: string | null;
+  mimeType: string | null;
+  size: number | null;
+  excerpt: string | null;
+  status: ProjectSourceStatus;
+  createdAt: string;
+};
+
+export type ProjectMember = {
+  id: string;
+  email: string;
+  name: string | null;
+  role: ProjectMemberRole;
+  status: ProjectMemberStatus;
+  addedAt: string;
+};
+
+export type ProjectMemory = {
+  enabled: boolean;
+  notes: string;
+  updatedAt: string | null;
+};
+
+export type ProjectSharing = {
+  visibility: ProjectVisibility;
+  members: ProjectMember[];
+};
+
 export type WorkbenchProject = {
   id: string;
   name: string;
   slug: string;
   status: ProjectStatus;
   pinned: boolean;
+  instructions: string;
+  sources: ProjectSource[];
+  memory: ProjectMemory;
+  sharing: ProjectSharing;
   workspace: WorkbenchWorkspace;
   createdAt: string;
   updatedAt: string;
@@ -77,6 +118,10 @@ export type UpdateProjectInput = {
   name?: string;
   pinned?: boolean;
   status?: ProjectStatus;
+  instructions?: string;
+  sources?: ProjectSource[];
+  memory?: ProjectMemory;
+  sharing?: ProjectSharing;
 };
 export type CreateThreadInput = { title: string };
 export type UpdateThreadInput = {
@@ -96,6 +141,48 @@ export function isUuid(value: unknown): value is string {
 
 function isIsoDate(value: unknown) {
   return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isSafeText(value: unknown, maximum: number) {
+  return typeof value === "string" && value.length <= maximum && !/\p{C}/u.test(value);
+}
+
+function isProjectSource(value: unknown): value is ProjectSource {
+  if (!isRecord(value)) return false;
+  return Object.keys(value).length === 9 &&
+    isUuid(value.id) &&
+    (value.kind === "file" || value.kind === "link" || value.kind === "note") &&
+    typeof value.name === "string" && isSafeText(value.name, 160) && value.name.trim().length > 0 &&
+    (value.url === null || (typeof value.url === "string" && value.url.length <= 2_048 && /^https?:\/\//.test(value.url))) &&
+    (value.mimeType === null || isSafeText(value.mimeType, 120)) &&
+    (value.size === null || (Number.isSafeInteger(value.size) && (value.size as number) >= 0 && (value.size as number) <= 20_000_000)) &&
+    (value.excerpt === null || isSafeText(value.excerpt, 32_000)) &&
+    (value.status === "ready" || value.status === "pending-index") &&
+    isIsoDate(value.createdAt);
+}
+
+function isProjectMember(value: unknown): value is ProjectMember {
+  if (!isRecord(value)) return false;
+  return Object.keys(value).length === 6 &&
+    isUuid(value.id) &&
+    typeof value.email === "string" && value.email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.email) &&
+    (value.name === null || (typeof value.name === "string" && isSafeText(value.name, 100) && value.name.trim().length > 0)) &&
+    (value.role === "owner" || value.role === "editor" || value.role === "viewer") &&
+    (value.status === "active" || value.status === "invited-local") &&
+    isIsoDate(value.addedAt);
+}
+
+function isProjectMemory(value: unknown): value is ProjectMemory {
+  return isRecord(value) && Object.keys(value).length === 3 &&
+    typeof value.enabled === "boolean" && isSafeText(value.notes, 16_000) &&
+    (value.updatedAt === null || isIsoDate(value.updatedAt));
+}
+
+function isProjectSharing(value: unknown): value is ProjectSharing {
+  return isRecord(value) && Object.keys(value).length === 2 &&
+    (value.visibility === "private" || value.visibility === "shared") &&
+    Array.isArray(value.members) && value.members.length <= 100 && value.members.every(isProjectMember) &&
+    new Set(value.members.map((member) => member.email.toLocaleLowerCase())).size === value.members.length;
 }
 
 export function isProjectName(value: unknown): value is string {
@@ -122,6 +209,10 @@ export function isWorkbenchProject(value: unknown): value is WorkbenchProject {
     typeof value.slug === "string" && /^[a-z0-9][a-z0-9-]{0,62}$/.test(value.slug) &&
     (value.status === "active" || value.status === "archived") &&
     typeof value.pinned === "boolean" &&
+    isSafeText(value.instructions, 16_000) &&
+    Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isProjectSource) &&
+    isProjectMemory(value.memory) &&
+    isProjectSharing(value.sharing) &&
     isWorkbenchWorkspace(value.workspace) &&
     isIsoDate(value.createdAt) &&
     isIsoDate(value.updatedAt);
@@ -227,12 +318,16 @@ export function isCreateProjectInput(value: unknown): value is CreateProjectInpu
 export function isUpdateProjectInput(value: unknown): value is UpdateProjectInput {
   if (!isRecord(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length === 0 || keys.some((key) => !["name", "pinned", "status"].includes(key))) {
+  if (keys.length === 0 || keys.some((key) => !["name", "pinned", "status", "instructions", "sources", "memory", "sharing"].includes(key))) {
     return false;
   }
   return (!("name" in value) || isProjectName(value.name)) &&
     (!("pinned" in value) || typeof value.pinned === "boolean") &&
-    (!("status" in value) || value.status === "active" || value.status === "archived");
+    (!("status" in value) || value.status === "active" || value.status === "archived") &&
+    (!("instructions" in value) || isSafeText(value.instructions, 16_000)) &&
+    (!("sources" in value) || (Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isProjectSource))) &&
+    (!("memory" in value) || isProjectMemory(value.memory)) &&
+    (!("sharing" in value) || isProjectSharing(value.sharing));
 }
 
 export function isCreateThreadInput(value: unknown): value is CreateThreadInput {

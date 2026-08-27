@@ -72,6 +72,10 @@ function seededProject(name: string, slug: string, workspaceKey: string): Stored
     slug,
     status: "active",
     pinned: workspaceKey === "workspace",
+    instructions: "",
+    sources: [],
+    memory: { enabled: true, notes: "", updatedAt: null },
+    sharing: { visibility: "private", members: [] },
     workspace: {
       id: randomUUID(),
       label: workspaceKey === "workspace" ? "Workspace principal" : name,
@@ -149,6 +153,15 @@ async function readState(session: AuthSession) {
             upgraded = true;
           }
         }
+      }
+    }
+    if (decoded && typeof decoded === "object" && "projects" in decoded && Array.isArray(decoded.projects)) {
+      for (const project of decoded.projects) {
+        if (!project || typeof project !== "object") continue;
+        if (!("instructions" in project)) { Object.assign(project, { instructions: "" }); upgraded = true; }
+        if (!("sources" in project)) { Object.assign(project, { sources: [] }); upgraded = true; }
+        if (!("memory" in project)) { Object.assign(project, { memory: { enabled: true, notes: "", updatedAt: null } }); upgraded = true; }
+        if (!("sharing" in project)) { Object.assign(project, { sharing: { visibility: "private", members: [] } }); upgraded = true; }
       }
     }
     if (!isDemoState(decoded)) {
@@ -233,6 +246,10 @@ export async function updateDemoProject(
     if (patch.name !== undefined) project.name = patch.name.trim();
     if (patch.pinned !== undefined) project.pinned = patch.pinned;
     if (patch.status !== undefined) project.status = patch.status;
+    if (patch.instructions !== undefined) project.instructions = patch.instructions;
+    if (patch.sources !== undefined) project.sources = patch.sources;
+    if (patch.memory !== undefined) project.memory = patch.memory;
+    if (patch.sharing !== undefined) project.sharing = patch.sharing;
     project.updatedAt = new Date().toISOString();
     return publicProject(project);
   });
@@ -291,6 +308,11 @@ function runtimeContext(state: DemoState, projectId: string): ThreadRuntimeConte
     projectId: project.id,
     projectName: project.name,
     workspaceKey: project.workspaceKey,
+    projectInstructions: project.instructions,
+    projectMemory: project.memory.enabled ? project.memory.notes : "",
+    projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
+      kind, name, url, excerpt, status,
+    })),
     runtimeThreadToken: null,
   };
 }

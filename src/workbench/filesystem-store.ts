@@ -63,11 +63,17 @@ const PROJECT_KEYS = [
   "slug",
   "status",
   "pinned",
+  "instructions",
+  "sources",
+  "memory",
+  "sharing",
   "workspace",
   "createdAt",
   "updatedAt",
   "workspaceKey",
 ] as const;
+const LEGACY_PROJECT_KEYS = PROJECT_KEYS.filter((key) =>
+  !["instructions", "sources", "memory", "sharing"].includes(key));
 const WORKSPACE_KEYS = ["id", "label", "hostType", "status", "isPrimary"] as const;
 const THREAD_KEYS = [
   "id",
@@ -162,21 +168,28 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
 
 function parseProject(value: unknown, context: ValidationContext): StoredProject {
   const record = isPlainRecord(value) ? value : null;
+  const upgraded = record ? {
+    ...record,
+    instructions: record.instructions ?? "",
+    sources: record.sources ?? [],
+    memory: record.memory ?? { enabled: true, notes: "", updatedAt: null },
+    sharing: record.sharing ?? { visibility: "private", members: [] },
+  } : value;
   if (
-    !hasExactKeys(value, PROJECT_KEYS) ||
+    !hasExactKeys(value, LEGACY_PROJECT_KEYS, ["instructions", "sources", "memory", "sharing"]) ||
     !hasExactKeys(record?.workspace, WORKSPACE_KEYS) ||
-    !isWorkbenchProject(value) ||
+    !isWorkbenchProject(upgraded) ||
     typeof record?.workspaceKey !== "string" ||
     !WORKSPACE_KEY_PATTERN.test(record.workspaceKey) ||
-    !isCanonicalIsoDate(value.createdAt) ||
-    !isCanonicalIsoDate(value.updatedAt)
+    !isCanonicalIsoDate(upgraded.createdAt) ||
+    !isCanonicalIsoDate(upgraded.updatedAt)
   ) {
     context.fail("expected a strict stored project");
   }
-  if (Date.parse(value.updatedAt) < Date.parse(value.createdAt)) {
+  if (Date.parse(upgraded.updatedAt) < Date.parse(upgraded.createdAt)) {
     context.at("updatedAt").fail("must not precede createdAt");
   }
-  return value as StoredProject;
+  return upgraded as StoredProject;
 }
 
 function parseThread(value: unknown, context: ValidationContext): StoredThread {
@@ -311,6 +324,10 @@ function newProject(name: string, slug: string): StoredProject {
     slug,
     status: "active",
     pinned: false,
+    instructions: "",
+    sources: [],
+    memory: { enabled: true, notes: "", updatedAt: null },
+    sharing: { visibility: "private", members: [] },
     workspace: {
       id: randomUUID(),
       label: name.trim(),
@@ -705,6 +722,10 @@ export class FileWorkbenchStore {
       }
       if (patch.pinned !== undefined) project.pinned = patch.pinned;
       if (patch.status !== undefined) project.status = patch.status;
+      if (patch.instructions !== undefined) project.instructions = patch.instructions;
+      if (patch.sources !== undefined) project.sources = patch.sources;
+      if (patch.memory !== undefined) project.memory = patch.memory;
+      if (patch.sharing !== undefined) project.sharing = patch.sharing;
       project.updatedAt = new Date().toISOString();
       return publicProject(project);
     });
@@ -775,6 +796,11 @@ export class FileWorkbenchStore {
       projectId: project.id,
       projectName: project.name,
       workspaceKey: project.workspaceKey,
+      projectInstructions: project.instructions,
+      projectMemory: project.memory.enabled ? project.memory.notes : "",
+      projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
+        kind, name, url, excerpt, status,
+      })),
       runtimeThreadToken: null,
     };
   }
