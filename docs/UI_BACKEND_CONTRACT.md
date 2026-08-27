@@ -53,6 +53,7 @@ Ejemplo de error:
 | `GET` | `/api/runtime/browser/viewer/frame` | Frame PNG privado |
 | `POST` | `/api/runtime/browser/viewer/input` | Navegación y input durante takeover humano |
 | `GET` | `/api/health/live` | Liveness del proceso, sin autenticación |
+| `GET` | `/api/health/ready` | Readiness de roots, capacidad y aislamiento del host |
 
 No existe hoy una ruta HTTP pública de branding. Browser/Computer Use sí tiene un contrato de viewer privado y acotado; las capacidades y límites exactos están en la sección 14.
 
@@ -222,7 +223,7 @@ type PublicInstallationBranding = {
 
 ### 4.2 Límite público actual
 
-**No hay endpoint JSON de branding.** Next.js carga esta proyección server-side y la pasa como props a login y recovery. El workbench recibe un `BrainManifest` renderizado en servidor cuyo `identity.productName` se sobrescribe con el branding de instalación. Metadata, favicon y título también se generan server-side.
+**No hay endpoint JSON de branding.** Next.js carga esta proyección server-side y la pasa como props a login y recovery. El workbench recibe un `BrainManifest` renderizado en servidor cuyo `identity.productName` y color de accent se sobrescriben con el branding exacto de instalación. Metadata, favicon y título también se generan server-side.
 
 La rama UI debe conservar ese límite o acordar una ruta nueva antes de intentar `fetch('/api/installation')`; esa ruta no existe.
 
@@ -545,7 +546,7 @@ type ActivityItem = {
 };
 ```
 
-La actividad de comandos puede actualizar `output` incrementalmente, pero cada evento contiene el snapshot acumulado del item. El tipo `tool` es actividad observable, no un endpoint de invocación arbitraria.
+La actividad de comandos puede actualizar `output` incrementalmente, pero cada evento contiene el snapshot acumulado del item. El tipo `tool` es actividad observable, no un endpoint de invocación arbitraria. El worker registra además un namespace cerrado `browser` en cada thread nuevo; solo Codex App Server puede invocarlo y la UI lo observa mediante actividad/approvals del mismo stream.
 
 ### 7.2 Estado, modelos, skills y capacidades
 
@@ -638,11 +639,12 @@ type ApprovalItem = {
   threadId: string;
   turnId: string;
   itemId: string;
-  kind: "command" | "file";
+  kind: "command" | "file" | "browser";
   title: string;
   detail: string;
   command?: string;
   cwd?: string;
+  permissionFingerprint?: string; // SHA-256 hex
   status: "pending" | "accepted" | "accepted_session" | "declined";
 };
 ```
@@ -667,7 +669,14 @@ Los items llegan en el stream como `{ "type": "approval", "item": ApprovalItem }
 { "ok": true, "status": "resolved" }
 ```
 
-Una aprobación ya no pendiente devuelve `404`; una decisión distinta concurrente puede devolver `409`; indisponibilidad del store, `503`. La espera de una aprobación pertenece solo a su turn y no bloquea otros turns.
+Una aprobación ya no pendiente devuelve `404`; una decisión distinta concurrente puede devolver `409`; indisponibilidad del store, `503`. La espera de una aprobación pertenece solo a su turn y no bloquea otros turns. El backend persiste el record pendiente antes de emitirlo, por lo que una resolución inmediata de UI no puede adelantarse al store.
+
+Las herramientas browser mutantes (`open`, `scroll`, `click`, `type`) siempre
+generan una approval `kind: "browser"` ligada a user/thread/turn/call y al
+fingerprint de `PERMISSIONS.md`. `read`, `screenshot`, `tabs` y `downloads` son
+solo lectura, pero siguen necesitando permiso server-side. El resultado se
+deduplica por call: un replay completado devuelve el mismo resultado y una
+acción que quedó `executing` tras crash no se repite automáticamente.
 
 ## 9. Review y diffs
 
@@ -983,7 +992,7 @@ fingerprint e IDs de la memoria inyectada, nunca su contenido en auditoría.
 
 ## 14. Browser y Computer Use
 
-El contrato público actual es un viewer browser propio: Chrome headless aislado por usuario, CDP privado en loopback, frames PNG y comandos de navegación/teclado/ratón. No es una conexión del navegador cliente a CDP y no es noVNC.
+El contrato público actual es un viewer browser propio: Chrome headless aislado por usuario, CDP privado por pipes heredados, frames PNG y comandos de navegación/teclado/ratón. No es una conexión del navegador cliente a CDP y no es noVNC.
 
 Todas las rutas requieren una sesión `local`. Tenant, user y sesión opaca se derivan server-side; ningún body acepta `userId`, `installationId`, perfil o path.
 
@@ -1069,6 +1078,10 @@ La respuesta es el mismo `BrowserStatus` actualizado. Flujo de UI:
 3. Mientras el humano controla, enviar `heartbeat` antes de `heartbeatExpiresAt`.
 4. `release` cerca la sesión anterior, ejecuta recovery y devuelve el control al agente en una nueva generación/sesión.
 5. `stop` cierra el runtime y deja lifecycle `stopped`.
+
+Durante `human-control`, todas las herramientas del agente quedan pausadas,
+incluidas lectura, screenshots, tabs y downloads. El viewer humano conserva su
+ruta autenticada de frames e input hasta `release` o expiración del heartbeat.
 
 `GET` también recupera un takeover con heartbeat caducado antes de calcular health. Tras un restart del proceso, un `start` sobre estado persistido no detenido inicia recuperación y cerca la sesión anterior.
 
@@ -1204,7 +1217,10 @@ Las descargas completadas se enrutan desde una cuarentena GUID al directorio
 privado del thread; `state.downloads` sigue siendo metadata de solo lectura
 para la UI hasta que exista una API de descarga explícita. No existen endpoints
 que expongan CDP, discovery, noVNC ni métodos arbitrarios; Chrome usa un pipe
-heredado sin listener TCP.
+heredado sin listener TCP. El runtime normal fuerza un proxy efímero en
+`127.0.0.1`, resuelve cada hostname con la política privada y conecta solo a la
+IP pública aprobada; QUIC y UDP WebRTC no proxyado quedan deshabilitados. El
+interceptor Fetch conserva una segunda validación con la misma policy.
 
 ## 15. Estados degradados y errores recuperables
 
@@ -1226,7 +1242,7 @@ heredado sin listener TCP.
 | `RuntimeStatus.ready=false` | Worker no listo aunque HTTP responda `200` | Deshabilitar envío y mostrar estado de conexión |
 | publicación `status="conflict"` | Original cambió desde freeze | Exigir nueva revisión/freeze; no confirmar de nuevo con IDs distintos a ciegas |
 
-### 15.2 Liveness
+### 15.2 Liveness y readiness
 
 `GET /api/health/live` no prueba filesystem, Codex, Supabase ni document toolchain. Solo confirma que el proceso HTTP está vivo:
 
@@ -1240,6 +1256,14 @@ heredado sin listener TCP.
 ```
 
 Para readiness de usuario/proyecto, usar `/api/runtime/status`.
+
+`GET /api/health/ready` comprueba que las raíces de datos, backups, documentos
+y usuarios son directorios accesibles con aislamiento seguro, que existe
+capacidad libre de disco y que no aparece `docker.sock` en el contenedor.
+Devuelve `200` con `status: "ready"` o `503` con `status: "degraded"`, una lista
+de checks con códigos no sensibles y, si el composition root configura probes,
+su estado tipado `ready | degraded | unavailable`. Este endpoint no crea
+workers ni browsers como efecto lateral.
 
 ## 16. Reglas de integración para la rama UI
 

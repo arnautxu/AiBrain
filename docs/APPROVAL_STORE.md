@@ -19,7 +19,7 @@ El registro JSON es la fuente de verdad del estado actual; el journal append-onl
 
 ## Flujo
 
-1. App Server emite `requestApproval` con `threadId`, `turnId` e `itemId`.
+1. App Server emite `requestApproval` o una tool cerrada `browser.*` con `threadId`, `turnId` e `itemId`/`callId`.
 2. Si App Server incluye su `approvalId`, se conserva. Si no, el backend deriva uno estable del método y routing para que un replay tras restart encuentre el mismo registro.
 3. El runtime rechaza el server request si thread/turn no coinciden con el turn activo.
 4. Antes de esperar, `FileApprovalStore.createPending` persiste el estado.
@@ -27,6 +27,13 @@ El registro JSON es la fuente de verdad del estado actual; el journal append-onl
 6. `POST /api/runtime/approvals` vuelve a obtener instalación y usuario de la sesión autenticada; el body no puede elegirlos.
 7. La decisión solo se aplica si `threadId + turnId + itemId + approvalId` encuentran exactamente un registro pendiente bajo ese usuario.
 8. El waiter consulta el registro durable. No existe resolver global ni handler compartido por ID.
+
+`requestType` admite `command`, `file`, `permissions` y `browser`. Las acciones
+browser mutantes persisten primero esta approval y después emiten el evento UI.
+Su `ApprovalItem` incluye `kind: "browser"` y el fingerprint de permisos del
+turn. Un store separado bajo `browser/tool-calls/` deduplica cada call y conserva
+un journal acotado solo con hashes, tool, estado, fingerprint, resultado booleano
+y timestamps; no audita URL, selector, texto escrito ni contenido de página.
 
 Body de decisión:
 
@@ -49,9 +56,14 @@ Decisiones válidas: `accept`, `acceptForSession`, `decline`. Repetir exactament
 - Cada waiter y record tienen su propio lock. Una approval pendiente no retiene un mutex global ni impide resolver approvals de otros turns o usuarios.
 - Los directorios de usuario deben existir con modo privado. Symlinks, hardlinks, permisos inseguros, records corruptos o storage inaccesible fallan cerrado.
 
-## Límite temporal del adapter legacy
+## Integración activa
 
-El store permite esperas concurrentes e independientes, pero la ruta `codex-app-server.ts` todavía usa el adapter legacy `stdio`, con un handler activo y cola por pool. Esa cola puede serializar turns que compartan el mismo proceso mientras una approval está pendiente. El aislamiento/concurrencia completo de ejecución requiere que la ruta de chat use `WorkerRuntimeRegistry` y el gateway `AppServerTransport`, que enrutan eventos y server requests por usuario/thread/turn/item. El store durable queda preparado para ese adapter y no debe sustituirse por estado en memoria durante la migración.
+La ruta de chat usa `WorkerRuntimeRegistry`, el worker persistente del empleado y
+`WebSocketAppServerTransport`. El router registra cada turn por
+usuario/thread/turn/item; una approval pendiente conserva su waiter propio sin
+bloquear eventos ni turns de otros threads. El pool global y el adapter legacy
+se eliminaron. El store durable sigue siendo la autoridad durante replay,
+reconnect y restart; nunca se sustituye por estado global en memoria.
 
 ## Pruebas
 
