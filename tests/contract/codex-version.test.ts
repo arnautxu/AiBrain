@@ -16,6 +16,7 @@ describe("pinned Codex App Server contract", () => {
     expect(dockerfile).not.toMatch(/ARG\s+(?:AIBRAIN_)?CODEX_VERSION/u);
     const scripts = (JSON.parse(packageJson) as { scripts: Record<string, string> }).scripts;
     expect(scripts["contracts:generate"]).toContain(`@openai/codex@${pinnedVersion}`);
+    expect(scripts["contracts:verify"]).toContain("verify-codex-contracts.mjs");
   });
 
   it("contains the aggregate request and event schemas used by the transport", async () => {
