@@ -42,12 +42,12 @@
 | 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`: persistencia antes de ACK, approvals no bloqueantes, routing aislado, retry/replay/reconnect, crash real del worker y recovery sin segundo `turn/start`, steering y stop idempotentes |
-| 8. Uploads, Office/PDF, previews y publicación | Completado localmente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`: multipart streaming a fichero privado, inspección OOXML por payload/CRC/ratio real, staging no-overwrite recuperable, previews reales y publicación confirmada exactamente una vez |
-| 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`: runtime/perfil por empleado, viewer autenticado ligado a thread, targets y descargas por thread, takeover/recovery, tool namespace cerrado con approval durable, CDP por pipe y egress por proxy DNS-pinned; dos pruebas Chrome real verdes |
+| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`: persistencia antes de ACK, approvals no bloqueantes, routing aislado, retry/replay/reconnect, crash real del worker y recovery sin segundo `turn/start`, steering/stop idempotentes y redelivery durable de approvals tras cortes en ambos lados de la resolución |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`: multipart streaming a fichero privado, inspección OOXML por payload/CRC/ratio real, staging no-overwrite recuperable, adjuntos ligados server-side al turn, previews reales y publicación confirmada exactamente una vez |
+| 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, tool namespace cerrado con approval durable, CDP por pipe y egress por proxy DNS-pinned; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`: contrato UI versionado para auth, branding, workbench, streaming, approvals, memoria, documentos, publicación, browser tools, takeover, recovery, readiness y errores |
-| 11. Compose y operación | Completado localmente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`: Compose aislado, mounts/bwrap fail-closed, readiness, logs estructurados, Nginx streaming/rate limits, backup sin credenciales, releases/rollback y soak; build/restore/reboot/rollback dentro de Docker quedan como validación externa QA |
-| 12. Hardening y suite completa | Completado localmente | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`: raíces sin solape, rate limit Auth file-backed/fail-closed, contratos contra Codex fijado, E2E HTTP con restart real, LibreOffice concurrente aislado, suite completa, auditoría 0 vulnerabilidades y soak verde; matrices Docker/QA externas pendientes |
+| 11. Compose y operación | En progreso | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`: Compose aislado, mounts/bwrap fail-closed, preflight por instalación, readiness de componentes, logs estructurados redactados, Nginx streaming/rate limits y backup CLI verificado; faltan cerrar localmente drain/mantenimiento, retención/umbrales de soak y release/rollback reproducible antes de la validación Docker QA |
+| 12. Hardening y suite completa | En progreso | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`: raíces sin solape, runtime fail-closed fuera de demos explícitas, rate limit Auth file-backed/fail-closed, contratos Codex fijados, E2E HTTP con restart real, LibreOffice concurrente aislado, auditoría y soak base; falta repetir la matriz final tras completar los gaps operativos |
 
 ## Decisiones menores registradas
 
@@ -85,6 +85,8 @@
 - Los threads ya existentes no pueden recibir definiciones `dynamicTools` con Codex 0.149.1; el contrato obliga a crear un thread runtime nuevo al habilitar la capacidad, sin simular tools en producción.
 - El E2E HTTP ejecuta una copia efímera de la aplicación para que `next dev` no modifique `next-env.d.ts` ni `tsconfig.json` del checkout compartido.
 - Cada proceso LibreOffice de test y de producto usa un perfil privado distinto; se evita la colisión observada al ejecutar conversiones en paralelo.
+- Chrome de escritorio autoactualizable no es una evidencia aceptable del runtime: la prueba real se ejecuta con Chrome for Testing exacto. En este host, Google Chrome 151 abrió el proceso pero no habilitó el pipe CDP; Chrome for Testing 152.0.7977.64 pasó la misma matriz en 1,29 s.
+- El runtime descubre todos los targets CDP y cierra cualquier popup, service worker o página no creada por la operación de thread activa; los cierres se deduplican para evitar carreras durante ráfagas de eventos.
 
 ## Riesgos y acciones externas pendientes
 
@@ -95,7 +97,7 @@
 
 ## Siguiente acción concreta
 
-Ejecutar el runbook QA Docker en la red y volúmenes exclusivos de AiBrain del Hetzner, sin conectar ni reiniciar BGreenly; después completar login Codex dedicado y Supabase Auth QA con intervención humana.
+Implementar y probar localmente el modo de mantenimiento/drain de workers y conexiones, después cerrar retención/umbrales del soak y el flujo reproducible de release/rollback. Solo entonces ejecutar el runbook QA Docker en la red y volúmenes exclusivos de AiBrain del Hetzner, sin conectar ni reiniciar BGreenly.
 
 ## Últimas validaciones
 
@@ -141,6 +143,8 @@ Ejecutar el runbook QA Docker en la red y volúmenes exclusivos de AiBrain del H
 - La integración y la matriz documental real se ejecutaron simultáneamente tras aislar los perfiles LibreOffice: ambas verdes. No se ampliaron timeouts para ocultar la carrera.
 - `npm audit --omit=dev --audit-level=critical` y `npm audit --audit-level=critical`: 0 vulnerabilidades.
 - `npm run infra:validate`: fronteras Docker/Compose, CDP pipe privado, imágenes fijadas y snapshot Debian verdes; `docker compose config` no ejecutado porque no existe Docker CLI en este host.
+- Hardening de targets: suite completa de unidad 58 ficheros verdes + 1 opt-in omitido, 294 pruebas verdes + 2 opt-in omitidas; typecheck y lint verdes.
+- Chrome for Testing 152.0.7977.64: 2/2 pruebas reales verdes en 1,29 s tras añadir discovery, ownership y cierre deduplicado de popup/service worker/página ajena. SHA-256 del ZIP mac-arm64 validado localmente: `ad6ea84171a067f0f1ce32d4063b726ea63b6c71ad6dfc480ddcd5af89acfdfb`.
 
 ## Matriz requisito → implementación → prueba
 
