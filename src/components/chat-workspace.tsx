@@ -17,6 +17,7 @@ import {
   ImagesSquare,
   List,
   Paperclip,
+  Plus,
   GitBranch,
   MagicWand,
   SidebarSimple,
@@ -162,9 +163,9 @@ function AssistantMessage({
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
-        <div className="flex items-center gap-2 py-1 text-[11px] text-[var(--text-muted)]" aria-label="Pensando"><SpinnerGap size={13} className="motion-safe:animate-spin" /><span className="activity-shimmer">Pensando…</span></div>
+        <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" aria-label="Pensando"><SpinnerGap size={14} className="motion-safe:animate-spin" /><span className="activity-shimmer">Pensando…</span></div>
       ) : message.content ? (
-        <div className="mt-4 max-w-[76ch] text-[14px] leading-7 text-[var(--text)] md:text-[14.5px]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
+        <div className="mt-4 max-w-[76ch] text-[16px] leading-7 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
           <MarkdownMessage>{message.content}</MarkdownMessage>
           {message.status === "streaming" ? <span className="stream-caret ml-0.5 inline-block h-4 w-[2px] bg-[var(--brain-accent)] align-middle" /> : null}
         </div>
@@ -206,7 +207,7 @@ function AssistantMessage({
 function UserMessage({ message }: { message: ChatMessage }) {
   return (
     <article className="message-enter flex justify-end">
-      <div className="max-w-[86%] rounded-[var(--brain-radius)] rounded-br-[4px] bg-[var(--surface-selected)] px-4 py-3 text-[13px] leading-6 text-[var(--text)] md:max-w-[70%]">
+      <div className="max-w-[86%] rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)] md:max-w-[70%]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -278,6 +279,7 @@ export function ChatWorkspace({
   const shouldStickToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
+  const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
@@ -395,9 +397,9 @@ export function ChatWorkspace({
 
   return (
     <main className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-2.5 md:px-4">
+      <header className="flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <button aria-label="Mostrar u ocultar la barra lateral" className={`touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] ${sidebarOpen ? "md:hidden" : "md:block"}`} onClick={onToggleSidebar}>
+          <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
             <SidebarSimple size={17} />
           </button>
           <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1">
@@ -444,8 +446,8 @@ export function ChatWorkspace({
         ) : guideVisible ? (
           <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? "Proyecto"} onCancel={() => setGuidedActionsOpen(false)} onStart={(message, summary) => { setGuidedActionsOpen(false); onSend(message, summary); }} />
         ) : hasMessages ? (
-          <div className={`mx-auto w-full max-w-[760px] px-5 md:px-8 ${preferences.density === "compact" ? "py-6" : "py-9"}`}>
-            <div className={preferences.density === "compact" ? "space-y-6" : "space-y-9"}>
+          <div className="mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
+            <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
               {thread?.messages.map((message) => message.role === "user" ? (
                 <UserMessage key={message.id} message={message} />
               ) : (
@@ -468,9 +470,9 @@ export function ChatWorkspace({
             <div ref={bottomRef} className="h-8" />
           </div>
         ) : (
-          <section className="mx-auto flex min-h-full w-full max-w-[680px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(4.5rem,12vh,7rem)] text-center md:px-8">
-            <h1 className="text-balance text-[25px] font-medium tracking-[-.025em] text-[var(--text)] md:text-[28px]">¿En qué trabajamos?</h1>
-            <div className="mt-[clamp(11.5rem,23vh,13rem)] flex w-full flex-wrap justify-center gap-1.5">
+          <section className="mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(8rem,26vh,12rem)] text-center md:px-8">
+            <h1 className="text-balance text-[24px] font-normal leading-7 tracking-[-.02em] text-[var(--text)]">¿En qué trabajamos?</h1>
+            <div className="mt-[clamp(14rem,27vh,16rem)] flex w-full flex-wrap justify-center gap-1.5 md:mt-[clamp(15rem,27vh,17rem)]">
               {[
                 ["Analizar información", "Encuentra riesgos, claves y próximos pasos"],
                 ["Crear un documento", "Prepara un primer borrador listo para revisar"],
@@ -485,19 +487,27 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-5" : "!absolute inset-x-0 top-[clamp(12.5rem,25vh,14rem)] z-10"} px-3 md:px-6`}>
+      <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "!absolute inset-x-0 top-[clamp(15.6rem,42vh,21.25rem)] z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
-        <div className="mx-auto max-w-[760px]">
+        <div className={`mx-auto ${hasMessages ? "max-w-[610px]" : "max-w-[768px]"}`}>
           {!networkOnline ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><WarningCircle size={14} />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <p className="mb-2 text-center text-[10px] text-[var(--text)]" role="status">Conectando con el servicio…</p> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 py-1 font-semibold" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             data-testid="composer"
-            className={`composer-shadow relative rounded-[18px] border bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-[var(--border-strong)]"}`}
+            className={`composer-shadow relative rounded-[28px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[128px]"} focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending && !documentUploading) void addFiles(event.dataTransfer.files); }}
           >
             {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta los archivos para adjuntarlos</div> : null}
+            {composerMenuOpen ? (
+              <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
+                {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
+                {canUseWeb ? <button role="menuitemcheckbox" aria-checked={webSearch} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={17} />Buscar en la web<span className="ml-auto text-[11px] text-[var(--text-subtle)]">{webSearch ? "Activado" : ""}</span></button> : null}
+                {canGenerateImages ? <button role="menuitemcheckbox" aria-checked={imageGeneration} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={17} />Crear imagen<span className="ml-auto text-[11px] text-[var(--text-subtle)]">{imageGeneration ? "Activado" : ""}</span></button> : null}
+                <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || !project} onClick={() => { setComposerMenuOpen(false); setGuidedActionsOpen(true); }}><MagicWand size={17} />Acciones guiadas</button>
+              </div>
+            ) : null}
             {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
@@ -520,7 +530,7 @@ export function ChatWorkspace({
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
-              className="max-h-48 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[14px] leading-6 text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+              className="composer-textarea max-h-52 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
               placeholder={project ? `Escribe a ${preferences.assistantName}…` : "Crea un proyecto para empezar…"}
               rows={1}
               value={prompt}
@@ -536,8 +546,8 @@ export function ChatWorkspace({
                 }
               }}
             />
-            <div className="flex items-center justify-between gap-3 px-1 pb-0.5">
-              <div className="scrollbar-thin flex min-w-0 items-center gap-1 overflow-x-auto">
+            <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
+              <div className="composer-controls-start scrollbar-thin flex min-w-0 items-center gap-1 overflow-x-auto">
                 {showAdvancedControls ? <select aria-label="Modo del turno" className="composer-select" value={composerMode} onChange={(event) => onComposerModeChange(event.target.value as ComposerMode)} disabled={sending}>
                   {manifest.composer.modes.includes("agent") ? <option value="agent">Agent</option> : null}
                   {manifest.composer.modes.includes("plan") ? <option value="plan">Plan</option> : null}
@@ -555,7 +565,7 @@ export function ChatWorkspace({
                     {effortOptions.map((effort) => <option key={effort} value={effort}>{effortLabels[effort]}</option>)}
                   </select>
                 ) : null}
-                <button aria-label="Abrir acciones guiadas" aria-pressed={guidedActionsOpen} className={`composer-tool ${guidedActionsOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setGuidedActionsOpen((current) => !current)}><MagicWand size={12} /><span className="hidden lg:inline">Ayuda</span></button>
+                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => setComposerMenuOpen((current) => !current)}><Plus size={15} /></button>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <label className="relative hidden sm:block">
                     <Wrench size={11} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text)]" />
@@ -565,21 +575,19 @@ export function ChatWorkspace({
                     </select>
                   </label>
                 ) : null}
-                {canUseWeb ? <button aria-label="Activar o desactivar la búsqueda web" aria-pressed={webSearch} className={`composer-tool ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={12} /><span className="hidden lg:inline">Web</span></button> : null}
-                {canGenerateImages ? <button aria-label="Activar o desactivar la generación de imágenes" aria-pressed={imageGeneration} className={`composer-tool ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={13} /><span className="hidden lg:inline">Imagen</span></button> : null}
-                {canAttachImages || canAttachDocuments ? <><input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /><button aria-label="Adjuntar archivos" className="composer-tool" disabled={sending || documentUploading || (attachments.length >= 3 && documents.length >= 10)} onClick={() => fileInputRef.current?.click()}>{documentUploading ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : <Paperclip size={13} />}</button></> : null}
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
+              <div className="composer-controls-end flex shrink-0 items-center gap-2">
+                <span className="composer-hint hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
-                  <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-7 sm:rounded-lg" onClick={onStop}><Stop size={11} weight="fill" /></button>
+                  <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-8 sm:rounded-full" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
-                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-7 sm:rounded-lg" disabled={!project || !prompt.trim() || !runtimeReady || documentUploading} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
+                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full" disabled={!project || !prompt.trim() || !runtimeReady || documentUploading} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
                 )}
               </div>
             </div>
           </div>
-          <div className="mt-2 flex h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]">
+          <div className={`${hasMessages ? "hidden" : "flex"} mt-2 h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]`}>
             {sending ? <><SpinnerGap size={11} className="motion-safe:animate-spin" />{preferences.assistantName} está trabajando</> : <span>Comprueba los datos importantes antes de usarlos.</span>}
           </div>
         </div>

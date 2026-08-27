@@ -1151,6 +1151,7 @@ export function BrainApp({
         busy={actionBusy || sending}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
+        onOpenDesktop={() => setDesktopSidebarOpen(true)}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
