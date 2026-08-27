@@ -500,7 +500,11 @@ export class FileDocumentPublisher {
     operation: StoredPublicationOperation,
     eventType: PublicationAuditEventType,
     clientRequestHash: string,
-    options: { resultSha256?: string | null; recoveredAfterInterruption?: boolean } = {},
+    options: {
+      resultSha256?: string | null;
+      recoveredAfterInterruption?: boolean;
+      occurredAt?: string;
+    } = {},
   ) {
     await this.#ensureStateDirectories(["audit", this.installationId]);
     const auditKey = sha256([
@@ -522,11 +526,53 @@ export class FileDocumentPublisher {
       resultSha256: options.resultSha256 ?? null,
       clientRequestHash,
       recoveredAfterInterruption: options.recoveredAfterInterruption ?? false,
-      occurredAt: this.#timestamp(),
+      occurredAt: options.occurredAt ?? this.#timestamp(),
     };
     await this.#audit.appendIf(event, (entries) =>
       !entries.some((entry) => entry.payload.auditKey === auditKey));
     await this.#onStage?.("audit-recorded", operation.operationId);
+  }
+
+  #expirationRequestHash(operation: StoredPublicationOperation) {
+    return sha256([
+      "publication-expiration-v1",
+      operation.installationId,
+      operation.userId,
+      operation.threadId,
+      operation.turnId,
+      operation.operationId,
+      operation.confirmationExpiresAt,
+    ].join(":"));
+  }
+
+  async #reconcileExpiration(operation: StoredPublicationOperation) {
+    if (operation.status === "expired") {
+      await this.#auditEvent(
+        operation,
+        "expired",
+        operation.decisionRequestHash ?? this.#expirationRequestHash(operation),
+        { occurredAt: operation.confirmationExpiresAt },
+      );
+      return operation;
+    }
+    if (
+      operation.status !== "awaiting_confirmation" ||
+      this.#now() < Date.parse(operation.confirmationExpiresAt)
+    ) {
+      return operation;
+    }
+    const expirationRequestHash = this.#expirationRequestHash(operation);
+    const expired: StoredPublicationOperation = {
+      ...operation,
+      status: "expired",
+      decisionRequestHash: expirationRequestHash,
+      updatedAt: operation.confirmationExpiresAt,
+    };
+    await this.#writeOperation(expired);
+    await this.#auditEvent(expired, "expired", expirationRequestHash, {
+      occurredAt: expired.confirmationExpiresAt,
+    });
+    return expired;
   }
 
   async freezeCandidate(input: FreezePublicationInput) {
@@ -549,12 +595,13 @@ export class FileDocumentPublisher {
       await this.#writeReceipt("freeze", requestHash, requestFingerprint, operationId);
       return this.#lockManager.withLock(this.#operationLock(operationId), async () => {
         try {
-          const existing = await this.#readOperation(operationId);
+          let existing = await this.#readOperation(operationId);
           this.#assertIdentity(existing, { operationId, threadId, turnId });
           if (existing.creationRequestHash !== requestFingerprint) {
             throw new StorageError("PUBLICATION_REQUEST_CONFLICT", "Operation id already identifies a different frozen candidate.");
           }
           await this.#auditEvent(existing, "frozen", requestHash);
+          existing = await this.#reconcileExpiration(existing);
           return { operation: this.#redact(existing), confirmationToken: this.#tokenFor(existing) };
         } catch (error) {
           if (!(error instanceof StorageError && error.code === "PUBLICATION_NOT_FOUND")) throw error;
@@ -656,6 +703,12 @@ export class FileDocumentPublisher {
         let operation = await this.#readOperation(operationId);
         this.#assertIdentity(operation, { operationId, threadId, turnId });
         this.#assertConfirmationToken(operation, input.confirmationToken);
+        operation = await this.#reconcileExpiration(operation);
+
+        if (operation.status === "expired") {
+          if (decision === "decline") return this.#redact(operation);
+          throw new StorageError("PUBLICATION_TOKEN_EXPIRED", "Publication confirmation token has expired.");
+        }
 
         if (operation.status === "declined") {
           if (decision === "decline" && operation.decisionRequestHash === requestHash) {
@@ -684,10 +737,6 @@ export class FileDocumentPublisher {
         if (operation.status === "publishing" && operation.decisionRequestHash !== requestHash) {
           throw new StorageError("PUBLICATION_ALREADY_DECIDED", "Publication is already being completed by another request.");
         }
-        if (operation.status === "awaiting_confirmation" && this.#now() > Date.parse(operation.confirmationExpiresAt)) {
-          throw new StorageError("PUBLICATION_TOKEN_EXPIRED", "Publication confirmation token has expired.");
-        }
-
         if (decision === "decline") {
           if (operation.status !== "awaiting_confirmation") {
             throw new StorageError("PUBLICATION_ALREADY_DECIDED", "A publishing operation cannot be declined.");
@@ -854,8 +903,9 @@ export class FileDocumentPublisher {
     validateUuid("threadId", identity.threadId);
     validateUuid("turnId", identity.turnId);
     return this.#lockManager.withLock(this.#operationLock(identity.operationId), async () => {
-      const operation = await this.#readOperation(identity.operationId);
+      let operation = await this.#readOperation(identity.operationId);
       this.#assertIdentity(operation, identity);
+      operation = await this.#reconcileExpiration(operation);
       return this.#redact(operation);
     });
   }

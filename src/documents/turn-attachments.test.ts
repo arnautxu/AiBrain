@@ -133,13 +133,17 @@ describe("turn document attachment binding", () => {
       stagingRoot,
       previews: {
         read: async () => ({
-          schemaVersion: 1,
+          schemaVersion: 2,
           uploadId: document.uploadId,
           threadId: document.threadId,
           sourceSha256: document.sha256,
           status: "ready",
           kind: "pdf",
           files: ["document.pdf", "page-1.png"],
+          artifacts: [
+            { fileName: "document.pdf", size: 14, sha256: "a".repeat(64) },
+            { fileName: "page-1.png", size: 8, sha256: "b".repeat(64) },
+          ],
           pages: 1,
           createdAt: document.createdAt,
         }),

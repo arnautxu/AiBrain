@@ -267,8 +267,68 @@
       "additionalProperties": false,
       "required": ["document", "preview"],
       "properties": {
-        "document": { "type": "object", "required": ["schemaVersion", "uploadId", "threadId", "fileName", "kind", "mediaType", "size", "sha256", "status", "createdAt"] },
-        "preview": { "type": "object", "required": ["schemaVersion", "uploadId", "threadId", "sourceSha256", "status", "kind", "files", "pages", "createdAt"] }
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "uploadId", "threadId", "fileName", "relativePath", "kind", "mediaType", "size", "sha256", "status", "createdAt"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "uploadId": { "$ref": "#/$defs/Uuid" },
+            "threadId": { "$ref": "#/$defs/Uuid" },
+            "fileName": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "relativePath": { "type": "string", "pattern": "^threads/" },
+            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "mediaType": { "type": "string", "minLength": 1, "maxLength": 180 },
+            "size": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "status": { "const": "staged" },
+            "createdAt": { "$ref": "#/$defs/IsoDate" }
+          }
+        },
+        "preview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "uploadId", "threadId", "sourceSha256", "status", "kind", "files", "artifacts", "pages", "createdAt"],
+          "properties": {
+            "schemaVersion": { "const": 2 },
+            "uploadId": { "$ref": "#/$defs/Uuid" },
+            "threadId": { "$ref": "#/$defs/Uuid" },
+            "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "status": { "const": "ready" },
+            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "url"],
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+                  "url": { "type": "string", "pattern": "^/api/threads/" }
+                }
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["fileName", "size", "sha256"],
+                "properties": {
+                  "fileName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+                  "size": { "type": "integer", "minimum": 1, "maximum": 104857600 },
+                  "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              }
+            },
+            "pages": { "type": ["integer", "null"], "minimum": 1, "maximum": 500 },
+            "createdAt": { "$ref": "#/$defs/IsoDate" }
+          }
+        }
       }
     },
     "PublicationOperation": {
@@ -282,7 +342,7 @@
         "threadId": { "$ref": "#/$defs/Uuid" },
         "turnId": { "$ref": "#/$defs/Uuid" },
         "targetRelativePath": { "type": "string" },
-        "status": { "enum": ["awaiting_confirmation", "publishing", "published", "declined", "conflict"] },
+        "status": { "enum": ["awaiting_confirmation", "publishing", "published", "declined", "expired", "conflict"] },
         "candidate": { "type": "object" },
         "preview": { "type": "object" },
         "original": { "type": "object" },

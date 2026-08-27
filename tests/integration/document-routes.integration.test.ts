@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
+import { assertUiContract } from "../helpers/ui-contract";
 
 const USER_A = "0198b9f0-6631-7000-8000-000000000501";
 const USER_B = "0198b9f0-6631-7000-8000-000000000502";
@@ -121,6 +122,7 @@ describe("authenticated document routes", () => {
       document: { kind: "text" },
       preview: { files: [{ name: "preview.txt" }] },
     });
+    expect(() => assertUiContract("DocumentUploadResponse", result)).not.toThrow();
 
     const previewContext = {
       params: Promise.resolve({ threadId, uploadId: UPLOAD_ID, fileName: "preview.txt" }),

@@ -29,7 +29,7 @@ export interface TurnDocumentPreviewReader {
 }
 
 export interface TurnDocumentInputResolver {
-  resolve(document: StagedDocument): Promise<readonly UserInput[]>;
+  resolve(document: StagedDocument, options?: { signal?: AbortSignal }): Promise<readonly UserInput[]>;
 }
 
 export type ResolvedTurnDocument = Readonly<{
@@ -101,7 +101,10 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
     }
   }
 
-  async resolve(document: StagedDocument): Promise<readonly UserInput[]> {
+  async resolve(
+    document: StagedDocument,
+    options: { signal?: AbortSignal } = {},
+  ): Promise<readonly UserInput[]> {
     if (document.kind === "image") {
       const bytes = await this.stagedBytes(document, MAX_IMAGE_BYTES_PER_TURN);
       return [{ type: "image", url: `data:${document.mediaType};base64,${bytes.toString("base64")}` }];
@@ -140,9 +143,10 @@ export class ServerTurnDocumentInputResolver implements TurnDocumentInputResolve
           cwd: workRoot,
           env: { HOME: workRoot, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
           timeoutMs: 30_000,
+          signal: options.signal,
         });
       const extracted = this.options.conversionGate
-        ? await this.options.conversionGate.run(extract)
+        ? await this.options.conversionGate.run(extract, { signal: options.signal })
         : await extract();
       if (Buffer.byteLength(extracted.stdout, "utf8") > MAX_EXTRACTED_TEXT_BYTES_PER_DOCUMENT) {
         throw new TurnDocumentAttachmentError("TURN_DOCUMENT_TEXT_TOO_LARGE", "Extracted document text exceeds the safe turn boundary.");
@@ -174,6 +178,7 @@ export async function resolveTurnDocumentAttachments(input: {
   uploadIds: readonly string[];
   permissions: ResolvedPermissions;
   inputResolver: TurnDocumentInputResolver;
+  signal?: AbortSignal;
 }) {
   if (input.uploadIds.length === 0) return [] as readonly ResolvedTurnDocument[];
   if (!permissionAllowsDocumentRead(input.permissions)) {
@@ -195,7 +200,9 @@ export async function resolveTurnDocumentAttachments(input: {
     }
     resolved.push(Object.freeze({
       ...candidate,
-      codexInputs: Object.freeze([...(await input.inputResolver.resolve(candidate.document))]),
+      codexInputs: Object.freeze([...(await input.inputResolver.resolve(candidate.document, {
+        signal: input.signal,
+      }))]),
     }));
   }
   const extractedTextBytes = resolved.flatMap(({ codexInputs }) => codexInputs)
