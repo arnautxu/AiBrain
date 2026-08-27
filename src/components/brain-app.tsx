@@ -10,6 +10,7 @@ import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
+import { LibraryPanel } from "@/components/library-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -333,6 +334,7 @@ export function BrainApp({
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [networkOnline, setNetworkOnline] = useState(true);
@@ -1127,6 +1129,7 @@ export function BrainApp({
       if (commandPaletteOpen) setCommandPaletteOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (memoryOpen) setMemoryOpen(false);
+      else if (libraryOpen) setLibraryOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
       else if (activeSideWindow) setActiveSideWindow(null);
@@ -1142,6 +1145,7 @@ export function BrainApp({
     confirmDialog,
     customizationOpen,
     memoryOpen,
+    libraryOpen,
     mobileSidebarOpen,
     sending,
     startNewThread,
@@ -1172,6 +1176,7 @@ export function BrainApp({
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
         onOpenDesktop={() => setDesktopSidebarOpen(true)}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onNewThread={startNewThread}
@@ -1274,6 +1279,19 @@ export function BrainApp({
         onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
       />
 
+      <LibraryPanel
+        open={libraryOpen}
+        projects={projects}
+        threads={threads}
+        onClose={() => setLibraryOpen(false)}
+        onOpenConversation={(threadId, messageId) => {
+          setLibraryOpen(false);
+          selectThread(threadId);
+          setSelectedMessageId(messageId);
+          window.setTimeout(() => document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+        }}
+      />
+
       <CommandPalette
         open={commandPaletteOpen}
         busy={actionBusy || sending}
@@ -1291,6 +1309,22 @@ export function BrainApp({
         onOpenBrowser={() => setActiveSideWindow("browser")}
         onOpenCustomization={() => setCustomizationOpen(true)}
         onOpenMemory={() => setMemoryOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
+        onOpenSearchResult={(result) => {
+          if (result.type === "memory") {
+            setMemoryOpen(true);
+            return;
+          }
+          if (result.threadId) {
+            selectThread(result.threadId);
+            if (result.messageId) {
+              setSelectedMessageId(result.messageId);
+              window.setTimeout(() => document.getElementById(`message-${result.messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+            }
+            return;
+          }
+          if (result.projectId) selectProject(result.projectId);
+        }}
       />
 
       {textDialogCopy ? (
