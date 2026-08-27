@@ -109,13 +109,16 @@ for executable in \
   /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
+  /usr/local/bin/aibrain-backup-replicate \
+  /usr/local/bin/aibrain-alerts \
   /usr/local/share/aibrain/configure-egress.mjs \
   /usr/bin/bwrap \
   /usr/bin/chromium \
   /usr/bin/pdfinfo \
   /usr/bin/pdftoppm \
   /usr/bin/pdftotext \
-  /usr/bin/qpdf; do
+  /usr/bin/qpdf \
+  /usr/bin/restic; do
   [ -x "$executable" ] || fail "required executable is unavailable: $executable"
 done
 

@@ -90,9 +90,13 @@ fecha de creación y fecha de verificación. El evaluator local
 `evaluateOperationalAlerts` produce códigos tipados para readiness degradado,
 disco >=80/90 %, tres reinicios en 15 minutos, fallos de preflight y backup
 ausente o con más de 26 horas. Verificar hoy un snapshot antiguo no reinicia su
-edad. El adaptador que recoge reinicios del host y entrega estas alertas al
-canal externo es configuración pendiente por instalación; no requiere acceso a
-`docker.sock` dentro de AiBrain.
+edad. `aibrain-alerts` recoge readiness loopback, disco y receipt dentro del
+contenedor, y exige que el controlador host aporte explícitamente los contadores
+de reinicios y preflight de 15 minutos. El outbox file-backed deduplica
+raised/updated/resolved, aplica backoff y entrega primero a un sink local
+durable; no requiere `docker.sock`. El adapter webhook HTTPS está implementado
+y probado, pero su destino/token y allowlist externa siguen pendientes por
+instalación. Procedimiento: `docs/ALERTING.md`.
 
 Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
 

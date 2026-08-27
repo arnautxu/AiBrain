@@ -26,6 +26,7 @@ const worker = read("infra/hetzner/app/worker-sandbox.sh");
 const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
 const backupReplicate = read("infra/hetzner/app/backup-replicate.sh");
+const alerts = read("infra/hetzner/app/alerts.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
@@ -45,7 +46,7 @@ const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
 const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -65,6 +66,9 @@ requireMatch(dockerfile, /\bbubblewrap\b/u, "Dockerfile does not install the wor
 requireMatch(dockerfile, /src\/documents\/publication-locks\.ts/u, "Dockerfile backup CLI is missing the shared publication barrier contract");
 requireMatch(dockerfile, /src\/operations\/backup-replica\.ts/u, "Dockerfile is missing the encrypted backup replica adapter");
 requireMatch(dockerfile, /scripts\/replicate-backup\.ts/u, "Dockerfile is missing the backup replica CLI");
+requireMatch(dockerfile, /scripts\/run-operational-alerts\.ts/u, "Dockerfile is missing the operational alert collector CLI");
+requireMatch(dockerfile, /src\/operations\/alert-delivery\.ts/u, "Dockerfile is missing durable alert delivery");
+requireMatch(dockerfile, /infra\/hetzner\/app\/alerts\.sh/u, "Dockerfile is missing the operational alert launcher");
 for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium", "restic"]) {
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
@@ -145,6 +149,8 @@ requireMatch(browserSandbox, /--tmpfs "\$source_root"[\s\S]*--remount-ro "\$sour
 requireMatch(browserSandbox, /--unshare-pid[\s\S]*--proc \/proc/u, "browser sandbox does not isolate the process namespace");
 forbidMatch(browserSandbox, /--unshare-net/u, "browser sandbox cannot reach its mandatory pinned loopback egress proxy");
 requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypoint does not fail closed when worker isolation is unavailable");
+requireMatch(entrypoint, /\/usr\/local\/bin\/aibrain-alerts/u, "entrypoint does not require the alert launcher");
+requireMatch(entrypoint, /\/usr\/bin\/restic/u, "entrypoint does not require the encrypted replica runtime");
 requireMatch(entrypoint, /AIBRAIN_CHROME_BIN must use the employee browser filesystem sandbox/u, "entrypoint does not require the browser sandbox launcher");
 requireMatch(entrypoint, /bubblewrap browser isolation is unavailable/u, "entrypoint does not fail closed when browser isolation is unavailable");
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
