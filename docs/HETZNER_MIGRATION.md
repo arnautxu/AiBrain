@@ -221,10 +221,11 @@ Restaura siempre al volumen separado, nunca sobre el root activo:
 docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app \
   aibrain-backup restore \
   --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id> \
-  --destination /var/lib/aibrain-restores/<backup-id>
+  --data-destination /var/lib/aibrain-restores/<backup-id>-data \
+  --publish-destination /var/lib/aibrain-restores/<backup-id>-publish
 ```
 
-Para probar el restore, crea un volumen de datos nuevo y copia dentro únicamente el root restaurado. El volumen de destino debe ser nuevo y pertenecer a la instalación de restore:
+Para probar el restore, crea un volumen de datos nuevo y un host path documental QA nuevo. Copia cada componente únicamente a su destino aislado. Ambos deben pertenecer a la instalación de restore:
 
 ```bash
 docker volume create aibrain-<installation>-restore-<backup-id>-data
@@ -232,10 +233,17 @@ docker run --rm --entrypoint /bin/sh \
   --mount source=aibrain-<installation>-restores,target=/restores,readonly \
   --mount source=aibrain-<installation>-restore-<backup-id>-data,target=/var/lib/aibrain/data \
   aibrain-<installation>:<git-sha> \
-  -c 'cp -a /restores/<backup-id>/. /var/lib/aibrain/data/'
+  -c 'cp -a /restores/<backup-id>-data/. /var/lib/aibrain/data/'
+
+install -d -m 0700 /srv/aibrain-<installation>-restore-<backup-id>/publish-rw
+docker run --rm --entrypoint /bin/sh \
+  --mount source=aibrain-<installation>-restores,target=/restores,readonly \
+  --mount type=bind,source=/srv/aibrain-<installation>-restore-<backup-id>/publish-rw,target=/publish-rw \
+  aibrain-<installation>:<git-sha> \
+  -c 'cp -a /restores/<backup-id>-publish/. /publish-rw/'
 ```
 
-Crea un segundo `compose.env` con proyecto, red, puerto, data volume, backup volume, restore volume y publish host nuevos. Usa una copia del `installation.json` original: conserva `installationId` y los paths internos para que los manifests restaurados sigan vinculados a su instalación; cambia únicamente `publicUrl` al origen QA aislado si es necesario. Apunta `AIBRAIN_DATA_VOLUME_NAME` al volumen recién creado. Lanza ese segundo Compose y valida health, login sintético, proyectos, threads, journals y artefactos; luego detenlo. No ejecutes primaria y restore contra los mismos recursos externos, y no elimines snapshot, restore, volumen validado o root anterior como parte de la prueba.
+Crea un segundo `compose.env` con proyecto, red, puerto, data volume, backup volume, restore volume y publish host nuevos. Usa una copia del `installation.json` original: conserva `installationId` y los paths internos para que los manifests restaurados sigan vinculados a su instalación; cambia únicamente `publicUrl` al origen QA aislado si es necesario. Apunta `AIBRAIN_DATA_VOLUME_NAME` al volumen recién creado y `AIBRAIN_PUBLISH_HOST_PATH` al host path documental restaurado. Lanza ese segundo Compose y valida health, login sintético, proyectos, threads, journals, artefactos y documentos publicados; luego detenlo. No ejecutes primaria y restore contra los mismos recursos externos, y no elimines snapshot, restore, volumen validado o root anterior como parte de la prueba.
 
 Reinicia la instancia primaria y valida recovery:
 

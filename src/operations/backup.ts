@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import {
+  access,
   chmod,
   lstat,
   mkdir,
@@ -8,14 +9,17 @@ import {
   readdir,
   realpath,
   rename,
+  statfs,
 } from "node:fs/promises";
 import path from "node:path";
+import { publicationBarrierLock } from "@/documents/publication-locks";
 import {
   atomicWriteJson,
   defineVersionedSchema,
   expectArray,
   expectInteger,
   expectIsoDate,
+  expectOneOf,
   expectStrictRecord,
   expectString,
   fsyncDirectory,
@@ -45,19 +49,35 @@ export class BackupError extends Error {
 }
 
 export type BackupManifestEntry = {
+  component: BackupComponent;
   path: string;
   size: number;
   sha256: string;
   mode: number;
 };
 
+export type BackupComponent = "product-data" | "published-documents";
+
+export type BackupManifestComponent = {
+  component: BackupComponent;
+  fileCount: number;
+  size: number;
+  sourceFingerprint: string;
+};
+
 export type BackupManifest = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   backupId: string;
   installationId: string;
   createdAt: string;
   sourceFingerprint: string;
+  components: BackupManifestComponent[];
   files: BackupManifestEntry[];
+};
+
+export type RestoreDestinations = {
+  dataRoot: string;
+  publishWriteRoot: string;
 };
 
 export type BackupVerificationReceipt = {
@@ -92,13 +112,14 @@ export const backupVerificationReceiptSchema = defineVersionedSchema<BackupVerif
 });
 
 function parseEntry(value: unknown, context: ValidationContext): BackupManifestEntry {
-  const record = expectStrictRecord(value, ["path", "size", "sha256", "mode"], context);
+  const record = expectStrictRecord(value, ["component", "path", "size", "sha256", "mode"], context);
   const relativePath = expectString(record.path, context.at("path"), {
     minLength: 1,
     maxLength: 4_096,
   });
   if (!safeRelativePath(relativePath)) context.at("path").fail("expected a safe POSIX relative path");
   return {
+    component: expectOneOf(record.component, ["product-data", "published-documents"] as const, context.at("component")),
     path: relativePath,
     size: expectInteger(record.size, context.at("size"), { minimum: 0 }),
     sha256: expectString(record.sha256, context.at("sha256"), {
@@ -110,19 +131,49 @@ function parseEntry(value: unknown, context: ValidationContext): BackupManifestE
   };
 }
 
+function parseComponent(value: unknown, context: ValidationContext): BackupManifestComponent {
+  const record = expectStrictRecord(
+    value,
+    ["component", "fileCount", "size", "sourceFingerprint"],
+    context,
+  );
+  return {
+    component: expectOneOf(record.component, ["product-data", "published-documents"] as const, context.at("component")),
+    fileCount: expectInteger(record.fileCount, context.at("fileCount"), { minimum: 0 }),
+    size: expectInteger(record.size, context.at("size"), { minimum: 0 }),
+    sourceFingerprint: expectString(record.sourceFingerprint, context.at("sourceFingerprint"), {
+      minLength: 64,
+      maxLength: 64,
+      pattern: HASH_PATTERN,
+    }),
+  };
+}
+
 export const backupManifestSchema = defineVersionedSchema<BackupManifest>({
   name: "BackupManifest",
-  schemaVersion: 1,
-  keys: ["backupId", "installationId", "createdAt", "sourceFingerprint", "files"],
+  schemaVersion: 2,
+  keys: ["backupId", "installationId", "createdAt", "sourceFingerprint", "components", "files"],
   parse(record, context) {
     const files = expectArray(record.files, context.at("files"), parseEntry, { maxLength: 1_000_000 });
-    const paths = files.map((entry) => entry.path);
+    const paths = files.map((entry) => `${entry.component}/${entry.path}`);
     if (new Set(paths).size !== paths.length) context.at("files").fail("contains duplicate paths");
     if (paths.some((entry, index) => index > 0 && paths[index - 1].localeCompare(entry) >= 0)) {
       context.at("files").fail("must be sorted by path");
     }
+    const components = expectArray(record.components, context.at("components"), parseComponent, { maxLength: 2 });
+    if (components.length !== 2 || components[0]?.component !== "product-data" || components[1]?.component !== "published-documents") {
+      context.at("components").fail("must contain product-data and published-documents in canonical order");
+    }
+    for (const component of components) {
+      const componentFiles = files.filter((entry) => entry.component === component.component);
+      if (component.fileCount !== componentFiles.length
+        || component.size !== componentFiles.reduce((total, entry) => total + entry.size, 0)
+        || component.sourceFingerprint !== sourceFingerprint(componentFiles)) {
+        context.at("components").fail(`summary mismatch for ${component.component}`);
+      }
+    }
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       backupId: expectString(record.backupId, context.at("backupId"), {
         minLength: 53,
         maxLength: 53,
@@ -139,6 +190,7 @@ export const backupManifestSchema = defineVersionedSchema<BackupManifest>({
         maxLength: 64,
         pattern: HASH_PATTERN,
       }),
+      components,
       files,
     };
   },
@@ -185,6 +237,7 @@ function backupId(now: number) {
 function sourceFingerprint(files: readonly BackupManifestEntry[]) {
   const hash = createHash("sha256");
   for (const entry of files) {
+    hash.update(entry.component).update("\0");
     hash.update(entry.path).update("\0");
     hash.update(String(entry.size)).update("\0");
     hash.update(entry.sha256).update("\0");
@@ -201,24 +254,27 @@ async function assertRealDirectory(directory: string) {
 }
 
 async function listSourceFiles(
-  dataRoot: string,
-  backupsRoot: string,
-  current = dataRoot,
+  sourceRoot: string,
+  options: {
+    excludedRoot?: string;
+    exclude?: (relativePath: string) => boolean;
+  } = {},
+  current = sourceRoot,
 ): Promise<string[]> {
   const entries = await readdir(current, { withFileTypes: true });
   const results: string[] = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     const absolute = path.join(current, entry.name);
-    if (inside(backupsRoot, absolute) || inside(absolute, backupsRoot)) continue;
-    const relative = path.relative(dataRoot, absolute).split(path.sep).join("/");
-    if (relative.split("/").includes("locks")) continue;
-    if (excludedBackupPath(relative)) continue;
+    if (options.excludedRoot
+      && (inside(options.excludedRoot, absolute) || inside(absolute, options.excludedRoot))) continue;
+    const relative = path.relative(sourceRoot, absolute).split(path.sep).join("/");
+    if (options.exclude?.(relative)) continue;
     const metadata = await lstat(absolute);
     if (metadata.isSymbolicLink()) {
       throw new BackupError("BACKUP_SYMLINK_REJECTED", `Refusing symbolic link ${relative}.`);
     }
     if (metadata.isDirectory()) {
-      results.push(...await listSourceFiles(dataRoot, backupsRoot, absolute));
+      results.push(...await listSourceFiles(sourceRoot, options, absolute));
       continue;
     }
     if (!metadata.isFile() || metadata.nlink !== 1) {
@@ -291,16 +347,77 @@ async function freezeTree(root: string, freezeRoot = true) {
   }
 }
 
+function componentSummary(
+  component: BackupComponent,
+  files: readonly BackupManifestEntry[],
+): BackupManifestComponent {
+  const selected = files.filter((entry) => entry.component === component);
+  return {
+    component,
+    fileCount: selected.length,
+    size: selected.reduce((total, entry) => total + entry.size, 0),
+    sourceFingerprint: sourceFingerprint(selected),
+  };
+}
+
+function dataPathExcluded(relativePath: string) {
+  return relativePath.split("/").includes("locks") || excludedBackupPath(relativePath);
+}
+
+async function sameFileList(
+  sourceRoot: string,
+  expected: readonly string[],
+  options: Parameters<typeof listSourceFiles>[1],
+) {
+  const after = await listSourceFiles(sourceRoot, options);
+  return after.length === expected.length && after.every((entry, index) => entry === expected[index]);
+}
+
+async function assertRestoreDestinationAvailable(destination: string, minimumBytes: number) {
+  try {
+    await lstat(destination);
+    throw new BackupError("RESTORE_DESTINATION_EXISTS", `Restore destination already exists: ${destination}`);
+  } catch (error) {
+    if (!isNodeError(error, "ENOENT")) throw error;
+  }
+  const parent = path.dirname(destination);
+  await assertRealDirectory(parent);
+  await access(parent, constants.R_OK | constants.W_OK | constants.X_OK);
+  const capacity = await statfs(parent, { bigint: true });
+  const availableBytes = capacity.bavail * capacity.bsize;
+  const requiredBytes = BigInt(minimumBytes) + 1024n * 1024n;
+  if (availableBytes < requiredBytes) {
+    throw new BackupError(
+      "RESTORE_CAPACITY_INSUFFICIENT",
+      `Restore destination does not have enough free space: ${destination}`,
+    );
+  }
+}
+
+async function existingPath(candidates: readonly string[]) {
+  for (const candidate of candidates) {
+    try {
+      await lstat(candidate);
+      return candidate;
+    } catch (error) {
+      if (!isNodeError(error, "ENOENT")) throw error;
+    }
+  }
+  return null;
+}
+
 export class FileBackupService {
   private readonly lockManager: ResourceLockManager;
+  private readonly publicationLockManager: ResourceLockManager;
 
   constructor(
     readonly dataRoot: string,
     readonly backupsRoot: string,
+    readonly publishWriteRoot: string,
     readonly installationId: string,
     private readonly now: () => number = Date.now,
   ) {
-    if (!path.isAbsolute(dataRoot) || !path.isAbsolute(backupsRoot)) {
+    if (!path.isAbsolute(dataRoot) || !path.isAbsolute(backupsRoot) || !path.isAbsolute(publishWriteRoot)) {
       throw new BackupError("BACKUP_PATH_INVALID", "Backup roots must be absolute.");
     }
     if (!INSTALLATION_ID_PATTERN.test(installationId)) {
@@ -308,45 +425,90 @@ export class FileBackupService {
     }
     this.dataRoot = path.resolve(dataRoot);
     this.backupsRoot = path.resolve(backupsRoot);
+    this.publishWriteRoot = path.resolve(publishWriteRoot);
     if (!inside(this.dataRoot, this.backupsRoot) || this.dataRoot === this.backupsRoot) {
       throw new BackupError("BACKUP_PATH_INVALID", "backupsRoot must be below dataRoot.");
     }
+    if (inside(this.dataRoot, this.publishWriteRoot) || inside(this.publishWriteRoot, this.dataRoot)) {
+      throw new BackupError("BACKUP_PATH_INVALID", "publishWriteRoot must not overlap dataRoot.");
+    }
     this.lockManager = new ResourceLockManager({
       rootDirectory: path.join(this.backupsRoot, "locks"),
+    });
+    this.publicationLockManager = new ResourceLockManager({
+      rootDirectory: path.join(this.dataRoot, "locks", "document-publication-targets"),
     });
   }
 
   async create() {
     return this.lockManager.withLock(`backup:${this.installationId}`, async () => {
-      await assertRealDirectory(this.dataRoot);
-      await mkdir(path.join(this.backupsRoot, "snapshots"), { recursive: true, mode: 0o700 });
-      const id = backupId(this.now());
-      const pendingRoot = path.join(this.backupsRoot, "snapshots", `.${id}.pending`);
-      const finalRoot = path.join(this.backupsRoot, "snapshots", id);
-      await mkdir(path.join(pendingRoot, "data"), { recursive: true, mode: 0o700 });
-      const files: BackupManifestEntry[] = [];
-      for (const relativePath of await listSourceFiles(this.dataRoot, this.backupsRoot)) {
-        const source = path.join(this.dataRoot, ...relativePath.split("/"));
-        const destination = path.join(pendingRoot, "data", ...relativePath.split("/"));
-        const copied = await copyAndHash(source, destination);
-        files.push({ path: relativePath, ...copied });
-      }
-      const manifest = backupManifestSchema.parse({
-        schemaVersion: 1,
-        backupId: id,
-        installationId: this.installationId,
-        createdAt: new Date(this.now()).toISOString(),
-        sourceFingerprint: sourceFingerprint(files),
-        files,
+      return this.publicationLockManager.withLock(publicationBarrierLock(this.installationId), async () => {
+        await Promise.all([assertRealDirectory(this.dataRoot), assertRealDirectory(this.publishWriteRoot)]);
+        await mkdir(path.join(this.backupsRoot, "snapshots"), { recursive: true, mode: 0o700 });
+        const id = backupId(this.now());
+        const pendingRoot = path.join(this.backupsRoot, "snapshots", `.${id}.pending`);
+        const finalRoot = path.join(this.backupsRoot, "snapshots", id);
+        await mkdir(path.join(pendingRoot, "roots"), { recursive: true, mode: 0o700 });
+        const files: BackupManifestEntry[] = [];
+        const sources: Array<{
+          component: BackupComponent;
+          root: string;
+          options: Parameters<typeof listSourceFiles>[1];
+        }> = [
+          {
+            component: "product-data",
+            root: this.dataRoot,
+            options: { excludedRoot: this.backupsRoot, exclude: dataPathExcluded },
+          },
+          {
+            component: "published-documents",
+            root: this.publishWriteRoot,
+            options: {},
+          },
+        ];
+        for (const sourceDefinition of sources) {
+          await mkdir(path.join(pendingRoot, "roots", sourceDefinition.component), {
+            recursive: true,
+            mode: 0o700,
+          });
+          const relativePaths = await listSourceFiles(sourceDefinition.root, sourceDefinition.options);
+          for (const relativePath of relativePaths) {
+            const source = path.join(sourceDefinition.root, ...relativePath.split("/"));
+            const destination = path.join(
+              pendingRoot,
+              "roots",
+              sourceDefinition.component,
+              ...relativePath.split("/"),
+            );
+            const copied = await copyAndHash(source, destination);
+            files.push({ component: sourceDefinition.component, path: relativePath, ...copied });
+          }
+          if (!await sameFileList(sourceDefinition.root, relativePaths, sourceDefinition.options)) {
+            throw new BackupError("BACKUP_SOURCE_CHANGED", `${sourceDefinition.component} changed while the snapshot was being copied.`);
+          }
+        }
+        files.sort((left, right) => `${left.component}/${left.path}`.localeCompare(`${right.component}/${right.path}`));
+        const manifest = backupManifestSchema.parse({
+          schemaVersion: 2,
+          backupId: id,
+          installationId: this.installationId,
+          createdAt: new Date(this.now()).toISOString(),
+          sourceFingerprint: sourceFingerprint(files),
+          components: [
+            componentSummary("product-data", files),
+            componentSummary("published-documents", files),
+          ],
+          files,
+        });
+        await atomicWriteJson(path.join(pendingRoot, "manifest.json"), manifest, backupManifestSchema, {
+          mode: 0o400,
+        });
+        await freezeTree(pendingRoot, false);
+        await rename(pendingRoot, finalRoot);
+        await chmod(finalRoot, 0o500);
+        await fsyncDirectory(path.dirname(finalRoot));
+        return { manifest, snapshotRoot: finalRoot };
       });
-      await atomicWriteJson(path.join(pendingRoot, "manifest.json"), manifest, backupManifestSchema, {
-        mode: 0o400,
-      });
-      await freezeTree(pendingRoot, false);
-      await rename(pendingRoot, finalRoot);
-      await chmod(finalRoot, 0o500);
-      await fsyncDirectory(path.dirname(finalRoot));
-      return { manifest, snapshotRoot: finalRoot };
     });
   }
 
@@ -362,13 +524,20 @@ export class FileBackupService {
     if (manifest.installationId !== this.installationId || path.basename(root) !== manifest.backupId) {
       throw new BackupError("BACKUP_MANIFEST_MISMATCH", "Snapshot does not belong to this installation.");
     }
-    const actual = await listSourceFiles(path.join(root, "data"), path.join(root, "excluded-backups"));
-    if (actual.length !== manifest.files.length
-      || actual.some((entry, index) => entry !== manifest.files[index]?.path)) {
+    const actual: string[] = [];
+    for (const component of ["product-data", "published-documents"] as const) {
+      const componentRoot = path.join(root, "roots", component);
+      await assertRealDirectory(componentRoot);
+      const paths = await listSourceFiles(componentRoot);
+      actual.push(...paths.map((entry) => `${component}/${entry}`));
+    }
+    const expected = manifest.files.map((entry) => `${entry.component}/${entry.path}`);
+    if (actual.length !== expected.length
+      || actual.some((entry, index) => entry !== expected[index])) {
       throw new BackupError("BACKUP_INTEGRITY_FAILED", "Snapshot files do not match the manifest.");
     }
     for (const entry of manifest.files) {
-      const source = path.join(root, "data", ...entry.path.split("/"));
+      const source = path.join(root, "roots", entry.component, ...entry.path.split("/"));
       const handle = await open(source, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
       try {
         const hash = createHash("sha256");
@@ -417,40 +586,99 @@ export class FileBackupService {
     }
   }
 
-  async restore(snapshotRoot: string, destinationRoot: string) {
-    if (!path.isAbsolute(destinationRoot)) {
-      throw new BackupError("RESTORE_PATH_INVALID", "Restore destination must be absolute.");
+  async restore(snapshotRoot: string, destinations: RestoreDestinations) {
+    if (!path.isAbsolute(destinations.dataRoot) || !path.isAbsolute(destinations.publishWriteRoot)) {
+      throw new BackupError("RESTORE_PATH_INVALID", "Restore destinations must be absolute.");
     }
-    const destination = path.resolve(destinationRoot);
-    if (inside(this.dataRoot, destination) || inside(destination, this.dataRoot)) {
-      throw new BackupError("RESTORE_PATH_INVALID", "Restore destination must be separate from live dataRoot.");
+    const destination = {
+      dataRoot: path.resolve(destinations.dataRoot),
+      publishWriteRoot: path.resolve(destinations.publishWriteRoot),
+    };
+    const liveRoots = [this.dataRoot, this.publishWriteRoot];
+    for (const candidate of Object.values(destination)) {
+      if (liveRoots.some((root) => inside(root, candidate) || inside(candidate, root))) {
+        throw new BackupError("RESTORE_PATH_INVALID", "Restore destinations must be separate from live roots.");
+      }
     }
-    try {
-      await lstat(destination);
-      throw new BackupError("RESTORE_DESTINATION_EXISTS", "Restore destination must not exist.");
-    } catch (error) {
-      if (!isNodeError(error, "ENOENT")) throw error;
+    if (inside(destination.dataRoot, destination.publishWriteRoot)
+      || inside(destination.publishWriteRoot, destination.dataRoot)) {
+      throw new BackupError("RESTORE_PATH_INVALID", "Restore destinations must not overlap each other.");
     }
     const manifest = await this.verify(snapshotRoot);
-    await mkdir(destination, { mode: 0o700 });
+    const totalSize = manifest.files.reduce((total, entry) => total + entry.size, 0);
+    await Promise.all([
+      assertRestoreDestinationAvailable(destination.dataRoot, totalSize),
+      assertRestoreDestinationAvailable(destination.publishWriteRoot, totalSize),
+    ]);
+    const restoreId = randomUUID();
+    const staging = {
+      dataRoot: `${destination.dataRoot}.pending.${restoreId}`,
+      publishWriteRoot: `${destination.publishWriteRoot}.pending.${restoreId}`,
+    };
+    await Promise.all([
+      mkdir(staging.dataRoot, { mode: 0o700 }),
+      mkdir(staging.publishWriteRoot, { mode: 0o700 }),
+    ]);
+    let dataCommitted = false;
+    let publishedCommitted = false;
     try {
       for (const entry of manifest.files) {
-        const source = path.join(snapshotRoot, "data", ...entry.path.split("/"));
-        const target = path.join(destination, ...entry.path.split("/"));
+        const source = path.join(snapshotRoot, "roots", entry.component, ...entry.path.split("/"));
+        const targetRoot = entry.component === "product-data"
+          ? staging.dataRoot
+          : staging.publishWriteRoot;
+        const target = path.join(targetRoot, ...entry.path.split("/"));
         await copyAndHash(source, target, entry);
         await chmod(target, entry.mode & 0o600);
       }
       await atomicWriteJson(
-        path.join(destination, ".aibrain-restore.json"),
+        path.join(staging.dataRoot, ".aibrain-restore.json"),
         manifest,
         backupManifestSchema,
         { mode: 0o400 },
       );
-      return { manifest, destinationRoot: destination };
+      await Promise.all([fsyncDirectory(staging.dataRoot), fsyncDirectory(staging.publishWriteRoot)]);
+      await rename(staging.dataRoot, destination.dataRoot);
+      dataCommitted = true;
+      try {
+        await rename(staging.publishWriteRoot, destination.publishWriteRoot);
+        publishedCommitted = true;
+      } catch (error) {
+        await rename(destination.dataRoot, staging.dataRoot);
+        dataCommitted = false;
+        throw error;
+      }
+      await Promise.all([
+        fsyncDirectory(path.dirname(destination.dataRoot)),
+        fsyncDirectory(path.dirname(destination.publishWriteRoot)),
+      ]);
+      return {
+        manifest,
+        dataDestinationRoot: destination.dataRoot,
+        publishDestinationRoot: destination.publishWriteRoot,
+      };
     } catch (error) {
-      const failed = `${destination}.failed.${randomUUID()}`;
-      await rename(destination, failed).catch(() => undefined);
-      throw new BackupError("RESTORE_FAILED", `Restore failed; partial data was preserved at ${failed}.`, {
+      const failedId = randomUUID();
+      const dataSource = await existingPath([
+        dataCommitted ? destination.dataRoot : staging.dataRoot,
+        staging.dataRoot,
+      ]);
+      const publishSource = await existingPath([
+        publishedCommitted ? destination.publishWriteRoot : staging.publishWriteRoot,
+        staging.publishWriteRoot,
+      ]);
+      const preserved: string[] = [];
+      if (dataSource) {
+        const failed = `${destination.dataRoot}.failed.${failedId}`;
+        await rename(dataSource, failed).catch(() => undefined);
+        preserved.push(failed);
+      }
+      if (publishSource) {
+        const failed = `${destination.publishWriteRoot}.failed.${failedId}`;
+        await rename(publishSource, failed).catch(() => undefined);
+        preserved.push(failed);
+      }
+      throw new BackupError("RESTORE_FAILED", `Restore failed; partial data was preserved at ${preserved.join(", ")}.`, {
         cause: error,
       });
     }

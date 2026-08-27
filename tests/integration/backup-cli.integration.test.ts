@@ -28,6 +28,7 @@ async function fixture() {
     mkdir(publishWriteRoot, { recursive: true, mode: 0o700 }),
   ]);
   await writeFile(path.join(companyContextRoot, "context.md"), "Company context v1\n", { mode: 0o600 });
+  await writeFile(path.join(publishWriteRoot, "published.txt"), "Published document v1\n", { mode: 0o600 });
   const configPath = path.join(root, "installation.json");
   await writeFile(configPath, `${JSON.stringify({
     schemaVersion: 1,
@@ -51,6 +52,7 @@ async function fixture() {
   return {
     root,
     dataRoot,
+    publishWriteRoot,
     configPath,
     environment,
   };
@@ -86,8 +88,13 @@ describe("backup operational CLI", () => {
       snapshotRoot: string;
       sourceFingerprint: string;
       fileCount: number;
+      components: Array<{ component: string; fileCount: number }>;
     };
-    expect(createReceipt).toMatchObject({ operation: "create", fileCount: 1 });
+    expect(createReceipt).toMatchObject({ operation: "create", fileCount: 2 });
+    expect(createReceipt.components).toEqual([
+      expect.objectContaining({ component: "product-data", fileCount: 1 }),
+      expect.objectContaining({ component: "published-documents", fileCount: 1 }),
+    ]);
     expect(createReceipt.snapshotRoot).toContain(path.join(test.dataRoot, "backups", "snapshots"));
 
     const verified = await execFile(executable, [script, "verify", "--snapshot", createReceipt.snapshotRoot], {
@@ -101,22 +108,28 @@ describe("backup operational CLI", () => {
     });
 
     const destination = path.join(test.root, "restored");
+    const publishDestination = path.join(test.root, "restored-publish");
     const restored = await execFile(executable, [
       script,
       "restore",
       "--snapshot",
       createReceipt.snapshotRoot,
-      "--destination",
+      "--data-destination",
       destination,
+      "--publish-destination",
+      publishDestination,
     ], { cwd: repositoryRoot, env: test.environment });
     expect(JSON.parse(restored.stdout)).toMatchObject({
       operation: "restore",
       restored: true,
-      destinationRoot: destination,
+      dataDestinationRoot: destination,
+      publishDestinationRoot: publishDestination,
       sourceFingerprint: createReceipt.sourceFingerprint,
     });
     expect(await readFile(path.join(destination, "company-context", "context.md"), "utf8"))
       .toBe("Company context v1\n");
+    expect(await readFile(path.join(publishDestination, "published.txt"), "utf8"))
+      .toBe("Published document v1\n");
   });
 
   it("rejects invalid operations and missing absolute arguments with a non-zero exit", async () => {

@@ -13,7 +13,9 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { publicationBarrierLock } from "@/documents/publication-locks";
 import { BackupError, FileBackupService } from "@/operations/backup";
+import { ResourceLockManager } from "@/storage";
 
 const roots: string[] = [];
 
@@ -22,6 +24,7 @@ async function fixture() {
   roots.push(root);
   const dataRoot = path.join(root, "live-data");
   const backupsRoot = path.join(dataRoot, "backups");
+  const publishWriteRoot = path.join(root, "publish-rw");
   await Promise.all([
     mkdir(path.join(dataRoot, "users", "user-one", "state"), { recursive: true }),
     mkdir(path.join(dataRoot, "users", "user-one", "browser", "profile", "Default"), { recursive: true }),
@@ -32,6 +35,7 @@ async function fixture() {
     mkdir(path.join(dataRoot, "auth-rate-limits"), { recursive: true }),
     mkdir(path.join(dataRoot, "secrets"), { recursive: true }),
     mkdir(path.join(dataRoot, "locks", "ephemeral.lock"), { recursive: true }),
+    mkdir(path.join(publishWriteRoot, "client-a"), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(path.join(dataRoot, "users", "user-one", "state", "project.json"), "project-v1\n"),
@@ -46,14 +50,17 @@ async function fixture() {
     writeFile(path.join(dataRoot, ".env.runtime"), "runtime-secret\n"),
     writeFile(path.join(dataRoot, "PERMISSIONS.md"), "permission-v1\n", { mode: 0o400 }),
     writeFile(path.join(dataRoot, "locks", "ephemeral.lock", "owner.json"), "ephemeral\n"),
+    writeFile(path.join(publishWriteRoot, "client-a", "report.pdf"), "published-report-v1\n"),
   ]);
   return {
     root,
     dataRoot,
     backupsRoot,
+    publishWriteRoot,
     service: new FileBackupService(
       dataRoot,
       backupsRoot,
+      publishWriteRoot,
       "synthetic-company-qa",
       () => Date.parse("2026-08-27T12:34:56.000Z"),
     ),
@@ -80,10 +87,11 @@ afterEach(async () => {
 
 describe("FileBackupService", () => {
   it("creates a schema-valid backup id when the clock includes milliseconds", async () => {
-    const { dataRoot, backupsRoot } = await fixture();
+    const { dataRoot, backupsRoot, publishWriteRoot } = await fixture();
     const service = new FileBackupService(
       dataRoot,
       backupsRoot,
+      publishWriteRoot,
       "synthetic-company-qa",
       () => Date.parse("2026-08-27T12:34:56.789Z"),
     );
@@ -95,11 +103,16 @@ describe("FileBackupService", () => {
   it("creates an immutable verified snapshot and restores it into a new root", async () => {
     const { root, dataRoot, service } = await fixture();
     const created = await service.create();
-    expect(created.manifest.files.map(({ path: filePath }) => filePath)).toEqual([
-      "PERMISSIONS.md",
-      "users/user-one/browser/downloads/report.txt",
-      "users/user-one/browser/session.json",
-      "users/user-one/state/project.json",
+    expect(created.manifest.files.map(({ component, path: filePath }) => `${component}/${filePath}`)).toEqual([
+      "product-data/PERMISSIONS.md",
+      "product-data/users/user-one/browser/downloads/report.txt",
+      "product-data/users/user-one/browser/session.json",
+      "product-data/users/user-one/state/project.json",
+      "published-documents/client-a/report.pdf",
+    ]);
+    expect(created.manifest.components).toEqual([
+      expect.objectContaining({ component: "product-data", fileCount: 4 }),
+      expect.objectContaining({ component: "published-documents", fileCount: 1 }),
     ]);
     expect((await lstat(created.snapshotRoot)).mode & 0o777).toBe(0o500);
     expect((await lstat(path.join(created.snapshotRoot, "manifest.json"))).mode & 0o777).toBe(0o400);
@@ -115,10 +128,16 @@ describe("FileBackupService", () => {
 
     await writeFile(path.join(dataRoot, "users", "user-one", "state", "project.json"), "project-v2\n");
     const restoreRoot = path.join(root, "restored-data");
-    const restored = await service.restore(created.snapshotRoot, restoreRoot);
+    const restoredPublishRoot = path.join(root, "restored-publish");
+    const restored = await service.restore(created.snapshotRoot, {
+      dataRoot: restoreRoot,
+      publishWriteRoot: restoredPublishRoot,
+    });
     expect(restored.manifest.sourceFingerprint).toBe(created.manifest.sourceFingerprint);
     expect(await readFile(path.join(restoreRoot, "users", "user-one", "state", "project.json"), "utf8"))
       .toBe("project-v1\n");
+    expect(await readFile(path.join(restoredPublishRoot, "client-a", "report.pdf"), "utf8"))
+      .toBe("published-report-v1\n");
     await expect(lstat(path.join(restoreRoot, "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "auth-challenges"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "auth-rate-limits"))).rejects.toMatchObject({ code: "ENOENT" });
@@ -134,7 +153,16 @@ describe("FileBackupService", () => {
   it("detects snapshot corruption and refuses an existing restore destination", async () => {
     const { root, service } = await fixture();
     const created = await service.create();
-    const target = path.join(created.snapshotRoot, "data", "users", "user-one", "state", "project.json");
+    const existing = path.join(root, "existing");
+    await mkdir(existing);
+    await expect(service.restore(created.snapshotRoot, {
+      dataRoot: existing,
+      publishWriteRoot: path.join(root, "restore-publish"),
+    })).rejects.toMatchObject({
+      code: "RESTORE_DESTINATION_EXISTS",
+    });
+
+    const target = path.join(created.snapshotRoot, "roots", "product-data", "users", "user-one", "state", "project.json");
     await chmod(path.dirname(target), 0o700);
     await chmod(target, 0o600);
     await writeFile(target, "tampered\n");
@@ -142,11 +170,6 @@ describe("FileBackupService", () => {
       code: "BACKUP_INTEGRITY_FAILED",
     });
 
-    const existing = path.join(root, "existing");
-    await mkdir(existing);
-    await expect(service.restore(created.snapshotRoot, existing)).rejects.toMatchObject({
-      code: "RESTORE_DESTINATION_EXISTS",
-    });
   });
 
   it("fails closed on symbolic links in live state", async () => {
@@ -167,10 +190,70 @@ describe("FileBackupService", () => {
     await expect(service.create()).rejects.toMatchObject({ code: "BACKUP_FILE_UNSAFE" });
   });
 
+  it("fails closed on symbolic links and hard links in published documents", async () => {
+    const first = await fixture();
+    const outside = path.join(first.root, "outside-published.txt");
+    await writeFile(outside, "outside\n");
+    await symlink(outside, path.join(first.publishWriteRoot, "client-a", "linked.txt"));
+    await expect(first.service.create()).rejects.toMatchObject({ code: "BACKUP_SYMLINK_REJECTED" });
+
+    const second = await fixture();
+    const hardLinkSource = path.join(second.root, "hard-link-source.txt");
+    await writeFile(hardLinkSource, "outside\n");
+    await link(hardLinkSource, path.join(second.publishWriteRoot, "client-a", "hard-linked.txt"));
+    await expect(second.service.create()).rejects.toMatchObject({ code: "BACKUP_FILE_UNSAFE" });
+  });
+
+  it("waits for an in-flight publication and snapshots only the completed target", async () => {
+    const { dataRoot, publishWriteRoot, service } = await fixture();
+    const publicationLocks = new ResourceLockManager({
+      rootDirectory: path.join(dataRoot, "locks", "document-publication-targets"),
+      retryDelayMs: 5,
+    });
+    let releasePublication!: () => void;
+    const publicationReleased = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    let publicationAcquired!: () => void;
+    const publicationReady = new Promise<void>((resolve) => {
+      publicationAcquired = resolve;
+    });
+    const publication = publicationLocks.withLock(
+      publicationBarrierLock("synthetic-company-qa"),
+      async () => {
+        publicationAcquired();
+        await publicationReleased;
+        await writeFile(
+          path.join(publishWriteRoot, "client-a", "report.pdf"),
+          "published-report-v2\n",
+        );
+      },
+    );
+    await publicationReady;
+
+    let backupSettled = false;
+    const backup = service.create().finally(() => {
+      backupSettled = true;
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 30));
+    expect(backupSettled).toBe(false);
+
+    releasePublication();
+    await publication;
+    const created = await backup;
+    await expect(readFile(path.join(
+      created.snapshotRoot,
+      "roots",
+      "published-documents",
+      "client-a",
+      "report.pdf",
+    ), "utf8")).resolves.toBe("published-report-v2\n");
+  });
+
   it("detects files added to or removed from an immutable snapshot", async () => {
     const { service } = await fixture();
     const created = await service.create();
-    const dataDirectory = path.join(created.snapshotRoot, "data");
+    const dataDirectory = path.join(created.snapshotRoot, "roots", "product-data");
     await chmod(created.snapshotRoot, 0o700);
     await chmod(dataDirectory, 0o700);
 
@@ -216,16 +299,22 @@ describe("FileBackupService", () => {
     const originalVerify = service.verify.bind(service);
     service.verify = async (snapshotRoot: string) => {
       const manifest = await originalVerify(snapshotRoot);
-      const missing = path.join(snapshotRoot, "data", "users", "user-one", "state", "project.json");
+      const componentRoot = path.join(snapshotRoot, "roots", "product-data");
+      const missing = path.join(componentRoot, "users", "user-one", "state", "project.json");
       await chmod(snapshotRoot, 0o700);
-      await chmod(path.join(snapshotRoot, "data"), 0o700);
+      await chmod(path.join(snapshotRoot, "roots"), 0o700);
+      await chmod(componentRoot, 0o700);
       await chmod(path.dirname(missing), 0o700);
       await rm(missing);
       return manifest;
     };
 
     const destination = path.join(root, "failed-restore");
-    await expect(service.restore(created.snapshotRoot, destination)).rejects.toMatchObject({
+    const publishDestination = path.join(root, "failed-publish-restore");
+    await expect(service.restore(created.snapshotRoot, {
+      dataRoot: destination,
+      publishWriteRoot: publishDestination,
+    })).rejects.toMatchObject({
       code: "RESTORE_FAILED",
       message: expect.stringContaining(`${destination}.failed.`),
     });

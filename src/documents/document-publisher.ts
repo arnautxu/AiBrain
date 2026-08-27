@@ -17,6 +17,7 @@ import {
   type PublicationPreviewMetadata,
   type StoredPublicationOperation,
 } from "@/documents/publication-contract";
+import { publicationBarrierLock, publicationTargetLock } from "@/documents/publication-locks";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
 import { readRegularFileWithin, UnsafeFilePathError } from "@/security/safe-file";
 import { atomicWriteFile, atomicWriteJson } from "@/storage/atomic-file";
@@ -296,7 +297,7 @@ export class FileDocumentPublisher {
   }
 
   #targetLock(targetRelativePath: string) {
-    return `document-publication-target:${this.installationId}:${sha256(targetRelativePath)}`;
+    return publicationTargetLock(this.installationId, targetRelativePath);
   }
 
   #timestamp() {
@@ -722,7 +723,8 @@ export class FileDocumentPublisher {
           throw new StorageError("PUBLICATION_STATE_CORRUPT", "Frozen publication candidate failed integrity verification.");
         }
 
-        return this.#targetLockManager.withLock(this.#targetLock(operation.targetRelativePath), async () => {
+        return this.#targetLockManager.withLock(publicationBarrierLock(this.installationId), () =>
+          this.#targetLockManager.withLock(this.#targetLock(operation.targetRelativePath), async () => {
           let current = await this.#readTarget(operation.targetRelativePath);
           const targetAlreadyContainsCandidate =
             current.metadata.exists && current.metadata.size === operation.candidate.size &&
@@ -842,7 +844,7 @@ export class FileDocumentPublisher {
         await this.#writeOperation(operation);
         await this.#onStage?.("published-recorded", operationId);
         return this.#redact(operation);
-        });
+          }));
       });
     });
   }
