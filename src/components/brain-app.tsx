@@ -28,6 +28,7 @@ import {
   type ComposerMode,
 } from "@/lib/chat-contract";
 import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
+import { createChatEventFrameDispatcher } from "@/ui/frame-event-dispatcher";
 import {
   initialRuntimeStatus,
   isRuntimeStatus,
@@ -55,6 +56,7 @@ type SideWindowId = Exclude<BrainWindowId, "chat">;
 type BrainStyle = CSSProperties & {
   "--brain-accent": string;
   "--brain-accent-strong": string;
+  "--brain-accent-on-soft": string;
   "--brain-accent-soft": string;
   "--brain-contrast": string;
   "--brain-radius": string;
@@ -429,6 +431,7 @@ export function BrainApp({
     return {
       "--brain-accent": branding.accentColor,
       "--brain-accent-strong": `color-mix(in srgb, ${branding.accentColor} 72%, #000000)`,
+      "--brain-accent-on-soft": `color-mix(in srgb, ${branding.accentColor} 45%, var(--text))`,
       "--brain-accent-soft": `color-mix(in srgb, ${branding.accentColor} 12%, transparent)`,
       "--brain-contrast": "#ffffff",
       "--brain-radius": cornerTokens[preferences.corners],
@@ -513,9 +516,10 @@ export function BrainApp({
     response: Response,
     threadId: string,
     assistantMessageId: string,
+    signal: AbortSignal,
   ) => {
     if (!response.ok) throw new Error(await chatError(response));
-    await consumeChatEventStream(response, (event) => {
+    const dispatcher = createChatEventFrameDispatcher((event) => {
       setThreads((current) => updateThreadMessage(
         current,
         threadId,
@@ -523,6 +527,11 @@ export function BrainApp({
         (message) => applyChatStreamEvent(message, event),
       ));
     });
+    try {
+      await consumeChatEventStream(response, dispatcher.dispatch, { signal });
+    } finally {
+      dispatcher.close();
+    }
   }, []);
 
   const sendMessage = useCallback(async (messageOverride?: string, displayMessageOverride?: string) => {
@@ -607,7 +616,7 @@ export function BrainApp({
           },
         }),
       });
-      await handleStream(response, threadId, assistantId);
+      await handleStream(response, threadId, assistantId, controller.signal);
       succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {

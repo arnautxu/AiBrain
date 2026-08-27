@@ -25,6 +25,7 @@ function parseEvent(line: string): ChatStreamEvent {
 export async function consumeChatEventStream(
   response: Response,
   onEvent: (event: ChatStreamEvent) => void,
+  options: { signal?: AbortSignal } = {},
 ) {
   if (!response.body) {
     throw new ChatStreamProtocolError("La respuesta no contiene datos.");
@@ -33,6 +34,11 @@ export async function consumeChatEventStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  const abortError = () => options.signal?.reason instanceof Error
+    ? options.signal.reason
+    : new DOMException("La lectura del stream se ha cancelado.", "AbortError");
+  const onAbort = () => { void reader.cancel(abortError()); };
+  options.signal?.addEventListener("abort", onAbort, { once: true });
 
   const applyLine = (line: string) => {
     if (!line.trim()) return;
@@ -43,6 +49,7 @@ export async function consumeChatEventStream(
   };
 
   try {
+    if (options.signal?.aborted) throw abortError();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -56,7 +63,12 @@ export async function consumeChatEventStream(
     }
     buffer += decoder.decode();
     applyLine(buffer);
+    if (options.signal?.aborted) throw abortError();
+  } catch (error) {
+    await reader.cancel(error).catch(() => undefined);
+    throw error;
   } finally {
+    options.signal?.removeEventListener("abort", onAbort);
     reader.releaseLock();
   }
 }
