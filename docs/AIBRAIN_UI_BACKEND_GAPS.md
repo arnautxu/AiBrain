@@ -60,6 +60,12 @@ type UiEventEnvelope = {
 9. El stream pertenece a `threadId/turnId`; cambiar de vista no lo cancela.
 10. Reconnect no crea una conversación nueva si resume falla.
 
+## Resiliencia UI ya cerrada sin fingir transporte durable
+
+- El checkpoint UI 7 cubre responsive, temas claro/oscuro/sistema, teclado, focus, motion reducido, offline y fallo de `/api/runtime/status` sobre el contrato legacy actual.
+- Offline o runtime no disponible mantienen el historial en lectura y bloquean el envío. El reintento es explícito y la vuelta online vuelve a consultar status antes de habilitar el composer.
+- Esta resiliencia local no se presenta como reconnect de turno: no deduplica eventos, no confirma cursores y no reanuda un stream App Server. Esas garantías continúan bloqueadas por checkpoints backend 7/10.
+
 ## Gaps reales, no simulables
 
 | Gap backend | Estado | Consecuencia UI |
