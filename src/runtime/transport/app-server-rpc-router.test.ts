@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type {
   AppServerEvent,
@@ -146,7 +147,11 @@ describe("AppServerRpcRouter", () => {
     expect(bNotification).toHaveBeenCalledOnce();
     expect(aApproval).toHaveBeenCalledOnce();
     expect(bApproval).not.toHaveBeenCalled();
+    const scopeDigest = createHash("sha256")
+      .update(JSON.stringify(["thread-a", "turn-a"]))
+      .digest("hex");
     expect(transport.sent.at(-1)).toMatchObject({
+      clientRequestId: `server-response:event-2:${scopeDigest}`,
       kind: "rpc-response",
       rpc: { id: "approval-a", result: { decision: "accept" } },
     });

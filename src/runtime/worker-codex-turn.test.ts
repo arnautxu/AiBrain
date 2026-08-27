@@ -411,6 +411,162 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "done" });
   });
 
+  it("declines generic App Server execution requests server-side when tools.execute is denied", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-deny-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(staging, { mode: 0o700 });
+    });
+    let handlers: {
+      onServerRequest(request: unknown, envelope: unknown): Promise<unknown>;
+      onNotification(value: unknown): Promise<void> | void;
+    } | null = null;
+    const responses: unknown[] = [];
+    const client = {
+      router: {
+        registerTurn(_threadId: string, _localTurnId: string, value: typeof handlers) {
+          handlers = value;
+          return {
+            threadId: "runtime-thread-deny",
+            localTurnId: assistantMessageId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connection() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-deny" } };
+          await beforeResolve?.(result as never, {
+            eventId: "deny-thread-response",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          const result = { turn: { id: "runtime-turn-deny" } };
+          await beforeResolve?.(result as never, {
+            eventId: "deny-turn-response",
+            sequence: 2,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          queueMicrotask(() => {
+            void (async () => {
+              for (const [index, requestMethod] of [
+                "item/commandExecution/requestApproval",
+                "item/fileChange/requestApproval",
+                "item/permissions/requestApproval",
+              ].entries()) {
+                const request = {
+                  id: index + 1,
+                  method: requestMethod,
+                  params: {
+                    threadId: "runtime-thread-deny",
+                    turnId: "runtime-turn-deny",
+                    itemId: `denied-${index}`,
+                    command: "touch forbidden",
+                    permissions: { fileSystem: { write: ["/forbidden"] } },
+                  },
+                };
+                responses.push(await handlers!.onServerRequest(request, {
+                  eventId: `deny-request-${index}`,
+                  sequence: index + 3,
+                  occurredAt: new Date().toISOString(),
+                  message: { kind: "server-request", rpc: request },
+                }));
+              }
+              await handlers!.onNotification({
+                method: "turn/completed",
+                params: {
+                  threadId: "runtime-thread-deny",
+                  turn: { id: "runtime-turn-deny", status: "completed", items: [], error: null },
+                },
+              });
+            })();
+          });
+          return result;
+        }
+        return {};
+      },
+    };
+    mocked.runtime = {
+      config: { installationId },
+      handle: { roots: { workspace, staging } },
+      client,
+    };
+    const approvalStore = {
+      createPending: vi.fn(() => { throw new Error("A policy denial must not create a pending approval."); }),
+    };
+    const events: Array<Record<string, unknown>> = [];
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/unused",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions([{
+        ruleId: "tools.execute",
+        action: "execute",
+        effect: "deny",
+        instruction: "Do not execute generic tools.",
+        sourceScope: "user",
+        sourcePolicyVersion: 1,
+        precedence: 400,
+      }]),
+      approvalStore as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(approvalStore.createPending).not.toHaveBeenCalled();
+    expect(responses).toEqual([
+      { decision: "decline" },
+      { decision: "decline" },
+      { permissions: {}, scope: "turn" },
+    ]);
+    expect(events.filter((event) => event.type === "approval")).toHaveLength(3);
+    expect(events.filter((event) => event.type === "approval"))
+      .toEqual(events.filter((event) => event.type === "approval").map((event) =>
+        expect.objectContaining({ item: expect.objectContaining({ status: "declined" }) })));
+  });
+
   it("fails closed before contacting a worker when the memory store is unavailable", async () => {
     let audited = false;
     await expect(runWorkerCodexTurn(

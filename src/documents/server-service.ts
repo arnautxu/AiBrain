@@ -4,6 +4,7 @@ import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { FileDocumentConversionGate } from "@/documents/conversion-gate";
 import { FileDocumentPublisher } from "@/documents/document-publisher";
+import { FilePublicationCapacityGate } from "@/documents/publication-capacity";
 import { DocumentPreviewService, type DocumentToolchain } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { FileDocumentStorageGate } from "@/documents/storage-gate";
@@ -109,5 +110,13 @@ export async function documentPublisherForUser(
       ),
     }),
     confirmationSecret: publicationSecret(),
+    capacityGate: new FilePublicationCapacityGate({
+      rootDirectory: path.join(
+        installation.paths.dataRoot,
+        "locks",
+        "document-publication-capacity",
+      ),
+      capacityRoot: installation.paths.publishWriteRoot,
+    }),
   });
 }

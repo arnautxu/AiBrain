@@ -7,8 +7,10 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `14f63af` en
+- Último checkpoint backend publicado: `bded0b6` en
   `origin/codex/aibrain-backend-definitivo`.
+- Último checkpoint backend local: `f788a5b`; matriz local final repetida y
+  verde. Push pendiente de este cierre documental.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
 
@@ -42,14 +44,14 @@
 | 2. Supabase Auth-only + sesión local | Completado localmente | `1c0386b`, `323243b`, `283caf8`: login/cambio inicial/recuperación, cookie opaca, expiración, revocación, CSRF/Origin y E2E HTTP de continuidad offline tras corte total y restart; eliminados adapters, migraciones y dependencia SSR de producto. Solo queda validación externa Supabase QA |
 | 3. Stores file-backed resilientes | Completado localmente | `38eeaaf`, `9efb45a`, `facda49`, `cf76855`, `ac0b62e`, `368aec0`, `4487ef2`, `016f708`: schemas estrictos, atomic write/fsync, journals, índices y locks con recovery verificado entre procesos reales; owner local vivo no se roba aunque el timestamp parezca stale |
 | 4. Provisionamiento idempotente + 20 usuarios | Completado localmente | `75316e1`, `545948a`, `323243b`, `d74a800`: alta real de 20 empleados, baja/reactivación/recuperación idempotentes, revocación de sesiones, parada selectiva de worker/browser, receipts y auditoría sin datos sensibles |
-| 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
+| 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`, `984d787`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff, respuesta RPC confirmada solo tras evidencia App Server y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
-| 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, reserva previa de volumen y recovery de temporales tras `SIGKILL` |
+| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`, `984d787`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash antes de evidencia, replay tras compactación, dedupe, restart y continuidad del otro worker |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`, `eff6edc`, `42c7539`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, retención terminal de candidato, gates separados de data/publish y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`: backup compuesto, réplica Restic, alertas y recovery transaccional de release cerrados localmente; falta evidencia Docker/host QA real |
-| 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
+| 11. Compose y operación | Completado localmente; evidencia Docker/host QA externa pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`, `78d1f22`, `326c5bd`, `e765eb0`, `9cd0d6d`: alert-dispatcher externo, backup/recovery systemd, release V3 con env/Compose/seccomp/config exactos y rollback sin depender de carpetas antiguas; Docker/reboot QA siguen fuera del host local |
+| 12. Hardening y suite completa | Completado localmente; gates externos listados abajo | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`, `bded0b6`, `42c7539`, `9cd0d6d`, `984d787`, `f788a5b`: ruta HTTP→worker/App Server y recovery RPC reales, soak final, CI reproducible, denegación física de tools, artefactos no cacheables, publicación separada y release inputs atestados; Docker/host QA, Supabase QA y cuenta Codex dedicada requieren infraestructura/credenciales externas |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
@@ -75,8 +77,21 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 - Backup V2 captura `product-data` y `published-documents` bajo fingerprints por componente y global. Comparte una barrera física con el publicador para no cruzar una confirmación; restore preflight comprueba roots/espacio, prepara ambos árboles y revierte la primera promoción si falla la segunda.
 - La réplica off-host es un proceso Restic one-shot separado: recibe snapshots read-only, password read-only y estado de receipts independiente; reusa tags exactos tras crash, verifica readback+repository, no ejecuta shell y solo reenvía variables de proveedor allowlisted. No inicializa, poda ni borra el remoto.
-- Las alertas operativas separan evaluación, outbox y sink. El estado file-backed genera transiciones `raised/updated/resolved`, deduplica por código+severidad+umbral, conserva generations y receipts, aplica backoff y falla por backpressure antes de una reconciliación parcial. El colector no monta `docker.sock`: readiness, disco y backup se leen dentro del contenedor y los contadores de supervisor son argumentos host obligatorios.
+- Las alertas operativas separan evaluación, outbox y sink. El estado file-backed genera transiciones `raised/updated/resolved`, deduplica por código+severidad+umbral, conserva generations y receipts, aplica backoff y falla por backpressure antes de una reconciliación parcial. `alert-dispatcher` no depende de la salud de app, no monta `docker.sock`, lee app/gateway, data/publish, snapshot y receipt off-host desde mounts mínimos y entrega por webhook HTTPS con token dedicado.
+- El preflight host exige env secretos privados y de un solo enlace, config/compose owner-controlled, password Restic read-only del UID de servicio y raíces source/publish/replica con ownership y modos compatibles con sus mounts. Rechaza antes de Docker cualquier symlink, hardlink, owner o permiso inseguro.
 - Una release une app+gateway y usa journal durable por fases. Antes de mutar, verifica estado, env, imágenes y contenedores actuales; después valida health, digest y revisión realmente ejecutados. `flock`/`lockf` serializa operadores, el lock local vincula PID+inicio+boot, los Docker subprocesses están acotados y recovery recibe un deadline independiente.
+- Release V3 conserva en estado privado bytes y SHA-256 de env, Compose fuente,
+  Compose efectivo, seccomp e InstallationConfig para `current` y `previous`.
+  El Compose efectivo apunta a un seccomp gestionado junto al estado y no a una
+  carpeta de release antigua. Rollback no acepta paths alternativos: restaura
+  los inputs, fuerza recreación, valida tres servicios y falla ante drift,
+  symlink, hardlink, owner o modo inseguro. El env candidato permite tunear
+  recursos pero no migrar identidad, rutas, puertos, redes, volúmenes o UIDs.
+- El backup host usa un journal privado por fases y lock advisory del SO. Ante
+  fallo recupera app+admisión antes de salir; tras SIGKILL/reboot, la unidad
+  systemd verifica un snapshot ya creado, espera health y solo emite receipt
+  `verified` tras readback. Un intento sin snapshot probado queda `aborted`, no
+  se presenta como backup válido.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -181,11 +196,49 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 
 ## Siguiente acción concreta
 
-Reauditar los checkpoints 11/12 contra el árbol actual y cerrar cualquier gap
-local reproducible restante. Mantener separados los gates externos exactos de
-Docker/host QA, Supabase, Codex dedicado, Restic y alertas reales.
+Cerrar los gaps locales restantes de la auditoría de seguridad: ejecutar la
+ruta HTTP real de chat hasta un App Server sintético a través del worker y su
+WebSocket privado, eliminar la ventana de pérdida entre escritura RPC y
+confirmación de procesamiento, y ampliar el soak para incluir HTTP/documentos/
+browser. Después repetir la matriz total y publicar los checkpoints verdes.
 
 ## Últimas validaciones
+
+- Resiliencia documental `eff6edc`: 20/20 focalizadas, typecheck, lint e infra
+  estática verdes; retención terminal de 30 días conserva operación, receipts,
+  versiones y auditoría y corrige el lease de multipart ante boundary inválido.
+- CI `bded0b6`: workflow sin secretos y acciones fijadas por SHA; contratos,
+  typecheck, lint, suite, E2E, build, auditorías, matriz Office/PDF y builds
+  Docker limpios. Validación local agregada: 100 ficheros pasados + 1 omitido,
+  463 pruebas pasadas + 3 omitidas, E2E 4/4, build y 0 vulnerabilidades.
+- Hardening `42c7539`: 43/43 pruebas focalizadas verdes antes del commit;
+  `tools.execute=deny` cubre tres requests App Server sin pendiente ni grants,
+  artefactos privados se reautorizan con `no-store` y capacidad data/publish se
+  mide por separado antes de cambiar una publicación a `publishing`.
+- Alertas/preflight `78d1f22`: 53/53 pruebas focalizadas verdes en siete
+  ficheros; validator Docker/Compose estático, typecheck y lint verdes. Incluye
+  fallos webhook `429/503/400/timeout`, app/gateway privados, réplica
+  ausente/stale/mismatch, snapshot realmente presente, secretos expuestos,
+  hardlinks y roots con permisos/ownership cerrados. Docker Compose real no se
+  ejecutó porque el CLI no existe en este host.
+- Release V3 `326c5bd`: 22/22 pruebas release+preflight verdes. A→B→A restaura
+  imágenes, revisión, env, Compose con límites distintos e InstallationConfig;
+  una release config-only recrea servicios; recovery cubre caída, estado
+  comprometido y fallback; drift, secreto mal ubicado, symlink, hardlink y modo
+  inseguro fallan cerrados. Typecheck, lint e infra estática verdes; Docker real
+  sigue siendo gate QA externo.
+- Orquestación de backup `e765eb0`: 7/7 integraciones verdes entre CLI y
+  controlador. Cubre drain/stop/create/verify/start/resume, fallo de create,
+  `SIGKILL` durante verify, recovery de snapshot y app, secreto runtime privado
+  y receipts `verified/aborted`; typecheck, lint e infra estática verdes. La
+  unidad systemd de boot queda pendiente de ejecución real en Hetzner QA.
+- Atestación de release `9cd0d6d`: 29/29 pruebas release+preflight verdes. El
+  gestor versiona env candidato, Compose fuente/efectivo, seccomp y config;
+  valida el YAML contra servicios/redes/volúmenes propios, permite RAM/CPU sin
+  migrar recursos, recupera A→B→A exacto y rechaza BGreenly, red no revisada,
+  config de otra instalación, drift seccomp y estado V2 con diagnóstico
+  recuperable. Typecheck, lint, auditoría producción e infra estática verdes;
+  Docker real permanece correctamente como `NOT RUN`.
 
 - `npx vitest run tests/unit/installation-config.test.ts`: 8/8 verdes.
 - `npm run lint`: verde, sin warnings.
@@ -377,6 +430,30 @@ Docker/host QA, Supabase, Codex dedicado, Restic y alertas reales.
   typecheck, lint, validator infra y build Next 16.3.2 verdes.
 - Push verificado: `886747b..b77dc7f` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Cierre de transporte `984d787`: una respuesta a request server-side no se
+  confirma al gateway hasta observar evidencia App Server posterior del mismo
+  thread/turn; `clientRequestId` es determinista y el digest de scope permite
+  reintentar tras crash incluso si el evento original ya fue compactado. El E2E
+  atraviesa login Supabase sintético, corte total del provider, HTTP Next,
+  WebSocket privado, worker persistente, App Server sintético, streaming,
+  restart real de Next y replay idempotente sin duplicar el mensaje.
+- Release Node 24 `f788a5b`: el deadline monotónico restante se convierte a
+  milisegundos enteros positivos antes de `execFileSync`; 26/26 pruebas de
+  promoción, rollback, recovery, locks y subprocess colgado quedan verdes.
+- Matriz local final de este cierre: typecheck y lint verdes; unitarias 423
+  pasadas + 2 opt-in omitidas en 74 ficheros + 1 omitido; integración 58
+  pasadas + 1 omitida en 25 ficheros; contratos 15/15 y regeneración byte a
+  byte con Codex 0.149.1; E2E HTTP 4/4; documentos reales 2/2; build Next
+  16.3.2 verde. Auditorías npm completa y producción: 0 vulnerabilidades.
+- Browser real: Google Chrome de escritorio 151 autoactualizado no respondió
+  por CDP pipe y se rechazó como evidencia; Chrome for Testing aislado
+  149.0.7827.55 ejecutó 2/2 escenarios en 3,21 s. La imagen QA conserva como
+  requisito la versión fijada 152.0.7977.64 y debe repetir allí la prueba.
+- Soak final de 120,133 s: 4 workers, 600 requests/eventos, 28 replays y 28
+  restarts, 4,99 req/s, media 698,76 ms, p95 965,49 ms y máximo 1.669,81 ms;
+  crecimiento sostenido RSS/heap 0, fugas de handles/recursos/sockets/listeners/
+  procesos 0 y journals acotados a 258 registros/90,68 KiB/3 ficheros por
+  worker.
 
 ## Matriz requisito → implementación → prueba
 
@@ -400,8 +477,8 @@ Docker/host QA, Supabase, Codex dedicado, Restic y alertas reales.
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
-| Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación, promoción dual y Restic off-host one-shot | 10 pruebas backup + CLI/proceso Restic sintético, incluidas corrupción, enlaces, publicación concurrente, restore, crash/replay y secretos; contenedor QA y proveedor externo pendientes |
-| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual atómica con journal | Alertas 13/13, release/preflight 19/19 y validator estático verde; ejecución Docker/reboot QA pendiente |
+| Backup/restore/recovery | Manifest V2 compuesto, controlador durable drain/stop/create/verify/start/resume, recovery systemd y Restic off-host one-shot | Pruebas backup + 7 integraciones CLI/controlador, incluidos corrupción, enlaces, publicación concurrente, SIGKILL, receipt verified/aborted y recovery; contenedor QA y proveedor externo pendientes |
+| Operación/release/rollback | Compose, Nginx, health, logs, alertas con outbox/sink durable, drain y release dual transaccional con env/Compose/seccomp/config atestados | Alertas 13/13, release/preflight 29/29 y validator estático verde; ejecución Docker/reboot QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
 

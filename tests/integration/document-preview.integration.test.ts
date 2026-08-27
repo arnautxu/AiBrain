@@ -12,13 +12,25 @@ import { validateUploadedDocument } from "@/documents/upload-validation";
 import { ResourceLockManager } from "@/storage/resource-lock";
 
 const run = promisify(execFile);
+function executable(environmentName: string, candidates: readonly string[]) {
+  const configured = process.env[environmentName]?.trim();
+  if (configured) return configured;
+  return candidates.find(existsSync) ?? candidates[0];
+}
+
+const qpdf = executable("AIBRAIN_QPDF_BIN", ["/opt/homebrew/bin/qpdf", "/usr/bin/qpdf"]);
 const tools = {
-  soffice: "/opt/homebrew/bin/soffice",
-  pdfinfo: "/opt/homebrew/bin/pdfinfo",
-  pdftoppm: "/opt/homebrew/bin/pdftoppm",
-  pdftotext: "/opt/homebrew/bin/pdftotext",
+  soffice: executable("AIBRAIN_SOFFICE_BIN", [
+    "/opt/homebrew/bin/soffice",
+    "/Applications/LibreOffice.app/Contents/MacOS/soffice",
+    "/usr/bin/soffice",
+  ]),
+  pdfinfo: executable("AIBRAIN_PDFINFO_BIN", ["/opt/homebrew/bin/pdfinfo", "/usr/bin/pdfinfo"]),
+  pdftoppm: executable("AIBRAIN_PDFTOPPM_BIN", ["/opt/homebrew/bin/pdftoppm", "/usr/bin/pdftoppm"]),
+  pdftotext: executable("AIBRAIN_PDFTOTEXT_BIN", ["/opt/homebrew/bin/pdftotext", "/usr/bin/pdftotext"]),
+  ...(existsSync(qpdf) ? { qpdf } : {}),
 };
-const hasToolchain = Object.values(tools).every(existsSync);
+const hasToolchain = [tools.soffice, tools.pdfinfo, tools.pdftoppm, tools.pdftotext].every(existsSync);
 const runFullMatrix = hasToolchain && process.env.AIBRAIN_REAL_DOCUMENT_MATRIX === "1";
 const roots: string[] = [];
 
@@ -59,7 +71,7 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
     previewRoot: path.join(root, "previews"),
     lockManager: locks,
     tools,
-    requireQpdf: false,
+    requireQpdf: Boolean(tools.qpdf),
   }).create(staged);
 
   expect(preview).toMatchObject({ kind: "docx", status: "ready", pages: 1 });
@@ -75,7 +87,7 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
       previewRoot: path.join(root, "previews"),
       lockManager: locks,
       tools,
-      requireQpdf: false,
+      requireQpdf: Boolean(tools.qpdf),
     }),
     pdftotext: tools.pdftotext,
   }).resolve(staged);
@@ -170,7 +182,7 @@ it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with t
     previewRoot,
     lockManager: locks,
     tools,
-    requireQpdf: false,
+    requireQpdf: Boolean(tools.qpdf),
   });
 
   for (const fixture of fixtures) {

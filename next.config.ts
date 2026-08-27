@@ -11,6 +11,10 @@ const nextConfig: NextConfig = {
   // Vercel owns the framework build output. The standalone bundle is only for
   // the persistent Docker/host target where Codex App Server can run.
   ...(process.env.VERCEL === "1" ? {} : { output: "standalone" as const }),
+  // The private worker gateway needs the real Node `ws` implementation at
+  // runtime. Keeping it external avoids framework bundlers substituting their
+  // own WebSocket shim in API-route chunks.
+  serverExternalPackages: ["ws"],
   reactStrictMode: true,
   poweredByHeader: false,
   async headers() {

@@ -8,6 +8,7 @@ import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-si
 import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
+  permissionAllowsGenericToolExecution,
   resolveServerTurnPermissions,
 } from "@/runtime/permission-turn";
 
@@ -241,5 +242,27 @@ describe("server turn permission preflight", () => {
       USER_ID,
       permissions,
     )).toThrow("La política resolta no correspon al torn autenticat.");
+  });
+
+  it("requires an explicit effective tools.execute allow for generic App Server actions", async () => {
+    const { installation } = await fixture();
+    const resolved = await resolve(installation, "cc3ccccc-cccc-4ccc-8ccc-cccccccccccc");
+    expect(permissionAllowsGenericToolExecution(resolved)).toBe(false);
+    const rule = {
+      ruleId: "tools.execute",
+      action: "execute" as const,
+      instruction: "Control generic App Server actions.",
+      sourceScope: "user" as const,
+      sourcePolicyVersion: 3,
+      precedence: 400,
+    };
+    expect(permissionAllowsGenericToolExecution({
+      ...resolved,
+      rules: [{ ...rule, effect: "deny" }],
+    })).toBe(false);
+    expect(permissionAllowsGenericToolExecution({
+      ...resolved,
+      rules: [{ ...rule, effect: "allow" }],
+    })).toBe(true);
   });
 });

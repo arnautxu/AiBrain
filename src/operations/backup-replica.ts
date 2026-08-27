@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { lstat } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import path from "node:path";
 import type { BackupManifest } from "@/operations/backup";
 import {
@@ -102,6 +102,41 @@ export const backupReplicaReceiptSchema = defineVersionedSchema<BackupReplicaRec
     };
   },
 });
+
+export async function readLatestBackupReplicaReceipt(
+  stateRoot: string,
+  installationId: string,
+): Promise<BackupReplicaReceipt | null> {
+  if (!path.isAbsolute(stateRoot) || !INSTALLATION_ID_PATTERN.test(installationId)) {
+    throw new BackupReplicaError("REPLICA_CONFIG_INVALID", "Replica receipt scope is invalid.");
+  }
+  const receiptsRoot = path.join(path.resolve(stateRoot), "receipts");
+  let entries;
+  try {
+    const metadata = await lstat(receiptsRoot);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+      throw new BackupReplicaError("REPLICA_RECEIPT_UNSAFE", "Replica receipts root is unsafe.");
+    }
+    entries = await readdir(receiptsRoot, { withFileTypes: true });
+  } catch (error) {
+    if (isNodeError(error, "ENOENT")) return null;
+    throw error;
+  }
+  const receipts: BackupReplicaReceipt[] = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !BACKUP_ID_PATTERN.test(entry.name.replace(/\.json$/u, "")) || !entry.name.endsWith(".json")) {
+      continue;
+    }
+    const receiptPath = path.join(receiptsRoot, entry.name);
+    const metadata = await lstat(receiptPath);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || (metadata.mode & 0o077) !== 0) {
+      throw new BackupReplicaError("REPLICA_RECEIPT_UNSAFE", "Replica receipt is unsafe.");
+    }
+    const receipt = await readValidatedJson(receiptPath, backupReplicaReceiptSchema);
+    if (receipt.installationId === installationId) receipts.push(receipt);
+  }
+  return receipts.sort((left, right) => right.verifiedAt.localeCompare(left.verifiedAt))[0] ?? null;
+}
 
 export type ResticCommandResult = {
   stdout: string;

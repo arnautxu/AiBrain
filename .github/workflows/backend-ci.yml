@@ -1,0 +1,124 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - codex/aibrain-backend-definitivo
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: "1"
+
+jobs:
+  quality:
+    name: Types, lint, contracts, tests and build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Use pinned Node runtime
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.1
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Verify generated Codex contracts
+        run: npm run contracts:verify
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Unit, integration and contract tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Validate infrastructure contracts
+        run: npm run infra:validate
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=critical
+      - name: Audit complete dependency tree
+        run: npm audit --audit-level=critical
+
+  e2e:
+    name: Filesystem and restart E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Use pinned Node runtime
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.1
+          package-manager-cache: false
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run HTTP E2E
+        run: npm run test:e2e
+
+  documents:
+    name: Real Office, PDF, text and image matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Use pinned Node runtime
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.1
+          package-manager-cache: false
+      - name: Install native document toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libreoffice-calc libreoffice-impress libreoffice-writer \
+            poppler-utils python3-pptx qpdf
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Run real document matrix
+        run: npm run test:documents:real
+
+  containers:
+    name: Clean immutable container builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Validate Compose model without secrets
+        run: |
+          docker compose \
+            --env-file infra/hetzner/compose.env.example \
+            -f infra/hetzner/compose.yaml \
+            config --no-env-resolution --quiet
+      - name: Build application image from scratch
+        run: |
+          docker build --pull --no-cache \
+            --target runtime \
+            --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
+            --tag "aibrain-ci:${GITHUB_SHA}" .
+      - name: Build egress gateway image from scratch
+        run: |
+          docker build --pull --no-cache \
+            --target egress-gateway \
+            --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
+            --tag "aibrain-egress-ci:${GITHUB_SHA}" .

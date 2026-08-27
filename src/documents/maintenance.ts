@@ -11,6 +11,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
+  publicationOperationSchema,
+  type StoredPublicationOperation,
+} from "@/documents/publication-contract";
+import { readRegularFileWithin } from "@/security/safe-file";
+import {
   ResourceLockManager,
   ResourceLockTimeoutError,
   StorageError,
@@ -24,10 +29,21 @@ const INCOMING_UPLOAD = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f
 const PREVIEW_WORK = /^\.work-[A-Za-z0-9]{6}$/u;
 const QUARANTINED_UPLOAD = /^\.gc-upload-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const QUARANTINED_PREVIEW = /^\.gc-preview-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const PUBLICATION_OPERATION = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.json$/u;
+const QUARANTINED_CANDIDATE = /^\.gc-candidate-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const TERMINAL_PUBLICATION_STATUSES = new Set<StoredPublicationOperation["status"]>([
+  "published",
+  "declined",
+  "expired",
+  "conflict",
+]);
+const INSTALLATION_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const MAX_PUBLICATION_OPERATION_BYTES = 1024 * 1024;
 
 export const DEFAULT_DOCUMENT_TEMPORARY_GRACE_MS = 6 * 60 * 60 * 1_000;
+export const DEFAULT_PUBLICATION_CANDIDATE_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
 
-export type DocumentTemporaryKind = "incoming-upload" | "preview-work";
+export type DocumentTemporaryKind = "incoming-upload" | "preview-work" | "publication-candidate";
 
 export type DocumentTemporaryMaintenanceItem = {
   kind: DocumentTemporaryKind;
@@ -44,6 +60,7 @@ export type DocumentTemporaryMaintenanceReport = {
   finishedAt: string;
   dryRun: boolean;
   gracePeriodMs: number;
+  publicationCandidateRetentionMs: number;
   scannedUsers: number;
   candidates: number;
   removed: DocumentTemporaryMaintenanceItem[];
@@ -56,7 +73,9 @@ export type DocumentTemporaryMaintenanceReport = {
 export type FileDocumentTemporaryMaintenanceOptions = {
   dataRoot: string;
   usersRoot: string;
+  installationId?: string;
   gracePeriodMs?: number;
+  publicationCandidateRetentionMs?: number;
   lockManager?: ResourceLockManager;
   documentLockOptions?: Pick<
     ResourceLockManagerOptions,
@@ -67,10 +86,13 @@ export type FileDocumentTemporaryMaintenanceOptions = {
 
 type Candidate = DocumentTemporaryMaintenanceItem & {
   absolutePath: string;
-  quarantinePrefix: ".gc-upload-" | ".gc-preview-";
+  quarantinePrefix: ".gc-upload-" | ".gc-preview-" | ".gc-candidate-";
   expectedType: "file" | "directory";
+  expectedSize?: number;
+  eligibleAtMs?: number;
   lockKey?: string;
   lockManager?: ResourceLockManager;
+  revalidate?: () => Promise<"eligible" | "retained" | "missing">;
 };
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
@@ -98,13 +120,23 @@ function validateOptions(options: FileDocumentTemporaryMaintenanceOptions) {
     );
   }
   const gracePeriodMs = options.gracePeriodMs ?? DEFAULT_DOCUMENT_TEMPORARY_GRACE_MS;
-  if (!Number.isSafeInteger(gracePeriodMs) || gracePeriodMs < 1) {
+  const publicationCandidateRetentionMs = options.publicationCandidateRetentionMs
+    ?? DEFAULT_PUBLICATION_CANDIDATE_RETENTION_MS;
+  if (!Number.isSafeInteger(gracePeriodMs) || gracePeriodMs < 1 ||
+      !Number.isSafeInteger(publicationCandidateRetentionMs) || publicationCandidateRetentionMs < 1 ||
+      (options.installationId !== undefined && !INSTALLATION_ID.test(options.installationId))) {
     throw new StorageError(
       "DOCUMENT_MAINTENANCE_OPTIONS_INVALID",
-      "Document temporary gracePeriodMs must be a positive safe integer.",
+      "Document maintenance identity and retention periods are invalid.",
     );
   }
-  return { dataRoot, usersRoot, gracePeriodMs };
+  return {
+    dataRoot,
+    usersRoot,
+    gracePeriodMs,
+    publicationCandidateRetentionMs,
+    installationId: options.installationId ?? null,
+  };
 }
 
 function privateRegularFile(metadata: Stats) {
@@ -160,7 +192,9 @@ export class FileDocumentTemporaryMaintenance {
   readonly dataRoot: string;
   readonly usersRoot: string;
   readonly gracePeriodMs: number;
+  readonly publicationCandidateRetentionMs: number;
   readonly lockManager: ResourceLockManager;
+  private readonly installationId: string | null;
   private readonly documentLockOptions: FileDocumentTemporaryMaintenanceOptions["documentLockOptions"];
   private readonly now: () => number;
 
@@ -169,6 +203,8 @@ export class FileDocumentTemporaryMaintenance {
     this.dataRoot = validated.dataRoot;
     this.usersRoot = validated.usersRoot;
     this.gracePeriodMs = validated.gracePeriodMs;
+    this.publicationCandidateRetentionMs = validated.publicationCandidateRetentionMs;
+    this.installationId = validated.installationId;
     this.lockManager = options.lockManager ?? new ResourceLockManager({
       rootDirectory: path.join(this.dataRoot, "locks", "document-maintenance"),
     });
@@ -403,6 +439,219 @@ export class FileDocumentTemporaryMaintenance {
     return candidates;
   }
 
+  private async readPublicationOperation(operationPath: string) {
+    let before: Stats;
+    try {
+      before = await lstat(operationPath);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
+    if (!privateRegularFile(before) || before.size > MAX_PUBLICATION_OPERATION_BYTES) {
+      throw new StorageError(
+        "DOCUMENT_MAINTENANCE_PUBLICATION_UNSAFE",
+        "Publication operation is not a bounded private regular file.",
+      );
+    }
+    const serialized = await readRegularFileWithin(
+      path.dirname(operationPath),
+      path.basename(operationPath),
+      MAX_PUBLICATION_OPERATION_BYTES,
+    );
+    const after = await lstat(operationPath);
+    if (!privateRegularFile(after) || !sameInode(before, after) || before.size !== after.size) {
+      throw new StorageError(
+        "DOCUMENT_MAINTENANCE_PUBLICATION_RACE",
+        "Publication operation changed while it was being read.",
+      );
+    }
+    try {
+      return publicationOperationSchema.parse(JSON.parse(serialized.toString("utf8")), operationPath);
+    } catch (error) {
+      throw new StorageError(
+        "DOCUMENT_MAINTENANCE_PUBLICATION_CORRUPT",
+        "Publication operation is not valid versioned state.",
+        { cause: error },
+      );
+    }
+  }
+
+  private async privateDirectoryChain(root: string, relativeDirectory: string) {
+    let current = root;
+    for (const segment of relativeDirectory.split(path.posix.sep).filter(Boolean)) {
+      current = path.join(current, segment);
+      let metadata: Stats;
+      try {
+        metadata = await lstat(current);
+      } catch (error) {
+        if (isNodeError(error, "ENOENT")) return false;
+        throw error;
+      }
+      if (!privateDirectory(metadata)) return false;
+    }
+    return true;
+  }
+
+  private publicationIdentityMatches(
+    operation: StoredPublicationOperation,
+    userId: string,
+    operationId: string,
+  ) {
+    return operation.userId === userId
+      && operation.operationId === operationId
+      && (this.installationId === null || operation.installationId === this.installationId);
+  }
+
+  private async scanPublications(
+    userId: string,
+    userRoot: string,
+    documentLocks: ResourceLockManager,
+    report: DocumentTemporaryMaintenanceReport,
+  ) {
+    // Durable publication retention is installation-scoped and stays disabled
+    // for library callers that did not bind an explicit installation identity.
+    if (this.installationId === null) return [];
+    const stateRoot = path.join(userRoot, "state");
+    const publicationsRoot = path.join(stateRoot, "publications");
+    const operationsRoot = path.join(publicationsRoot, "operations");
+    const userOperationsRoot = path.join(operationsRoot, userId);
+    for (const [rootIndex, root] of [stateRoot, publicationsRoot, operationsRoot, userOperationsRoot].entries()) {
+      let metadata: Stats;
+      try {
+        metadata = await lstat(root);
+      } catch (error) {
+        if (isNodeError(error, "ENOENT")) return [];
+        throw error;
+      }
+      if (!privateDirectory(metadata)) {
+        const suffix = ["state", "publications", "operations", userId].slice(0, rootIndex + 1);
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, ...suffix),
+        }, "publication state root is not a private real directory");
+        return [];
+      }
+    }
+    const entries = await directoryEntries(userOperationsRoot);
+    if (entries === null) return [];
+    const canonicalPublications = await realpath(publicationsRoot);
+    const candidates: Candidate[] = [];
+
+    for (const entry of entries) {
+      const match = PUBLICATION_OPERATION.exec(entry.name);
+      if (!match) continue;
+      const operationId = match[1]!;
+      const operationPath = path.join(userOperationsRoot, entry.name);
+      let operation: StoredPublicationOperation | null;
+      try {
+        operation = await this.readPublicationOperation(operationPath);
+      } catch {
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, "state", "publications", "operations", userId, entry.name),
+        }, "publication operation is unsafe or corrupt");
+        continue;
+      }
+      if (operation === null) continue;
+      if (!this.publicationIdentityMatches(operation, userId, operationId)) {
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, "state", "publications", "operations", userId, entry.name),
+        }, "publication operation scope does not match its installation or path");
+        continue;
+      }
+      if (!TERMINAL_PUBLICATION_STATUSES.has(operation.status)) continue;
+      const updatedAtMs = Date.parse(operation.updatedAt);
+      const eligibleAtMs = updatedAtMs + this.publicationCandidateRetentionMs;
+      if (!Number.isFinite(updatedAtMs) || !Number.isSafeInteger(eligibleAtMs)) {
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, "state", "publications", "operations", userId, entry.name),
+        }, "publication retention timestamp is invalid");
+        continue;
+      }
+      const candidatePath = path.join(publicationsRoot, operation.candidate.snapshotRelativePath);
+      const relativeParent = path.posix.dirname(operation.candidate.snapshotRelativePath);
+      const candidateParent = path.dirname(candidatePath);
+      if (
+        !inside(publicationsRoot, candidatePath)
+        || !await this.privateDirectoryChain(publicationsRoot, relativeParent)
+      ) {
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, "state", "publications", operation.candidate.snapshotRelativePath),
+        }, "publication candidate path has an unsafe directory chain");
+        continue;
+      }
+      const canonicalParent = await realpath(candidateParent);
+      if (!inside(canonicalPublications, canonicalParent) || canonicalParent === canonicalPublications) {
+        this.unsafe(report, {
+          kind: "publication-candidate",
+          relativePath: path.posix.join(userId, "state", "publications", operation.candidate.snapshotRelativePath),
+        }, "canonical publication candidate path escapes publication state");
+        continue;
+      }
+
+      const expectedSnapshot = operation.candidate.snapshotRelativePath;
+      const expectedUpdatedAt = operation.updatedAt;
+      const revalidate = async (): Promise<"eligible" | "retained" | "missing"> => {
+        let refreshed: StoredPublicationOperation | null;
+        try {
+          refreshed = await this.readPublicationOperation(operationPath);
+        } catch {
+          return "retained";
+        }
+        if (refreshed === null) return "missing";
+        if (
+          !this.publicationIdentityMatches(refreshed, userId, operationId)
+          || !TERMINAL_PUBLICATION_STATUSES.has(refreshed.status)
+          || refreshed.candidate.snapshotRelativePath !== expectedSnapshot
+          || refreshed.updatedAt !== expectedUpdatedAt
+          || !await this.privateDirectoryChain(publicationsRoot, relativeParent)
+        ) {
+          return "retained";
+        }
+        const refreshedParent = await realpath(candidateParent).catch(() => null);
+        if (
+          refreshedParent === null
+          || !inside(canonicalPublications, refreshedParent)
+          || refreshedParent === canonicalPublications
+        ) {
+          return "retained";
+        }
+        return this.now() >= eligibleAtMs ? "eligible" : "retained";
+      };
+      const base: Omit<Candidate, "absolutePath" | "relativePath"> = {
+        kind: "publication-candidate",
+        quarantinePrefix: ".gc-candidate-",
+        expectedType: "file",
+        expectedSize: operation.candidate.size,
+        eligibleAtMs,
+        lockKey: `document-publication:${operation.installationId}:${userId}:${operationId}`,
+        lockManager: documentLocks,
+        revalidate,
+      };
+      const candidateEntries = await directoryEntries(candidateParent) ?? [];
+      for (const candidateEntry of candidateEntries) {
+        const isCandidate = candidateEntry.name === path.basename(candidatePath);
+        const isQuarantine = QUARANTINED_CANDIDATE.test(candidateEntry.name);
+        if (isCandidate || isQuarantine) {
+          candidates.push({
+            ...base,
+            absolutePath: path.join(candidateParent, candidateEntry.name),
+            relativePath: path.posix.join(userId, "state", "publications", relativeParent, candidateEntry.name),
+          });
+        } else if (candidateEntry.name.startsWith(".gc-candidate-")) {
+          this.unsafe(report, {
+            kind: "publication-candidate",
+            relativePath: path.posix.join(userId, "state", "publications", relativeParent, candidateEntry.name),
+          }, "unexpected publication candidate quarantine name");
+        }
+      }
+    }
+    return candidates;
+  }
+
   private async acquireCandidateLock(candidate: Candidate): Promise<ResourceLockLease | null | "locked"> {
     if (!candidate.lockKey || !candidate.lockManager) return null;
     try {
@@ -426,6 +675,12 @@ export class FileDocumentTemporaryMaintenance {
       return;
     }
     try {
+      const retentionState = await candidate.revalidate?.();
+      if (retentionState === "missing") return;
+      if (retentionState === "retained") {
+        report.skippedYoung.push(item);
+        return;
+      }
       let metadata: Stats;
       try {
         metadata = await lstat(candidate.absolutePath);
@@ -440,7 +695,14 @@ export class FileDocumentTemporaryMaintenance {
         this.unsafe(report, candidate, `${candidate.expectedType} temporary is not private and real`);
         return;
       }
-      if (this.now() - metadata.mtimeMs < this.gracePeriodMs) {
+      if (candidate.expectedSize !== undefined && metadata.size !== candidate.expectedSize) {
+        this.unsafe(report, candidate, "publication candidate size differs from versioned operation state");
+        return;
+      }
+      const remainsRetained = candidate.eligibleAtMs !== undefined
+        ? this.now() < candidate.eligibleAtMs
+        : this.now() - metadata.mtimeMs < this.gracePeriodMs;
+      if (remainsRetained) {
         report.skippedYoung.push(item);
         return;
       }
@@ -487,6 +749,7 @@ export class FileDocumentTemporaryMaintenance {
       finishedAt: new Date(startedAtMs).toISOString(),
       dryRun,
       gracePeriodMs: this.gracePeriodMs,
+      publicationCandidateRetentionMs: this.publicationCandidateRetentionMs,
       scannedUsers: 0,
       candidates: 0,
       removed: [],
@@ -532,6 +795,7 @@ export class FileDocumentTemporaryMaintenance {
           const candidates = [
             ...await this.scanIncoming(user.name, userRoot, documentLocks, report),
             ...await this.scanPreviews(user.name, userRoot, documentLocks, report),
+            ...await this.scanPublications(user.name, userRoot, documentLocks, report),
           ].sort((left, right) => left.relativePath.localeCompare(right.relativePath));
           for (const candidate of candidates) {
             await this.processCandidate(candidate, report, dryRun);

@@ -102,11 +102,12 @@ conectar temporalmente `app` a la red egress.
 ## Release y rollback
 
 App y gateway forman una unidad de release. Ambos digests deben llevar el mismo
-label OCI de revisión. `manage-release.mjs promote` exige `--image` y
-`--egress-image`, verifica digest y revisión de ambos, actualiza los dos valores
-atómicamente, arranca los dos servicios y exige ambos healthchecks. Ante fallo
-restaura los dos digests; rollback usa el mismo registro schema v2. No promover
-manualmente uno de los dos servicios.
+label OCI de revisión. `manage-release.mjs promote` exige `--image`,
+`--egress-image` y un env candidato completo, verifica digest y revisión de
+ambos, selecciona los inputs bajo journal durable, arranca los tres servicios
+(`app`, gateway y alertas) y exige sus healthchecks. Ante fallo restaura ambos
+digests y los inputs versionados; rollback usa el registro V3 atestado. No
+promover manualmente uno de los servicios.
 
 Las pruebas sintéticas locales cubren autenticación cruzada, DNS mixto/privado,
 metadata, puertos, exactitud de Supabase, pin browser, stripping de credenciales,
