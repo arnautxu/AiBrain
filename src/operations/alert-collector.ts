@@ -1,0 +1,57 @@
+import { statfs } from "node:fs/promises";
+import type { BackupVerificationReceipt } from "@/operations/backup";
+import type { OperationalAlertInput } from "@/operations/alerts";
+
+export type OperationalAlertCollectorOptions = {
+  dataRoot: string;
+  readinessUrl: string;
+  restartCount15m: number;
+  preflightFailureCount15m: number;
+  readBackupReceipt: () => Promise<BackupVerificationReceipt | null>;
+  timeoutMs?: number;
+  fetchImplementation?: typeof fetch;
+};
+
+function count(name: string, value: number) {
+  if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative integer.`);
+  return value;
+}
+
+export async function collectOperationalAlertInput(
+  options: OperationalAlertCollectorOptions,
+): Promise<OperationalAlertInput> {
+  const readinessUrl = new URL(options.readinessUrl);
+  if (readinessUrl.protocol !== "http:"
+    || (readinessUrl.hostname !== "127.0.0.1" && readinessUrl.hostname !== "localhost")
+    || readinessUrl.username || readinessUrl.password || readinessUrl.hash
+    || readinessUrl.pathname !== "/api/health/ready" || readinessUrl.search) {
+    throw new Error("readinessUrl must be the exact loopback readiness endpoint.");
+  }
+  const timeoutMs = options.timeoutMs ?? 5_000;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 250 || timeoutMs > 30_000) {
+    throw new Error("timeoutMs is invalid.");
+  }
+  const restartCount15m = count("restartCount15m", options.restartCount15m);
+  const preflightFailureCount15m = count("preflightFailureCount15m", options.preflightFailureCount15m);
+  const fetchImplementation = options.fetchImplementation ?? fetch;
+  const [capacity, backupReceipt, readiness] = await Promise.all([
+    statfs(options.dataRoot, { bigint: true }),
+    options.readBackupReceipt(),
+    fetchImplementation(readinessUrl, {
+      cache: "no-store",
+      redirect: "error",
+      signal: AbortSignal.timeout(timeoutMs),
+    }).then((response) => response.ok ? "ready" as const : "degraded" as const)
+      .catch(() => "degraded" as const),
+  ]);
+  const total = capacity.blocks * capacity.bsize;
+  const available = capacity.bavail * capacity.bsize;
+  const diskUsedRatio = total === 0n ? null : Number(total - available) / Number(total);
+  return {
+    readiness,
+    diskUsedRatio,
+    restartCount15m,
+    preflightFailureCount15m,
+    backupReceipt,
+  };
+}

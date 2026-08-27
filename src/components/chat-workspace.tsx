@@ -6,11 +6,11 @@ import {
   ArrowUp,
   CaretRight,
   CheckCircle,
-  Code,
   Command,
   Copy,
   DownloadSimple,
   FolderOpen,
+  File as FileIcon,
   Globe,
   GitDiff,
   Image as ImageIcon,
@@ -29,12 +29,15 @@ import {
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
 import { MarkdownMessage } from "@/components/markdown-message";
-import type { ApprovalDecision, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
+import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindow, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
+import { DocumentPublicationCard } from "@/components/document-publication-card";
+import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
+import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -50,6 +53,9 @@ type ChatWorkspaceProps = {
   imageGeneration: boolean;
   selectedSkill: string | null;
   attachments: ChatInputAttachment[];
+  documents: StagedComposerDocument[];
+  publications: DocumentPublicationDraft[];
+  documentUploading: boolean;
   sending: boolean;
   runtimeStatus: RuntimeStatus;
   networkOnline: boolean;
@@ -62,6 +68,10 @@ type ChatWorkspaceProps = {
   onImageGenerationChange: (value: boolean) => void;
   onSelectedSkillChange: (value: string | null) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
+  onDocumentsChange: (value: StagedComposerDocument[]) => void;
+  onAddDocuments: (files: File[]) => Promise<void>;
+  onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
+  onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
   onComposerNotice: (message: string) => void;
   onSend: (message?: string, displayMessage?: string) => void;
   onStop: () => void;
@@ -70,13 +80,13 @@ type ChatWorkspaceProps = {
   onOpenCommandPalette: () => void;
   onOpenCustomization: () => void;
   enabledWindows: BrainWindow[];
-  activeSideWindow: Exclude<BrainWindowId, "chat"> | null;
-  onOpenWindow: (windowId: Exclude<BrainWindowId, "chat">) => void;
+  activeSideWindow: Exclude<BrainWindowId, "chat" | "runtime"> | null;
+  onOpenWindow: (windowId: Exclude<BrainWindowId, "chat" | "runtime">) => void;
   canInspect: boolean;
   onInspectMessage: (messageId: string) => void;
   onResolveApproval: (
     messageId: string,
-    approvalId: string,
+    approval: ApprovalItem,
     decision: ApprovalDecision,
   ) => Promise<void>;
   onCreateVersion: (message: ChatMessage) => void;
@@ -107,61 +117,52 @@ function ResultActions({ message, onCreateVersion, onResultAction }: { message: 
     try { await onResultAction(approved ? "pending" : "approved"); } finally { setBusy(false); }
   };
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-1.5">
-      <button type="button" disabled={busy} aria-pressed={approved} className={`flex min-h-10 items-center gap-1.5 rounded-lg border px-3 py-2 text-[12px] font-medium transition ${approved ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]" : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text)] hover:bg-[var(--surface-muted)]"}`} onClick={() => void review()}><CheckCircle size={13} />{approved ? "Resultado aprobado" : "Aprobar resultado"}</button>
-      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => void copyResult()}><Copy size={13} />{copied ? "Copiado" : "Copiar"}</button>
-      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={downloadResult}><DownloadSimple size={13} />Descargar</button>
-      <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={onCreateVersion}><GitBranch size={13} />Nueva versión</button>
-      {message.diff ? <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-lg border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[12px] font-medium text-[var(--danger)] hover:brightness-95" onClick={() => void onResultAction("undo")}>Deshacer cambios</button> : null}
+    <div className="mt-3 flex flex-wrap items-center gap-0.5 text-[var(--text-muted)]">
+      <button type="button" title={approved ? "Resultado aprobado" : "Aprobar resultado"} aria-label={approved ? "Resultado aprobado" : "Aprobar resultado"} disabled={busy} aria-pressed={approved} className={`result-action ${approved ? "text-[var(--positive)]" : ""}`} onClick={() => void review()}><CheckCircle size={14} weight={approved ? "fill" : "regular"} /></button>
+      <button type="button" title="Copiar resultado" aria-label="Copiar resultado" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
+      <button type="button" title="Descargar resultado" aria-label="Descargar resultado" className="result-action" onClick={downloadResult}><DownloadSimple size={14} /></button>
+      <button type="button" title="Crear una nueva versión" aria-label="Crear una nueva versión" className="result-action" onClick={onCreateVersion}><GitBranch size={14} /></button>
+      {message.diff ? <button type="button" title="Deshacer cambios" aria-label="Deshacer cambios" className="result-action text-[var(--danger)]" onClick={() => void onResultAction("undo")}><ArrowUp size={14} className="rotate-[-90deg]" /></button> : null}
     </div>
   );
 }
 
 function AssistantMessage({
   message,
-  assistantName,
   showActivity,
   onInspect,
   onResolveApproval,
   canInspect,
   showInlineDiff,
-  isLatest,
-  onFollowUp,
   onCreateVersion,
   onResultAction,
+  publications,
+  onFreezePublication,
+  onDecidePublication,
 }: {
   message: ChatMessage;
-  assistantName: string;
   showActivity: boolean;
   onInspect: () => void;
-  onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
+  onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
   canInspect: boolean;
   showInlineDiff: boolean;
-  isLatest: boolean;
-  onFollowUp: (message: string) => void;
   onCreateVersion: () => void;
   onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
+  publications: DocumentPublicationDraft[];
+  onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
+  onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
 }) {
   const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
+  const hasExecution = message.activity.length > 0 || message.plan.length > 0;
 
   return (
     <article className="message-enter group">
-      <div className="mb-2 flex items-center gap-2">
-        <span className="grid size-5 place-items-center rounded-md bg-[var(--brain-accent)] text-[var(--brain-contrast)]">
-          <Code size={12} weight="bold" />
-        </span>
-        <span className="text-[11px] font-semibold text-[var(--text)]">{assistantName}</span>
-      </div>
-
       {showActivity ? (
         <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} />
       ) : null}
 
-      {message.status === "streaming" && !message.content ? (
-        <div className="mt-4 space-y-2.5 py-1" aria-label="Preparant resposta">
-          <div className="skeleton-line h-3.5 w-[74%]" />
-          <div className="skeleton-line h-3.5 w-[56%]" />
-        </div>
+      {message.status === "streaming" && !message.content && !hasExecution ? (
+        <div className="flex items-center gap-2 py-1 text-[11px] text-[var(--text-muted)]" aria-label="Pensando"><SpinnerGap size={13} className="motion-safe:animate-spin" /><span className="activity-shimmer">Pensando…</span></div>
       ) : message.content ? (
         <div className="mt-4 max-w-[76ch] text-[14px] leading-7 text-[var(--text)] md:text-[14.5px]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
           <MarkdownMessage>{message.content}</MarkdownMessage>
@@ -186,14 +187,16 @@ function AssistantMessage({
         </div>
       ) : null}
 
+      {publications.map((draft) => (
+        <DocumentPublicationCard key={draft.id} draft={draft} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
+      ))}
+
       {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onResultAction={(action) => onResultAction(message, action)} /> : null}
 
-      {isLatest && message.status === "complete" ? <div className="mt-5 border-t border-[var(--border-subtle)] pt-4"><p className="text-[12px] font-medium text-[var(--text)]">¿Qué quieres hacer ahora?</p><div className="mt-2 flex flex-wrap gap-1.5"><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("Explica este resultado de forma más sencilla y destaca solo lo que debo saber.")}>Explicarlo mejor</button><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("A partir de este resultado, dame los siguientes pasos concretos y ordenados.")}>Siguientes pasos</button><button type="button" className="min-h-10 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => onFollowUp("Prepara una versión final, limpia y lista para utilizar de este resultado.")}>Preparar versión final</button></div></div> : null}
-
       {hasDetails && canInspect ? (
-        <button className="mt-3 flex min-h-10 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text)] transition" onClick={onInspect}>
+        <button className="mt-2 flex min-h-9 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text-muted)] transition hover:text-[var(--text)]" onClick={onInspect}>
           <List size={12} />
-          Abrir Review
+          Revisar cambios
         </button>
       ) : null}
     </article>
@@ -233,6 +236,9 @@ export function ChatWorkspace({
   imageGeneration,
   selectedSkill,
   attachments,
+  documents,
+  publications,
+  documentUploading,
   sending,
   runtimeStatus,
   networkOnline,
@@ -245,6 +251,10 @@ export function ChatWorkspace({
   onImageGenerationChange,
   onSelectedSkillChange,
   onAttachmentsChange,
+  onDocumentsChange,
+  onAddDocuments,
+  onFreezePublication,
+  onDecidePublication,
   onComposerNotice,
   onSend,
   onStop,
@@ -290,8 +300,8 @@ export function ChatWorkspace({
 
   const hasMessages = Boolean(thread?.messages.length);
   const guideVisible = guidedActionsOpen;
-  const latestAssistantId = thread?.messages.findLast((message) => message.role === "assistant")?.id ?? null;
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
+  const canAttachDocuments = runtimeStatus.mode === "codex";
   const canUseWeb = manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
@@ -352,6 +362,23 @@ export function ChatWorkspace({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const addFiles = async (files: FileList | File[] | null) => {
+    if (!files) return;
+    const images: File[] = [];
+    const documentFiles: File[] = [];
+    for (const file of Array.from(files)) {
+      if (canAttachImages && /^image\/(png|jpeg|webp|gif)$/.test(file.type) && file.size <= 2_000_000) {
+        images.push(file);
+      } else if (canAttachDocuments) {
+        documentFiles.push(file);
+      } else {
+        onComposerNotice(`${file.name} no es compatible con este runtime.`);
+      }
+    }
+    if (images.length) await addImages(images);
+    if (documentFiles.length) await onAddDocuments(documentFiles);
+  };
+
   const updateScrollState = () => {
     const element = scrollRef.current;
     if (!element) return;
@@ -383,7 +410,8 @@ export function ChatWorkspace({
 
         <div className="flex items-center gap-1">
           {enabledWindows.filter((window) => window.id !== "chat").map((window) => {
-            const windowId = window.id as Exclude<BrainWindowId, "chat">;
+            if (window.id !== "inspector" && window.id !== "browser") return null;
+            const windowId = window.id;
             const active = activeSideWindow === windowId;
             return (
               <button
@@ -393,7 +421,7 @@ export function ChatWorkspace({
                 className={`touch-target flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => onOpenWindow(windowId)}
               >
-                <GitDiff size={15} />
+                {windowId === "inspector" ? <GitDiff size={15} /> : <Globe size={15} />}
                 <span className="hidden xl:inline">{window.label}</span>
               </button>
             );
@@ -424,35 +452,32 @@ export function ChatWorkspace({
                 <AssistantMessage
                   key={message.id}
                   message={message}
-                  assistantName={preferences.assistantName}
                   showActivity={preferences.showActivityPanel}
                   onInspect={() => onInspectMessage(message.id)}
-                  onResolveApproval={(approvalId, decision) => void onResolveApproval(message.id, approvalId, decision)}
+                  onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
                   canInspect={canInspect}
                   showInlineDiff={activeSideWindow !== "inspector"}
-                  isLatest={message.id === latestAssistantId}
-                  onFollowUp={onSend}
                   onCreateVersion={() => onCreateVersion(message)}
                   onResultAction={onResultAction}
+                  publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
+                  onFreezePublication={onFreezePublication}
+                  onDecidePublication={onDecidePublication}
                 />
               ))}
             </div>
             <div ref={bottomRef} className="h-8" />
           </div>
         ) : (
-          <section className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center px-5 pb-10 pt-16 text-center md:px-8">
-            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><MagicWand size={21} /></span>
-            <h1 className="mt-5 text-balance text-[28px] font-semibold tracking-[-.035em] text-[var(--text)] md:text-[34px]">¿En qué trabajamos?</h1>
-            <p className="mt-2 max-w-md text-[14px] leading-6 text-[var(--text-muted)]">Escribe directamente o empieza con una sugerencia. Podrás revisar el resultado antes de usarlo.</p>
-            <div className="mt-7 grid w-full max-w-[620px] gap-2 sm:grid-cols-3">
+          <section className="mx-auto flex min-h-full w-full max-w-[680px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(4.5rem,12vh,7rem)] text-center md:px-8">
+            <h1 className="text-balance text-[25px] font-medium tracking-[-.025em] text-[var(--text)] md:text-[28px]">¿En qué trabajamos?</h1>
+            <div className="mt-[clamp(11.5rem,23vh,13rem)] flex w-full flex-wrap justify-center gap-1.5">
               {[
                 ["Analizar información", "Encuentra riesgos, claves y próximos pasos"],
                 ["Crear un documento", "Prepara un primer borrador listo para revisar"],
                 ["Resumir contenido", "Quédate con decisiones, fechas y acciones"],
               ].map(([label, detail]) => (
-                <button key={label} type="button" className="rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-3.5 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]" onClick={() => { onPromptChange(`${label}: `); }}>
-                  <span className="block text-[13px] font-semibold text-[var(--text)]">{label}</span>
-                  <span className="mt-1 block text-[11px] leading-4 text-[var(--text-muted)]">{detail}</span>
+                <button key={label} type="button" title={detail} className="min-h-9 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[10px] font-medium text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)]" onClick={() => { onPromptChange(`${label}: `); }}>
+                  {label}
                 </button>
               ))}
             </div>
@@ -460,26 +485,34 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className="relative shrink-0 bg-[var(--surface)]/94 px-3 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:px-6 md:pb-5">
+      <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-5" : "!absolute inset-x-0 top-[clamp(12.5rem,25vh,14rem)] z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
-        <div className="mx-auto max-w-[820px]">
+        <div className="mx-auto max-w-[760px]">
           {!networkOnline ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><WarningCircle size={14} />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <p className="mb-2 text-center text-[10px] text-[var(--text)]" role="status">Conectando con el servicio…</p> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className="mb-2 flex items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 text-center text-[11px] text-[var(--text)]" role="alert"><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="rounded-md border border-[var(--border-strong)] bg-[var(--surface-raised)] px-2 py-1 font-semibold" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             data-testid="composer"
-            className={`composer-shadow relative rounded-[calc(var(--brain-radius)+4px)] border bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-[var(--border-strong)]"}`}
-            onDragEnter={(event) => { event.preventDefault(); if (canAttachImages && !sending) setDragActive(true); }}
+            className={`composer-shadow relative rounded-[18px] border bg-[var(--surface-raised)] p-2 focus-within:border-[var(--brain-accent)] ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-[var(--border-strong)]"}`}
+            onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
-            onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending) void addImages(event.dataTransfer.files); }}
+            onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending && !documentUploading) void addFiles(event.dataTransfer.files); }}
           >
-            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta las imágenes para adjuntarlas</div> : null}
-            {attachments.length ? (
+            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta los archivos para adjuntarlos</div> : null}
+            {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><ImageIcon size={12} /></span>
                     <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[8px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
                     <button type="button" aria-label={`Quitar ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
+                  </div>
+                ))}
+                {documents.map((document) => (
+                  <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
+                    <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[8px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
+                    {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[8px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
+                    <button type="button" aria-label={`Quitar ${document.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
                   </div>
                 ))}
               </div>
@@ -496,7 +529,7 @@ export function ChatWorkspace({
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  if (!sending && prompt.trim() && runtimeReady) {
+                  if (!sending && !documentUploading && prompt.trim() && runtimeReady) {
                     shouldStickToBottomRef.current = true;
                     onSend();
                   }
@@ -534,14 +567,14 @@ export function ChatWorkspace({
                 ) : null}
                 {canUseWeb ? <button aria-label="Activar o desactivar la búsqueda web" aria-pressed={webSearch} className={`composer-tool ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={12} /><span className="hidden lg:inline">Web</span></button> : null}
                 {canGenerateImages ? <button aria-label="Activar o desactivar la generación de imágenes" aria-pressed={imageGeneration} className={`composer-tool ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={13} /><span className="hidden lg:inline">Imagen</span></button> : null}
-                {canAttachImages ? <><input ref={fileInputRef} aria-label="Seleccionar imágenes para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple onChange={(event) => void addImages(event.target.files)} /><button aria-label="Adjuntar imágenes" className="composer-tool" disabled={sending || attachments.length >= 3} onClick={() => fileInputRef.current?.click()}><Paperclip size={13} /></button></> : null}
+                {canAttachImages || canAttachDocuments ? <><input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /><button aria-label="Adjuntar archivos" className="composer-tool" disabled={sending || documentUploading || (attachments.length >= 3 && documents.length >= 10)} onClick={() => fileInputRef.current?.click()}>{documentUploading ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : <Paperclip size={13} />}</button></> : null}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <span className="hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
                   <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-7 sm:rounded-lg" onClick={onStop}><Stop size={11} weight="fill" /></button>
                 ) : (
-                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-7 sm:rounded-lg" disabled={!project || !prompt.trim() || !runtimeReady} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
+                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-7 sm:rounded-lg" disabled={!project || !prompt.trim() || !runtimeReady || documentUploading} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
                 )}
               </div>
             </div>

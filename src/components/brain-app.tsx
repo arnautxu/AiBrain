@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AuthSession } from "@/auth/types";
 import { ChatWorkspace } from "@/components/chat-workspace";
+import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
@@ -23,12 +24,22 @@ import {
 import {
   applyChatStreamEvent,
   type ApprovalDecision,
+  type ApprovalItem,
   type ChatMessage,
   type ChatInputAttachment,
   type ComposerMode,
 } from "@/lib/chat-contract";
 import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
 import { createChatEventFrameDispatcher } from "@/ui/frame-event-dispatcher";
+import {
+  stageDocument,
+  type StagedComposerDocument,
+} from "@/ui/document-ui-adapter";
+import {
+  decideDocumentPublication,
+  freezeDocumentPublication,
+  type DocumentPublicationDraft,
+} from "@/ui/publication-ui-adapter";
 import {
   initialRuntimeStatus,
   isRuntimeStatus,
@@ -49,9 +60,9 @@ import {
   type WorkbenchSnapshot,
   type WorkbenchThread,
 } from "@/workbench/types";
-import type { PublicInstallationBranding } from "@/ui/installation-branding";
+import type { PublicInstallationBranding } from "@/config/installation-branding";
 
-type SideWindowId = Exclude<BrainWindowId, "chat">;
+type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
 
 type BrainStyle = CSSProperties & {
   "--brain-accent": string;
@@ -102,6 +113,11 @@ function createMessage(
 function titleFromMessage(message: string) {
   const clean = message.replace(/\s+/g, " ").trim();
   return clean.length > 52 ? `${clean.slice(0, 49)}…` : clean;
+}
+
+function publicationTarget(fileName: string) {
+  const safeName = fileName.replace(/[\\/\u0000-\u001f\u007f]/g, "-").trim() || "documento";
+  return `knowledge/${safeName}`;
 }
 
 function byPriority<Item extends { pinned: boolean; updatedAt: string }>(a: Item, b: Item) {
@@ -296,6 +312,9 @@ export function BrainApp({
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatInputAttachment[]>([]);
+  const [documents, setDocuments] = useState<StagedComposerDocument[]>([]);
+  const [publications, setPublications] = useState<DocumentPublicationDraft[]>([]);
+  const [documentUploading, setDocumentUploading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [sending, setSending] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
@@ -393,7 +412,6 @@ export function BrainApp({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [hydrated]);
-
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
@@ -439,7 +457,7 @@ export function BrainApp({
   }, [branding.accentColor, preferences.corners]);
 
   const selectProject = useCallback((projectId: string) => {
-    if (sending) {
+    if (sending || documentUploading) {
       setNotice("Detén la respuesta actual antes de cambiar de proyecto.");
       return;
     }
@@ -453,13 +471,15 @@ export function BrainApp({
     setActiveProjectId(projectId);
     setActiveThreadId(thread?.id ?? null);
     setPendingRuntimeContext(null);
+    setAttachments([]);
+    setDocuments([]);
     setSelectedMessageId(null);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, activeThreadId, projects, sending, threads]);
+  }, [activeProjectId, activeThreadId, documentUploading, projects, sending, threads]);
 
   const selectThread = useCallback((threadId: string) => {
-    if (sending) {
+    if (sending || documentUploading) {
       setNotice("Detén la respuesta actual antes de cambiar de conversación.");
       return;
     }
@@ -468,22 +488,25 @@ export function BrainApp({
     setActiveProjectId(thread.projectId);
     setActiveThreadId(thread.id);
     setPendingRuntimeContext(null);
+    setAttachments([]);
+    setDocuments([]);
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
-  }, [sending, threads]);
+  }, [documentUploading, sending, threads]);
 
   const startNewThread = useCallback(() => {
-    if (sending) return;
+    if (sending || documentUploading) return;
     if (activeProjectId) delete threadByProjectRef.current[activeProjectId];
     setActiveThreadId(null);
     setSelectedMessageId(null);
     setPrompt("");
     setPendingRuntimeContext(null);
     setAttachments([]);
+    setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, sending]);
+  }, [activeProjectId, documentUploading, sending]);
 
   const createVersionFromMessage = useCallback(async (message: ChatMessage) => {
     if (!activeProject || sending || actionBusy || !message.content.trim()) return;
@@ -503,6 +526,7 @@ export function BrainApp({
       ].join("\n"));
       setPendingRuntimeContext(`Resultado de partida que debe conservarse intacto:\n\n${message.content.slice(0, 12_000)}`);
       setAttachments([]);
+      setDocuments([]);
       setActiveSideWindow(null);
       setNotice("Nueva versión preparada en una conversación separada. El original se conserva.");
     } catch (error) {
@@ -511,6 +535,126 @@ export function BrainApp({
       setActionBusy(false);
     }
   }, [actionBusy, activeProject, activeThread?.title, initialWorkbench.persistence, sending]);
+
+  const addDocuments = useCallback(async (files: File[]) => {
+    if (!activeProject || documentUploading || sending) return;
+    if (initialWorkbench.persistence !== "filesystem") {
+      setNotice("Los documentos reales requieren el runtime privado de la instalación.");
+      return;
+    }
+    const available = Math.max(0, 10 - documents.filter((document) => document.status !== "error").length);
+    const selected = files.slice(0, available);
+    if (files.length > available) setNotice("Puedes preparar un máximo de 10 documentos por turno.");
+    if (!selected.length) return;
+
+    let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id
+      ? activeThread
+      : null;
+    setDocumentUploading(true);
+    try {
+      if (!thread) {
+        thread = await createThreadRequest(activeProject.id, "Conversación con documentos");
+        setThreads((current) => [thread as WorkbenchThread, ...current]);
+        setActiveThreadId(thread.id);
+        threadByProjectRef.current[activeProject.id] = thread.id;
+      }
+      for (const file of selected) {
+        const uploadId = crypto.randomUUID();
+        const placeholder: StagedComposerDocument = {
+          id: uploadId,
+          uploadId,
+          threadId: thread.id,
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          size: file.size,
+          kind: "text",
+          previewFiles: [],
+          pages: null,
+          status: "uploading",
+          error: null,
+        };
+        setDocuments((current) => [...current, placeholder]);
+        try {
+          const result = await stageDocument(thread.id, file, uploadId);
+          setDocuments((current) => current.map((document) => document.uploadId === uploadId ? {
+            ...document,
+            name: result.document.fileName,
+            mimeType: result.document.mediaType,
+            size: result.document.size,
+            kind: result.document.kind,
+            previewFiles: result.preview.files,
+            pages: result.preview.pages,
+            status: "ready",
+          } : document));
+        } catch (reason) {
+          const message = reason instanceof Error ? reason.message : "No se ha podido preparar el documento.";
+          setDocuments((current) => current.map((document) => document.uploadId === uploadId
+            ? { ...document, status: "error", error: message }
+            : document));
+          setNotice(message);
+        }
+      }
+    } catch (reason) {
+      setNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.");
+    } finally {
+      setDocumentUploading(false);
+    }
+  }, [activeProject, activeThread, documentUploading, documents, initialWorkbench.persistence, sending]);
+
+  const freezePublication = useCallback(async (draftId: string, targetRelativePath: string) => {
+    const draft = publications.find((candidate) => candidate.id === draftId);
+    if (!draft || draft.phase === "freezing" || draft.phase === "deciding") return;
+    setPublications((current) => current.map((candidate) => candidate.id === draftId
+      ? { ...candidate, targetRelativePath, phase: "freezing", error: null }
+      : candidate));
+    try {
+      const receipt = await freezeDocumentPublication(draft, targetRelativePath);
+      setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
+        ...candidate,
+        targetRelativePath,
+        phase: "awaiting_confirmation",
+        operation: receipt.operation,
+        confirmationToken: receipt.confirmationToken,
+        permissionFingerprint: receipt.permissionFingerprint,
+        error: null,
+      } : candidate));
+    } catch (error) {
+      setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
+        ...candidate,
+        targetRelativePath,
+        phase: "error",
+        error: error instanceof Error ? error.message : "No se ha podido preparar la publicación.",
+      } : candidate));
+    }
+  }, [publications]);
+
+  const decidePublication = useCallback(async (draftId: string, action: "confirm" | "decline") => {
+    const draft = publications.find((candidate) => candidate.id === draftId);
+    if (!draft || draft.phase !== "awaiting_confirmation") return;
+    setPublications((current) => current.map((candidate) => candidate.id === draftId
+      ? { ...candidate, phase: "deciding", error: null }
+      : candidate));
+    try {
+      const receipt = await decideDocumentPublication(draft, action);
+      const phase = receipt.operation.status === "publishing"
+        ? "deciding"
+        : receipt.operation.status;
+      setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
+        ...candidate,
+        phase,
+        operation: receipt.operation,
+        confirmationToken: null,
+        permissionFingerprint: receipt.permissionFingerprint,
+        error: null,
+      } : candidate));
+    } catch (error) {
+      setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
+        ...candidate,
+        phase: "awaiting_confirmation",
+        error: error instanceof Error ? error.message : "No se ha podido aplicar la decisión.",
+      } : candidate));
+    }
+  }, [publications]);
 
   const handleStream = useCallback(async (
     response: Response,
@@ -539,7 +683,7 @@ export function BrainApp({
     const runtimeContent = (messageOverride ?? (pendingRuntimeContext
       ? `${prompt.trim()}\n\n${pendingRuntimeContext}`
       : prompt)).trim();
-    if (!visibleContent || !runtimeContent || sending || !activeProject || activeProject.status !== "active") return;
+    if (!visibleContent || !runtimeContent || sending || documentUploading || !activeProject || activeProject.status !== "active") return;
 
     setSending(true);
     let thread = activeThread && activeThread.status === "active" &&
@@ -565,7 +709,11 @@ export function BrainApp({
         "complete",
         startedAt.toISOString(),
       );
-      userMessage.attachments = attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment);
+      const readyDocuments = documents.filter((document) => document.status === "ready");
+      userMessage.attachments = [
+        ...attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment),
+        ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, ...attachment }) => attachment),
+      ];
       assistantMessage = createMessage(
         crypto.randomUUID(),
         "assistant",
@@ -575,6 +723,25 @@ export function BrainApp({
       );
       const threadId = thread.id;
       const assistantId = assistantMessage.id;
+      if (readyDocuments.length) {
+        setPublications((current) => [
+          ...current.filter((candidate) => !readyDocuments.some((document) => document.uploadId === candidate.uploadId)),
+          ...readyDocuments.map((document): DocumentPublicationDraft => ({
+            id: document.uploadId,
+            threadId,
+            turnId: assistantId,
+            uploadId: document.uploadId,
+            fileName: document.name,
+            size: document.size,
+            targetRelativePath: publicationTarget(document.name),
+            phase: "ready",
+            operation: null,
+            confirmationToken: null,
+            permissionFingerprint: null,
+            error: null,
+          })),
+        ]);
+      }
       setThreads((current) => current.map((candidate) => candidate.id === threadId
         ? {
             ...candidate,
@@ -586,6 +753,7 @@ export function BrainApp({
       setPrompt("");
       setPendingRuntimeContext(null);
       setAttachments([]);
+      setDocuments([]);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -613,6 +781,7 @@ export function BrainApp({
             imageGeneration,
             skill: selectedSkill,
             attachments,
+            ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
           },
         }),
       });
@@ -643,7 +812,38 @@ export function BrainApp({
       abortRef.current = null;
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+
+  const stopActiveTurn = useCallback(async () => {
+    const controller = abortRef.current;
+    const activeAssistant = activeThread
+      ? [...activeThread.messages].reverse().find((message) =>
+          message.role === "assistant" && message.status === "streaming")
+      : null;
+    if (initialWorkbench.persistence !== "filesystem" || !activeThread || !activeAssistant) {
+      controller?.abort();
+      return;
+    }
+    try {
+      const response = await fetch("/api/runtime/turns/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "stop",
+          threadId: activeThread.id,
+          assistantMessageId: activeAssistant.id,
+          clientRequestId: crypto.randomUUID(),
+        }),
+      });
+      if (!response.ok && response.status !== 409) {
+        setNotice("No s’ha pogut confirmar l’aturada amb el runtime.");
+      }
+    } catch {
+      setNotice("S’ha perdut la connexió mentre s’aturava el torn.");
+    } finally {
+      controller?.abort();
+    }
+  }, [activeThread, initialWorkbench.persistence]);
 
   const persistResultAction = useCallback(async (
     message: ChatMessage,
@@ -677,14 +877,20 @@ export function BrainApp({
 
   const resolveApproval = useCallback(async (
     messageId: string,
-    approvalId: string,
+    selectedApproval: ApprovalItem,
     decision: ApprovalDecision,
   ) => {
     if (!activeThreadId) return;
     const response = await fetch("/api/runtime/approvals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ approvalId, decision }),
+      body: JSON.stringify({
+        approvalId: selectedApproval.id,
+        threadId: selectedApproval.threadId,
+        turnId: selectedApproval.turnId,
+        itemId: selectedApproval.itemId,
+        decision,
+      }),
     });
     if (!response.ok) {
       setNotice("Esta aprobación ya no está pendiente.");
@@ -700,7 +906,7 @@ export function BrainApp({
       (message) => ({
         ...message,
         approvals: message.approvals.map((approval) =>
-          approval.id === approvalId ? { ...approval, status } : approval),
+          approval.id === selectedApproval.id ? { ...approval, status } : approval),
       }),
     ));
   }, [activeThreadId]);
@@ -866,7 +1072,7 @@ export function BrainApp({
   );
 
   const enabledWindows = manifest.windows.filter((window) =>
-    window.enabled && (window.id === "chat" || window.id === "inspector"));
+    window.enabled && (window.id === "chat" || window.id === "inspector" || window.id === "browser"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
 
   const openSideWindow = useCallback((windowId: SideWindowId) => {
@@ -969,6 +1175,9 @@ export function BrainApp({
         imageGeneration={imageGeneration}
         selectedSkill={selectedSkill}
         attachments={attachments}
+        documents={documents}
+        publications={publications}
+        documentUploading={documentUploading}
         sending={sending}
         runtimeStatus={runtimeStatus}
         networkOnline={networkOnline}
@@ -981,9 +1190,13 @@ export function BrainApp({
         onImageGenerationChange={setImageGeneration}
         onSelectedSkillChange={setSelectedSkill}
         onAttachmentsChange={setAttachments}
+        onDocumentsChange={setDocuments}
+        onAddDocuments={addDocuments}
+        onFreezePublication={freezePublication}
+        onDecidePublication={decidePublication}
         onComposerNotice={setNotice}
         onSend={sendMessage}
-        onStop={() => abortRef.current?.abort()}
+        onStop={() => void stopActiveTurn()}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
@@ -996,7 +1209,7 @@ export function BrainApp({
         onResolveApproval={resolveApproval}
         onCreateVersion={(message) => void createVersionFromMessage(message)}
         onResultAction={persistResultAction}
-        showAdvancedControls={false}
+        showAdvancedControls
       />
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
@@ -1007,6 +1220,14 @@ export function BrainApp({
           onResolveApproval={(approvalId, decision) => {
             if (selectedMessage) void resolveApproval(selectedMessage.id, approvalId, decision);
           }}
+        />
+      ) : null}
+
+      {activeSideWindow === "browser" ? (
+        <BrowserPanel
+          threadId={activeThreadId}
+          open
+          onClose={() => setActiveSideWindow(null)}
         />
       ) : null}
 

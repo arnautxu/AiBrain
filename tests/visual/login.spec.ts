@@ -7,8 +7,8 @@ test.beforeEach(async ({ page }) => {
 test("login light is deterministic and installation branded", async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem("aibrain:theme", "light"));
   await page.goto("/login");
-  await expect(page).toHaveTitle("Example Brain");
-  await expect(page.locator("html")).toHaveAttribute("data-installation", "example-lab-dev");
+  await expect(page).toHaveTitle("Example Brain · Example Laboratory");
+  await expect(page.locator("html")).toHaveAttribute("data-installation", "example-lab-playwright");
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect(page.getByRole("img", { name: "Example Brain, Example Laboratory" })).toBeVisible();
   await expect(page).toHaveScreenshot("example-login-light.png", { fullPage: true });

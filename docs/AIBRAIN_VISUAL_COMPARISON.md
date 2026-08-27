@@ -8,7 +8,7 @@ Base: `a54838787fe7ca516510fb73d7e3bc4f77f2e183`
 
 ## Alcance y límites de la referencia
 
-La única captura autenticada que pudo conservarse de forma segura es una conversación temporal vacía de ChatGPT en tema oscuro, sin historial ni prompts, bajo `artifacts/ui-parity/reference/chatgpt-temporary-empty-dark.png`. La ventana de Codex Desktop no pudo capturarse por la restricción explícita de Computer Use. Por tanto:
+La única captura autenticada que pudo conservarse de forma segura es una conversación temporal vacía de ChatGPT en tema oscuro, sin historial ni prompts, bajo `artifacts/ui-parity/reference/chatgpt-temporary-empty-dark.png`. Para Codex se fijaron además la página oficial de introducción, la página de producto, la ayuda oficial y el whitepaper oficial del 27-08-2026. La ventana de Codex Desktop no pudo capturarse por la restricción explícita de Computer Use. Por tanto:
 
 - la comparación ChatGPT → AiBrain es humana y geométrica, no un diff numérico entre dos productos con contenido, viewport y marca distintos;
 - la regresión píxel a píxel reproducible se aplica a AiBrain contra sus propias baselines deterministas;
@@ -24,6 +24,7 @@ La única captura autenticada que pudo conservarse de forma segura es una conver
 | Navegación | Rail colapsado de aproximadamente 32 px | Sidebar de 260 px en desktop; drawer `min(280px, 88vw)` en móvil | Diferencia intencional para proyectos y threads AiBrain |
 | Cabecera | Utilidad mínima en el rail | Barra de 56 px con proyecto, thread, Review y preferencias | Diferencia intencional y employee-first |
 | Ritmo | Una superficie principal, controles discretos | Una superficie principal, actividad progresiva y acciones al final | Patrón equivalente sin copiar identidad |
+| Actividad Codex | Progreso conciso durante trabajo prolongado | `Pensando`, `Editando archivos`, comandos/web/tools con shimmer activo y resumen plegado al completar | Patrón funcional equivalente con copy propio y sin revelar razonamiento privado |
 | Tema | Oscuro casi negro | Claro, oscuro y sistema con tokens semánticos por instalación | Capacidad ampliada y white-label |
 | Acciones | Iconos compactos alrededor del composer | 44 px táctiles en móvil, 40 px en acciones de resultado | Adaptación accesible |
 
@@ -32,7 +33,7 @@ La única captura autenticada que pudo conservarse de forma segura es una conver
 - No se copian logotipos, assets, textos, nombres ni identidad de OpenAI.
 - AiBrain conserva proyectos, conversaciones, Review, aprobación explícita y artefactos porque forman parte de su contrato de producto.
 - El shell no muestra runtime, tenant, rol, control plane ni jerga de Codex al empleado.
-- Documento, Browser/Computer Use y publicación solo muestran estados autorizados por el contrato; no inventan una sesión o route productiva ausente.
+- Documento, Browser/Computer Use y publicación muestran únicamente estados autorizados por los contratos públicos integrados; nunca exponen paths, CDP, tokens o mounts.
 - Example Laboratory y Northwind QA cambian identidad, cuenta, color y copy mediante configuración; no existen forks visuales por cliente.
 
 ## Matriz reproducible
@@ -85,6 +86,7 @@ La matriz exige en cada captura:
 | Drawer dark | 375×812 | `artifacts/ui-parity/checkpoint-09/drawer-dark-375x812.png` |
 | Offline light | 1024×768 | `artifacts/ui-parity/checkpoint-09/shell-offline-light-1024x768.png` |
 | Aprobación light | 768×1024 | `artifacts/ui-parity/checkpoint-09/turn-approval-light-768x1024.png` |
+| Actividad con shimmer | 763×952 | `artifacts/ui-parity/checkpoint-05/example-activity-shimmer-light-763x952.png` |
 | Review light | 600×900 | `artifacts/ui-parity/checkpoint-09/review-light-600x900.png` |
 | Documento light | 375×812 | `artifacts/ui-parity/checkpoint-09/document-light-375x812.png` |
 | Browser light | 375×812 | `artifacts/ui-parity/checkpoint-09/browser-light-375x812.png` |

@@ -9,8 +9,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    maxWorkers: 1,
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "tests/**/*.test.ts", "tests/**/*.test.tsx"],
-    exclude: ["tests/e2e/**", "tests/visual/**"],
+    exclude: ["tests/e2e/**", "tests/visual/**", "tests/visual-matrix/**", "tests/accessibility/**"],
     setupFiles: ["./tests/setup.ts"],
     coverage: {
       provider: "v8",

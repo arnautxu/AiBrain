@@ -3,7 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 const northwind = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa";
 const accountName = northwind ? "Taylor" : "Alex";
 const productName = northwind ? "Northwind Brain" : "Example Brain";
-const primaryProject = northwind ? "Operaciones" : "Trabajo interno";
+const primaryProject = "AiBrain";
 
 async function login(page: Page) {
   await page.goto("/login");

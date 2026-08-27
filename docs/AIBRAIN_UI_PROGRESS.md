@@ -10,6 +10,15 @@
 - `main` permanece en `/Users/arnau/automations/AiBrain` con siete cambios ajenos sin commit; no se han tocado.
 - Production permanece intacta. Están autorizados Preview y el host Hetzner existente, sin gasto adicional.
 
+## Cierre de integración (estado vigente)
+
+- La rama UI se ha reconciliado de forma revisada, conflicto por conflicto, con `origin/codex/aibrain-backend-definitivo@812e20c8f3f13e84bd6c4291872d8ac2dfa84787`. Las notas históricas inferiores que describen contratos bloqueados reflejan checkpoints anteriores y quedan sustituidas por este cierre.
+- La UI consume los contratos públicos reales del backend para workbench, `/api/chat`, stop/steer, approvals, documentos, publicación en dos fases y Browser/Computer Use. Los componentes no conectan al worker ni conservan tokens de publicación.
+- La actividad de ejecución reproduce la jerarquía útil de Codex sin exponer razonamiento privado: `Pensando`, `Editando archivos`, `Ejecutando comando`, `Buscando en la web` y estados equivalentes muestran shimmer mientras están activos; al terminar se pliegan bajo `Trabajo completado`.
+- Referencias fijadas el 27-08-2026: ChatGPT Work autenticado con una superficie temporal/sintética; materiales oficiales de Codex (página de producto, introducción, ayuda y whitepaper). Codex Desktop no pudo ser controlado por la restricción de seguridad explícita de Computer Use, por lo que no se afirma una comparación píxel a píxel no observada.
+- Regresión final local: `npm test` 506 verdes + 4 skips explícitos; `npm run test:a11y` 5/5; `npm run test:visual` 36 verdes + 1 skip mobile-only; `npm run test:e2e` backend 4/4 y UI 22/22 + 1 skip de runtime externo; typecheck, lint, build y `git diff --check` verdes.
+- El smoke real ya ejecutado contra el host Hetzner existente sigue siendo la evidencia de App Server: `ready: true`, `isolated: true`, primer turno, resume en el mismo thread y cancelación, con datos sintéticos y teardown completo.
+
 ## Baseline
 
 | Gate | Resultado |
@@ -27,13 +36,13 @@
 | 1. Auditoría, baseline, rutas, contratos, matriz, referencias | Completado | `REFERENCE_BRIEF.md`, `AIBRAIN_UI_AUDIT.md`, `AIBRAIN_UI_BACKEND_GAPS.md`, screenshots checkpoint 01 |
 | 2. Tokens, primitivas, white-label, tipografía, tema, responsive | Completado | proyección Example/Northwind, login light/dark/mobile, snapshots visuales |
 | 3. Login, shell, sidebar, navegación, proyectos, búsqueda, mobile | Completado | shell employee-first, composer persistente, Example/Northwind y desktop/mobile |
-| 4. Conversación, composer, attachments, streaming, stop, recovery | Completado en la rebanada disponible | Markdown/GFM, adapter NDJSON fail-closed, imágenes, stop, recovery y scroll largo; replay definitivo bloqueado por backend 7/10 |
-| 5. Plan, actividad, tools, diffs, Review, approvals, errores | Completado en la rebanada disponible | Presentación employee-first, permisos aceptar/rechazar, diff, salida y error de red; integración App Server definitiva sigue bloqueada por backend 7/10 |
-| 6. PDF/Office/image, preview, publish, Browser/Computer Use | Completado en la rebanada disponible | View models fail-closed, PDF/Office/image, lifecycle de preview/publicación/browser, viewer aislado, logout y evidencia desktop/mobile; routes reales bloqueadas por backend 8/9/10 |
+| 4. Conversación, composer, attachments, streaming, stop, recovery | Completado | Markdown/GFM, NDJSON real, imágenes, stop, recovery, replay idempotente y scroll largo |
+| 5. Plan, actividad, tools, diffs, Review, approvals, errores | Completado | Estados activos con shimmer, permisos reales aceptar/rechazar, diff, salida, error y replay durable |
+| 6. PDF/Office/image, preview, publish, Browser/Computer Use | Completado | Adapters tipados conectados a upload/preview, publicación en dos fases y viewer Browser aislado |
 | 7. Responsive, temas, a11y, keyboard, motion, degraded | Completado | 7 viewports, temas claro/oscuro/sistema, focus traps, motion reducido, recuperación offline/runtime y evidencia checkpoint 07 |
-| 8. Integración, ordering, dedupe, replay, reconnect, performance | Completado en la rebanada disponible | E2E real stdio con primer turno/resume/cancel, adapter durable fail-closed, batching por frame y tests; conexión al gateway durable bloqueada por backend 7/10 |
+| 8. Integración, ordering, dedupe, replay, reconnect, performance | Completado | E2E real stdio con primer turno/resume/cancel, gateway durable integrado, dedupe, gaps/replay y batching por frame |
 | 9. Comparación visual exhaustiva | Completado | 7 viewports, 66 baselines nuevas, 101 PNG totales, umbral ≤0,005, cero overflow y revisión humana documentada |
-| 10. Regresiones, build, handoff, integración segura | Completado dentro del alcance seguro; objetivo global bloqueado | Matriz final verde, Preview Ready, QA anónima protegida, contrato backend `6bc7bc2` fijado y `AIBRAIN_UI_PARITY_HANDOFF.md`; falta integración entre ramas y QA autenticada |
+| 10. Regresiones, build, handoff, integración segura | Completado | Matriz final verde, backend `812e20c` integrado, gates completos y handoff actualizado; Preview final registrada al publicar la rama |
 
 ## Evidencia de pantalla
 
@@ -55,6 +64,7 @@
 | Example conversación, inicio mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-04/example-conversation-start-light-390x844.png` | Historia y respuesta responsive con composer fijo |
 | Example conversación, resultado mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-04/example-conversation-light-390x844.png` | Tabla responsive, acciones y composer móvil |
 | Example turno con approval | light | 1440×900 | `artifacts/ui-parity/checkpoint-05/example-turn-approval-light-1440x900.png` | Plan, comando, permiso explícito, diff y acciones de resultado |
+| Example actividad activa | light | 763×952 | `artifacts/ui-parity/checkpoint-05/example-activity-shimmer-light-763x952.png` | `Editando archivos` activo con shimmer, spinner y guía visual |
 | Example turno con approval mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-05/example-turn-approval-light-390x844.png` | Decisiones táctiles, resultado y composer móvil |
 | Example Review diff | light | 1440×900 | `artifacts/ui-parity/checkpoint-05/example-review-diff-light-1440x900.png` | Panel lateral, fichero, contadores y diff legible |
 | Example Review diff mobile | light | 390×844 | `artifacts/ui-parity/checkpoint-05/example-review-diff-light-390x844.png` | Review a viewport completo y diff horizontal seguro |
@@ -90,11 +100,12 @@
 - Backend fijado para checkpoint 1: `7a20c51f6d5870a9f02ba3df8311b6955dd3b386`.
 - Backend reverificado para checkpoint 4: `b8b0f3c64119e0e723ddf286077da97cf1555c59`.
 - Backend fijado para el handoff del checkpoint 10: `6bc7bc2f8a9d4e5706c8796fd57b2621929ca5eb`.
+- Backend integrado en el cierre final: `812e20c8f3f13e84bd6c4291872d8ac2dfa84787`.
 - Codex App Server fijado por backend: `0.149.1`.
 - InstallationConfig v1.
 - El transporte privado del worker conserva sus garantías internas; el contrato público UI actual es `/api/chat` NDJSON idempotente con replay por repetición exacta del request.
-- Contrato público y plan de integración documentados en `AIBRAIN_UI_BACKEND_GAPS.md`.
-- La rama UI consume todavía el NDJSON legacy de `/api/chat`; no está reconciliada con los stores, rutas y recovery definitivos del backend y no simula esa integración.
+- Contrato público y decisiones de integración documentados en `UI_BACKEND_CONTRACT.md`, `AIBRAIN_UI_BACKEND_GAPS.md` y adapters tipados bajo `src/ui/`.
+- Los gaps de checkpoints anteriores se cerraron al integrar el backend definitivo: no existe fallback productivo que finja Codex, documentos, publicación o Browser.
 
 ## Fuentes y decisiones
 

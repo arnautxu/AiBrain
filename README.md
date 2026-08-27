@@ -1,79 +1,102 @@
 # AiBrain
 
-Workbench propi, replicable i personalitzable sobre Codex App Server. Codex continua sent el motor agentic; AiBrain controla la UX, l’auth, els tenants, els manifests, les finestres i les polítiques.
+AiBrain is a white-label Company Brain built on Codex App Server. One codebase
+serves independent company installations; identity, branding, paths, secrets,
+networks, volumes and release tags come from configuration rather than tenant
+forks or customer hardcodes.
 
-## Què funciona
+## Implemented architecture
 
-- Client real de Codex App Server persistent per `stdio`, amb inici i represa de threads, cua per workspace, streaming i interrupció.
-- Plans, activitat, ordres, eines, canvis, diffs i aprovacions interactives amb un contracte NDJSON tipat.
-- Sessió demo local signada en cookie `HttpOnly`, allowlist, rols `owner` i `member` i protecció server-side de totes les APIs.
-- Auth Supabase SSR hosted validada amb login passwordless invite-only, refresh de sessió i resolució de tenant/rol a cada petició.
-- Projectes i fils durables amb crear, canviar, cercar, reanomenar, fixar, arxivar i reprendre per projecte.
-- Command center amb jerarquia projecte → fil, sidebar col·lapsable, cerca global amb `⌘K` i dreceres de creació.
-- Review per torn amb navegació per fitxer, comptadors, diff línia a línia, còpia i activitat separada.
-- Selector de model i profunditat, amb mode ràpid per defecte, estat del procés calent i mètriques d'ús de Codex.
-- Flux principal per a persones no tècniques: accions guiades, plantilles ràpides per projecte, formularis simples, seguiments suggerits i resultats que es poden aprovar, copiar, descarregar o convertir en una nova versió.
-- Onboarding de treballador en tres passos amb rol, responsabilitats, preferències i primera missió assignats per l’owner; Runtime i controls de model queden fora de la seva interfície.
-- Automatitzacions guiades governades per l’owner: activació per tenant, permisos per treballador i validació server-side abans de cada execució.
-- Migracions Postgres amb RLS, memberships, invitacions, manifests append-only, workspaces, threads, missatges i auditoria per triggers.
-- Dos tenants locals de demostració, cadascun amb manifest, identitat, preferències, finestres i workspace propis.
-- Tokens opacs de thread vinculats al tenant i al fil persistent; el navegador no rep ni l’ID cru de Codex ni el token de represa.
-- Control plane owner-only amb overlays de manifest validats i escriptura atòmica.
-- Registre extensible de finestres: workbench, inspector i runtime.
-- Selecció i preferències de navegador separades per tenant; a la preview protegida, projectes, fils i missatges persisteixen a Supabase amb auth real.
+- Supabase is used only to authenticate login, initial-password change and
+  recovery. AiBrain exchanges that identity for an opaque, revocable local
+  session cookie; all product data remains local.
+- Projects, threads, turns, approvals, documents, publication records, memory,
+  audit and runtime state use validated, versioned filesystem stores with
+  atomic writes, locks, journals and recovery.
+- Every employee receives an independent `CODEX_HOME`, workspace, staging,
+  artifacts, browser profile, downloads, credentials and audit roots.
+- A persistent per-employee worker talks to the server through an authenticated
+  loopback WebSocket transport with replay, ACK, dedupe, idempotency,
+  heartbeat, backoff and restart recovery. The browser never connects to App
+  Server.
+- `PERMISSIONS.md` is resolved read-only on the server for each turn and its
+  version/fingerprint is written to durable audit before execution.
+- Office, PDF, text and image uploads stream to private staging, are validated
+  before isolated preview conversion, and can reach the official document root
+  only through the server-side freeze/review/confirm publisher.
+- Each employee has one persistent Chromium runtime. Threads receive separate
+  page targets and download roots. CDP uses inherited process pipes only—no TCP
+  listener or discovery file—and the viewer requires short, session- and
+  thread-bound tokens plus explicit takeover for human input.
+- The production container is non-root/read-only, does not mount `docker.sock`,
+  masks other employees and `publish-rw` from worker sandboxes, and uses unique
+  networks, volumes, ports and host paths per installation.
 
-## Executar el prototip local
+## Local development
+
+Requirements: Node 24 and npm. The committed development installation is
+synthetic and writes only below `/tmp/aibrain-example-lab`.
 
 ```bash
 npm ci
-AIBRAIN_SESSION_SECRET="$(openssl rand -hex 32)" npm run dev
-```
-
-Obre `http://localhost:3000/login` i tria una de les dues identitats de demostració:
-
-- `AiBrain Studio`: owner amb accés a `/control`.
-- `AiBrain Operations`: member sense permisos de control plane.
-
-L’entrada demo no demana contrasenya i està desactivada amb `NODE_ENV=production`, excepte en un deployment Vercel Preview que declari alhora `AIBRAIN_AUTH_MODE=demo` i `AIBRAIN_ENABLE_PREVIEW_DEMO=1`. El codi comprova `VERCEL_ENV=preview`, de manera que la mateixa bandera no pot obrir producció. Serveix per validar sessió, autorització, tenancy i UX; no és auth de producció.
-
-## Activar l’adaptador Supabase
-
-El projecte hosted `aibrain-workbench` està creat i vinculat; les migracions d’automatitzacions governades i onboarding s’han d’aplicar abans de provar aquests dos fluxos a la preview hosted. SMTP, templates, bootstrap del primer owner i gates live d'auth i RLS previs estan validats; l'estat verificat és a [docs/SUPABASE.md](docs/SUPABASE.md).
-
-Quan les credencials existeixen, `AIBRAIN_AUTH_MODE=supabase` substitueix completament la sessió demo i el filesystem de manifests. Si falta configuració, l’aplicació queda tancada.
-
-## Activar Codex local
-
-```bash
-CHAT_RUNTIME=codex \
-CODEX_WORKSPACE_ROOT=/ruta/absoluta/workspaces \
-CODEX_HOME_ROOT=/ruta/privada/codex-homes \
-AIBRAIN_SESSION_SECRET="$(openssl rand -hex 32)" \
+export AIBRAIN_INSTALLATION_CONFIG="$PWD/config/installations/development.example.json"
+export AIBRAIN_SESSION_SECRET="$(openssl rand -hex 32)"
 npm run dev
 ```
 
-Per a cada tenant es deriva automàticament:
+Demo login is development-only. Production requires `AIBRAIN_AUTH_MODE=supabase`,
+the Supabase URL/publishable key, independent session/challenge/publication/
+browser secrets, an absolute `AIBRAIN_INSTALLATION_CONFIG`, and an exact
+`AIBRAIN_CHROME_EXPECTED_VERSION`. No Supabase service-role key or product
+database is used.
 
-```text
-CODEX_WORKSPACE_ROOT/<tenant>/workspace
-CODEX_HOME_ROOT/<tenant>
+Provision employees using the same UUID issued by Supabase Auth:
+
+```bash
+npm run users:provision -- --input /absolute/path/to/users.json
 ```
 
-Si `CODEX_HOME_ROOT` no està configurat, el prototip pot utilitzar la sessió local heretada del procés, però la UI el marca com a no aïllat i el runtime ho rebutja en producció.
+El lifecycle posterior es host-local, idempotente y auditable: `POST /api/operations/users` para baja/reactivación/recuperación con la app activa, o `npm run users:manage -- --offline ...` únicamente con la app detenida. Consulta `docs/USER_PROVISIONING.md`.
 
-## Superfícies i contractes
+The command is idempotent and accepts any number of employees; capacity is
+controlled operationally rather than through commercial quotas.
 
-- `POST /api/auth/login|logout`: demo local o passwordless Supabase segons l’adaptador actiu.
-- `GET /auth/confirm`: intercanvi server-side de code o token hash per sessió SSR.
-- `GET /api/auth/session`: DTO mínim de sessió.
-- `GET /api/workbench`: snapshot públic de projectes, workspaces, fils i missatges del tenant actiu.
-- `POST|PATCH /api/projects|threads`: CRUD validat i protegit per sessió, origen i RLS.
-- `POST /api/chat`: NDJSON amb `plan`, `activity`, `approval`, `diff`, `delta`, `done` i `error`; la represa de Codex queda server-side.
-- `POST /api/runtime/approvals`: resol una aprovació només si pertany al tenant actiu.
-- `GET /api/runtime/status`: estat no sensible i específic del tenant.
-- `GET|PUT /api/control-plane/manifest`: lectura i edició owner-only del manifest del tenant actiu.
-- `POST /api/control-plane/invitations`: alta owner-only de membres amb assignació i audit atòmics.
+## Verification
 
-Consulta [AIBRAIN_CODEX_ARCHITECTURE.md](AIBRAIN_CODEX_ARCHITECTURE.md), [docs/SUPABASE.md](docs/SUPABASE.md), [docs/PRODUCTION.md](docs/PRODUCTION.md) i [.env.example](.env.example).
+```bash
+npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:integration
+npm run test:contract
+npm run test:e2e
+npm run build
+npm run infra:validate
+```
 
-La preparació del host Hetzner i de la pantalla Chromium per a computer use és a [docs/HETZNER_MIGRATION.md](docs/HETZNER_MIGRATION.md). Els ports del navegador queden limitats a loopback fins que el gateway multi-tenant autenticat estigui implementat i validat.
+The real document and Chromium matrices are opt-in because they require the
+host toolchain:
+
+```bash
+npm run test:documents:real
+AIBRAIN_CHROME_EXECUTABLE=/absolute/path/to/pinned/chrome \
+AIBRAIN_CHROME_EXPECTED_VERSION=152.0.7977.64 \
+npm run test:browser:real
+```
+
+## Contracts and operations
+
+- [UI/backend contract](docs/UI_BACKEND_CONTRACT.md)
+- [Backend progress and reproducible evidence](docs/AIBRAIN_BACKEND_PROGRESS.md)
+- [Installation configuration](docs/INSTALLATION_CONFIGURATION.md)
+- [Permissions provider](docs/PERMISSIONS_PROVIDER.md)
+- [Browser/Computer Use runtime](docs/BROWSER_COMPUTER_USE_RUNTIME.md)
+- [Document publisher](docs/DOCUMENT_PUBLISHER.md)
+- [Document storage and temporary recovery](docs/DOCUMENT_MAINTENANCE.md)
+- [Backup and restore](docs/BACKUP_RESTORE.md)
+- [Dedicated-server operation](docs/PRODUCTION.md)
+- [Isolated Hetzner QA runbook](docs/HETZNER_MIGRATION.md)
+
+The repository does not authorize DNS changes, production cutover, real client
+data, real NAS writes, destructive Supabase actions, subscription purchases or
+shared personal Codex accounts.

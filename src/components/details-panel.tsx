@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   X,
 } from "@phosphor-icons/react";
-import type { ApprovalDecision, ChatMessage } from "@/lib/chat-contract";
+import type { ApprovalDecision, ApprovalItem, ChatMessage } from "@/lib/chat-contract";
 import { TurnActivity } from "@/components/turn-activity";
 import { useModalFocus } from "@/ui/use-modal-focus";
 
@@ -18,7 +18,7 @@ type DetailsPanelProps = {
   message: ChatMessage | null;
   open: boolean;
   onClose: () => void;
-  onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
+  onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
 };
 
 type DiffFile = {

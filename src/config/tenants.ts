@@ -21,31 +21,29 @@ const tenants: Record<string, TenantDefinition> = {
   },
   operations: {
     id: "operations",
-    name: "Northwind Advisory QA",
+    name: "Northstar Operations",
     manifest: operationsBrainManifest,
   },
 };
 
 const demoAccounts: DemoAccount[] = [
   {
-    id: "arnau-owner",
-    name: "Alex",
-    email: "alex@example-laboratory.test",
-    role: "owner",
+    id: "example-user",
+    name: "Alex Example",
+    email: "alex@example.invalid",
     tenantId: "studio",
     tenantName: tenants.studio.name,
     productName: tenants.studio.manifest.identity.productName,
-    description: "Cuenta de desarrollo con proyectos sintéticos",
+    description: "Entorn de desenvolupament amb marca i workbench propis",
   },
   {
-    id: "ops-member",
-    name: "Taylor",
-    email: "taylor@northwind-advisory.test",
-    role: "member",
+    id: "operations-user",
+    name: "Equip Ops",
+    email: "equip@operations.demo",
     tenantId: "operations",
     tenantName: tenants.operations.name,
     productName: tenants.operations.manifest.identity.productName,
-    description: "Cuenta QA con actividad sintética",
+    description: "Segona instal·lació sintètica amb configuració independent",
   },
 ];
 

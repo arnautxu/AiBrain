@@ -1,0 +1,341 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRequest";
+import type { InstallationConfig } from "@/config/installation-schema";
+import { FileLocalUserStore } from "@/auth/local-user-store";
+import { loadInstallationConfig } from "@/config/installation";
+import {
+  MaintenanceCoordinator,
+  type EnterMaintenanceOptions,
+  type MaintenanceActivityLease,
+} from "@/operations/maintenance";
+import {
+  parseAccount,
+  parseModels,
+  parseRateLimit,
+  parseSkills,
+  parseUsage,
+  type CodexConnection,
+  type ResolvedSkill,
+} from "@/runtime/codex-app-server";
+import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
+import type { AppServerEvent, JsonValue } from "@/runtime/transport";
+import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gateway-runtime";
+import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
+import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
+
+const CATALOG_TTL_MS = 60_000;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function installationFingerprint(config: Readonly<InstallationConfig>) {
+  return createHash("sha256").update(JSON.stringify({
+    schemaVersion: config.schemaVersion,
+    installationId: config.installationId,
+    usersRoot: config.paths.usersRoot,
+    companyContextRoot: config.paths.companyContextRoot,
+    sourceReadRoot: config.paths.sourceReadRoot,
+    publishWriteRoot: config.paths.publishWriteRoot,
+  })).digest("hex");
+}
+
+function randomRequest(
+  method: ClientRequest["method"],
+  params: unknown,
+  purpose: string,
+) {
+  return {
+    method,
+    id: `${purpose}:${randomUUID()}`,
+    params,
+  } as ClientRequest;
+}
+
+export class WorkerAppServerClient {
+  readonly router: AppServerRpcRouter;
+  private initialized: Promise<void> | null = null;
+  private account: CodexConnection | null = null;
+  private cachedConnection: CodexConnection | null = null;
+  private cachedAt = 0;
+
+  constructor(
+    readonly handle: WorkerRuntimeHandle,
+    private readonly maintenance: MaintenanceCoordinator | null = null,
+  ) {
+    this.router = new AppServerRpcRouter(handle.transport);
+  }
+
+  async initialize() {
+    if (!this.initialized) {
+      this.initialized = this.initializeOnce().catch((error) => {
+        this.initialized = null;
+        throw error;
+      });
+    }
+    return this.initialized;
+  }
+
+  private async initializeOnce() {
+    await this.router.start();
+    await this.router.request(randomRequest("initialize", {
+      clientInfo: {
+        name: "aibrain_workbench",
+        title: "AiBrain",
+        version: "0.4.0",
+      },
+      capabilities: null,
+    }, "initialize"), 30_000);
+    await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
+    this.account = parseAccount(await this.router.request(randomRequest(
+      "account/read",
+      { refreshToken: false },
+      "account-read",
+    ), 10_000));
+  }
+
+  async request(
+    method: ClientRequest["method"],
+    params: unknown,
+    purpose: string,
+    timeoutMs = 30_000,
+    beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
+    activityLease?: MaintenanceActivityLease,
+  ) {
+    if (method === "turn/start") this.maintenance?.assertActiveLease(activityLease);
+    await this.initialize();
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(purpose)) {
+      throw new Error("Stable App Server request id is invalid.");
+    }
+    return this.router.request(
+      { method, id: purpose, params } as ClientRequest,
+      timeoutMs,
+      beforeResolve,
+    );
+  }
+
+  async connection(cwd: string, forceRefresh = false): Promise<CodexConnection> {
+    await this.initialize();
+    if (!this.account) throw new Error("Codex did not return account state.");
+    if (!forceRefresh && this.cachedConnection && Date.now() - this.cachedAt < CATALOG_TTL_MS) {
+      return this.cachedConnection;
+    }
+    const [modelsResult, skillsResult, capabilitiesResult, rateLimitResult, usageResult] = await Promise.all([
+      this.router.request(randomRequest("model/list", { limit: 30, includeHidden: false }, "models"), 10_000).catch(() => null),
+      this.router.request(randomRequest("skills/list", { cwds: [cwd], forceReload: false }, "skills"), 10_000).catch(() => null),
+      this.router.request(randomRequest("modelProvider/capabilities/read", {}, "capabilities"), 10_000).catch(() => null),
+      this.router.request(randomRequest("account/rateLimits/read", undefined, "rate-limits"), 10_000).catch(() => null),
+      this.router.request(randomRequest("account/usage/read", undefined, "usage"), 10_000).catch(() => null),
+    ]);
+    this.cachedConnection = {
+      ...this.account,
+      processWarm: true,
+      models: parseModels(modelsResult),
+      skills: parseSkills(skillsResult).map(({ path: _path, ...skill }) => skill),
+      webSearch: isRecord(capabilitiesResult) && capabilitiesResult.webSearch === true,
+      imageGeneration: isRecord(capabilitiesResult) && capabilitiesResult.imageGeneration === true,
+      rateLimit: parseRateLimit(rateLimitResult),
+      usage: parseUsage(usageResult),
+    };
+    this.cachedAt = Date.now();
+    return this.cachedConnection;
+  }
+
+  async resolvedSkills(cwd: string): Promise<ResolvedSkill[]> {
+    await this.initialize();
+    return parseSkills(await this.router.request(randomRequest(
+      "skills/list",
+      { cwds: [cwd], forceReload: false },
+      "resolved-skills",
+    ), 10_000));
+  }
+
+  close() {
+    return this.router.close();
+  }
+}
+
+type RuntimeServiceState = {
+  fingerprint: string;
+  config: Readonly<InstallationConfig>;
+  registry: WorkerRuntimeRegistry;
+  maintenance: MaintenanceCoordinator;
+  clients: Map<string, WorkerAppServerClient>;
+  activeTurnCancellations: Map<string, {
+    runtimeThreadId: string;
+    cancelAfterRemoteInterrupt(): void;
+  }>;
+};
+
+const runtimeGlobal = globalThis as typeof globalThis & {
+  __aibrainWorkerRuntimeService?: RuntimeServiceState;
+  __aibrainWorkerRuntimeServicePromise?: Promise<RuntimeServiceState>;
+};
+
+async function serviceState(): Promise<RuntimeServiceState> {
+  const config = await loadInstallationConfig();
+  const fingerprint = installationFingerprint(config);
+  const existing = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (existing?.fingerprint === fingerprint) return existing;
+  const inFlight = runtimeGlobal.__aibrainWorkerRuntimeServicePromise;
+  if (inFlight) {
+    const initialized = await inFlight;
+    return initialized.fingerprint === fingerprint ? initialized : serviceState();
+  }
+  const initialize = (async () => {
+    const replaced = runtimeGlobal.__aibrainWorkerRuntimeService;
+    if (replaced) {
+      await Promise.allSettled([
+        ...[...replaced.clients.values()].map((client) => client.close()),
+        replaced.registry.close(),
+      ]);
+    }
+    const maintenance = new MaintenanceCoordinator();
+    const state: RuntimeServiceState = {
+      fingerprint,
+      config,
+      registry: new WorkerRuntimeRegistry({
+        config,
+        factory: new LocalGatewayWorkerRuntimeFactory(),
+        maintenance,
+      }),
+      maintenance,
+      clients: new Map(),
+      activeTurnCancellations: new Map(),
+    };
+    runtimeGlobal.__aibrainWorkerRuntimeService = state;
+    return state;
+  })();
+  runtimeGlobal.__aibrainWorkerRuntimeServicePromise = initialize;
+  try {
+    return await initialize;
+  } finally {
+    if (runtimeGlobal.__aibrainWorkerRuntimeServicePromise === initialize) {
+      delete runtimeGlobal.__aibrainWorkerRuntimeServicePromise;
+    }
+  }
+}
+
+export async function workerAppServerForUser(
+  userId: string,
+  activityLease?: MaintenanceActivityLease,
+) {
+  const state = await serviceState();
+  const localUser = await new FileLocalUserStore(state.config.paths.usersRoot).read(userId);
+  if (!localUser?.enabled) {
+    throw new Error("Worker user is not provisioned or is disabled.");
+  }
+  if (activityLease) state.maintenance.assertActiveLease(activityLease);
+  let handle = await state.registry.start(userId, activityLease);
+  let client = state.clients.get(userId);
+  if (!client || client.handle.transport !== handle.transport) {
+    if (client) await client.close();
+    client = new WorkerAppServerClient(handle, state.maintenance);
+    state.clients.set(userId, client);
+  }
+  try {
+    await client.initialize();
+  } catch {
+    await client.close().catch(() => undefined);
+    state.clients.delete(userId);
+    await state.registry.stop(userId).catch(() => undefined);
+    handle = await state.registry.start(userId, activityLease);
+    client = new WorkerAppServerClient(handle, state.maintenance);
+    state.clients.set(userId, client);
+    try {
+      await client.initialize();
+    } catch (retryError) {
+      state.clients.delete(userId);
+      throw retryError;
+    }
+  }
+  return { config: state.config, registry: state.registry, handle, client };
+}
+
+export async function acquireWorkerTurnActivity() {
+  const state = await serviceState();
+  return state.maintenance.acquire("turn");
+}
+
+export async function workerMaintenanceStatus() {
+  return (await serviceState()).maintenance.status();
+}
+
+export async function enterWorkerMaintenance(options: EnterMaintenanceOptions) {
+  return (await serviceState()).maintenance.enter(options);
+}
+
+export async function resumeWorkerMaintenance() {
+  return (await serviceState()).maintenance.resume();
+}
+
+export async function workerRuntimeHealth(userId: string) {
+  const state = await serviceState();
+  return state.registry.health(userId);
+}
+
+/** Stops only the selected employee runtime and releases its active stream handlers. */
+export async function stopWorkerRuntimeForUser(userId: string) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (!state) return false;
+  const client = state.clients.get(userId);
+  if (client) {
+    await client.close().catch(() => undefined);
+    state.clients.delete(userId);
+  }
+  for (const [key, registration] of state.activeTurnCancellations) {
+    if (!key.startsWith(`${userId}:`)) continue;
+    registration.cancelAfterRemoteInterrupt();
+    state.activeTurnCancellations.delete(key);
+  }
+  return state.registry.stop(userId);
+}
+
+export function workerTurnIsActive(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  const client = state?.clients.get(userId);
+  return client?.router.hasActiveTurn(runtimeThreadId, localTurnId) ?? false;
+}
+
+function activeTurnKey(userId: string, localTurnId: string) {
+  return `${userId}:${localTurnId}`;
+}
+
+export function registerWorkerTurnCancellation(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+  cancelAfterRemoteInterrupt: () => void,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (!state || !state.clients.has(userId) || !runtimeThreadId || !localTurnId) {
+    throw new Error("Worker turn cancellation scope is unavailable.");
+  }
+  const key = activeTurnKey(userId, localTurnId);
+  if (state.activeTurnCancellations.has(key)) {
+    throw new Error("Worker turn cancellation scope is already registered.");
+  }
+  const registration = { runtimeThreadId, cancelAfterRemoteInterrupt };
+  state.activeTurnCancellations.set(key, registration);
+  return () => {
+    if (state.activeTurnCancellations.get(key) === registration) {
+      state.activeTurnCancellations.delete(key);
+    }
+  };
+}
+
+export function cancelWorkerTurnLocally(
+  userId: string,
+  runtimeThreadId: string,
+  localTurnId: string,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  const registration = state?.activeTurnCancellations.get(activeTurnKey(userId, localTurnId));
+  if (!registration || registration.runtimeThreadId !== runtimeThreadId) return false;
+  registration.cancelAfterRemoteInterrupt();
+  return true;
+}

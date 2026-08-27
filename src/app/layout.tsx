@@ -3,7 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import type { CSSProperties } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
-import { resolveUiInstallationBranding } from "@/ui/installation-branding";
+import { loadInstallationConfig } from "@/config/installation";
+import { publicInstallationBranding } from "@/config/installation-branding";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/ui/theme";
 import "./globals.css";
 
@@ -17,22 +18,30 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
-export function generateMetadata(): Metadata {
-  const branding = resolveUiInstallationBranding();
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  const installation = await loadInstallationConfig();
   return {
-    applicationName: branding.productName,
+    metadataBase: new URL(installation.publicUrl),
+    applicationName: installation.branding.productName,
     title: {
-      default: branding.productName,
-      template: `%s · ${branding.productName}`,
+      default: `${installation.branding.productName} · ${installation.companyName}`,
+      template: `%s · ${installation.branding.productName}`,
     },
-    description: `Espacio de trabajo privado de ${branding.companyName}.`,
-    icons: [{ rel: "icon", url: branding.faviconPath }],
+    description: `Espacio de trabajo privado de ${installation.companyName}.`,
+    icons: {
+      icon: installation.branding.faviconPath,
+    },
   };
 }
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const branding = resolveUiInstallationBranding();
+export default async function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
+  const branding = publicInstallationBranding(await loadInstallationConfig());
   const installationStyle = { "--installation-accent": branding.accentColor } as CSSProperties;
+
   return (
     <html
       lang="es"

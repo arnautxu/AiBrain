@@ -26,6 +26,9 @@ const message: ChatMessage = {
   }],
   approvals: [{
     id: "approval-1",
+    threadId: "thread-1",
+    turnId: "turn-1",
+    itemId: "item-1",
     kind: "command",
     title: "Ejecutar comprobación",
     detail: "Solo lee el estado sintético.",
@@ -48,6 +51,29 @@ const message: ChatMessage = {
 afterEach(cleanup);
 
 describe("turn activity and Review", () => {
+  it("shows safe live activity labels with shimmer while a turn is running", () => {
+    render(<TurnActivity
+      message={{
+        ...message,
+        status: "streaming",
+        plan: [],
+        approvals: [],
+        diff: "",
+        activity: [
+          { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "running" },
+          { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
+          { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
+        ],
+      }}
+      onResolveApproval={vi.fn()}
+    />);
+
+    expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
+  });
+
   it("presents plan, command output, diff and approval decisions in employee language", () => {
     const onResolve = vi.fn();
     render(<TurnActivity message={message} onResolveApproval={onResolve} />);
@@ -57,8 +83,8 @@ describe("turn activity and Review", () => {
     expect(screen.getByText("Comprobación sintética terminada")).toBeInTheDocument();
     expect(screen.getByText("Cambios preparados")).toBeInTheDocument();
     const approval = screen.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
-    fireEvent.click(within(approval).getByRole("button", { name: "Permitir una vez" }));
-    expect(onResolve).toHaveBeenCalledWith("approval-1", "accept");
+    fireEvent.click(within(approval).getByRole("button", { name: "Permitir" }));
+    expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
   });
 
   it("renders an inspectable file diff and activity tabs", () => {

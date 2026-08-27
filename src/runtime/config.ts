@@ -23,6 +23,21 @@ function absoluteRoot(value: string | null, variable: string) {
   return value;
 }
 
+function runtimeMode(): RuntimeConfig["mode"] {
+  const configured = configuredValue(process.env.CHAT_RUNTIME);
+  if (configured === "codex") return "codex";
+  if (configured !== null && configured !== "demo") {
+    throw new Error("CHAT_RUNTIME ha de ser codex o demo.");
+  }
+  const explicitPreviewDemo = process.env.VERCEL_ENV === "preview"
+    && process.env.AIBRAIN_AUTH_MODE === "demo"
+    && process.env.AIBRAIN_ENABLE_PREVIEW_DEMO === "1";
+  if (process.env.NODE_ENV === "production" && !explicitPreviewDemo) {
+    throw new Error("CHAT_RUNTIME=codex és obligatori en producció.");
+  }
+  return "demo";
+}
+
 export function readRuntimeConfig(tenantId: string, workspaceKey = "workspace"): RuntimeConfig {
   if (!/^[a-z0-9-]+$/.test(tenantId)) {
     throw new Error("Identificador de tenant no vàlid.");
@@ -41,7 +56,7 @@ export function readRuntimeConfig(tenantId: string, workspaceKey = "workspace"):
 
   return {
     tenantId,
-    mode: process.env.CHAT_RUNTIME === "codex" ? "codex" : "demo",
+    mode: runtimeMode(),
     codexBinary: configuredValue(process.env.CODEX_BIN) ?? "codex",
     codexHome: codexHomeRoot ? path.join(codexHomeRoot, tenantId) : null,
     workspace: workspaceKey === "workspace"

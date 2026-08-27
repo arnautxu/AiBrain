@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.aibrain.local/installation-config.v1.schema.json",
+  "title": "AiBrain InstallationConfig v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "installationId",
+    "companyName",
+    "companySlug",
+    "publicUrl",
+    "branding",
+    "paths"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "installationId": { "$ref": "#/$defs/identifier" },
+    "companyName": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "companySlug": { "$ref": "#/$defs/identifier" },
+    "publicUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https?://[^/?#]+/?$",
+      "maxLength": 300
+    },
+    "branding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["productName", "logoPath", "faviconPath", "accentColor"],
+      "properties": {
+        "productName": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "logoPath": { "$ref": "#/$defs/publicAssetPath" },
+        "faviconPath": { "$ref": "#/$defs/publicAssetPath" },
+        "accentColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dataRoot",
+        "companyContextRoot",
+        "usersRoot",
+        "sourceReadRoot",
+        "publishWriteRoot",
+        "backupsRoot"
+      ],
+      "properties": {
+        "dataRoot": { "$ref": "#/$defs/filesystemPath" },
+        "companyContextRoot": { "$ref": "#/$defs/filesystemPath" },
+        "usersRoot": { "$ref": "#/$defs/filesystemPath" },
+        "sourceReadRoot": { "$ref": "#/$defs/filesystemPath" },
+        "publishWriteRoot": { "$ref": "#/$defs/filesystemPath" },
+        "backupsRoot": { "$ref": "#/$defs/filesystemPath" }
+      }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 63,
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+    },
+    "publicAssetPath": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 300,
+      "pattern": "^/(?!/)(?!.*(?:\\.\\.|[%?#\\\\])).+$"
+    },
+    "filesystemPath": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 500,
+      "pattern": "^/(?!$)(?!.*(?:/\\.{1,2}(?:/|$)|//)).+[^/]$"
+    }
+  }
+}

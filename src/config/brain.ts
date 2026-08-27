@@ -1,7 +1,7 @@
 export type AccentName = "graphite" | "blue" | "violet";
 export type Density = "comfortable" | "compact";
 export type CornerStyle = "soft" | "rounded" | "precise";
-export type BrainWindowId = "chat" | "inspector" | "runtime";
+export type BrainWindowId = "chat" | "inspector" | "browser" | "runtime";
 
 export type BrainWindow = {
   id: BrainWindowId;
@@ -32,6 +32,8 @@ export type BrainManifest = {
     welcomeTitle: string;
     welcomeMessage: string;
     accent: AccentName;
+    /** Installation-owned accent used until the employee chooses a personal palette. */
+    accentColor?: string;
     density: Density;
     corners: CornerStyle;
     showInspector: boolean;
@@ -43,7 +45,7 @@ export type BrainManifest = {
   };
   runtime: {
     adapter: "local_demo" | "codex_app_server";
-    transport: "stdio";
+    transport: "private_websocket";
   };
   composer: ComposerCapability;
   windows: BrainWindow[];
@@ -98,7 +100,7 @@ export const baseBrainManifest: BrainManifest = {
   },
   runtime: {
     adapter: "codex_app_server",
-    transport: "stdio",
+    transport: "private_websocket",
   },
   composer: {
     images: true,
@@ -111,6 +113,7 @@ export const baseBrainManifest: BrainManifest = {
   windows: [
     { id: "chat", label: "Workbench", enabled: true },
     { id: "inspector", label: "Review", enabled: true },
+    { id: "browser", label: "Computer Use", enabled: true },
     { id: "runtime", label: "Runtime", enabled: true },
   ],
 };
@@ -141,7 +144,7 @@ export const operationsBrainManifest: BrainManifest = {
   },
   runtime: {
     adapter: "codex_app_server",
-    transport: "stdio",
+    transport: "private_websocket",
   },
   composer: {
     images: true,
@@ -154,6 +157,7 @@ export const operationsBrainManifest: BrainManifest = {
   windows: [
     { id: "chat", label: "Trabajo", enabled: true },
     { id: "inspector", label: "Review", enabled: true },
+    { id: "browser", label: "Computer Use", enabled: true },
     { id: "runtime", label: "Entorno", enabled: true },
   ],
 };
@@ -168,6 +172,19 @@ export const accentTokens: Record<
   blue: { solid: "#315ee7", soft: "#e9efff", contrast: "#ffffff" },
   violet: { solid: "#7656d8", soft: "#f0ebff", contrast: "#ffffff" },
 };
+
+export function customAccentTokens(color: string) {
+  if (!/^#[0-9a-f]{6}$/u.test(color)) return null;
+  const channels = [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16) / 255);
+  const luminance = channels
+    .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
+    .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+  return Object.freeze({
+    solid: color,
+    soft: `color-mix(in srgb, ${color} 12%, white)`,
+    contrast: luminance > 0.42 ? "#111827" : "#ffffff",
+  });
+}
 
 export const cornerTokens: Record<CornerStyle, string> = {
   soft: "12px",

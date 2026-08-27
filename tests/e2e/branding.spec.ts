@@ -8,7 +8,7 @@ const expected = northwind ? {
   accountName: "Taylor",
   favicon: "northwind-qa/favicon.svg",
 } : {
-  installationId: "example-lab-dev",
+  installationId: "example-lab-playwright",
   productName: "Example Brain",
   companyName: "Example Laboratory",
   accountName: "Alex",
@@ -18,7 +18,7 @@ const expected = northwind ? {
 test("the installation changes identity without changing the login component", async ({ page }) => {
   await page.goto("/login");
 
-  await expect(page).toHaveTitle(expected.productName);
+  await expect(page).toHaveTitle(`${expected.productName} · ${expected.companyName}`);
   await expect(page.locator("html")).toHaveAttribute("data-installation", expected.installationId);
   await expect(page.getByRole("img", { name: `${expected.productName}, ${expected.companyName}` })).toBeVisible();
   await expect(page.getByRole("button", { name: new RegExp(expected.accountName) })).toBeVisible();
