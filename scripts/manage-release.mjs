@@ -22,6 +22,7 @@ import {
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
+import { load as parseYaml } from "js-yaml";
 
 const IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$/u;
 const REVISION = /^[0-9a-f]{7,64}$/u;
@@ -50,7 +51,7 @@ class ReleaseError extends Error {
 function usage() {
   return [
     "Usage:",
-    "  node scripts/manage-release.mjs promote --image <name@sha256:...> --egress-image <name@sha256:...> --revision <git-sha> --installation-id <slug> --env-file <absolute> --compose-file <target absolute> --current-compose-file <current absolute> --installation-config <target absolute> --state-file <absolute>",
+    "  node scripts/manage-release.mjs promote --image <name@sha256:...> --egress-image <name@sha256:...> --revision <git-sha> --installation-id <slug> --env-file <active absolute> --target-env-file <target absolute> --compose-file <target absolute> --current-compose-file <current absolute> --installation-config <target absolute> --state-file <absolute>",
     "  node scripts/manage-release.mjs rollback --installation-id <slug> --env-file <absolute> --state-file <absolute>",
     "Optional: --docker-bin <absolute> --health-timeout-ms <positive integer> --docker-command-timeout-ms <positive integer>",
   ].join("\n");
@@ -77,6 +78,7 @@ function parseArguments(argv) {
     "--revision",
     "--installation-id",
     "--env-file",
+    "--target-env-file",
     "--compose-file",
     "--current-compose-file",
     "--installation-config",
@@ -90,13 +92,13 @@ function parseArguments(argv) {
   }
   const required = ["--installation-id", "--env-file", "--state-file"];
   if (command === "promote") {
-    required.push("--image", "--egress-image", "--revision", "--compose-file", "--installation-config");
+    required.push("--image", "--egress-image", "--revision", "--target-env-file", "--compose-file", "--installation-config");
   }
   for (const name of required) {
     if (!values.has(name)) throw new ReleaseError("RELEASE_USAGE", `Missing ${name}.`);
   }
   const installationId = values.get("--installation-id");
-  if (!INSTALLATION.test(installationId)) {
+  if (!INSTALLATION.test(installationId) || installationId.length < 2) {
     throw new ReleaseError("RELEASE_INSTALLATION_INVALID", "Installation ID is invalid.");
   }
   const image = values.get("--image") ?? null;
@@ -126,6 +128,9 @@ function parseArguments(argv) {
     egressImage,
     revision,
     envFile: safeExistingFile(values.get("--env-file"), "compose env"),
+    targetEnvFile: values.has("--target-env-file")
+      ? safeExistingFile(values.get("--target-env-file"), "target compose env")
+      : null,
     composeFile: values.has("--compose-file")
       ? safeExistingFile(values.get("--compose-file"), "target Compose")
       : null,
@@ -214,27 +219,210 @@ function assertNoReleaseSecrets(values) {
   }
 }
 
-function replaceImages(contents, images) {
-  let appReplacements = 0;
-  let egressReplacements = 0;
-  let revisionReplacements = 0;
-  const updated = contents
-    .replace(/^AIBRAIN_IMAGE=.*$/gmu, () => {
-      appReplacements += 1;
-      return `AIBRAIN_IMAGE=${images.image}`;
-    })
-    .replace(/^AIBRAIN_EGRESS_IMAGE=.*$/gmu, () => {
-      egressReplacements += 1;
-      return `AIBRAIN_EGRESS_IMAGE=${images.egressImage}`;
-    })
-    .replace(/^AIBRAIN_REVISION=.*$/gmu, () => {
-      revisionReplacements += 1;
-      return `AIBRAIN_REVISION=${images.revision}`;
-    });
-  if (appReplacements !== 1 || egressReplacements !== 1 || revisionReplacements !== 1) {
-    throw new ReleaseError("RELEASE_ENV_INVALID", "Compose env must contain both release images and revision exactly once.");
+const IMMUTABLE_ENV_KEYS = [
+  "AIBRAIN_INSTALLATION_ID",
+  "AIBRAIN_COMPOSE_PROJECT_NAME",
+  "AIBRAIN_INSTALLATION_CONFIG_HOST",
+  "AIBRAIN_RUNTIME_ENV_FILE",
+  "AIBRAIN_EGRESS_ENV_FILE",
+  "AIBRAIN_ALERTS_ENV_FILE",
+  "AIBRAIN_REPLICA_ENV_FILE",
+  "AIBRAIN_RESTIC_PASSWORD_FILE_HOST",
+  "AIBRAIN_HOST_ROOT",
+  "AIBRAIN_SOURCE_HOST_PATH",
+  "AIBRAIN_PUBLISH_HOST_PATH",
+  "AIBRAIN_REPLICA_STATE_HOST_PATH",
+  "AIBRAIN_NETWORK_NAME",
+  "AIBRAIN_EGRESS_NETWORK_NAME",
+  "AIBRAIN_DATA_VOLUME_NAME",
+  "AIBRAIN_BACKUP_VOLUME_NAME",
+  "AIBRAIN_RESTORE_VOLUME_NAME",
+  "AIBRAIN_HTTP_PORT",
+  "AIBRAIN_UID",
+  "AIBRAIN_GID",
+  "AIBRAIN_EGRESS_UID",
+  "AIBRAIN_EGRESS_GID",
+];
+
+function assertTargetEnvironment(current, target, options) {
+  assertNoReleaseSecrets(target);
+  if (target.get("AIBRAIN_INSTALLATION_ID") !== options.installationId
+    || target.get("AIBRAIN_COMPOSE_PROJECT_NAME") !== `aibrain-${options.installationId}`
+    || target.get("AIBRAIN_IMAGE") !== options.image
+    || target.get("AIBRAIN_EGRESS_IMAGE") !== options.egressImage
+    || target.get("AIBRAIN_REVISION") !== options.revision) {
+    throw new ReleaseError("RELEASE_TARGET_ENV_INVALID", "Target env identity, images or revision do not match the requested release.");
   }
-  return updated;
+  for (const key of IMMUTABLE_ENV_KEYS) {
+    if (!current.has(key) || target.get(key) !== current.get(key)) {
+      throw new ReleaseError("RELEASE_TARGET_ENV_MIGRATION_REQUIRED", `${key} cannot change in an ordinary release.`);
+    }
+  }
+  for (const value of target.values()) {
+    if (/(?:^|[\\/])bgreenly(?:[\\/]|$)/iu.test(value)) {
+      throw new ReleaseError("RELEASE_TARGET_ENV_INVALID", "Target env must never address BGreenly.");
+    }
+  }
+}
+
+const INSTALLATION_ROOT_KEYS = [
+  "schemaVersion", "installationId", "companyName", "companySlug", "publicUrl", "branding", "paths",
+];
+const INSTALLATION_BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"];
+const INSTALLATION_PATHS = Object.freeze({
+  dataRoot: "/var/lib/aibrain/data",
+  companyContextRoot: "/var/lib/aibrain/data/company-context",
+  usersRoot: "/var/lib/aibrain/data/users",
+  sourceReadRoot: "/srv/aibrain/source-ro",
+  publishWriteRoot: "/srv/aibrain/publish-rw",
+  backupsRoot: "/var/lib/aibrain/data/backups",
+});
+
+function exactObjectKeys(value, keys) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+function validConfigString(value, maximumLength) {
+  return typeof value === "string" && value.length > 0 && value.length <= maximumLength
+    && value.trim() === value && !/\p{C}/u.test(value);
+}
+
+function validPublicAssetPath(value) {
+  return validConfigString(value, 300) && value.startsWith("/") && !value.startsWith("//")
+    && !/[\\?#%]/u.test(value) && path.posix.normalize(value) === value;
+}
+
+function validateVersionedInstallationConfig(contents, installationId) {
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch (error) {
+    throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig is invalid JSON.", { cause: error });
+  }
+  const branding = value?.branding;
+  const paths = value?.paths;
+  if (!exactObjectKeys(value, INSTALLATION_ROOT_KEYS)
+    || value.schemaVersion !== 1 || value.installationId !== installationId
+    || !exactObjectKeys(branding, INSTALLATION_BRANDING_KEYS)
+    || !exactObjectKeys(paths, Object.keys(INSTALLATION_PATHS))
+    || !validConfigString(value.companyName, 120)
+    || !validConfigString(value.companySlug, 63)
+    || value.companySlug.length < 2
+    || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u.test(value.companySlug)
+    || !validConfigString(value.publicUrl, 300)
+    || !validConfigString(branding?.productName, 80)
+    || !validPublicAssetPath(branding?.logoPath)
+    || !validPublicAssetPath(branding?.faviconPath)
+    || !/^#[0-9a-fA-F]{6}$/u.test(branding.accentColor)
+    || Object.entries(INSTALLATION_PATHS).some(([key, expected]) => paths[key] !== expected)) {
+    throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig does not match the installation schema and fixed container paths.");
+  }
+  let publicUrl;
+  try { publicUrl = new URL(value.publicUrl); } catch {
+    throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig publicUrl is invalid.");
+  }
+  if ((publicUrl.protocol !== "https:" && !(publicUrl.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(publicUrl.hostname)))
+    || publicUrl.origin !== value.publicUrl || publicUrl.username || publicUrl.password) {
+    throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig publicUrl must be an approved exact origin.");
+  }
+}
+
+function validateComposeSafety(contents, installationId) {
+  if (/bgreenly/iu.test(contents)
+    || /^\s*(?:privileged|network_mode)\s*:/mu.test(contents)
+    || /^\s*external\s*:/mu.test(contents)
+    || /docker\.sock/iu.test(contents)
+    || /^\s*build\s*:/mu.test(contents)
+    || !/127\.0\.0\.1:\$\{AIBRAIN_HTTP_PORT:/u.test(contents)
+    || !/com\.graphikai\.aibrain\.installation:[^\n]*AIBRAIN_INSTALLATION_ID/u.test(contents)
+    || !/aibrain-internal:[\s\S]*internal: true/u.test(contents)
+    || !contents.includes("seccomp=./browser/seccomp_profile.json")) {
+    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose for ${installationId} violates fixed isolation boundaries.`);
+  }
+  let value;
+  try {
+    value = parseYaml(contents, { json: true });
+  } catch (error) {
+    throw new ReleaseError("RELEASE_COMPOSE_INVALID", "Release Compose is invalid YAML.", { cause: error });
+  }
+  const services = value?.services;
+  const networks = value?.networks;
+  const volumes = value?.volumes;
+  const allowedServices = new Set(["app", "egress-gateway", "alert-dispatcher", "backup-replicator"]);
+  const requiredServices = ["app", "egress-gateway", "alert-dispatcher"];
+  const expectedNetworks = {
+    app: ["aibrain-internal"],
+    "egress-gateway": ["aibrain-egress", "aibrain-internal"],
+    "alert-dispatcher": ["aibrain-egress", "aibrain-internal"],
+    "backup-replicator": ["aibrain-egress"],
+  };
+  const expectedImages = {
+    app: "AIBRAIN_IMAGE",
+    "egress-gateway": "AIBRAIN_EGRESS_IMAGE",
+    "alert-dispatcher": "AIBRAIN_IMAGE",
+    "backup-replicator": "AIBRAIN_IMAGE",
+  };
+  const expectedResourceNames = {
+    "aibrain-internal": "AIBRAIN_NETWORK_NAME",
+    "aibrain-egress": "AIBRAIN_EGRESS_NETWORK_NAME",
+    "aibrain-data": "AIBRAIN_DATA_VOLUME_NAME",
+    "aibrain-backups": "AIBRAIN_BACKUP_VOLUME_NAME",
+    "aibrain-restores": "AIBRAIN_RESTORE_VOLUME_NAME",
+  };
+  const allowedVolumeSources = new Set([
+    "aibrain-data", "aibrain-backups", "aibrain-restores",
+    "AIBRAIN_INSTALLATION_CONFIG_HOST", "AIBRAIN_SOURCE_HOST_PATH", "AIBRAIN_PUBLISH_HOST_PATH",
+    "AIBRAIN_REPLICA_STATE_HOST_PATH", "AIBRAIN_RESTIC_PASSWORD_FILE_HOST",
+  ]);
+  const dangerousServiceKeys = [
+    "build", "devices", "device_cgroup_rules", "external_links", "ipc", "links",
+    "network_mode", "pid", "privileged", "uts", "userns_mode",
+  ];
+  const interpolationKey = (candidate) => typeof candidate === "string"
+    ? /^\$\{([A-Z][A-Z0-9_]*)(?::[^}]*)?\}$/u.exec(candidate)?.[1] ?? null
+    : null;
+  const exactStringSet = (candidate, expected) => Array.isArray(candidate)
+    && candidate.every((item) => typeof item === "string")
+    && [...candidate].sort().join("\0") === [...expected].sort().join("\0");
+  if (!exactObjectKeys(networks, ["aibrain-internal", "aibrain-egress"])
+    || !exactObjectKeys(volumes, ["aibrain-data", "aibrain-backups", "aibrain-restores"])
+    || networks["aibrain-internal"]?.internal !== true
+    || interpolationKey(value?.name) !== "AIBRAIN_COMPOSE_PROJECT_NAME") {
+    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose resources do not match the isolated installation topology.");
+  }
+  for (const [name, key] of Object.entries(expectedResourceNames)) {
+    const resource = networks[name] ?? volumes[name];
+    if (!resource || resource.external !== undefined || interpolationKey(resource.name) !== key) {
+      throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose resource names must use the installation-owned environment keys.");
+    }
+  }
+  if (!services || typeof services !== "object" || Array.isArray(services)
+    || requiredServices.some((name) => !services[name])
+    || Object.keys(services).some((name) => !allowedServices.has(name))) {
+    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose services do not match the reviewed runtime set.");
+  }
+  for (const [name, service] of Object.entries(services)) {
+    if (!service || typeof service !== "object" || Array.isArray(service)
+      || dangerousServiceKeys.some((key) => service[key] !== undefined)
+      || interpolationKey(service.image) !== expectedImages[name]
+      || !exactStringSet(service.networks, expectedNetworks[name])) {
+      throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} violates runtime isolation.`);
+    }
+    if (service.volumes !== undefined) {
+      if (!Array.isArray(service.volumes) || service.volumes.some((mount) => {
+        if (!mount || typeof mount !== "object" || Array.isArray(mount)) return true;
+        const source = interpolationKey(mount.source) ?? mount.source;
+        return typeof source !== "string" || !allowedVolumeSources.has(source)
+          || typeof mount.target !== "string" || !path.posix.isAbsolute(mount.target);
+      })) {
+        throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} has an unreviewed mount.`);
+      }
+    }
+    if (name !== "app" && service.ports !== undefined) {
+      throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} cannot publish host ports.`);
+    }
+  }
 }
 
 function writeAtomic(file, contents, mode = 0o600, ownership = null) {
@@ -338,11 +526,15 @@ function activeComposePath(options) {
   return `${options.stateFile}.active.compose.yaml`;
 }
 
+function activeSeccompPath(options) {
+  return `${options.stateFile}.active.seccomp.json`;
+}
+
 function composeArgs(options, release, ...args) {
   return [
     "compose",
     "--env-file", options.envFile,
-    "--project-directory", release.composeProjectDirectory,
+    "--project-directory", path.dirname(activeComposePath(options)),
     "-f", activeComposePath(options),
     ...args,
   ];
@@ -440,7 +632,8 @@ const RELEASE_INPUT_LIMIT = 32 * 1024;
 const RELEASE_RECORD_KEYS = [
   "image", "egressImage", "revision", "promotedAt",
   "environment", "environmentSha256",
-  "compose", "composeSha256", "composeProjectDirectory",
+  "compose", "composeSha256", "composeEffective", "composeEffectiveSha256",
+  "seccomp", "seccompSha256", "seccompActivePath",
   "installationConfig", "installationConfigSha256", "installationConfigPath",
 ];
 
@@ -485,6 +678,8 @@ function decodeInput(value, expectedHash) {
 }
 
 function releaseRecord({
+  installationId,
+  stateFile,
   image,
   egressImage,
   revision,
@@ -496,7 +691,26 @@ function releaseRecord({
 }) {
   assertNoReleaseSecrets(parseEnv(environmentContents));
   const composeContents = readControlledText(composeFile, "Release Compose input");
+  const seccompContents = readControlledText(
+    path.join(path.dirname(composeFile), "browser", "seccomp_profile.json"),
+    "Release seccomp input",
+  );
   const installationConfigContents = readControlledText(installationConfigSource, "Release installation config input");
+  validateComposeSafety(composeContents, installationId);
+  validateVersionedInstallationConfig(installationConfigContents, installationId);
+  let seccomp;
+  try { seccomp = JSON.parse(seccompContents); } catch (error) {
+    throw new ReleaseError("RELEASE_SECCOMP_INVALID", "Release seccomp profile is invalid JSON.", { cause: error });
+  }
+  if (seccomp?.defaultAction !== "SCMP_ACT_ERRNO" || !Array.isArray(seccomp.syscalls)) {
+    throw new ReleaseError("RELEASE_SECCOMP_INVALID", "Release seccomp profile does not fail closed.");
+  }
+  const sourceToken = "seccomp=./browser/seccomp_profile.json";
+  if (composeContents.split(sourceToken).length !== 2) {
+    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose must reference exactly one reviewed seccomp profile.");
+  }
+  const seccompActivePath = `${stateFile}.active.seccomp.json`;
+  const composeEffective = composeContents.replace(sourceToken, `seccomp=${seccompActivePath}`);
   return {
     image,
     egressImage,
@@ -506,7 +720,11 @@ function releaseRecord({
     environmentSha256: sha256(environmentContents),
     compose: encodeInput(composeContents),
     composeSha256: sha256(composeContents),
-    composeProjectDirectory: realpathSync(path.dirname(composeFile)),
+    composeEffective: encodeInput(composeEffective),
+    composeEffectiveSha256: sha256(composeEffective),
+    seccomp: encodeInput(seccompContents),
+    seccompSha256: sha256(seccompContents),
+    seccompActivePath,
     installationConfig: encodeInput(installationConfigContents),
     installationConfigSha256: sha256(installationConfigContents),
     installationConfigPath,
@@ -516,11 +734,13 @@ function releaseRecord({
 function releaseContents(release) {
   const environment = decodeInput(release.environment, release.environmentSha256);
   const compose = decodeInput(release.compose, release.composeSha256);
+  const composeEffective = decodeInput(release.composeEffective, release.composeEffectiveSha256);
+  const seccomp = decodeInput(release.seccomp, release.seccompSha256);
   const installationConfig = decodeInput(release.installationConfig, release.installationConfigSha256);
-  if (environment === null || compose === null || installationConfig === null) {
+  if (environment === null || compose === null || composeEffective === null || seccomp === null || installationConfig === null) {
     throw new ReleaseError("RELEASE_STATE_INVALID", "Versioned release inputs failed their hashes.");
   }
-  return { environment, compose, installationConfig };
+  return { environment, compose, composeEffective, seccomp, installationConfig };
 }
 
 function isIsoDate(value) {
@@ -533,17 +753,28 @@ function hasExactKeys(value, expected) {
 }
 
 function validReleaseRecord(value) {
+  const compose = decodeInput(value?.compose, value?.composeSha256);
+  const composeEffective = decodeInput(value?.composeEffective, value?.composeEffectiveSha256);
   return hasExactKeys(value, RELEASE_RECORD_KEYS)
     && IMAGE.test(value.image) && IMAGE.test(value.egressImage)
     && REVISION.test(value.revision) && isIsoDate(value.promotedAt)
     && /^[0-9a-f]{64}$/u.test(value.environmentSha256)
     && /^[0-9a-f]{64}$/u.test(value.composeSha256)
+    && /^[0-9a-f]{64}$/u.test(value.composeEffectiveSha256)
+    && /^[0-9a-f]{64}$/u.test(value.seccompSha256)
     && /^[0-9a-f]{64}$/u.test(value.installationConfigSha256)
-    && typeof value.composeProjectDirectory === "string" && path.isAbsolute(value.composeProjectDirectory)
+    && typeof value.seccompActivePath === "string" && path.isAbsolute(value.seccompActivePath)
     && typeof value.installationConfigPath === "string" && path.isAbsolute(value.installationConfigPath)
     && decodeInput(value.environment, value.environmentSha256) !== null
-    && decodeInput(value.compose, value.composeSha256) !== null
+    && compose !== null
+    && composeEffective !== null
+    && decodeInput(value.seccomp, value.seccompSha256) !== null
     && decodeInput(value.installationConfig, value.installationConfigSha256) !== null
+    && compose.split("seccomp=./browser/seccomp_profile.json").length === 2
+    && compose.replace(
+      "seccomp=./browser/seccomp_profile.json",
+      `seccomp=${value.seccompActivePath}`,
+    ) === composeEffective
     && releaseEnvironmentMatches(value);
 }
 
@@ -580,49 +811,52 @@ function writeExistingControlled(file, contents, label) {
   writeAtomic(file, contents, metadata.mode & 0o777, { uid: metadata.uid, gid: metadata.gid });
 }
 
-function writeActiveCompose(options, contents) {
-  const target = activeComposePath(options);
+function writeManagedFile(target, contents, label) {
   if (existsSync(target)) {
-    writeExistingControlled(target, contents, "Managed active Compose");
+    writeExistingControlled(target, contents, label);
   } else {
     writeAtomic(target, contents, 0o600);
   }
+}
+
+function writeActiveRuntimeInputs(options, contents) {
+  writeManagedFile(activeSeccompPath(options), contents.seccomp, "Managed active seccomp");
+  writeManagedFile(activeComposePath(options), contents.composeEffective, "Managed active Compose");
 }
 
 function selectReleaseInputs(options, release) {
   const contents = releaseContents(release);
   writeExistingControlled(release.installationConfigPath, contents.installationConfig, "Active installation config");
   writeExistingControlled(options.envFile, contents.environment, "Active Compose env");
-  writeActiveCompose(options, contents.compose);
+  writeActiveRuntimeInputs(options, contents);
   assertSelectedReleaseInputs(options, release);
 }
 
-function selectedReleaseInputHashes(options, release, { allowMissingCompose = false } = {}) {
+function selectedReleaseInputHashes(options, release, { allowMissingManaged = false } = {}) {
   const environment = readControlledText(options.envFile, "Active Compose env");
   const installationConfig = readControlledText(release.installationConfigPath, "Active installation config");
   const compose = readControlledText(activeComposePath(options), "Managed active Compose", {
-    allowMissing: allowMissingCompose,
+    allowMissing: allowMissingManaged,
+  });
+  const seccomp = readControlledText(activeSeccompPath(options), "Managed active seccomp", {
+    allowMissing: allowMissingManaged,
   });
   return {
     environmentSha256: sha256(environment),
     installationConfigSha256: sha256(installationConfig),
-    composeSha256: compose === null ? null : sha256(compose),
+    composeEffectiveSha256: compose === null ? null : sha256(compose),
+    seccompSha256: seccomp === null ? null : sha256(seccomp),
   };
 }
 
 function assertSelectedReleaseInputs(options, release) {
   const hashes = selectedReleaseInputHashes(options, release);
-  let projectDirectory;
-  try {
-    projectDirectory = realpathSync(release.composeProjectDirectory);
-  } catch (error) {
-    throw new ReleaseError("RELEASE_INPUT_DRIFT", "Compose project directory is unavailable.", { cause: error });
-  }
-  if (projectDirectory !== release.composeProjectDirectory
+  if (release.seccompActivePath !== activeSeccompPath(options)
     || hashes.environmentSha256 !== release.environmentSha256
     || hashes.installationConfigSha256 !== release.installationConfigSha256
-    || hashes.composeSha256 !== release.composeSha256) {
-    throw new ReleaseError("RELEASE_INPUT_DRIFT", "Compose, environment or installation config differs from the selected release.");
+    || hashes.composeEffectiveSha256 !== release.composeEffectiveSha256
+    || hashes.seccompSha256 !== release.seccompSha256) {
+    throw new ReleaseError("RELEASE_INPUT_DRIFT", "Compose, seccomp, environment or installation config differs from the selected release.");
   }
 }
 
@@ -664,6 +898,12 @@ function readStateSnapshot(options) {
   const contents = safeOptionalRegularFile(options.stateFile, "RELEASE_STATE_UNSAFE", "Release state");
   if (contents === null) return { value: null, hash: null };
   const value = parseJson(contents, "RELEASE_STATE_INVALID", "Release state");
+  if (value?.schemaVersion === 2) {
+    throw new ReleaseError(
+      "RELEASE_STATE_MIGRATION_REQUIRED",
+      "Release state V2 lacks Compose/config bytes; archive it and perform the documented controlled V3 bootstrap.",
+    );
+  }
   if (!validReleaseState(value, options.installationId)) {
     throw new ReleaseError("RELEASE_STATE_INVALID", "Release state failed validation.");
   }
@@ -734,6 +974,8 @@ function releaseIdentityMatches(left, right) {
     && left.revision === right.revision
     && left.environmentSha256 === right.environmentSha256
     && left.composeSha256 === right.composeSha256
+    && left.composeEffectiveSha256 === right.composeEffectiveSha256
+    && left.seccompSha256 === right.seccompSha256
     && left.installationConfigSha256 === right.installationConfigSha256);
 }
 
@@ -758,11 +1000,12 @@ function clearTransaction(options) {
 }
 
 function classifyTransactionInputs(options, transaction) {
-  const hashes = selectedReleaseInputHashes(options, transaction.current, { allowMissingCompose: true });
+  const hashes = selectedReleaseInputHashes(options, transaction.current, { allowMissingManaged: true });
   const fields = [
     [hashes.environmentSha256, transaction.current.environmentSha256, transaction.target.environmentSha256],
     [hashes.installationConfigSha256, transaction.current.installationConfigSha256, transaction.target.installationConfigSha256],
-    [hashes.composeSha256, transaction.current.composeSha256, transaction.target.composeSha256],
+    [hashes.composeEffectiveSha256, transaction.current.composeEffectiveSha256, transaction.target.composeEffectiveSha256],
+    [hashes.seccompSha256, transaction.current.seccompSha256, transaction.target.seccompSha256],
   ];
   if (fields.some(([actual, current, target]) => actual !== null && actual !== current && actual !== target)) {
     throw new ReleaseError("RELEASE_TRANSACTION_DRIFT", "A versioned release input changed outside the transaction.");
@@ -771,7 +1014,7 @@ function classifyTransactionInputs(options, transaction) {
     current: fields.every(([actual, current]) => actual === current),
     target: fields.every(([actual, , target]) => actual === target),
     currentRecoverable: fields.every(([actual, current, target], index) =>
-      actual === current || actual === target || (index === 2 && actual === null)),
+      actual === current || actual === target || (index >= 2 && actual === null)),
   };
 }
 
@@ -1109,6 +1352,8 @@ function executeUnlocked(options) {
       throw new ReleaseError("RELEASE_BOOTSTRAP_REQUIRED", "The first promotion requires --current-compose-file.");
     }
     current = releaseRecord({
+      installationId: options.installationId,
+      stateFile: options.stateFile,
       image: currentImage,
       egressImage: currentEgressImage,
       revision: currentRevision,
@@ -1117,19 +1362,18 @@ function executeUnlocked(options) {
       installationConfigSource: activeConfigCanonical,
       installationConfigPath: activeConfigCanonical,
     });
-    writeActiveCompose(options, releaseContents(current).compose);
+    writeActiveRuntimeInputs(options, releaseContents(current));
   }
   verifyCurrentDeployment(options, current, operationDeadline);
   let target;
   if (options.command === "promote") {
     const revision = inspectImage(options, options.image, options.revision, operationDeadline);
     inspectImage(options, options.egressImage, options.revision, operationDeadline);
-    const targetEnvContents = replaceImages(envContents, {
-      image: options.image,
-      egressImage: options.egressImage,
-      revision,
-    });
+    const targetEnvContents = readControlledText(options.targetEnvFile, "Target Compose env");
+    assertTargetEnvironment(env, parseEnv(targetEnvContents), options);
     target = releaseRecord({
+      installationId: options.installationId,
+      stateFile: options.stateFile,
       image: options.image,
       egressImage: options.egressImage,
       revision,

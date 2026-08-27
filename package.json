@@ -39,6 +39,7 @@
     "@supabase/supabase-js": "2.112.4",
     "ajv": "8.20.0",
     "busboy": "1.6.0",
+    "js-yaml": "4.3.2",
     "next": "16.3.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",

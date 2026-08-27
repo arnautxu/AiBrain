@@ -279,11 +279,12 @@ Antes de un release, completa maintenance/drain, backup/verify, SBOM, scan y tes
 
 Promueve mediante el gestor transaccional. Este verifica que ambos digests
 existen localmente, que sus labels OCI coinciden con el commit, valida Compose,
-cambia `AIBRAIN_IMAGE`, `AIBRAIN_EGRESS_IMAGE` y `AIBRAIN_REVISION`
-atómicamente, espera los tres
+acepta un `compose.target.env` completo para versionar también límites de
+CPU/RAM sin cambiar rutas o recursos de aislamiento, y selecciona sus valores
+mediante journal durable. Espera los tres
 healthchecks, verifica la identidad de las imágenes realmente ejecutadas y
-registra `current`/`previous` junto con bytes y hashes exactos de env, Compose e
-InstallationConfig. Si cualquiera falla, restaura los tres inputs y ambos
+registra `current`/`previous` junto con bytes y hashes exactos de env, Compose
+fuente/efectivo, seccomp e InstallationConfig. Si cualquiera falla, restaura los inputs y ambos
 digests anteriores y exige que los tres servicios vuelvan a estar healthy. El
 journal recupera SIGKILL o
 reboot sin adivinar el estado; procedimiento y códigos: `docs/RELEASES.md`.
@@ -295,6 +296,7 @@ node scripts/manage-release.mjs promote \
   --revision <git-sha> \
   --installation-id <installation> \
   --env-file /etc/aibrain/<installation>/compose.env \
+  --target-env-file /etc/aibrain/<installation>/compose.target.env \
   --compose-file /opt/aibrain-<installation>/releases/<git-sha>/infra/hetzner/compose.yaml \
   --current-compose-file /opt/aibrain-<installation>/releases/<previous-sha>/infra/hetzner/compose.yaml \
   --installation-config /opt/aibrain-<installation>/releases/<git-sha>/config/installation.json \
