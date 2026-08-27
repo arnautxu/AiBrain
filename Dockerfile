@@ -1,16 +1,5 @@
 ARG NODE_IMAGE=node:24.18.1-bookworm-slim@sha256:235600a8101ab264e117b1768e925532262668dc9b581ef1dd7d96ced463b8e7
 
-FROM ${NODE_IMAGE} AS dependencies
-WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci
-
-FROM ${NODE_IMAGE} AS builder
-WORKDIR /app
-COPY --from=dependencies /app/node_modules ./node_modules
-COPY . .
-RUN npm run build
-
 FROM ${NODE_IMAGE} AS egress-gateway
 
 ARG AIBRAIN_EGRESS_UID=10002
@@ -33,6 +22,17 @@ LABEL org.opencontainers.image.title="AiBrain Egress Gateway" \
 USER aibrain-egress:aibrain-egress
 EXPOSE 8080
 ENTRYPOINT ["node", "/usr/local/share/aibrain/egress-gateway.mts"]
+
+FROM ${NODE_IMAGE} AS dependencies
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+FROM ${NODE_IMAGE} AS builder
+WORKDIR /app
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN npm run build
 
 FROM ${NODE_IMAGE} AS runtime
 

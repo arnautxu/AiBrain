@@ -61,6 +61,15 @@ new_dangling_images() {
   comm -13 "$before" "$after"
 }
 
+remove_new_dangling_images() {
+  local before="$1" after="$2" image_id
+  while IFS= read -r image_id; do
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+    [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || continue
+    docker image rm "$image_id" >/dev/null 2>&1 || true
+  done < <(new_dangling_images "$before" "$after")
+}
+
 sync_company_context() {
   local source="$1" file temporary
   install -d -m 0700 -o 10001 -g 10001 "$CONTEXT_ROOT"
@@ -104,7 +113,7 @@ main() {
   dd if=/dev/stdin of="$archive" bs=1M count=65 iflag=fullblock status=none
   validate_archive "$archive"
   install -d -m 0700 -o root -g root "$release_dir"
-  tar --extract --file="$archive" --directory="$release_dir" --no-same-owner --no-same-permissions
+  tar --extract --file="$archive" --directory="$release_dir" --no-same-owner
   rm -f "$archive"
   chown -R root:root "$release_dir"
   find "$release_dir" -type d -exec chmod go-w {} +
@@ -141,6 +150,10 @@ main() {
   egress_image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$egress_tag")"
   [[ "$app_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "application image digest is unavailable"
   [[ "$egress_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "egress image digest is unavailable"
+  # Docker's compatibility builder materializes intermediate images. Remove
+  # only the dangling IDs created after this deployment started, before the
+  # release manager evaluates the storage-aware healthcheck.
+  remove_new_dangling_images "$dangling_before" "$dangling_after"
 
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"
   install -m 0400 -o root -g root "${release_dir}/config/installations/arnall.qa.example.json" "$target_config"
@@ -180,11 +193,13 @@ main() {
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
 
-  new_dangling_images "$dangling_before" "$dangling_after" | while IFS= read -r image_id; do
-    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
-    docker image rm "$image_id" >/dev/null 2>&1 || true
-  done
+  remove_new_dangling_images "$dangling_before" "$dangling_after"
   rm -f "$dangling_before" "$dangling_after"
+
+  bash -n "${release_dir}/infra/hetzner/app/deploy-arnall-main.sh"
+  install -m 0700 -o root -g root \
+    "${release_dir}/infra/hetzner/app/deploy-arnall-main.sh" \
+    /usr/local/sbin/aibrain-deploy-gateway
 
   jq -n --arg revision "$revision" --arg image "$app_image" --arg egressImage "$egress_image" \
     '{schemaVersion:1,installationId:"company-qa",revision:$revision,image:$image,egressImage:$egressImage,deployedAt:(now|todateiso8601)}' \
