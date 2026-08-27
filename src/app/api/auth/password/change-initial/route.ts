@@ -9,6 +9,8 @@ import {
   LOCAL_AUTH_CHALLENGE_COOKIE,
   setLocalSessionCookie,
 } from "@/auth/session-cookie";
+import { authRateLimitSubject } from "@/auth/rate-limit";
+import { checkAuthRateLimit } from "@/auth/rate-limit-context";
 
 export const runtime = "nodejs";
 
@@ -21,10 +23,35 @@ export async function POST(request: Request) {
     typeof body.password === "string" ? body.password : "";
   const confirmation = body && typeof body === "object" && "confirmation" in body &&
     typeof body.confirmation === "string" ? body.confirmation : "";
+  const challengeId = (await cookies()).get(LOCAL_AUTH_CHALLENGE_COOKIE)?.value;
+  let rateLimit;
+  try {
+    rateLimit = await checkAuthRateLimit(
+      request,
+      "initial-password-change",
+      authRateLimitSubject("challenge", challengeId),
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "No s’ha pogut verificar temporalment el canvi de contrasenya." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Massa intents. Torna-ho a provar més tard." },
+      {
+        status: 429,
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Retry-After": String(rateLimit.retryAfterSeconds),
+        },
+      },
+    );
+  }
   if (password !== confirmation) {
     return NextResponse.json({ error: "Les contrasenyes no coincideixen." }, { status: 400 });
   }
-  const challengeId = (await cookies()).get(LOCAL_AUTH_CHALLENGE_COOKIE)?.value;
   if (!challengeId) {
     return NextResponse.json({ error: "El canvi de contrasenya ha caducat." }, { status: 401 });
   }

@@ -28,6 +28,7 @@ async function fixture() {
     mkdir(path.join(dataRoot, "users", "user-one", "runtime", "codex-home"), { recursive: true }),
     mkdir(path.join(dataRoot, "sessions", "records"), { recursive: true }),
     mkdir(path.join(dataRoot, "auth-challenges", "records"), { recursive: true }),
+    mkdir(path.join(dataRoot, "auth-rate-limits"), { recursive: true }),
     mkdir(path.join(dataRoot, "secrets"), { recursive: true }),
     mkdir(path.join(dataRoot, "locks", "ephemeral.lock"), { recursive: true }),
   ]);
@@ -39,6 +40,7 @@ async function fixture() {
     writeFile(path.join(dataRoot, "users", "user-one", "runtime", "codex-home", "auth.json"), "codex-secret\n"),
     writeFile(path.join(dataRoot, "sessions", "records", "session.json"), "session-v1\n"),
     writeFile(path.join(dataRoot, "auth-challenges", "records", "challenge.json"), "challenge-secret\n"),
+    writeFile(path.join(dataRoot, "auth-rate-limits", "login.json"), "opaque-rate-limit-state\n"),
     writeFile(path.join(dataRoot, "secrets", "service.key"), "service-secret\n"),
     writeFile(path.join(dataRoot, ".env.runtime"), "runtime-secret\n"),
     writeFile(path.join(dataRoot, "PERMISSIONS.md"), "permission-v1\n", { mode: 0o400 }),
@@ -97,6 +99,7 @@ describe("FileBackupService", () => {
       .toBe("project-v1\n");
     await expect(lstat(path.join(restoreRoot, "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "auth-challenges"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, "auth-rate-limits"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "secrets"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, ".env.runtime"))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "users", "user-one", "browser", "profile")))

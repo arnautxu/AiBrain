@@ -1,10 +1,18 @@
 import { NextResponse } from "next/server";
 import { createLocalAuthService } from "@/auth/auth-context";
-import { IdentityProviderError } from "@/auth/identity-provider";
 import { getPublicOrigin } from "@/auth/public-url";
 import { isSameOriginMutation } from "@/auth/request-security";
+import { authRateLimitSubject } from "@/auth/rate-limit";
+import { checkAuthRateLimit } from "@/auth/rate-limit-context";
 
 export const runtime = "nodejs";
+
+function accepted() {
+  return NextResponse.json(
+    { accepted: true },
+    { status: 202, headers: { "Cache-Control": "private, no-store" } },
+  );
+}
 
 export async function POST(request: Request) {
   if (!await isSameOriginMutation(request)) {
@@ -14,18 +22,23 @@ export async function POST(request: Request) {
   const email = body && typeof body === "object" && "email" in body &&
     typeof body.email === "string" ? body.email : "";
   try {
+    const rateLimit = await checkAuthRateLimit(
+      request,
+      "password-reset-request",
+      authRateLimitSubject("email", email),
+    );
+    if (!rateLimit.allowed) return accepted();
+  } catch {
+    // Fail closed without exposing whether the subject, limiter or provider exists.
+    return accepted();
+  }
+  try {
     await (await createLocalAuthService()).requestPasswordRecovery(
       email,
       `${await getPublicOrigin()}/auth/recovery`,
     );
-  } catch (error) {
-    if (error instanceof IdentityProviderError && error.code === "provider_unavailable") {
-      return NextResponse.json({ error: "El servei d’identitat no està disponible." }, { status: 503 });
-    }
-    // Deliberately indistinguishable for unknown, disabled and malformed accounts.
+  } catch {
+    // Deliberately indistinguishable for unknown, disabled, malformed and unavailable accounts.
   }
-  return NextResponse.json(
-    { accepted: true },
-    { status: 202, headers: { "Cache-Control": "private, no-store" } },
-  );
+  return accepted();
 }
