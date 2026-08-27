@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { accessSync, constants, lstatSync, readFileSync, realpathSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import process from "node:process";
@@ -118,6 +118,13 @@ async function assertPortAvailable(port) {
 
 const { envFile, installationId } = parseArgs(process.argv.slice(2));
 if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/u.test(installationId)) fail("installation id is invalid");
+if (process.platform === "linux") {
+  try {
+    accessSync("/usr/bin/flock", constants.X_OK);
+  } catch {
+    fail("/usr/bin/flock is required for crash-safe release serialization");
+  }
+}
 const envFileReal = assertRegularNoSymlink(envFile, "compose env file");
 const env = parseEnv(readFileSync(envFileReal, "utf8"));
 if (required(env, "AIBRAIN_INSTALLATION_ID") !== installationId) fail("installation id does not match compose env");

@@ -128,4 +128,7 @@ a `@sha256`; el build vive
 en `infra/hetzner/compose.build.yaml` y exige la revisión Git exacta, registrada
 como label OCI. `scripts/manage-release.mjs` verifica digest+revisión, conserva
 estado atómico `current`/`previous`, espera readiness y recupera automáticamente
-las dos imágenes anteriores si una promoción no llega a healthy.
+las dos imágenes anteriores si una promoción no llega a healthy. Un journal por
+fase, timeout de subprocess, deadline compartido, lock advisory del SO e
+inspección del digest/revisión realmente ejecutados cubren caída y reboot;
+runbook: `docs/RELEASES.md`.
