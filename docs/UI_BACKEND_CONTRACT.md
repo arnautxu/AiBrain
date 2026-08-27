@@ -1281,12 +1281,14 @@ interceptor Fetch conserva una segunda validación con la misma policy.
 Para readiness de usuario/proyecto, usar `/api/runtime/status`.
 
 `GET /api/health/ready` comprueba que las raíces de datos, backups, documentos
-y usuarios son directorios accesibles con aislamiento seguro, que existe
-capacidad libre de disco y que no aparece `docker.sock` en el contenedor.
-Devuelve `200` con `status: "ready"` o `503` con `status: "degraded"`, una lista
-de checks con códigos no sensibles y, si el composition root configura probes,
-su estado tipado `ready | degraded | unavailable`. Este endpoint no crea
-workers ni browsers como efecto lateral.
+y usuarios son directorios accesibles con aislamiento seguro, que queda al
+menos 20 % y 1 GiB de disco libre y que no aparece `docker.sock` en el
+contenedor. Además agrega tres probes requeridos: Codex 0.149.1 más launcher y
+`bwrap`, Chromium con versión exacta más launcher, y LibreOffice/Poppler/QPDF.
+Devuelve `200` con `status: "ready"` solo si todos pasan; cualquier componente
+`degraded | unavailable` devuelve `503`, con códigos no sensibles. Los probes
+solo inspeccionan ejecutables/versiones: no crean workers, perfiles o browsers
+ni tocan sesiones de empleados.
 
 ## 16. Reglas de integración para la rama UI
 
