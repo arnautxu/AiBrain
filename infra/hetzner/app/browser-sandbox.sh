@@ -78,6 +78,11 @@ else
   # Compose plus a private bwrap PID, IPC, UTS and filesystem namespace. Only
   # this root-owned wrapper may disable Chromium's redundant inner sandbox;
   # application-supplied --no-sandbox remains rejected by ChromeCdpRuntime.
+  # Chromium creates its process-singleton Unix socket below TMPDIR. The
+  # provisioned per-user path is intentionally descriptive but exceeds Linux's
+  # Unix-socket path limit. `/tmp` is a private tmpfs inside this bwrap, so it is
+  # both short and isolated from every other employee browser.
+  export TMPDIR=/tmp
   set -- /usr/bin/chromium --no-sandbox "$@"
 fi
 
