@@ -138,7 +138,11 @@ La jerarquía del usuario debe existir, ser real (sin symlinks) y tener permisos
 
 Un fallo de policy o auditoría devuelve un estado degradado recuperable y no crea un fallback de producción. El modo demo identificado no ejecuta Codex y no simula una resolución de permisos real.
 
-La ruta activa de chat todavía usa el adapter App Server legacy por `stdio` y su pool se identifica por instalación/workspace, no por usuario. La preflight de permisos sí queda ligada al usuario y turn, pero el aislamiento definitivo del proceso, `CODEX_HOME` y transporte WebSocket requiere reemplazar esta ruta por `WorkerRuntimeRegistry` + `AppServerTransport`; no debe considerarse resuelto por esta integración.
+La ruta activa usa `WorkerRuntimeRegistry`, un worker/CODEX_HOME privado por
+empleado y `WebSocketAppServerTransport`. El router valida el binding del turn
+antes de aceptar server requests y el sandbox físico oculta otros usuarios,
+credenciales, browser y `publish-rw`. No existe un adapter `stdio` global ni un
+fallback de ejecución sin esta frontera.
 
 ## Seguridad de filesystem
 
