@@ -4,6 +4,8 @@ El snapshot incluye el estado file-backed de la instalación y excluye `backupsR
 
 Un backup consistente requiere drenar mutaciones y turns antes de crearlo. El servicio detecta un fichero que cambia durante su copia y falla; el runbook de producción debe poner la app en mantenimiento antes del command.
 
+La imagen de servidor incluye el CLI mínimo de backup y un volumen separado para restores QA. En contenedor, usa siempre el procedimiento de parada, snapshot, restore a volumen nuevo y validación aislada de [HETZNER_MIGRATION.md](HETZNER_MIGRATION.md); no restaures sobre `/var/lib/aibrain/data` activo.
+
 ## Crear y verificar
 
 ```bash

@@ -1,50 +1,189 @@
-# Migració d’AiBrain a Hetzner
+# Runbook QA aislado en Hetzner
 
-## Estat preparat
+Este procedimiento crea una instalación QA sin tocar servicios, redes, volúmenes, puertos, rutas o procesos de terceros presentes en el host. No autoriza DNS, cutover, datos reales, NAS real ni producción.
 
-El host Hetzner es comparteix amb BGreenly, però AiBrain queda separat sota `/opt/aibrain`, `/var/lib/aibrain` i `/etc/aibrain`. El contenidor web només publica Next.js a `127.0.0.1:3000`; Nginx serà l’únic punt d’entrada HTTPS. El navegador gràfic també queda limitat a loopback (`6080` per noVNC i `9222` per CDP) i no s’ha d’obrir al firewall.
+En los ejemplos, sustituye `<installation>` por un slug nuevo y `<git-sha>` por el commit exacto. No reutilices nombres o rutas de otra instalación.
 
-OpenClaw i el seu helper de bootstrap s’han retirat del runtime BGreenly. La seva còpia de recuperació queda protegida a `/opt/bgreenly/backups/retired-openclaw-20260826T101738Z`. L’API BGreenly i el portal continuen actius.
-
-## Directoris
-
-```text
-/opt/aibrain/app/                         checkout o release immutable
-/etc/aibrain/aibrain.env                 secrets de runtime, root:aibrain 0640
-/var/lib/aibrain/codex/<tenant>/         identitat i estat Codex privat
-/var/lib/aibrain/workspaces/<tenant>/    workspaces i projectes
-/var/lib/aibrain/control-plane/           fallback local, no Supabase
-/var/lib/aibrain/computer/<tenant>/       perfil del navegador gràfic
-```
-
-Cap `CODEX_HOME`, perfil de navegador o secret s’ha de muntar en més d’un tenant. El tenant del navegador ha de coincidir amb el tenant resolt server-side per la sessió Supabase.
-
-## Computer use
-
-La base preparada executa Chromium amb pantalla virtual, noVNC i CDP dins un contenidor separat. Això permet que l’agent controli el mateix navegador que veu l’usuari. La implementació segueix tres límits:
-
-1. El navegador i el perfil són aïllats per tenant.
-2. noVNC i CDP només escolten a loopback; mai s’exposen directament a Internet.
-3. Les accions sensibles continuen passant per aprovació humana i el contingut de les pàgines es tracta com a entrada no fiable.
-
-El servei gràfic no usa `no-new-privileges`, perquè aquesta bandera impedeix el helper setuid que implementa el sandbox de Chromium. En lloc d’obrir tot el contenidor, aplica el perfil seccomp recomanat per Playwright, que afegeix únicament els syscalls de namespace necessaris (`clone`, `setns` i `unshare`) al perfil Docker. El procés continua executant-se com a usuari no-root, sense socket Docker ni muntatges del host fora del perfil del tenant. No s’accepta `--no-sandbox` com a alternativa.
-
-Per validar la pantalla abans de tenir domini i gateway autenticat:
+## 1. Preparar release y configuración
 
 ```bash
-ssh -L 6080:127.0.0.1:6080 bgreenly-hetzner
+install -d -m 0750 /opt/aibrain-<installation>/releases/<git-sha>
+install -d -m 0750 /etc/aibrain/<installation>
+install -d -m 0550 -o 10001 -g 10001 /srv/aibrain-<installation>/source-ro
+install -d -m 0750 -o 10001 -g 10001 /srv/aibrain-<installation>/publish-rw
 ```
 
-Després es pot obrir `http://127.0.0.1:6080/vnc.html?autoconnect=1&resize=scale`. Aquest túnel és només una prova privada. Per a usuaris finals, Nginx haurà de fer `auth_request` contra AiBrain, emetre una sessió curta vinculada a tenant i fil, i només llavors fer proxy del WebSocket noVNC. No s’ha de publicar una URL estàtica ni compartir la cookie Supabase amb noVNC.
+Coloca el checkout exacto en `/opt/aibrain-<installation>/releases/<git-sha>` sin modificar otro checkout. Copia y edita:
 
-## Gates pendents abans de trànsit real
+```bash
+cp infra/hetzner/compose.env.example /etc/aibrain/<installation>/compose.env
+cp infra/hetzner/aibrain.env.example /etc/aibrain/<installation>/runtime.env
+cp infra/hetzner/installation.qa.example.json /etc/aibrain/<installation>/installation.json
+chmod 0640 /etc/aibrain/<installation>/compose.env /etc/aibrain/<installation>/installation.json
+chmod 0600 /etc/aibrain/<installation>/runtime.env
+chown root:10001 /etc/aibrain/<installation>/installation.json
+```
 
-1. Assignar un domini propi d’AiBrain i el certificat TLS.
-2. Injectar les variables Supabase i el secret de sessió directament a `/etc/aibrain/aibrain.env`; no copiar-les al repositori ni a la imatge.
-3. Autenticar Codex de forma independent dins `/var/lib/aibrain/codex/<tenant>`.
-4. Afegir el gateway de sessions curtes de computer use i validar que un tenant no pot obrir el navegador d’un altre.
-5. Definir quotes de CPU, memòria, disc, temps de sessió i egress per tenant.
-6. Configurar backup xifrat extern de `/var/lib/aibrain` i provar una restauració.
-7. Validar `ready: true`, `isolated: true`, primer torn, represa, approvals, streaming sense buffering i tancament net.
+En `compose.env`, usa nombres únicos para proyecto, red y los tres volúmenes, un puerto loopback libre, rutas host exclusivas y el tag `aibrain-<installation>:<git-sha>`. Usa paths absolutos para los dos ficheros montados. En `installation.json`, cambia identidad, branding y `publicUrl`, pero conserva exactamente los seis paths internos del ejemplo: son el contrato de mounts del contenedor.
 
-No s’ha d’apuntar DNS ni activar Production fins que aquests gates passin i hi hagi autorització separada.
+Genera cuatro secretos distintos. No pegues el resultado en terminales grabadas, tickets o commits:
+
+```bash
+umask 077
+openssl rand -base64 48
+```
+
+Completa `runtime.env` con Supabase Auth y los secretos. No añadas `SUPABASE_SECRET_KEY`.
+
+## 2. Validación estática y build inmutable
+
+Desde el release:
+
+```bash
+npm run infra:validate
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  config --quiet
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  build --pull app
+docker scout cves --only-severity critical --exit-code \
+  aibrain-<installation>:<git-sha>
+```
+
+No uses `docker compose config` sin `--quiet`: su salida puede incluir variables del runtime. No publiques la imagen desde este runbook. El gate de vulnerabilidades debe quedar verde; si Docker Scout no está disponible, ejecuta un scanner equivalente actualizado y conserva el informe. No aceptes una vulnerabilidad crítica sin documentar paquete, explotabilidad, mitigación, versión corregida y responsable/fecha de actualización.
+
+Obtén la versión exacta de Chromium desde el tag construido:
+
+```bash
+docker run --rm --entrypoint /usr/bin/chromium \
+  aibrain-<installation>:<git-sha> --version
+```
+
+Escribe solo los cuatro componentes numéricos en `AIBRAIN_CHROME_EXPECTED_VERSION` de `runtime.env`, vuelve a ejecutar `config --quiet` y conserva como evidencia el tag, digest local, commit, versión Codex `0.149.1` y versión Chromium.
+
+Este check fija la versión aceptada al arrancar, no el artifact de build: APT puede resolver otra versión en una reconstrucción futura. Registra también `dpkg-query -W chromium chromium-sandbox libreoffice-core poppler-utils qpdf` dentro de la imagen y su SBOM. El build solo será reproducible cuando estas dependencias procedan de snapshot/artifacts con checksums fijos o de una imagen interna inmutable ya escaneada.
+
+## 3. Primer arranque QA
+
+Comprueba que el puerto no está ocupado y que los nombres no existen antes de crear nada:
+
+```bash
+ss -ltn | grep ':<qa-port> ' || true
+docker network inspect aibrain-<installation>-private >/dev/null 2>&1 && exit 1 || true
+docker volume inspect aibrain-<installation>-data >/dev/null 2>&1 && exit 1 || true
+docker volume inspect aibrain-<installation>-backups >/dev/null 2>&1 && exit 1 || true
+docker volume inspect aibrain-<installation>-restores >/dev/null 2>&1 && exit 1 || true
+```
+
+Si cualquiera de esos recursos pertenece a otro stack, detente: no lo conectes, renombres o elimines. Arranca solo AiBrain:
+
+```bash
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  up -d --no-deps app
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  ps
+```
+
+El entrypoint prueba, antes de Next.js, UID no-root, secretos, config, toolchain, versión Chromium, mounts y el namespace de workers. Crea un marker real en `publish-rw` y exige que sea invisible e inmutable dentro del mount de worker. Cualquier fallo bloquea el servicio.
+
+Comprueba las fronteras del servidor sin mostrar secretos:
+
+```bash
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  exec -T app sh -c \
+  'test "$(id -u)" -ne 0 && test ! -w /srv/aibrain/source-ro && test -w /srv/aibrain/publish-rw && test ! -S /var/run/docker.sock'
+```
+
+El único puerto publicado debe ser `<bind-address>:<qa-port>->3000`. CDP usa puertos loopback efímeros dentro del contenedor y no debe aparecer en `docker compose ps`.
+
+Esto evita exposición al host, pero todavía no aísla CDP de los workers: Chrome y App Server comparten el namespace de red del contenedor. Trátalo como P0. No habilites Browser/Computer Use para usuarios reales hasta mover cada browser a un namespace/contenedor de red por empleado con gateway autenticado; no montes `docker.sock` para conseguirlo.
+
+## 4. Diagnóstico seguro
+
+```bash
+docker inspect --format '{{.State.Health.Status}} {{.RestartCount}}' \
+  "$(docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml ps -q app)"
+docker compose \
+  --env-file /etc/aibrain/<installation>/compose.env \
+  -f infra/hetzner/compose.yaml \
+  logs --tail 200 app
+docker stats --no-stream \
+  "$(docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml ps -q app)"
+```
+
+No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en una sesión compartida. Alerta ante `unhealthy`, tres reinicios en 15 minutos, disco/volumen mayor al 80 %, ausencia de backup verificado o errores de sandbox/publicación. El envío de esas alertas al canal del cliente requiere integración externa y no forma parte del repositorio.
+
+## 5. Backup y restore QA reales
+
+Primero drena turns y mutaciones desde la aplicación. Después detén `app` para congelar el filesystem:
+
+```bash
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml stop app
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app aibrain-backup create
+```
+
+Anota `backupId`, `sourceFingerprint` y `fileCount`. Verifica el snapshot indicado por el comando:
+
+```bash
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app \
+  aibrain-backup verify --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id>
+```
+
+Restaura siempre al volumen separado, nunca sobre el root activo:
+
+```bash
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml run --rm --no-deps app \
+  aibrain-backup restore \
+  --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id> \
+  --destination /var/lib/aibrain-restores/<backup-id>
+```
+
+Para probar el restore, crea un volumen de datos nuevo y copia dentro únicamente el root restaurado. El volumen de destino debe ser nuevo y pertenecer a la instalación de restore:
+
+```bash
+docker volume create aibrain-<installation>-restore-<backup-id>-data
+docker run --rm --entrypoint /bin/sh \
+  --mount source=aibrain-<installation>-restores,target=/restores,readonly \
+  --mount source=aibrain-<installation>-restore-<backup-id>-data,target=/var/lib/aibrain/data \
+  aibrain-<installation>:<git-sha> \
+  -c 'cp -a /restores/<backup-id>/. /var/lib/aibrain/data/'
+```
+
+Crea un segundo `compose.env` con proyecto, red, puerto, data volume, backup volume, restore volume y publish host nuevos. Usa una copia del `installation.json` original: conserva `installationId` y los paths internos para que los manifests restaurados sigan vinculados a su instalación; cambia únicamente `publicUrl` al origen QA aislado si es necesario. Apunta `AIBRAIN_DATA_VOLUME_NAME` al volumen recién creado. Lanza ese segundo Compose y valida health, login sintético, proyectos, threads, journals y artefactos; luego detenlo. No ejecutes primaria y restore contra los mismos recursos externos, y no elimines snapshot, restore, volumen validado o root anterior como parte de la prueba.
+
+Reinicia la instancia primaria y valida recovery:
+
+```bash
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps app
+```
+
+La copia cifrada fuera del servidor, sus credenciales y la prueba del proveedor externo son gates externos.
+
+## 6. Release y rollback
+
+Antes de un release, completa backup/verify y conserva el tag anterior. Construye el nuevo commit con un tag nuevo, ejecuta `node scripts/validate-infra.mjs`, `config --quiet`, smoke y tests. Cambia solo `AIBRAIN_IMAGE` en `compose.env` y recrea `app`:
+
+```bash
+docker compose --env-file /etc/aibrain/<installation>/compose.env -f infra/hetzner/compose.yaml up -d --no-deps app
+```
+
+Para rollback de código, repón el tag anterior en `AIBRAIN_IMAGE` y repite el mismo comando. No borres imágenes, releases, volúmenes ni backups. Si el release migró datos incompatibles, detén `app`, valida el snapshot y arranca una instalación QA aislada sobre el restore antes de cambiar cualquier ruta activa.
+
+## 7. Gates externos pendientes
+
+- Docker build y Compose deben ejecutarse en el host QA; Docker no está disponible en el Mac de desarrollo actual.
+- El kernel/daemon del host debe pasar el preflight real de `bubblewrap`, seccomp y sandbox de Chromium.
+- Browser/CDP sigue necesitando una frontera de red por empleado; loopback compartido con App Server no satisface aislamiento cross-user.
+- Chromium/LibreOffice/Poppler/QPDF proceden de APT sin artifact+checksum fijo; build reproducible queda pendiente.
+- Faltan credenciales reales de Supabase Auth y login de una suscripción Codex dedicada.
+- La réplica cifrada fuera del servidor y el canal de alertas deben configurarse y probarse.
+- DNS, TLS público, NAS/documental real y cutover requieren autorización separada.

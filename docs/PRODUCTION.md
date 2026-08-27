@@ -1,62 +1,70 @@
-# Producció d’AiBrain
+# Operación de AiBrain en servidor dedicado
 
-## Estat actual
+AiBrain se despliega como una instalación white-label independiente por empresa. La misma imagen sirve para otra compañía cambiando únicamente `InstallationConfig`, secretos, branding, rutas host, nombres de red/volúmenes, puerto e imagen de release. No existen servicios, usuarios o rutas funcionales precreados para una empresa concreta.
 
-La imatge i el runtime estan preparats per aïllar recursos per tenant. El projecte Supabase hosted té quatre migracions aplicades, SMTP i templates actius; el primer owner consentit i els gates live d'auth, rol, logout i revocació estan validats. Les migracions noves d’automatitzacions governades i onboarding encara són pendents de desplegament i validació hosted. La matriu RLS cross-tenant prèvia passa i l'advisor de seguretat és net. Aquest Mac ja funciona com a host persistent privat de validació, amb `CODEX_HOME` i workspace aïllats. **El producte encara no està llest per exposar-se a usuaris externs**: falten quotes pròpies per tenant, backups, rotació operativa i observabilitat de producció.
+El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproducible en [HETZNER_MIGRATION.md](HETZNER_MIGRATION.md). No debe exponerse a tráfico real hasta completar allí todos los gates externos.
 
-## Topologia mínima
+## Fronteras de seguridad
 
-AiBrain necessita un procés Node persistent. El mateix servei entrega Next.js i manté una sessió Codex App Server per `stdio` per cada combinació tenant/workspace. Els torns del mateix workspace es serialitzen, el catàleg i l'ús es reutilitzen durant 60 segons i el procés es tanca després de 15 minuts d'inactivitat. No utilitzis `/api/chat` com una funció serverless: binari, autenticació Codex, cues i threads necessiten disc i processos persistents.
+- Next.js, el publicador documental y los App Servers ejecutan como UID/GID no-root configurable; el root filesystem del contenedor es read-only y todas las capabilities están eliminadas.
+- `sourceReadRoot` es un bind mount `ro` para Next.js y los workers.
+- `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only, solo sus raíces privadas se re-montan con escritura y `publish-rw` se reemplaza por un mount vacío read-only.
+- El arranque falla si el host no puede crear ese namespace o si `source-ro` es writable. No hay fallback de worker sin aislamiento.
+- No se monta `docker.sock`, no se usan redes/volúmenes externos y todos sus nombres son obligatoriamente únicos por instalación.
+- Chromium usa CDP en loopback dentro del mismo contenedor y perfiles/descargas por empleado. No se publican puertos CDP o noVNC.
+- LibreOffice se ejecuta en headless/safe mode, con perfil desechable y seguridad de macros `Very High`; uploads OOXML con macros ya son rechazados antes de conversión. Poppler y QPDF forman parte de la imagen.
+- Los logs Docker tienen rotación y buffer no bloqueante. No se debe ejecutar `docker compose config` sin `--quiet` en registros compartidos porque puede materializar variables del `env_file`.
+
+## Persistencia
 
 ```text
-/var/lib/aibrain/
-  codex/<tenant>/          credencials i estat privat de Codex
-  workspaces/<tenant>/     workspace i projectes aïllats
-  computer/<tenant>/       perfil del navegador gràfic
-  control-plane/           overlays de manifest del prototip
+/var/lib/aibrain/data/                 estado file-backed, sesiones y empleados
+/var/lib/aibrain/data/users/<uuid>/    CODEX_HOME, workspace, staging, artefactos, browser y auditoría privados
+/var/lib/aibrain/data/backups/         volumen de snapshots separado
+/var/lib/aibrain-restores/             volumen de restauraciones QA, nunca root activo
+/srv/aibrain/source-ro/                repositorio documental oficial, solo lectura
+/srv/aibrain/publish-rw/               destino oficial, escritura solo server-side confirmada
 ```
 
-Variables de runtime:
+Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador protegen frente a saturación. No son cuotas comerciales de empleados, proyectos, chats, turns o tokens; se amplían cambiando recursos/configuración, no código.
 
-- `AIBRAIN_SESSION_SECRET=<secret fort, injectat al runtime>`
-- `AIBRAIN_AUTH_MODE=supabase`
-- `AIBRAIN_PUBLIC_URL=https://<domini>`
-- `NEXT_PUBLIC_SUPABASE_URL=<project-url>`
-- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<sb_publishable>`
-- `SUPABASE_SECRET_KEY=<sb_secret, només servidor>`
-- `CONTROL_PLANE_DATA_DIR=/var/lib/aibrain/control-plane` només per al fallback demo local
-- `CHAT_RUNTIME=codex`
-- `CODEX_BIN=/usr/local/bin/codex`
-- `CODEX_HOME_ROOT=/var/lib/aibrain/codex`
-- `CODEX_WORKSPACE_ROOT=/var/lib/aibrain/workspaces`
-- `CODEX_APPROVAL_POLICY=on-request`
-- `CODEX_SANDBOX=workspace-write`
-- `CODEX_MODEL=<opcional>`
+## Riesgos P0 aún abiertos
 
-`CODEX_HOME_ROOT` i `CONTROL_PLANE_DATA_DIR` han d’estar en un volum privat, persistent, xifrat i no compartit amb el navegador. Cap secret no s’ha d’incorporar a la imatge.
+El Chrome actual comparte el namespace de red del proceso Next.js. Aunque CDP solo escucha en loopback y no se publica al host, los App Servers también necesitan red y hoy comparten ese loopback: un worker comprometido podría intentar descubrir el puerto CDP efímero de otro empleado. El sandbox de filesystem no corrige esta frontera. Antes de producción, browser/CDP debe ejecutarse en un namespace o contenedor de red por empleado y aceptar únicamente un canal autenticado desde el servidor, sin `docker.sock` y sin exponer CDP al worker. Hasta validar esa arquitectura, browser/Computer Use y el checkpoint operativo no están completos.
 
-La preparació específica del host Hetzner i del navegador gràfic està descrita a [HETZNER_MIGRATION.md](HETZNER_MIGRATION.md). noVNC i CDP es mantenen a loopback fins que hi hagi un gateway autenticat i sessions curtes vinculades a tenant.
+La imagen base Node está fijada por versión y digest, pero Chromium, LibreOffice, Poppler y QPDF se resuelven desde APT durante el build. `AIBRAIN_CHROME_EXPECTED_VERSION` detecta cambios y bloquea un arranque que no coincida, pero no vuelve reproducible el build. Falta fijar snapshots/artifacts y checksums de esas herramientas o adoptar una imagen interna inmutable escaneada. Cada build QA debe registrar versiones, digest y SBOM; no debe describirse como reproducible bit a bit.
 
-## Gates abans d’obrir trànsit
+## Variables obligatorias
 
-La preview protegida actual funciona amb auth Supabase real i persistència hosted, però continua sent només el frontend de validació: no allotja Codex App Server ni els volums privats del runtime. Una preview separada pot activar el demo efímer amb `AIBRAIN_ENABLE_PREVIEW_DEMO=1`, però el codi només ho accepta quan Vercel injecta `VERCEL_ENV=preview`; aquesta excepció no pot activar el demo al target de producció.
+Los valores de Compose, no secretos, parten de `infra/hetzner/compose.env.example`. Los secretos de runtime parten de `infra/hetzner/aibrain.env.example` y deben vivir fuera del checkout con modo `0600`.
 
-1. Mantenir els gates hosted de [Supabase](SUPABASE.md) i decidir si cal MFA/SSO abans d'incorporar més usuaris.
-2. Convertir l'host privat validat en una topologia de producció monitorada o provisionar-ne un d'equivalent amb volum privat i xifrat.
-3. Autenticar la subscripció Codex dins de cada `CODEX_HOME_ROOT/<tenant>` independent, sense copiar credencials al checkout ni a la imatge. Això ja està validat per al tenant de prova d'aquest Mac.
-4. Mantenir la cua de concurrència per workspace i afegir quotes pròpies per tenant; la UI ja exposa el límit i l'ús que retorna Codex.
-5. Verificar backups, rotació de secrets, logs sense dades sensibles i recuperació.
-6. Fer una prova real de separació creuada de sessions, threads, approvals, workspace i credencials.
-7. Validar la matriu d’automatitzacions: desactivada, owner, treballador autoritzat, treballador no autoritzat i intent cross-tenant.
-8. Aplicar i validar hosted `automation_permissions` i `member_onboarding`, incloent assignació, onboarding completat i bloqueig de permisos per a members.
+Secretos independientes, cada uno con al menos 32 bytes:
 
-## Acceptació del runtime
+- `AIBRAIN_SESSION_SECRET`
+- `AIBRAIN_AUTH_CHALLENGE_SECRET`
+- `AIBRAIN_PUBLICATION_SECRET`
+- `AIBRAIN_BROWSER_GATEWAY_SECRET`
 
-1. L’usuari no autenticat rep `401` a totes les APIs protegides.
-2. Un member rep `403` al control plane.
-3. Un token de thread d’un altre tenant rep `403`.
-4. `/api/runtime/status` retorna el tenant correcte i `isolated: true`.
-5. Un segon missatge reprèn el mateix thread mitjançant el token opac.
-6. Una aprovació només es resol des del tenant que l’ha originada.
-7. El canvi de manifest afecta només el tenant propietari.
-8. Un torn real produeix streaming, activitat, diff i interrupció; el procés calent es reutilitza i es tanca per inactivitat sense deixar processos orfes.
+Supabase solo requiere su URL y publishable key para Auth. No se inyecta service-role/secret key ni se usa Postgres de producto. `AIBRAIN_CHROME_EXPECTED_VERSION` debe coincidir exactamente con Chromium en la imagen inmutable.
+
+## Health, logs y alertas
+
+El healthcheck interno consulta Next.js por loopback cada 15 segundos, con período inicial de 45 segundos. Un estado `unhealthy`, reinicios repetidos, presión de disco mayor al 80 %, volumen de backups sin réplica reciente o errores `preflight failed` deben alertar al operador. El runbook muestra los comandos de diagnóstico sin imprimir secretos.
+
+Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
+
+## Gates de producción
+
+Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa:
+
+1. build desde cero, `npm run infra:validate`, `docker compose config --quiet`, SBOM y scan crítico;
+2. health estable y smoke de login/trabajo con Supabase temporalmente inaccesible después de login;
+3. Codex dedicado autenticado en el `CODEX_HOME` del primer empleado, nunca una cuenta personal compartida;
+4. matriz de dos empleados para workers, threads, approvals, archivos y browser sin acceso cruzado;
+5. `source-ro` no writable y `publish-rw` invisible/no writable desde el App Server;
+6. Office/PDF/texto/imagen y confirmación documental exactamente una vez;
+7. backup, restore a volumen separado, reboot recovery, release y rollback medidos;
+8. réplica de backup cifrada fuera del servidor y alertas conectadas;
+9. revisión de capacidad/egress y hardening del host;
+10. separación de red browser/CDP por empleado y build reproducible de la toolchain;
+11. autorización separada para DNS y producción.
