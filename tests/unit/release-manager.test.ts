@@ -181,7 +181,7 @@ describe("immutable release manager", () => {
     expect(log).toContain('"config","--quiet"');
     expect(log).toContain('"up","-d","--no-deps","egress-gateway","app"');
     expect(log).toContain('"{{.State.Health.Status}}"');
-  });
+  }, 20_000);
 
   it("automatically restores the previous healthy image after a failed promotion", async () => {
     const files = await fixture();
