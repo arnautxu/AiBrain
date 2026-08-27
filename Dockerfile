@@ -67,6 +67,14 @@ ENV NODE_ENV=production \
     XDG_DATA_HOME=/var/lib/aibrain/data/server/xdg/data \
     XDG_STATE_HOME=/var/lib/aibrain/data/server/xdg/state
 
+# The pinned slim base does not contain a system trust store. Bootstrap only
+# ca-certificates from the base image's signed Debian sources before switching
+# every runtime/tool package to the immutable snapshot below.
+RUN apt-get update \
+  && export DEBIAN_FRONTEND=noninteractive \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN printf '%s\n' \
     "deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bookworm main" \
     "deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bookworm-updates main" \
