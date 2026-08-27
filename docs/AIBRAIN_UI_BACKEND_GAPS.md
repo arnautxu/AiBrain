@@ -1,97 +1,73 @@
 # Contrato UI ↔ backend y gaps
 
-Última verificación backend: `origin/codex/aibrain-backend-definitivo@b8b0f3c64119e0e723ddf286077da97cf1555c59`, 2026-08-27.
+Última verificación backend: `origin/codex/aibrain-backend-definitivo@6bc7bc2f8a9d4e5706c8796fd57b2621929ca5eb`, 2026-08-27.
 
-## Contratos consumibles hoy
+La fuente de verdad de integración es `docs/UI_BACKEND_CONTRACT.md` de ese commit. La rama UI continúa basada en `a54838787fe7ca516510fb73d7e3bc4f77f2e183`: no se ha hecho merge ni se afirma que estos endpoints estén conectados en esta rama.
 
-- `InstallationConfig` schema v1 y `PublicInstallationBranding`.
-- Codex App Server `0.149.1` generado bajo `contracts/codex/0.149.1`.
-- Envelope de transporte `APP_SERVER_TRANSPORT_PROTOCOL_VERSION = 1`.
-- `AppServerEvent { eventId, sequence, occurredAt, message }`.
-- Cursor durable `{ eventId, sequence }`.
-- Frames `ready`, `accepted`, `event`, `pong`, `rejected`, `overloaded` y cliente `resume`, `request`, `event-ack`, `ping`.
-- Estado de transporte `idle | connecting | connected | reconnecting | closing | closed`.
+## Contratos públicos disponibles en la rama backend
 
-Estos contratos existen y tienen pruebas en la rama backend, pero todavía no están conectados al flujo de producto: los checkpoints backend 5, 7 y 10 siguen en curso o pendientes.
+- Auth y sesión: `/api/auth/session`; la UI no lee cookies ni tokens directamente.
+- Workbench durable: proyectos, threads y mensajes bajo `/api/projects` y `/api/threads`.
+- Turnos: `POST /api/chat` devuelve `application/x-ndjson`, con `snapshot`, `content`, `delta`, `activity`, `plan`, `approval`, `diff`, `artifact`, `done`, `stopped` y `error`.
+- Recuperación: el par `userMessageId + assistantMessageId` es idempotente. Tras un corte, se repite exactamente el mismo body; un replay terminado devuelve `snapshot` y `X-AiBrain-Idempotent-Replay: true`.
+- Control: `POST /api/runtime/turns/control` implementa `stop` y `steer` con `clientRequestId` idempotente.
+- Approvals: `POST /api/runtime/approvals`, copiando literalmente `approvalId`, `threadId`, `turnId` e `itemId` recibidos.
+- Runtime: `GET /api/runtime/status`; modelos, skills y capacidades visibles proceden de esta respuesta, no del manifest visual.
+- Documentos: upload multipart bajo `/api/threads/{threadId}/documents`, previews privadas mediante las URLs opacas devueltas y límite general de 50 MiB.
+- Publicación: freeze y confirmación en dos pasos bajo `/api/threads/{threadId}/publications`; el token de confirmación permanece solo en memoria.
+- Browser: lifecycle, token, frame PNG e input humano bajo `/api/runtime/browser*`. Es polling HTTP, no CDP público, no noVNC y no WebSocket de vídeo.
 
-## Contrato conectado hoy en la rama UI
+## Lo conectado hoy en la rama UI
 
-- `POST /api/chat` recibe IDs opacos de proyecto, conversación y mensajes, opciones de turno e imágenes inline validadas.
-- La respuesta es NDJSON con el discriminante `ChatStreamEvent`: `activity`, `plan`, `approval`, `diff`, `delta`, `artifact`, `done` y `error`.
-- `src/ui/app-server-ui-adapter.ts` conserva el orden de lectura, soporta fragmentación arbitraria de chunks y falla cerrado ante JSON malformado, eventos desconocidos o líneas mayores de 1 MB.
-- `AbortController` cancela la petición existente y la UI conserva el resultado parcial con estado terminal `stopped`.
-- En Preview sintética, proyectos, conversaciones y mensajes se recuperan desde almacenamiento local; un mensaje que quedó `streaming` durante una recarga se recupera honestamente como `stopped`.
-- El evento `artifact` admite tres view models fail-closed: imagen, documento y navegador. Los documentos conservan `kind`, MIME, tamaño, estado de conversión, total de páginas, preview, lifecycle de publicación y errores; los cambios de estado con el mismo ID reemplazan el artefacto anterior sin duplicarlo.
-- El límite documental del view model es 50 MB, alineado con `StagedDocument` v1 del backend. Las URLs visibles solo se aceptan bajo rutas opacas `/api/projects/…`; viewer, captura y descarga de navegador quedan limitados a `/api/browser/sessions/…`.
-- La presentación cubre DOCX/XLSX/PPTX/PDF, imagen generada, conversión, preview/error, página 1 de N, descarga, estados `awaiting_confirmation | publishing | published | declined | conflict`, error de publicación y lifecycle de browser/Computer Use (`starting | ready | active | reconnecting | disconnected | closed | error`) con control del agente, empleado o aprobación pendiente.
-- El iframe de Computer Use no recibe `allow-same-origin`, no envía referrer y solo se monta si llega un artefacto válido en estado listo/activo. El logout desmonta el viewer. No hay fallback productivo ni sesión sintética fuera de tests.
-- El contrato actual no expone `eventId`, `sequence`, cursor, ACK, `turnId` ni `itemId`; por tanto la UI no simula dedupe, replay o reconnect durable.
-- Los adjuntos de entrada actuales siguen siendo únicamente PNG/JPEG/WebP/GIF inline, máximo 3, 2 MB por imagen y 5 MB agregados. No se amplía el selector a Office/PDF porque todavía no existe una route autorizada conectada a esta rama.
+- El flujo legacy de `/api/chat` ya parsea NDJSON de forma fail-closed y presenta actividad, plan, approvals, diff, deltas y artefactos.
+- `AbortController` detiene la petición local y conserva el resultado parcial como `stopped`.
+- La UI cubre presentación white-label de mensajes, Review, documentos, publicación y Computer Use con fixtures sintéticos exclusivos de test.
+- `src/ui/durable-chat-event-adapter.ts` prueba ordering, dedupe, gaps y replay sobre un envelope UI interno. Ese envelope no es el contrato HTTP público actual y no debe conectarse como si existiera un endpoint WebSocket.
+- El smoke real del checkpoint 8 probó `/api/chat` → Codex App Server por `stdio`: primer turno, resume del mismo thread y cancelación, con `ready: true` e `isolated: true` en el host Hetzner existente.
+- Preview sintética usa almacenamiento local para proyectos, threads y mensajes. No equivale al store durable del backend definitivo.
 
-## Mapping objetivo al contrato backend definitivo
+## Mapping de integración exacto
 
-Los componentes no importarán tipos RPC generados. Un adapter server-side transforma los eventos en un envelope UI versionado:
+1. Sustituir el store Preview de la UI por los clientes de proyectos/threads del backend.
+2. Adaptar el reader existente al `ChatRequest` definitivo y conservar los cuatro UUID hasta estado terminal.
+3. Reducir `snapshot` como autoridad; `content` reemplaza, `delta` concatena, `activity`/`approval` hacen upsert por ID y `plan` reemplaza pasos.
+4. Recuperar un stream cortado repitiendo el mismo `POST /api/chat`; no crear IDs nuevos ni exigir ACK/cursor en el navegador.
+5. Conectar stop/steer a `/api/runtime/turns/control` y approvals a `/api/runtime/approvals` usando IDs opacos.
+6. Poblar modelos, skills y capabilities desde `/api/runtime/status`.
+7. Separar imágenes inline de documentos: Office/PDF/texto usan upload multipart y las URLs de preview devueltas.
+8. Implementar publicación con freeze + confirmación, sin registrar ni persistir el `confirmationToken`.
+9. Implementar Computer Use solo con `/api/runtime/browser*`: takeover antes de input, heartbeat durante control humano y tokens cortos fuera de logs/URLs.
 
-```ts
-type UiEventEnvelope = {
-  schemaVersion: 1;
-  eventId: string;
-  sequence: number;
-  occurredAt: string;
-  projectId: string;
-  threadId: string;
-  turnId: string | null;
-  payload: UiEvent;
-};
-```
+El backend es autoridad para seguridad, schemas, rutas, stores y runtime. La rama UI es autoridad para tokens visuales, componentes, reducers de presentación y suites visuales. Los archivos compartidos se reconcilian uno a uno; no se elige una rama completa ni se hace merge automático.
 
-`UiEvent` discrimina como mínimo `connection`, `thread`, `turn`, `message-delta`, `plan`, `activity`, `tool`, `diff`, `approval`, `artifact`, `browser`, `usage`, `error` y `complete`. IDs y rutas Codex permanecen server-side salvo IDs opacos que el backend declare públicos.
+## Gaps reales restantes
 
-## Reglas del reducer cliente definitivo
-
-1. Rechazar versiones desconocidas.
-2. Deduplicar por `eventId`.
-3. Aplicar solo `sequence === lastSequence + 1`.
-4. Ante gap, detener la aplicación de eventos y solicitar replay desde el cursor confirmado.
-5. Persistir el cursor solo después de aplicar el evento de forma idempotente.
-6. Un ACK no implica completion del turno.
-7. `rejected.retryable` y `overloaded.retryAfterMs` gobiernan backoff; no se reenvían peticiones aceptadas.
-8. Completion/error/cancelled son terminales por turn, no globales para la app.
-9. El stream pertenece a `threadId/turnId`; cambiar de vista no lo cancela.
-10. Reconnect no crea una conversación nueva si resume falla.
-
-## Resiliencia UI ya cerrada sin fingir transporte durable
-
-- El checkpoint UI 7 cubre responsive, temas claro/oscuro/sistema, teclado, focus, motion reducido, offline y fallo de `/api/runtime/status` sobre el contrato legacy actual.
-- Offline o runtime no disponible mantienen el historial en lectura y bloquean el envío. El reintento es explícito y la vuelta online vuelve a consultar status antes de habilitar el composer.
-- Esta resiliencia local no se presenta como reconnect de turno: no deduplica eventos, no confirma cursores y no reanuda un stream App Server. Esas garantías continúan bloqueadas por checkpoints backend 7/10.
-
-## Adapter durable y smoke real del checkpoint UI 8
-
-- `src/ui/durable-chat-event-adapter.ts` implementa el envelope UI schema v1 documentado, preserva scope e IDs, exige secuencia contigua, deduplica, detecta gaps, solicita replay y falla cerrado. No está conectado a una URL inventada.
-- `src/ui/frame-event-dispatcher.ts` agrupa únicamente deltas adyacentes por frame y vacía el buffer antes de cualquier evento estructurado; así conserva ordering y reduce updates globales.
-- `playwright.real-runtime.config.ts` y `tests/integration/real-app-server.spec.ts` aíslan el smoke real del suite determinista. Sin `AIBRAIN_REAL_RUNTIME_BASE_URL`, el caso se omite explícitamente y nunca cae a demo como si fuera real.
-- El 2026-08-27 se validó en el host Hetzner existente, mediante un contenedor QA efímero y loopback, `mode: codex`, `ready: true`, `isolated: true`, primer turno, resume del mismo thread y cancelación. El contenedor y el túnel se retiraron al terminar.
-- Esta prueba confirma el pipeline real AiBrain → `/api/chat` → Codex App Server por `stdio`; no confirma el WebSocket durable, ACK o replay del gateway porque la ruta de producto del SHA backend fijado todavía no lo compone.
-
-## Gaps reales, no simulables
-
-| Gap backend | Estado | Consecuencia UI |
+| Gap | Estado verificado | Consecuencia |
 | --- | --- | --- |
-| Auth-only + sesión local opaca | Completado localmente; QA externa pendiente | Login UI se puede completar; smoke definitivo espera endpoint |
-| Stores de producto migrados a filesystem | En curso checkpoint 3 | Preview verifica recuperación local, no persistencia definitiva |
-| Provisionamiento y registry por empleado | Provisionamiento completo; factory/gateway en curso checkpoint 5 | No hay smoke multiusuario definitivo |
-| Proyectos/threads definitivos | En curso checkpoint 6 | Adapter conserva frontera y fixtures de test |
-| Streaming/steer/stop/approval/replay integrados end-to-end | Streaming, resume y stop legacy verificados contra App Server real; gateway durable pendiente backend 7/10 | Adapter durable y fixtures cubiertos; ACK/replay/reconnect reales esperan composición del endpoint final |
-| Office/PDF/previews/publicador | Servicios backend checkpoint 8 en curso; `StagedDocument`, `DocumentPreview` y publicador v1 existen, pero faltan routes autorizadas y el preview real solo materializa página 1 | UI/adapter/fixtures cubren tipos y lifecycle; upload, paginación interactiva y confirmación real siguen bloqueados |
-| Browser/Computer Use aislado | Pendiente backend checkpoint 9; no existe gateway/viewer autenticado por usuario/thread | UI/adapter/fixtures cubren estados, captura, takeover representado, devolución, descarga, reconexión y cierre; ninguna acción declara una sesión real disponible |
-| Contrato final para rama UI | Pendiente checkpoint 10 | Este documento es propuesta de integración, no API final |
+| Integración entre ramas | Backend `6bc7bc2` expone el contrato; UI `43465f8` aún usa el flujo legacy/fixtures | La definición global de end-to-end no está cumplida hasta reconciliar ambas ramas |
+| Auth de esta Preview UI | Login real carga correctamente, pero no había sesión AiBrain/test credential autorizada | No se recorrió el workbench autenticado en el deployment exacto |
+| Codex login y límites reales | Pendiente QA externa en la rama backend | No se declara aceptación operativa multiusuario completa |
+| Browser tool final | Viewer y takeover existen; falta cerrar la invocación App Server con approval/auditoría y defensa DNS-pinned contra rebinding | La UI no debe inventar tabs, URL/title, downloads ni tool calls no publicados |
+| Documentación/memory contractual | Contrato UI principal existe; la rama backend aún registra incorporación explícita de memory como pendiente | Revalidar el SHA y contrato antes de integrar |
+| Operación real | Docker/Compose, restore, reboot, rollback y soak siguen pendientes en backend | Preview y smoke efímero no son aceptación de Production |
 
-## Integración segura
+## Superficies que la UI debe ocultar o degradar
 
-- No mergear automáticamente las ramas.
-- Antes del merge final, volver a fijar el SHA backend y comparar `InstallationConfig`, transporte y contrato UI.
-- Preferir el backend como fuente de verdad para schemas generados, seguridad, Auth, stores y gateway.
-- Preferir esta rama para tokens, componentes, adapters de presentación, reducers y tests visuales.
-- Resolver cambios compartidos archivo a archivo; nunca elegir una rama completa sobre la otra.
-- Orden recomendado provisional: backend definitivo → adapter UI compatible → componentes UI → E2E/visual compartidos.
+- No hay endpoints públicos para listar/abrir/cerrar tabs ni leer URL/título actuales.
+- `state.downloads` es solo lectura; no hay API pública de descarga.
+- No hay API de hunks tipados, patch parcial ni undo filesystem desde Review.
+- No hay API pública para listar/restaurar versiones anteriores de una publicación.
+- `RuntimeStatus.ready=false` bloquea el envío aunque HTTP responda `200`.
+- `503` nunca autoriza a asumir que una mutación no ocurrió; el reintento conserva IDs.
+
+## Archivos con conflicto probable
+
+- `src/components/brain-app.tsx`
+- `src/components/chat-workspace.tsx`
+- `src/components/details-panel.tsx`
+- `src/components/turn-activity.tsx`
+- `src/lib/chat-contract.ts`
+- `src/app/api/chat/route.ts`
+- `src/runtime/*`
+
+La integración segura parte de la rama backend, incorpora manualmente la presentación y tests UI, y termina con typecheck, lint, unit, adapter, component, E2E, a11y, visual, builds Example/Northwind, smoke real y QA autenticada de Preview.

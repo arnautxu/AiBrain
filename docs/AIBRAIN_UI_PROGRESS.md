@@ -33,7 +33,7 @@
 | 7. Responsive, temas, a11y, keyboard, motion, degraded | Completado | 7 viewports, temas claro/oscuro/sistema, focus traps, motion reducido, recuperación offline/runtime y evidencia checkpoint 07 |
 | 8. Integración, ordering, dedupe, replay, reconnect, performance | Completado en la rebanada disponible | E2E real stdio con primer turno/resume/cancel, adapter durable fail-closed, batching por frame y tests; conexión al gateway durable bloqueada por backend 7/10 |
 | 9. Comparación visual exhaustiva | Completado | 7 viewports, 66 baselines nuevas, 101 PNG totales, umbral ≤0,005, cero overflow y revisión humana documentada |
-| 10. Regresiones, build, handoff, integración segura | Pendiente | — |
+| 10. Regresiones, build, handoff, integración segura | Completado dentro del alcance seguro; objetivo global bloqueado | Matriz final verde, Preview Ready, QA anónima protegida, contrato backend `6bc7bc2` fijado y `AIBRAIN_UI_PARITY_HANDOFF.md`; falta integración entre ramas y QA autenticada |
 
 ## Evidencia de pantalla
 
@@ -89,11 +89,12 @@
 
 - Backend fijado para checkpoint 1: `7a20c51f6d5870a9f02ba3df8311b6955dd3b386`.
 - Backend reverificado para checkpoint 4: `b8b0f3c64119e0e723ddf286077da97cf1555c59`.
+- Backend fijado para el handoff del checkpoint 10: `6bc7bc2f8a9d4e5706c8796fd57b2621929ca5eb`.
 - Codex App Server fijado por backend: `0.149.1`.
 - InstallationConfig v1.
-- Transporte privado durable v1 con cursor, ordering, dedupe, replay y ACK.
-- Contrato UI propuesto documentado en `AIBRAIN_UI_BACKEND_GAPS.md`.
-- La rama UI consume todavía el NDJSON legacy de `/api/chat`; el envelope durable con `eventId`, `sequence`, replay y ACK no está conectado y no se simula.
+- El transporte privado del worker conserva sus garantías internas; el contrato público UI actual es `/api/chat` NDJSON idempotente con replay por repetición exacta del request.
+- Contrato público y plan de integración documentados en `AIBRAIN_UI_BACKEND_GAPS.md`.
+- La rama UI consume todavía el NDJSON legacy de `/api/chat`; no está reconciliada con los stores, rutas y recovery definitivos del backend y no simula esa integración.
 
 ## Fuentes y decisiones
 
@@ -218,6 +219,16 @@
 - Revisión visual humana completada sobre diez evidencias representativas. Se corrigió una carrera entre autoscroll y carga de artefactos separando aprobación, documento y browser en turnos deterministas; el gate final pasó después sin relajar tolerancias.
 - La comparación directa con ChatGPT se limita a jerarquía y geometría de la única captura temporal segura. Codex Desktop no fue accesible a Computer Use; no se declara paridad píxel a píxel de una referencia no observada. El detalle queda en `docs/AIBRAIN_VISUAL_COMPARISON.md`.
 
+## Gates del checkpoint 10
+
+- Regresión final verde: typecheck, lint, 18 unit, 9 adapter, 22 component, E2E Example/Northwind 22+1 skip por instalación, a11y 5/5 por instalación, visual 36+1 skip y builds Example/Northwind de 17 páginas.
+- Preview `dpl_FNhrn5kbngN7JYYRMUASVN3JHE6y` publicada desde `43465f8`, target Preview y estado Ready; Production no se tocó.
+- `/login` respondió `200` bajo Deployment Protection; auth/session y runtime/status respondieron `401` anónimo. Browser real: light/dark, 1280 px sin overflow y consola limpia.
+- El workbench autenticado del deployment exacto no se recorrió porque no había sesión AiBrain ni credencial sintética autorizada. No se envió email ni se creó una cuenta.
+- Backend fijado de nuevo en `6bc7bc2`: ya ofrece contrato UI para workbench, NDJSON idempotente, stop/steer, approvals, documentos/publicación y Browser HTTP. La rama UI no se mergeó ni se conectó por la frontera de alcance.
+- `docs/AIBRAIN_UI_PARITY_HANDOFF.md` registra resultado, Preview, pruebas, plan de integración archivo a archivo y definición de terminado honesta.
+- El trabajo UI local seguro queda cerrado; el objetivo global permanece bloqueado por integración entre ramas, QA autenticada y cierres backend/operativos externos.
+
 ## Commits y push
 
 - `8314cc6 chore(ui): establish parity baseline` — checkpoint 1, tooling y correcciones de lint.
@@ -236,4 +247,4 @@
 
 ## Siguiente acción
 
-Completar el checkpoint 10: regresión final, builds Example/Northwind, Preview autorizado, handoff y plan de integración segura con el backend fijado.
+Abrir, cuando se autorice, una rama de integración desde `codex/aibrain-backend-definitivo@6bc7bc2`, aplicar manualmente la capa visual y tests de esta rama y ejecutar los gates end-to-end descritos en `AIBRAIN_UI_PARITY_HANDOFF.md`. No hacer merge automático ni tocar Production.
