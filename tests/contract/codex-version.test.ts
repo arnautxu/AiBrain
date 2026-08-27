@@ -7,8 +7,14 @@ const pinnedVersion = "0.149.1";
 
 describe("pinned Codex App Server contract", () => {
   it("pins the worker binary to the generated contract version", async () => {
-    const dockerfile = await readFile(path.join(repositoryRoot, "Dockerfile"), "utf8");
-    expect(dockerfile).toContain(`@openai/codex@${pinnedVersion}`);
+    const [dockerfile, packageJson] = await Promise.all([
+      readFile(path.join(repositoryRoot, "Dockerfile"), "utf8"),
+      readFile(path.join(repositoryRoot, "package.json"), "utf8"),
+    ]);
+    expect(dockerfile).toContain(`ARG CODEX_VERSION=${pinnedVersion}`);
+    expect(dockerfile).toContain('"@openai/codex@${CODEX_VERSION}"');
+    const scripts = (JSON.parse(packageJson) as { scripts: Record<string, string> }).scripts;
+    expect(scripts["contracts:generate"]).toContain(`@openai/codex@${pinnedVersion}`);
   });
 
   it("contains the aggregate request and event schemas used by the transport", async () => {
