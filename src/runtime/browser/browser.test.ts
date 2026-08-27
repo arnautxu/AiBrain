@@ -308,6 +308,41 @@ describe("BrowserGatewayTokenService", () => {
 });
 
 describe("BrowserRuntimeRegistry", () => {
+  it("recovers expired human and agent control before accepting direct actions", async () => {
+    let now = Date.UTC(2026, 7, 27, 12, 0, 0);
+    const { store } = await fixture({ now: () => now, heartbeatTtlMs: 1_000 });
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    const initial = await registry.start(USER_A);
+    await registry.takeOver(USER_A);
+    now += 1_001;
+    await expect(registry.navigate(USER_A, THREAD_A, "https://expired.test"))
+      .rejects.toThrow("requires an active human takeover");
+    const recoveredHuman = registry.get(USER_A);
+    expect(recoveredHuman?.browserSessionId).not.toBe(initial.browserSessionId);
+    expect(await registry.state(USER_A)).toMatchObject({ lifecycle: "ready", controller: "agent" });
+
+    const agentSession = recoveredHuman?.browserSessionId;
+    now += 1_001;
+    await expect(registry.agentNavigate(USER_A, THREAD_A, "https://agent.test")).resolves.toBeUndefined();
+    expect(registry.get(USER_A)?.browserSessionId).not.toBe(agentSession);
+    await registry.close();
+  });
+
+  it("replaces an unhealthy runtime and fences its browser session on the next service start", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    const initial = await registry.start(USER_A);
+    factory.runtimes[0].stopped = true;
+    const recovered = await registry.start(USER_A);
+    expect(factory.runtimes).toHaveLength(2);
+    expect(recovered.browserSessionId).not.toBe(initial.browserSessionId);
+    await expect(registry.agentNavigate(USER_A, THREAD_A, "https://recovered.test")).resolves.toBeUndefined();
+    expect(factory.runtimes[1].navigations).toEqual([`agent:${THREAD_A}:https://recovered.test`]);
+    await registry.close();
+  });
+
   it("keeps runtimes exclusive per user and recovers durable state after process restart", async () => {
     const { store } = await fixture();
     const firstFactory = new FakeBrowserFactory();

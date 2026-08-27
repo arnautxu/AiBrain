@@ -142,9 +142,8 @@ export class BrowserRuntimeRegistry {
       await entry.stopPromise;
       return this.start(userId);
     }
-    if (entry.handle) return entry.handle;
     if (entry.startPromise) return entry.startPromise;
-    const promise = this.startEntry(userId, entry);
+    const promise = this.ensureStarted(userId, entry);
     entry.startPromise = promise;
     void promise.finally(() => {
       if (entry.startPromise === promise) entry.startPromise = null;
@@ -162,11 +161,13 @@ export class BrowserRuntimeRegistry {
   }
 
   async heartbeat(userId: string, controller: "agent" | "human") {
+    await this.recoverExpired(userId);
     const handle = this.requireHandle(userId);
     return this.store.heartbeat(userId, handle.browserSessionId, controller);
   }
 
   async takeOver(userId: string) {
+    await this.recoverExpired(userId);
     const entry = this.requireEntry(userId);
     const handle = entry.handle as BrowserRuntimeHandle;
     const state = await this.store.takeOver(userId, handle.browserSessionId);
@@ -180,6 +181,7 @@ export class BrowserRuntimeRegistry {
   }
 
   async releaseTakeover(userId: string) {
+    await this.recoverExpired(userId);
     const entry = this.requireEntry(userId);
     const handle = entry.handle as BrowserRuntimeHandle;
     const recovering = await this.store.releaseTakeover(userId, handle.browserSessionId);
@@ -227,6 +229,9 @@ export class BrowserRuntimeRegistry {
         state = await this.recoverExpired(userId);
       }
       const health = await entry.runtime.health();
+      if (!health.healthy) {
+        state = await this.store.markDegraded(userId, entry.handle.browserSessionId);
+      }
       if (health.healthy && state.lifecycle === "ready" && state.controller === "agent") {
         state = await this.store.heartbeat(userId, entry.handle.browserSessionId, "agent");
       }
@@ -240,7 +245,7 @@ export class BrowserRuntimeRegistry {
   async captureFrame(userId: string, threadId: string): Promise<BrowserFrame> {
     validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertCurrentSession(userId, state);
     if (state.lifecycle !== "ready" && state.lifecycle !== "human-control") {
       throw new Error("Browser viewer is unavailable in the current lifecycle state.");
@@ -251,7 +256,7 @@ export class BrowserRuntimeRegistry {
   async readPage(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     return runtime.readPage(threadId);
   }
@@ -259,7 +264,7 @@ export class BrowserRuntimeRegistry {
   async agentCaptureFrame(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     return runtime.agentCaptureFrame(threadId);
   }
@@ -267,7 +272,7 @@ export class BrowserRuntimeRegistry {
   async listTabs(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     return runtime.listTabs(threadId);
   }
@@ -275,7 +280,7 @@ export class BrowserRuntimeRegistry {
   async listDownloads(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     return runtime.listDownloads(threadId);
   }
@@ -283,7 +288,7 @@ export class BrowserRuntimeRegistry {
   async agentNavigate(userId: string, threadId: string, url: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     await runtime.agentNavigate(threadId, url);
   }
@@ -291,7 +296,7 @@ export class BrowserRuntimeRegistry {
   async agentScroll(userId: string, threadId: string, deltaX: number, deltaY: number) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     await runtime.agentScroll(threadId, deltaX, deltaY);
   }
@@ -299,7 +304,7 @@ export class BrowserRuntimeRegistry {
   async agentClick(userId: string, threadId: string, selector: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     await runtime.agentClick(threadId, selector);
   }
@@ -307,7 +312,7 @@ export class BrowserRuntimeRegistry {
   async agentType(userId: string, threadId: string, selector: string, text: string, clear: boolean) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertAgentControl(userId, state);
     await runtime.agentType(threadId, selector, text, clear);
   }
@@ -315,7 +320,7 @@ export class BrowserRuntimeRegistry {
   async navigate(userId: string, threadId: string, url: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertHumanControl(userId, state);
     await runtime.navigate(threadId, url);
   }
@@ -323,7 +328,7 @@ export class BrowserRuntimeRegistry {
   async dispatchInput(userId: string, threadId: string, command: BrowserInputCommand) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
-    const state = await this.store.load(userId);
+    const state = await this.recoverExpired(userId);
     this.assertHumanControl(userId, state);
     await runtime.dispatchInput(threadId, command);
   }
@@ -346,6 +351,18 @@ export class BrowserRuntimeRegistry {
     this.closed = true;
     this.starts.close();
     await Promise.allSettled([...this.entries.keys()].map((userId) => this.stop(userId)));
+  }
+
+  private async ensureStarted(userId: string, entry: Entry) {
+    if (entry.runtime && entry.handle) {
+      const health = await entry.runtime.health().catch(() => ({ healthy: false }));
+      if (health.healthy) return entry.handle;
+      await this.store.markDegraded(userId, entry.handle.browserSessionId).catch(() => undefined);
+      await entry.runtime.stop().catch(() => undefined);
+      entry.runtime = null;
+      entry.handle = null;
+    }
+    return this.startEntry(userId, entry);
   }
 
   private async startEntry(userId: string, entry: Entry) {

@@ -210,17 +210,21 @@ function toolResponse(command: BrowserAgentCommand, value: unknown): DynamicTool
   return textResponse(value);
 }
 
-function permissionAllowsBrowser(permissions: ResolvedPermissions) {
-  const browserRules = permissions.rules.filter((rule) => rule.ruleId === "browser.execute" || rule.ruleId === "browser.read");
-  if (browserRules.some((rule) => rule.effect === "deny")) return false;
-  if (browserRules.some((rule) => rule.effect === "allow")) return true;
-  return permissions.rules.some((rule) =>
-    rule.ruleId === "tools.execute" && rule.action === "execute" && rule.effect === "allow");
-}
-
 function isMutation(command: BrowserAgentCommand) {
   return command.action === "open" || command.action === "scroll" ||
     command.action === "click" || command.action === "type";
+}
+
+function permissionAllowsBrowser(permissions: ResolvedPermissions, command: BrowserAgentCommand) {
+  const mutation = isMutation(command);
+  const ruleId = mutation ? "browser.execute" : "browser.read";
+  const action = mutation ? "execute" : "consult";
+  const exactRules = permissions.rules.filter((rule) => rule.ruleId === ruleId && rule.action === action);
+  if (exactRules.some((rule) => rule.effect === "deny")) return false;
+  if (exactRules.some((rule) => rule.effect === "allow")) return true;
+  const fallback = permissions.rules.filter((rule) => rule.ruleId === "tools.execute" && rule.action === "execute");
+  if (fallback.some((rule) => rule.effect === "deny")) return false;
+  return fallback.some((rule) => rule.effect === "allow");
 }
 
 function approvalTitle(command: BrowserAgentCommand) {
@@ -293,7 +297,7 @@ export async function handleBrowserDynamicToolCall(
   if (reserved.status === "executing") {
     return failure("This browser action has an indeterminate prior result and was not replayed.");
   }
-  if (!permissionAllowsBrowser(context.permissions)) {
+  if (!permissionAllowsBrowser(context.permissions, command)) {
     const response = failure("Server-resolved permissions deny browser tools for this turn.");
     await store.complete(identity, response);
     return response;

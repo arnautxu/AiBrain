@@ -46,6 +46,10 @@ function permissions(allowed = true): ResolvedPermissions {
   };
 }
 
+function browserPermissions(rules: ResolvedPermissions["rules"]): ResolvedPermissions {
+  return { ...permissions(), rules };
+}
+
 function request(
   tool: string,
   argumentsValue: unknown,
@@ -286,5 +290,30 @@ describe("closed browser dynamic tools", () => {
     expect(response.success).toBe(false);
     expect(execute).not.toHaveBeenCalled();
     expect(emitted).toEqual([]);
+  });
+
+  it("does not let browser.read authorize browser mutations", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "" }));
+    const readOnly = browserPermissions([{
+      ruleId: "browser.read",
+      action: "consult",
+      effect: "allow",
+      instruction: "Read-only browser access.",
+      sourceScope: "installation",
+      sourcePolicyVersion: 1,
+      precedence: 100,
+    }]);
+    const read = await handleBrowserDynamicToolCall(
+      request("read", {}),
+      context(approvalStore, execute, [], { permissions: readOnly }),
+    );
+    const open = await handleBrowserDynamicToolCall(
+      request("open", { url: "https://example.test/" }),
+      context(approvalStore, execute, [], { permissions: readOnly }),
+    );
+    expect(read.success).toBe(true);
+    expect(open.success).toBe(false);
+    expect(execute).toHaveBeenCalledOnce();
   });
 });
