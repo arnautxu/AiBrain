@@ -88,6 +88,35 @@
         "status": { "enum": ["pending", "running", "waiting", "complete", "failed", "stopped"] }
       }
     },
+    "TurnSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "url", "domain", "snippet", "publishedAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+        "kind": { "enum": ["web", "file", "app"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "url": { "type": ["string", "null"], "pattern": "^https?://", "maxLength": 2048 },
+        "domain": { "type": ["string", "null"], "maxLength": 255 },
+        "snippet": { "type": ["string", "null"], "maxLength": 2000 },
+        "publishedAt": { "oneOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }] }
+      }
+    },
+    "ToolResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "status", "summary", "output", "sourceIds", "createdAt"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+        "kind": { "enum": ["command", "file", "web", "app", "browser"] },
+        "title": { "type": "string", "minLength": 1, "maxLength": 240 },
+        "status": { "enum": ["running", "complete", "failed", "stopped"] },
+        "summary": { "type": ["string", "null"], "maxLength": 4000 },
+        "output": { "type": ["string", "null"], "maxLength": 64000 },
+        "sourceIds": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" } },
+        "createdAt": { "$ref": "#/$defs/IsoDate" }
+      }
+    },
     "PlanStep": {
       "type": "object",
       "additionalProperties": false,
@@ -153,7 +182,9 @@
         "approvals": { "type": "array", "items": { "$ref": "#/$defs/ApprovalItem" } },
         "diff": { "type": "string" },
         "attachments": { "type": "array", "items": { "$ref": "#/$defs/ChatAttachment" } },
-        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/GeneratedArtifact" } }
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/GeneratedArtifact" } },
+        "sources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/TurnSource" } },
+        "toolResults": { "type": "array", "items": { "$ref": "#/$defs/ToolResult" } }
       }
     },
     "WorkbenchWorkspace": {
@@ -257,6 +288,8 @@
         { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "activity" }, "item": { "$ref": "#/$defs/ActivityItem" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "approval" }, "item": { "$ref": "#/$defs/ApprovalItem" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "artifact" }, "item": { "$ref": "#/$defs/GeneratedArtifact" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "source" }, "item": { "$ref": "#/$defs/TurnSource" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "toolResult" }, "item": { "$ref": "#/$defs/ToolResult" } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "explanation", "steps"], "properties": { "type": { "const": "plan" }, "explanation": { "type": ["string", "null"] }, "steps": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } } } },
         { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "enum": ["done", "stopped"] } } },
         { "type": "object", "additionalProperties": false, "required": ["type", "message"], "properties": { "type": { "const": "error" }, "message": { "type": "string" } } }
@@ -532,6 +565,7 @@
       }
     },
     { "schema": "ChatStreamEvent", "value": { "type": "delta", "value": "Validated stream chunk" } },
+    { "schema": "ChatStreamEvent", "value": { "type": "source", "item": { "id": "source-official", "kind": "web", "title": "Official report", "url": "https://example.com/report", "domain": "example.com", "snippet": "Runtime-provided excerpt", "publishedAt": null } } },
     { "schema": "ErrorResponse", "value": { "error": "Servei temporalment no disponible.", "code": "DEGRADED", "retryable": true } },
     {
       "schema": "PublicInstallationBranding",

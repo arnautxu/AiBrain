@@ -120,6 +120,8 @@ function createMessage(
     diff: "",
     attachments: [],
     artifacts: [],
+    sources: [],
+    toolResults: [],
   };
 }
 

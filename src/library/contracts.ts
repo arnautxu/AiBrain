@@ -28,7 +28,9 @@ export type SearchResultType =
   | "file"
   | "artifact"
   | "memory"
-  | "activity";
+  | "activity"
+  | "source"
+  | "tool";
 
 export type GlobalSearchResult = {
   id: string;
@@ -72,7 +74,7 @@ export function isGlobalSearchResult(value: unknown): value is GlobalSearchResul
   return typeof value.id === "string" && value.id.length > 0 && value.id.length <= 300 &&
     (value.type === "project" || value.type === "thread" || value.type === "message" ||
       value.type === "file" || value.type === "artifact" || value.type === "memory" ||
-      value.type === "activity") &&
+      value.type === "activity" || value.type === "source" || value.type === "tool") &&
     typeof value.title === "string" && value.title.trim().length > 0 && value.title.length <= 200 &&
     typeof value.snippet === "string" && value.snippet.length <= 280 && isoDate(value.createdAt) &&
     (value.projectId === null || typeof value.projectId === "string") &&
@@ -291,6 +293,26 @@ export function buildGlobalSearchResults(
           snippet: snippet(`${activity.detail ?? ""} ${activity.output ?? ""}`, needle),
           createdAt: message.createdAt, projectId: project.id, threadId: thread.id,
           messageId: message.id, libraryItemId: null, score: 76,
+        });
+      }
+      for (const source of message.sources ?? []) {
+        const searchable = `${source.title} ${source.domain ?? ""} ${source.snippet ?? ""} ${source.url ?? ""}`;
+        if (!match(searchable, needle)) continue;
+        results.push({
+          id: `source:${message.id}:${source.id}`, type: "source", title: source.title,
+          snippet: snippet(`${source.domain ?? ""} ${source.snippet ?? ""}`, needle),
+          createdAt: message.createdAt, projectId: project.id, threadId: thread.id,
+          messageId: message.id, libraryItemId: null, score: 90,
+        });
+      }
+      for (const result of message.toolResults ?? []) {
+        const searchable = `${result.title} ${result.summary ?? ""} ${result.output ?? ""}`;
+        if (!match(searchable, needle)) continue;
+        results.push({
+          id: `tool:${message.id}:${result.id}`, type: "tool", title: result.title,
+          snippet: snippet(`${result.summary ?? ""} ${result.output ?? ""}`, needle),
+          createdAt: result.createdAt, projectId: project.id, threadId: thread.id,
+          messageId: message.id, libraryItemId: null, score: 78,
         });
       }
     }

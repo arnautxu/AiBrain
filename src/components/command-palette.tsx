@@ -219,11 +219,13 @@ export function CommandPalette({
         artifact: "Resultado generado",
         memory: "Memoria",
         activity: "Actividad",
+        source: "Fuente",
+        tool: "Resultado de herramienta",
       }[result.type]),
       icon: result.type === "project" ? <Folder size={16} /> :
         result.type === "thread" || result.type === "message" ? <ChatCircleDots size={16} /> :
           result.type === "memory" ? <BookOpenText size={16} /> :
-            result.type === "activity" ? <ListChecks size={16} /> : <File size={16} />,
+            result.type === "activity" || result.type === "tool" ? <ListChecks size={16} /> : <File size={16} />,
       keywords: result.type,
       run: () => onOpenSearchResult(result),
     }));

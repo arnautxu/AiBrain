@@ -42,6 +42,7 @@ import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from
 import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
+import { TurnSourceChips } from "@/components/turn-sources";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 
@@ -242,7 +243,8 @@ function AssistantMessage({
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
 }) {
-  const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
+  const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 ||
+    Boolean(message.diff) || Boolean(message.sources?.length) || Boolean(message.toolResults?.length);
   const hasExecution = message.activity.length > 0 || message.plan.length > 0;
 
   return (
@@ -259,6 +261,8 @@ function AssistantMessage({
           {message.status === "streaming" ? <span className="stream-caret ml-0.5 inline-block h-4 w-[2px] bg-[var(--brain-accent)] align-middle" /> : null}
         </div>
       ) : null}
+
+      <TurnSourceChips sources={message.sources ?? []} />
 
       {message.status === "error" ? (
         <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[11px] text-[var(--danger)]" role="alert">
@@ -286,7 +290,7 @@ function AssistantMessage({
       {hasDetails && canInspect ? (
         <button className="mt-2 flex min-h-9 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text-muted)] transition hover:text-[var(--text)]" onClick={onInspect}>
           <List size={12} />
-          Revisar cambios
+          Revisar resultados
         </button>
       ) : null}
     </article>

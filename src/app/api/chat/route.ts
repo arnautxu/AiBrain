@@ -150,6 +150,8 @@ function message(
     diff: "",
     attachments: [],
     artifacts: [],
+    sources: [],
+    toolResults: [],
   };
 }
 
@@ -389,6 +391,15 @@ export async function POST(request: Request) {
     "streaming",
     new Date(startedAt.getTime() + 1).toISOString(),
   );
+  assistantMessage.sources = userMessage.attachments.map((attachment) => ({
+    id: `source-file-${attachment.id}`,
+    kind: "file",
+    title: attachment.name.replace(/\p{C}+/gu, " ").trim() || "Archivo adjunto",
+    url: null,
+    domain: null,
+    snippet: null,
+    publishedAt: null,
+  }));
   let turnOutcome: "created" | "existing" = "created";
   if (persistent) {
     try {

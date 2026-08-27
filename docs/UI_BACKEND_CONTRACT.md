@@ -406,6 +406,27 @@ Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la 
 ### 6.1 Modelo persistido
 
 ```ts
+type TurnSource = {
+  id: string;
+  kind: "web" | "file" | "app";
+  title: string;
+  url: string | null;         // solo HTTP(S) entregado por el runtime
+  domain: string | null;
+  snippet: string | null;
+  publishedAt: string | null; // ISO-8601 cuando existe en metadatos
+};
+
+type ToolResult = {
+  id: string;
+  kind: "command" | "file" | "web" | "app" | "browser";
+  title: string;
+  status: "running" | "complete" | "failed" | "stopped";
+  summary: string | null;
+  output: string | null;      // salida real acotada; nunca texto inferido del asistente
+  sourceIds: string[];
+  createdAt: string;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -418,8 +439,12 @@ type ChatMessage = {
   diff: string;
   attachments: ChatAttachment[];
   artifacts: GeneratedArtifact[];
+  sources?: TurnSource[];     // opcional solo para leer mensajes V1 previos
+  toolResults?: ToolResult[]; // opcional solo para leer mensajes V1 previos
 };
 ```
+
+Las fuentes se proyectan únicamente desde URLs o archivos presentes en los metadatos del runtime, la búsqueda web, una app/MCP o los adjuntos del turno. Un resultado sin URL no se transforma en cita. Los tool results conservan salida y estado por separado de `activity`, de modo que siguen siendo revisables tras refresh.
 
 ### 6.2 Iniciar o reanudar un turn
 
@@ -495,6 +520,8 @@ type ChatStreamEvent =
   | { type: "approval"; item: ApprovalItem }
   | { type: "diff"; value: string }
   | { type: "artifact"; item: GeneratedArtifact }
+  | { type: "source"; item: TurnSource }
+  | { type: "toolResult"; item: ToolResult }
   | { type: "done" }
   | { type: "stopped" }
   | { type: "error"; message: string };
@@ -508,6 +535,7 @@ Reglas del reducer actual:
 - `plan` reemplaza `message.plan` con `steps`; `explanation` no se persiste en `ChatMessage`;
 - `diff` reemplaza el diff completo;
 - `artifact` añade el elemento;
+- `source` y `toolResult` hacen upsert por `item.id`; cada `toolResult.sourceIds` solo referencia fuentes observadas en el mismo turn;
 - `done`, `stopped`, `error` cambian el estado terminal.
 
 ### 6.4 Idempotencia, refresh y recuperación
