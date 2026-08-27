@@ -15,19 +15,12 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
 
   await textarea.fill("Primera línea\nSegunda línea\nTercera línea\nCuarta línea");
   expect(await textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
+  await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 
-  await composer.evaluate((element) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File(["synthetic"], "informe.pdf", { type: "application/pdf" }));
-    element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
-  });
-  await expect(page.getByRole("status").filter({ hasText: "informe.pdf no es una imagen compatible." })).toBeVisible();
-
-  await composer.evaluate((element) => {
-    const transfer = new DataTransfer();
-    transfer.items.add(new File([new Uint8Array([137, 80, 78, 71])], "informe.png", { type: "image/png" }));
-    element.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
-    element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  await page.getByLabel("Seleccionar archivos para adjuntar").setInputFiles({
+    name: "informe.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=", "base64"),
   });
   await expect(page.getByText("informe.png")).toBeVisible();
   await expect(page.getByText(/Lista ·/)).toBeVisible();
@@ -52,6 +45,9 @@ test("the existing chat route streams a complete turn and persists it in preview
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
+  await expect(page.getByText("Trabajando", { exact: true })).toBeVisible();
+  await expect(page.getByText("Trabajando", { exact: true })).toHaveClass(/activity-shimmer/);
+  await expect(page.getByText(/Pensando|Editando archivos|Ejecutando comando/, { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
 

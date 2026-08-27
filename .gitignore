@@ -6,6 +6,7 @@ out
 *.tsbuildinfo
 .env*
 !.env.example
+runtime/demo/
 runtime/control-plane/
 runtime/tenants/*/workspace/*
 !runtime/tenants/*/workspace/AGENTS.md
@@ -14,5 +15,3 @@ runtime/tenants/*/workspace/*
 supabase/.temp/
 .impeccable/review/
 coverage/
-playwright-report/
-test-results/

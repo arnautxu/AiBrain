@@ -2,17 +2,22 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import type { AuthMode, AuthSession, UserRole } from "@/auth/types";
+import { createLocalSessionContext } from "@/auth/auth-context";
+import {
+  clearAuthChallengeCookie,
+  clearLocalSessionCookie,
+  LOCAL_AUTH_CHALLENGE_COOKIE,
+  LOCAL_SESSION_COOKIE,
+} from "@/auth/session-cookie";
+import type { AuthMode, AuthSession } from "@/auth/types";
 import { getDemoAccount, getTenantDefinition } from "@/config/tenants";
 import { readSupabasePublicConfig } from "@/lib/supabase/config";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export const SESSION_COOKIE = "aibrain_session";
-export const ACTIVE_TENANT_COOKIE = "aibrain_tenant";
-const SESSION_SECONDS = 60 * 60 * 12;
+const DEMO_SESSION_COOKIE = "aibrain_demo_session";
+const DEMO_SESSION_SECONDS = 12 * 60 * 60;
 const DEVELOPMENT_SECRET = "aibrain-local-demo-session-key-v1";
 
-type SessionPayload = {
+type DemoSessionPayload = {
   version: 1;
   userId: string;
   tenantId: string;
@@ -58,7 +63,7 @@ export function getSigningSecret() {
   const configured = process.env.AIBRAIN_SESSION_SECRET?.trim();
   if (configured) return configured;
   if (process.env.NODE_ENV !== "production") return DEVELOPMENT_SECRET;
-  throw new Error("AIBRAIN_SESSION_SECRET és obligatori en un entorn real.");
+  throw new Error("AIBRAIN_SESSION_SECRET is required for remote demo auth.");
 }
 
 function sign(value: string) {
@@ -72,11 +77,10 @@ function signaturesMatch(received: string, expected: string) {
     timingSafeEqual(receivedBuffer, expectedBuffer);
 }
 
-function parsePayload(token: string): SessionPayload | null {
+function parseDemoPayload(token: string): DemoSessionPayload | null {
   const [encodedPayload, receivedSignature, extra] = token.split(".");
   if (!encodedPayload || !receivedSignature || extra) return null;
   if (!signaturesMatch(receivedSignature, sign(encodedPayload))) return null;
-
   try {
     const payload: unknown = JSON.parse(decode(encodedPayload));
     if (!payload || typeof payload !== "object") return null;
@@ -86,38 +90,61 @@ function parsePayload(token: string): SessionPayload | null {
     if (!("issuedAt" in payload) || typeof payload.issuedAt !== "number") return null;
     if (!("expiresAt" in payload) || typeof payload.expiresAt !== "number") return null;
     if (payload.expiresAt <= Date.now()) return null;
-    return payload as SessionPayload;
+    return payload as DemoSessionPayload;
   } catch {
     return null;
   }
 }
 
-function toSession(payload: SessionPayload): AuthSession | null {
+function demoSession(payload: DemoSessionPayload): AuthSession | null {
   const account = getDemoAccount(payload.userId);
   const tenant = getTenantDefinition(payload.tenantId);
   if (!account || !tenant || account.tenantId !== tenant.id) return null;
-
   return {
     provider: "demo",
     user: {
       id: account.id,
       name: account.name,
       email: account.email,
-      role: account.role,
     },
     tenant: { id: tenant.id, name: tenant.name },
     expiresAt: new Date(payload.expiresAt).toISOString(),
   };
 }
 
+async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
+  const { installation, sessions, users } = await createLocalSessionContext();
+  const resolved = await sessions.read(sessionId, installation.installationId);
+  if (!resolved) return null;
+  const user = await users.read(resolved.record.userId);
+  if (!user || !user.enabled) {
+    await sessions.revokeUser(installation.installationId, resolved.record.userId);
+    return null;
+  }
+  return {
+    provider: "local",
+    user: {
+      id: user.userId,
+      name: user.displayName,
+      email: user.email,
+    },
+    tenant: {
+      id: installation.installationId,
+      name: installation.companyName,
+    },
+    expiresAt: new Date(resolved.record.idleExpiresAt).toISOString(),
+  };
+}
+
 export async function getSession(): Promise<AuthSession | null> {
-  const mode = getAuthMode();
-  if (mode === "supabase") return getSupabaseSession();
-  if (mode !== "demo") return null;
-  const token = (await cookies()).get(SESSION_COOKIE)?.value;
+  const cookieStore = await cookies();
+  const localSessionId = cookieStore.get(LOCAL_SESSION_COOKIE)?.value;
+  if (localSessionId) return getLocalSession(localSessionId);
+  if (!isDemoAuthEnabled()) return null;
+  const token = cookieStore.get(DEMO_SESSION_COOKIE)?.value;
   if (!token) return null;
-  const payload = parsePayload(token);
-  return payload ? toSession(payload) : null;
+  const payload = parseDemoPayload(token);
+  return payload ? demoSession(payload) : null;
 }
 
 export async function createDemoSession(userId: string) {
@@ -125,100 +152,46 @@ export async function createDemoSession(userId: string) {
   const account = getDemoAccount(userId);
   if (!account) return null;
   const now = Date.now();
-  const payload: SessionPayload = {
+  const payload: DemoSessionPayload = {
     version: 1,
     userId: account.id,
     tenantId: account.tenantId,
     issuedAt: now,
-    expiresAt: now + SESSION_SECONDS * 1000,
+    expiresAt: now + DEMO_SESSION_SECONDS * 1000,
   };
   const encodedPayload = encode(JSON.stringify(payload));
   const token = `${encodedPayload}.${sign(encodedPayload)}`;
-  (await cookies()).set(SESSION_COOKIE, token, {
+  (await cookies()).set(DEMO_SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: SESSION_SECONDS,
+    maxAge: DEMO_SESSION_SECONDS,
     priority: "high",
   });
-  return toSession(payload);
+  return demoSession(payload);
 }
 
 export async function deleteSession() {
-  if (isSupabaseAuthEnabled()) {
-    const supabase = await createSupabaseServerClient();
-    await supabase.auth.signOut();
-  }
   const cookieStore = await cookies();
-  cookieStore.delete(SESSION_COOKIE);
-  cookieStore.delete(ACTIVE_TENANT_COOKIE);
-}
-
-function isRole(value: unknown): value is UserRole {
-  return value === "owner" || value === "member";
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? value as Record<string, unknown> : null;
-}
-
-function displayName(claims: Record<string, unknown>, email: string) {
-  const metadata = asRecord(claims.user_metadata);
-  const configured = metadata?.full_name ?? metadata?.name;
-  if (typeof configured === "string" && configured.trim()) return configured.trim();
-  return email.split("@")[0] || "Usuari";
-}
-
-function parseMembership(value: unknown) {
-  const membership = asRecord(value);
-  if (!membership || !isRole(membership.role)) return null;
-  const rawTenant = Array.isArray(membership.tenant) ? membership.tenant[0] : membership.tenant;
-  const tenant = asRecord(rawTenant);
-  if (!tenant || typeof tenant.slug !== "string" || typeof tenant.name !== "string") return null;
-  if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(tenant.slug)) return null;
-  return {
-    role: membership.role,
-    tenant: { id: tenant.slug, name: tenant.name },
-  };
-}
-
-async function getSupabaseSession(): Promise<AuthSession | null> {
-  const supabase = await createSupabaseServerClient();
-  const { data: claimsResult, error: claimsError } = await supabase.auth.getClaims();
-  const claims = asRecord(claimsResult?.claims);
-  if (claimsError || !claims || typeof claims.sub !== "string" ||
-    typeof claims.email !== "string" || typeof claims.exp !== "number") {
-    return null;
+  const localSessionId = cookieStore.get(LOCAL_SESSION_COOKIE)?.value;
+  if (localSessionId) {
+    const { sessions } = await createLocalSessionContext();
+    await sessions.delete(localSessionId);
   }
-
-  const { data, error } = await supabase
-    .from("tenant_memberships")
-    .select("role, created_at, tenant:tenants!tenant_memberships_tenant_id_fkey(id, slug, name)")
-    .eq("user_id", claims.sub)
-    .order("created_at", { ascending: true });
-
-  if (error) {
-    console.error("AiBrain membership lookup failed", { code: error.code });
-    return null;
+  await clearLocalSessionCookie();
+  const challengeId = cookieStore.get(LOCAL_AUTH_CHALLENGE_COOKIE)?.value;
+  if (challengeId) {
+    const { challenges } = await createLocalSessionContext();
+    await challenges.delete(challengeId);
+    await clearAuthChallengeCookie();
   }
-
-  const memberships = Array.isArray(data) ? data.map(parseMembership).filter(Boolean) : [];
-  if (!memberships.length) return null;
-  const preferredTenant = (await cookies()).get(ACTIVE_TENANT_COOKIE)?.value;
-  const membership = memberships.find((candidate) => candidate?.tenant.id === preferredTenant) ??
-    memberships[0];
-  if (!membership) return null;
-
-  return {
-    provider: "supabase",
-    user: {
-      id: claims.sub,
-      name: displayName(claims, claims.email),
-      email: claims.email,
-      role: membership.role,
-    },
-    tenant: membership.tenant,
-    expiresAt: new Date(claims.exp * 1000).toISOString(),
-  };
+  cookieStore.set(DEMO_SESSION_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    expires: new Date(0),
+    maxAge: 0,
+  });
 }

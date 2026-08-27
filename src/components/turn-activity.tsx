@@ -26,7 +26,7 @@ type TurnActivityProps = {
   message: ChatMessage;
   compact?: boolean;
   showDiff?: boolean;
-  onResolveApproval: (approvalId: string, decision: ApprovalDecision) => void;
+  onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
 };
 
 function ActivityIcon({ item }: { item: ActivityItem }) {
@@ -55,13 +55,13 @@ function friendlyActivity(item: ActivityItem) {
   };
   if (item.status === "running" || item.status === "waiting") {
     return {
-      command: "Ejecutando un comando",
-      file: "Preparando los cambios",
-      reasoning: "Preparando la respuesta",
-      web: "Consultando información",
-      tool: "Usando una herramienta autorizada",
-      agent: "Coordinando el trabajo",
-      plan: "Preparando los pasos",
+      command: "Ejecutando comando",
+      file: "Editando archivos",
+      reasoning: "Pensando",
+      web: "Buscando en la web",
+      tool: "Usando herramienta",
+      agent: "Coordinando agentes",
+      plan: "Preparando el plan",
       system: systemLabels[item.label] ?? item.label,
     }[item.kind];
   }
@@ -97,11 +97,13 @@ function ApprovalCard({
   const title = approval.title;
   const explanation = approval.kind === "file"
     ? "AiBrain ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
-    : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";
+    : approval.kind === "browser"
+      ? "La siguiente acción del navegador necesita tu permiso antes de continuar."
+      : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";
 
   return (
-    <div className="overflow-hidden rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface-raised)]" role="group" aria-label={`Aprobación: ${title}`}>
-      <div className="flex items-start gap-3 px-3.5 py-3">
+    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]" role="group" aria-label={`Aprobación: ${title}`}>
+      <div className="flex items-start gap-3 px-3 py-2.5">
         <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text)]">
           <ShieldCheck size={15} />
         </span>
@@ -119,12 +121,12 @@ function ApprovalCard({
       </div>
 
       {pending ? (
-        <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5">
-          <button type="button" className="min-h-10 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
+        <div className="flex flex-wrap justify-end gap-1.5 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2">
+          <button type="button" className="min-h-9 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
           {approval.kind === "command" ? (
-            <button type="button" className="min-h-10 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("acceptForSession")}>Permitir durante esta tarea</button>
+            <button type="button" className="min-h-9 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("acceptForSession")}>Durante esta tarea</button>
           ) : null}
-          <button type="button" className="min-h-10 rounded-lg bg-[var(--brain-accent-strong)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir una vez</button>
+          <button type="button" className="min-h-9 rounded-lg bg-[var(--brain-accent-strong)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir</button>
         </div>
       ) : (
         <div className="border-t border-[var(--border-subtle)] px-3.5 py-2 text-[9px] font-medium text-[var(--text)]" role="status">{result}</div>
@@ -139,8 +141,20 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
 
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
-      {message.plan.length > 0 ? (
-        <section>
+      {message.plan.length > 0 || message.activity.length > 0 ? (
+        <details
+          key={`${compact ? "panel" : "turn"}-${message.status}`}
+          className="group/execution"
+          open={compact || message.status === "streaming" ? true : undefined}
+        >
+          <summary className="flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
+            {message.status === "streaming" ? <SpinnerGap size={11} className="motion-safe:animate-spin" /> : <Check size={11} />}
+            <span className={message.status === "streaming" ? "activity-shimmer" : undefined}>{message.status === "streaming" ? "Trabajando" : "Trabajo completado"}</span>
+            <span aria-hidden className="transition group-open/execution:rotate-90">›</span>
+          </summary>
+          <div className="mt-2 space-y-3 border-l border-[var(--border-subtle)] pl-3">
+            {message.plan.length > 0 ? (
+              <section>
           <div className="mb-2 flex items-center gap-2 text-[10px] font-semibold text-[var(--text)]">
             <ListChecks size={13} />
             Plan
@@ -161,20 +175,20 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
               </li>
             ))}
           </ol>
-        </section>
-      ) : null}
+              </section>
+            ) : null}
 
-      {message.activity.length > 0 ? (
-        <section className="overflow-hidden rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)]">
-          {message.activity.map((item, index) => (
-            <div key={item.id} className={`flex items-start gap-2.5 px-3 py-2.5 ${index > 0 ? "border-t border-[var(--border-subtle)]" : ""}`}>
+            {message.activity.length > 0 ? (
+              <section className="space-y-0.5">
+          {message.activity.map((item) => (
+            <div key={item.id} className={`flex items-start gap-2.5 px-1 py-1.5 ${item.status === "running" || item.status === "waiting" ? "activity-live-row" : ""}`}>
               <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md ${
                 item.status === "failed" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--text)]"
               }`}>
                 <ActivityIcon item={item} />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-medium text-[var(--text)]">{friendlyActivity(item)}</p>
+                <p className={`text-[10px] font-medium text-[var(--text)] ${item.status === "running" || item.status === "waiting" ? "activity-shimmer" : ""}`}>{friendlyActivity(item)}</p>
                 {item.detail ? <p className="mt-0.5 text-[9px] leading-4 text-[var(--text)]">{item.detail}</p> : null}
                 {item.output ? (
                   <details className="mt-2">
@@ -185,17 +199,20 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
               </div>
             </div>
           ))}
-        </section>
+              </section>
+            ) : null}
+          </div>
+        </details>
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval.id, decision)} />
+        <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       {message.diff && showDiff ? (
-        <section className="flex items-start gap-3 rounded-[var(--brain-radius)] border border-[var(--positive)] bg-[var(--positive-soft)] px-3.5 py-3 text-[var(--text)]">
-          <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--positive)]" />
-          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-1 text-[9px] leading-4">Puedes revisar el diff desde el botón “Abrir Review”.</p></div>
+        <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
+          <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
+          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Disponibles en Review</p></div>
         </section>
       ) : null}
     </div>

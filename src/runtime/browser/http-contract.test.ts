@@ -1,0 +1,41 @@
+import { describe, expect, it } from "vitest";
+import {
+  parseBrowserControlRequest,
+  parseBrowserGatewayTokenRequest,
+  parseBrowserViewerCommand,
+} from "@/runtime/browser/http-contract";
+
+const THREAD_ID = "0198b9f0-6631-7000-8000-000000000691";
+
+describe("browser HTTP contracts", () => {
+  it("accepts only exact lifecycle and token requests", () => {
+    expect(parseBrowserControlRequest({ action: "takeover" })).toEqual({ action: "takeover" });
+    expect(parseBrowserControlRequest({ action: "takeover", userId: "foreign" })).toBeNull();
+    expect(parseBrowserGatewayTokenRequest({
+      threadId: THREAD_ID,
+      capabilities: ["control", "view"],
+      ttlMs: 30_000,
+    })).toEqual({ threadId: THREAD_ID, capabilities: ["control", "view"], ttlMs: 30_000 });
+    expect(parseBrowserGatewayTokenRequest({ threadId: THREAD_ID, capabilities: ["view", "view"] })).toBeNull();
+  });
+
+  it("normalizes navigation and bounds viewer input", () => {
+    expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "navigate", url: "https://example.test/path" }))
+      .toEqual({ threadId: THREAD_ID, action: "navigate", url: "https://example.test/path" });
+    expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "navigate", url: "file:///etc/passwd" })).toBeNull();
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left" },
+    })).toEqual({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left" },
+    });
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "key", event: "keyDown", key: "A", extra: true },
+    })).toBeNull();
+  });
+});

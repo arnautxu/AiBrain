@@ -1,12 +1,12 @@
-export function isSameOriginMutation(request: Request) {
+import { loadInstallationConfig } from "@/config/installation";
+
+export async function isSameOriginMutation(request: Request) {
+  const installation = await loadInstallationConfig();
+  const expectedOrigin = new URL(installation.publicUrl).origin;
   const origin = request.headers.get("origin");
   if (origin) {
     try {
-      const originUrl = new URL(origin);
-      const requestUrl = new URL(request.url);
-      const host = request.headers.get("host") ?? requestUrl.host;
-      const protocol = request.headers.get("x-forwarded-proto") ?? requestUrl.protocol.replace(":", "");
-      return originUrl.host === host && originUrl.protocol === `${protocol}:`;
+      return new URL(origin).origin === expectedOrigin;
     } catch {
       return false;
     }
@@ -15,5 +15,5 @@ export function isSameOriginMutation(request: Request) {
   const fetchSite = request.headers.get("sec-fetch-site");
   if (fetchSite) return fetchSite === "same-origin";
 
-  return process.env.NODE_ENV !== "production";
+  return process.env.NODE_ENV !== "production" && new URL(request.url).origin === expectedOrigin;
 }

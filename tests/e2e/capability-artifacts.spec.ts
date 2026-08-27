@@ -55,11 +55,12 @@ test("document preview, publication state and isolated browser viewer consume ar
 
   await expect(page.getByRole("heading", { name: "Archivos preparados" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "informe-sintetico.pdf" })).toHaveCount(1);
+  await page.getByText("Vista previa ›", { exact: true }).click();
   await expect(page.getByRole("img", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
   await expect(page.getByText("Pendiente de confirmación segura")).toBeVisible();
   await expect(page.getByRole("img", { name: "Un diagrama sintético sin datos privados" })).toBeVisible();
-  await expect(page.getByTitle("Sesión de navegador: Comprobación web sintética")).toBeVisible();
-  await expect(page.frameLocator('iframe[title="Sesión de navegador: Comprobación web sintética"]').getByText("Comprobación web")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Abrir", exact: true })).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+  await expect(page.locator("iframe")).toHaveCount(0);
   await expect(page.getByText("Control del agente")).toBeVisible();
   await expect(page.getByRole("link", { name: "Descargar resultado" })).toBeVisible();
   await page.getByRole("button", { name: "Cerrar sesión" }).click();

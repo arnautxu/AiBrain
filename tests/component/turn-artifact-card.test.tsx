@@ -30,7 +30,8 @@ describe("TurnArtifactCard", () => {
     expect(screen.getByRole("heading", { name: "informe.pdf" })).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Vista previa de informe.pdf" })).toBeInTheDocument();
     expect(screen.getByText("Pendiente de confirmación segura")).toBeInTheDocument();
-    expect(screen.getByText("Destino: Informes/informe.pdf")).toBeInTheDocument();
+    expect(screen.getByText("Informes/informe.pdf")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Descargar informe.pdf" })).toHaveAttribute("href", documentArtifact.url);
   });
 
   it("announces document conversion errors", () => {
@@ -45,7 +46,8 @@ describe("TurnArtifactCard", () => {
   ] as const)("shows %s metadata after server-side conversion", (kind, label) => {
     render(<TurnArtifactCard artifact={{ ...documentArtifact, kind, name: `informe.${kind}`, pages: 1 }} />);
     expect(screen.getByText(new RegExp(`^${label} ·`))).toBeInTheDocument();
-    expect(screen.getByText("Vista previa · Página 1 de 1")).toBeInTheDocument();
+    expect(screen.getByText("Vista previa ›")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp("1 página$"))).toBeInTheDocument();
   });
 
   it.each([
@@ -63,7 +65,7 @@ describe("TurnArtifactCard", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido publicar.");
   });
 
-  it("embeds only the supplied isolated browser viewer route", () => {
+  it("links only to the supplied isolated browser viewer route", () => {
     const browser: BrowserArtifact = {
       id: "018f5f68-4a6e-7abc-8def-0123456789af",
       type: "browser",
@@ -76,7 +78,8 @@ describe("TurnArtifactCard", () => {
       error: null,
     };
     render(<TurnArtifactCard artifact={browser} />);
-    expect(screen.getByTitle("Sesión de navegador: Comprobación web")).toHaveAttribute("sandbox", "allow-scripts allow-forms allow-pointer-lock");
+    expect(screen.getByRole("link", { name: "Abrir" })).toHaveAttribute("href", browser.viewerUrl);
+    expect(document.querySelector("iframe")).toBeNull();
     expect(screen.getByText("Tienes el control")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Descargar resultado" })).toBeInTheDocument();
   });

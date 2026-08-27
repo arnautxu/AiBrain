@@ -1,10 +1,14 @@
 .git
+.github
 .next
 node_modules
 .env*
 !.env.example
 npm-debug.log*
 runtime/control-plane
-runtime/tenants/*/workspace/*
-!runtime/tenants/*/workspace/AGENTS.md
+runtime/tenants
+coverage
+test-results
+playwright-report
 supabase/.temp
+docs/*.pdf

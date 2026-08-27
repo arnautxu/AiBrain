@@ -1,6 +1,6 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 
-const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
+const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
 const browserId = "018f5f68-4a6e-7abc-8def-0123456789af";
@@ -21,7 +21,7 @@ const approvalEvents = [
   ] },
   { type: "activity", item: { id: "matrix-command", kind: "command", label: "Comprobar datos", detail: "Lectura sintética completada", output: "status: clean", status: "complete" } },
   { type: "diff", value: "diff --git a/estado.txt b/estado.txt\n--- a/estado.txt\n+++ b/estado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
-  { type: "approval", item: { id: "matrix-approval", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
+  { type: "approval", item: { id: "018f5f68-4a6e-7abc-8def-012345678931", threadId: "018f5f68-4a6e-7abc-8def-012345678932", turnId: "018f5f68-4a6e-7abc-8def-012345678933", itemId: "018f5f68-4a6e-7abc-8def-012345678934", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
   { type: "delta", value: "## Resultado preparado\n\nEl turno sintético está listo para revisión." },
   { type: "done" },
 ];
@@ -145,7 +145,13 @@ for (const viewport of viewports) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await screenshot(page, "login-dark", viewport);
 
-    await page.getByRole("button", { name: new RegExp(accountName) }).click();
+    const origin = new URL(page.url()).origin;
+    const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
+      data: { userId: demoUserId },
+      headers: { Origin: origin },
+    });
+    expect(loginResponse.ok()).toBe(true);
+    await page.goto("/");
     await expect(page.getByTestId("composer")).toBeVisible();
     await screenshot(page, "shell-dark", viewport);
 
@@ -186,6 +192,7 @@ for (const viewport of viewports) {
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
     const document = page.getByRole("heading", { name: "informe-sintetico.pdf" });
     await expect(document).toBeVisible();
+    await page.getByText("Vista previa ›", { exact: true }).click();
     const preview = page.getByRole("img", { name: "Vista previa de informe-sintetico.pdf" });
     await expect(preview).toBeVisible();
     await preview.evaluate((element) => element instanceof HTMLImageElement ? element.decode() : Promise.resolve());
@@ -201,11 +208,12 @@ for (const viewport of viewports) {
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
     const browserHeading = page.getByRole("heading", { name: "Sesión preparada" });
     await expect(browserHeading).toBeVisible();
-    const viewer = page.getByTitle("Sesión de navegador: Comprobación web sintética");
+    const viewer = page.getByRole("link", { name: "Abrir", exact: true });
     await expect(viewer).toBeVisible();
     await centerArtifactInWorkbench(page, browserHeading);
     await expect(viewer).toBeInViewport();
-    await expect(page.frameLocator('iframe[title="Sesión de navegador: Comprobación web sintética"]').getByText("Comprobación web")).toBeVisible();
+    await expect(viewer).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+    await expect(page.locator("iframe")).toHaveCount(0);
     await screenshot(page, "browser-light", viewport);
   });
 }

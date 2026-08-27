@@ -22,8 +22,8 @@ test("plan, command, diff, Review and approval decisions consume the typed turn 
       ] },
       { type: "activity", item: { id: "command-qa", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
       { type: "diff", value: "diff --git a/resultado.txt b/resultado.txt\n--- a/resultado.txt\n+++ b/resultado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
-      { type: "approval", item: { id: "approval-command", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
-      { type: "approval", item: { id: "approval-file", kind: "file", title: "Aplicar cambio preparado", detail: "Modifica únicamente resultado.txt.", status: "pending" } },
+      { type: "approval", item: { id: "approval-command", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-command-qa", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
+      { type: "approval", item: { id: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", kind: "file", title: "Aplicar cambio preparado", detail: "Modifica únicamente resultado.txt.", status: "pending" } },
       { type: "delta", value: "## Resultado de la prueba\n\nEl turno está listo para revisión." },
       { type: "done" },
     ];
@@ -37,21 +37,24 @@ test("plan, command, diff, Review and approval decisions consume the typed turn 
   await login(page);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Ejecuta el turno sintético de Review.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
-  await expect(page.getByRole("heading", { name: "Resultado de la prueba" })).toBeVisible();
-  await expect(page.getByText("Plan")).toBeVisible();
+  const resultHeading = page.getByRole("heading", { name: "Resultado de la prueba" });
+  await expect(resultHeading).toBeVisible();
+  const assistantTurn = resultHeading.locator("xpath=ancestor::article");
+  await page.locator("summary").filter({ hasText: "Trabajo completado" }).click();
+  await expect(assistantTurn.getByText("Plan", { exact: true })).toBeVisible();
   await expect(page.getByText("Comando completado")).toBeVisible();
   await expect(page.getByText("Lectura sintética terminada")).toBeVisible();
   await expect(page.getByText("Cambios preparados")).toBeVisible();
 
   const commandApproval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
-  await commandApproval.getByRole("button", { name: "Permitir una vez" }).click();
+  await commandApproval.getByRole("button", { name: "Permitir", exact: true }).click();
   await expect(commandApproval.getByText("Permitido una vez")).toBeVisible();
   const fileApproval = page.getByRole("group", { name: "Aprobación: Aplicar cambio preparado" });
   await fileApproval.getByRole("button", { name: "Rechazar" }).click();
   await expect(fileApproval.getByText("Acción rechazada")).toBeVisible();
   expect(decisions).toEqual([
-    { approvalId: "approval-command", decision: "accept" },
-    { approvalId: "approval-file", decision: "decline" },
+    { approvalId: "approval-command", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-command-qa", decision: "accept" },
+    { approvalId: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", decision: "decline" },
   ]);
 
   await page.getByLabel("Abrir Review", { exact: true }).click();

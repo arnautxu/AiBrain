@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { AuthSession } from "@/auth/types";
-import { getAuthMode, isVercelPreviewDemoEnabled } from "@/auth/session";
+import { isVercelPreviewDemoEnabled } from "@/auth/session";
 import type { ChatMessage } from "@/lib/chat-contract";
 import {
   assertWorkbenchId,
@@ -18,44 +18,74 @@ import {
 } from "@/workbench/demo-store";
 import { WorkbenchPersistenceError } from "@/workbench/errors";
 import {
-  beginSupabaseThreadTurn,
-  createSupabaseProject,
-  createSupabaseThread,
-  finishSupabaseThreadTurn,
-  getSupabaseProjectRuntimeContext,
-  getSupabaseThreadRuntimeContext,
-  loadSupabaseWorkbench,
-  updateSupabaseProject,
-  updateSupabaseThread,
-  updateSupabaseMessageActivity,
-} from "@/workbench/supabase-store";
+  assertFilesystemWorkbenchId,
+  FileWorkbenchStore,
+} from "@/workbench/filesystem-store";
+import { loadInstallationConfig } from "@/config/installation";
 import type {
   UpdateProjectInput,
   UpdateThreadInput,
+  WorkbenchListQuery,
 } from "@/workbench/types";
 
-function mode() {
-  const authMode = getAuthMode();
-  if (authMode === "unavailable") {
-    throw new WorkbenchPersistenceError("La persistència del workbench no està disponible.");
+function mode(session: AuthSession): "filesystem" | "demo" {
+  if (session?.provider === "local") return "filesystem";
+  if (session?.provider === "demo") return "demo";
+  throw new WorkbenchPersistenceError("La sessió no té un adapter de producte autoritzat.");
+}
+
+async function filesystemStore(session: AuthSession) {
+  if (session.provider !== "local") {
+    throw new WorkbenchPersistenceError("La sessió no pertany al workbench local.");
   }
-  return authMode;
+  const installation = await loadInstallationConfig();
+  if (session.tenant.id !== installation.installationId) {
+    throw new WorkbenchPersistenceError("La sessió no pertany a aquesta instal·lació.");
+  }
+  return FileWorkbenchStore.fromInstallation(installation);
 }
 
 export function isBrowserPreviewWorkbench() {
-  return mode() === "demo" && isVercelPreviewDemoEnabled();
+  return isVercelPreviewDemoEnabled();
 }
 
 export async function loadWorkbench(session: AuthSession) {
-  if (mode() === "supabase") return loadSupabaseWorkbench(session);
+  if (mode(session) === "filesystem") {
+    return (await filesystemStore(session)).load(session.user.id);
+  }
   return loadDemoWorkbench(
     session,
     isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
   );
 }
 
+export async function listProjects(session: AuthSession, query: WorkbenchListQuery) {
+  return (await filesystemStore(session)).listProjects(session.user.id, query);
+}
+
+export async function getProject(session: AuthSession, projectId: string) {
+  assertFilesystemWorkbenchId(projectId);
+  return (await filesystemStore(session)).getProject(session.user.id, projectId);
+}
+
+export async function listThreads(
+  session: AuthSession,
+  projectId: string | null,
+  query: WorkbenchListQuery,
+) {
+  if (projectId !== null) assertFilesystemWorkbenchId(projectId);
+  return (await filesystemStore(session)).listThreads(session.user.id, projectId, query);
+}
+
+export async function getThread(session: AuthSession, threadId: string) {
+  assertFilesystemWorkbenchId(threadId);
+  return (await filesystemStore(session)).getThread(session.user.id, threadId);
+}
+
 export async function createProject(session: AuthSession, name: string) {
-  if (mode() === "supabase") return createSupabaseProject(session, name);
+  if (mode(session) === "filesystem") {
+    return (await filesystemStore(session)).createProject(session.user.id, name);
+  }
   return createDemoProject(session, name);
 }
 
@@ -64,8 +94,11 @@ export async function updateProject(
   projectId: string,
   patch: UpdateProjectInput,
 ) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(projectId);
+    return (await filesystemStore(session)).updateProject(session.user.id, projectId, patch);
+  }
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return updateSupabaseProject(session, projectId, patch);
   return updateDemoProject(session, projectId, patch);
 }
 
@@ -74,8 +107,11 @@ export async function createThread(
   projectId: string,
   title: string,
 ) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(projectId);
+    return (await filesystemStore(session)).createThread(session.user.id, projectId, title);
+  }
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return createSupabaseThread(session, projectId, title);
   return createDemoThread(session, projectId, title);
 }
 
@@ -84,20 +120,29 @@ export async function updateThread(
   threadId: string,
   patch: UpdateThreadInput,
 ) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).updateThread(session.user.id, threadId, patch);
+  }
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") return updateSupabaseThread(session, threadId, patch);
   return updateDemoThread(session, threadId, patch);
 }
 
 export async function getProjectRuntimeContext(session: AuthSession, projectId: string) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(projectId);
+    return (await filesystemStore(session)).getProjectRuntimeContext(session.user.id, projectId);
+  }
   assertWorkbenchId(projectId);
-  if (mode() === "supabase") return getSupabaseProjectRuntimeContext(session, projectId);
   return getDemoProjectRuntimeContext(session, projectId);
 }
 
 export async function getThreadRuntimeContext(session: AuthSession, threadId: string) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).getThreadRuntimeContext(session.user.id, threadId);
+  }
   assertWorkbenchId(threadId);
-  if (mode() === "supabase") return getSupabaseThreadRuntimeContext(session, threadId);
   return getDemoThreadRuntimeContext(session, threadId);
 }
 
@@ -107,10 +152,16 @@ export async function beginThreadTurn(
   userMessage: ChatMessage,
   assistantMessage: ChatMessage,
 ) {
-  assertWorkbenchId(threadId);
-  if (mode() === "supabase") {
-    return beginSupabaseThreadTurn(session, threadId, userMessage, assistantMessage);
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).beginThreadTurn(
+      session.user.id,
+      threadId,
+      userMessage,
+      assistantMessage,
+    );
   }
+  assertWorkbenchId(threadId);
   return beginDemoThreadTurn(session, threadId, userMessage, assistantMessage);
 }
 
@@ -120,15 +171,16 @@ export async function finishThreadTurn(
   assistantMessage: ChatMessage,
   runtimeThreadToken: string | null,
 ) {
-  assertWorkbenchId(threadId);
-  if (mode() === "supabase") {
-    return finishSupabaseThreadTurn(
-      session,
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).finishThreadTurn(
+      session.user.id,
       threadId,
       assistantMessage,
       runtimeThreadToken,
     );
   }
+  assertWorkbenchId(threadId);
   return finishDemoThreadTurn(
     session,
     threadId,
@@ -143,10 +195,17 @@ export async function updateMessageActivity(
   messageId: string,
   item: ChatMessage["activity"][number],
 ) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    assertFilesystemWorkbenchId(messageId);
+    return (await filesystemStore(session)).updateMessageActivity(
+      session.user.id,
+      threadId,
+      messageId,
+      item,
+    );
+  }
   assertWorkbenchId(threadId);
   assertWorkbenchId(messageId);
-  if (mode() === "supabase") {
-    return updateSupabaseMessageActivity(session, threadId, messageId, item);
-  }
   return updateDemoMessageActivity(session, threadId, messageId, item);
 }

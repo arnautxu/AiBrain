@@ -1,6 +1,5 @@
-export type UserRole = "owner" | "member";
-export type AuthProvider = "demo" | "supabase";
-export type AuthMode = AuthProvider | "unavailable";
+export type AuthProvider = "demo" | "local";
+export type AuthMode = "demo" | "supabase" | "unavailable";
 
 export type AuthSession = {
   provider: AuthProvider;
@@ -8,7 +7,6 @@ export type AuthSession = {
     id: string;
     name: string;
     email: string;
-    role: UserRole;
   };
   tenant: {
     id: string;
@@ -21,7 +19,6 @@ export type DemoAccount = {
   id: string;
   name: string;
   email: string;
-  role: UserRole;
   tenantId: string;
   tenantName: string;
   productName: string;

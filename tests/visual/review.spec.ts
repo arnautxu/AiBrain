@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
+const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 const events = [
   { type: "plan", explanation: "Fixture visual", steps: [
     { step: "Inspeccionar el proyecto", status: "completed" },
@@ -8,7 +8,7 @@ const events = [
   ] },
   { type: "activity", item: { id: "command-visual", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
   { type: "diff", value: "diff --git a/resultado.txt b/resultado.txt\n--- a/resultado.txt\n+++ b/resultado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
-  { type: "approval", item: { id: "approval-visual", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
+  { type: "approval", item: { id: "018f5f68-4a6e-7abc-8def-012345678921", threadId: "018f5f68-4a6e-7abc-8def-012345678922", turnId: "018f5f68-4a6e-7abc-8def-012345678923", itemId: "018f5f68-4a6e-7abc-8def-012345678924", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
   { type: "delta", value: "## Resultado preparado\n\nEl turno sintético está listo para revisión." },
   { type: "done" },
 ];
@@ -20,7 +20,13 @@ async function openSyntheticTurn(page: Page) {
     body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
   }));
   await page.goto("/login");
-  await page.getByRole("button", { name: new RegExp(accountName) }).click();
+  const origin = new URL(page.url()).origin;
+  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
+    data: { userId: demoUserId },
+    headers: { Origin: origin },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  await page.goto("/");
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Ejecuta una comprobación sintética.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("heading", { name: "Resultado preparado" })).toBeVisible();

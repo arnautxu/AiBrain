@@ -5,18 +5,20 @@ import {
   getSession,
   isVercelPreviewDemoEnabled,
 } from "@/auth/session";
+import { loadInstallationConfig } from "@/config/installation";
+import { publicInstallationBranding } from "@/config/installation-branding";
 import { listDemoAccounts } from "@/config/tenants";
-import { resolveUiInstallationBranding } from "@/ui/installation-branding";
 
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage() {
   if (await getSession()) redirect("/");
-  const branding = resolveUiInstallationBranding();
+  const installation = await loadInstallationConfig();
+
   return (
     <LoginForm
-      accounts={listDemoAccounts().filter((account) => account.productName === branding.productName)}
-      branding={branding}
+      accounts={listDemoAccounts()}
+      branding={publicInstallationBranding(installation)}
       mode={getAuthMode()}
       remotePreview={isVercelPreviewDemoEnabled()}
     />

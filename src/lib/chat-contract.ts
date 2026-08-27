@@ -97,15 +97,20 @@ export type TurnOptions = {
   imageGeneration: boolean;
   skill: string | null;
   attachments: ChatInputAttachment[];
+  documentUploadIds?: string[];
 };
 
 export type ApprovalItem = {
   id: string;
-  kind: "command" | "file";
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  kind: "command" | "file" | "browser";
   title: string;
   detail: string;
   command?: string;
   cwd?: string;
+  permissionFingerprint?: string;
   status: "pending" | "accepted" | "accepted_session" | "declined";
 };
 
@@ -140,10 +145,31 @@ export type ChatRequest = {
 
 export type ApprovalResolutionRequest = {
   approvalId: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
   decision: ApprovalDecision;
 };
 
+export type TurnControlRequest =
+  | {
+      action: "stop";
+      threadId: string;
+      assistantMessageId: string;
+      clientRequestId: string;
+    }
+  | {
+      action: "steer";
+      threadId: string;
+      assistantMessageId: string;
+      clientRequestId: string;
+      userMessageId: string;
+      message: string;
+    };
+
 export type ChatStreamEvent =
+  | { type: "snapshot"; message: ChatMessage }
+  | { type: "content"; value: string }
   | { type: "activity"; item: ActivityItem }
   | { type: "plan"; explanation: string | null; steps: PlanStep[] }
   | { type: "approval"; item: ApprovalItem }
@@ -151,6 +177,7 @@ export type ChatStreamEvent =
   | { type: "delta"; value: string }
   | { type: "artifact"; item: GeneratedArtifact }
   | { type: "done" }
+  | { type: "stopped" }
   | { type: "error"; message: string };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -159,6 +186,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hasOptionalString(value: Record<string, unknown>, key: string) {
   return !(key in value) || value[key] === undefined || typeof value[key] === "string";
+}
+
+function isOpaqueRuntimeId(value: unknown) {
+  return typeof value === "string" &&
+    /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/.test(value);
+}
+
+function isUuidString(value: unknown) {
+  return typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -170,24 +207,48 @@ export function isChatAttachment(value: unknown): value is ChatAttachment {
     value.name.trim().length > 0 &&
     value.name.length <= 120 &&
     typeof value.mimeType === "string" &&
-    /^image\/(png|jpeg|webp|gif)$/.test(value.mimeType) &&
+    /^(?:image\/(?:png|jpeg|webp|gif)|application\/(?:pdf|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(?:plain|markdown|csv)|application\/json)$/.test(value.mimeType) &&
     typeof value.size === "number" &&
     Number.isSafeInteger(value.size) &&
     value.size > 0 &&
-    value.size <= 2_000_000
+    value.size <= 50 * 1024 * 1024
   );
 }
 
 export function isChatInputAttachment(value: unknown): value is ChatInputAttachment {
   if (!isRecord(value) || !isChatAttachment(value)) return false;
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(value.mimeType) || value.size > 2_000_000) return false;
   const dataUrl = (value as Record<string, unknown>).dataUrl;
-  return typeof dataUrl === "string" &&
-    dataUrl.startsWith(`data:${value.mimeType};base64,`) &&
-    dataUrl.length <= 2_700_000;
+  if (typeof dataUrl !== "string" || !dataUrl.startsWith(`data:${value.mimeType};base64,`) ||
+      dataUrl.length > 2_700_000) return false;
+  const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)) return false;
+  let binary: string;
+  try {
+    binary = atob(encoded);
+  } catch {
+    return false;
+  }
+  if (binary.length !== value.size) return false;
+  const byte = (index: number) => binary.charCodeAt(index);
+  if (value.mimeType === "image/png") {
+    return [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      .every((expected, index) => byte(index) === expected);
+  }
+  if (value.mimeType === "image/jpeg") return byte(0) === 0xff && byte(1) === 0xd8 && byte(binary.length - 2) === 0xff && byte(binary.length - 1) === 0xd9;
+  if (value.mimeType === "image/gif") return binary.startsWith("GIF87a") || binary.startsWith("GIF89a");
+  return binary.startsWith("RIFF") && binary.slice(8, 12) === "WEBP";
 }
 
 export function isTurnOptions(value: unknown): value is TurnOptions {
   if (!isRecord(value)) return false;
+  const documentUploadIds = value.documentUploadIds;
+  const validDocumentUploadIds = documentUploadIds === undefined || (
+    Array.isArray(documentUploadIds) && documentUploadIds.length <= 10 &&
+    documentUploadIds.every((uploadId) => typeof uploadId === "string" &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uploadId)) &&
+    new Set(documentUploadIds).size === documentUploadIds.length
+  );
   return (
     (value.mode === "agent" || value.mode === "plan" || value.mode === "ask") &&
     (value.model === null || (typeof value.model === "string" && value.model.length <= 100)) &&
@@ -200,7 +261,8 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
     Array.isArray(value.attachments) &&
     value.attachments.length <= 3 &&
     value.attachments.every(isChatInputAttachment) &&
-    value.attachments.reduce((total, attachment) => total + attachment.size, 0) <= 5_000_000
+    value.attachments.reduce((total, attachment) => total + attachment.size, 0) <= 5_000_000 &&
+    validDocumentUploadIds
   );
 }
 
@@ -273,11 +335,17 @@ export function isApprovalItem(value: unknown): value is ApprovalItem {
   if (!isRecord(value)) return false;
   return (
     typeof value.id === "string" &&
-    (value.kind === "command" || value.kind === "file") &&
+    isOpaqueRuntimeId(value.id) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
+    (value.kind === "command" || value.kind === "file" || value.kind === "browser") &&
     typeof value.title === "string" &&
     typeof value.detail === "string" &&
     hasOptionalString(value, "command") &&
     hasOptionalString(value, "cwd") &&
+    (!("permissionFingerprint" in value) || value.permissionFingerprint === undefined ||
+      (typeof value.permissionFingerprint === "string" && /^[0-9a-f]{64}$/u.test(value.permissionFingerprint))) &&
     (value.status === "pending" ||
       value.status === "accepted" ||
       value.status === "accepted_session" ||
@@ -290,18 +358,43 @@ export function isApprovalResolutionRequest(
 ): value is ApprovalResolutionRequest {
   if (!isRecord(value)) return false;
   return (
-    typeof value.approvalId === "string" &&
+    isOpaqueRuntimeId(value.approvalId) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
     (value.decision === "accept" ||
       value.decision === "acceptForSession" ||
       value.decision === "decline")
   );
 }
 
+export function isTurnControlRequest(value: unknown): value is TurnControlRequest {
+  if (!isRecord(value)) return false;
+  const common =
+    isUuidString(value.threadId) &&
+    isUuidString(value.assistantMessageId) &&
+    isUuidString(value.clientRequestId);
+  if (!common) return false;
+  if (value.action === "stop") {
+    return Object.keys(value).length === 4;
+  }
+  if (value.action === "steer") {
+    return Object.keys(value).length === 6 &&
+      isUuidString(value.userMessageId) &&
+      typeof value.message === "string" &&
+      value.message.trim().length > 0 &&
+      value.message.length <= 32_000 &&
+      !value.message.includes("\0");
+  }
+  return false;
+}
+
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
-  if (value.type === "done") return true;
-  if (value.type === "delta" || value.type === "diff") {
+  if (value.type === "done" || value.type === "stopped") return true;
+  if (value.type === "snapshot") return isChatMessage(value.message);
+  if (value.type === "delta" || value.type === "diff" || value.type === "content") {
     return typeof value.value === "string";
   }
   if (value.type === "error") return typeof value.message === "string";
@@ -342,6 +435,8 @@ export function isChatMessage(message: unknown): message is ChatMessage {
 }
 
 export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEvent): ChatMessage {
+  if (event.type === "snapshot") return event.message;
+  if (event.type === "content") return { ...message, content: event.value };
   if (event.type === "delta") return { ...message, content: message.content + event.value };
   if (event.type === "activity") {
     const index = message.activity.findIndex((item) => item.id === event.item.id);
@@ -367,6 +462,7 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
     return { ...message, artifacts };
   }
   if (event.type === "done") return { ...message, status: "complete" };
+  if (event.type === "stopped") return { ...message, status: "stopped" };
   if (event.type === "error") {
     return { ...message, status: "error", content: message.content || event.message };
   }

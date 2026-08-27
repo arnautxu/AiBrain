@@ -12,28 +12,42 @@ const attachment = {
   id: "018f5f68-4a6e-7abc-8def-0123456789ab",
   name: "synthetic.png",
   mimeType: "image/png",
-  size: 128,
+  size: 8,
 };
+
+const pngSignature = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function pngDataUrl(size: number) {
+  const bytes = new Uint8Array(size);
+  bytes.set(pngSignature);
+  return `data:image/png;base64,${Buffer.from(bytes).toString("base64")}`;
+}
 
 describe("chat contract", () => {
   it("accepts the bounded synthetic image attachment", () => {
     expect(isChatAttachment(attachment)).toBe(true);
     expect(isChatInputAttachment({
       ...attachment,
-      dataUrl: "data:image/png;base64,c3ludGhldGlj",
+      dataUrl: pngDataUrl(attachment.size),
     })).toBe(true);
   });
 
-  it("rejects files outside the current image-only boundary", () => {
-    expect(isChatAttachment({ ...attachment, mimeType: "application/pdf" })).toBe(false);
-    expect(isChatAttachment({ ...attachment, size: 2_000_001 })).toBe(false);
+  it("keeps persisted document metadata outside the inline image-input boundary", () => {
+    const document = { ...attachment, mimeType: "application/pdf" };
+    expect(isChatAttachment(document)).toBe(true);
+    expect(isChatInputAttachment({
+      ...document,
+      dataUrl: "data:application/pdf;base64,JVBERg==",
+    })).toBe(false);
+    expect(isChatAttachment({ ...attachment, size: (50 * 1024 * 1024) + 1 })).toBe(false);
   });
 
   it("rejects aggregate attachment payloads above the server limit", () => {
+    const size = 1_700_000;
     const large = {
       ...attachment,
-      size: 1_800_000,
-      dataUrl: "data:image/png;base64,c3ludGhldGlj",
+      size,
+      dataUrl: pngDataUrl(size),
     };
     expect(isTurnOptions({
       mode: "agent",
@@ -74,7 +88,12 @@ describe("chat contract", () => {
       downloadUrl: null,
       error: null,
     })).toBe(true);
-    expect(isChatAttachment({ ...attachment, mimeType: "application/pdf" })).toBe(false);
+    expect(isChatAttachment({ ...attachment, mimeType: "application/pdf" })).toBe(true);
+    expect(isChatInputAttachment({
+      ...attachment,
+      mimeType: "application/pdf",
+      dataUrl: "data:application/pdf;base64,JVBERg==",
+    })).toBe(false);
   });
 
   it("updates an artifact by id instead of duplicating a status transition", () => {

@@ -1,0 +1,431 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://graphikai.com/aibrain/contracts/v1/ui-backend.schema.json",
+  "title": "AiBrain UI/backend contract v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {},
+  "$defs": {
+    "JsonObject": { "type": "object" },
+    "Uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "IsoDate": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$"
+    },
+    "ErrorResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["error"],
+      "properties": {
+        "error": { "type": "string", "minLength": 1 },
+        "code": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" },
+        "retryAfterMs": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "AuthSession": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "user", "tenant", "expiresAt"],
+      "properties": {
+        "provider": { "enum": ["demo", "local"] },
+        "user": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name", "email"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 },
+            "email": { "type": "string", "minLength": 3 }
+          }
+        },
+        "tenant": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "name"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "name": { "type": "string", "minLength": 1 }
+          }
+        },
+        "expiresAt": { "$ref": "#/$defs/IsoDate" }
+      }
+    },
+    "AuthSessionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session"],
+      "properties": { "session": { "$ref": "#/$defs/AuthSession" } }
+    },
+    "PublicInstallationBranding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["installationId", "companyName", "companySlug", "publicUrl", "productName", "logoPath", "faviconPath", "accentColor"],
+      "properties": {
+        "installationId": { "type": "string", "minLength": 1 },
+        "companyName": { "type": "string", "minLength": 1 },
+        "companySlug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "publicUrl": { "type": "string", "pattern": "^https?://" },
+        "productName": { "type": "string", "minLength": 1 },
+        "logoPath": { "type": "string", "pattern": "^/" },
+        "faviconPath": { "type": "string", "pattern": "^/" },
+        "accentColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
+      }
+    },
+    "ActivityItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "label", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["system", "reasoning", "plan", "command", "file", "tool", "web", "agent"] },
+        "label": { "type": "string" },
+        "detail": { "type": "string" },
+        "output": { "type": "string" },
+        "status": { "enum": ["pending", "running", "waiting", "complete", "failed", "stopped"] }
+      }
+    },
+    "PlanStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["step", "status"],
+      "properties": {
+        "step": { "type": "string" },
+        "status": { "enum": ["pending", "in_progress", "completed"] }
+      }
+    },
+    "ApprovalItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "threadId", "turnId", "itemId", "kind", "title", "detail", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "threadId": { "type": "string", "minLength": 1 },
+        "turnId": { "type": "string", "minLength": 1 },
+        "itemId": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["command", "file", "browser"] },
+        "title": { "type": "string" },
+        "detail": { "type": "string" },
+        "command": { "type": "string" },
+        "cwd": { "type": "string" },
+        "permissionFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "status": { "enum": ["pending", "accepted", "accepted_session", "declined"] }
+      }
+    },
+    "ChatAttachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "mimeType", "size"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "mimeType": { "type": "string", "minLength": 1 },
+        "size": { "type": "integer", "minimum": 1, "maximum": 52428800 }
+      }
+    },
+    "GeneratedArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "name", "url", "prompt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "type": { "const": "image" },
+        "name": { "type": "string", "maxLength": 120 },
+        "url": { "type": "string", "pattern": "^/api/projects/" },
+        "prompt": { "type": ["string", "null"] }
+      }
+    },
+    "ChatMessage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "role", "content", "createdAt", "status", "activity", "plan", "approvals", "diff", "attachments", "artifacts"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "role": { "enum": ["user", "assistant"] },
+        "content": { "type": "string" },
+        "createdAt": { "$ref": "#/$defs/IsoDate" },
+        "status": { "enum": ["complete", "streaming", "error", "stopped"] },
+        "activity": { "type": "array", "items": { "$ref": "#/$defs/ActivityItem" } },
+        "plan": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } },
+        "approvals": { "type": "array", "items": { "$ref": "#/$defs/ApprovalItem" } },
+        "diff": { "type": "string" },
+        "attachments": { "type": "array", "items": { "$ref": "#/$defs/ChatAttachment" } },
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/GeneratedArtifact" } }
+      }
+    },
+    "WorkbenchWorkspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "hostType", "status", "isPrimary"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "hostType": { "const": "managed" },
+        "status": { "enum": ["ready", "pending", "unavailable"] },
+        "isPrimary": { "type": "boolean" }
+      }
+    },
+    "WorkbenchProject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "slug", "status", "pinned", "workspace", "createdAt", "updatedAt"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "status": { "enum": ["active", "archived"] },
+        "pinned": { "type": "boolean" },
+        "workspace": { "$ref": "#/$defs/WorkbenchWorkspace" },
+        "createdAt": { "$ref": "#/$defs/IsoDate" },
+        "updatedAt": { "$ref": "#/$defs/IsoDate" }
+      }
+    },
+    "WorkbenchThread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "projectId", "title", "status", "pinned", "createdAt", "updatedAt", "messages"],
+      "properties": {
+        "id": { "$ref": "#/$defs/Uuid" },
+        "projectId": { "$ref": "#/$defs/Uuid" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "status": { "enum": ["active", "archived"] },
+        "pinned": { "type": "boolean" },
+        "createdAt": { "$ref": "#/$defs/IsoDate" },
+        "updatedAt": { "$ref": "#/$defs/IsoDate" },
+        "messages": { "type": "array", "items": { "$ref": "#/$defs/ChatMessage" } }
+      }
+    },
+    "WorkbenchResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workbench"],
+      "properties": {
+        "workbench": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["persistence", "projects", "threads"],
+          "properties": {
+            "persistence": { "enum": ["filesystem", "filesystem-demo", "browser-preview"] },
+            "projects": { "type": "array", "items": { "$ref": "#/$defs/WorkbenchProject" } },
+            "threads": { "type": "array", "items": { "$ref": "#/$defs/WorkbenchThread" } }
+          }
+        }
+      }
+    },
+    "RuntimeStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tenantId", "projectId", "projectName", "mode", "codex", "isolated", "ready", "authMode", "planType", "processWarm", "rateLimit", "usage", "workspaceName", "model", "approvalPolicy", "sandbox", "models", "skills", "capabilities"],
+      "properties": {
+        "tenantId": { "type": "string" },
+        "projectId": { "type": ["string", "null"] },
+        "projectName": { "type": "string" },
+        "mode": { "enum": ["demo", "codex"] },
+        "codex": { "enum": ["checking", "connected", "unavailable", "disabled"] },
+        "isolated": { "type": "boolean" },
+        "ready": { "type": "boolean" },
+        "authMode": { "enum": ["chatgpt", "apiKey", "amazonBedrock", null] },
+        "planType": { "type": ["string", "null"] },
+        "processWarm": { "type": "boolean" },
+        "rateLimit": { "type": ["object", "null"] },
+        "usage": { "type": ["object", "null"] },
+        "workspaceName": { "type": "string" },
+        "model": { "type": ["string", "null"] },
+        "approvalPolicy": { "enum": ["never", "on-request"] },
+        "sandbox": { "enum": ["read-only", "workspace-write"] },
+        "models": { "type": "array", "items": { "type": "object" } },
+        "skills": { "type": "array", "items": { "type": "object" } },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["webSearch", "imageInput", "imageGeneration"],
+          "properties": {
+            "webSearch": { "type": "boolean" },
+            "imageInput": { "type": "boolean" },
+            "imageGeneration": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "ChatStreamEvent": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["type", "message"], "properties": { "type": { "const": "snapshot" }, "message": { "$ref": "#/$defs/ChatMessage" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "value"], "properties": { "type": { "enum": ["content", "diff", "delta"] }, "value": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "activity" }, "item": { "$ref": "#/$defs/ActivityItem" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "approval" }, "item": { "$ref": "#/$defs/ApprovalItem" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "item"], "properties": { "type": { "const": "artifact" }, "item": { "$ref": "#/$defs/GeneratedArtifact" } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "explanation", "steps"], "properties": { "type": { "const": "plan" }, "explanation": { "type": ["string", "null"] }, "steps": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } } } },
+        { "type": "object", "additionalProperties": false, "required": ["type"], "properties": { "type": { "enum": ["done", "stopped"] } } },
+        { "type": "object", "additionalProperties": false, "required": ["type", "message"], "properties": { "type": { "const": "error" }, "message": { "type": "string" } } }
+      ]
+    },
+    "DocumentUploadResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document", "preview"],
+      "properties": {
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "uploadId", "threadId", "fileName", "relativePath", "kind", "mediaType", "size", "sha256", "status", "createdAt"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "uploadId": { "$ref": "#/$defs/Uuid" },
+            "threadId": { "$ref": "#/$defs/Uuid" },
+            "fileName": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "relativePath": { "type": "string", "pattern": "^threads/" },
+            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "mediaType": { "type": "string", "minLength": 1, "maxLength": 180 },
+            "size": { "type": "integer", "minimum": 1, "maximum": 52428800 },
+            "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "status": { "const": "staged" },
+            "createdAt": { "$ref": "#/$defs/IsoDate" }
+          }
+        },
+        "preview": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "uploadId", "threadId", "sourceSha256", "status", "kind", "files", "artifacts", "pages", "createdAt"],
+          "properties": {
+            "schemaVersion": { "const": 2 },
+            "uploadId": { "$ref": "#/$defs/Uuid" },
+            "threadId": { "$ref": "#/$defs/Uuid" },
+            "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+            "status": { "const": "ready" },
+            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "files": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "url"],
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+                  "url": { "type": "string", "pattern": "^/api/threads/" }
+                }
+              }
+            },
+            "artifacts": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["fileName", "size", "sha256"],
+                "properties": {
+                  "fileName": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$" },
+                  "size": { "type": "integer", "minimum": 1, "maximum": 104857600 },
+                  "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                }
+              }
+            },
+            "pages": { "type": ["integer", "null"], "minimum": 1, "maximum": 500 },
+            "createdAt": { "$ref": "#/$defs/IsoDate" }
+          }
+        }
+      }
+    },
+    "PublicationOperation": {
+      "type": "object",
+      "required": ["schemaVersion", "operationId", "installationId", "userId", "threadId", "turnId", "targetRelativePath", "status", "candidate", "preview", "original", "confirmationExpiresAt", "version", "result", "createdAt", "updatedAt"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "operationId": { "$ref": "#/$defs/Uuid" },
+        "installationId": { "type": "string" },
+        "userId": { "type": "string" },
+        "threadId": { "$ref": "#/$defs/Uuid" },
+        "turnId": { "$ref": "#/$defs/Uuid" },
+        "targetRelativePath": { "type": "string" },
+        "status": { "enum": ["awaiting_confirmation", "publishing", "published", "declined", "expired", "conflict"] },
+        "candidate": { "type": "object" },
+        "preview": { "type": "object" },
+        "original": { "type": "object" },
+        "confirmationExpiresAt": { "$ref": "#/$defs/IsoDate" },
+        "version": { "type": ["object", "null"] },
+        "result": { "type": ["object", "null"] },
+        "createdAt": { "$ref": "#/$defs/IsoDate" },
+        "updatedAt": { "$ref": "#/$defs/IsoDate" }
+      }
+    },
+    "PublicationFreezeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "confirmationToken", "permissionFingerprint"],
+      "properties": {
+        "operation": { "$ref": "#/$defs/PublicationOperation" },
+        "confirmationToken": { "type": "string", "minLength": 1 },
+        "permissionFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "PublicationDecisionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "permissionFingerprint"],
+      "properties": {
+        "operation": { "$ref": "#/$defs/PublicationOperation" },
+        "permissionFingerprint": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "BrowserStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["healthy", "state", "runtime", "runningInProcess"],
+      "properties": {
+        "healthy": { "type": "boolean" },
+        "state": {
+          "type": "object",
+          "required": ["schemaVersion", "installationId", "userId", "browserSessionId", "lifecycle", "controller", "generation", "downloads", "createdAt", "updatedAt"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "installationId": { "type": "string" },
+            "userId": { "type": "string" },
+            "browserSessionId": { "type": ["string", "null"] },
+            "lifecycle": { "enum": ["stopped", "starting", "ready", "human-control", "recovering", "degraded"] },
+            "controller": { "enum": ["none", "agent", "human"] },
+            "generation": { "type": "integer", "minimum": 0 },
+            "downloads": { "type": "array" },
+            "createdAt": { "$ref": "#/$defs/IsoDate" },
+            "updatedAt": { "$ref": "#/$defs/IsoDate" }
+          }
+        },
+        "runtime": { "type": ["object", "null"] },
+        "runningInProcess": { "type": "boolean" }
+      }
+    }
+  },
+  "x-examples": [
+    {
+      "schema": "AuthSessionResponse",
+      "value": {
+        "session": {
+          "provider": "local",
+          "user": { "id": "0198b9f0-6631-7000-8000-000000000010", "name": "Example Employee", "email": "employee@example.test" },
+          "tenant": { "id": "example-lab-dev", "name": "Example Laboratory" },
+          "expiresAt": "2026-08-28T10:00:00.000Z"
+        }
+      }
+    },
+    {
+      "schema": "WorkbenchResponse",
+      "value": { "workbench": { "persistence": "filesystem", "projects": [], "threads": [] } }
+    },
+    {
+      "schema": "RuntimeStatus",
+      "value": {
+        "tenantId": "example-lab-dev", "projectId": null, "projectName": "Example Laboratory", "mode": "codex", "codex": "unavailable", "isolated": true, "ready": false, "authMode": null, "planType": null, "processWarm": false, "rateLimit": null, "usage": null, "workspaceName": "Example Laboratory / workspace", "model": null, "approvalPolicy": "on-request", "sandbox": "workspace-write", "models": [], "skills": [], "capabilities": { "webSearch": false, "imageInput": false, "imageGeneration": false }
+      }
+    },
+    { "schema": "ChatStreamEvent", "value": { "type": "delta", "value": "Validated stream chunk" } },
+    { "schema": "ErrorResponse", "value": { "error": "Servei temporalment no disponible.", "code": "DEGRADED", "retryable": true } },
+    {
+      "schema": "PublicInstallationBranding",
+      "value": { "installationId": "example-lab-dev", "companyName": "Example Laboratory", "companySlug": "example-laboratory", "publicUrl": "https://brain.example.test", "productName": "Example Brain", "logoPath": "/branding/example/logo.svg", "faviconPath": "/branding/example/favicon.svg", "accentColor": "#0f766e" }
+    }
+  ]
+}

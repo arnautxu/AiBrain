@@ -39,15 +39,15 @@ type DemoState = {
 const mutationQueues = new Map<string, Promise<unknown>>();
 
 function dataDirectory() {
-  const configured = process.env.CONTROL_PLANE_DATA_DIR?.trim();
+  const configured = process.env.AIBRAIN_DEMO_DATA_DIR?.trim();
   if (configured && !path.isAbsolute(configured)) {
-    throw new WorkbenchPersistenceError("CONTROL_PLANE_DATA_DIR ha de ser una ruta absoluta.");
+    throw new WorkbenchPersistenceError("AIBRAIN_DEMO_DATA_DIR ha de ser una ruta absoluta.");
   }
   if (configured) return path.join(configured, "workbench");
   if (process.env.NODE_ENV === "production") {
     throw new WorkbenchPersistenceError("La persistència demo no està configurada.");
   }
-  return path.join(process.cwd(), "runtime", "control-plane", "workbench");
+  return path.join(process.cwd(), "runtime", "demo", "workbench");
 }
 
 function statePath(tenantId: string) {
@@ -58,9 +58,9 @@ function statePath(tenantId: string) {
 }
 
 function seedNames(tenantId: string, tenantName: string) {
-  if (tenantId === "studio") return ["Trabajo interno", "Investigación"] as const;
-  if (tenantId === "operations") return ["Operaciones", "Clientes"] as const;
-  return [tenantName, "Laboratorio"] as const;
+  if (tenantId === "studio") return ["AiBrain", "Laboratori"] as const;
+  if (tenantId === "operations") return ["Operacions", "Processos"] as const;
+  return [tenantName, "Laboratori"] as const;
 }
 
 function seededProject(name: string, slug: string, workspaceKey: string): StoredProject {
@@ -307,16 +307,32 @@ export async function beginDemoThreadTurn(
   userMessage: ChatMessage,
   assistantMessage: ChatMessage,
 ) {
-  await mutateState(session, (state) => {
+  return mutateState(session, (state) => {
     const thread = state.threads.find((candidate) => candidate.id === threadId);
     if (!thread || thread.status !== "active") {
       throw new WorkbenchNotFoundError("Fil actiu no trobat.");
     }
-    if (thread.messages.some((message) => message.id === userMessage.id || message.id === assistantMessage.id)) {
-      throw new WorkbenchConflictError("Aquest torn ja existeix.");
+    const existingUserIndex = thread.messages.findIndex((message) => message.id === userMessage.id);
+    const existingAssistantIndex = thread.messages.findIndex((message) => message.id === assistantMessage.id);
+    if (existingUserIndex !== -1 || existingAssistantIndex !== -1) {
+      const existingUser = thread.messages[existingUserIndex];
+      const existingAssistant = thread.messages[existingAssistantIndex];
+      if (
+        existingUserIndex >= 0 && existingAssistantIndex === existingUserIndex + 1 &&
+        existingUser?.role === "user" && existingAssistant?.role === "assistant" &&
+        existingUser.content === userMessage.content &&
+        JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments)
+      ) {
+        return { outcome: "existing" as const, assistantMessage: existingAssistant };
+      }
+      throw new WorkbenchConflictError("Els identificadors del torn ja existeixen amb un altre contingut.");
+    }
+    if (thread.messages.some((message) => message.role === "assistant" && message.status === "streaming")) {
+      throw new WorkbenchConflictError("Aquest fil ja té un torn actiu.");
     }
     thread.messages.push(userMessage, assistantMessage);
     thread.updatedAt = new Date().toISOString();
+    return { outcome: "created" as const, assistantMessage };
   });
 }
 

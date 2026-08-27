@@ -8,7 +8,7 @@ test("turn approval and Review have no critical or serious axe violations", asyn
     { type: "plan", explanation: null, steps: [{ step: "Revisar el proyecto", status: "completed" }] },
     { type: "activity", item: { id: "command-a11y", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
     { type: "diff", value: "diff --git a/resultado.txt b/resultado.txt\n--- a/resultado.txt\n+++ b/resultado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
-    { type: "approval", item: { id: "approval-a11y", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", status: "pending" } },
+    { type: "approval", item: { id: "018f5f68-4a6e-7abc-8def-012345678901", threadId: "018f5f68-4a6e-7abc-8def-012345678902", turnId: "018f5f68-4a6e-7abc-8def-012345678903", itemId: "018f5f68-4a6e-7abc-8def-012345678904", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
     { type: "delta", value: "## Resultado preparado\n\nEl turno está listo." },
     { type: "done" },
   ];

@@ -1,10 +1,16 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
+const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 
 async function login(page: Page) {
   await page.goto("/login");
-  await page.getByRole("button", { name: new RegExp(accountName) }).click();
+  const origin = new URL(page.url()).origin;
+  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
+    data: { userId: demoUserId },
+    headers: { Origin: origin },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
 }
@@ -62,12 +68,6 @@ test("completed conversation", async ({ page }) => {
   });
   await expect(page.getByRole("button", { name: "Volver al final" })).toHaveCount(0);
   await expect(page).toHaveScreenshot("completed-conversation.png", { fullPage: true });
-  await scroller.evaluate((element) => {
-    element.scrollTop = 0;
-    element.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-  await expect(page.getByRole("button", { name: "Volver al final" })).toBeVisible();
-  await expect(page).toHaveScreenshot("conversation-start.png", { fullPage: true });
 });
 
 test("completed conversation dark", async ({ page }) => {

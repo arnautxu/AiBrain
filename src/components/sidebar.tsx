@@ -22,7 +22,7 @@ import {
 import { useRouter } from "next/navigation";
 import type { AuthSession } from "@/auth/types";
 import { BrandMark, ThemeToggle } from "@/components/ui/primitives";
-import type { PublicInstallationBranding } from "@/ui/installation-branding";
+import type { PublicInstallationBranding } from "@/config/installation-branding";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
 
