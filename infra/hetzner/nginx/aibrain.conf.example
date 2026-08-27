@@ -38,6 +38,12 @@ server {
         return 404;
     }
 
+    # Employee lifecycle is also host-operator-only. The app port remains
+    # bound to loopback for the runbook and this path is never public.
+    location = /api/operations/users {
+        return 404;
+    }
+
     location / {
         proxy_pass http://aibrain___AIBRAIN_INSTANCE_TOKEN___backend;
         proxy_http_version 1.1;

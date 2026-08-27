@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRequest";
 import type { InstallationConfig } from "@/config/installation-schema";
+import { FileLocalUserStore } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";
 import {
   MaintenanceCoordinator,
@@ -220,6 +221,10 @@ export async function workerAppServerForUser(
   activityLease?: MaintenanceActivityLease,
 ) {
   const state = await serviceState();
+  const localUser = await new FileLocalUserStore(state.config.paths.usersRoot).read(userId);
+  if (!localUser?.enabled) {
+    throw new Error("Worker user is not provisioned or is disabled.");
+  }
   if (activityLease) state.maintenance.assertActiveLease(activityLease);
   let handle = await state.registry.start(userId, activityLease);
   let client = state.clients.get(userId);
@@ -267,6 +272,23 @@ export async function resumeWorkerMaintenance() {
 export async function workerRuntimeHealth(userId: string) {
   const state = await serviceState();
   return state.registry.health(userId);
+}
+
+/** Stops only the selected employee runtime and releases its active stream handlers. */
+export async function stopWorkerRuntimeForUser(userId: string) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (!state) return false;
+  const client = state.clients.get(userId);
+  if (client) {
+    await client.close().catch(() => undefined);
+    state.clients.delete(userId);
+  }
+  for (const [key, registration] of state.activeTurnCancellations) {
+    if (!key.startsWith(`${userId}:`)) continue;
+    registration.cancelAfterRemoteInterrupt();
+    state.activeTurnCancellations.delete(key);
+  }
+  return state.registry.stop(userId);
 }
 
 export function workerTurnIsActive(

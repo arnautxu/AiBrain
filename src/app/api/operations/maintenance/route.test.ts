@@ -25,6 +25,7 @@ import { GET, POST } from "@/app/api/operations/maintenance/route";
 
 const SECRET = "maintenance-test-secret-with-32-bytes-minimum";
 const originalSecret = process.env.AIBRAIN_MAINTENANCE_SECRET;
+const originalOperatorSecret = process.env.AIBRAIN_OPERATOR_SECRET;
 
 function status(phase: MaintenanceStatus["phase"], activeActivities = 0): MaintenanceStatus {
   return {
@@ -51,6 +52,7 @@ function request(method: "GET" | "POST", body?: unknown, secret = SECRET) {
 
 describe("maintenance operator route", () => {
   beforeEach(() => {
+    delete process.env.AIBRAIN_OPERATOR_SECRET;
     process.env.AIBRAIN_MAINTENANCE_SECRET = SECRET;
     mocked.sameOrigin = true;
     mocked.status = status("accepting");
@@ -59,6 +61,8 @@ describe("maintenance operator route", () => {
   });
 
   afterAll(() => {
+    if (originalOperatorSecret === undefined) delete process.env.AIBRAIN_OPERATOR_SECRET;
+    else process.env.AIBRAIN_OPERATOR_SECRET = originalOperatorSecret;
     if (originalSecret === undefined) delete process.env.AIBRAIN_MAINTENANCE_SECRET;
     else process.env.AIBRAIN_MAINTENANCE_SECRET = originalSecret;
   });

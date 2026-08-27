@@ -56,6 +56,8 @@ Provision employees using the same UUID issued by Supabase Auth:
 npm run users:provision -- --input /absolute/path/to/users.json
 ```
 
+El lifecycle posterior es host-local, idempotente y auditable: `POST /api/operations/users` para baja/reactivación/recuperación con la app activa, o `npm run users:manage -- --offline ...` únicamente con la app detenida. Consulta `docs/USER_PROVISIONING.md`.
+
 The command is idempotent and accepts any number of employees; capacity is
 controlled operationally rather than through commercial quotas.
 

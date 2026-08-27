@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { loadInstallationConfig } from "@/config/installation";
 import { getSigningSecret } from "@/auth/session";
+import { FileLocalUserStore } from "@/auth/local-user-store";
 import { BrowserGatewayTokenService } from "@/runtime/browser/gateway-token";
 import { ChromeBrowserRuntimeFactory } from "@/runtime/browser/chrome-runtime";
 import {
@@ -117,6 +118,17 @@ function ensureBinding(state: BrowserServiceState, installationId: string, userI
   }
 }
 
+async function ensureEnabledUser(state: BrowserServiceState, userId: string) {
+  const user = await new FileLocalUserStore(state.config.paths.usersRoot).read(userId);
+  if (!user?.enabled) {
+    throw new BrowserServiceError(
+      "BROWSER_USER_DISABLED",
+      "Browser user is not provisioned or is disabled.",
+      403,
+    );
+  }
+}
+
 async function currentHandle(state: BrowserServiceState, userId: string) {
   await state.registry.start(userId);
   const handle = state.registry.get(userId);
@@ -135,6 +147,7 @@ async function currentHandle(state: BrowserServiceState, userId: string) {
 export async function browserStatus(installationId: string, userId: string) {
   const state = await serviceState();
   ensureBinding(state, installationId, userId);
+  await ensureEnabledUser(state, userId);
   const health = await state.registry.health(userId);
   return {
     healthy: health.healthy,
@@ -151,6 +164,7 @@ export async function controlBrowser(
 ) {
   const state = await serviceState();
   ensureBinding(state, installationId, userId);
+  if (action !== "stop") await ensureEnabledUser(state, userId);
   try {
     if (action === "start") await state.registry.start(userId);
     else if (action === "stop") await state.registry.stop(userId);
@@ -176,6 +190,7 @@ export async function issueBrowserGatewayToken(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureEnabledUser(state, input.userId);
   const { handle, persistent } = await currentHandle(state, input.userId);
   if (persistent.lifecycle !== "ready" && persistent.lifecycle !== "human-control") {
     throw new BrowserServiceError("BROWSER_VIEWER_UNAVAILABLE", "Browser viewer is unavailable.", 409, true);
@@ -204,6 +219,7 @@ async function authorizeGateway(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureEnabledUser(state, input.userId);
   const { handle } = await currentHandle(state, input.userId);
   state.tokens.verify(input.token, {
     installationId: input.installationId,
@@ -262,6 +278,7 @@ export async function executeBrowserAgentCommand(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureEnabledUser(state, input.userId);
   try {
     await state.registry.start(input.userId);
   } catch (error) {
@@ -307,6 +324,14 @@ export async function executeBrowserAgentCommand(input: {
     return state.registry.listTabs(input.userId, input.threadId);
   }
   return state.registry.listDownloads(input.userId, input.threadId);
+}
+
+/** Stops only the selected employee browser without creating a service instance. */
+export async function stopBrowserRuntimeForUser(installationId: string, userId: string) {
+  const state = browserGlobal.__aibrainBrowserRuntimeService;
+  if (!state) return false;
+  ensureBinding(state, installationId, userId);
+  return state.registry.stop(userId);
 }
 
 export function resetBrowserServiceForTests() {
