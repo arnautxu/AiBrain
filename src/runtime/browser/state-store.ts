@@ -37,6 +37,7 @@ const CONTROLLERS = ["none", "agent", "human"] as const;
 const RECOVERY_REASONS = ["process_restart", "human_release", "heartbeat_timeout", "runtime_failure"] as const;
 const DOWNLOAD_STATUSES = ["active", "complete", "failed"] as const;
 const MAX_STATE_BYTES = 8 * 1024 * 1024;
+const DEFAULT_MAX_DOWNLOAD_RECORDS = 1_000;
 
 export class BrowserStateError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {
@@ -240,12 +241,14 @@ export type BrowserSessionStoreOptions = {
   provisioner?: WorkerProvisioner;
   now?: () => number;
   heartbeatTtlMs?: number;
+  maxDownloadRecords?: number;
 };
 
 export class BrowserSessionStore {
   readonly config: Readonly<InstallationConfig>;
   readonly provisioner: WorkerProvisioner;
   readonly heartbeatTtlMs: number;
+  readonly maxDownloadRecords: number;
   private readonly now: () => number;
 
   constructor(options: BrowserSessionStoreOptions) {
@@ -253,8 +256,13 @@ export class BrowserSessionStore {
     this.provisioner = options.provisioner ?? new WorkerProvisioner({ config: options.config });
     this.now = options.now ?? Date.now;
     this.heartbeatTtlMs = options.heartbeatTtlMs ?? 30_000;
+    this.maxDownloadRecords = options.maxDownloadRecords ?? DEFAULT_MAX_DOWNLOAD_RECORDS;
     if (!Number.isSafeInteger(this.heartbeatTtlMs) || this.heartbeatTtlMs < 1_000) {
       throw new BrowserStateError("BROWSER_HEARTBEAT_TTL_INVALID", "Browser heartbeat TTL is invalid.");
+    }
+    if (!Number.isSafeInteger(this.maxDownloadRecords) ||
+      this.maxDownloadRecords < 1 || this.maxDownloadRecords > 10_000) {
+      throw new BrowserStateError("BROWSER_DOWNLOAD_RETENTION_INVALID", "Browser download metadata retention is invalid.");
     }
   }
 
@@ -390,6 +398,7 @@ export class BrowserSessionStore {
       state.heartbeatExpiresAt = null;
       state.recoveryAttempt += 1;
       state.lastRecoveryReason = reason;
+      if (reason !== "human_release") this.failActiveDownloads(state);
       return state;
     });
   }
@@ -451,6 +460,7 @@ export class BrowserSessionStore {
       state.heartbeatExpiresAt = null;
       state.recoveryAttempt += 1;
       state.lastRecoveryReason = "heartbeat_timeout";
+      this.failActiveDownloads(state);
       return { changed: true, state } as const;
     });
   }
@@ -463,6 +473,7 @@ export class BrowserSessionStore {
       state.heartbeatAt = null;
       state.heartbeatExpiresAt = null;
       state.lastRecoveryReason = "runtime_failure";
+      this.failActiveDownloads(state);
       return state;
     });
   }
@@ -476,6 +487,7 @@ export class BrowserSessionStore {
       state.heartbeatAt = null;
       state.heartbeatExpiresAt = null;
       state.profileCleanShutdown = cleanShutdown;
+      this.failActiveDownloads(state);
       return state;
     });
   }
@@ -484,6 +496,23 @@ export class BrowserSessionStore {
     return this.mutate(userId, (state) => {
       this.assertControlledSession(state, sessionId);
       const now = this.iso();
+      if (state.downloads.length >= this.maxDownloadRecords) {
+        const removable = state.downloads.length - this.maxDownloadRecords + 1;
+        let removed = 0;
+        state.downloads = state.downloads.filter((download) => {
+          if (removed < removable && download.status !== "active") {
+            removed += 1;
+            return false;
+          }
+          return true;
+        });
+        if (state.downloads.length >= this.maxDownloadRecords) {
+          throw new BrowserStateError(
+            "BROWSER_DOWNLOAD_BACKPRESSURE",
+            "Too many active browser downloads; retry after existing downloads settle.",
+          );
+        }
+      }
       const download = parseDownload({
         id: randomUUID(),
         fileName,
@@ -519,6 +548,16 @@ export class BrowserSessionStore {
   private assertSession(state: BrowserPersistentState, sessionId: string) {
     if (!UUID_PATTERN.test(sessionId) || state.browserSessionId !== sessionId) {
       throw new BrowserStateError("BROWSER_SESSION_MISMATCH", "Browser session does not match this user.");
+    }
+  }
+
+  private failActiveDownloads(state: BrowserPersistentState) {
+    const now = this.iso();
+    for (const download of state.downloads) {
+      if (download.status !== "active") continue;
+      download.status = "failed";
+      download.sizeBytes = null;
+      download.updatedAt = now;
     }
   }
 

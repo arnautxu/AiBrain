@@ -1114,6 +1114,13 @@ thread; al recrear su target la revalida con la política de red vigente y la
 restaura. Si esa persistencia falla, `runtime.healthy` pasa a `false` con detalle
 de navegación degradada en vez de simular una recuperación correcta.
 
+`state.downloads` es la proyección durable de eventos reales de Chrome, no un
+fixture: registra basename, estado y tamaño terminal sin exponer paths. Un
+restart, timeout, fallo del runtime o stop convierte registros activos en
+`failed`; una rotación normal de takeover conserva la descarga. La retención
+evicta únicamente metadata terminal antigua y aplica backpressure si todas las
+entradas retenidas siguen activas; los archivos descargados no se borran.
+
 ### 14.2 Token privado del viewer
 
 `POST /api/runtime/browser/token`
