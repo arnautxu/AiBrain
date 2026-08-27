@@ -60,6 +60,7 @@ describe("installation readiness", () => {
       minimumFreeRatio: 0,
       dockerSocketPath: path.join(root, "missing-docker.sock"),
     });
+    expect(report).not.toHaveProperty("components");
     expect(report).toMatchObject({
       schemaVersion: 1,
       status: "ready",
@@ -92,5 +93,79 @@ describe("installation readiness", () => {
       { name: "disk-capacity", status: "fail", code: "DISK_CAPACITY_LOW" },
       { name: "docker-socket", status: "fail", code: "DOCKER_SOCKET_PRESENT" },
     ]));
+  });
+
+  it("aggregates typed required and optional component probes without global registries", async () => {
+    const { root, config } = await fixture();
+    const report = await checkInstallationReadiness(config, {
+      minimumFreeBytes: 0,
+      minimumFreeRatio: 0,
+      dockerSocketPath: path.join(root, "missing-docker.sock"),
+      componentProbes: [
+        {
+          name: "worker-runtime",
+          required: true,
+          async check() {
+            return { status: "degraded", code: "WORKERS_DEGRADED", metrics: { active: 1, expected: 2 } };
+          },
+        },
+        {
+          name: "browser-runtime",
+          required: false,
+          async check() {
+            throw new Error("browser intentionally unavailable");
+          },
+        },
+      ],
+    });
+
+    expect(report.status).toBe("degraded");
+    expect(report.components).toEqual([
+      {
+        name: "worker-runtime",
+        required: true,
+        status: "degraded",
+        code: "WORKERS_DEGRADED",
+        metrics: { active: 1, expected: 2 },
+      },
+      {
+        name: "browser-runtime",
+        required: false,
+        status: "unavailable",
+        code: "COMPONENT_CHECK_FAILED",
+      },
+    ]);
+  });
+
+  it("bounds readiness probes with a timeout and abort signal", async () => {
+    const { root, config } = await fixture();
+    let aborted = false;
+    const report = await checkInstallationReadiness(config, {
+      minimumFreeBytes: 0,
+      minimumFreeRatio: 0,
+      dockerSocketPath: path.join(root, "missing-docker.sock"),
+      componentTimeoutMs: 10,
+      componentProbes: [{
+        name: "codex-runtime",
+        required: true,
+        async check(signal) {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => {
+              aborted = true;
+              resolve();
+            }, { once: true });
+          });
+          return { status: "ready", code: "OK" };
+        },
+      }],
+    });
+    expect(aborted).toBe(true);
+    expect(report.status).toBe("degraded");
+    expect(report.components).toEqual([{
+      name: "codex-runtime",
+      required: true,
+      status: "unavailable",
+      code: "COMPONENT_TIMEOUT",
+    }]);
   });
 });

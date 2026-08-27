@@ -75,9 +75,10 @@ Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa
 6. Office/PDF/texto/imagen y confirmación documental exactamente una vez;
 7. backup, restore a volumen separado, reboot recovery, release y rollback medidos;
 8. réplica de backup cifrada fuera del servidor y alertas conectadas;
-9. revisión de capacidad/egress y hardening del host;
-10. canal CDP heredado sin sockets, egress browser fijado por DNS y build reproducible de la toolchain;
-11. autorización separada para DNS y producción.
+9. soak operativo corto verde en cada release y perfil QA largo verde antes del primer cutover, siguiendo `docs/OPERATIONS_SOAK.md`.
+10. revisión de capacidad/egress y hardening del host;
+11. canal CDP heredado sin sockets, egress browser fijado por DNS y build reproducible de la toolchain;
+12. autorización separada para DNS y producción.
 
 La imagen base se fija por digest, Codex/Node packages por versión y APT contra
 el snapshot inmutable `20260820T000000Z` de Debian. Cambiar ese snapshot es una

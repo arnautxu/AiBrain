@@ -24,6 +24,32 @@ export type ReadinessReport = Readonly<{
   checkedAt: string;
   disk: Readonly<{ freeBytes: number; totalBytes: number; freeRatio: number }> | null;
   checks: readonly ReadinessCheck[];
+  /** Present only when the composition root supplied component probes. */
+  components?: readonly ReadinessComponentCheck[];
+}>;
+
+export type ReadinessComponentStatus = "ready" | "degraded" | "unavailable";
+
+export type ReadinessComponentResult = Readonly<{
+  status: ReadinessComponentStatus;
+  code: string;
+  metrics?: Readonly<Record<string, number>>;
+}>;
+
+export type ReadinessComponentCheck = ReadinessComponentResult & Readonly<{
+  name: string;
+  required: boolean;
+}>;
+
+/**
+ * Side-effect-free adapter owned by the caller. It lets the composition root
+ * aggregate worker, browser, Codex or document health without importing a
+ * process-global registry into the operations layer.
+ */
+export type ReadinessComponentProbe = Readonly<{
+  name: string;
+  required: boolean;
+  check(signal: AbortSignal): Promise<ReadinessComponentResult>;
 }>;
 
 export type ReadinessOptions = {
@@ -31,7 +57,12 @@ export type ReadinessOptions = {
   minimumFreeBytes?: number;
   minimumFreeRatio?: number;
   dockerSocketPath?: string;
+  componentProbes?: readonly ReadinessComponentProbe[];
+  componentTimeoutMs?: number;
 };
+
+const SAFE_COMPONENT_NAME = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
+const SAFE_COMPONENT_CODE = /^[A-Z][A-Z0-9_]{0,95}$/u;
 
 function validNonNegativeInteger(name: string, value: number) {
   if (!Number.isSafeInteger(value) || value < 0) throw new Error(`${name} must be a non-negative safe integer.`);
@@ -43,6 +74,57 @@ function validRatio(value: number) {
     throw new Error("minimumFreeRatio must be between 0 and 1.");
   }
   return value;
+}
+
+function validPositiveInteger(name: string, value: number) {
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error(`${name} must be a positive safe integer.`);
+  return value;
+}
+
+function validateComponentResult(result: ReadinessComponentResult) {
+  if (!["ready", "degraded", "unavailable"].includes(result.status)) {
+    throw new Error("Readiness component returned an invalid status.");
+  }
+  if (!SAFE_COMPONENT_CODE.test(result.code)) {
+    throw new Error("Readiness component returned an invalid code.");
+  }
+  if (result.metrics) {
+    for (const [key, value] of Object.entries(result.metrics)) {
+      if (!SAFE_COMPONENT_NAME.test(key) || !Number.isFinite(value)) {
+        throw new Error("Readiness component returned invalid metrics.");
+      }
+    }
+  }
+  return result;
+}
+
+async function checkComponent(probe: ReadinessComponentProbe, timeoutMs: number) {
+  if (!SAFE_COMPONENT_NAME.test(probe.name) || probe.name.length > 96) {
+    throw new Error("Readiness component names must be safe lowercase identifiers.");
+  }
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        controller.abort();
+        reject(new Error("readiness timeout"));
+      }, timeoutMs);
+      timer.unref?.();
+    });
+    const result = await Promise.race([probe.check(controller.signal), timeout]);
+    if (controller.signal.aborted) throw new Error("readiness timeout");
+    return Object.freeze({ name: probe.name, required: probe.required, ...validateComponentResult(result) });
+  } catch {
+    return Object.freeze({
+      name: probe.name,
+      required: probe.required,
+      status: "unavailable" as const,
+      code: controller.signal.aborted ? "COMPONENT_TIMEOUT" : "COMPONENT_CHECK_FAILED",
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function directoryCheck(
@@ -104,6 +186,11 @@ export async function checkInstallationReadiness(
     options.minimumFreeBytes ?? 1024 * 1024 * 1024,
   );
   const minimumFreeRatio = validRatio(options.minimumFreeRatio ?? 0.05);
+  const componentTimeoutMs = validPositiveInteger("componentTimeoutMs", options.componentTimeoutMs ?? 2_000);
+  const componentProbes = options.componentProbes ?? [];
+  if (new Set(componentProbes.map(({ name }) => name)).size !== componentProbes.length) {
+    throw new Error("Readiness component names must be unique.");
+  }
   const checks: ReadinessCheck[] = await Promise.all([
     directoryCheck("data-root", config.paths.dataRoot, constants.R_OK | constants.W_OK | constants.X_OK, "DATA_ROOT_UNAVAILABLE"),
     directoryCheck("backups-root", config.paths.backupsRoot, constants.R_OK | constants.W_OK | constants.X_OK, "BACKUPS_ROOT_UNAVAILABLE"),
@@ -130,11 +217,15 @@ export async function checkInstallationReadiness(
     checks.push({ name: "disk-capacity", status: "fail", code: "DISK_CAPACITY_UNAVAILABLE" });
   }
 
+  const components = await Promise.all(componentProbes.map((probe) => checkComponent(probe, componentTimeoutMs)));
+  const componentFailure = components.some((component) => component.required && component.status !== "ready");
+
   return Object.freeze({
     schemaVersion: 1,
-    status: checks.some((check) => check.status === "fail") ? "degraded" : "ready",
+    status: checks.some((check) => check.status === "fail") || componentFailure ? "degraded" : "ready",
     checkedAt: new Date(now()).toISOString(),
     disk,
     checks: Object.freeze(checks),
+    ...(components.length > 0 ? { components: Object.freeze(components) } : {}),
   });
 }
