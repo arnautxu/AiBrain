@@ -41,7 +41,8 @@ test("preferences dark", async ({ page }) => {
 test("guided actions dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
-  await page.getByRole("button", { name: "Abrir acciones guiadas" }).click();
+  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+  await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
   await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
   await expect(page).toHaveScreenshot("guided-actions-dark.png", { fullPage: true });
 });

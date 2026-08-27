@@ -35,7 +35,8 @@ test("dark shell, guided actions, turn capabilities and Review have no blocking 
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
 
-  await page.getByRole("button", { name: "Abrir acciones guiadas" }).click();
+  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+  await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
   await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
   await assertNoBlockingViolations();
   await page.getByRole("button", { name: "Volver a la conversación" }).click();

@@ -41,6 +41,7 @@ type SidebarProps = {
   busy: boolean;
   onCloseMobile: () => void;
   onCloseDesktop: () => void;
+  onOpenDesktop: () => void;
   onOpenCommandPalette: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
@@ -114,6 +115,7 @@ export function Sidebar({
   busy,
   onCloseMobile,
   onCloseDesktop,
+  onOpenDesktop,
   onOpenCommandPalette,
   onSelectProject,
   onSelectThread,
@@ -163,6 +165,20 @@ export function Sidebar({
   return (
     <>
       {mobileOpen ? <button aria-label="Cerrar barra lateral" className="fixed inset-0 z-30 bg-black/25 backdrop-blur-[2px] md:hidden" onClick={onCloseMobile} /> : null}
+      {!desktopOpen ? (
+        <aside aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className="hidden h-full w-[52px] shrink-0 flex-col items-center border-r border-[var(--border-subtle)] bg-[var(--sidebar)] py-2 md:flex">
+          <button aria-label="Mostrar barra lateral" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}><SidebarSimple size={19} /></button>
+          <div className="mt-2 flex flex-col items-center gap-1">
+            <button disabled={!activeProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={onNewThread}><NotePencil size={18} /></button>
+            <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
+            <button aria-label="Mostrar proyectos" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}>{activeProject ? <FolderOpen size={18} weight="fill" /> : <Folder size={18} />}</button>
+          </div>
+          <div className="mt-auto flex flex-col items-center gap-1">
+            <button aria-label="Abrir preferencias" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}><GearSix size={18} /></button>
+            <button aria-label={`${session.user.name}. Mostrar cuenta`} className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}><UserCircle size={21} /></button>
+          </div>
+        </aside>
+      ) : null}
       <aside
         ref={sidebarRef}
         tabIndex={mobileOpen ? -1 : undefined}
@@ -172,7 +188,7 @@ export function Sidebar({
         data-testid="workbench-sidebar"
         className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col border-r border-[var(--border-subtle)] bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:static md:w-[260px] md:translate-x-0 md:pb-0 md:pt-0 ${desktopOpen ? "md:flex" : "md:hidden"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
-        <div className="flex h-14 shrink-0 items-center justify-between px-3">
+        <div className="flex h-[52px] shrink-0 items-center justify-between px-3">
           <BrandMark branding={branding} />
           <button aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:block" onClick={onCloseDesktop}><SidebarSimple size={18} /></button>
           <button aria-label="Cerrar menú" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>

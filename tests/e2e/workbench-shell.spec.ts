@@ -42,6 +42,13 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(search).toBeHidden();
+
+  await page.getByRole("button", { name: "Ocultar barra lateral" }).click();
+  const rail = page.getByTestId("workbench-sidebar-rail");
+  await expect(rail).toBeVisible();
+  await expect(page.getByTestId("workbench-sidebar")).toBeHidden();
+  await rail.getByRole("button", { name: "Mostrar barra lateral" }).click();
+  await expect(page.getByTestId("workbench-sidebar")).toBeVisible();
   expect(pageErrors).toEqual([]);
 });
 
