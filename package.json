@@ -14,7 +14,7 @@
     "test:adapter": "vitest run tests/unit/app-server-ui-adapter.test.ts tests/unit/durable-chat-event-adapter.test.ts tests/unit/frame-event-dispatcher.test.ts",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test --project=chromium-desktop",
-    "test:visual": "playwright test --project=visual-desktop --project=visual-mobile",
+    "test:visual": "playwright test --project=visual-desktop --project=visual-mobile --project=visual-matrix",
     "test:a11y": "playwright test --project=accessibility"
   },
   "dependencies": {

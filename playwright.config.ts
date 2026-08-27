@@ -30,7 +30,7 @@ export default defineConfig({
     {
       name: "chromium-desktop",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
-      testIgnore: ["**/visual/**", "**/accessibility/**"],
+      testIgnore: ["**/visual/**", "**/visual-matrix/**", "**/accessibility/**"],
     },
     {
       name: "visual-desktop",
@@ -45,6 +45,11 @@ export default defineConfig({
     {
       name: "accessibility",
       testMatch: ["**/accessibility/**/*.spec.ts"],
+      use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "visual-matrix",
+      testMatch: ["**/visual-matrix/**/*.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
     },
   ],
