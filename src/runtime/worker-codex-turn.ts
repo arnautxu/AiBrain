@@ -61,6 +61,10 @@ import {
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
+import {
+  parseTurnTokenUsage,
+  type TokenUsageBreakdown,
+} from "@/usage/contracts";
 
 export type WorkerTurnProjection = {
   envelope: AppServerEvent;
@@ -70,6 +74,9 @@ export type WorkerTurnProjection = {
 export type WorkerCodexTurnEvent = CodexTurnEvent | {
   type: "runtimeTurn";
   turnId: string;
+} | {
+  type: "runtimeUsage";
+  tokenUsage: TokenUsageBreakdown;
 };
 
 type EmitEvent = (
@@ -377,6 +384,13 @@ export async function runWorkerCodexTurn(
               { envelope, key: `delta:${notificationItemId(params) ?? "agent"}` },
             );
           }
+          return;
+        }
+        if (method === "thread/tokenUsage/updated" && isRecord(params) &&
+            params.threadId === threadId &&
+            (!runtimeTurnId || params.turnId === runtimeTurnId)) {
+          const tokenUsage = parseTurnTokenUsage(params);
+          if (tokenUsage) await emit({ type: "runtimeUsage", tokenUsage });
           return;
         }
         if (method === "item/started" || method === "item/completed") {

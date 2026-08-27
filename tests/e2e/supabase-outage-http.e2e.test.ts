@@ -368,12 +368,8 @@ describe("real worker HTTP session during Supabase outage", () => {
     expect(workbench.status).toBe(200);
     const workbenchBody = await workbench.json();
     assertUiContract("WorkbenchResponse", workbenchBody);
-    expect(workbenchBody).toMatchObject({
-      workbench: {
-        projects: [expect.objectContaining({ id: projectId })],
-        threads: [expect.objectContaining({ projectId })],
-      },
-    });
+    expect(workbenchBody.workbench.projects).toContainEqual(expect.objectContaining({ id: projectId }));
+    expect(workbenchBody.workbench.threads).toContainEqual(expect.objectContaining({ projectId }));
     expect(providerRequests).toHaveLength(1);
 
     const replay = await http("/api/chat", {

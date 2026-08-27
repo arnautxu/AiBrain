@@ -6,6 +6,9 @@ export type ThreadStatus = "active" | "archived";
 export type WorkspaceStatus = "ready" | "pending" | "unavailable";
 export type WorkbenchPersistence = "filesystem" | "filesystem-demo" | "browser-preview";
 
+/** Internal per-user workspace backing chats that are not filed in a project. */
+export const STANDALONE_PROJECT_SLUG = "aibrain-standalone-chats";
+
 export type WorkbenchWorkspace = {
   id: string;
   label: string;
@@ -24,6 +27,10 @@ export type WorkbenchProject = {
   createdAt: string;
   updatedAt: string;
 };
+
+export function isStandaloneProject(project: Pick<WorkbenchProject, "slug"> | null | undefined) {
+  return project?.slug === STANDALONE_PROJECT_SLUG;
+}
 
 export type WorkbenchThread = {
   id: string;

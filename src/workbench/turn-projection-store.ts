@@ -44,6 +44,12 @@ export type TurnProjection = {
   updatedAt: string;
 };
 
+export type TurnProjectionTransportEvent = {
+  envelope: AppServerEvent;
+  projectionKey: string;
+  event: ChatStreamEvent;
+};
+
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === "object" && "code" in error &&
     (code === undefined || (error as NodeJS.ErrnoException).code === code));
@@ -316,36 +322,66 @@ export class FileTurnProjectionStore {
     projectionKey: string,
     event: ChatStreamEvent,
   ) {
-    if (!PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event)) {
-      throw new WorkbenchPersistenceError("L’esdeveniment de projecció no és vàlid.");
+    const result = await this.applyTransportEvents(threadId, assistantMessageId, [{
+      envelope,
+      projectionKey,
+      event,
+    }]);
+    return { projection: result.projection, applied: result.applied[0] ?? false };
+  }
+
+  /**
+   * Applies a short ordered transport batch with one lock/read/atomic-write.
+   * The transport journal remains the durable source for replay; this compact
+   * projection is the refresh/restart checkpoint exposed to the workbench.
+   */
+  async applyTransportEvents(
+    threadId: string,
+    assistantMessageId: string,
+    events: readonly TurnProjectionTransportEvent[],
+  ) {
+    if (events.length < 1 || events.length > 256 || events.some(({ projectionKey, event }) =>
+      !PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event))) {
+      throw new WorkbenchPersistenceError("El lot d’esdeveniments de projecció no és vàlid.");
     }
     const identity = await this.prepare(threadId, assistantMessageId);
     return this.locks.withLock(identity.lockKey, async () => {
-      const projection = await this.readUnlocked(identity.filePath);
-      if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
-      this.assertBinding(projection, threadId, assistantMessageId);
-      if (envelope.sequence < projection.lastTransportSequence) {
-        return { projection, applied: false as const };
-      }
-      let keys = projection.appliedKeysAtLastSequence;
-      if (envelope.sequence === projection.lastTransportSequence) {
-        if (projection.lastTransportEventId !== envelope.eventId) {
-          throw new WorkbenchPersistenceError("La seqüència de transport s’ha reutilitzat.");
+      const stored = await this.readUnlocked(identity.filePath);
+      if (!stored) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      this.assertBinding(stored, threadId, assistantMessageId);
+      let projection = stored;
+      let changed = false;
+      const applied: boolean[] = [];
+      for (const { envelope, projectionKey, event } of events) {
+        if (envelope.sequence < projection.lastTransportSequence) {
+          applied.push(false);
+          continue;
         }
-        if (keys.includes(projectionKey)) return { projection, applied: false as const };
-      } else {
-        keys = [];
+        let keys = projection.appliedKeysAtLastSequence;
+        if (envelope.sequence === projection.lastTransportSequence) {
+          if (projection.lastTransportEventId !== envelope.eventId) {
+            throw new WorkbenchPersistenceError("La seqüència de transport s’ha reutilitzat.");
+          }
+          if (keys.includes(projectionKey)) {
+            applied.push(false);
+            continue;
+          }
+        } else {
+          keys = [];
+        }
+        projection = turnProjectionSchema.parse({
+          ...projection,
+          lastTransportSequence: envelope.sequence,
+          lastTransportEventId: envelope.eventId,
+          appliedKeysAtLastSequence: [...keys, projectionKey],
+          message: applyChatStreamEvent(projection.message, event),
+          updatedAt: new Date().toISOString(),
+        });
+        changed = true;
+        applied.push(true);
       }
-      const next = turnProjectionSchema.parse({
-        ...projection,
-        lastTransportSequence: envelope.sequence,
-        lastTransportEventId: envelope.eventId,
-        appliedKeysAtLastSequence: [...keys, projectionKey],
-        message: applyChatStreamEvent(projection.message, event),
-        updatedAt: new Date().toISOString(),
-      });
-      await this.write(identity.filePath, next);
-      return { projection: next, applied: true as const };
+      if (changed) await this.write(identity.filePath, projection);
+      return { projection, applied };
     });
   }
 

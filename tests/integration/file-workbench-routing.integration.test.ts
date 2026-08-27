@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 
 const USER_ID = "0198b9f0-6631-7000-8000-000000000201";
 const roots: string[] = [];
@@ -79,16 +80,17 @@ describe("local workbench routing", () => {
   it("routes a local authenticated session only to the per-user filesystem store", async () => {
     const { session } = await fixture();
     const { createProject, loadWorkbench } = await import("@/workbench/store");
-    await expect(loadWorkbench(session)).resolves.toEqual({
-      persistence: "filesystem",
-      projects: [],
-      threads: [],
-    });
+    const initial = await loadWorkbench(session);
+    expect(initial).toMatchObject({ persistence: "filesystem", threads: [] });
+    expect(initial.projects).toEqual([
+      expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
+    ]);
     const project = await createProject(session, "Local only");
     expect(project.name).toBe("Local only");
-    expect((await loadWorkbench(session)).projects).toEqual([
+    expect((await loadWorkbench(session)).projects).toEqual(expect.arrayContaining([
+      expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
       expect.objectContaining({ id: project.id }),
-    ]);
+    ]));
     expect(forbidden).not.toHaveBeenCalled();
   });
 });

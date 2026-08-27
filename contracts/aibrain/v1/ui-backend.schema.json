@@ -372,6 +372,116 @@
         "permissionFingerprint": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
       }
     },
+    "TokenUsageBreakdown": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["totalTokens", "inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens"],
+      "properties": {
+        "totalTokens": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "type": "integer", "minimum": 0 },
+        "cachedInputTokens": { "type": "integer", "minimum": 0 },
+        "cacheWriteInputTokens": { "type": "integer", "minimum": 0 },
+        "outputTokens": { "type": "integer", "minimum": 0 },
+        "reasoningOutputTokens": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "UsageAggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["turns", "completedTurns", "errorTurns", "stoppedTurns", "activeDays", "averageDurationMs", "p95DurationMs", "averageFirstTextMs", "p95FirstTextMs", "turnsWithTokenData", "tokens"],
+      "properties": {
+        "turns": { "type": "integer", "minimum": 0 },
+        "completedTurns": { "type": "integer", "minimum": 0 },
+        "errorTurns": { "type": "integer", "minimum": 0 },
+        "stoppedTurns": { "type": "integer", "minimum": 0 },
+        "activeDays": { "type": "integer", "minimum": 0 },
+        "averageDurationMs": { "type": ["integer", "null"], "minimum": 0 },
+        "p95DurationMs": { "type": ["integer", "null"], "minimum": 0 },
+        "averageFirstTextMs": { "type": ["integer", "null"], "minimum": 0 },
+        "p95FirstTextMs": { "type": ["integer", "null"], "minimum": 0 },
+        "turnsWithTokenData": { "type": "integer", "minimum": 0 },
+        "tokens": { "$ref": "#/$defs/TokenUsageBreakdown" }
+      }
+    },
+    "SharedSubscriptionSnapshot": {
+      "type": ["object", "null"],
+      "required": ["schemaVersion", "installationId", "observedAt", "scope", "planType", "rateLimitsAvailable", "accountTokenUsageAvailable", "rateLimits", "accountTokenUsage"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "installationId": { "type": "string", "minLength": 1 },
+        "observedAt": { "$ref": "#/$defs/IsoDate" },
+        "scope": { "const": "shared_chatgpt_account" },
+        "planType": { "type": ["string", "null"] },
+        "rateLimitsAvailable": { "type": "boolean" },
+        "accountTokenUsageAvailable": { "type": "boolean" },
+        "rateLimits": { "type": "array", "items": { "type": "object" } },
+        "accountTokenUsage": { "type": ["object", "null"] }
+      }
+    },
+    "PersonalUsageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "scope", "generatedAt", "userId", "internal", "sharedSubscription", "notices"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "scope": { "const": "personal" },
+        "generatedAt": { "$ref": "#/$defs/IsoDate" },
+        "userId": { "$ref": "#/$defs/Uuid" },
+        "internal": { "$ref": "#/$defs/UsageAggregate" },
+        "sharedSubscription": { "$ref": "#/$defs/SharedSubscriptionSnapshot" },
+        "notices": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "CompanyUsageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "scope", "generatedAt", "installationId", "internal", "members", "sharedSubscription", "notices"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "scope": { "const": "company" },
+        "generatedAt": { "$ref": "#/$defs/IsoDate" },
+        "installationId": { "type": "string", "minLength": 1 },
+        "internal": { "$ref": "#/$defs/UsageAggregate" },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["userId", "displayName", "email", "usage"],
+            "properties": {
+              "userId": { "$ref": "#/$defs/Uuid" },
+              "displayName": { "type": "string", "minLength": 1 },
+              "email": { "type": "string", "minLength": 3 },
+              "usage": { "$ref": "#/$defs/UsageAggregate" }
+            }
+          }
+        },
+        "sharedSubscription": { "$ref": "#/$defs/SharedSubscriptionSnapshot" },
+        "notices": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "TeamResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "members"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["userId", "displayName", "email", "workerId"],
+            "properties": {
+              "userId": { "$ref": "#/$defs/Uuid" },
+              "displayName": { "type": "string", "minLength": 1 },
+              "email": { "type": "string", "minLength": 3 },
+              "workerId": { "type": "string", "minLength": 2 }
+            }
+          }
+        }
+      }
+    },
     "BrowserStatus": {
       "type": "object",
       "additionalProperties": false,

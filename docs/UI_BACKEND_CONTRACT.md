@@ -1305,6 +1305,121 @@ interceptor Fetch conserva una segunda validación con la misma policy.
 El proxy solo permite TCP 80/443 por defecto; un puerto público arbitrario se
 rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
+### 14.6 Settings > Usage
+
+`GET /api/usage/me` requiere la cookie local opaca y siempre devuelve únicamente
+las métricas internas del empleado autenticado. `GET /api/usage/company`
+requiere además que su UUID figure en `AIBRAIN_USAGE_ADMIN_USER_IDS` (lista
+separada por comas); la autorización falla de forma cerrada con `403`.
+
+Ambos endpoints responden `Cache-Control: private, no-store`. El objeto
+`internal` usa este contrato:
+
+```ts
+type UsageAggregate = {
+  turns: number;
+  completedTurns: number;
+  errorTurns: number;
+  stoppedTurns: number;
+  activeDays: number;
+  averageDurationMs: number | null;
+  p95DurationMs: number | null;
+  averageFirstTextMs: number | null;
+  p95FirstTextMs: number | null;
+  turnsWithTokenData: number;
+  tokens: {
+    totalTokens: number;
+    inputTokens: number;
+    cachedInputTokens: number;
+    cacheWriteInputTokens: number;
+    outputTokens: number;
+    reasoningOutputTokens: number;
+  };
+};
+```
+
+Respuesta personal:
+
+```json
+{
+  "schemaVersion": 1,
+  "scope": "personal",
+  "generatedAt": "2026-08-27T10:00:00.000Z",
+  "userId": "00000000-0000-4000-8000-000000000001",
+  "internal": {
+    "turns": 8,
+    "completedTurns": 7,
+    "errorTurns": 1,
+    "stoppedTurns": 0,
+    "activeDays": 2,
+    "averageDurationMs": 6220,
+    "p95DurationMs": 8900,
+    "averageFirstTextMs": 1250,
+    "p95FirstTextMs": 2100,
+    "turnsWithTokenData": 7,
+    "tokens": {
+      "totalTokens": 4800,
+      "inputTokens": 3500,
+      "cachedInputTokens": 1200,
+      "cacheWriteInputTokens": 0,
+      "outputTokens": 1300,
+      "reasoningOutputTokens": 300
+    }
+  },
+  "sharedSubscription": {
+    "schemaVersion": 1,
+    "installationId": "arnall",
+    "observedAt": "2026-08-27T10:00:00.000Z",
+    "scope": "shared_chatgpt_account",
+    "planType": "team",
+    "rateLimitsAvailable": true,
+    "accountTokenUsageAvailable": true,
+    "rateLimits": [
+      {
+        "limitId": "codex",
+        "limitName": "Codex",
+        "planType": "team",
+        "primary": {
+          "usedPercent": 32,
+          "windowDurationMins": 300,
+          "resetsAt": 1777000000
+        },
+        "secondary": null,
+        "credits": null,
+        "individualLimit": null,
+        "spendControlReached": false,
+        "rateLimitReachedType": null
+      }
+    ],
+    "accountTokenUsage": {
+      "lifetimeTokens": "125000",
+      "peakDailyTokens": "22000",
+      "longestRunningTurnSec": "98",
+      "currentStreakDays": "4",
+      "longestStreakDays": "9",
+      "dailyUsageBuckets": [
+        { "startDate": "2026-08-27", "tokens": "12000" }
+      ]
+    }
+  },
+  "notices": [
+    "Les mètriques internes per empleat provenen només dels torns d’aquesta instal·lació.",
+    "El percentatge i l’ús del proveïdor pertanyen al compte ChatGPT compartit; no s’atribueixen a cap empleat."
+  ]
+}
+```
+
+La respuesta de empresa cambia `scope` a `company`, añade `installationId` y
+`members: Array<{ userId, displayName, email, usage }>` y mantiene un único
+`sharedSubscription`. La UI puede mostrar `rateLimits[].primary.usedPercent`
+como porcentaje del plan solo cuando `rateLimitsAvailable=true`; en caso
+contrario debe mostrar «No disponible», nunca derivarlo de tokens internos.
+
+Los tokens por empleado se registran únicamente desde
+`thread/tokenUsage/updated` ligado al mismo thread y turn. Los totales de
+`account/usage/read` son globales de la suscripción compartida y no se reparten
+ni estiman por empleado.
+
 ## 15. Estados degradados y errores recuperables
 
 Durante un drain operativo, un chat nuevo devuelve `503` con
@@ -1377,6 +1492,7 @@ ni tocan sesiones de empleados.
 - Instalación: [`src/config/installation-schema.ts`](../src/config/installation-schema.ts), [`src/config/installation-branding.ts`](../src/config/installation-branding.ts).
 - Workbench: [`src/workbench/types.ts`](../src/workbench/types.ts), [`src/app/api/projects`](../src/app/api/projects), [`src/app/api/threads`](../src/app/api/threads).
 - Chat/runtime: [`src/lib/chat-contract.ts`](../src/lib/chat-contract.ts), [`src/lib/runtime-status.ts`](../src/lib/runtime-status.ts), [`src/app/api/chat/route.ts`](../src/app/api/chat/route.ts), [`src/app/api/runtime`](../src/app/api/runtime).
+- Usage: [`src/usage`](../src/usage), [`src/app/api/usage`](../src/app/api/usage).
 - Documentos/publicación: [`src/documents`](../src/documents), [`src/app/api/threads/[threadId]/documents`](../src/app/api/threads/%5BthreadId%5D/documents), [`src/app/api/threads/[threadId]/publications`](../src/app/api/threads/%5BthreadId%5D/publications).
 - Browser/Computer Use: [`src/runtime/browser`](../src/runtime/browser), [`src/app/api/runtime/browser`](../src/app/api/runtime/browser), [`tests/integration/browser-routes.integration.test.ts`](../tests/integration/browser-routes.integration.test.ts).
 - Pruebas de rutas: [`tests/integration`](../tests/integration).

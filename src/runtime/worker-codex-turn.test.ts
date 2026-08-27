@@ -201,6 +201,23 @@ describe("worker Codex turn", () => {
                 params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "Fet" },
               });
               await handlers?.onNotification({
+                method: "thread/tokenUsage/updated",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  tokenUsage: {
+                    last: {
+                      totalTokens: 120,
+                      inputTokens: 80,
+                      cachedInputTokens: 20,
+                      cacheWriteInputTokens: 0,
+                      outputTokens: 40,
+                      reasoningOutputTokens: 8,
+                    },
+                  },
+                },
+              });
+              await handlers?.onNotification({
                 method: "turn/completed",
                 params: { threadId: "runtime-thread-1", turn: { id: "runtime-turn-1", status: "completed", items: [], error: null } },
               });
@@ -313,6 +330,17 @@ describe("worker Codex turn", () => {
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
+    expect(events).toContainEqual({
+      type: "runtimeUsage",
+      tokenUsage: {
+        totalTokens: 120,
+        inputTokens: 80,
+        cachedInputTokens: 20,
+        cacheWriteInputTokens: 0,
+        outputTokens: 40,
+        reasoningOutputTokens: 8,
+      },
+    });
     expect(events).toContainEqual({ type: "done" });
     expect(mocked.maintenanceReleases).toBe(1);
   });

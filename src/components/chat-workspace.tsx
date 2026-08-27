@@ -6,6 +6,7 @@ import {
   ArrowUp,
   CaretDown,
   CaretRight,
+  ChatCircleDots,
   Check,
   CheckCircle,
   Copy,
@@ -33,7 +34,7 @@ import { MarkdownMessage } from "@/components/markdown-message";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
-import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
@@ -357,6 +358,7 @@ export function ChatWorkspace({
   const [composerPickerOpen, setComposerPickerOpen] = useState<"mode" | "model" | "effort" | "skill" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const standaloneConversation = Boolean(project && isStandaloneProject(project));
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current && !sending) return;
@@ -499,9 +501,9 @@ export function ChatWorkspace({
             <SidebarSimple size={17} />
           </button>
           <div className="flex min-w-0 items-center gap-1.5 rounded-md px-1 py-1">
-            <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" />
-            <span className="hidden max-w-36 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name ?? "Proyecto"}</span>
-            {thread ? <CaretRight size={11} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" /> : null}
+            {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : <ChatCircleDots size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" />}
+            {!standaloneConversation ? <span className="hidden max-w-36 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name ?? "Proyecto"}</span> : null}
+            {thread && !standaloneConversation ? <CaretRight size={11} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" /> : null}
             <span className="max-w-[52vw] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread?.title ?? (project ? "Nueva conversación" : "Inicio")}</span>
           </div>
         </div>

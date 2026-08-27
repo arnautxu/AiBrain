@@ -33,6 +33,7 @@ import {
 } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
+import type { TurnProjectionTransportEvent } from "@/workbench/turn-projection-store";
 import {
   acquireWorkerTurnActivity,
   workerTurnIsActive,
@@ -55,12 +56,66 @@ import {
   MaintenanceModeError,
   type MaintenanceActivityLease,
 } from "@/operations/maintenance";
+import { recordTurnUsage } from "@/usage/server-service";
+import type { TokenUsageBreakdown } from "@/usage/contracts";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
+const PROJECTION_BATCH_DELAY_MS = 24;
+const PROJECTION_BATCH_MAX_EVENTS = 64;
 
 function line(event: ChatStreamEvent) {
   return encoder.encode(`${JSON.stringify(event)}\n`);
+}
+
+class TurnProjectionBatchWriter {
+  private pending: TurnProjectionTransportEvent[] = [];
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private chain = Promise.resolve();
+  private failure: unknown = null;
+
+  constructor(
+    private readonly store: FileTurnProjectionStore,
+    private readonly threadId: string,
+    private readonly assistantMessageId: string,
+  ) {}
+
+  enqueue(event: TurnProjectionTransportEvent) {
+    if (this.failure) return;
+    this.pending.push(event);
+    if (this.pending.length >= PROJECTION_BATCH_MAX_EVENTS) {
+      void this.flush();
+      return;
+    }
+    if (this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.flush();
+    }, PROJECTION_BATCH_DELAY_MS);
+    this.timer.unref?.();
+  }
+
+  async flush() {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const batch = this.pending.splice(0);
+    if (batch.length > 0) {
+      this.chain = this.chain.then(async () => {
+        if (this.failure) return;
+        await this.store.applyTransportEvents(
+          this.threadId,
+          this.assistantMessageId,
+          batch,
+        );
+      }).catch((error: unknown) => {
+        this.failure ??= error;
+      });
+    }
+    await this.chain;
+    if (this.failure) throw this.failure;
+  }
 }
 
 function delay(milliseconds: number, signal: AbortSignal) {
@@ -375,20 +430,31 @@ export async function POST(request: Request) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let runtimeThreadToken: string | null = null;
+      let runtimeTurnId: string | null = null;
+      let firstTextAt: number | null = null;
+      let tokenUsage: TokenUsageBreakdown | null = null;
+      const projectionWriter = persistent && turnProjectionStore
+        ? new TurnProjectionBatchWriter(
+            turnProjectionStore,
+            body.threadId,
+            body.assistantMessageId,
+          )
+        : null;
       const emit = async (event: ChatStreamEvent, projection?: WorkerTurnProjection) => {
-        let applied = true;
-        if (persistent && turnProjectionStore) {
+        if (persistent && turnProjectionStore && projectionWriter) {
           if (projection) {
-            const result = await turnProjectionStore.applyTransportEvent(
-              body.threadId,
-              body.assistantMessageId,
-              projection.envelope,
-              projection.key,
+            // Deliver the live App Server delta immediately. The durable
+            // transport journal already owns replay; compact the refresh
+            // projection in short atomic batches instead of blocking every
+            // token on a full filesystem write.
+            assistantMessage = applyChatStreamEvent(assistantMessage, event);
+            projectionWriter.enqueue({
+              envelope: projection.envelope,
+              projectionKey: projection.key,
               event,
-            );
-            assistantMessage = result.projection.message;
-            applied = result.applied;
+            });
           } else {
+            await projectionWriter.flush();
             assistantMessage = (await turnProjectionStore.applyLocalEvent(
               body.threadId,
               body.assistantMessageId,
@@ -398,7 +464,6 @@ export async function POST(request: Request) {
         } else {
           assistantMessage = applyChatStreamEvent(assistantMessage, event);
         }
-        if (!applied) return;
         controller.enqueue(line(event));
       };
       const emitCodex = async (event: WorkerCodexTurnEvent, projection?: WorkerTurnProjection) => {
@@ -414,6 +479,7 @@ export async function POST(request: Request) {
           return;
         }
         if (event.type === "runtimeTurn") {
+          runtimeTurnId = event.turnId;
           if (persistent && turnProjectionStore) {
             await turnProjectionStore.setRuntimeTurnId(
               body.threadId,
@@ -423,6 +489,11 @@ export async function POST(request: Request) {
           }
           return;
         }
+        if (event.type === "runtimeUsage") {
+          tokenUsage = event.tokenUsage;
+          return;
+        }
+        if (event.type === "delta") firstTextAt ??= Date.now();
         await emit(event, projection);
       };
 
@@ -470,6 +541,19 @@ export async function POST(request: Request) {
           message: error instanceof Error ? error.message : "El runtime no està disponible.",
         });
       } finally {
+        try {
+          await projectionWriter?.flush();
+        } catch (error) {
+          operationalLogger.error("turn.projection_flush_failed", { error });
+          if (!request.signal.aborted) {
+            const event: ChatStreamEvent = {
+              type: "error",
+              message: "El torn ha acabat, però no s’ha pogut consolidar la recuperació.",
+            };
+            assistantMessage = applyChatStreamEvent(assistantMessage, event);
+            controller.enqueue(line(event));
+          }
+        }
         if (assistantMessage.status === "streaming") {
           assistantMessage = {
             ...assistantMessage,
@@ -490,6 +574,27 @@ export async function POST(request: Request) {
               await emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
             }
           }
+        }
+        if (persistent && config.mode === "codex" && turnOutcome === "created") {
+          const completedAt = new Date();
+          const status = assistantMessage.status === "complete"
+            ? "completed"
+            : assistantMessage.status === "stopped" ? "stopped" : "error";
+          await recordTurnUsage({
+            installationId: session.tenant.id,
+            userId: session.user.id,
+            projectId: body.projectId,
+            threadId: body.threadId,
+            turnId: runtimeTurnId ?? body.assistantMessageId,
+            status,
+            startedAt: startedAt.toISOString(),
+            completedAt: completedAt.toISOString(),
+            durationMs: Math.max(0, completedAt.getTime() - startedAt.getTime()),
+            firstTextMs: firstTextAt === null ? null : Math.max(0, firstTextAt - startedAt.getTime()),
+            tokenUsage,
+          }).catch((error: unknown) => {
+            operationalLogger.error("usage.turn_record_failed", { error });
+          });
         }
         maintenanceActivity?.release();
         controller.close();

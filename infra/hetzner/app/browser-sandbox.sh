@@ -72,7 +72,13 @@ if [ "${AIBRAIN_BROWSER_PREFLIGHT:-}" = entrypoint-boundary-v1 ]; then
   set -- /bin/sh -c '[ -f "$1" ] && [ ! -e "$2" ] && [ ! -e "$3" ] && ! /bin/sh -c '\'' : >"$1" '\'' sh "$4"' sh \
     "$browser_root/.aibrain-preflight" "$sibling_marker" "$publish_marker" "$publish_root/browser-write-test"
 else
-  set -- /usr/bin/chromium "$@"
+  # Chromium's setuid/user-namespace sandbox cannot initialize below Docker's
+  # no-new-privileges boundary and aborts before opening the inherited CDP
+  # pipes. This launcher is already the browser sandbox: non-root/no caps in
+  # Compose plus a private bwrap PID, IPC, UTS and filesystem namespace. Only
+  # this root-owned wrapper may disable Chromium's redundant inner sandbox;
+  # application-supplied --no-sandbox remains rejected by ChromeCdpRuntime.
+  set -- /usr/bin/chromium --no-sandbox "$@"
 fi
 
 # The browser retains the parent's network namespace solely to reach its
