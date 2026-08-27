@@ -114,6 +114,10 @@ RUN printf '%s\n' \
   && install -d -m 0555 -o root -g root /srv/aibrain/source-ro \
   && install -d -m 0755 -o root -g root /etc/aibrain /usr/local/share/aibrain
 
+# Bubblewrap needs a pre-existing mountpoint because the container root is
+# deliberately read-only before document conversion begins.
+RUN install -d -m 0555 -o root -g root /work
+
 WORKDIR /app
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
