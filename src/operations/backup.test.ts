@@ -23,12 +23,24 @@ async function fixture() {
   const backupsRoot = path.join(dataRoot, "backups");
   await Promise.all([
     mkdir(path.join(dataRoot, "users", "user-one", "state"), { recursive: true }),
+    mkdir(path.join(dataRoot, "users", "user-one", "browser", "profile", "Default"), { recursive: true }),
+    mkdir(path.join(dataRoot, "users", "user-one", "browser", "downloads"), { recursive: true }),
+    mkdir(path.join(dataRoot, "users", "user-one", "runtime", "codex-home"), { recursive: true }),
     mkdir(path.join(dataRoot, "sessions", "records"), { recursive: true }),
+    mkdir(path.join(dataRoot, "auth-challenges", "records"), { recursive: true }),
+    mkdir(path.join(dataRoot, "secrets"), { recursive: true }),
     mkdir(path.join(dataRoot, "locks", "ephemeral.lock"), { recursive: true }),
   ]);
   await Promise.all([
     writeFile(path.join(dataRoot, "users", "user-one", "state", "project.json"), "project-v1\n"),
+    writeFile(path.join(dataRoot, "users", "user-one", "browser", "session.json"), "browser-state\n"),
+    writeFile(path.join(dataRoot, "users", "user-one", "browser", "downloads", "report.txt"), "report\n"),
+    writeFile(path.join(dataRoot, "users", "user-one", "browser", "profile", "Default", "Cookies"), "cookie-secret\n"),
+    writeFile(path.join(dataRoot, "users", "user-one", "runtime", "codex-home", "auth.json"), "codex-secret\n"),
     writeFile(path.join(dataRoot, "sessions", "records", "session.json"), "session-v1\n"),
+    writeFile(path.join(dataRoot, "auth-challenges", "records", "challenge.json"), "challenge-secret\n"),
+    writeFile(path.join(dataRoot, "secrets", "service.key"), "service-secret\n"),
+    writeFile(path.join(dataRoot, ".env.runtime"), "runtime-secret\n"),
     writeFile(path.join(dataRoot, "PERMISSIONS.md"), "permission-v1\n", { mode: 0o400 }),
     writeFile(path.join(dataRoot, "locks", "ephemeral.lock", "owner.json"), "ephemeral\n"),
   ]);
@@ -69,7 +81,8 @@ describe("FileBackupService", () => {
     const created = await service.create();
     expect(created.manifest.files.map(({ path: filePath }) => filePath)).toEqual([
       "PERMISSIONS.md",
-      "sessions/records/session.json",
+      "users/user-one/browser/downloads/report.txt",
+      "users/user-one/browser/session.json",
       "users/user-one/state/project.json",
     ]);
     expect((await lstat(created.snapshotRoot)).mode & 0o777).toBe(0o500);
@@ -82,15 +95,21 @@ describe("FileBackupService", () => {
     expect(restored.manifest.sourceFingerprint).toBe(created.manifest.sourceFingerprint);
     expect(await readFile(path.join(restoreRoot, "users", "user-one", "state", "project.json"), "utf8"))
       .toBe("project-v1\n");
-    expect(await readFile(path.join(restoreRoot, "sessions", "records", "session.json"), "utf8"))
-      .toBe("session-v1\n");
+    await expect(lstat(path.join(restoreRoot, "sessions"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, "auth-challenges"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, "secrets"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, ".env.runtime"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, "users", "user-one", "browser", "profile")))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(path.join(restoreRoot, "users", "user-one", "runtime", "codex-home", "auth.json")))
+      .rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(path.join(restoreRoot, "locks"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("detects snapshot corruption and refuses an existing restore destination", async () => {
     const { root, service } = await fixture();
     const created = await service.create();
-    const target = path.join(created.snapshotRoot, "data", "sessions", "records", "session.json");
+    const target = path.join(created.snapshotRoot, "data", "users", "user-one", "state", "project.json");
     await chmod(path.dirname(target), 0o700);
     await chmod(target, 0o600);
     await writeFile(target, "tampered\n");
