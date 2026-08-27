@@ -89,7 +89,7 @@ COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/tsconfig.json ./tsconfig.json
 COPY --from=builder --chown=root:root /app/scripts/backup.ts ./scripts/backup.ts
 COPY --from=builder --chown=root:root /app/src/config/installation.ts /app/src/config/installation-schema.ts ./src/config/
-COPY --from=builder --chown=root:root /app/src/operations/backup.ts /app/src/operations/index.ts ./src/operations/
+COPY --from=builder --chown=root:root /app/src/operations/backup.ts ./src/operations/backup.ts
 COPY --from=builder --chown=root:root /app/src/security/safe-file.ts ./src/security/safe-file.ts
 COPY --from=builder --chown=root:root \
   /app/src/storage/atomic-file.ts \

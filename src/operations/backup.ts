@@ -144,7 +144,10 @@ export function excludedBackupPath(relativePath: string) {
 }
 
 function backupId(now: number) {
-  return `${new Date(now).toISOString().replace(/[-:]/g, "").replace(".000", "")}-${randomUUID()}`;
+  const timestamp = new Date(now).toISOString()
+    .replace(/\.\d{3}Z$/u, "Z")
+    .replace(/[-:]/g, "");
+  return `${timestamp}-${randomUUID()}`;
 }
 
 function sourceFingerprint(files: readonly BackupManifestEntry[]) {

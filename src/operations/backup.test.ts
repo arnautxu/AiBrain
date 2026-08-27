@@ -78,6 +78,19 @@ afterEach(async () => {
 });
 
 describe("FileBackupService", () => {
+  it("creates a schema-valid backup id when the clock includes milliseconds", async () => {
+    const { dataRoot, backupsRoot } = await fixture();
+    const service = new FileBackupService(
+      dataRoot,
+      backupsRoot,
+      "synthetic-company-qa",
+      () => Date.parse("2026-08-27T12:34:56.789Z"),
+    );
+    await expect(service.create()).resolves.toMatchObject({
+      manifest: { backupId: expect.stringMatching(/^20260827T123456Z-[0-9a-f-]{36}$/u) },
+    });
+  });
+
   it("creates an immutable verified snapshot and restores it into a new root", async () => {
     const { root, dataRoot, service } = await fixture();
     const created = await service.create();

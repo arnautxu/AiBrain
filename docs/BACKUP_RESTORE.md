@@ -11,7 +11,7 @@ La imagen de servidor incluye el CLI mínimo de backup y un volumen separado par
 ```bash
 export AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json
 npm run backup:create
-npm run backup:verify -- --snapshot /var/lib/aibrain/backups/snapshots/<backup-id>
+npm run backup:verify -- --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id>
 ```
 
 Conservar `backupId`, `sourceFingerprint`, número de ficheros y resultado del verify en el registro de release. El volumen de backups debe usar cifrado en reposo y una copia fuera del servidor con acceso separado; este command no sube ni elimina copias.
@@ -22,7 +22,7 @@ La restauración nunca escribe encima del `dataRoot` activo y exige un destino i
 
 ```bash
 npm run backup:restore -- \
-  --snapshot /var/lib/aibrain/backups/snapshots/<backup-id> \
+  --snapshot /var/lib/aibrain/data/backups/snapshots/<backup-id> \
   --destination /var/lib/aibrain-restores/<backup-id>
 ```
 
