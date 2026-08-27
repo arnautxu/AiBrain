@@ -1,6 +1,6 @@
 # Backup, restore y rollback del estado local
 
-El snapshot incluye el estado file-backed de la instalación y excluye `backupsRoot` y cualquier directorio `locks`. Cada fichero se abre sin seguir symlinks, se exige regular y con un solo hardlink, se copia con `fsync`, se vuelve a comprobar que no cambió durante la lectura y se registra con SHA-256. El manifest se escribe al final y el snapshot queda read-only.
+El snapshot incluye el estado file-backed de producto y excluye `backupsRoot`, cualquier directorio `locks` y toda identidad o credencial efímera: `sessions/`, `auth-challenges/`, `secrets/`, ficheros `.env*`, cualquier `auth.json` y `users/<userId>/browser/profile/`. Por tanto, las cookies Chromium, sesiones web y autenticación Codex no se copian ni se restauran. El estado durable del browser y las descargas fuera del perfil sí pueden formar parte del snapshot. Cada fichero incluido se abre sin seguir symlinks, se exige regular y con un solo hardlink, se copia con `fsync`, se vuelve a comprobar que no cambió durante la lectura y se registra con SHA-256. El manifest se escribe al final y el snapshot queda read-only.
 
 Un backup consistente requiere drenar mutaciones y turns antes de crearlo. El servicio detecta un fichero que cambia durante su copia y falla; el runbook de producción debe poner la app en mantenimiento antes del command.
 
@@ -43,4 +43,4 @@ No modificar la ruta de BGreenly, no reutilizar sus redes/volúmenes y no borrar
 npx vitest run src/operations/backup.test.ts
 ```
 
-La prueba crea estado QA real en un filesystem temporal, congela y verifica el snapshot, modifica el estado vivo, restaura a un root nuevo y comprueba que reaparece la versión anterior. También demuestra rechazo de corrupción, symlinks y destinos existentes.
+La prueba crea estado QA real en un filesystem temporal, congela y verifica el snapshot, modifica el estado vivo, restaura a un root nuevo y comprueba que reaparece la versión anterior. También demuestra que sesiones, challenges, secretos, `auth.json`, `.env*` y el perfil/cookies Chromium no llegan al snapshot ni al restore, además del rechazo de corrupción, symlinks y destinos existentes.

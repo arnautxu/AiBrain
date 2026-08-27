@@ -29,6 +29,7 @@ const HASH_PATTERN = /^[0-9a-f]{64}$/;
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const BACKUP_ID_PATTERN = /^[0-9]{8}T[0-9]{6}Z-[0-9a-f-]{36}$/;
 const MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
+const SENSITIVE_ROOT_DIRECTORIES = new Set(["auth-challenges", "secrets", "sessions"]);
 
 export class BackupError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {
@@ -120,6 +121,23 @@ function inside(root: string, candidate: string) {
     || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
+/**
+ * Credentials and browser identity must never enter a product-state snapshot.
+ * The policy is based on canonical paths relative to dataRoot, never on file
+ * contents, so a backup cannot leak a secret while trying to classify it.
+ */
+export function excludedBackupPath(relativePath: string) {
+  if (!safeRelativePath(relativePath)) return false;
+  const segments = relativePath.split("/");
+  const basename = segments.at(-1) as string;
+  if (SENSITIVE_ROOT_DIRECTORIES.has(segments[0])) return true;
+  if (basename === "auth.json" || basename === ".env" || basename.startsWith(".env.")) {
+    return true;
+  }
+  return segments.length >= 4 && segments[0] === "users" &&
+    segments[2] === "browser" && segments[3] === "profile";
+}
+
 function backupId(now: number) {
   return `${new Date(now).toISOString().replace(/[-:]/g, "").replace(".000", "")}-${randomUUID()}`;
 }
@@ -154,6 +172,7 @@ async function listSourceFiles(
     if (inside(backupsRoot, absolute) || inside(absolute, backupsRoot)) continue;
     const relative = path.relative(dataRoot, absolute).split(path.sep).join("/");
     if (relative.split("/").includes("locks")) continue;
+    if (excludedBackupPath(relative)) continue;
     const metadata = await lstat(absolute);
     if (metadata.isSymbolicLink()) {
       throw new BackupError("BACKUP_SYMLINK_REJECTED", `Refusing symbolic link ${relative}.`);
