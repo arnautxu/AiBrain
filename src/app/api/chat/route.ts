@@ -46,6 +46,7 @@ import {
 import { documentServicesForUser } from "@/documents/server-service";
 import {
   resolveTurnDocumentAttachments,
+  ServerTurnDocumentInputResolver,
   TurnDocumentAttachmentError,
   turnDocumentChatAttachments,
   type ResolvedTurnDocument,
@@ -265,6 +266,11 @@ export async function POST(request: Request) {
           threadId: body.threadId,
           uploadIds: documentUploadIds,
           permissions: turnPermissions,
+          inputResolver: new ServerTurnDocumentInputResolver({
+            stagingRoot: documentServices.manifest.roots.staging,
+            previews: documentServices.previews,
+            pdftotext: documentServices.toolchain.pdftotext,
+          }),
         });
       }
     } catch (error) {

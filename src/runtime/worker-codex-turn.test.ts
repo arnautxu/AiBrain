@@ -264,6 +264,11 @@ describe("worker Codex turn", () => {
           createdAt: "2026-08-27T00:00:00.000Z",
         },
         absolutePath: documentPath,
+        codexInputs: [{
+          type: "text",
+          text: "BEGIN UNTRUSTED ATTACHMENT notes.txt\nserver-derived attachment\nEND UNTRUSTED ATTACHMENT notes.txt",
+          text_elements: [],
+        }],
       }],
       new AbortController().signal,
       async (event) => { events.push(event); },
@@ -273,13 +278,15 @@ describe("worker Codex turn", () => {
     expect(turnStart?.params).toMatchObject({
       threadId: "runtime-thread-1",
       clientUserMessageId: userMessageId,
-      runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId), staging],
+      runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId)],
     });
     expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "text", text: expect.stringContaining("server-attached documents") }),
-        { type: "mention", name: "notes.txt", path: documentPath },
+        expect.objectContaining({ type: "text", text: expect.stringContaining("server-derived attachment") }),
       ]));
+    expect(JSON.stringify(turnStart?.params)).not.toContain(documentPath);
+    expect(JSON.stringify(turnStart?.params)).not.toContain(staging);
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
     const threadStart = calls.find((call) => call.method === "thread/start");
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([

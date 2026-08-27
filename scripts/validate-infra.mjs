@@ -40,6 +40,8 @@ const releaseManager = read("scripts/manage-release.mjs");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
+const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
+const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
 const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, egressGateway].join("\n");
 
@@ -118,10 +120,15 @@ requireMatch(worker, /company context root is outside dataRoot[\s\S]*users root 
 for (const contextFile of ["PROFILE.md", "PREFERENCES.md", "PERMISSIONS.md"]) {
   requireMatch(worker, new RegExp(`--ro-bind "\\$user_root/${contextFile}" "\\$user_root/${contextFile}"`, "u"), `worker sandbox is missing private ${contextFile}`);
 }
-for (const writable of ["runtime_root", "workspace", "staging_root", "artifacts_root", "transport_audit_root"]) {
+for (const writable of ["runtime_root", "workspace", "artifacts_root", "transport_audit_root"]) {
   requireMatch(worker, new RegExp(`--bind "\\$${writable}" "\\$${writable}"`, "u"), `worker sandbox is missing its declared ${writable} write root`);
 }
+requireMatch(worker, /--bind "\$staging_root\/tmp" "\$staging_root\/tmp"/u, "worker sandbox is missing its private temporary directory");
+forbidMatch(worker, /--bind "\$staging_root" "\$staging_root"/u, "worker sandbox exposes all staged uploads");
 forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-rw as a real writable bind");
+forbidMatch(workerCodexTurn, /runtimeWorkspaceRoots:\s*\[[^\]]*roots\.staging/gu, "Codex turn exposes the employee staging root as a workspace");
+requireMatch(turnAttachments, /No filesystem staging path is exposed/u, "turn document inputs do not declare the server-only staging boundary");
+forbidMatch(turnAttachments, /result\.push\(\{\s*type:\s*"(?:mention|localImage|localAudio)"/u, "turn document inputs expose server-local staging paths");
 requireMatch(browserSandbox, /--tmpfs "\$data_root"[\s\S]*--bind "\$browser_root" "\$browser_root"/u, "browser sandbox does not hide product data before exposing one employee browser root");
 requireMatch(browserSandbox, /--tmpfs "\$source_root"[\s\S]*--remount-ro "\$source_root"[\s\S]*--tmpfs "\$publish_root"[\s\S]*--remount-ro "\$publish_root"/u, "browser sandbox does not mask source and publish roots");
 requireMatch(browserSandbox, /--unshare-pid[\s\S]*--proc \/proc/u, "browser sandbox does not isolate the process namespace");

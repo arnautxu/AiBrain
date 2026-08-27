@@ -23,6 +23,9 @@
 - App Server runs in a persistent per-employee worker; an authenticated private WebSocket adapter carries the versioned protocol to Next.js and the web client sees only AiBrain's application contract.
 - Approvals are always explicit and remain pending until the user accepts or declines them.
 - The default Codex workspace is dedicated to the runtime, not the AiBrain source tree.
+- Staged uploads remain server-only. Codex receives bounded, attested content
+  prepared for the authorized turn and never receives a staging filesystem
+  path or staging workspace root.
 - Product customization is configuration-driven and does not require tenant forks.
 - The UI works in demo mode without implying a real Codex connection.
 

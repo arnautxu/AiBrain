@@ -335,6 +335,8 @@ describe("WorkerRuntimeRegistry", () => {
     for (const context of factory.contexts) {
       expect(JSON.stringify(context)).not.toContain(config.paths.publishWriteRoot);
       expect(context.environment.HOME).not.toBe(context.environment.CODEX_HOME);
+      expect(context.mounts.runtimeReadWrite).toContain(context.environment.TMPDIR);
+      expect(context.mounts.runtimeReadWrite).not.toContain(context.staging);
       expect(context.mounts.runtimeReadWrite).not.toContain(context.browser.profile);
       expect(context.mounts.browserReadWrite).not.toContain(context.workspace);
     }
@@ -423,6 +425,8 @@ describe("WorkerRuntimeRegistry", () => {
       config.paths.sourceReadRoot,
     ]);
     expect(context.mounts.runtimeReadWrite).not.toContain(config.paths.publishWriteRoot);
+    expect(context.mounts.runtimeReadWrite).toContain(manifest.roots.stagingTemp);
+    expect(context.mounts.runtimeReadWrite).not.toContain(manifest.roots.staging);
     expect(context.mounts.browserReadWrite).not.toContain(config.paths.publishWriteRoot);
     expect(Object.values(context.environment)).not.toContain(config.paths.publishWriteRoot);
   });

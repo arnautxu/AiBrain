@@ -35,9 +35,13 @@ comprobación evita una composición insegura, pero no sustituye el aislamiento
 del sistema operativo: Compose/systemd debe montar `publishWriteRoot` solo en
 la web/publicador y nunca en workers, browser, viewer ni App Server.
 
-El worker debe recibir `source-ro` y su staging privado; no recibe una ruta,
-variable de entorno, descriptor, socket delegado ni volumen con acceso a
-`publish-rw`.
+El worker recibe `source-ro`, el workspace del proyecto y únicamente
+`staging/tmp` como temporal privado. Los uploads staged permanecen visibles
+solo para el servidor: antes de iniciar el turn, este verifica usuario, thread,
+hash y preview, extrae texto acotado y entrega contenido preparado en el
+payload App Server. No se envía ningún path staged a Codex. El worker tampoco
+recibe una ruta, variable de entorno, descriptor, socket delegado ni volumen
+con acceso a `publish-rw`.
 
 ## Lifecycle durable
 
@@ -150,7 +154,11 @@ operación explícita y autorizada; este módulo no restaura automáticamente.
 
 ## Conflictos, locks y filesystem
 
-- Existe un lock por operación, uno por receipt y uno por target lógico.
+- Existe un lock por operación, uno por receipt y uno por target lógico. El
+  lock de target vive en
+  `<dataRoot>/locks/document-publication-targets`, compartido físicamente por
+  todos los publicadores de la instalación; nunca bajo el estado privado de un
+  usuario.
 - Dos operaciones que parten del mismo original pueden congelarse, pero solo
   una puede publicar. La segunda observa el cambio y termina en `conflict`.
 - El original se comprueba al confirmar, antes de crear/escribir y de nuevo
@@ -190,7 +198,8 @@ npm run typecheck
 La prueba focalizada cubre preview obligatorio, snapshot inmutable, rechazo sin
 publicar, confirmación exactamente una vez, idempotencia, versión recuperable,
 conflicto del original, crash/restart, aislamiento usuario/thread, publicación
-concurrente sobre un target, traversal, symlinks y frontera worker/publish.
+concurrente entre dos usuarios sobre un mismo target físico, traversal,
+symlinks y frontera worker/publish.
 
 Las pruebas usan únicamente directorios temporales locales y datos sintéticos.
 No simulan ni afirman haber validado un NAS. Quedan como validaciones de

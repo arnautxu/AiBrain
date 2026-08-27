@@ -14,7 +14,9 @@ function configuredAbsolutePath(name: string, fallback: string) {
   return path.resolve(value);
 }
 
-export function documentToolchainFromEnvironment(): DocumentToolchain {
+export type ConfiguredDocumentToolchain = DocumentToolchain & { pdftotext: string };
+
+export function documentToolchainFromEnvironment(): ConfiguredDocumentToolchain {
   const darwin = process.platform === "darwin";
   const qpdf = process.env.AIBRAIN_QPDF_BIN?.trim() ||
     (process.env.NODE_ENV === "production" ? "/usr/bin/qpdf" : undefined);
@@ -31,6 +33,10 @@ export function documentToolchainFromEnvironment(): DocumentToolchain {
       "AIBRAIN_PDFTOPPM_BIN",
       darwin ? "/opt/homebrew/bin/pdftoppm" : "/usr/bin/pdftoppm",
     ),
+    pdftotext: configuredAbsolutePath(
+      "AIBRAIN_PDFTOTEXT_BIN",
+      darwin ? "/opt/homebrew/bin/pdftotext" : "/usr/bin/pdftotext",
+    ),
     ...(qpdf ? { qpdf: configuredAbsolutePath("AIBRAIN_QPDF_BIN", qpdf) } : {}),
   };
 }
@@ -45,13 +51,14 @@ export async function documentServicesForUser(
     rootDirectory: path.join(stateRoot, ".locks", "documents"),
   });
   const staging = new FileDocumentStagingStore(manifest.roots.staging, locks);
+  const toolchain = documentToolchainFromEnvironment();
   const previews = new DocumentPreviewService({
     stagingRoot: manifest.roots.staging,
     previewRoot: path.join(stateRoot, "document-previews"),
     lockManager: locks,
-    tools: documentToolchainFromEnvironment(),
+    tools: toolchain,
   });
-  return { manifest, locks, staging, previews };
+  return { manifest, locks, staging, previews, toolchain };
 }
 
 function publicationSecret() {
@@ -84,6 +91,13 @@ export async function documentPublisherForUser(
       installation.paths.sourceReadRoot,
     ],
     lockManager: services.locks,
+    targetLockManager: new ResourceLockManager({
+      rootDirectory: path.join(
+        installation.paths.dataRoot,
+        "locks",
+        "document-publication-targets",
+      ),
+    }),
     confirmationSecret: publicationSecret(),
   });
 }

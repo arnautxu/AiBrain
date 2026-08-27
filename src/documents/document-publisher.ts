@@ -43,6 +43,7 @@ export type FileDocumentPublisherOptions = {
   stateRoot: string;
   workerVisibleRoots: readonly string[];
   lockManager: ResourceLockManager;
+  targetLockManager?: ResourceLockManager;
   confirmationSecret: string | Uint8Array;
   maximumCandidateBytes?: number;
   confirmationTtlMs?: number;
@@ -200,6 +201,7 @@ export class FileDocumentPublisher {
   readonly #publishWriteRoot: string;
   readonly #stateRoot: string;
   readonly #lockManager: ResourceLockManager;
+  readonly #targetLockManager: ResourceLockManager;
   readonly #confirmationSecret: Buffer;
   readonly #now: () => number;
   readonly #onStage?: FileDocumentPublisherOptions["onStage"];
@@ -253,6 +255,7 @@ export class FileDocumentPublisher {
     this.#publishWriteRoot = publishWriteRoot;
     this.#stateRoot = stateRoot;
     this.#lockManager = options.lockManager;
+    this.#targetLockManager = options.targetLockManager ?? options.lockManager;
     this.#confirmationSecret = secret;
     this.#now = options.now ?? Date.now;
     this.#onStage = options.onStage;
@@ -719,11 +722,11 @@ export class FileDocumentPublisher {
           throw new StorageError("PUBLICATION_STATE_CORRUPT", "Frozen publication candidate failed integrity verification.");
         }
 
-        return this.#lockManager.withLock(this.#targetLock(operation.targetRelativePath), async () => {
-        let current = await this.#readTarget(operation.targetRelativePath);
-        const targetAlreadyContainsCandidate =
-          current.metadata.exists && current.metadata.size === operation.candidate.size &&
-          current.metadata.sha256 === operation.candidate.sha256;
+        return this.#targetLockManager.withLock(this.#targetLock(operation.targetRelativePath), async () => {
+          let current = await this.#readTarget(operation.targetRelativePath);
+          const targetAlreadyContainsCandidate =
+            current.metadata.exists && current.metadata.size === operation.candidate.size &&
+            current.metadata.sha256 === operation.candidate.sha256;
 
         if (!targetAlreadyContainsCandidate || (operation.original.exists && !operation.version)) {
           if (!this.#sameOriginal(operation.original, current.metadata)) {

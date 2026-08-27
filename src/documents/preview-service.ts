@@ -72,7 +72,7 @@ export class SystemDocumentToolRunner implements DocumentToolRunner {
         cwd: options.cwd,
         env: { NODE_ENV: process.env.NODE_ENV ?? "production", ...options.env },
         timeout: options.timeoutMs,
-        maxBuffer: 1024 * 1024,
+        maxBuffer: 4 * 1024 * 1024,
         encoding: "utf8",
       });
       return { stdout: result.stdout, stderr: result.stderr };
