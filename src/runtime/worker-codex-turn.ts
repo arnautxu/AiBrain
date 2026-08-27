@@ -38,6 +38,7 @@ import { executeBrowserAgentCommand } from "@/runtime/browser/server-service";
 import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
+  permissionAllowsGenericToolExecution,
 } from "@/runtime/permission-turn";
 import {
   prepareTurnMemory,
@@ -504,6 +505,13 @@ export async function runWorkerCodexTurn(
           ...approval.item,
           permissionFingerprint: permissions.fingerprint,
         };
+        if (!permissionAllowsGenericToolExecution(permissions)) {
+          await emit(
+            { type: "approval", item: resolvedApproval(permissionBoundItem, "decline") },
+            { envelope, key: `approval:policy-denied:${approval.item.id}` },
+          );
+          return approval.response("decline") as JsonValue;
+        }
         const durableApproval = await approvalStore.createPending({
           locator: approvalLocatorFromItem(installationId, authenticatedUserId, permissionBoundItem),
           requestType: approval.requestType,

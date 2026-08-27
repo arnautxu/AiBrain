@@ -17,6 +17,7 @@ describe("operational alert evaluation", () => {
     expect(evaluateOperationalAlerts({
       readiness: "ready",
       diskUsedRatio: 0.5,
+      publishDiskUsedRatio: 0.5,
       restartCount15m: 0,
       preflightFailureCount15m: 0,
       backupReceipt: receipt,
@@ -27,6 +28,7 @@ describe("operational alert evaluation", () => {
     const result = evaluateOperationalAlerts({
       readiness: "degraded",
       diskUsedRatio: 0.91,
+      publishDiskUsedRatio: 0.81,
       restartCount15m: 3,
       preflightFailureCount15m: 1,
       backupReceipt: null,
@@ -35,6 +37,7 @@ describe("operational alert evaluation", () => {
     expect(result.alerts.map(({ code }) => code)).toEqual([
       "READINESS_DEGRADED",
       "DISK_PRESSURE",
+      "PUBLISH_DISK_PRESSURE",
       "RESTART_LOOP",
       "PREFLIGHT_FAILURE",
       "BACKUP_UNVERIFIED",
@@ -46,6 +49,7 @@ describe("operational alert evaluation", () => {
     const result = evaluateOperationalAlerts({
       readiness: "ready",
       diskUsedRatio: 0.2,
+      publishDiskUsedRatio: 0.2,
       restartCount15m: 0,
       preflightFailureCount15m: 0,
       backupReceipt: {

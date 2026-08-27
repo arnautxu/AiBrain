@@ -10,6 +10,7 @@ export type ReadinessCheckName =
   | "source-read"
   | "publish-write"
   | "disk-capacity"
+  | "publish-capacity"
   | "docker-socket";
 
 export type ReadinessCheck = Readonly<{
@@ -59,6 +60,11 @@ export type ReadinessOptions = {
   dockerSocketPath?: string;
   componentProbes?: readonly ReadinessComponentProbe[];
   componentTimeoutMs?: number;
+  readFilesystemCapacity?: (root: string) => Promise<{
+    bavail: bigint;
+    bsize: bigint;
+    blocks: bigint;
+  }>;
 };
 
 const SAFE_COMPONENT_NAME = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/u;
@@ -188,6 +194,8 @@ export async function checkInstallationReadiness(
   const minimumFreeRatio = validRatio(options.minimumFreeRatio ?? 0.05);
   const componentTimeoutMs = validPositiveInteger("componentTimeoutMs", options.componentTimeoutMs ?? 2_000);
   const componentProbes = options.componentProbes ?? [];
+  const readFilesystemCapacity = options.readFilesystemCapacity
+    ?? (async (root: string) => statfs(root, { bigint: true }));
   if (new Set(componentProbes.map(({ name }) => name)).size !== componentProbes.length) {
     throw new Error("Readiness component names must be unique.");
   }
@@ -203,7 +211,7 @@ export async function checkInstallationReadiness(
 
   let disk: ReadinessReport["disk"] = null;
   try {
-    const filesystem = await statfs(config.paths.dataRoot, { bigint: true });
+    const filesystem = await readFilesystemCapacity(config.paths.dataRoot);
     const freeBytes = safeFilesystemNumber(filesystem.bavail * filesystem.bsize);
     const totalBytes = safeFilesystemNumber(filesystem.blocks * filesystem.bsize);
     const freeRatio = totalBytes === 0 ? 0 : freeBytes / totalBytes;
@@ -215,6 +223,21 @@ export async function checkInstallationReadiness(
     });
   } catch {
     checks.push({ name: "disk-capacity", status: "fail", code: "DISK_CAPACITY_UNAVAILABLE" });
+  }
+
+  try {
+    const filesystem = await readFilesystemCapacity(config.paths.publishWriteRoot);
+    const freeBytes = safeFilesystemNumber(filesystem.bavail * filesystem.bsize);
+    const totalBytes = safeFilesystemNumber(filesystem.blocks * filesystem.bsize);
+    const freeRatio = totalBytes === 0 ? 0 : freeBytes / totalBytes;
+    const available = freeBytes >= minimumFreeBytes && freeRatio >= minimumFreeRatio;
+    checks.push({
+      name: "publish-capacity",
+      status: available ? "pass" : "fail",
+      code: available ? "OK" : "PUBLISH_CAPACITY_LOW",
+    });
+  } catch {
+    checks.push({ name: "publish-capacity", status: "fail", code: "PUBLISH_CAPACITY_UNAVAILABLE" });
   }
 
   const components = await Promise.all(componentProbes.map((probe) => checkComponent(probe, componentTimeoutMs)));

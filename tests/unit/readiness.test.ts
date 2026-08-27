@@ -69,10 +69,28 @@ describe("installation readiness", () => {
         { name: "source-read", status: "pass", code: "OK" },
         { name: "publish-write", status: "pass", code: "OK" },
         { name: "disk-capacity", status: "pass", code: "OK" },
+        { name: "publish-capacity", status: "pass", code: "OK" },
         { name: "docker-socket", status: "pass", code: "OK" },
       ]),
     });
     expect(report.disk?.totalBytes).toBeGreaterThan(0);
+  });
+
+  it("degrades when publish capacity is low even while the product-data filesystem is healthy", async () => {
+    const { root, config } = await fixture();
+    const report = await checkInstallationReadiness(config, {
+      minimumFreeBytes: 1_000,
+      minimumFreeRatio: 0.1,
+      dockerSocketPath: path.join(root, "missing-docker.sock"),
+      readFilesystemCapacity: async (capacityRoot) => capacityRoot === config.paths.dataRoot
+        ? { bavail: 9_000n, bsize: 1n, blocks: 10_000n }
+        : { bavail: 999n, bsize: 1n, blocks: 10_000n },
+    });
+    expect(report.status).toBe("degraded");
+    expect(report.checks).toEqual(expect.arrayContaining([
+      { name: "disk-capacity", status: "pass", code: "OK" },
+      { name: "publish-capacity", status: "fail", code: "PUBLISH_CAPACITY_LOW" },
+    ]));
   });
 
   it("degrades for writable source, missing publish, low disk or docker socket", async () => {
