@@ -243,6 +243,7 @@
 - `0906d9a feat(ui): add durable event integration boundary` — checkpoint 8, ordering, dedupe, gap/replay, cleanup, batching, performance y smoke App Server real.
 - `cc5ff4b test(ui): add exhaustive visual matrix` — checkpoint 9, siete viewports, 66 baselines deterministas, overflow y umbral visual estricto.
 - `67714ab test(ui): stabilize visual state captures` — checkpoint 9, turnos aislados, scroll reproducible y baselines sin avisos transitorios.
+- `c172950 docs(ui): finalize parity handoff` — checkpoint 10, contrato backend actualizado, Preview, regresión final, gaps y plan de integración segura.
 - Rama publicada en `origin/codex/aibrain-ui-parity` sin force-push.
 
 ## Siguiente acción
