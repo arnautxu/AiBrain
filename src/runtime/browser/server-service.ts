@@ -118,6 +118,7 @@ function ensureBinding(state: BrowserServiceState, installationId: string, userI
 }
 
 async function currentHandle(state: BrowserServiceState, userId: string) {
+  await state.registry.start(userId);
   const handle = state.registry.get(userId);
   const persistent = await state.registry.state(userId);
   if (!handle || !persistent.browserSessionId || handle.browserSessionId !== persistent.browserSessionId) {

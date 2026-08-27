@@ -279,11 +279,12 @@ export class AppServerRpcRouter {
     const request = event.message.rpc;
     const scope = eventScope(request);
     const turn = scope ? this.turns.get(scope.threadId) : null;
+    let turnScopeMismatch = false;
     if (turn && scope?.turnId) {
-      if (turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId) return;
-      turn.runtimeTurnId ??= scope.turnId;
+      turnScopeMismatch = Boolean(turn.runtimeTurnId && turn.runtimeTurnId !== scope.turnId);
+      if (!turnScopeMismatch) turn.runtimeTurnId ??= scope.turnId;
     }
-    const response: JsonRpcSuccess | JsonRpcFailure = turn
+    const response: JsonRpcSuccess | JsonRpcFailure = turn && !turnScopeMismatch
       ? await Promise.resolve(turn.handlers.onServerRequest(request, event)).then(
           (result) => ({ id: request.id, result }),
           (error: unknown) => ({ id: request.id, error: { code: -32603, message: safeError(error).message } }),
@@ -292,7 +293,9 @@ export class AppServerRpcRouter {
           id: request.id,
           error: {
             code: -32602,
-            message: "No active user/thread/turn route owns this server request.",
+            message: turnScopeMismatch
+              ? "The active thread route does not own this runtime turn."
+              : "No active user/thread/turn route owns this server request.",
           },
         };
     await this.transport.send({

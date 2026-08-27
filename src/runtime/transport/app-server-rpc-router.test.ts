@@ -189,6 +189,40 @@ describe("AppServerRpcRouter", () => {
     await router.close();
   });
 
+  it("returns an explicit error for a server request from the wrong turn on an owned thread", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    await router.start();
+    const handler = vi.fn(async () => ({ decision: "accept" }));
+    router.registerTurn("thread-a", "local-a", {
+      onNotification: vi.fn(),
+      onServerRequest: handler,
+      onFailure: vi.fn(),
+    }).bindRuntimeTurn("turn-a");
+    transport.queue.push(event(1, {
+      kind: "rpc-request",
+      rpc: {
+        method: "item/fileChange/requestApproval",
+        id: "approval-wrong-turn",
+        params: {
+          threadId: "thread-a",
+          turnId: "turn-b",
+          itemId: "item-other",
+          reason: null,
+          grantRoot: null,
+          startedAtMs: 1,
+        },
+      },
+    }));
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    expect(handler).not.toHaveBeenCalled();
+    expect(transport.sent[0]).toMatchObject({
+      kind: "rpc-response",
+      rpc: { id: "approval-wrong-turn", error: { code: -32602, message: expect.stringContaining("does not own") } },
+    });
+    await router.close();
+  });
+
   it("keeps another thread streaming while an approval is pending and ACKs in order", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
