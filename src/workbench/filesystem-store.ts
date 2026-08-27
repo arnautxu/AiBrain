@@ -147,6 +147,21 @@ function isCanonicalIsoDate(value: unknown) {
   return !Number.isNaN(parsed.valueOf()) && parsed.toISOString() === value;
 }
 
+function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
+  if (value.type === "image") {
+    return hasExactKeys(value, ["id", "type", "name", "url", "prompt"]);
+  }
+  if (value.type === "document") {
+    return hasExactKeys(value, [
+      "id", "type", "name", "url", "kind", "mimeType", "size", "status", "pages",
+      "previewUrl", "publicationStatus", "publicationError", "targetLabel", "error",
+    ]);
+  }
+  return hasExactKeys(value, [
+    "id", "type", "name", "status", "control", "viewerUrl", "captureUrl", "downloadUrl", "error",
+  ]);
+}
+
 function isStrictChatMessage(value: unknown): value is ChatMessage {
   if (!hasExactKeys(value, MESSAGE_KEYS) || !isChatMessage(value)) return false;
   if (!isUuid(value.id)) return false;
@@ -158,12 +173,11 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
     hasExactKeys(
       item,
       ["id", "threadId", "turnId", "itemId", "kind", "title", "detail", "status"],
-      ["command", "cwd"],
+      ["command", "cwd", "permissionFingerprint"],
     ))) return false;
   if (!value.attachments.every((item) =>
     hasExactKeys(item, ["id", "name", "mimeType", "size"]))) return false;
-  return value.artifacts.every((item) =>
-    hasExactKeys(item, ["id", "type", "name", "url", "prompt"]));
+  return value.artifacts.every(hasExactArtifactKeys);
 }
 
 function parseProject(value: unknown, context: ValidationContext): StoredProject {
