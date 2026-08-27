@@ -67,6 +67,7 @@ import {
   type WorkbenchThread,
 } from "@/workbench/types";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
+import { isSettingsSnapshot, type SettingsSnapshot } from "@/settings/contracts";
 import {
   getThreadActivity,
   isThreadReadMarker,
@@ -399,6 +400,7 @@ export function BrainApp({
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
   const [networkOnline, setNetworkOnline] = useState(true);
   const [runtimeRetry, setRuntimeRetry] = useState(0);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
@@ -569,6 +571,43 @@ export function BrainApp({
       });
     return () => controller.abort();
   }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const controller = new AbortController();
+    void fetch("/api/settings", { signal: controller.signal, cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value: unknown) => {
+        if (isSettingsSnapshot(value)) setSettingsSnapshot(value);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [hydrated]);
+
+  const effectiveRuntimeStatus = useMemo<RuntimeStatus>(() => {
+    const enabled = (id: string) => settingsSnapshot?.apps.find((app) => app.id === id)?.effectiveEnabled ?? true;
+    return {
+      ...runtimeStatus,
+      capabilities: {
+        ...runtimeStatus.capabilities,
+        webSearch: runtimeStatus.capabilities.webSearch && enabled("web-search"),
+        imageGeneration: runtimeStatus.capabilities.imageGeneration && enabled("image-generation"),
+      },
+      skills: enabled("skills") ? runtimeStatus.skills : [],
+    };
+  }, [runtimeStatus, settingsSnapshot]);
+
+  const appPolicy = useMemo(() => ({
+    webSearch: settingsSnapshot?.apps.find((app) => app.id === "web-search")?.effectiveEnabled ?? true,
+    imageGeneration: settingsSnapshot?.apps.find((app) => app.id === "image-generation")?.effectiveEnabled ?? true,
+    skills: settingsSnapshot?.apps.find((app) => app.id === "skills")?.effectiveEnabled ?? true,
+  }), [settingsSnapshot]);
+
+  useEffect(() => {
+    if (!appPolicy.webSearch || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.webSearch)) setWebSearch(false);
+    if (!appPolicy.imageGeneration || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.imageGeneration)) setImageGeneration(false);
+    if (!appPolicy.skills || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && selectedSkill && !runtimeStatus.skills.some((skill) => skill.id === selectedSkill))) setSelectedSkill(null);
+  }, [appPolicy, runtimeStatus, selectedSkill]);
 
   const style = useMemo<BrainStyle>(() => {
     return {
@@ -1307,7 +1346,8 @@ export function BrainApp({
   const enabledWindows = manifest.windows.filter((window) =>
     window.enabled && (window.id === "chat" || window.id === "inspector" || window.id === "browser"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-  const browserEnabled = enabledWindows.some((window) => window.id === "browser");
+  const browserEnabled = enabledWindows.some((window) => window.id === "browser") &&
+    (settingsSnapshot?.apps.find((app) => app.id === "managed-browser")?.effectiveEnabled ?? true);
 
   const toggleSidebar = useCallback(() => {
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -1415,7 +1455,8 @@ export function BrainApp({
         publications={publications}
         documentUploading={documentUploading}
         sending={sending}
-        runtimeStatus={runtimeStatus}
+        runtimeStatus={effectiveRuntimeStatus}
+        appPolicy={appPolicy}
         networkOnline={networkOnline}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
@@ -1461,7 +1502,7 @@ export function BrainApp({
         />
       ) : null}
 
-      {activeSideWindow === "browser" ? (
+      {browserEnabled && activeSideWindow === "browser" ? (
         <BrowserPanel
           threadId={activeThreadId}
           open
@@ -1473,9 +1514,10 @@ export function BrainApp({
         productName={branding.productName}
         open={customizationOpen}
         preferences={preferences}
-        runtimeStatus={runtimeStatus}
+        runtimeStatus={effectiveRuntimeStatus}
         selectedSkill={selectedSkill}
         onSelectedSkillChange={setSelectedSkill}
+        onSettingsSnapshot={setSettingsSnapshot}
         onChange={changePreference}
         onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}

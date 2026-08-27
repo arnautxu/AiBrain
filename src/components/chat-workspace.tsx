@@ -65,6 +65,7 @@ type ChatWorkspaceProps = {
   documentUploading: boolean;
   sending: boolean;
   runtimeStatus: RuntimeStatus;
+  appPolicy: { webSearch: boolean; imageGeneration: boolean; skills: boolean };
   networkOnline: boolean;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
@@ -349,6 +350,7 @@ export function ChatWorkspace({
   documentUploading,
   sending,
   runtimeStatus,
+  appPolicy,
   networkOnline,
   onRetryRuntime,
   onPromptChange,
@@ -426,8 +428,8 @@ export function ChatWorkspace({
   const guideVisible = guidedActionsOpen;
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canAttachDocuments = runtimeStatus.mode === "codex";
-  const canUseWeb = manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
-  const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
+  const canUseWeb = appPolicy.webSearch && manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
+  const canGenerateImages = appPolicy.imageGeneration && manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
   const selectedModelOption = runtimeStatus.models.find((model) => model.id === composerModel) ??
     runtimeStatus.models.find((model) => model.isDefault) ?? runtimeStatus.models[0] ?? null;

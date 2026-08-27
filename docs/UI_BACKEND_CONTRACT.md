@@ -44,6 +44,7 @@ Ejemplo de error:
 | `POST` | `/api/runtime/turns/control` | Steering o stop idempotente |
 | `POST` | `/api/runtime/approvals` | Resolución durable de aprobación |
 | `GET` | `/api/runtime/status?projectId={uuid}` | Estado, modelos, skills y capacidades del worker |
+| `GET`, `PATCH` | `/api/settings` | Cuenta, apps reales, permisos, privacidad, red y preferencias persistentes |
 | `POST` | `/api/threads/{threadId}/messages/{messageId}/result` | Estado de revisión/reversión del resultado |
 | `GET` | `/api/projects/{projectId}/artifacts/{artifactId}` | Artefacto de imagen generado |
 | `POST` | `/api/threads/{threadId}/documents` | Upload seguro, staging y preview |
@@ -1555,3 +1556,28 @@ ni tocan sesiones de empleados.
 - Documentos/publicación: [`src/documents`](../src/documents), [`src/app/api/threads/[threadId]/documents`](../src/app/api/threads/%5BthreadId%5D/documents), [`src/app/api/threads/[threadId]/publications`](../src/app/api/threads/%5BthreadId%5D/publications).
 - Browser/Computer Use: [`src/runtime/browser`](../src/runtime/browser), [`src/app/api/runtime/browser`](../src/app/api/runtime/browser), [`tests/integration/browser-routes.integration.test.ts`](../tests/integration/browser-routes.integration.test.ts).
 - Pruebas de rutas: [`tests/integration`](../tests/integration).
+
+## 18. Settings, apps and capability policy
+
+`GET /api/settings` returns a private, no-store `schemaVersion: 1` snapshot for
+the authenticated employee. The snapshot separates account/company identity,
+the real capability catalogue, in-app notification preferences, effective
+permission rules, privacy/isolation facts and browser/network policy.
+
+Apps use `connected | available | blocked | not_configured`. A connected label
+requires live runtime evidence. No route creates OAuth, secret or provider
+records. Missing external adapters are configuration work, not a clickable
+fake connection.
+
+`PATCH /api/settings` accepts one strict mutation:
+
+- `{ target: "user-app", appId, enabled }`
+- `{ target: "installation-app", appId, enabled }` (admin only)
+- `{ target: "notifications", values }`
+
+Controllable app IDs are `web-search`, `image-generation`, `skills` and
+`managed-browser`. Both policy files are private (`0600`), atomically replaced
+under a cross-process resource lock, and scoped to the current installation or
+employee. `/api/chat` enforces web/image/skill gates and the browser service
+enforces the managed-browser gate for human and agent operations. A stop action
+remains available so disabling a running browser cannot strand the process.
