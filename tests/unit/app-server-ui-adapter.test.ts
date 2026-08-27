@@ -37,4 +37,33 @@ describe("App Server UI stream adapter", () => {
       () => undefined,
     )).rejects.toBeInstanceOf(ChatStreamProtocolError);
   });
+
+  it("cancels the reader and rejects when the request signal is aborted", async () => {
+    const cancelled = vi.fn();
+    const response = new Response(new ReadableStream({
+      pull() {
+        return new Promise(() => undefined);
+      },
+      cancel: cancelled,
+    }));
+    const controller = new AbortController();
+    const reading = consumeChatEventStream(response, () => undefined, { signal: controller.signal });
+    controller.abort();
+    await expect(reading).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the body when an event consumer fails", async () => {
+    const cancelled = vi.fn();
+    const encoder = new TextEncoder();
+    const response = new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('{"type":"delta","value":"hola"}\n'));
+      },
+      cancel: cancelled,
+    }));
+    const error = new Error("consumer failed");
+    await expect(consumeChatEventStream(response, () => { throw error; })).rejects.toBe(error);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
 });

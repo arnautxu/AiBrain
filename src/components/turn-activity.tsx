@@ -152,7 +152,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
                   step.status === "completed"
                     ? "bg-[var(--positive-soft)] text-[var(--positive)]"
                     : step.status === "in_progress"
-                      ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]"
+                      ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"
                       : "text-[var(--text-muted)]"
                 }`}>
                   {step.status === "completed" ? <Check size={8} weight="bold" /> : step.status === "in_progress" ? <SpinnerGap size={8} className="motion-safe:animate-spin" /> : <Circle size={8} />}

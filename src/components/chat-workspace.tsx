@@ -390,7 +390,7 @@ export function ChatWorkspace({
                 key={window.id}
                 aria-label={`Abrir ${window.label}`}
                 aria-pressed={active}
-                className={`touch-target flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
+                className={`touch-target flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[11px] font-medium transition ${active ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => onOpenWindow(windowId)}
               >
                 <GitDiff size={15} />
@@ -441,7 +441,7 @@ export function ChatWorkspace({
           </div>
         ) : (
           <section className="mx-auto flex min-h-full w-full max-w-[760px] flex-col items-center justify-center px-5 pb-10 pt-16 text-center md:px-8">
-            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-strong)]"><MagicWand size={21} /></span>
+            <span className="grid size-11 place-items-center rounded-2xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><MagicWand size={21} /></span>
             <h1 className="mt-5 text-balance text-[28px] font-semibold tracking-[-.035em] text-[var(--text)] md:text-[34px]">¿En qué trabajamos?</h1>
             <p className="mt-2 max-w-md text-[14px] leading-6 text-[var(--text-muted)]">Escribe directamente o empieza con una sugerencia. Podrás revisar el resultado antes de usarlo.</p>
             <div className="mt-7 grid w-full max-w-[620px] gap-2 sm:grid-cols-3">
