@@ -15,6 +15,7 @@ import {
   type ValidationContext,
 } from "@/storage";
 import {
+  branchHistory,
   publicProject,
   publicThread,
   uniqueSlug,
@@ -30,6 +31,7 @@ import {
 } from "@/workbench/errors";
 import {
   isUuid,
+  isBranchThreadInput,
   isProjectName,
   isThreadTitle,
   isUpdateProjectInput,
@@ -86,6 +88,7 @@ const THREAD_KEYS = [
   "messages",
   "runtimeThreadToken",
 ] as const;
+const THREAD_OPTIONAL_KEYS = ["lineage"] as const;
 const MESSAGE_KEYS = [
   "id",
   "role",
@@ -210,7 +213,7 @@ function parseThread(value: unknown, context: ValidationContext): StoredThread {
   const record = isPlainRecord(value) ? value : null;
   const runtimeThreadToken = record?.runtimeThreadToken;
   if (
-    !hasExactKeys(value, THREAD_KEYS) ||
+    !hasExactKeys(value, THREAD_KEYS, THREAD_OPTIONAL_KEYS) ||
     !isWorkbenchThread(value) ||
     !isCanonicalIsoDate(value.createdAt) ||
     !isCanonicalIsoDate(value.updatedAt) ||
@@ -816,6 +819,7 @@ export class FileWorkbenchStore {
         kind, name, url, excerpt, status,
       })),
       runtimeThreadToken: null,
+      branchHistory: null,
     };
   }
 
@@ -834,7 +838,72 @@ export class FileWorkbenchStore {
     return {
       ...this.runtimeContext(state, thread.projectId),
       runtimeThreadToken: thread.runtimeThreadToken,
+      branchHistory: branchHistory(thread),
     };
+  }
+
+  async branchThread(
+    userId: string,
+    threadId: string,
+    input: import("@/workbench/types").BranchThreadInput,
+  ): Promise<import("@/workbench/types").BranchThreadResult> {
+    assertFilesystemWorkbenchId(threadId);
+    if (!isBranchThreadInput(input)) throw new WorkbenchValidationError("La branca no és vàlida.");
+    return this.mutate(userId, (state) => {
+      const parent = state.threads.find((candidate) => candidate.id === threadId);
+      if (!parent || parent.status !== "active") {
+        throw new WorkbenchNotFoundError("Fil actiu no trobat.");
+      }
+      const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
+      const target = parent.messages[targetIndex];
+      if (!target) throw new WorkbenchNotFoundError("Missatge no trobat.");
+
+      let prefixEnd = targetIndex;
+      let draftMessage: string | null = null;
+      if (input.kind === "edit") {
+        if (target.role !== "user" || !input.editedContent?.trim()) {
+          throw new WorkbenchValidationError("Només es poden editar missatges de l’usuari.");
+        }
+        prefixEnd = targetIndex - 1;
+        draftMessage = input.editedContent.trim();
+      } else if (input.kind === "retry") {
+        if (target.role !== "assistant") {
+          throw new WorkbenchValidationError("Només es poden regenerar respostes de l’assistent.");
+        }
+        const userIndex = parent.messages.findLastIndex(
+          (message, index) => index < targetIndex && message.role === "user",
+        );
+        if (userIndex < 0) throw new WorkbenchConflictError("La resposta no té cap petició per regenerar.");
+        prefixEnd = userIndex - 1;
+        draftMessage = parent.messages[userIndex].content;
+      } else if (target.role !== "assistant") {
+        throw new WorkbenchValidationError("La branca ha de començar des d’una resposta.");
+      }
+
+      const now = new Date().toISOString();
+      const suffix = input.kind === "edit" ? "editada" : input.kind === "retry" ? "regenerada" : "rama";
+      const title = `${parent.title.replace(/ · (?:editada|regenerada|rama)$/u, "")} · ${suffix}`.slice(0, 120);
+      const thread: StoredThread = {
+        id: randomUUID(),
+        projectId: parent.projectId,
+        title,
+        status: "active",
+        pinned: false,
+        createdAt: now,
+        updatedAt: now,
+        messages: structuredClone(parent.messages.slice(0, prefixEnd + 1)),
+        runtimeThreadToken: null,
+        lineage: {
+          parentThreadId: parent.id,
+          branchedFromMessageId: target.id,
+          kind: input.kind,
+        },
+      };
+      state.threads.push(thread);
+      const project = state.projects.find((candidate) => candidate.id === parent.projectId);
+      if (project) project.updatedAt = now;
+      return { thread: publicThread(thread), draftMessage };
+    });
   }
 
   async beginThreadTurn(

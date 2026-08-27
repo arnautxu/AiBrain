@@ -225,6 +225,7 @@ export async function POST(request: Request) {
     projectMemory: string;
     projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
     runtimeThreadToken: string | null;
+    branchHistory: string | null;
   };
   if (browserPreview) {
     persistent = false;
@@ -236,6 +237,7 @@ export async function POST(request: Request) {
       projectMemory: "",
       projectSources: [],
       runtimeThreadToken: null,
+      branchHistory: null,
     };
   } else {
     try {

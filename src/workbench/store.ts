@@ -6,6 +6,7 @@ import type { ChatMessage } from "@/lib/chat-contract";
 import {
   assertWorkbenchId,
   beginDemoThreadTurn,
+  branchDemoThread,
   createDemoProject,
   createDemoThread,
   finishDemoThreadTurn,
@@ -24,6 +25,7 @@ import {
 } from "@/workbench/filesystem-store";
 import { loadInstallationConfig } from "@/config/installation";
 import type {
+  BranchThreadInput,
   UpdateProjectInput,
   UpdateThreadInput,
   WorkbenchListQuery,
@@ -131,6 +133,19 @@ export async function updateThread(
   }
   assertWorkbenchId(threadId);
   return updateDemoThread(session, threadId, patch);
+}
+
+export async function branchThread(
+  session: AuthSession,
+  threadId: string,
+  input: BranchThreadInput,
+) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(threadId);
+    return (await filesystemStore(session)).branchThread(session.user.id, threadId, input);
+  }
+  assertWorkbenchId(threadId);
+  return branchDemoThread(session, threadId, input);
 }
 
 export async function getProjectRuntimeContext(session: AuthSession, projectId: string) {

@@ -16,6 +16,7 @@
     "GET /api/settings/team": "TeamResponse",
     "GET /api/threads": "JsonObject",
     "GET /api/threads/{threadId}": "JsonObject",
+    "GET /api/threads/{threadId}/export": "binary:conversation-export",
     "GET /api/threads/{threadId}/documents/{uploadId}/preview/{fileName}": "binary:document-preview",
     "GET /api/usage/company": "CompanyUsageResponse",
     "GET /api/usage/me": "PersonalUsageResponse",
@@ -40,8 +41,10 @@
     "POST /api/runtime/browser/viewer/input": "JsonObject",
     "POST /api/runtime/turns/control": "JsonObject",
     "POST /api/threads/{threadId}/documents": "DocumentUploadResponse",
+    "POST /api/threads/{threadId}/branch": "JsonObject",
     "POST /api/threads/{threadId}/messages/{messageId}/result": "JsonObject",
     "POST /api/threads/{threadId}/publications": "PublicationFreezeResponse",
-    "POST /api/threads/{threadId}/publications/{operationId}": "PublicationDecisionResponse"
+    "POST /api/threads/{threadId}/publications/{operationId}": "PublicationDecisionResponse",
+    "POST /api/threads/{threadId}/share": "JsonObject"
   }
 }
