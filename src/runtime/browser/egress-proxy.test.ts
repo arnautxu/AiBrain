@@ -179,6 +179,7 @@ describe("BrowserEgressProxy pinned transport", () => {
     const { url } = await startProxy({
       networkPolicy: publicPolicy(lookup),
       connect: localConnector((target) => pins.push(target)),
+      allowedPorts: [upstreamPort],
     });
 
     const response = await proxyRequest(url, `http://public.example:${upstreamPort}/path?q=1`, {
@@ -216,6 +217,7 @@ describe("BrowserEgressProxy pinned transport", () => {
         return [{ address: "2606:4700:4700::1111", family: 6 }];
       }),
       connect: localConnector((target) => pins.push(target)),
+      allowedPorts: [upstreamPort],
     });
     const tunnel = await openConnect(url, `secure.example:${upstreamPort}`);
     const echoed = await new Promise<string>((resolve, reject) => {
@@ -245,7 +247,11 @@ describe("BrowserEgressProxy pinned transport", () => {
 
   it("closes active CONNECT tunnels on idempotent stop", async () => {
     const upstreamPort = await listen(createNetServer(() => undefined));
-    const { proxy, url } = await startProxy({ networkPolicy: publicPolicy(), connect: localConnector() });
+    const { proxy, url } = await startProxy({
+      networkPolicy: publicPolicy(),
+      connect: localConnector(),
+      allowedPorts: [upstreamPort],
+    });
     const tunnel = await openConnect(url, `public.example:${upstreamPort}`);
     const closed = new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
     await proxy.stop();
@@ -259,6 +265,7 @@ describe("BrowserEgressProxy pinned transport", () => {
       networkPolicy: publicPolicy(),
       connect: localConnector(),
       maxBytesPerExchange: 1_024,
+      allowedPorts: [upstreamPort],
     });
     const tunnel = await openConnect(url, `public.example:${upstreamPort}`);
     const closed = new Promise<void>((resolve) => tunnel.socket.once("close", () => resolve()));
@@ -305,6 +312,26 @@ describe("BrowserEgressProxy rejection and bounds", () => {
     expect(connects).toBe(0);
   });
 
+  it("allows only standard web ports unless an explicit private test policy overrides them", async () => {
+    let connections = 0;
+    const { url } = await startProxy({
+      networkPolicy: publicPolicy(),
+      connect: async () => {
+        connections += 1;
+        throw new Error("must not connect");
+      },
+    });
+    await expect(proxyRequest(url, "http://public.example:8080/"))
+      .resolves.toMatchObject({ status: 403 });
+    await expect(rawProxyResponse(url, [
+      "CONNECT public.example:8443 HTTP/1.1",
+      "Host: public.example:8443",
+      "",
+      "",
+    ].join("\r\n"))).resolves.toContain("403 Forbidden");
+    expect(connections).toBe(0);
+  });
+
   it("rejects private and mixed DNS results without opening an upstream socket", async () => {
     let connects = 0;
     const { url } = await startProxy({
@@ -333,6 +360,7 @@ describe("BrowserEgressProxy rejection and bounds", () => {
       networkPolicy: publicPolicy(),
       connect: localConnector(),
       maxBytesPerExchange: 1_024,
+      allowedPorts: [upstreamPort],
     });
     await expect(proxyRequest(url, `http://public.example:${upstreamPort}/large`))
       .resolves.toMatchObject({ status: 502, body: "Upstream response exceeds the browser proxy limit." });
