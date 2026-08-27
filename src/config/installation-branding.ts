@@ -37,5 +37,9 @@ export function applyInstallationBranding(
       ...manifest.identity,
       productName: installation.branding.productName,
     },
+    interface: {
+      ...manifest.interface,
+      accentColor: installation.branding.accentColor,
+    },
   };
 }

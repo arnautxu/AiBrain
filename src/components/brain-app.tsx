@@ -17,6 +17,7 @@ import {
 import { ConfirmDialog, TextDialog } from "@/components/workbench-dialogs";
 import {
   accentTokens,
+  customAccentTokens,
   cornerTokens,
   preferencesFromManifest,
   type BrainManifest,
@@ -409,14 +410,16 @@ export function BrainApp({
   }, [activeProjectId, hydrated]);
 
   const style = useMemo<BrainStyle>(() => {
-    const accent = accentTokens[preferences.accent];
+    const accent = preferences.accent === manifest.interface.accent
+      ? customAccentTokens(manifest.interface.accentColor ?? "") ?? accentTokens[preferences.accent]
+      : accentTokens[preferences.accent];
     return {
       "--brain-accent": accent.solid,
       "--brain-accent-soft": accent.soft,
       "--brain-contrast": accent.contrast,
       "--brain-radius": cornerTokens[preferences.corners],
     };
-  }, [preferences.accent, preferences.corners]);
+  }, [manifest.interface.accent, manifest.interface.accentColor, preferences.accent, preferences.corners]);
 
   const selectProject = useCallback((projectId: string) => {
     if (sending) {
