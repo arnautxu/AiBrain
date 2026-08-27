@@ -73,6 +73,47 @@ async function setCredentials(client: SupabaseClient, credentials: IdentityCrede
   if (error) throw error;
 }
 
+async function updatePasswordWithAccessToken(
+  config: SupabasePublicConfig,
+  accessToken: string,
+  newPassword: string,
+) {
+  let response: Response;
+  try {
+    response = await fetch(`${config.url}/auth/v1/user`, {
+      method: "PUT",
+      headers: {
+        apikey: config.publishableKey,
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ password: newPassword }),
+      cache: "no-store",
+    });
+  } catch (error) {
+    throw providerFailure(error, "provider_rejected");
+  }
+  if (response.status >= 500) {
+    throw new IdentityProviderError(
+      "provider_unavailable",
+      "Identity provider is unavailable.",
+    );
+  }
+  if (!response.ok) {
+    throw new IdentityProviderError(
+      "provider_rejected",
+      "Identity provider rejected the request.",
+    );
+  }
+  const body: unknown = await response.json().catch(() => null);
+  if (!body || typeof body !== "object" || !("id" in body) || typeof body.id !== "string") {
+    throw new IdentityProviderError(
+      "provider_rejected",
+      "Identity provider returned an invalid password-update response.",
+    );
+  }
+}
+
 export class SupabaseAuthIdentityProvider implements AuthIdentityProvider {
   private readonly config: SupabasePublicConfig;
 
@@ -92,15 +133,11 @@ export class SupabaseAuthIdentityProvider implements AuthIdentityProvider {
   }
 
   async updatePassword(credentials: IdentityCredentials, newPassword: string) {
-    try {
-      const client = isolatedClient(this.config);
-      await setCredentials(client, credentials);
-      const { error } = await client.auth.updateUser({ password: newPassword });
-      if (error) throw error;
-      await client.auth.signOut({ scope: "local" }).catch(() => undefined);
-    } catch (error) {
-      throw providerFailure(error, "provider_rejected");
-    }
+    // A password-change challenge is deliberately shorter than the provider's
+    // access-token lifetime. Use that token directly instead of calling
+    // setSession(), which refreshes and rotates the stored refresh token before
+    // the update and can invalidate an otherwise fresh one-time challenge.
+    await updatePasswordWithAccessToken(this.config, credentials.accessToken, newPassword);
   }
 
   async requestPasswordRecovery(email: string, redirectTo: string) {
