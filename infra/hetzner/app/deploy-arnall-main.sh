@@ -72,10 +72,12 @@ remove_new_dangling_images() {
 
 sync_company_context() {
   local source="$1" file temporary
-  install -d -m 0700 -o 10001 -g 10001 "$CONTEXT_ROOT"
+  install -d -m 0700 -o root -g root "$CONTEXT_ROOT"
+  chown 10001:10001 "$CONTEXT_ROOT"
   while IFS= read -r -d '' file; do
     temporary="${CONTEXT_ROOT}/.$(basename "$file").pending-$$"
-    install -m 0400 -o 10001 -g 10001 "$file" "$temporary"
+    install -m 0400 -o root -g root "$file" "$temporary"
+    chown 10001:10001 "$temporary"
     mv -f "$temporary" "${CONTEXT_ROOT}/$(basename "$file")"
   done < <(find "$source" -maxdepth 1 -type f -name '*.md' -print0)
 }
