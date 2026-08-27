@@ -68,3 +68,8 @@ Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa
 9. revisión de capacidad/egress y hardening del host;
 10. separación de red browser/CDP por empleado y build reproducible de la toolchain;
 11. autorización separada para DNS y producción.
+
+La imagen base se fija por digest, Codex/Node packages por versión y APT contra
+el snapshot inmutable `20260820T000000Z` de Debian. Cambiar ese snapshot es una
+actualización de release revisable: requiere build limpio, SBOM, scan y matriz
+Office/PDF/Chromium antes de promover la nueva imagen.

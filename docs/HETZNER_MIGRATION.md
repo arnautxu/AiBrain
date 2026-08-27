@@ -183,7 +183,7 @@ Para rollback de código, repón el tag anterior en `AIBRAIN_IMAGE` y repite el 
 - Docker build y Compose deben ejecutarse en el host QA; Docker no está disponible en el Mac de desarrollo actual.
 - El kernel/daemon del host debe pasar el preflight real de `bubblewrap`, seccomp y sandbox de Chromium.
 - Browser/CDP sigue necesitando una frontera de red por empleado; loopback compartido con App Server no satisface aislamiento cross-user.
-- Chromium/LibreOffice/Poppler/QPDF proceden de APT sin artifact+checksum fijo; build reproducible queda pendiente.
+- La base, el snapshot Debian y los paquetes Node están fijados. Falta ejecutar build limpio, SBOM y scan sobre la imagen resultante en el host QA antes de considerarla promovible.
 - Faltan credenciales reales de Supabase Auth y login de una suscripción Codex dedicada.
 - La réplica cifrada fuera del servidor y el canal de alertas deben configurarse y probarse.
 - DNS, TLS público, NAS/documental real y cutover requieren autorización separada.

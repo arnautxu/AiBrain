@@ -16,6 +16,7 @@ FROM ${NODE_IMAGE} AS runtime
 ARG AIBRAIN_UID=10001
 ARG AIBRAIN_GID=10001
 ARG CODEX_VERSION=0.149.1
+ARG DEBIAN_SNAPSHOT=20260820T000000Z
 
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
@@ -38,7 +39,14 @@ ENV NODE_ENV=production \
     XDG_DATA_HOME=/var/lib/aibrain/data/server/xdg/data \
     XDG_STATE_HOME=/var/lib/aibrain/data/server/xdg/state
 
-RUN apt-get update \
+RUN printf '%s\n' \
+    "deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bookworm main" \
+    "deb https://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT}/ bookworm-updates main" \
+    "deb https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/ bookworm-security main" \
+    > /etc/apt/sources.list \
+  && rm -f /etc/apt/sources.list.d/debian.sources \
+  && printf '%s\n' 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99snapshot \
+  && apt-get update \
   && export DEBIAN_FRONTEND=noninteractive \
   && apt-get upgrade -y \
   && apt-get install -y --no-install-recommends \
