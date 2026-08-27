@@ -15,11 +15,6 @@ FROM ${NODE_IMAGE} AS egress-gateway
 
 ARG AIBRAIN_EGRESS_UID=10002
 ARG AIBRAIN_EGRESS_GID=10002
-ARG AIBRAIN_REVISION=development
-
-LABEL org.opencontainers.image.title="AiBrain Egress Gateway" \
-      org.opencontainers.image.vendor="GraphikAI" \
-      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
 
 RUN groupadd --system --gid "${AIBRAIN_EGRESS_GID}" aibrain-egress \
   && useradd --system --uid "${AIBRAIN_EGRESS_UID}" --gid aibrain-egress \
@@ -28,6 +23,11 @@ RUN groupadd --system --gid "${AIBRAIN_EGRESS_GID}" aibrain-egress \
 
 COPY --chown=root:root infra/hetzner/egress/gateway.mts /usr/local/share/aibrain/egress-gateway.mts
 RUN chmod 0444 /usr/local/share/aibrain/egress-gateway.mts
+
+ARG AIBRAIN_REVISION=development
+LABEL org.opencontainers.image.title="AiBrain Egress Gateway" \
+      org.opencontainers.image.vendor="GraphikAI" \
+      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
 
 USER aibrain-egress:aibrain-egress
 EXPOSE 8080
@@ -38,11 +38,6 @@ FROM ${NODE_IMAGE} AS runtime
 ARG AIBRAIN_UID=10001
 ARG AIBRAIN_GID=10001
 ARG DEBIAN_SNAPSHOT=20260820T000000Z
-ARG AIBRAIN_REVISION=development
-
-LABEL org.opencontainers.image.title="AiBrain Company Brain" \
-      org.opencontainers.image.vendor="GraphikAI" \
-      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
 
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
@@ -175,6 +170,11 @@ RUN chmod 0755 \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
   && chmod -R a-w /app /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
+
+ARG AIBRAIN_REVISION=development
+LABEL org.opencontainers.image.title="AiBrain Company Brain" \
+      org.opencontainers.image.vendor="GraphikAI" \
+      org.opencontainers.image.revision="${AIBRAIN_REVISION}"
 
 USER aibrain:aibrain
 EXPOSE 3000

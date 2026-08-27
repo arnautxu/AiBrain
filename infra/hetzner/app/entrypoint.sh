@@ -154,7 +154,7 @@ trap 'rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"' EXIT INT TERM
   --ro-bind /var/lib/aibrain/data/company-context /var/lib/aibrain/data/company-context \
   --tmpfs /srv/aibrain/publish-rw \
   --remount-ro /srv/aibrain/publish-rw \
-  /bin/sh -c '[ ! -e "$1" ] && [ -f "$2" ] && ! : >"$2" && [ ! -e "$3" ] && ! : >"$4"' sh \
+  /bin/sh -c '[ ! -e "$1" ] && [ -f "$2" ] && ! /bin/sh -c '\'' : >"$1" '\'' sh "$2" && [ ! -e "$3" ] && ! /bin/sh -c '\'' : >"$1" '\'' sh "$4"' sh \
     "$hidden_marker" "$allowed_marker" \
     "$boundary_marker" /srv/aibrain/publish-rw/worker-write-test \
   >/dev/null 2>&1 || fail "bubblewrap worker isolation is unavailable on this host"

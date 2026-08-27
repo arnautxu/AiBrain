@@ -36,7 +36,7 @@ if [ "$preflight" = entrypoint-boundary-v1 ]; then
   publish_marker=${AIBRAIN_DOCUMENT_PREFLIGHT_PUBLISH:-}
   case "$hidden" in /var/lib/aibrain/data/.aibrain-document-hidden.*) ;; *) fail "hidden preflight marker is invalid" ;; esac
   case "$publish_marker" in /srv/aibrain/publish-rw/.aibrain-document-publish.*) ;; *) fail "publish preflight marker is invalid" ;; esac
-  command=(/bin/sh -c '[ ! -e "$1" ] && [ ! -e "$2" ] && : > "/work/preflight-$3-ok" && ! : > "$2"' sh "$hidden" "$publish_marker" "$launcher")
+  command=(/bin/sh -c '[ ! -e "$1" ] && [ ! -e "$2" ] && : > "/work/preflight-$3-ok" && ! /bin/sh -c '\'' : >"$1" '\'' sh "$2"' sh "$hidden" "$publish_marker" "$launcher")
 else
   rewritten=()
   has_headless=0

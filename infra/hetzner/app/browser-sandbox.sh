@@ -69,7 +69,7 @@ if [ "${AIBRAIN_BROWSER_PREFLIGHT:-}" = entrypoint-boundary-v1 ]; then
   sibling_marker=${AIBRAIN_BROWSER_PREFLIGHT_SIBLING:-}
   publish_marker=${AIBRAIN_BROWSER_PREFLIGHT_PUBLISH:-}
   [ -n "$sibling_marker" ] && [ -n "$publish_marker" ] || fail "browser preflight markers are missing"
-  set -- /bin/sh -c '[ -f "$1" ] && [ ! -e "$2" ] && [ ! -e "$3" ] && ! : >"$4"' sh \
+  set -- /bin/sh -c '[ -f "$1" ] && [ ! -e "$2" ] && [ ! -e "$3" ] && ! /bin/sh -c '\'' : >"$1" '\'' sh "$4"' sh \
     "$browser_root/.aibrain-preflight" "$sibling_marker" "$publish_marker" "$publish_root/browser-write-test"
 else
   set -- /usr/bin/chromium "$@"
