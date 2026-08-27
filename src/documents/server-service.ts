@@ -6,6 +6,7 @@ import { FileDocumentConversionGate } from "@/documents/conversion-gate";
 import { FileDocumentPublisher } from "@/documents/document-publisher";
 import { DocumentPreviewService, type DocumentToolchain } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
+import { FileDocumentStorageGate } from "@/documents/storage-gate";
 import { WorkerProvisioner } from "@/runtime/workers/provisioner";
 import { ResourceLockManager } from "@/storage";
 
@@ -55,6 +56,10 @@ export async function documentServicesForUser(
   const conversionGate = new FileDocumentConversionGate({
     rootDirectory: path.join(installation.paths.dataRoot, "locks", "document-conversions"),
   });
+  const storageGate = new FileDocumentStorageGate({
+    rootDirectory: path.join(installation.paths.dataRoot, "locks", "document-storage"),
+    capacityRoot: installation.paths.dataRoot,
+  });
   const toolchain = documentToolchainFromEnvironment();
   const previews = new DocumentPreviewService({
     stagingRoot: manifest.roots.staging,
@@ -63,7 +68,7 @@ export async function documentServicesForUser(
     tools: toolchain,
     conversionGate,
   });
-  return { manifest, locks, staging, previews, toolchain, conversionGate };
+  return { manifest, locks, staging, previews, toolchain, conversionGate, storageGate };
 }
 
 function publicationSecret() {

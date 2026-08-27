@@ -190,4 +190,64 @@ describe("authenticated document routes", () => {
       else process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS = previousRetry;
     }
   });
+
+  it("rejects a saturated storage slot before persisting the multipart body", async () => {
+    const previousMaximum = process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS;
+    const previousRetry = process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS;
+    process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS = "1";
+    process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS = "4200";
+    const { FileDocumentStorageGate } = await import("@/documents/storage-gate");
+    const gate = new FileDocumentStorageGate({
+      rootDirectory: path.join(dataRoot, "locks", "document-storage"),
+      capacityRoot: dataRoot,
+      maxActiveUploads: 1,
+      minimumFreeBytes: 0,
+      minimumFreeRatioPpm: 0,
+      worstCaseActiveBytes: 128 * 1024 * 1024,
+    });
+    let release!: () => void;
+    let admitted!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const started = new Promise<void>((resolve) => { admitted = resolve; });
+    const active = gate.run(async () => {
+      admitted();
+      await held;
+    });
+    await started;
+    try {
+      const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+      auth.session = session(USER_A);
+      const response = await uploadRoute.POST(
+        uploadRequest(
+          "0198b9f0-6631-7000-8000-000000000514",
+          new File(["must not persist"], "blocked.txt", { type: "text/plain" }),
+        ),
+        { params: Promise.resolve({ threadId }) },
+      );
+      expect(response.status).toBe(429);
+      expect(response.headers.get("Retry-After")).toBe("5");
+      expect(await response.json()).toEqual({
+        error: "L’emmagatzematge de documents està protegit temporalment. Torna-ho a provar.",
+      });
+      const blockedUpload = path.join(
+        dataRoot,
+        "users",
+        USER_A,
+        "staging",
+        "threads",
+        threadId,
+        "uploads",
+        "0198b9f0-6631-7000-8000-000000000514",
+      );
+      await expect(import("node:fs/promises").then(({ lstat }) => lstat(blockedUpload)))
+        .rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      release();
+      await active;
+      if (previousMaximum === undefined) delete process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS;
+      else process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS = previousMaximum;
+      if (previousRetry === undefined) delete process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS;
+      else process.env.AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS = previousRetry;
+    }
+  });
 });

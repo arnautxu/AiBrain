@@ -6,8 +6,10 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import { pipeline } from "node:stream/promises";
 import path from "node:path";
 import Busboy from "busboy";
+import { documentUploadTemporaryLockKey } from "@/documents/maintenance";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
 import { UploadValidationError } from "@/documents/upload-validation";
+import type { ResourceLockManager } from "@/storage/resource-lock";
 
 export const MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
 export const MAX_MULTIPART_BYTES = 52 * 1024 * 1024;
@@ -58,6 +60,7 @@ function safeContentLength(request: Request) {
 export async function parseStreamingDocumentUpload(
   request: Request,
   stagingRoot: string,
+  lockManager: ResourceLockManager,
 ): Promise<ParsedDocumentUpload> {
   safeContentLength(request);
   const contentType = request.headers.get("content-type") ?? "";
@@ -88,6 +91,7 @@ export async function parseStreamingDocumentUpload(
   };
 
   let parser: ReturnType<typeof Busboy>;
+  const temporaryLease = await lockManager.acquire(documentUploadTemporaryLockKey(temporaryPath));
   try {
     parser = Busboy({
       headers: { "content-type": contentType },
@@ -198,14 +202,22 @@ export async function parseStreamingDocumentUpload(
       async dispose() {
         if (disposed) return;
         disposed = true;
-        await unlink(temporaryPath).catch((error: unknown) => {
-          if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
-        });
+        try {
+          await unlink(temporaryPath).catch((error: unknown) => {
+            if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
+          });
+        } finally {
+          await temporaryLease.release();
+        }
       },
     };
   } catch (error) {
     await Promise.allSettled(fileCompletions);
-    await unlink(temporaryPath).catch(() => undefined);
+    try {
+      await unlink(temporaryPath).catch(() => undefined);
+    } finally {
+      await temporaryLease.release();
+    }
     if (error instanceof UploadValidationError) throw error;
     if (request.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
       throw new UploadValidationError("UPLOAD_ABORTED", "Upload was aborted before completion.", { cause: error });
