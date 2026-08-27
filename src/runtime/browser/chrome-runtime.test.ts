@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BrowserRuntimeContext } from "@/runtime/browser/types";
+import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 import {
   buildChromeArguments,
   ChromeBrowserRuntimeFactory,
@@ -40,6 +41,7 @@ class FakeChromeProcess extends EventEmitter {
 class FakeCdpClient implements CdpClientLike {
   isOpen = true;
   readonly commands: Array<{ method: string; params: Record<string, unknown> }> = [];
+  private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
 
   constructor(
     private readonly kind: "browser" | "page",
@@ -65,9 +67,38 @@ class FakeCdpClient implements CdpClientLike {
     throw new Error("unexpected client");
   }
 
+  on(method: string, listener: (params: unknown) => void) {
+    const listeners = this.listeners.get(method) ?? new Set<(params: unknown) => void>();
+    listeners.add(listener);
+    this.listeners.set(method, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(method);
+    };
+  }
+
+  emitEvent(method: string, params: unknown) {
+    for (const listener of this.listeners.get(method) ?? []) listener(params);
+  }
+
   async close() {
     this.isOpen = false;
   }
+}
+
+function publicNetworkPolicy() {
+  return new BrowserNetworkPolicy({
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+  });
+}
+
+async function eventually(check: () => boolean, timeoutMs = 1_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (check()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("condition did not become true");
 }
 
 async function contextFixture() {
@@ -140,6 +171,7 @@ describe("ChromeCdpRuntime", () => {
         pageClient = new FakeCdpClient("page", () => child.exit());
         return pageClient;
       },
+      networkPolicy: publicNetworkPolicy(),
     });
 
     await runtime.start();
@@ -158,6 +190,22 @@ describe("ChromeCdpRuntime", () => {
       .rejects.toMatchObject({ code: "CHROME_TAKEOVER_REQUIRED" });
     await runtime.takeOver();
     await runtime.navigate("https://example.test");
+    await expect(runtime.navigate("http://169.254.169.254/latest/meta-data/"))
+      .rejects.toMatchObject({ code: "BROWSER_NETWORK_PRIVATE_DESTINATION" });
+    expect(pageClient!.commands.filter((command) => command.method === "Page.navigate")).toHaveLength(1);
+    pageClient!.emitEvent("Fetch.requestPaused", {
+      requestId: "allowed-1",
+      request: { url: "https://cdn.example.test/app.js" },
+    });
+    pageClient!.emitEvent("Fetch.requestPaused", {
+      requestId: "blocked-1",
+      request: { url: "http://127.0.0.1/private" },
+      redirectedRequestId: "allowed-1",
+    });
+    await eventually(() => pageClient!.commands.some((command) =>
+      command.method === "Fetch.continueRequest" && command.params.requestId === "allowed-1") &&
+      pageClient!.commands.some((command) =>
+        command.method === "Fetch.failRequest" && command.params.requestId === "blocked-1"));
     await runtime.dispatchInput({
       kind: "mouse",
       event: "mousePressed",
@@ -177,6 +225,9 @@ describe("ChromeCdpRuntime", () => {
     ]));
     expect(pageClient!.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ method: "Page.navigate" }),
+      expect.objectContaining({ method: "Fetch.enable" }),
+      expect.objectContaining({ method: "Fetch.continueRequest" }),
+      expect.objectContaining({ method: "Fetch.failRequest" }),
       expect.objectContaining({ method: "Input.dispatchMouseEvent" }),
       expect.objectContaining({ method: "Input.dispatchKeyEvent" }),
     ]));
@@ -238,6 +289,7 @@ describe("ChromeCdpRuntime", () => {
           () => child.exit(),
         );
       },
+      networkPolicy: publicNetworkPolicy(),
     });
     await runtime.start();
     expect(orphanClosed).toBe(true);
@@ -263,5 +315,11 @@ describe("ChromeCdpRuntime", () => {
     expect(() => new ChromeBrowserRuntimeFactory()).toThrowError(
       expect.objectContaining({ code: "CHROME_VERSION_REQUIRED" }),
     );
+    expect(() => new ChromeBrowserRuntimeFactory({
+      expectedVersion: "140.0.0.0",
+      allowPrivateNetwork: true,
+    })).toThrowError(expect.objectContaining({
+      code: "BROWSER_NETWORK_PRODUCTION_OVERRIDE_FORBIDDEN",
+    }));
   });
 });

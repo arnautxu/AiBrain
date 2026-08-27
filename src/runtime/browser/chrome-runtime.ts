@@ -16,6 +16,7 @@ import {
   type PrivateCdpClientOptions,
   type PrivateCdpMethod,
 } from "@/runtime/browser/cdp-client";
+import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 import { readRegularFileWithin, UnsafeFilePathError } from "@/security/safe-file";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/u;
@@ -23,6 +24,7 @@ const DEVTOOLS_PATH_PATTERN = /^\/devtools\/browser\/[A-Za-z0-9._-]{1,256}$/u;
 const PAGE_PATH_PATTERN = /^\/devtools\/page\/[A-Za-z0-9._-]{1,256}$/u;
 const MAX_HTTP_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_SCREENSHOT_BYTES = 25 * 1024 * 1024;
+const MAX_INTERCEPTED_REQUESTS = 64;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class ChromeRuntimeError extends Error {
@@ -45,6 +47,7 @@ type ChromeProcess = {
 export type CdpClientLike = {
   readonly isOpen: boolean;
   send<Result = unknown>(method: PrivateCdpMethod, params?: Record<string, unknown>): Promise<Result>;
+  on(method: string, listener: (params: unknown) => void): () => void;
   close(): Promise<void>;
 };
 
@@ -52,6 +55,7 @@ type RuntimeDependencies = {
   spawnProcess?: (executable: string, args: readonly string[], options: SpawnOptions) => ChromeProcess;
   fetchJson?: (port: number, resource: "/json/version" | "/json/list", timeoutMs: number) => Promise<unknown>;
   connectCdp?: (endpoint: string, options: PrivateCdpClientOptions) => Promise<CdpClientLike>;
+  networkPolicy?: BrowserNetworkPolicy;
   now?: () => number;
 };
 
@@ -61,11 +65,12 @@ export type ChromeCdpRuntimeOptions = RuntimeDependencies & {
   startupTimeoutMs?: number;
   commandTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  allowPrivateNetwork?: boolean;
 };
 
 export type ChromeBrowserRuntimeFactoryOptions = Pick<
   ChromeCdpRuntimeOptions,
-  "executablePath" | "expectedVersion" | "startupTimeoutMs"
+  "allowPrivateNetwork" | "executablePath" | "expectedVersion" | "startupTimeoutMs"
 >;
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
@@ -322,6 +327,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private readonly spawnProcess: NonNullable<RuntimeDependencies["spawnProcess"]>;
   private readonly fetchJson: NonNullable<RuntimeDependencies["fetchJson"]>;
   private readonly connectCdp: NonNullable<RuntimeDependencies["connectCdp"]>;
+  private readonly networkPolicy: BrowserNetworkPolicy;
   private readonly now: () => number;
   private process: ChromeProcess | null = null;
   private browserClient: CdpClientLike | null = null;
@@ -335,9 +341,14 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private browserVersion: string | null = null;
   private port: number | null = null;
   private pageTargetId: string | null = null;
+  private fetchUnsubscribe: (() => void) | null = null;
+  private interceptedRequests = 0;
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
     validateRuntimeContext(context);
+    if (options.allowPrivateNetwork) {
+      new BrowserNetworkPolicy({ allowPrivateNetwork: true });
+    }
     this.context = context;
     this.configuredExecutable = options.executablePath;
     this.expectedVersion = validateExpectedVersion(
@@ -351,6 +362,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.fetchJson = options.fetchJson ?? defaultFetchJson;
     this.connectCdp = options.connectCdp ?? ((endpoint, clientOptions) =>
       PrivateCdpClient.connect(endpoint, clientOptions));
+    this.networkPolicy = options.networkPolicy ?? new BrowserNetworkPolicy({
+      allowPrivateNetwork: options.allowPrivateNetwork,
+    });
     this.now = options.now ?? Date.now;
   }
 
@@ -415,8 +429,10 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
 
   async navigate(url: string) {
     this.assertHumanControl();
+    const destination = validateBrowserNavigationUrl(url);
+    await this.networkPolicy.assertAllowed(destination);
     const result = await this.requirePage().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
-      url: validateBrowserNavigationUrl(url),
+      url: destination,
     });
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
@@ -542,6 +558,15 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       await this.pageClient.send("Network.enable", {
         maxTotalBufferSize: 1_048_576,
         maxResourceBufferSize: 262_144,
+      });
+      this.fetchUnsubscribe = this.pageClient.on("Fetch.requestPaused", (params) => {
+        this.queueInterceptedRequest(params);
+      });
+      await this.pageClient.send("Fetch.enable", {
+        patterns: [
+          { urlPattern: "http://*", requestStage: "Request" },
+          { urlPattern: "https://*", requestStage: "Request" },
+        ],
       });
       this.running = true;
       this.takenOver = false;
@@ -732,14 +757,63 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     }
   }
 
+  private queueInterceptedRequest(value: unknown) {
+    const page = this.pageClient;
+    if (!page?.isOpen) return;
+    const requestId = this.interceptedRequestId(value);
+    if (requestId === null) return;
+    if (this.interceptedRequests >= MAX_INTERCEPTED_REQUESTS) {
+      void page.send("Fetch.failRequest", {
+        requestId,
+        errorReason: "BlockedByClient",
+      }).catch(() => undefined);
+      return;
+    }
+    this.interceptedRequests += 1;
+    void this.handleInterceptedRequest(page, requestId, value).finally(() => {
+      this.interceptedRequests -= 1;
+    });
+  }
+
+  private interceptedRequestId(value: unknown) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const requestId = (value as Record<string, unknown>).requestId;
+    return typeof requestId === "string" && /^[A-Za-z0-9.-]{1,256}$/u.test(requestId)
+      ? requestId
+      : null;
+  }
+
+  private async handleInterceptedRequest(page: CdpClientLike, requestId: string, value: unknown) {
+    let allowed = false;
+    try {
+      const request = (value as Record<string, unknown>).request;
+      if (request && typeof request === "object" && !Array.isArray(request)) {
+        const url = (request as Record<string, unknown>).url;
+        if (typeof url === "string") {
+          await this.networkPolicy.assertAllowed(url);
+          allowed = true;
+        }
+      }
+    } catch {
+      allowed = false;
+    }
+    if (!page.isOpen) return;
+    await page.send(allowed ? "Fetch.continueRequest" : "Fetch.failRequest", allowed
+      ? { requestId }
+      : { requestId, errorReason: "BlockedByClient" }).catch(() => undefined);
+  }
+
   private async stopOnce() {
     this.running = false;
     this.takenOver = false;
     const browser = this.browserClient;
     const page = this.pageClient;
     const child = this.process;
+    this.fetchUnsubscribe?.();
+    this.fetchUnsubscribe = null;
     this.browserClient = null;
     this.pageClient = null;
+    if (page?.isOpen) await page.send("Fetch.disable").catch(() => undefined);
     if (browser?.isOpen) await browser.send("Browser.close").catch(() => undefined);
     await Promise.allSettled([page?.close(), browser?.close()].filter(Boolean) as Promise<void>[]);
     if (child && child.exitCode === null) {
@@ -774,6 +848,9 @@ export class ChromeBrowserRuntimeFactory implements BrowserRuntimeFactory {
 
   constructor(options: ChromeBrowserRuntimeFactoryOptions = {}) {
     validateExpectedVersion(options.expectedVersion ?? process.env.AIBRAIN_CHROME_EXPECTED_VERSION);
+    if (options.allowPrivateNetwork) {
+      new BrowserNetworkPolicy({ allowPrivateNetwork: true });
+    }
     this.options = { ...options };
   }
 

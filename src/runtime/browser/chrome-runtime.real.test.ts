@@ -103,6 +103,7 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       executablePath,
       expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION,
       startupTimeoutMs: 60_000,
+      allowPrivateNetwork: true,
     };
     const runtimeA = new ChromeCdpRuntime(contextA, options);
     const runtimeB = new ChromeCdpRuntime(contextB, options);
