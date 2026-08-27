@@ -67,6 +67,8 @@ jobs:
           package-manager-cache: false
       - name: Install locked dependencies
         run: npm ci
+      - name: Install pinned Chromium runtime
+        run: npx playwright install --with-deps chromium
       - name: Run HTTP E2E
         run: npm run test:e2e
 
@@ -89,7 +91,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libreoffice-calc libreoffice-impress libreoffice-writer \
-            poppler-utils python3-pptx qpdf
+            poppler-utils python3-pip qpdf
+          python3 -m pip install --break-system-packages --no-cache-dir \
+            python-pptx==1.0.2
       - name: Install locked dependencies
         run: npm ci
       - name: Run real document matrix
@@ -105,6 +109,11 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate Compose model without secrets
+        env:
+          AIBRAIN_RUNTIME_ENV_FILE: ci.env.placeholder
+          AIBRAIN_EGRESS_ENV_FILE: ci.env.placeholder
+          AIBRAIN_ALERTS_ENV_FILE: ci.env.placeholder
+          AIBRAIN_REPLICA_ENV_FILE: ci.env.placeholder
         run: |
           docker compose \
             --env-file infra/hetzner/compose.env.example \
