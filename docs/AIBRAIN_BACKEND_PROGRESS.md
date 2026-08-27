@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `bfbe610` en
+- Último checkpoint backend publicado: `5cae93c` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -48,12 +48,12 @@
 | 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 y backup documental cerrados | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`: staging queda server-only, Codex recibe inputs preparados sin paths, el lock físico de target es global y el snapshot/restore V2 incluye `publishWriteRoot`; faltan retención/backpressure y sandbox reforzado del conversor |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
-| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
+| 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`: backup compuesto y adapter Restic off-host cerrados localmente; faltan alert delivery, build reproducible en Docker y recovery transaccional de releases/host |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0` y el backup documental compuesto en `bfbe610`. La siguiente acción concreta es implementar el adapter probado de réplica cifrada off-host y dejar únicamente la conexión/credenciales externas como gate.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0`, el backup documental compuesto en `bfbe610` y la réplica cifrada off-host en `5cae93c`. La siguiente acción concreta es convertir la evaluación de alertas en delivery durable y probado sin incluir secretos o datos de usuario.
 
 ## Decisiones menores registradas
 
@@ -74,6 +74,7 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Después del intercambio inicial con Supabase, sesión, workbench y logout no construyen un cliente remoto. El E2E corta el servidor de identidad, crea proyecto/thread, reinicia Next y conserva la cookie local; un nuevo login durante el corte devuelve `503`, no un falso `401`.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 - Backup V2 captura `product-data` y `published-documents` bajo fingerprints por componente y global. Comparte una barrera física con el publicador para no cruzar una confirmación; restore preflight comprueba roots/espacio, prepara ambos árboles y revierte la primera promoción si falla la segunda.
+- La réplica off-host es un proceso Restic one-shot separado: recibe snapshots read-only, password read-only y estado de receipts independiente; reusa tags exactos tras crash, verifica readback+repository, no ejecuta shell y solo reenvía variables de proveedor allowlisted. No inicializa, poda ni borra el remoto.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
 - Los tokens de continuidad de thread son V2 y están firmados contra instalación, usuario y runtime thread; un empleado no puede reanudar el token de otro.
 - Los proyectos viven bajo `users/<uuid>/workspace/projects/<projectId>`; la ruta legacy configurable no se entrega al worker ni al sandbox del turn.
@@ -139,13 +140,16 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Los hosts exactos que necesita Codex 0.149.1 y el origen Supabase deben
   observarse con las credenciales QA antes de cerrar sus allowlists de cada
   instalación; el gateway falla cerrado y no admite wildcards.
+- Restic no está instalado en este Mac y no se usaron credenciales/proveedor
+  reales. Adapter, proceso sintético y Compose estático están verdes; `init`,
+  upload y restore drill off-host permanecen como gate externo exacto.
 
 ## Siguiente acción concreta
 
-Implementar el adapter de réplica cifrada off-host sobre snapshots ya
-verificados, con ejecución sin shell, entorno mínimo, timeout, receipt durable,
-fixtures de proceso y runbook exacto. La conexión efectiva al repositorio
-externo y sus credenciales seguirán pendientes de autorización/configuración.
+Implementar delivery durable de alertas operativas desde el evaluator existente:
+dedupe, retries/backoff, receipt, redacción y un sink local probado más adapter
+externo configurable. La entrega real a un canal externo quedará pendiente de
+credenciales/destino; la aplicación no debe enviar alertas por sí sola.
 
 ## Últimas validaciones
 
@@ -291,6 +295,14 @@ externo y sus credenciales seguirán pendientes de autorización/configuración.
   lint, validator infra y build de producción verdes.
 - Push verificado: `7655fb0..bfbe610` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Réplica cifrada `5cae93c`: adapter Restic idempotente, entorno allowlisted,
+  password privado, ejecución sin shell/timeout, tags+readback+check y receipt
+  sin URL/secretos; servicio Compose one-shot con snapshots read-only y red
+  egress-only. Focalizadas 20/20; suite completa 88 ficheros pasados + 1
+  opt-in omitido, 401 pruebas pasadas + 3 omitidas; typecheck, lint, YAML,
+  validator infra y build verdes. Restic/proveedor real: no ejecutado.
+- Push verificado: `74dfd83..5cae93c` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -314,7 +326,7 @@ externo y sus credenciales seguirán pendientes de autorización/configuración.
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
 | Contratos UI reales | `contracts/aibrain/v1`: inventario exacto de rutas y bundle JSON Schema; guía humana en `UI_BACKEND_CONTRACT.md`; contratos App Server generados | 13/13 contract tests, 39 operaciones en paridad con handlers, ejemplos+fixtures tipados y respuestas Next E2E; regeneración/compare byte a byte de Codex 0.149.1 |
 | Auth defensivo | Cookie opaca, Origin/CSRF, expiración, revocación y rate limit | 24 pruebas Auth/rate limit y E2E de logout |
-| Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación y promoción dual con rollback | 10 pruebas locales + CLI multiproceso, incluidas corrupción, enlaces, publicación concurrente, restore real y recovery interrumpido; contenedor QA y réplica externa pendientes |
+| Backup/restore/recovery | Manifest V2 compuesto para estado+documental, hashes por componente/global, barrera de publicación, promoción dual y Restic off-host one-shot | 10 pruebas backup + CLI/proceso Restic sintético, incluidas corrupción, enlaces, publicación concurrente, restore, crash/replay y secretos; contenedor QA y proveedor externo pendientes |
 | Operación/release/rollback | Compose, Nginx, health, logs, alertas, drain y release dual atómica | Release manager 5/5 y validator estático verde; ejecución Docker QA pendiente |
 | Hardening/dependencias | Paths seguros, límites, fail-closed y versiones fijadas | Lint/typecheck/build, auditorías 0 vulnerabilidades |
 | Soak y latencia | Harness de workers/WS/replay/restart, compactación y gates de recursos | Ejecución final 120,893 s verde, p95 865,49 ms, 0 fugas y journals acotados |
@@ -335,6 +347,9 @@ AIBRAIN_REAL_CHROME_TEST=1 AIBRAIN_CHROME_EXECUTABLE=/ruta/chrome-headless-shell
 npm run test:soak
 npm run test:coverage
 npm run build
+npm run backup:create
+npm run backup:verify -- --snapshot /ruta/absoluta
+npm run backup:replicate -- --snapshot /ruta/absoluta
 npm audit --omit=dev --audit-level=critical
 npm audit --audit-level=critical
 npm run infra:validate
@@ -345,11 +360,12 @@ npm run infra:validate
 1. En el Hetzner QA, comprobar nombres de red, puertos y volúmenes exclusivos de AiBrain antes de ejecutar nada; abortar si aparece una referencia a BGreenly.
 2. Con Docker disponible: validar `docker compose config`, construir desde cero las imágenes `app` y `egress-gateway`, levantar únicamente el proyecto Compose de AiBrain y esperar ambos healthchecks verdes.
 3. Ejecutar `npm run test:soak:qa`, la matriz documental con QPDF obligatorio, dos instalaciones y 20 usuarios dentro del contenedor.
-4. Crear backup QA, verificarlo, restaurarlo en una raíz QA vacía, reiniciar host/servicios AiBrain y confirmar replay/recovery sin duplicados.
-5. Ensayar release anterior/nueva y rollback sin borrar releases ni backups; generar SBOM y escaneo de imagen, resolviendo cualquier hallazgo crítico.
-6. Con una suscripción Codex dedicada al primer empleado, completar login humano, verificar Data Controls y ejecutar un turn real con tool browser y approval.
-7. Configurar un proyecto Supabase QA solo-Auth, probar login/cambio inicial/recovery y después bloquear su acceso temporalmente para confirmar continuidad del workbench.
-8. DNS, NAS real, cutover, datos Arnay, compras, producción y merge a `main` siguen requiriendo aprobación separada.
+4. Crear backup compuesto QA, verificarlo, restaurarlo en dos raíces QA vacías (estado+documental), reiniciar host/servicios AiBrain y confirmar replay/recovery sin duplicados.
+5. Con destino y credenciales off-host aprobados, inicializar Restic una vez, replicar el snapshot verificado y ejecutar el restore drill exacto de `BACKUP_REPLICATION.md`.
+6. Ensayar release anterior/nueva y rollback sin borrar releases ni backups; generar SBOM y escaneo de imagen, resolviendo cualquier hallazgo crítico.
+7. Con una suscripción Codex dedicada al primer empleado, completar login humano, verificar Data Controls y ejecutar un turn real con tool browser y approval.
+8. Configurar un proyecto Supabase QA solo-Auth, probar login/cambio inicial/recovery y después bloquear su acceso temporalmente para confirmar continuidad del workbench.
+9. DNS, NAS real, cutover, datos Arnay, compras, producción y merge a `main` siguen requiriendo aprobación separada.
 
 ## Integración con `codex/aibrain-ui-parity`
 
