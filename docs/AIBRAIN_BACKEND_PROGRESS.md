@@ -682,3 +682,30 @@ npm run infra:validate
 - Pruebas locales del cambio: workers 11/11, runtime/turn 17/17, typecheck y
   lint verdes. Siguiente acción: build inmutable, despliegue y repetición del
   turn real desde David hasta respuesta terminal correcta.
+
+### Cierre de la incidencia
+
+- `94bdc1a` dejó de enviar el UUID local de proyecto al campo semánticamente
+  distinto `thread/start.projectId` de Codex. `001781c` movió las tools del
+  navegador privado de la namespace reservada `browser` a
+  `aibrain_browser`; ambas incompatibilidades se reprodujeron contra el App
+  Server real antes de corregirse.
+- Aceptación real pública con David: proyecto persistido, thread
+  `ec915e1e-5123-48ee-a298-8650b52cfa19`, streaming completo, mensaje
+  asistente persistido `AIBRAIN_SHARED_SUBSCRIPTION_OK`, primer texto en
+  4.962 s y total en 5.960 s. Runtime: `chatgpt`, plan `pro`, worker caliente.
+- Despliegue `001781cc04660ee544804678ec9627d47ea145f7`: app
+  `sha256:fc67c536d4659900a8f66d7f17f1d2ba4ef2517591c0b76734da750b28153636`
+  y egress/ingress
+  `sha256:7b8eebbffbc204fd6e7f459f1976ef4243d67749a14d92a4cfecb541b16c2419`;
+  tres healthchecks verdes y cero reinicios. Readiness pública 200 y sentinel
+  BGreenly 410.
+- La build limpia activó correctamente el límite de disco. Se retiraron solo
+  builds locales obsoletas de AiBrain y los dos contenedores de la demo
+  anterior; sus datos no se borraron y las imágenes versionadas siguen
+  recuperables desde el registry privado. Capacidad final: 20,54 % libre.
+- El test agregado reveló que el release manager todavía describía la
+  topología anterior. Ahora valida, recrea, espera y comprueba también
+  `ingress-gateway` y su red exclusiva. Resultado final local: 116 ficheros
+  pasados, 1 omitido; 551 tests pasados, 3 omitidos; typecheck, lint,
+  contratos fijados e infraestructura estática verdes.

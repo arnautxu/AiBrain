@@ -349,16 +349,20 @@ function validateComposeSafety(contents, installationId) {
   const services = value?.services;
   const networks = value?.networks;
   const volumes = value?.volumes;
-  const allowedServices = new Set(["app", "egress-gateway", "alert-dispatcher", "backup-replicator"]);
-  const requiredServices = ["app", "egress-gateway", "alert-dispatcher"];
+  const allowedServices = new Set([
+    "app", "ingress-gateway", "egress-gateway", "alert-dispatcher", "backup-replicator",
+  ]);
+  const requiredServices = ["app", "ingress-gateway", "egress-gateway", "alert-dispatcher"];
   const expectedNetworks = {
     app: ["aibrain-internal"],
+    "ingress-gateway": ["aibrain-ingress", "aibrain-internal"],
     "egress-gateway": ["aibrain-egress", "aibrain-internal"],
     "alert-dispatcher": ["aibrain-egress", "aibrain-internal"],
     "backup-replicator": ["aibrain-egress"],
   };
   const expectedImages = {
     app: "AIBRAIN_IMAGE",
+    "ingress-gateway": "AIBRAIN_EGRESS_IMAGE",
     "egress-gateway": "AIBRAIN_EGRESS_IMAGE",
     "alert-dispatcher": "AIBRAIN_IMAGE",
     "backup-replicator": "AIBRAIN_IMAGE",
@@ -366,6 +370,7 @@ function validateComposeSafety(contents, installationId) {
   const expectedResourceNames = {
     "aibrain-internal": "AIBRAIN_NETWORK_NAME",
     "aibrain-egress": "AIBRAIN_EGRESS_NETWORK_NAME",
+    "aibrain-ingress": "AIBRAIN_INGRESS_NETWORK_NAME",
     "aibrain-data": "AIBRAIN_DATA_VOLUME_NAME",
     "aibrain-backups": "AIBRAIN_BACKUP_VOLUME_NAME",
     "aibrain-restores": "AIBRAIN_RESTORE_VOLUME_NAME",
@@ -385,7 +390,7 @@ function validateComposeSafety(contents, installationId) {
   const exactStringSet = (candidate, expected) => Array.isArray(candidate)
     && candidate.every((item) => typeof item === "string")
     && [...candidate].sort().join("\0") === [...expected].sort().join("\0");
-  if (!exactObjectKeys(networks, ["aibrain-internal", "aibrain-egress"])
+  if (!exactObjectKeys(networks, ["aibrain-internal", "aibrain-egress", "aibrain-ingress"])
     || !exactObjectKeys(volumes, ["aibrain-data", "aibrain-backups", "aibrain-restores"])
     || networks["aibrain-internal"]?.internal !== true
     || interpolationKey(value?.name) !== "AIBRAIN_COMPOSE_PROJECT_NAME") {
@@ -419,7 +424,7 @@ function validateComposeSafety(contents, installationId) {
         throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} has an unreviewed mount.`);
       }
     }
-    if (name !== "app" && service.ports !== undefined) {
+    if (name !== "ingress-gateway" && service.ports !== undefined) {
       throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} cannot publish host ports.`);
     }
   }
@@ -604,14 +609,21 @@ function deploy(options, release, deadline = performance.now() + options.healthT
   runDocker(options, composeArgs(options, release, "config", "--quiet"), remainingDockerTimeout(options, deadline));
   runDocker(
     options,
-    composeArgs(options, release, "up", "-d", "--force-recreate", "--no-deps", "egress-gateway", "app", "alert-dispatcher"),
+    composeArgs(
+      options,
+      release,
+      "up", "-d", "--force-recreate", "--no-deps",
+      "egress-gateway", "app", "ingress-gateway", "alert-dispatcher",
+    ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
   waitUntilHealthy(options, release, "app", deadline);
+  waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
+  verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
 }
 
@@ -619,9 +631,11 @@ function verifyCurrentDeployment(options, release, deadline = performance.now() 
   assertSelectedReleaseInputs(options, release);
   waitUntilHealthy(options, release, "egress-gateway", deadline);
   waitUntilHealthy(options, release, "app", deadline);
+  waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
+  verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
 }
 
