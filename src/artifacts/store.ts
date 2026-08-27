@@ -11,7 +11,8 @@ import type {
   InternalSiteSnapshotContent,
   VisualizationSnapshotContent,
 } from "@/artifacts/contracts";
-import { contentHash, isVisualizationSpec } from "@/artifacts/contracts";
+import { isVisualizationSpec } from "@/artifacts/contracts";
+import { contentHash } from "@/artifacts/content-hash";
 import { atomicWriteFile, fsyncDirectory, ResourceLockManager } from "@/storage";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
