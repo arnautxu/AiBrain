@@ -1,5 +1,6 @@
 import {
   chmod,
+  link,
   lstat,
   mkdir,
   mkdtemp,
@@ -155,5 +156,83 @@ describe("FileBackupService", () => {
     await symlink(outside, path.join(dataRoot, "users", "user-one", "state", "linked.txt"));
     await expect(service.create()).rejects.toBeInstanceOf(BackupError);
     await expect(service.create()).rejects.toMatchObject({ code: "BACKUP_SYMLINK_REJECTED" });
+  });
+
+  it("fails closed on hard-linked live files", async () => {
+    const { root, dataRoot, service } = await fixture();
+    const outside = path.join(root, "outside.txt");
+    await writeFile(outside, "outside\n");
+    await link(outside, path.join(dataRoot, "users", "user-one", "state", "hard-linked.txt"));
+
+    await expect(service.create()).rejects.toMatchObject({ code: "BACKUP_FILE_UNSAFE" });
+  });
+
+  it("detects files added to or removed from an immutable snapshot", async () => {
+    const { service } = await fixture();
+    const created = await service.create();
+    const dataDirectory = path.join(created.snapshotRoot, "data");
+    await chmod(created.snapshotRoot, 0o700);
+    await chmod(dataDirectory, 0o700);
+
+    const extra = path.join(dataDirectory, "unmanifested.txt");
+    await writeFile(extra, "not-in-manifest\n");
+    await expect(service.verify(created.snapshotRoot)).rejects.toMatchObject({
+      code: "BACKUP_INTEGRITY_FAILED",
+    });
+
+    await rm(extra);
+    const missing = path.join(dataDirectory, "users", "user-one", "state", "project.json");
+    await chmod(path.dirname(missing), 0o700);
+    await rm(missing);
+    await expect(service.verify(created.snapshotRoot)).rejects.toMatchObject({
+      code: "BACKUP_INTEGRITY_FAILED",
+    });
+  });
+
+  it("never publishes an interrupted pending snapshot and can create the next backup", async () => {
+    const { root, dataRoot, backupsRoot, service } = await fixture();
+    const outside = path.join(root, "outside.txt");
+    const unsafe = path.join(dataRoot, "users", "user-one", "state", "linked.txt");
+    await writeFile(outside, "outside\n");
+    await symlink(outside, unsafe);
+
+    await expect(service.create()).rejects.toMatchObject({ code: "BACKUP_SYMLINK_REJECTED" });
+    const afterFailure = await readdir(path.join(backupsRoot, "snapshots"));
+    expect(afterFailure).toHaveLength(1);
+    expect(afterFailure[0]).toMatch(/^\..+\.pending$/u);
+
+    await rm(unsafe);
+    const created = await service.create();
+    const afterRecovery = await readdir(path.join(backupsRoot, "snapshots"));
+    expect(afterRecovery).toContain(path.basename(created.snapshotRoot));
+    expect(afterRecovery.filter((entry) => !entry.startsWith("."))).toEqual([
+      path.basename(created.snapshotRoot),
+    ]);
+  });
+
+  it("preserves partial data for forensic recovery when restore copying fails", async () => {
+    const { root, service } = await fixture();
+    const created = await service.create();
+    const originalVerify = service.verify.bind(service);
+    service.verify = async (snapshotRoot: string) => {
+      const manifest = await originalVerify(snapshotRoot);
+      const missing = path.join(snapshotRoot, "data", "users", "user-one", "state", "project.json");
+      await chmod(snapshotRoot, 0o700);
+      await chmod(path.join(snapshotRoot, "data"), 0o700);
+      await chmod(path.dirname(missing), 0o700);
+      await rm(missing);
+      return manifest;
+    };
+
+    const destination = path.join(root, "failed-restore");
+    await expect(service.restore(created.snapshotRoot, destination)).rejects.toMatchObject({
+      code: "RESTORE_FAILED",
+      message: expect.stringContaining(`${destination}.failed.`),
+    });
+    await expect(lstat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+    const preserved = (await readdir(root)).find((entry) => entry.startsWith("failed-restore.failed."));
+    expect(preserved).toBeDefined();
+    await expect(readFile(path.join(root, preserved as string, "PERMISSIONS.md"), "utf8"))
+      .resolves.toBe("permission-v1\n");
   });
 });
