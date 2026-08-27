@@ -47,13 +47,13 @@
 | 7. Streaming, steering, stop, approvals, replay | Reabierto por auditoría estricta | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`: las piezas aisladas están probadas; falta una aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket reales con approval, stop y crash/reconnect |
 | 8. Uploads, Office/PDF, previews y publicación | Reabierto por auditoría estricta | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`: validación y publicación individual fuertes; falta aislar físicamente staging por turn, hacer global el lock de target entre usuarios y cubrir backup documental |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
-| 10. Contratos reales para UI | Reabierto por auditoría estricta | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`: documento amplio pero todavía manual; deben eliminarse roles/control/onboarding/automations rechazados y validar schemas/ejemplos contra handlers |
+| 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`: Auth y contrato ya no tienen roles; retirados build/routes/paneles de onboarding, invitaciones, control plane, automations y Runtime técnico; falta hacer ejecutables los schemas/ejemplos HTTP restantes |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
 | 12. Hardening y suite completa | Reabierto por auditoría estricta | `b8dff0a`, `1ced607`, `47ea3c0`, `9f5092b`, `0cde0da`, `b58bc9f`, `4ef6d96`, `8d4edde`, `e58ef6c`, `4b2ed61`, `e539ffd`, `67a8394`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`, `c95f820`: la matriz previa sigue verde, pero no es condición de cierre mientras queden gaps locales comprobados y gates agregados incompletos |
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. El primer bloque ya quedó corregido en `d74a800`; el siguiente cambio concreto es retirar roles, onboarding, control plane y automations del build público y de sus contratos.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800` y las superficies rechazadas en `27984f2`. La siguiente acción concreta es cerrar las dos fronteras P0 documentales: staging físico por turn y lock global de publicación entre usuarios.
 
 ## Decisiones menores registradas
 
@@ -117,6 +117,10 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Alta y lifecycle son operaciones distintas: el alta conserva identidad local
   inmutable; baja/reactivación/recuperación usan un `requestId` durable, revocan
   sesiones cuando corresponde y nunca introducen roles o paneles admin.
+- Auth no contiene roles de producto. `PERMISSIONS.md` decide acciones
+  server-side; onboarding, invitaciones, control plane y automatizaciones
+  programadas no forman parte del build V1. Review sigue visible y el panel
+  técnico Runtime queda oculto a empleados.
 
 ## Riesgos y acciones externas pendientes
 
@@ -159,6 +163,11 @@ las acciones externas autorizadas.
   pruebas focalizadas cubren baja, reactivación, recuperación, revocación,
   parada selectiva, Origin/bearer, replay y conflicto. Suite agregada posterior:
   82 ficheros pasados + 1 opt-in omitido, 376 pruebas pasadas + 3 opt-in omitidas.
+- Superficies rechazadas: contract test 2/2, 14 integraciones focalizadas, E2E
+  HTTP 3/3 y build Next 16.3.2 verdes. El build lista 38 rutas dinámicas y
+  ninguna corresponde a onboarding, control plane, invitaciones o automations.
+  Suite agregada posterior: 83 ficheros pasados + 1 opt-in omitido, 378 pruebas
+  pasadas + 3 opt-in omitidas.
 - Backup/restore: tres pruebas reales de snapshot inmutable, verificación por hash, restore separado y rechazo de corrupción/symlink/hardlink.
 - Workbench filesystem: seis pruebas de aislamiento, restart, concurrencia y lifecycle de proyecto/thread.
 - Permisos por turn: 31 pruebas focalizadas con auditoría durable, binding de identidad y fallo cerrado.
@@ -241,6 +250,7 @@ las acciones externas autorizadas.
 | Sin hardcodes de Arnay/dominio/paths | Config obligatoria en producción y ejemplos sintéticos | Contract tests y búsqueda estática de fronteras/configuración |
 | Veinte empleados sin cambiar código | Provisionador idempotente y raíces privadas por UUID | CLI real en proceso hijo: 20 creados y replay 20 unchanged |
 | Alta/baja/reactivación/recovery | Endpoint host-local + CLI offline, receipts y journal por `requestId` | 12 focalizadas + proceso hijo; sesiones revocadas y worker/browser selectivos |
+| Sin roles/control/onboarding/automations | Auth role-free, UI sin panel Runtime y rutas rechazadas eliminadas | Contract test 2/2, build de 38 rutas y E2E 3/3 |
 | Sesión/worker/workspace/staging/browser independientes | `WorkerRuntimeRegistry` y layout por usuario | Tests de workers, browser, cookies, archivos y symlinks cross-user |
 | WebSocket privado resiliente | Gateway loopback autenticado, journal, ACK/replay/dedupe/backoff | 20 pruebas gateway/router, crash/restart y soak con 28 replays |
 | Concurrencia sin mezcla | Routing por instalación+usuario+thread+turn+item | Tests concurrentes, approval pendiente y stop aislado |
@@ -292,7 +302,7 @@ npm run infra:validate
 
 ## Integración con `codex/aibrain-ui-parity`
 
-- Fuente de verdad de la UI: `docs/UI_BACKEND_CONTRACT.md` y schemas versionados del repo; no inferir payloads desde componentes antiguos.
+- Fuente de verdad de la UI: `docs/UI_BACKEND_CONTRACT.md` y schemas versionados del repo; no inferir payloads desde componentes antiguos ni reintroducir roles, onboarding, control plane, automations o panel Runtime.
 - Consumir `InstallationConfig`/manifest para marca exacta, incluida `accentColor`; no mantener nombres, dominios ni rutas de empresa en componentes.
 - Mantener cursores/IDs de instalación+usuario+thread+turn+item, deduplicar eventos y representar estados `pending`, `degraded`, `reconnecting`, `conflict` y recuperables según contrato.
 - Abrir un runtime thread nuevo cuando se habiliten browser dynamic tools; approvals y takeover se resuelven por las rutas documentadas y nunca desde estado global de cliente.
