@@ -2,6 +2,8 @@
 
 Estado verificado: rama `codex/aibrain-backend-definitivo`, implementación observada el 27-08-2026. Este documento describe las rutas, validadores y tipos que existen en el repositorio. No convierte stores internos en APIs públicas ni promete endpoints futuros.
 
+Contrato ejecutable V1: `contracts/aibrain/v1/ui-backend.schema.json` contiene los JSON Schemas y ejemplos compilables; `contracts/aibrain/v1/http-routes.json` inventaría cada método y ruta pública. `npm run test:contract` exige paridad exacta con los handlers de Next, valida los ejemplos y fixtures TypeScript y las pruebas E2E validan respuestas reales de sesión, workbench y runtime contra esos schemas. Este Markdown es la guía humana complementaria.
+
 ## 1. Convenciones de transporte y seguridad
 
 - Todas las rutas de producto se ejecutan en Node.js y usan la cookie de sesión; la UI no envía tokens de Supabase ni credenciales de Codex.

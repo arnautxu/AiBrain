@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { assertUiContract } from "../helpers/ui-contract";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 type NextProcess = ChildProcessByStdio<null, Readable, Readable>;
@@ -116,6 +117,7 @@ beforeAll(async () => {
   await mkdir(applicationRoot, { recursive: true, mode: 0o700 });
   await Promise.all([
     "src",
+    "contracts",
     "public",
     "config",
     "next.config.ts",
@@ -226,8 +228,15 @@ describe("real Next HTTP workbench lifecycle", () => {
     const body = await snapshot.json() as {
       workbench: { projects: Array<{ id: string }>; threads: Array<{ id: string; status: string }> };
     };
+    assertUiContract("WorkbenchResponse", body);
     expect(body.workbench.projects).toContainEqual(expect.objectContaining({ id: projectId }));
     expect(body.workbench.threads).toContainEqual(expect.objectContaining({ id: threadId, status: "archived" }));
+
+    const runtime = await json(`/api/runtime/status?projectId=${projectId}`);
+    const runtimeText = await runtime.text();
+    expect(runtime.status, runtimeText.slice(0, 2_000)).toBe(200);
+    const runtimeBody = JSON.parse(runtimeText);
+    assertUiContract("RuntimeStatus", runtimeBody);
 
     const logout = await json("/api/auth/logout", {
       method: "POST",

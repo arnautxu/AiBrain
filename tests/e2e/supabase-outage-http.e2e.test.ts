@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Readable } from "node:stream";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { assertUiContract } from "../helpers/ui-contract";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
 const USER_ID = "0198b9f0-6631-7000-8000-000000000010";
@@ -232,7 +233,9 @@ describe("local HTTP session during Supabase outage", () => {
     await stopProvider();
     const session = await http("/api/auth/session");
     expect(session.status).toBe(200);
-    expect(await session.json()).toMatchObject({
+    const sessionBody = await session.json();
+    assertUiContract("AuthSessionResponse", sessionBody);
+    expect(sessionBody).toMatchObject({
       session: { provider: "local", user: { id: USER_ID, email: EMAIL } },
     });
 
@@ -254,7 +257,9 @@ describe("local HTTP session during Supabase outage", () => {
     next = await startNext();
     const workbench = await http("/api/workbench");
     expect(workbench.status).toBe(200);
-    expect(await workbench.json()).toMatchObject({
+    const workbenchBody = await workbench.json();
+    assertUiContract("WorkbenchResponse", workbenchBody);
+    expect(workbenchBody).toMatchObject({
       workbench: {
         projects: [expect.objectContaining({ id: projectId })],
         threads: [expect.objectContaining({ projectId })],
