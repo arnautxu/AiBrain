@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `d16b3a1` en
+- Último checkpoint backend publicado: `14f63af` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -45,7 +45,7 @@
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
 | 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`, `78972d3`: aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket loopback reales, con approval pendiente, stop aislado, crash, replay, dedupe, restart y continuidad del otro worker |
-| 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0, sandbox, capacidad e integridad cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables y publicación `expired`; falta recovery/retención de temporales y capacidad acumulada en disco |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente; ejecución dentro de Docker QA pendiente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`, `bfbe610`, `3091b0f`, `dd8da5b`, `d16b3a1`, `14f63af`: staging server-only, backup documental, conversores aislados, capacidad multiproceso, previews V2 atestados/cancelables, publicación `expired`, reserva previa de volumen y recovery de temporales tras `SIGKILL` |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | Completado localmente | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`, `40c94b8`, `7655fb0`: Auth/contrato role-free, superficies rechazadas retiradas, schemas Codex 0.149.1 regenerados byte a byte y contrato HTTP V1 ejecutable con inventario exacto de 39 operaciones, JSON Schemas, ejemplos, tipos y respuestas Next E2E |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`, `bfbe610`, `5cae93c`, `f35edc3`, `b77dc7f`: backup compuesto, réplica Restic, alertas y recovery transaccional de release cerrados localmente; falta evidencia Docker/host QA real |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0`, el backup documental compuesto en `bfbe610`, la réplica cifrada off-host en `5cae93c`, el delivery durable de alertas en `f35edc3`, el release recovery en `b77dc7f`, el sandbox de conversión en `3091b0f`, su gate multiproceso en `dd8da5b` y la integridad/expiración documental en `d16b3a1`. La siguiente acción concreta continúa dentro del checkpoint documental: recovery/retención y capacidad acumulada en disco.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2`, ambas fronteras documentales P0 en `9d0500c`, la exclusión/recovery multiproceso de locks en `016f708`, la aceptación conjunta multiusuario en `78972d3`, la continuidad HTTP sin Supabase en `283caf8`, el guard/regeneración de contratos fijados en `40c94b8`, el contrato HTTP ejecutable en `7655fb0`, el backup documental compuesto en `bfbe610`, la réplica cifrada off-host en `5cae93c`, el delivery durable de alertas en `f35edc3`, el release recovery en `b77dc7f`, el sandbox de conversión en `3091b0f`, su gate multiproceso en `dd8da5b`, la integridad/expiración documental en `d16b3a1` y la admisión/recovery de almacenamiento en `14f63af`. El pipeline documental ya no conserva gaps locales conocidos; su frontera ejecutable dentro de Docker permanece como gate QA externo.
 
 ## Decisiones menores registradas
 
@@ -118,6 +118,16 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - El TTL de publicación se reconcilia bajo lock a `expired` exactamente en su
   instante de vencimiento. El evento se repara tras restart, confirm no escribe
   y decline posterior es un acuse idempotente que conserva el estado terminal.
+- El upload completo reserva un slot filesystem de instalación antes de leer el
+  multipart. La admisión mide el volumen y conserva el mayor margen entre bytes
+  y ratio libres más 512 MiB por cada upload simultáneo posible; saturación o
+  disco bajo devuelven `429 Retry-After` sin persistir el body. No es una cuota
+  comercial y se amplía por configuración/recursos.
+- `.incoming` y `.work-*` mantienen locks con heartbeat. El mantenimiento es
+  dry-run por defecto, exige `--apply`, espera seis horas, valida raíz, inode,
+  tipo, permisos y hardlinks, y elimina mediante cuarentena atómica. Uploads,
+  previews y registros de publicación duraderos se retienen; no se borran
+  silenciosamente para recuperar capacidad.
 - Chrome de escritorio autoactualizable no es una evidencia aceptable del runtime: la prueba real se ejecuta con Chrome for Testing exacto. En este host, Google Chrome 151 abrió el proceso pero no habilitó el pipe CDP; Chrome for Testing 152.0.7977.64 pasó la misma matriz en 1,29 s.
 - El runtime descubre todos los targets CDP y cierra cualquier popup, service worker o página no creada por la operación de thread activa; los cierres se deduplican para evitar carreras durante ráfagas de eventos.
 - En producción `app` solo pertenece a una red Docker `internal`; el sidecar
@@ -165,12 +175,15 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
   token o body remoto. Su destino/token y allowlist exacta siguen siendo una
   acción externa por instalación; el sink local durable queda operativo sin
   fingir una entrega externa.
+- El launcher `aibrain-document-maintenance` está incluido y validado
+  estáticamente, pero su dry-run/apply debe ejecutarse también dentro de la
+  imagen QA real junto con el preflight de los conversores.
 
 ## Siguiente acción concreta
 
-Cerrar retención/backpressure de bytes persistidos en uploads, previews,
-candidatos y artefactos, y añadir recovery de `.incoming`/`.work-*` tras caída.
-Añadir regresiones de cleanup, reserva de disco, retención y crash recovery.
+Reauditar los checkpoints 11/12 contra el árbol actual y cerrar cualquier gap
+local reproducible restante. Mantener separados los gates externos exactos de
+Docker/host QA, Supabase, Codex dedicado, Restic y alertas reales.
 
 ## Últimas validaciones
 
@@ -241,6 +254,15 @@ Añadir regresiones de cleanup, reserva de disco, retención y crash recovery.
   nativo; publicación expira durablemente y sin tocar target. Selección conjunta
   41/41 verde; suite completa 94 ficheros pasados + 1 opt-in omitido, 441 pruebas
   pasadas + 3 omitidas y build Next 16.3.2 verde.
+- Almacenamiento documental `14f63af`: 32/32 focalizadas verdes; dos procesos
+  comparten slots de upload, overflow falla antes del multipart y un owner
+  muerto se recupera. Un `SIGKILL` real durante multipart y otro durante preview
+  dejan temporales que el recolector elimina tras heartbeat/gracia, sin unsafe ni
+  locked. El escenario de caída se repitió tres veces (3/3).
+- Gate global posterior a `14f63af`: 99 ficheros pasados + 1 opt-in omitido,
+  457 pruebas pasadas + 3 opt-in omitidas; typecheck, lint, build Next 16.3.2,
+  infra estática y matriz real LibreOffice/Poppler 2/2 verdes. Docker Compose no
+  se ejecutó porque el CLI no está instalado en este Mac.
 - Hardening de targets: suite completa de unidad 58 ficheros verdes + 1 opt-in omitido, 294 pruebas verdes + 2 opt-in omitidas; typecheck y lint verdes.
 - Chrome for Testing 152.0.7977.64: 2/2 pruebas reales verdes en 1,29 s tras añadir discovery, ownership y cierre deduplicado de popup/service worker/página ajena. SHA-256 del ZIP mac-arm64 validado localmente: `ad6ea84171a067f0f1ce32d4063b726ea63b6c71ad6dfc480ddcd5af89acfdfb`.
 - Soak final de 120,487 s: 4 workers, 808 requests, 36 restarts, p95
