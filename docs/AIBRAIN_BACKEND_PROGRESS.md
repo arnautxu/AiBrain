@@ -593,3 +593,68 @@ npm run infra:validate
    digest nuevos.
 4. Cuando la rama integrada esté aceptada visual y funcionalmente, abrir PR a
    `main`; el merge sigue siendo una acción separada y no se ha realizado.
+
+## Dominio canónico Arnall y revisión integrada final — 2026-08-27
+
+- Rama activa: `codex/aibrain-integrated-qa`. La UI más reciente de Arnau
+  (`b046a80` y sus tres commits previos) se integró mediante el merge normal
+  `1c40785`; no se modificó ni rebasó `codex/aibrain-ui-parity`. El checkpoint
+  desplegado definitivo es `302716952d4b632d5a7a7bc09c66223e2e948f1f`.
+- Dominio canónico: `https://arnall.graphikai.com/`. El A autoritativo y los
+  resolvers 1.1.1.1/8.8.8.8 resuelven `167.233.146.105`. Nginx solo publica el
+  ingress loopback `127.0.0.1:3100`; el Funnel temporal de Tailscale quedó
+  desactivado después de validar el dominio definitivo.
+- TLS: certificado Let's Encrypt exclusivo para `arnall.graphikai.com`, válido
+  hasta 2026-11-25. La renovación simulada con Certbot fue verde. El template
+  Nginx conserva el webroot ACME, usa HTTP/2 no deprecado y entrecomilla la ruta
+  regex de uploads; su prueba focalizada pasa 2/2 y `nginx -t` es verde.
+- Identidad de instalación: `companyName=Arnall`, `companySlug=arnall`, producto
+  `AiBrain` y assets genéricos `/branding/aibrain/*`. Ya no se sirve el logo ni
+  el texto de Example Laboratory. Todo permanece en `InstallationConfig`; no se
+  añadió Arnall como tenant funcional hardcodeado.
+- Imágenes inmutables del registry privado loopback:
+  - app `sha256:38087dcda1ab07111bfcd784550c89685840a2d33e2cc94c2d01560087b5730d`;
+  - egress/ingress `sha256:fca5fc7347c16b04a014a1c9612febc1665156574fe99d8d08bf57410905d80d`.
+  Las tres instancias declaran la revisión OCI completa `3027169...`, están
+  `healthy`, tienen cero restarts y no se eliminó la revisión anterior.
+- Fronteras medidas: app únicamente en `aibrain-company-qa-private`; egress en
+  private+egress; ingress en private+ingress. `source-ro` está montado RO, no se
+  monta `docker.sock` y la readiness confirma storage, publicación, disco y
+  toolchains Codex/browser/documentos listos.
+- Validación pública: login 200, readiness 200, logo/favicon 200, credenciales
+  reales de David 200 con cambio inicial obligatorio, credenciales falsas 401
+  y Origin ajeno 403. La inspección en navegador devolvió título
+  `AiBrain · Arnall`, formulario real de contraseña inicial, cero marcadores
+  demo y cero errores de consola.
+- BGreenly no se modificó, reinició ni conectó a AiBrain. Su sentinel público
+  devolvió 410 antes y después del cutover. AiBrain conserva redes, volúmenes,
+  rutas, registro, puerto y Nginx site propios.
+- Gates de esta revisión: typecheck, lint, build Docker/Next, validator estático,
+  integración 25/25 (58 pasadas, 1 omitida), contratos 15/15, unit 447 pasadas
+  (2 omitidas) y E2E UI 21 pasadas (1 omitida); el único fallo paralelo de UI
+  pasó aislado sin debilitar la prueba.
+
+### Pendientes exclusivamente externos
+
+1. Supabase Dashboard exige MFA del propietario para añadir explícitamente
+   `https://arnall.graphikai.com/auth/recovery` a Redirect URLs/Site URL. No se
+   intentó enviar correo de recuperación ni se alteró Auth sin completar MFA.
+   El login, el cambio inicial y las sesiones locales ya funcionan en el dominio.
+2. Google OAuth no forma parte aún del login desplegado. Si se habilita, debe ser
+   solo para empleados previamente provisionados; nunca un signup público que
+   cree acceso al producto automáticamente.
+3. El worker de Arnau tiene su suscripción Codex dedicada y un turn real verde.
+   El usuario de David conserva CODEX_HOME/workspace/browser propios y necesita
+   autenticar su propia suscripción antes de ejecutar turns reales; no se
+   compartirán credenciales Codex entre empleados.
+4. NAS/documental real, DNS adicionales, merge a `main` y cualquier cutover de
+   otra empresa siguen fuera de este despliegue aislado.
+
+### Siguiente integración de UI
+
+1. Arnau continúa en `codex/aibrain-ui-parity` y hace push de commits pequeños.
+2. Se fusionan backend y UI únicamente en `codex/aibrain-integrated-qa` mediante
+   merge commits normales, usando `docs/UI_BACKEND_CONTRACT.md` como contrato.
+3. Se ejecutan typecheck, lint, unit/integración/contratos/E2E y build; solo un
+   checkpoint verde genera dos digests OCI nuevos y recrea los tres servicios
+   AiBrain. `main` no se toca hasta aprobación humana separada.
