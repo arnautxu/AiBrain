@@ -11,8 +11,9 @@ describe("pinned Codex App Server contract", () => {
       readFile(path.join(repositoryRoot, "Dockerfile"), "utf8"),
       readFile(path.join(repositoryRoot, "package.json"), "utf8"),
     ]);
-    expect(dockerfile).toContain(`ARG CODEX_VERSION=${pinnedVersion}`);
-    expect(dockerfile).toContain('"@openai/codex@${CODEX_VERSION}"');
+    expect(dockerfile).toContain(`"@openai/codex@${pinnedVersion}"`);
+    expect(dockerfile).toContain(`AIBRAIN_CODEX_EXPECTED_VERSION=${pinnedVersion}`);
+    expect(dockerfile).not.toMatch(/ARG\s+(?:AIBRAIN_)?CODEX_VERSION/u);
     const scripts = (JSON.parse(packageJson) as { scripts: Record<string, string> }).scripts;
     expect(scripts["contracts:generate"]).toContain(`@openai/codex@${pinnedVersion}`);
   });
