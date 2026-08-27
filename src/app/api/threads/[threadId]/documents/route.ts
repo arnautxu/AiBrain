@@ -26,11 +26,15 @@ function documentErrorResponse(error: unknown) {
   if (code === "STORAGE_STAGING_ID_CONFLICT" || code === "DOCUMENT_PREVIEW_CONFLICT") {
     return NextResponse.json({ error: "Aquest uploadId ja identifica un altre document." }, { status: 409 });
   }
-  if (code === "DOCUMENT_CONVERSION_BACKPRESSURE") {
+  if (code === "DOCUMENT_CONVERSION_BACKPRESSURE" || code === "DOCUMENT_STORAGE_BACKPRESSURE") {
     const retryAfterMs = error && typeof error === "object" && "retryAfterMs" in error &&
       typeof error.retryAfterMs === "number" ? error.retryAfterMs : 1_000;
     return NextResponse.json(
-      { error: "La conversió de documents està ocupada. Torna-ho a provar." },
+      {
+        error: code === "DOCUMENT_STORAGE_BACKPRESSURE"
+          ? "L’emmagatzematge de documents està protegit temporalment. Torna-ho a provar."
+          : "La conversió de documents està ocupada. Torna-ho a provar.",
+      },
       {
         status: 429,
         headers: { "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1_000))) },
@@ -52,7 +56,6 @@ export async function POST(request: Request, context: RouteContext) {
   const { threadId } = await context.params;
   if (!isUuid(threadId)) return NextResponse.json({ error: "Fil no vàlid." }, { status: 400 });
 
-  let parsed: ParsedDocumentUpload | null = null;
   try {
     await getThreadRuntimeContext(session, threadId);
     const installation = await loadInstallationConfig();
@@ -60,42 +63,51 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
     }
     const services = await documentServicesForUser(installation, session.user.id);
-    parsed = await parseStreamingDocumentUpload(request, services.staging.rootDirectory);
-    const parsedUpload = parsed;
-    if (!isUuid(parsedUpload.uploadId)) {
-      throw new UploadValidationError("UPLOAD_MULTIPART_CONTRACT_INVALID", "uploadId must be a UUID.");
-    }
-    const validated = await validateUploadedDocumentFile({
-      fileName: parsedUpload.fileName,
-      declaredMimeType: parsedUpload.declaredMimeType,
-      filePath: parsedUpload.temporaryPath,
-    });
-    if (validated.size !== parsedUpload.size) {
-      throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Upload size changed before validation.");
-    }
-    const document = await services.staging.stageFile({
-      threadId,
-      uploadId: parsedUpload.uploadId,
-      validated,
-      sourcePath: parsedUpload.temporaryPath,
-    });
-    const preview = await services.previews.create(document, { signal: request.signal });
-    return NextResponse.json({
-      document,
-      preview: {
-        ...preview,
-        files: preview.files.map((name) => ({
-          name,
-          url: `/api/threads/${threadId}/documents/${parsedUpload.uploadId}/preview/${encodeURIComponent(name)}`,
-        })),
-      },
-    }, { status: 201 });
+    return await services.storageGate.run(async () => {
+      let parsedUpload: ParsedDocumentUpload | null = null;
+      try {
+        parsedUpload = await parseStreamingDocumentUpload(
+          request,
+          services.staging.rootDirectory,
+          services.locks,
+        );
+        if (!isUuid(parsedUpload.uploadId)) {
+          throw new UploadValidationError("UPLOAD_MULTIPART_CONTRACT_INVALID", "uploadId must be a UUID.");
+        }
+        const uploadId = parsedUpload.uploadId;
+        const validated = await validateUploadedDocumentFile({
+          fileName: parsedUpload.fileName,
+          declaredMimeType: parsedUpload.declaredMimeType,
+          filePath: parsedUpload.temporaryPath,
+        });
+        if (validated.size !== parsedUpload.size) {
+          throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Upload size changed before validation.");
+        }
+        const document = await services.staging.stageFile({
+          threadId,
+          uploadId,
+          validated,
+          sourcePath: parsedUpload.temporaryPath,
+        });
+        const preview = await services.previews.create(document, { signal: request.signal });
+        return NextResponse.json({
+          document,
+          preview: {
+            ...preview,
+            files: preview.files.map((name) => ({
+              name,
+              url: `/api/threads/${threadId}/documents/${uploadId}/preview/${encodeURIComponent(name)}`,
+            })),
+          },
+        }, { status: 201 });
+      } finally {
+        await parsedUpload?.dispose();
+      }
+    }, { signal: request.signal });
   } catch (error) {
     if (!(error instanceof UploadValidationError) && !(error instanceof StorageError)) {
       return workbenchErrorResponse(error, "No s’ha pogut verificar el fil del document.");
     }
     return documentErrorResponse(error);
-  } finally {
-    await parsed?.dispose();
   }
 }

@@ -27,6 +27,7 @@ const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
 const backupReplicate = read("infra/hetzner/app/backup-replicate.sh");
 const alerts = read("infra/hetzner/app/alerts.sh");
+const documentMaintenance = read("infra/hetzner/app/document-maintenance.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
@@ -46,7 +47,7 @@ const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const workerCodexTurn = read("src/runtime/worker-codex-turn.ts");
 const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, replicaEnv, egressGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -69,6 +70,10 @@ requireMatch(dockerfile, /scripts\/replicate-backup\.ts/u, "Dockerfile is missin
 requireMatch(dockerfile, /scripts\/run-operational-alerts\.ts/u, "Dockerfile is missing the operational alert collector CLI");
 requireMatch(dockerfile, /src\/operations\/alert-delivery\.ts/u, "Dockerfile is missing durable alert delivery");
 requireMatch(dockerfile, /infra\/hetzner\/app\/alerts\.sh/u, "Dockerfile is missing the operational alert launcher");
+requireMatch(dockerfile, /scripts\/maintain-document-temporaries\.ts/u, "Dockerfile is missing the document maintenance CLI");
+requireMatch(dockerfile, /src\/documents\/maintenance\.ts/u, "Dockerfile is missing document maintenance logic");
+requireMatch(dockerfile, /infra\/hetzner\/app\/document-maintenance\.sh/u, "Dockerfile is missing the document maintenance launcher");
+requireMatch(documentMaintenance, /maintain-document-temporaries\.ts "\$@"/u, "document maintenance launcher does not preserve explicit arguments");
 for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium", "restic"]) {
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
@@ -256,6 +261,10 @@ const requiredRuntimeKeys = [
   "AIBRAIN_CHROME_EXPECTED_VERSION",
   "AIBRAIN_DOCUMENT_MAX_CONVERSIONS",
   "AIBRAIN_DOCUMENT_RETRY_AFTER_MS",
+  "AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS",
+  "AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES",
+  "AIBRAIN_DOCUMENT_STORAGE_RETRY_AFTER_MS",
+  "AIBRAIN_DOCUMENT_TEMP_GRACE_MS",
 ];
 for (const key of requiredRuntimeKeys) requireMatch(runtimeEnv, new RegExp(`^${key}=`, "mu"), `runtime env example is missing ${key}`);
 forbidMatch(runtimeEnv, /SUPABASE_SECRET_KEY/u, "runtime env includes an unnecessary Supabase server key");

@@ -6,6 +6,8 @@ import {
   MAX_MULTIPART_BYTES,
   parseStreamingDocumentUpload,
 } from "@/documents/multipart-upload";
+import { documentUploadTemporaryLockKey } from "@/documents/maintenance";
+import { ResourceLockManager } from "@/storage/resource-lock";
 
 const BOUNDARY = "aibrain-streaming-boundary";
 const UPLOAD_ID = "22222222-2222-4222-8222-222222222222";
@@ -37,9 +39,11 @@ function incomingFiles(root: string) {
 
 describe("streaming multipart document intake", () => {
   let root: string;
+  let locks: ResourceLockManager;
 
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), "aibrain-multipart-"));
+    locks = new ResourceLockManager({ rootDirectory: path.join(root, ".locks") });
   });
 
   afterEach(async () => {
@@ -54,7 +58,7 @@ describe("streaming multipart document intake", () => {
         if (chunk) controller.enqueue(chunk);
         else controller.close();
       },
-    })), root);
+    })), root, locks);
 
     expect(parsed).toMatchObject({
       uploadId: UPLOAD_ID,
@@ -63,6 +67,10 @@ describe("streaming multipart document intake", () => {
       size: 14,
     });
     expect(await readFile(parsed.temporaryPath, "utf8")).toBe("streamed notes");
+    await expect(new ResourceLockManager({ rootDirectory: path.join(root, ".locks") }).acquire(
+      documentUploadTemporaryLockKey(parsed.temporaryPath),
+      { timeoutMs: 0 },
+    )).rejects.toMatchObject({ code: "STORAGE_LOCK_TIMEOUT" });
     await parsed.dispose();
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
@@ -86,7 +94,7 @@ describe("streaming multipart document intake", () => {
       },
     }));
     expect(request.headers.has("content-length")).toBe(false);
-    await expect(parseStreamingDocumentUpload(request, root)).rejects.toMatchObject({
+    await expect(parseStreamingDocumentUpload(request, root, locks)).rejects.toMatchObject({
       code: "UPLOAD_SIZE_INVALID",
     });
     await expect(incomingFiles(root)).resolves.toEqual([]);
@@ -100,7 +108,7 @@ describe("streaming multipart document intake", () => {
         if (chunk) controller.enqueue(chunk);
         else controller.close();
       },
-    })), root)).rejects.toMatchObject({ code: "UPLOAD_MULTIPART_INVALID" });
+    })), root, locks)).rejects.toMatchObject({ code: "UPLOAD_MULTIPART_INVALID" });
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
 
@@ -116,7 +124,7 @@ describe("streaming multipart document intake", () => {
         controller.enqueue(body);
         controller.close();
       },
-    })), root)).rejects.toMatchObject({ code: "UPLOAD_MULTIPART_CONTRACT_INVALID" });
+    })), root, locks)).rejects.toMatchObject({ code: "UPLOAD_MULTIPART_CONTRACT_INVALID" });
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
 
@@ -132,7 +140,7 @@ describe("streaming multipart document intake", () => {
         }
       },
     }), abort.signal);
-    await expect(parseStreamingDocumentUpload(request, root)).rejects.toMatchObject({ code: "UPLOAD_ABORTED" });
+    await expect(parseStreamingDocumentUpload(request, root, locks)).rejects.toMatchObject({ code: "UPLOAD_ABORTED" });
     await expect(incomingFiles(root)).resolves.toEqual([]);
   });
 

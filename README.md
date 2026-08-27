@@ -92,6 +92,7 @@ npm run test:browser:real
 - [Permissions provider](docs/PERMISSIONS_PROVIDER.md)
 - [Browser/Computer Use runtime](docs/BROWSER_COMPUTER_USE_RUNTIME.md)
 - [Document publisher](docs/DOCUMENT_PUBLISHER.md)
+- [Document storage and temporary recovery](docs/DOCUMENT_MAINTENANCE.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Dedicated-server operation](docs/PRODUCTION.md)
 - [Isolated Hetzner QA runbook](docs/HETZNER_MIGRATION.md)

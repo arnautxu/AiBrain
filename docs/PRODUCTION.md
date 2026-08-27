@@ -52,6 +52,22 @@ heartbeat y se recuperan tras la caída de su proceso propietario. Estos límite
 no son cuotas comerciales de empleados, proyectos, chats, turns o tokens; se
 amplían cambiando recursos/configuración, no código.
 
+El upload completo también usa slots compartidos
+(`AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS`). Antes de leer el multipart se mide el
+volumen y se reserva de forma conservadora el peor caso de todos los uploads
+simultáneos (`AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES`, 512 MiB por defecto),
+además del mayor margen entre `AIBRAIN_MINIMUM_FREE_BYTES` y
+`AIBRAIN_MINIMUM_FREE_RATIO`. Si no cabe ese burst sin degradar el host, la API
+devuelve `429 Retry-After` y no persiste el body. Es backpressure operativo de
+la instalación, no una cuota de usuario.
+
+Los restos de una caída se inspeccionan y recuperan con
+`aibrain-document-maintenance`; el modo predeterminado es dry-run y `--apply`
+solo elimina `.incoming`/`.work-*` sin lock vivo y fuera de la gracia. La
+política y los comandos exactos están en `docs/DOCUMENT_MAINTENANCE.md`. Los
+uploads, previews y registros de publicación duraderos no se purgan de forma
+implícita.
+
 ## Gates P0 que requieren evidencia QA
 
 El canal CDP ya no cruza el namespace de red: existe únicamente entre Next.js
