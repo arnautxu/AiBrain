@@ -154,6 +154,11 @@ if (process.platform === "linux") {
 }
 const envFileReal = assertControlledFile(envFile, "compose env file");
 const env = parseEnv(readFileSync(envFileReal, "utf8"));
+for (const key of env.keys()) {
+  if (/(?:^|_)(?:SECRET|TOKEN|PASSWORD|PRIVATE_KEY|ACCESS_KEY_ID)$/u.test(key)) {
+    fail("compose env must not contain secret values");
+  }
+}
 if (required(env, "AIBRAIN_INSTALLATION_ID") !== installationId) fail("installation id does not match compose env");
 const serviceUid = numericId(env, "AIBRAIN_UID");
 const serviceGid = numericId(env, "AIBRAIN_GID");

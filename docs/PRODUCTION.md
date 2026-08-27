@@ -171,8 +171,9 @@ El Compose de runtime exige `AIBRAIN_IMAGE` y `AIBRAIN_EGRESS_IMAGE` resueltas
 a `@sha256`; el build vive
 en `infra/hetzner/compose.build.yaml` y exige la revisión Git exacta, registrada
 como label OCI. `scripts/manage-release.mjs` verifica digest+revisión, conserva
-estado atómico `current`/`previous`, espera readiness y recupera automáticamente
-las dos imágenes anteriores si una promoción no llega a healthy. Un journal por
-fase, timeout de subprocess, deadline compartido, lock advisory del SO e
+estado atómico V3 `current`/`previous` con bytes+hashes exactos de Compose,
+compose env e InstallationConfig, espera readiness y recupera automáticamente
+los tres inputs y las dos imágenes anteriores si una promoción no llega a
+healthy. Un journal por fase, timeout de subprocess, deadline compartido, lock advisory del SO e
 inspección del digest/revisión realmente ejecutados cubren caída y reboot;
 runbook: `docs/RELEASES.md`.

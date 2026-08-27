@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -21,10 +21,14 @@ function sha256(value: string) {
 }
 
 async function fixture() {
-  const root = await mkdtemp(path.join(tmpdir(), "aibrain-release-test-"));
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), "aibrain-release-test-")));
   roots.push(root);
   const envFile = path.join(root, "compose.env");
-  const composeFile = path.join(root, "compose.yaml");
+  const currentComposeFile = path.join(root, "compose-a.yaml");
+  const composeFile = path.join(root, "compose-b.yaml");
+  const activeConfigFile = path.join(root, "installation-active.json");
+  const installationConfig = path.join(root, "installation-b.json");
+  const installationConfigC = path.join(root, "installation-c.json");
   const stateFile = path.join(root, "release.json");
   const dockerBin = path.join(root, "docker-fake.mjs");
   const logFile = path.join(root, "docker.log");
@@ -34,9 +38,15 @@ async function fixture() {
     "AIBRAIN_COMPOSE_PROJECT_NAME=aibrain-company-qa",
     `AIBRAIN_IMAGE=${digestA}`,
     `AIBRAIN_EGRESS_IMAGE=${egressDigestA}`,
+    `AIBRAIN_REVISION=${revisionA}`,
+    `AIBRAIN_INSTALLATION_CONFIG_HOST=${activeConfigFile}`,
     "",
   ].join("\n"));
-  await writeFile(composeFile, "services:\n  app:\n    image: ${AIBRAIN_IMAGE}\n  egress-gateway:\n    image: ${AIBRAIN_EGRESS_IMAGE}\n");
+  await writeFile(currentComposeFile, "services:\n  app:\n    image: ${AIBRAIN_IMAGE}\n    mem_limit: 1g\n  egress-gateway:\n    image: ${AIBRAIN_EGRESS_IMAGE}\n");
+  await writeFile(composeFile, "services:\n  app:\n    image: ${AIBRAIN_IMAGE}\n    mem_limit: 2g\n  egress-gateway:\n    image: ${AIBRAIN_EGRESS_IMAGE}\n");
+  await writeFile(activeConfigFile, '{"schemaVersion":1,"brand":"A"}\n');
+  await writeFile(installationConfig, '{"schemaVersion":1,"brand":"B"}\n');
+  await writeFile(installationConfigC, '{"schemaVersion":1,"brand":"C"}\n');
   await writeFile(runtimeFile, JSON.stringify({ app: digestA, egress: egressDigestA }));
   await writeFile(dockerBin, `#!/usr/bin/env node
 import { appendFileSync, readFileSync } from "node:fs";
@@ -88,17 +98,35 @@ if (args[0] === "image" && args[1] === "inspect") {
 `);
   await chmod(dockerBin, 0o755);
   await mkdir(path.dirname(stateFile), { recursive: true });
-  return { root, envFile, composeFile, stateFile, dockerBin, logFile, runtimeFile };
+  return {
+    root,
+    envFile,
+    composeFile,
+    currentComposeFile,
+    activeConfigFile,
+    installationConfig,
+    installationConfigC,
+    stateFile,
+    dockerBin,
+    logFile,
+    runtimeFile,
+  };
 }
 
 function commandArgs(files: Awaited<ReturnType<typeof fixture>>, command: "promote" | "rollback") {
   return [
     manager,
     command,
-    ...(command === "promote" ? ["--image", digestB, "--egress-image", egressDigestB, "--revision", revisionB] : []),
+    ...(command === "promote" ? [
+      "--image", digestB,
+      "--egress-image", egressDigestB,
+      "--revision", revisionB,
+      "--compose-file", files.composeFile,
+      "--current-compose-file", files.currentComposeFile,
+      "--installation-config", files.installationConfig,
+    ] : []),
     "--installation-id", "company-qa",
     "--env-file", files.envFile,
-    "--compose-file", files.composeFile,
     "--state-file", files.stateFile,
     "--docker-bin", files.dockerBin,
     "--health-timeout-ms", "5000",
@@ -160,13 +188,16 @@ describe("immutable release manager", () => {
       env: environment(files),
     });
     expect(JSON.parse(promoted.stdout)).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       installationId: "company-qa",
       current: { image: digestB, egressImage: egressDigestB, revision: revisionB },
       previous: { image: digestA, egressImage: egressDigestA, revision: revisionA },
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestB}`);
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestB}`);
+    expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_REVISION=${revisionB}`);
+    expect(await readFile(files.activeConfigFile, "utf8")).toContain('"brand":"B"');
+    expect(await readFile(`${files.stateFile}.active.compose.yaml`, "utf8")).toContain("mem_limit: 2g");
 
     const rolledBack = await execFileAsync(process.execPath, commandArgs(files, "rollback"), {
       env: environment(files),
@@ -177,9 +208,12 @@ describe("immutable release manager", () => {
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
+    expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_REVISION=${revisionA}`);
+    expect(await readFile(files.activeConfigFile, "utf8")).toContain('"brand":"A"');
+    expect(await readFile(`${files.stateFile}.active.compose.yaml`, "utf8")).toContain("mem_limit: 1g");
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--no-deps","egress-gateway","app","alert-dispatcher"');
+    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","alert-dispatcher"');
     expect(log).toContain('"{{.State.Health.Status}}"');
   }, 20_000);
 
@@ -192,6 +226,8 @@ describe("immutable release manager", () => {
     });
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
+    expect(await readFile(files.activeConfigFile, "utf8")).toContain('"brand":"A"');
+    expect(await readFile(`${files.stateFile}.active.compose.yaml`, "utf8")).toContain("mem_limit: 1g");
     await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const log = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(log.filter((args) => args.includes("up"))).toHaveLength(2);
@@ -214,12 +250,60 @@ describe("immutable release manager", () => {
     const files = await fixture();
     await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), {
       env: { ...environment(files, digestB), FAKE_MUTATE_ENV_ON_FAIL: "1" },
-    })).rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_ENV_DRIFT_DURING_RECOVERY") });
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_TRANSACTION_DRIFT") });
     const env = await readFile(files.envFile, "utf8");
     expect(env).toContain(`AIBRAIN_IMAGE=${digestB}`);
     expect(env).toContain("EXTERNAL_CHANGE=preserve");
     await expect(stat(`${files.stateFile}.transaction.json`)).resolves.toMatchObject({ mode: expect.any(Number) });
   });
+
+  it("promotes and rolls back a config-only release with the same images", async () => {
+    const files = await fixture();
+    await execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) });
+    const args = commandArgs(files, "promote");
+    args[args.indexOf("--installation-config") + 1] = files.installationConfigC;
+    await execFileAsync(process.execPath, args, { env: environment(files) });
+    expect(await readFile(files.activeConfigFile, "utf8")).toContain('"brand":"C"');
+    const log = await readFile(files.logFile, "utf8");
+    expect(log).toContain('"--force-recreate"');
+
+    await execFileAsync(process.execPath, commandArgs(files, "rollback"), { env: environment(files) });
+    expect(await readFile(files.activeConfigFile, "utf8")).toContain('"brand":"B"');
+  }, 20_000);
+
+  it("rejects unsafe or drifting release inputs before Docker mutation", async () => {
+    const secret = await fixture();
+    await writeFile(secret.envFile, `${await readFile(secret.envFile, "utf8")}AIBRAIN_SESSION_SECRET=must-not-be-versioned\n`);
+    await expect(execFileAsync(process.execPath, commandArgs(secret, "promote"), { env: environment(secret) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_ENV_SECRET") });
+    await expect(readFile(secret.logFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    const linked = await fixture();
+    await link(linked.composeFile, path.join(linked.root, "compose-hardlink.yaml"));
+    await expect(execFileAsync(process.execPath, commandArgs(linked, "promote"), { env: environment(linked) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_PATH_INVALID") });
+    await expect(readFile(linked.logFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+
+    const exposed = await fixture();
+    await chmod(exposed.composeFile, 0o666);
+    await expect(execFileAsync(process.execPath, commandArgs(exposed, "promote"), { env: environment(exposed) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_PATH_INVALID") });
+
+    const redirected = await fixture();
+    const original = `${redirected.composeFile}.original`;
+    await (await import("node:fs/promises")).rename(redirected.composeFile, original);
+    await symlink(original, redirected.composeFile);
+    await expect(execFileAsync(process.execPath, commandArgs(redirected, "promote"), { env: environment(redirected) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_PATH_INVALID") });
+
+    const drifted = await fixture();
+    await execFileAsync(process.execPath, commandArgs(drifted, "promote"), { env: environment(drifted) });
+    const before = (await readFile(drifted.logFile, "utf8")).split("\n").length;
+    await writeFile(drifted.activeConfigFile, '{"schemaVersion":1,"brand":"tampered"}\n');
+    await expect(execFileAsync(process.execPath, commandArgs(drifted, "rollback"), { env: environment(drifted) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INPUT_DRIFT") });
+    expect((await readFile(drifted.logFile, "utf8")).split("\n").length).toBe(before);
+  }, 20_000);
 
   it("rejects mutable image tags before invoking Docker", async () => {
     const files = await fixture();
@@ -315,7 +399,7 @@ describe("immutable release manager", () => {
     await writeFile(files.stateFile, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
     await expect(execFileAsync(process.execPath, commandArgs(files, "rollback"), {
       env: environment(files),
-    })).rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_STATE_DRIFT") });
+    })).rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_STATE_INVALID") });
     await expect(stat(`${files.stateFile}.transaction.json`)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -385,8 +469,9 @@ describe("immutable release manager", () => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     const transactionPath = `${files.stateFile}.transaction.json`;
     const transaction = JSON.parse(await readFile(transactionPath, "utf8"));
-    await writeFile(files.envFile, (await readFile(files.envFile, "utf8"))
-      .replace(digestB, digestA).replace(egressDigestB, egressDigestA));
+    await writeFile(files.envFile, Buffer.from(transaction.current.environment, "base64").toString("utf8"));
+    await writeFile(files.activeConfigFile, Buffer.from(transaction.current.installationConfig, "base64").toString("utf8"));
+    await writeFile(`${files.stateFile}.active.compose.yaml`, Buffer.from(transaction.current.compose, "base64").toString("utf8"));
     await writeFile(files.runtimeFile, JSON.stringify({ app: digestA, egress: egressDigestA }));
     await writeFile(files.stateFile, `${JSON.stringify(transaction.recoveryState, null, 2)}\n`, { mode: 0o600 });
     await writeFile(transactionPath, `${JSON.stringify({
