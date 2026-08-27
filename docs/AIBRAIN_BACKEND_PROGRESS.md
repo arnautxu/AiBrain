@@ -7,7 +7,7 @@
 - Rama: `codex/aibrain-backend-definitivo`
 - Commit base: `21bb8b4a2bd9b74cba6a1b771d46b0033893ea01`
 - Remoto: `origin` (`arnautxu/AiBrain`)
-- Último checkpoint backend publicado: `dbb7137` en
+- Último checkpoint backend publicado: `9d0500c` en
   `origin/codex/aibrain-backend-definitivo`.
 - Rama UI paralela reservada: `codex/aibrain-ui-parity` (no se integra ni se reescribe desde esta rama)
 - Worktree inicial: limpio; no había cambios ajenos que preservar.
@@ -45,7 +45,7 @@
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
 | 7. Streaming, steering, stop, approvals, replay | Reabierto por auditoría estricta | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`, `2d7b063`: las piezas aisladas están probadas; falta una aceptación conjunta 2 usuarios × 2 threads sobre gateways WebSocket reales con approval, stop y crash/reconnect |
-| 8. Uploads, Office/PDF, previews y publicación | Reabierto por auditoría estricta | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`: validación y publicación individual fuertes; falta aislar físicamente staging por turn, hacer global el lock de target entre usuarios y cubrir backup documental |
+| 8. Uploads, Office/PDF, previews y publicación | En corrección; fronteras P0 cerradas | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`, `be93949`, `9d0500c`: staging queda server-only, Codex recibe inputs preparados sin paths y el lock físico de target es global por instalación; faltan retención/backpressure, sandbox del conversor y backup documental |
 | 9. Browser/Computer Use aislado | Completado localmente | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`, `ae319e9`, `b23c1d5`, `4aff307`, `0f196a1`, `35920e3`, `79aaeb9`, `4021124`, `e546a23`, `ecbb10b`, `6827f51`, `cc2f7a4`: runtime/perfil por empleado, sandbox filesystem por usuario, viewer autenticado ligado a thread, targets propios con cierre de popups/workers no autorizados, takeover/recovery, navegación privada recuperable, descargas proyectadas y acotadas, historial idempotente con backpressure, tool namespace cerrado con approval durable, CDP por pipe y egress autenticado/DNS-pinned a través del sidecar físico; dos pruebas Chrome for Testing reales verdes |
 | 10. Contratos reales para UI | En corrección | `0728b17`, `9dffcc4`, `f90e4fa`, `915f875`, `27984f2`: Auth y contrato ya no tienen roles; retirados build/routes/paneles de onboarding, invitaciones, control plane, automations y Runtime técnico; falta hacer ejecutables los schemas/ejemplos HTTP restantes |
 | 11. Compose y operación | Reabierto por auditoría estricta; evidencia Docker QA pendiente | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`, `93947b6`, `c645483`, `76b5cbf`, `853089b`, `3cf7e1e`, `b566152`, `95958c8`, `721ca68`, `4021124`: base aislada presente; faltan réplica cifrada off-host, alert delivery, backup compuesto, build reproducible y recovery transaccional de releases |
@@ -53,7 +53,7 @@
 
 ### Reapertura de auditoría de cierre (2026-08-27)
 
-El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800` y las superficies rechazadas en `27984f2`. La siguiente acción concreta es cerrar las dos fronteras P0 documentales: staging físico por turn y lock global de publicación entre usuarios.
+El commit `dbb7137` documentó un handoff, no una condición de acabado. La auditoría adversarial posterior demostró trabajo local seguro restante: CLI de alta roto, lifecycle de empleados ausente, superficies funcionales rechazadas aún publicadas, locks/aceptaciones multiproceso insuficientes, staging de adjuntos visible entre turns del mismo empleado, lock documental no global entre usuarios, backup sin documental ni réplica cifrada, alertas sin delivery, contratos UI manuales y gaps de release/Compose. Lifecycle quedó corregido en `d74a800`, las superficies rechazadas en `27984f2` y ambas fronteras documentales P0 en `9d0500c`. La siguiente acción concreta es cerrar la carrera stale de locks y demostrar exclusión real entre procesos hijos.
 
 ## Decisiones menores registradas
 
@@ -79,6 +79,8 @@ El commit `dbb7137` documentó un handoff, no una condición de acabado. La audi
 - Una approval pendiente mantiene su contexto completo pero no bloquea eventos de otros threads; los ACK de transporte siguen avanzando únicamente en orden contiguo.
 - Steering y stop reciben únicamente IDs locales de UI: el servidor obtiene los IDs App Server desde la proyección vinculada al usuario, exige `expectedTurnId`, persiste la aceptación antes del ACK y cancela los waiters locales después de una interrupción confirmada.
 - Los uploads aceptan un único `File + uploadId`, no aceptan raíces ni paths del navegador, revalidan propiedad del thread y generan previews bajo estado privado. El publicador deriva candidato/preview/target desde estado server-side y exige `documents.publish=allow` para freeze/confirm; decline sigue disponible para cerrar una operación pendiente.
+- Los uploads staged no se montan en el worker ni se añaden a `runtimeWorkspaceRoots`: el servidor prepara texto UTF-8 o texto/primera página desde el PDF atestado y entrega data URLs acotadas. Codex solo conserva `staging/tmp` para temporales privados y nunca recibe un path de upload.
+- El lock de publicación por target vive en una raíz física común de la instalación. Dos empleados con stores privados que confirman sobre el mismo original quedan serializados; uno publica y el otro recibe conflicto.
 - La matriz pesada de LibreOffice/Poppler se ejecuta con `npm run test:documents:real`; la suite general serializa los ficheros de test para conservar sin ampliar los umbrales de 5 s de locks/gateway en hosts QA pequeños. La concurrencia funcional se mantiene dentro de los suites focalizados.
 - La memoria V1 solo acepta escrituras y revocaciones explícitas, conserva provenance, journal e índice privados por usuario e inyecta un snapshot acotado como datos no confiables; cada turn audita IDs y fingerprint sin copiar contenido.
 - Los reintentos HTTP de memoria conservan idempotencia aunque cambie el timestamp server-side de recepción; contenido, tipo y provenance semántica siguen protegidos contra conflicto.
@@ -241,6 +243,12 @@ las acciones externas autorizadas.
   con las 44 rutas API/UI previstas.
 - Push verificado: `a0e7045..c95f820` publicado exclusivamente en
   `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
+- Cierre P0 documental `9d0500c`: typecheck, lint e infra validator verdes;
+  suite completa 83 ficheros pasados + 1 opt-in omitido, 381 pruebas pasadas +
+  3 omitidas; E2E 3/3; matriz real LibreOffice/Poppler 2/2, incluido DOCX a
+  inputs de turn sin path; build Next 16.3.2 verde con 38 rutas dinámicas.
+- Push verificado: `a229f86..9d0500c` publicado exclusivamente en
+  `origin/codex/aibrain-backend-definitivo`, sin merge ni force-push.
 
 ## Matriz requisito → implementación → prueba
 
@@ -258,8 +266,8 @@ las acciones externas autorizadas.
 | Persistencia tras refresh/restart | Stores versionados, atomic/fsync, locks, journal e índices | E2E HTTP con proceso Next reiniciado y tests de recovery |
 | `PERMISSIONS.md` server-side | Provider Markdown read-only y fingerprint por turn | 31 tests focalizados y auditoría durable |
 | Office/PDF/texto/imagen | Staging validado, LibreOffice/Poppler/QPDF configurable | Matriz real 2/2 y suites de OOXML/bomb/MIME/macros |
-| Codex sin `publish-rw` | Sandbox bwrap con mount vacío RO para worker | Validator infra y pruebas de frontera/symlink |
-| Publicación confirmada | Freeze+hash+preview+HMAC+conflicto+versión+atomic write | 10/10 focalizadas y 21/21 documentales |
+| Codex sin staging ni `publish-rw` | Sandbox bwrap con upload server-only, solo `staging/tmp` y mount vacío RO para `publish-rw` | Validator infra, turn DOCX real sin path y pruebas de frontera/symlink |
+| Publicación confirmada | Freeze+hash+preview+HMAC+conflicto+versión+atomic write+lock global por target | Focalizadas, carrera concurrente entre dos usuarios y 28/28 de la selección documental/runtime |
 | Browser/Computer Use aislado | CDP pipe autenticado, perfil/targets/navegación/descargas/viewer por usuario/thread | Chrome real 2/2 y matriz browser focalizada 50/50 |
 | Browser egress sin rebinding | Proxy loopback con resolución/IP fijadas y sidecar físico autenticado | Unit/integration, gateway 6/6 e HTTPS real a `example.com`; Compose QA pendiente |
 | Contratos UI reales | Schemas HTTP/eventos/tools/errores en `UI_BACKEND_CONTRACT.md` | Contract tests y validación Codex 0.149.1 |
