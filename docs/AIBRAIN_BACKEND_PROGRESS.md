@@ -42,12 +42,12 @@
 | 4. Provisionamiento idempotente + 20 usuarios | Completado | `75316e1`, `545948a`, `323243b`: `user.json`, perfiles, políticas y raíces completas; comando idempotente y prueba con veinte empleados sintéticos |
 | 5. Worker registry + WebSocket + contratos | Completado localmente | `fc29316`, `75316e1`, `26fa801`, `a67ecf5`: worker caliente por usuario, gateway loopback autenticado, registry, router scoped, replay/ACK/dedupe/backoff y contratos Codex 0.149.1; falta únicamente login Codex externo real |
 | 6. Proyectos y threads completos | Completado localmente | `9efb45a`, `6439f0d`, `a67ecf5`: crear/listar/leer/continuar/renombrar/buscar/fijar/archivar/restaurar, paginación estable y runtime thread ligado a instalación+usuario |
-| 7. Streaming, steering, stop, approvals, replay | En curso | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`: streaming proyectado antes del ACK, approvals durables no bloqueantes, replay, routing aislado, retry por `clientUserMessageId`, recuperación desde historial Codex y controles explícitos `turn/steer`/`turn/interrupt` autenticados e idempotentes; falta recovery E2E tras crash real |
-| 8. Uploads, Office/PDF, previews y publicación | Completado localmente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`: multipart autorizado, staging privado, previews autenticados y matriz real DOCX/XLSX/PPTX/PDF/texto/imagen; freeze/decline/confirm con permiso server-side, hash, conflicto, versión, exactly-once y auditoría |
-| 9. Browser/Computer Use aislado | En curso | `4bed095`: roots, perfil, descargas, estado durable, fencing, heartbeat, takeover, recovery, tokens HMAC y backpressure por usuario; faltan adapter Chrome/CDP/noVNC y routes autenticadas |
-| 10. Contratos reales para UI | Pendiente | — |
-| 11. Compose y operación | Pendiente | — |
-| 12. Hardening y suite completa | Pendiente | — |
+| 7. Streaming, steering, stop, approvals, replay | Completado localmente | `cf76855`, `26fa801`, `a67ecf5`, `46569e6`, `4487ef2`, `2b8de16`, `392d837`, `d40862a`: persistencia antes de ACK, approvals no bloqueantes, routing aislado, retry/replay/reconnect, crash real del worker y recovery sin segundo `turn/start`, steering y stop idempotentes |
+| 8. Uploads, Office/PDF, previews y publicación | Completado localmente | `d51f171`, `afcec39`, `e090832`, `416d368`, `907feab`, `ca630f3`: multipart streaming a fichero privado, inspección OOXML por payload/CRC/ratio real, staging no-overwrite recuperable, previews reales y publicación confirmada exactamente una vez |
+| 9. Browser/Computer Use aislado | En curso | `4bed095`, `77935a5`, `29dd7c5`, `a69f049`, `7e6ff36`: runtime/perfil por empleado, viewer autenticado ligado a thread, targets y descargas por thread, takeover/recovery y CDP por pipe heredado sin listener TCP; faltan tool cerrado con approval/auditoría y egress DNS-pinned |
+| 10. Contratos reales para UI | En curso | `0728b17`, `9dffcc4`: contrato UI versionado para auth/workbench/streaming/approvals/documentos/publicación/browser; falta incorporar memoria explícita y el contrato final de browser tool/approval |
+| 11. Compose y operación | En curso | `73f3329`, `c67ec92`, `4bbf53a`, `caec559`, `cf6f39d`, `28674bc`: Compose aislado, mounts/bwrap fail-closed, readiness de storage, Nginx streaming/rate limits, backup sin credenciales y toolchain contra snapshot; build/restore/reboot/rollback dentro de Docker quedan como validación externa QA |
+| 12. Hardening y suite completa | En curso | `b8dff0a`, `1ced607`, `47ea3c0`: raíces sin solape, rate limit Auth file-backed/fail-closed, runtime global legado eliminado; faltan cierre browser, soak y matrices Docker/QA externas |
 
 ## Decisiones menores registradas
 
@@ -60,8 +60,8 @@
 - Los eventos del transporte se aceptan únicamente tras persistencia JSONL y se reanudan con cursor durable; no existe journal in-memory implícito en la composición WebSocket.
 - Los payloads RPC se validan en runtime con los JSON Schemas generados por Codex 0.149.1, además del tipado estático.
 - Las credenciales efímeras usadas durante el cambio inicial se cifran en disco con AES-256-GCM; la cookie de sesión contiene 256 bits aleatorios y el store conserva solo su SHA-256.
-- `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en App Server y registra fingerprint/versiones en un journal durable por usuario; la ruta de ejecución todavía debe migrar del adapter `stdio` legacy al registry por empleado.
-- El launch context del worker no contiene `publishWriteRoot`; la factory concreta deberá imponer esos mounts a nivel proceso/contenedor.
+- `PERMISSIONS.md` v1 se resuelve antes de persistir cada turn, se inyecta en el App Server privado y registra fingerprint/versiones en un journal durable por usuario.
+- El worker se ejecuta bajo `bubblewrap`: oculta todo `dataRoot`, reexpone únicamente sus raíces declaradas y sustituye `publishWriteRoot` por un mount vacío read-only. El preflight del contenedor falla si esa frontera no existe.
 - El UUID de Supabase Auth es exactamente el UUID filesystem del empleado; no existe membership, rol, proyecto o sesión de producto remota.
 - El publicador conserva el original como versión verificable, congela candidato+preview y exige una confirmación HMAC idempotente; el worker nunca recibe la raíz `publish-rw`.
 - El chat y el status reales ya no usan el pool `stdio` por tenant/workspace: ambos arrancan o reutilizan el worker privado del UUID autenticado y hablan exclusivamente por el transporte WebSocket loopback.
@@ -74,16 +74,23 @@
 - Steering y stop reciben únicamente IDs locales de UI: el servidor obtiene los IDs App Server desde la proyección vinculada al usuario, exige `expectedTurnId`, persiste la aceptación antes del ACK y cancela los waiters locales después de una interrupción confirmada.
 - Los uploads aceptan un único `File + uploadId`, no aceptan raíces ni paths del navegador, revalidan propiedad del thread y generan previews bajo estado privado. El publicador deriva candidato/preview/target desde estado server-side y exige `documents.publish=allow` para freeze/confirm; decline sigue disponible para cerrar una operación pendiente.
 - La matriz pesada de LibreOffice/Poppler se ejecuta con `npm run test:documents:real`; la suite general serializa los ficheros de test para conservar sin ampliar los umbrales de 5 s de locks/gateway en hosts QA pequeños. La concurrencia funcional se mantiene dentro de los suites focalizados.
+- La memoria V1 solo acepta escrituras y revocaciones explícitas, conserva provenance, journal e índice privados por usuario e inyecta un snapshot acotado como datos no confiables; cada turn audita IDs y fingerprint sin copiar contenido.
+- Los reintentos HTTP de memoria conservan idempotencia aunque cambie el timestamp server-side de recepción; contenido, tipo y provenance semántica siguen protegidos contra conflicto.
+- Auth limita login, solicitud/consumo de recovery y cambio inicial con buckets HMAC file-backed por cliente+sujeto. Los identificadores crudos no se persisten, la corrupción falla cerrada y la solicitud de reset mantiene siempre un `202` indistinguible.
+- Chrome no abre CDP en loopback: usa `--remote-debugging-pipe` sobre fds heredados 3/4, con framing NUL, UTF-8 estricto, allowlist y routing por `sessionId`. Cada thread tiene target y descarga propios dentro del perfil exclusivo del empleado.
+- El upload HTTP nunca materializa `FormData`/`File` completo: aplica límites al stream, valida OOXML local+central, expansión/CRC reales y publica en staging con hardlink exclusivo, `fsync` y recovery de orphan inequívoco.
 
 ## Riesgos y acciones externas pendientes
 
 - Falta Docker local: se prepararán y validarán schemas/scripts estáticamente; el build real de imágenes se ejecutará donde Docker esté disponible.
 - No se tocarán DNS, Supabase hosted, NAS real, BGreenly, suscripciones Codex ni producción sin aprobación separada.
 - La primera autenticación Codex real y la comprobación de Data Controls requieren login humano y suscripción dedicada.
+- El egress browser todavía necesita una conexión DNS-pinned para eliminar el TOCTOU entre autorización y resolución de Chrome; el bloqueo actual de IPs privadas/metadata es necesario pero no suficiente ante rebinding.
+- Nginx, bubblewrap, Chromium sandbox, Docker build/Compose, SBOM/scan y restore/reboot/rollback del contenedor no pueden validarse realmente en este Mac sin Docker/Nginx y deben repetirse en el QA aislado.
 
 ## Siguiente acción concreta
 
-Implementar el adapter Chrome headless con CDP loopback privado, viewer autenticado, takeover/heartbeat/input y routes por usuario, seguido de una prueba real con dos perfiles sin cookies, tabs ni descargas compartidas.
+Cerrar el tool browser de App Server con approvals/auditoría y el proxy de egress DNS-pinned; después actualizar el contrato UI y ejecutar contract/E2E/build/soak completos.
 
 ## Últimas validaciones
 
@@ -110,7 +117,7 @@ Implementar el adapter Chrome headless con CDP loopback privado, viewer autentic
 - Publicación: 10/10 pruebas focalizadas y 21/21 documentales para freeze, preview, decline, exactly-once, conflicto, versión, recovery, symlinks y frontera de mounts.
 - Lifecycle workbench: 14 pruebas focalizadas para lectura, búsqueda, paginación, rename, pin, archive/restore y aislamiento cross-user.
 - Approvals: 8 pruebas focalizadas para persistencia, expiración, conflicto, cancelación, restart e identidad completa por item.
-- Browser foundation: 6 pruebas focalizadas para aislamiento de perfiles/cookies/downloads, takeover, heartbeat, recovery y tokens autenticados.
+- Browser: 27 pruebas focalizadas (1 real opt-in) para tokens/thread ownership, targets y descargas por thread, aislamiento de perfiles/cookies entre dos usuarios, takeover/recovery, framing/EOF del pipe y backpressure; la prueba real con Chrome for Testing 152.0.7977.64 pasó sin listener TCP ni `DevToolsActivePort`.
 - Gateway/router: 20 pruebas de transporte, gateway y routing, incluido replay durable, ACK posterior al handler, requests inciertos, dedupe y concurrencia por thread.
 - Camino real worker: tests de token user-bound, inicialización única y turn con `clientUserMessageId`; el pool legacy queda sin referencias desde `/api/chat` y `/api/runtime/status`.
 - Persistencia/recovery: tests de proyección exact-once, múltiples mutaciones sobre una misma secuencia, overlay tras restart y recuperación de un turn completado sin repetir `turn/start`.
@@ -118,4 +125,7 @@ Implementar el adapter Chrome headless con CDP loopback privado, viewer autentic
 - Control de turn: ruta real con sesión/Origin, contrato estricto, rechazo de runtime IDs elegidos por cliente, aislamiento cross-user, steering con precondición de turn, stop durable y replay idempotente.
 - Documentos HTTP: tests de sesión, ownership cross-user, multipart, MIME falso, preview privado, permiso publish, decline sin escritura, confirmación exactly-once y versión recuperable.
 - Matriz documental real: `npm run test:documents:real`, 2/2 pruebas; conversiones y previews reales DOCX, XLSX, PPTX y PDF con LibreOffice/Poppler, más texto e imagen. QPDF sigue pendiente de instalación local, pero es obligatorio por configuración en producción.
-- Suite global más reciente: dos ejecuciones verdes serializadas, 202/202 tests ejecutados en 44 ficheros (1 test de matriz pesada omitido y ejecutado por separado); lint, typecheck y build Next.js con las cuatro nuevas routes documentales verdes tras `907feab`.
+- Upload streaming/OOXML/staging: 26/26 pruebas focalizadas, incluido multipart abortado/sin `Content-Length`, ZIP local inconsistente, bomb con metadata falsa, CRC y retry tras crash sin overwrite.
+- Memoria explícita: 12/12 pruebas HTTP+service para auth, aislamiento, create/replay/list/revoke, provenance y conflicto idempotente.
+- Auth rate limiting: 14/14 pruebas focalizadas para límites exactos, concurrencia multiproceso, HMAC sin identificadores crudos, corrupción/symlink fail-closed y reset indistinguible.
+- Suite global más reciente tras `7e6ff36`: typecheck y lint verdes; unit 244 pasados + 1 opt-in omitido en 47 ficheros; integración 19 pasados + 1 opt-in omitido en 10 ficheros; `npm run infra:validate` verde con Docker Compose no ejecutado por ausencia de Docker.
