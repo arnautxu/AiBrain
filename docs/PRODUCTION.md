@@ -12,6 +12,10 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 - El arranque falla si el host no puede crear ese namespace o si `source-ro` es writable. No hay fallback de worker sin aislamiento.
 - No se monta `docker.sock`, no se usan redes/volúmenes externos y todos sus nombres son obligatoriamente únicos por instalación.
 - Chromium usa un canal CDP heredado por proceso (`--remote-debugging-pipe`),
+  y un launcher `bubblewrap` separado por empleado. El namespace oculta todo
+  `dataRoot`, reexpone únicamente su `browserRoot`, aísla PID/IPC/UTS y enmascara
+  tanto `source-ro` como `publish-rw`. El seccomp no permite `ptrace` ni
+  `process_vm_*` sin `CAP_SYS_PTRACE`, capability que Compose elimina.
   sin socket TCP, discovery URL ni `DevToolsActivePort`; perfiles, targets y
   descargas se aíslan por empleado y thread. No se publican puertos CDP o
   viewers internos.

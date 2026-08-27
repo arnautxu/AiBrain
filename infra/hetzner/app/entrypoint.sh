@@ -30,6 +30,7 @@ require_secret() {
 [ "${AIBRAIN_AUTH_MODE:-}" = supabase ] || fail "AIBRAIN_AUTH_MODE must be supabase"
 [ "${CHAT_RUNTIME:-}" = codex ] || fail "CHAT_RUNTIME must be codex"
 [ "${CODEX_BIN:-}" = /usr/local/bin/aibrain-codex-worker ] || fail "CODEX_BIN must use the worker filesystem sandbox"
+[ "${AIBRAIN_CHROME_BIN:-}" = /usr/local/bin/aibrain-chrome ] || fail "AIBRAIN_CHROME_BIN must use the employee browser filesystem sandbox"
 [ "${AIBRAIN_SOFFICE_BIN:-}" = /usr/local/bin/aibrain-soffice ] || fail "LibreOffice must use the safe headless wrapper"
 
 require_secret AIBRAIN_SESSION_SECRET
@@ -95,6 +96,7 @@ done
 for executable in \
   /usr/local/bin/codex-real \
   /usr/local/bin/aibrain-codex-worker \
+  /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
   /usr/bin/bwrap \
@@ -133,6 +135,31 @@ trap 'rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"' EXIT INT TERM
     "$boundary_marker" /srv/aibrain/publish-rw/worker-write-test \
   >/dev/null 2>&1 || fail "bubblewrap worker isolation is unavailable on this host"
 rm -f "$boundary_marker" "$hidden_marker" "$allowed_marker"
+trap - EXIT INT TERM
+
+# Exercise the exact browser launcher too. A synthetic employee marker must be
+# visible, while a sibling employee and the official publisher marker remain
+# hidden. Only these newly-created synthetic roots are removed afterwards.
+browser_test_user=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
+browser_sibling_user=$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')
+browser_test_root=/var/lib/aibrain/data/users/$browser_test_user
+browser_sibling_root=/var/lib/aibrain/data/users/$browser_sibling_user
+mkdir -p "$browser_test_root/browser/profile" "$browser_test_root/browser/downloads" "$browser_sibling_root/browser"
+browser_own_marker=$browser_test_root/browser/.aibrain-preflight
+browser_sibling_marker=$browser_sibling_root/browser/.aibrain-preflight
+browser_publish_marker=$(mktemp /srv/aibrain/publish-rw/.aibrain-browser-boundary.XXXXXX)
+: >"$browser_own_marker"
+: >"$browser_sibling_marker"
+trap 'rm -rf "$browser_test_root" "$browser_sibling_root"; rm -f "$browser_publish_marker"' EXIT INT TERM
+AIBRAIN_BROWSER_PREFLIGHT=entrypoint-boundary-v1 \
+AIBRAIN_BROWSER_PREFLIGHT_SIBLING=$browser_sibling_marker \
+AIBRAIN_BROWSER_PREFLIGHT_PUBLISH=$browser_publish_marker \
+  /usr/local/bin/aibrain-chrome \
+  --user-data-dir="$browser_test_root/browser/profile" \
+  --aibrain-preflight \
+  >/dev/null 2>&1 || fail "bubblewrap browser isolation is unavailable on this host"
+rm -rf "$browser_test_root" "$browser_sibling_root"
+rm -f "$browser_publish_marker"
 trap - EXIT INT TERM
 
 exec "$@"

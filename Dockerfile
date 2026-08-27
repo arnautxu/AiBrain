@@ -27,7 +27,7 @@ ENV NODE_ENV=production \
     CODEX_APPROVAL_POLICY=on-request \
     CODEX_SANDBOX=workspace-write \
     AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json \
-    AIBRAIN_CHROME_BIN=/usr/bin/chromium \
+    AIBRAIN_CHROME_BIN=/usr/local/bin/aibrain-chrome \
     AIBRAIN_SOFFICE_BIN=/usr/local/bin/aibrain-soffice \
     AIBRAIN_PDFINFO_BIN=/usr/bin/pdfinfo \
     AIBRAIN_PDFTOPPM_BIN=/usr/bin/pdftoppm \
@@ -102,12 +102,14 @@ COPY --from=builder --chown=root:root \
   ./src/storage/
 COPY --chown=root:root infra/hetzner/app/entrypoint.sh /usr/local/bin/aibrain-entrypoint
 COPY --chown=root:root infra/hetzner/app/worker-sandbox.sh /usr/local/bin/aibrain-codex-worker
+COPY --chown=root:root infra/hetzner/app/browser-sandbox.sh /usr/local/bin/aibrain-chrome
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-soffice
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
 RUN chmod 0755 \
   /usr/local/bin/aibrain-entrypoint \
   /usr/local/bin/aibrain-codex-worker \
+  /usr/local/bin/aibrain-chrome \
   /usr/local/bin/aibrain-soffice \
   /usr/local/bin/aibrain-backup \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \

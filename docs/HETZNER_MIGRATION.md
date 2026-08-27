@@ -138,7 +138,11 @@ docker compose \
   ps
 ```
 
-El entrypoint prueba, antes de Next.js, UID no-root, secretos, config, toolchain, versión Chromium, mounts y el namespace de workers. Crea un marker real en `publish-rw` y exige que sea invisible e inmutable dentro del mount de worker. Cualquier fallo bloquea el servicio.
+El entrypoint prueba, antes de Next.js, UID no-root, secretos, config, toolchain,
+versiones Codex/Chromium, mounts y los namespaces de workers y browser. Para el
+browser crea dos empleados sintéticos efímeros: el proceso debe ver su propio
+marker, no el del hermano ni el de `publish-rw`; después elimina únicamente
+estos roots sintéticos. Cualquier fallo bloquea el servicio.
 
 Comprueba las fronteras del servidor sin mostrar secretos:
 

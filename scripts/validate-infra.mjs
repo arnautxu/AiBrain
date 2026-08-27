@@ -22,6 +22,7 @@ function read(file) {
 const dockerfile = read("Dockerfile");
 const compose = read("infra/hetzner/compose.yaml");
 const worker = read("infra/hetzner/app/worker-sandbox.sh");
+const browserSandbox = read("infra/hetzner/app/browser-sandbox.sh");
 const backup = read("infra/hetzner/app/backup.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
@@ -30,12 +31,13 @@ const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
 const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");
 const runtimeEnv = read("infra/hetzner/aibrain.env.example");
 const composeEnv = read("infra/hetzner/compose.env.example");
+const seccompProfile = JSON.parse(read("infra/hetzner/browser/seccomp_profile.json"));
 const hostPreflight = read("scripts/validate-host-preflight.mjs");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
-const deployArtifacts = [dockerfile, compose, worker, backup, entrypoint, soffice, runtimeEnv, composeEnv].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, entrypoint, soffice, runtimeEnv, composeEnv].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -56,6 +58,7 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
+requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
 
 for (const marker of [
   "read_only: true",
@@ -89,7 +92,13 @@ for (const writable of ["runtime_root", "workspace", "staging_root", "artifacts_
   requireMatch(worker, new RegExp(`--bind "\\$${writable}" "\\$${writable}"`, "u"), `worker sandbox is missing its declared ${writable} write root`);
 }
 forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-rw as a real writable bind");
+requireMatch(browserSandbox, /--tmpfs "\$data_root"[\s\S]*--bind "\$browser_root" "\$browser_root"/u, "browser sandbox does not hide product data before exposing one employee browser root");
+requireMatch(browserSandbox, /--tmpfs "\$source_root"[\s\S]*--remount-ro "\$source_root"[\s\S]*--tmpfs "\$publish_root"[\s\S]*--remount-ro "\$publish_root"/u, "browser sandbox does not mask source and publish roots");
+requireMatch(browserSandbox, /--unshare-pid[\s\S]*--proc \/proc/u, "browser sandbox does not isolate the process namespace");
+forbidMatch(browserSandbox, /--unshare-net/u, "browser sandbox cannot reach its mandatory pinned loopback egress proxy");
 requireMatch(entrypoint, /bubblewrap worker isolation is unavailable/u, "entrypoint does not fail closed when worker isolation is unavailable");
+requireMatch(entrypoint, /AIBRAIN_CHROME_BIN must use the employee browser filesystem sandbox/u, "entrypoint does not require the browser sandbox launcher");
+requireMatch(entrypoint, /bubblewrap browser isolation is unavailable/u, "entrypoint does not fail closed when browser isolation is unavailable");
 requireMatch(entrypoint, /--tmpfs \/var\/lib\/aibrain\/data[\s\S]*--ro-bind \/var\/lib\/aibrain\/data\/company-context \/var\/lib\/aibrain\/data\/company-context/u, "entrypoint does not exercise the worker data visibility boundary");
 requireMatch(entrypoint, /source-ro is missing or writable/u, "entrypoint does not verify the source-ro mount");
 requireMatch(entrypoint, /codex-real --version[\s\S]*actual_codex_version[\s\S]*generated App Server contracts/u, "entrypoint does not enforce the contract-pinned Codex version");
@@ -123,6 +132,12 @@ requireMatch(chromeRuntime, /await this\.egressProxy\.health\(\)/u, "Chrome heal
 requireMatch(browserEgressProxy, /server\.listen\(\{ host: "127\.0\.0\.1", port: 0, exclusive: true \}\)/u, "Browser egress proxy is not an exclusive ephemeral loopback listener");
 requireMatch(browserEgressProxy, /this\.networkPolicy\.assertAllowed\(/u, "Browser egress proxy bypasses BrowserNetworkPolicy");
 requireMatch(productionRunbook, /canal CDP heredado[\s\S]*sin socket TCP/u, "production runbook does not document the private CDP process boundary");
+for (const syscall of ["ptrace", "process_vm_readv", "process_vm_writev"]) {
+  const unsafeRule = seccompProfile.syscalls?.find((rule) =>
+    rule.action === "SCMP_ACT_ALLOW" && rule.names?.includes(syscall) &&
+    !rule.includes?.caps?.includes("CAP_SYS_PTRACE"));
+  if (unsafeRule) failures.push(`seccomp permits ${syscall} without CAP_SYS_PTRACE`);
+}
 requireMatch(soffice, /MacroSecurityLevel[\s\S]*<value>3<\/value>/u, "LibreOffice wrapper does not enforce Very High macro security");
 for (const flag of ["--headless", "--safe-mode", "--norestore"]) {
   requireMatch(soffice, new RegExp(flag, "u"), `LibreOffice wrapper does not require ${flag}`);
@@ -162,6 +177,7 @@ for (const [key, value] of Object.entries(expectedPaths)) {
 for (const script of [
   "infra/hetzner/app/entrypoint.sh",
   "infra/hetzner/app/worker-sandbox.sh",
+  "infra/hetzner/app/browser-sandbox.sh",
   "infra/hetzner/app/soffice-safe.sh",
   "infra/hetzner/app/backup.sh",
 ]) {

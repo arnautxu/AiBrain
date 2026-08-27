@@ -13,7 +13,7 @@ services:
       - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
     environment:
       AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
-      AIBRAIN_CHROME_BIN: /usr/bin/chromium
+      AIBRAIN_CHROME_BIN: /usr/local/bin/aibrain-chrome
       AIBRAIN_SOFFICE_BIN: /usr/local/bin/aibrain-soffice
       AIBRAIN_PDFINFO_BIN: /usr/bin/pdfinfo
       AIBRAIN_PDFTOPPM_BIN: /usr/bin/pdftoppm
