@@ -1,4 +1,4 @@
-import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -230,6 +230,68 @@ describe("WorkerProvisioner", () => {
       code: "WORKER_SYMLINK_REJECTED",
     });
     expect(await readFile(path.join(outside, "worker.json"), "utf8").catch(() => null)).toBeNull();
+  });
+
+  it("securely distributes one QA Codex subscription without sharing worker roots", async () => {
+    const { config } = await fixture();
+    const sharedRoot = path.join(config.paths.dataRoot, "shared-codex-auth");
+    const sourcePath = path.join(sharedRoot, "auth.json");
+    await mkdir(sharedRoot, { recursive: true, mode: 0o700 });
+    await writeFile(sourcePath, JSON.stringify({ auth_mode: "chatgpt", tokens: { test: "secret-a" } }), {
+      mode: 0o600,
+    });
+    const provisioner = new WorkerProvisioner({
+      config,
+      now: () => Date.parse("2026-08-27T16:30:00.000Z"),
+      sharedCodexAuth: { scope: "shared-qa", sourcePath },
+    });
+
+    const [first, second] = await Promise.all([
+      provisioner.provision(syntheticUser(1)),
+      provisioner.provision(syntheticUser(2)),
+    ]);
+    expect(first.roots.codexHome).not.toBe(second.roots.codexHome);
+    for (const manifest of [first, second]) {
+      const authPath = path.join(manifest.roots.codexHome, "auth.json");
+      expect(await readFile(authPath, "utf8")).toContain("secret-a");
+      expect(await mode(authPath)).toBe(0o600);
+      const receipt = await readFile(path.join(manifest.roots.auditRoot, "codex-auth-scope.json"), "utf8");
+      expect(receipt).toContain('"scope": "shared-qa"');
+      expect(receipt).not.toContain("secret-a");
+    }
+
+    await writeFile(sourcePath, JSON.stringify({ auth_mode: "chatgpt", tokens: { test: "secret-b" } }), {
+      mode: 0o600,
+    });
+    await provisioner.provision(first.userId);
+    expect(await readFile(path.join(first.roots.codexHome, "auth.json"), "utf8")).toContain("secret-b");
+  });
+
+  it("rejects unsafe shared Codex credential sources", async () => {
+    const { root, config } = await fixture();
+    const outside = path.join(root, "outside-auth.json");
+    const linkedRoot = path.join(config.paths.dataRoot, "linked");
+    const linked = path.join(linkedRoot, "auth.json");
+    await mkdir(config.paths.dataRoot, { recursive: true, mode: 0o700 });
+    await mkdir(linkedRoot, { mode: 0o700 });
+    await writeFile(outside, "{}", { mode: 0o600 });
+    await symlink(outside, linked);
+
+    await expect(new WorkerProvisioner({
+      config,
+      sharedCodexAuth: { scope: "shared-qa", sourcePath: linked },
+    }).provision(syntheticUser(3))).rejects.toMatchObject({
+      code: "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+    });
+
+    const insecure = path.join(config.paths.dataRoot, "auth.json");
+    await writeFile(insecure, "{}", { mode: 0o644 });
+    await expect(new WorkerProvisioner({
+      config,
+      sharedCodexAuth: { scope: "shared-qa", sourcePath: insecure },
+    }).provision(syntheticUser(4))).rejects.toMatchObject({
+      code: "WORKER_SHARED_AUTH_SOURCE_UNSAFE",
+    });
   });
 
   it("resolves only normalized paths without existing symlink components", async () => {

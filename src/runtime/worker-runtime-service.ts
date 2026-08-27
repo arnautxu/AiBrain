@@ -84,7 +84,10 @@ export class WorkerAppServerClient {
         title: "AiBrain",
         version: "0.4.0",
       },
-      capabilities: null,
+      capabilities: {
+        experimentalApi: true,
+        requestAttestation: false,
+      },
     }, "initialize"), 30_000);
     await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
     this.account = parseAccount(await this.router.request(randomRequest(

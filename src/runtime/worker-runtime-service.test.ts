@@ -120,6 +120,17 @@ describe("worker App Server client", () => {
 
     expect(transport.sent.filter((item) =>
       item.kind === "rpc-request" && item.rpc.method === "initialize")).toHaveLength(1);
+    expect(transport.sent.find((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "initialize")).toMatchObject({
+      rpc: {
+        params: {
+          capabilities: {
+            experimentalApi: true,
+            requestAttestation: false,
+          },
+        },
+      },
+    });
     expect(transport.sent.filter((item) =>
       item.kind === "rpc-notification" && item.rpc.method === "initialized")).toHaveLength(1);
     expect(connection).toMatchObject({

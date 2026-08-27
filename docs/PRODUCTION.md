@@ -162,6 +162,22 @@ Antes de DNS/cutover deben estar validados en un servidor dedicado de la empresa
     inmutable verificado de la toolchain;
 12. autorización separada para DNS y producción.
 
+### Suscripción Codex compartida solo para QA
+
+Durante la validación interna previa a la futura integración por API se puede
+activar explícitamente `AIBRAIN_CODEX_AUTH_SCOPE=shared-qa` junto con
+`AIBRAIN_SHARED_CODEX_AUTH_SOURCE=<auth.json privado dentro de dataRoot>`. El
+provisioner valida que la fuente sea un fichero regular, owner-controlled,
+modo privado, sin symlink/hardlink y dentro de `dataRoot`; copia el credential
+atómicamente a cada `CODEX_HOME` y deja únicamente un fingerprint en la
+auditoría del usuario. Workspace, staging, browser, contexto, journals y
+procesos siguen siendo privados por empleado. Ningún token se registra ni se
+incluye en backup.
+
+Este modo no usa API y existe únicamente para el QA solicitado. Antes de un
+cutover productivo debe retirarse y volver al gate 3: identidad por empleado o
+la integración API empresarial que la sustituya.
+
 La imagen base se fija por digest, Codex/Node packages por versión y APT contra
 el snapshot inmutable `20260820T000000Z` de Debian. Cambiar ese snapshot es una
 actualización de release revisable: requiere build limpio, SBOM, scan y matriz

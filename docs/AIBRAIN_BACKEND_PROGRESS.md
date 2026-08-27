@@ -643,10 +643,11 @@ npm run infra:validate
 2. Google OAuth no forma parte aún del login desplegado. Si se habilita, debe ser
    solo para empleados previamente provisionados; nunca un signup público que
    cree acceso al producto automáticamente.
-3. El worker de Arnau tiene su suscripción Codex dedicada y un turn real verde.
-   El usuario de David conserva CODEX_HOME/workspace/browser propios y necesita
-   autenticar su propia suscripción antes de ejecutar turns reales; no se
-   compartirán credenciales Codex entre empleados.
+3. El QA interno usa temporalmente una suscripción Codex compartida por decisión
+   explícita de producto. Cada empleado conserva CODEX_HOME, workspace, staging,
+   browser, contexto, journals y proceso propios; el provisioner distribuye solo
+   `auth.json` desde una fuente privada y auditada. Antes de producción se
+   sustituirá por API o identidad empresarial por usuario.
 4. NAS/documental real, DNS adicionales, merge a `main` y cualquier cutover de
    otra empresa siguen fuera de este despliegue aislado.
 
@@ -657,4 +658,27 @@ npm run infra:validate
    merge commits normales, usando `docs/UI_BACKEND_CONTRACT.md` como contrato.
 3. Se ejecutan typecheck, lint, unit/integración/contratos/E2E y build; solo un
    checkpoint verde genera dos digests OCI nuevos y recrea los tres servicios
-   AiBrain. `main` no se toca hasta aprobación humana separada.
+   AiBrain. `main` ya contiene la integración aprobada y los cambios futuros se
+   incorporan mediante merges normales, nunca force-push.
+
+## QA de suscripción compartida y runtime real — 2026-08-27
+
+- Rama y `main` antes de este checkpoint: `72e58f053c8dd0a8f609ec008f7b55b620546623`.
+- Incidencia reproducida con David: login y workbench 200, pero
+  `/api/runtime/status` devolvía `codex=unavailable` porque solo el worker de
+  Arnau tenía `auth.json`.
+- Recuperación operativa: credencial copiada de forma privada y atómica al
+  `CODEX_HOME` aislado de David, app reiniciada y runtime verificado como
+  `connected`, `ready=true`, `authMode=chatgpt`, `planType=pro`.
+- Implementación durable: modo explícito `shared-qa`, validación fail-closed de
+  la fuente, copia 0600 atómica por worker y receipt auditado por fingerprint
+  sin tokens. Dos workers de prueba mantienen raíces distintas y reciben la
+  misma identidad de suscripción; fuentes fuera de `dataRoot`, symlinks,
+  hardlinks, permisos inseguros o JSON inválido se rechazan.
+- El primer turn real detectó un error de contrato adicional:
+  `runtimeWorkspaceRoots requires experimentalApi capability`. El cliente ahora
+  negocia `experimentalApi=true` y `requestAttestation=false` contra los schemas
+  fijados de Codex `0.149.1`.
+- Pruebas locales del cambio: workers 11/11, runtime/turn 17/17, typecheck y
+  lint verdes. Siguiente acción: build inmutable, despliegue y repetición del
+  turn real desde David hasta respuesta terminal correcta.
