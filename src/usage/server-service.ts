@@ -305,11 +305,4 @@ export async function companyUsageForUser(requestingUserId: string): Promise<Com
   };
 }
 
-export function isUsageCompanyAdmin(userId: string) {
-  const configured = process.env.AIBRAIN_USAGE_ADMIN_USER_IDS?.split(",")
-    .map((value) => value.trim())
-    .filter(Boolean) ?? [];
-  return configured.includes(userId);
-}
-
 export type { TokenUsageBreakdown };

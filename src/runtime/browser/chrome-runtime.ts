@@ -3,7 +3,15 @@ import { access, chmod, link, lstat, mkdir, readdir, realpath, unlink } from "no
 import { spawn, type SpawnOptions } from "node:child_process";
 import type { Readable, Writable } from "node:stream";
 import path from "node:path";
+import {
+  browserEvidenceHash,
+  sameBrowserActionResource,
+  type BrowserActionReadback,
+  type BrowserActionResourceSnapshot,
+  type BrowserMutationAction,
+} from "@/runtime/browser/action-evidence";
 import type {
+  ApprovalBoundManagedBrowserRuntime,
   BrowserDownloadSnapshot,
   BrowserFrame,
   BrowserInputCommand,
@@ -11,7 +19,6 @@ import type {
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
   BrowserRuntimeHealth,
-  InteractiveManagedBrowserRuntime,
 } from "@/runtime/browser/types";
 import {
   CdpClientError,
@@ -111,8 +118,20 @@ type ThreadPage = {
   navigationUnsubscribe: (() => void) | null;
   downloadUnsubscribes: Array<() => void>;
   interceptedRequests: number;
+  documentGeneration: number;
+  documentVersion: string;
   closed: boolean;
 };
+
+type BrowserMutationCommand = Readonly<{
+  action: BrowserMutationAction;
+  url?: string;
+  selector?: string;
+  deltaX?: number;
+  deltaY?: number;
+  text?: string;
+  clear?: boolean;
+}>;
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
@@ -375,7 +394,7 @@ async function wait(milliseconds: number) {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
+export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   readonly context: BrowserRuntimeContext;
   readonly expectedVersion: string | undefined;
   readonly startupTimeoutMs: number;
@@ -807,6 +826,273 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     });
   }
 
+  async prepareAgentMutation(
+    threadId: string,
+    command: BrowserMutationCommand,
+  ): Promise<BrowserActionResourceSnapshot> {
+    this.assertAgentControl();
+    return this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertAgentControl();
+      return this.actionResource(page, command);
+    });
+  }
+
+  async executeAgentMutation(
+    threadId: string,
+    command: BrowserMutationCommand,
+    expected: BrowserActionResourceSnapshot,
+    evidenceFingerprint: string,
+  ): Promise<BrowserActionReadback> {
+    this.assertAgentControl();
+    if (!/^[0-9a-f]{64}$/u.test(evidenceFingerprint)) {
+      throw new ChromeRuntimeError("CHROME_ACTION_EVIDENCE_INVALID", "Browser action evidence is invalid.");
+    }
+    return this.withExclusiveBrowserOperation(async () => {
+      const page = await this.requireThreadPage(threadId);
+      this.assertAgentControl();
+      const current = await this.actionResource(page, command);
+      if (!sameBrowserActionResource(current, expected)) {
+        throw new ChromeRuntimeError(
+          "CHROME_ACTION_EVIDENCE_MISMATCH",
+          "Browser page or target changed after approval; a new approval is required.",
+        );
+      }
+      await this.dispatchApprovedAgentMutation(page, command);
+      this.assertAgentControl();
+      if (command.action === "type" && command.clear) {
+        await this.verifyTypedValue(page, command.selector, command.text);
+        return Object.freeze({
+          schemaVersion: 1,
+          outcome: "applied" as const,
+          verification: "type-value-matched" as const,
+          actionKind: command.action,
+          evidenceFingerprint,
+          resource: expected,
+          observedAt: new Date(this.now()).toISOString(),
+        });
+      }
+      return Object.freeze({
+        schemaVersion: 1,
+        outcome: "dispatched" as const,
+        verification: "cdp-dispatch-acknowledged" as const,
+        actionKind: command.action,
+        evidenceFingerprint,
+        resource: expected,
+        observedAt: new Date(this.now()).toISOString(),
+      });
+    });
+  }
+
+  private async verifyTypedValue(page: ThreadPage, selector: string | undefined, text: string | undefined) {
+    const safeSelector = validateSelector(selector ?? "");
+    const expected = text ?? "";
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `(() => {
+        const element = document.querySelector(${JSON.stringify(safeSelector)});
+        if (!element) return { verifiable: false, matched: false };
+        const expected = ${JSON.stringify(expected)};
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          return { verifiable: true, matched: element.value === expected };
+        }
+        if (element instanceof HTMLElement && element.isContentEditable) {
+          return { verifiable: true, matched: element.textContent === expected };
+        }
+        return { verifiable: false, matched: false };
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    if (evaluated.exceptionDetails || !isRecord(evaluated.result?.value) ||
+      typeof evaluated.result.value.verifiable !== "boolean" ||
+      typeof evaluated.result.value.matched !== "boolean") {
+      throw new ChromeRuntimeError(
+        "CHROME_ACTION_READBACK_UNAVAILABLE",
+        "Browser action readback is unavailable after typing.",
+      );
+    }
+    if (!evaluated.result.value.verifiable || !evaluated.result.value.matched) {
+      throw new ChromeRuntimeError(
+        "CHROME_ACTION_READBACK_MISMATCH",
+        "Browser typed value could not be verified after dispatch.",
+      );
+    }
+  }
+
+  private async actionResource(
+    page: ThreadPage,
+    command: BrowserMutationCommand,
+  ): Promise<BrowserActionResourceSnapshot> {
+    validateThreadId(page.threadId);
+    if (command.action === "open") {
+      const destination = validateBrowserNavigationUrl(command.url ?? "");
+      await this.networkPolicy.assertAllowed(destination);
+      const parsed = destination === "about:blank" ? null : new URL(destination);
+      const origin = parsed?.origin ?? "about:blank";
+      const sanitizedUrl = parsed ? `${parsed.origin}${parsed.pathname}`.slice(0, 1_200) : "about:blank";
+      return Object.freeze({
+        kind: "browser-page",
+        origin,
+        sanitizedUrl,
+        scopeId: page.threadId,
+        generation: page.documentGeneration,
+        version: page.documentVersion,
+        locatorHash: browserEvidenceHash({ action: command.action, destination }),
+        locatorSummary: `open ${sanitizedUrl}`,
+      });
+    }
+    const selector = command.action === "click" || command.action === "type"
+      ? validateSelector(command.selector ?? "") : null;
+    let backendNodeId: number | null = null;
+    if (selector) {
+      const nodeId = await this.querySelector(page, selector);
+      const described = await this.requireBrowser().send<{
+        node?: { backendNodeId?: number };
+      }>("DOM.describeNode", { nodeId }, { sessionId: page.sessionId });
+      if (!Number.isSafeInteger(described.node?.backendNodeId) || (described.node?.backendNodeId ?? 0) < 1) {
+        throw new ChromeRuntimeError("CHROME_ACTION_EVIDENCE_INVALID", "Chrome returned invalid target evidence.");
+      }
+      backendNodeId = described.node?.backendNodeId ?? null;
+    }
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `(() => {
+        const selector = ${JSON.stringify(selector)};
+        const element = selector ? document.querySelector(selector) : null;
+        if (selector && !element) return { missing: true, url: location.href, title: document.title };
+        const name = element
+          ? (element.getAttribute('aria-label') || element.getAttribute('title') ||
+            element.getAttribute('placeholder') || element.innerText || element.getAttribute('name') || '').trim()
+          : '';
+        return {
+          missing: false,
+          url: location.href,
+          title: document.title,
+          tag: element?.tagName?.toLowerCase() || '',
+          role: element?.getAttribute('role') || '',
+          name: name.slice(0, 240),
+          href: element instanceof HTMLAnchorElement ? element.href : '',
+          inputType: element instanceof HTMLInputElement ? element.type : '',
+        };
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    if (evaluated.exceptionDetails || !isRecord(evaluated.result?.value)) {
+      throw new ChromeRuntimeError("CHROME_ACTION_EVIDENCE_UNAVAILABLE", "Browser action evidence is unavailable.");
+    }
+    const value = evaluated.result.value;
+    if (value.missing) {
+      throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_FOUND", "Browser selector did not match an element.");
+    }
+    if (typeof value.url !== "string" || typeof value.title !== "string" ||
+      typeof value.tag !== "string" || typeof value.role !== "string" ||
+      typeof value.name !== "string" || typeof value.href !== "string" ||
+      typeof value.inputType !== "string") {
+      throw new ChromeRuntimeError("CHROME_ACTION_EVIDENCE_INVALID", "Chrome returned invalid action evidence.");
+    }
+    const safeUrl = validateBrowserNavigationUrl(value.url);
+    const parsed = safeUrl === "about:blank" ? null : new URL(safeUrl);
+    const sanitizedUrl = parsed ? `${parsed.origin}${parsed.pathname}`.slice(0, 1_200) : "about:blank";
+    const locator = {
+      selector,
+      tag: value.tag.slice(0, 64),
+      role: value.role.slice(0, 128),
+      name: value.name.slice(0, 240),
+      hrefHash: value.href ? browserEvidenceHash(value.href) : null,
+      inputType: value.inputType.slice(0, 64),
+      backendNodeId,
+    };
+    return Object.freeze({
+      kind: "browser-page",
+      origin: parsed?.origin ?? "about:blank",
+      sanitizedUrl,
+      scopeId: page.threadId,
+      generation: page.documentGeneration,
+      version: page.documentVersion,
+      locatorHash: browserEvidenceHash(locator),
+      locatorSummary: selector
+        ? `${selector.slice(0, 300)} · ${locator.tag || "element"}${locator.role ? ` role=${locator.role}` : ""}${locator.name ? ` · ${locator.name}` : ""}`
+        : `${command.action} ${sanitizedUrl}`,
+    });
+  }
+
+  private async dispatchApprovedAgentMutation(page: ThreadPage, command: BrowserMutationCommand) {
+    const browser = this.requireBrowser();
+    if (command.action === "open") {
+      const destination = validateBrowserNavigationUrl(command.url ?? "");
+      const response = await browser.send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
+        url: destination,
+      }, { sessionId: page.sessionId });
+      if (response.errorText && !response.isDownload) {
+        throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(response.errorText));
+      }
+      if (!response.isDownload) {
+        await this.waitForReadablePage(page, () => this.assertAgentControl());
+        await this.persistNavigation(page, destination);
+      }
+      return;
+    }
+    if (command.action === "scroll") {
+      const deltaX = command.deltaX ?? Number.NaN;
+      const deltaY = command.deltaY ?? Number.NaN;
+      if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) ||
+        Math.abs(deltaX) > 5_000 || Math.abs(deltaY) > 5_000 || (deltaX === 0 && deltaY === 0)) {
+        throw new ChromeRuntimeError("CHROME_SCROLL_INVALID", "Browser scroll delta is invalid.");
+      }
+      await browser.send("Input.dispatchMouseEvent", {
+        type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
+      }, { sessionId: page.sessionId });
+      return;
+    }
+    const selector = validateSelector(command.selector ?? "");
+    const nodeId = await this.querySelector(page, selector);
+    if (command.action === "click") {
+      await browser.send("DOM.scrollIntoViewIfNeeded", { nodeId }, { sessionId: page.sessionId });
+      const result = await browser.send<{ model?: { border?: number[] } }>("DOM.getBoxModel", {
+        nodeId,
+      }, { sessionId: page.sessionId });
+      const border = result.model?.border;
+      if (!Array.isArray(border) || border.length !== 8 || !border.every(Number.isFinite)) {
+        throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_VISIBLE", "Browser element is not visible.");
+      }
+      const x = (border[0] + border[2] + border[4] + border[6]) / 4;
+      const y = (border[1] + border[3] + border[5] + border[7]) / 4;
+      await browser.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y }, { sessionId: page.sessionId });
+      await browser.send("Input.dispatchMouseEvent", {
+        type: "mousePressed", x, y, button: "left", clickCount: 1,
+      }, { sessionId: page.sessionId });
+      await browser.send("Input.dispatchMouseEvent", {
+        type: "mouseReleased", x, y, button: "left", clickCount: 1,
+      }, { sessionId: page.sessionId });
+      return;
+    }
+    const text = command.text ?? "";
+    validateTypedText(text);
+    await browser.send("DOM.focus", { nodeId }, { sessionId: page.sessionId });
+    if (command.clear) {
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyDown", key: "a", code: "KeyA", modifiers: 2,
+      }, { sessionId: page.sessionId });
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyUp", key: "a", code: "KeyA", modifiers: 2,
+      }, { sessionId: page.sessionId });
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyDown", key: "Backspace", code: "Backspace",
+      }, { sessionId: page.sessionId });
+      await browser.send("Input.dispatchKeyEvent", {
+        type: "keyUp", key: "Backspace", code: "Backspace",
+      }, { sessionId: page.sessionId });
+    }
+    await browser.send("Input.insertText", { text }, { sessionId: page.sessionId });
+  }
+
   private async querySelector(page: ThreadPage, selector: string) {
     const browser = this.requireBrowser();
     const document = await browser.send<{ root?: { nodeId?: number } }>("DOM.getDocument", {
@@ -1181,6 +1467,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         navigationUnsubscribe: null,
         downloadUnsubscribes: [],
         interceptedRequests: 0,
+        documentGeneration: 1,
+        documentVersion: browserEvidenceHash({ targetId, sessionId, restoredUrl, generation: 1 }),
         closed: false,
       };
       await browser.send("Page.enable", {}, { sessionId });
@@ -1315,6 +1603,14 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     } catch {
       return;
     }
+    page.documentGeneration += 1;
+    page.documentVersion = browserEvidenceHash({
+      targetId: page.targetId,
+      sessionId: page.sessionId,
+      loaderId: typeof frame.loaderId === "string" ? frame.loaderId : null,
+      url,
+      generation: page.documentGeneration,
+    });
     const write = this.persistNavigation(page, url);
     this.navigationWrites.add(write);
     void write.finally(() => this.navigationWrites.delete(write)).catch(() => undefined);

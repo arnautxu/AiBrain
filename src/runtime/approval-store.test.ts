@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readdir, rm, symlink } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   FileApprovalStore,
   approvalLocatorFromItem,
   waitForApproval,
+  type ConnectorApprovalReceipt,
   type ApprovalLocator,
 } from "@/runtime/approval-store";
 
@@ -63,6 +64,15 @@ describe("FileApprovalStore", () => {
 
   function locator(item: ApprovalItem, userId = USER_A): ApprovalLocator {
     return approvalLocatorFromItem(INSTALLATION_ID, userId, item);
+  }
+
+  function fingerprint(seed = "a") {
+    return seed.repeat(64);
+  }
+
+  function receiptFrom(result: { receipt: ConnectorApprovalReceipt | null }) {
+    if (!result.receipt) throw new Error("Expected connector approval receipt.");
+    return result.receipt;
   }
 
   it("persists a decision across independent store instances and restart replay", async () => {
@@ -243,5 +253,220 @@ describe("FileApprovalStore", () => {
       itemId: "item-contract",
       decision: "always",
     })).toBe(false);
+  });
+
+  it("binds connector authorization, receipt, revalidation, execution, and audit without arguments", async () => {
+    const { usersRoot } = await fixture();
+    const approvals = store(usersRoot);
+    const item = approval("connector-success", "thread-connector", "turn-connector", "item-connector");
+    const prepared = await approvals.prepareConnectorApproval({
+      locator: locator(item),
+      authorizationFingerprint: fingerprint(),
+    });
+    const receipt = receiptFrom(prepared);
+    expect(prepared.record.status).toBe("approval_requested");
+    expect((await approvals.approveConnectorApproval(receipt)).outcome).toBe("approved");
+
+    let executions = 0;
+    const first = await approvals.executeConnectorApproval(receipt, {
+      revalidate: () => true,
+      execute: () => {
+        executions += 1;
+        return "connector mutation completed";
+      },
+    });
+    expect(first).toMatchObject({ outcome: "executed", value: "connector mutation completed" });
+    expect((await approvals.executeConnectorApproval(receipt, {
+      revalidate: () => true,
+      execute: () => {
+        executions += 1;
+      },
+    })).outcome).toBe("replayed");
+    expect(executions).toBe(1);
+
+    const events = await approvals.readConnectorApprovalEvents();
+    expect(events.map((entry) => entry.payload.eventType))
+      .toEqual(["authorized", "approval_requested", "approved", "executing", "executed"]);
+    expect(Object.keys(events[0]?.payload ?? {}).sort()).toEqual([
+      "approvalId",
+      "authorizationFingerprint",
+      "eventType",
+      "installationId",
+      "itemId",
+      "occurredAt",
+      "schemaVersion",
+      "threadId",
+      "turnId",
+      "userId",
+    ]);
+  });
+
+  it("denies tampered, cross-user, expired, and failed connector approvals", async () => {
+    const { usersRoot } = await fixture();
+    const approvals = store(usersRoot);
+    const item = approval("connector-tamper", "thread-tamper", "turn-tamper", "item-tamper");
+    const receipt = receiptFrom(await approvals.prepareConnectorApproval({
+      locator: locator(item),
+      authorizationFingerprint: fingerprint("a"),
+    }));
+    const tampered = { ...receipt, authorizationFingerprint: fingerprint("b") };
+    expect((await approvals.approveConnectorApproval(tampered)).outcome).toBe("denied");
+    expect(await approvals.readConnectorApproval(locator(item))).toMatchObject({ status: "denied" });
+
+    const locatorFingerprintItem = approval("connector-locator-fingerprint", "thread-locator", "turn-locator", "item-locator");
+    await approvals.prepareConnectorApproval({
+      locator: locator(locatorFingerprintItem),
+      authorizationFingerprint: fingerprint("f"),
+    });
+    expect((await approvals.approveConnectorApprovalByLocator(
+      locator(locatorFingerprintItem),
+      fingerprint("0"),
+    )).outcome).toBe("fingerprint-mismatch");
+    expect(await approvals.readConnectorApproval(locator(locatorFingerprintItem)))
+      .toMatchObject({ status: "approval_requested" });
+
+    const deniedItem = approval("connector-denied", "thread-denied", "turn-denied", "item-denied");
+    await approvals.prepareConnectorApproval({
+      locator: locator(deniedItem),
+      authorizationFingerprint: fingerprint("9"),
+    });
+    expect((await approvals.denyConnectorApprovalByLocator(
+      locator(deniedItem),
+      fingerprint("9"),
+    )).outcome).toBe("denied");
+    expect((await approvals.denyConnectorApprovalByLocator(
+      locator(deniedItem),
+      fingerprint("9"),
+    )).outcome).toBe("already-denied");
+    expect((await approvals.approveConnectorApprovalByLocator(
+      locator(deniedItem),
+      fingerprint("9"),
+    )).outcome).toBe("not-pending");
+    expect(await store(usersRoot).readConnectorApproval(locator(deniedItem)))
+      .toMatchObject({ status: "denied" });
+
+    const crossUserItem = approval("connector-cross-user", "thread-cross", "turn-cross", "item-cross");
+    const crossUserReceipt = receiptFrom(await approvals.prepareConnectorApproval({
+      locator: locator(crossUserItem),
+      authorizationFingerprint: fingerprint("c"),
+    }));
+    await expect(store(usersRoot, USER_B).approveConnectorApproval(crossUserReceipt))
+      .rejects.toMatchObject({ code: "APPROVAL_IDENTITY_MISMATCH" });
+    expect(await approvals.readConnectorApproval(locator(crossUserItem))).toMatchObject({ status: "approval_requested" });
+
+    let clock = Date.UTC(2026, 7, 28, 12, 0, 0);
+    const expiring = store(usersRoot, USER_A, () => clock);
+    const expiredItem = approval("connector-expired", "thread-expired", "turn-expired", "item-expired");
+    const expiredReceipt = receiptFrom(await expiring.prepareConnectorApproval({
+      locator: locator(expiredItem),
+      authorizationFingerprint: fingerprint("d"),
+      ttlMs: 10,
+    }));
+    clock += 11;
+    expect((await expiring.approveConnectorApproval(expiredReceipt)).outcome).toBe("not-pending");
+    expect(await expiring.readConnectorApproval(locator(expiredItem))).toMatchObject({ status: "denied" });
+
+    const staleItem = approval("connector-stale", "thread-stale", "turn-stale", "item-stale");
+    const staleReceipt = receiptFrom(await approvals.prepareConnectorApproval({
+      locator: locator(staleItem),
+      authorizationFingerprint: fingerprint("f"),
+    }));
+    await approvals.approveConnectorApproval(staleReceipt);
+    let staleExecuted = false;
+    expect((await approvals.executeConnectorApproval(staleReceipt, {
+      revalidate: () => false,
+      execute: () => { staleExecuted = true; },
+    })).outcome).toBe("denied");
+    expect(staleExecuted).toBe(false);
+    expect(await approvals.readConnectorApproval(locator(staleItem))).toMatchObject({ status: "denied" });
+
+    const failureItem = approval("connector-failed", "thread-failed", "turn-failed", "item-failed");
+    const failureReceipt = receiptFrom(await approvals.prepareConnectorApproval({
+      locator: locator(failureItem),
+      authorizationFingerprint: fingerprint("e"),
+    }));
+    await approvals.approveConnectorApproval(failureReceipt);
+    expect((await approvals.executeConnectorApproval(failureReceipt, {
+      revalidate: () => true,
+      execute: () => { throw new Error("adapter unavailable"); },
+    })).outcome).toBe("indeterminate");
+    expect(await approvals.readConnectorApproval(locator(failureItem))).toMatchObject({ status: "indeterminate" });
+
+    const revalidationItem = approval("connector-revalidation", "thread-revalidation", "turn-revalidation", "item-revalidation");
+    const revalidationReceipt = receiptFrom(await approvals.prepareConnectorApproval({
+      locator: locator(revalidationItem),
+      authorizationFingerprint: fingerprint("a"),
+    }));
+    await approvals.approveConnectorApproval(revalidationReceipt);
+    await expect(approvals.executeConnectorApproval(revalidationReceipt, {
+      revalidate: () => { throw new Error("permission source unavailable"); },
+      execute: () => { throw new Error("must not execute"); },
+    })).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_REVALIDATION_FAILED" });
+    expect(await approvals.readConnectorApproval(locator(revalidationItem))).toMatchObject({ status: "failed" });
+  });
+
+  it("recovers a durable executing record after restart without dispatching again", async () => {
+    const { usersRoot } = await fixture();
+    const firstProcess = store(usersRoot);
+    const item = approval("connector-crash", "thread-crash", "turn-crash", "item-crash");
+    const itemLocator = locator(item);
+    await firstProcess.prepareConnectorApproval({
+      locator: itemLocator,
+      authorizationFingerprint: fingerprint("b"),
+    });
+    await firstProcess.approveConnectorApprovalByLocator(itemLocator, fingerprint("b"));
+
+    // This is the durable state left by a process crash after marking dispatch started.
+    const [recordName] = await readdir(firstProcess.connectorRecordsRoot);
+    const recordPath = path.join(firstProcess.connectorRecordsRoot, recordName ?? "");
+    const persisted = JSON.parse(await readFile(recordPath, "utf8")) as Record<string, unknown>;
+    await writeFile(recordPath, `${JSON.stringify({ ...persisted, status: "executing", completedAt: null })}\n`, { mode: 0o600 });
+
+    let restartDispatches = 0;
+    const restartedProcess = store(usersRoot);
+    expect((await restartedProcess.executeConnectorApprovalByLocator(itemLocator, fingerprint("b"), {
+      revalidate: () => true,
+      execute: () => { restartDispatches += 1; },
+    })).outcome).toBe("indeterminate");
+    expect(restartDispatches).toBe(0);
+    expect(await restartedProcess.readConnectorApproval(itemLocator)).toMatchObject({ status: "indeterminate" });
+  });
+
+  it("dispatches at most once and rejects restart, cross-user, and fingerprint replay", async () => {
+    const { usersRoot } = await fixture();
+    const approvals = store(usersRoot);
+    const item = approval("connector-at-most-once", "thread-once", "turn-once", "item-once");
+    const itemLocator = locator(item);
+    await approvals.prepareConnectorApproval({
+      locator: itemLocator,
+      authorizationFingerprint: fingerprint("c"),
+    });
+    await approvals.approveConnectorApprovalByLocator(itemLocator, fingerprint("c"));
+
+    let dispatches = 0;
+    expect((await approvals.executeConnectorApprovalByLocator(itemLocator, fingerprint("c"), {
+      revalidate: () => true,
+      execute: () => {
+        dispatches += 1;
+        throw new Error("provider outcome unavailable after dispatch");
+      },
+    })).outcome).toBe("indeterminate");
+    expect(dispatches).toBe(1);
+
+    const restartedProcess = store(usersRoot);
+    expect((await restartedProcess.executeConnectorApprovalByLocator(itemLocator, fingerprint("c"), {
+      revalidate: () => true,
+      execute: () => { dispatches += 1; },
+    })).outcome).toBe("indeterminate");
+    expect(dispatches).toBe(1);
+    await expect(store(usersRoot, USER_B).executeConnectorApprovalByLocator(itemLocator, fingerprint("c"), {
+      revalidate: () => true,
+      execute: () => { dispatches += 1; },
+    })).rejects.toMatchObject({ code: "APPROVAL_IDENTITY_MISMATCH" });
+    expect((await restartedProcess.executeConnectorApprovalByLocator(itemLocator, fingerprint("0"), {
+      revalidate: () => true,
+      execute: () => { dispatches += 1; },
+    })).outcome).toBe("fingerprint-mismatch");
+    expect(dispatches).toBe(1);
   });
 });

@@ -27,6 +27,32 @@ export type ActivityItem = {
   status: ActivityStatus;
 };
 
+export type TurnSourceKind = "web" | "file" | "app";
+
+/** A source observed in runtime metadata. Null fields are deliberately honest. */
+export type TurnSource = {
+  id: string;
+  kind: TurnSourceKind;
+  title: string;
+  url: string | null;
+  domain: string | null;
+  snippet: string | null;
+  publishedAt: string | null;
+};
+
+export type ToolResultKind = "command" | "file" | "web" | "app" | "browser";
+
+export type ToolResult = {
+  id: string;
+  kind: ToolResultKind;
+  title: string;
+  status: "running" | "complete" | "failed" | "stopped";
+  summary: string | null;
+  output: string | null;
+  sourceIds: string[];
+  createdAt: string;
+};
+
 export type PlanStep = {
   step: string;
   status: "pending" | "in_progress" | "completed";
@@ -126,6 +152,10 @@ export type ChatMessage = {
   diff: string;
   attachments: ChatAttachment[];
   artifacts: GeneratedArtifact[];
+  /** Optional while schema-v1 conversations are migrated on read. */
+  sources?: TurnSource[];
+  /** Optional while schema-v1 conversations are migrated on read. */
+  toolResults?: ToolResult[];
 };
 
 export type ChatRequest = {
@@ -149,6 +179,16 @@ export type ApprovalResolutionRequest = {
   turnId: string;
   itemId: string;
   decision: ApprovalDecision;
+};
+
+/** Connector resolution is always bound to the authorization fingerprint. */
+export type ConnectorApprovalResolutionRequest = {
+  approvalId: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  decision: "accept" | "decline" | "cancel" | "acceptForSession";
+  authorizationFingerprint: string;
 };
 
 export type TurnControlRequest =
@@ -176,6 +216,8 @@ export type ChatStreamEvent =
   | { type: "diff"; value: string }
   | { type: "delta"; value: string }
   | { type: "artifact"; item: GeneratedArtifact }
+  | { type: "source"; item: TurnSource }
+  | { type: "toolResult"; item: ToolResult }
   | { type: "done" }
   | { type: "stopped" }
   | { type: "error"; message: string };
@@ -196,6 +238,54 @@ function isOpaqueRuntimeId(value: unknown) {
 function isUuidString(value: unknown) {
   return typeof value === "string" &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isIsoDate(value: unknown) {
+  return typeof value === "string" && !Number.isNaN(Date.parse(value));
+}
+
+function isSafeNullableText(value: unknown, maximum: number) {
+  return value === null || (
+    typeof value === "string" && value.length <= maximum &&
+    !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value)
+  );
+}
+
+export function isTurnSource(value: unknown): value is TurnSource {
+  if (!isRecord(value)) return false;
+  const url = value.url;
+  let validUrl = url === null;
+  if (typeof url === "string" && url.length <= 2_048) {
+    try {
+      const parsed = new URL(url);
+      validUrl = parsed.protocol === "http:" || parsed.protocol === "https:";
+    } catch {
+      validUrl = false;
+    }
+  }
+  return typeof value.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value.id) &&
+    (value.kind === "web" || value.kind === "file" || value.kind === "app") &&
+    typeof value.title === "string" && value.title.trim().length > 0 && value.title.length <= 240 &&
+    !/\p{C}/u.test(value.title) && validUrl &&
+    isSafeNullableText(value.domain, 255) &&
+    isSafeNullableText(value.snippet, 2_000) &&
+    (value.publishedAt === null || isIsoDate(value.publishedAt));
+}
+
+export function isToolResult(value: unknown): value is ToolResult {
+  if (!isRecord(value)) return false;
+  return typeof value.id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(value.id) &&
+    (value.kind === "command" || value.kind === "file" || value.kind === "web" ||
+      value.kind === "app" || value.kind === "browser") &&
+    typeof value.title === "string" && value.title.trim().length > 0 && value.title.length <= 240 &&
+    !/\p{C}/u.test(value.title) &&
+    (value.status === "running" || value.status === "complete" || value.status === "failed" || value.status === "stopped") &&
+    isSafeNullableText(value.summary, 4_000) &&
+    isSafeNullableText(value.output, 64_000) &&
+    Array.isArray(value.sourceIds) && value.sourceIds.length <= 100 &&
+    value.sourceIds.every((id) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(id)) &&
+    new Set(value.sourceIds).size === value.sourceIds.length &&
+    isIsoDate(value.createdAt);
 }
 
 export function isChatAttachment(value: unknown): value is ChatAttachment {
@@ -368,6 +458,24 @@ export function isApprovalResolutionRequest(
   );
 }
 
+export function isConnectorApprovalResolutionRequest(
+  value: unknown,
+): value is ConnectorApprovalResolutionRequest {
+  if (!isRecord(value) || Object.keys(value).length !== 6) return false;
+  return (
+    isOpaqueRuntimeId(value.approvalId) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
+    (value.decision === "accept" ||
+      value.decision === "decline" ||
+      value.decision === "cancel" ||
+      value.decision === "acceptForSession") &&
+    typeof value.authorizationFingerprint === "string" &&
+    /^[0-9a-f]{64}$/u.test(value.authorizationFingerprint)
+  );
+}
+
 export function isTurnControlRequest(value: unknown): value is TurnControlRequest {
   if (!isRecord(value)) return false;
   const common =
@@ -399,6 +507,8 @@ export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   }
   if (value.type === "error") return typeof value.message === "string";
   if (value.type === "artifact") return isGeneratedArtifact(value.item);
+  if (value.type === "source") return isTurnSource(value.item);
+  if (value.type === "toolResult") return isToolResult(value.item);
   if (value.type === "activity") return isActivityItem(value.item);
   if (value.type === "approval") return isApprovalItem(value.item);
   if (value.type === "plan") {
@@ -431,6 +541,10 @@ export function isChatMessage(message: unknown): message is ChatMessage {
   if (!Array.isArray(message.approvals) || !message.approvals.every(isApprovalItem)) return false;
   if (!Array.isArray(message.attachments) || !message.attachments.every(isChatAttachment)) return false;
   if (!Array.isArray(message.artifacts) || !message.artifacts.every(isGeneratedArtifact)) return false;
+  if (message.sources !== undefined &&
+      (!Array.isArray(message.sources) || !message.sources.every(isTurnSource))) return false;
+  if (message.toolResults !== undefined &&
+      (!Array.isArray(message.toolResults) || !message.toolResults.every(isToolResult))) return false;
   return typeof message.diff === "string";
 }
 
@@ -460,6 +574,22 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
     const artifacts = [...message.artifacts];
     artifacts[index] = event.item;
     return { ...message, artifacts };
+  }
+  if (event.type === "source") {
+    const sources = message.sources ?? [];
+    const index = sources.findIndex((source) => source.id === event.item.id);
+    if (index === -1) return { ...message, sources: [...sources, event.item] };
+    const next = [...sources];
+    next[index] = event.item;
+    return { ...message, sources: next };
+  }
+  if (event.type === "toolResult") {
+    const toolResults = message.toolResults ?? [];
+    const index = toolResults.findIndex((result) => result.id === event.item.id);
+    if (index === -1) return { ...message, toolResults: [...toolResults, event.item] };
+    const next = [...toolResults];
+    next[index] = event.item;
+    return { ...message, toolResults: next };
   }
   if (event.type === "done") return { ...message, status: "complete" };
   if (event.type === "stopped") return { ...message, status: "stopped" };

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
@@ -52,12 +53,14 @@ import {
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
+import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import {
   MaintenanceModeError,
   type MaintenanceActivityLease,
 } from "@/operations/maintenance";
 import { recordTurnUsage } from "@/usage/server-service";
 import type { TokenUsageBreakdown } from "@/usage/contracts";
+import { featurePolicyForUser } from "@/settings/server-service";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -150,6 +153,8 @@ function message(
     diff: "",
     attachments: [],
     artifacts: [],
+    sources: [],
+    toolResults: [],
   };
 }
 
@@ -177,25 +182,39 @@ function followProjectedTurn(
   assistantMessageId: string,
   initial: ChatMessage,
   signal: AbortSignal,
+  onDisconnect: () => void,
 ) {
+  let clientDetached = false;
+  const detach = () => {
+    if (clientDetached) return;
+    clientDetached = true;
+    onDisconnect();
+  };
   const replay = new ReadableStream<Uint8Array>({
     async start(controller) {
+      signal.addEventListener("abort", detach, { once: true });
+      if (signal.aborted) detach();
       let lastUpdatedAt = "";
       let current = initial;
-      controller.enqueue(line({ type: "snapshot", message: current }));
-      const deadline = Date.now() + 10 * 60_000;
-      while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
-        await delay(100, signal);
-        const projection = await store.read(threadId, assistantMessageId);
-        if (!projection) break;
-        current = projection.message;
-        if (projection.updatedAt !== lastUpdatedAt) {
-          lastUpdatedAt = projection.updatedAt;
-          controller.enqueue(line({ type: "snapshot", message: current }));
+      try {
+        controller.enqueue(line({ type: "snapshot", message: current }));
+        const deadline = Date.now() + 10 * 60_000;
+        while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
+          await delay(100, signal);
+          const projection = await store.read(threadId, assistantMessageId);
+          if (!projection) break;
+          current = projection.message;
+          if (projection.updatedAt !== lastUpdatedAt) {
+            lastUpdatedAt = projection.updatedAt;
+            controller.enqueue(line({ type: "snapshot", message: current }));
+          }
         }
+        if (!clientDetached) controller.close();
+      } finally {
+        signal.removeEventListener("abort", detach);
       }
-      controller.close();
     },
+    cancel: detach,
   });
   return new Response(replay, { headers: replayHeaders() });
 }
@@ -215,13 +234,40 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
 
+  const requestsControlledFeature = body.options.webSearch || body.options.imageGeneration || Boolean(body.options.skill);
+  if (requestsControlledFeature) {
+    try {
+      const featurePolicy = await featurePolicyForUser(session);
+      const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
+        ? "búsqueda web"
+        : body.options.imageGeneration && !featurePolicy["image-generation"]
+          ? "generación de imágenes"
+          : body.options.skill && !featurePolicy.skills ? "skills" : null;
+      if (disabledFeature) {
+        return NextResponse.json({
+          error: `La capacidad ${disabledFeature} está desactivada en Configuración.`,
+          code: "FEATURE_DISABLED",
+        }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+      }
+    } catch {
+      return NextResponse.json({
+        error: "No se ha podido verificar la política de aplicaciones.",
+        code: "FEATURE_POLICY_UNAVAILABLE",
+      }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
+    }
+  }
+
   const browserPreview = isBrowserPreviewWorkbench();
   let persistent = !browserPreview;
   let context: {
     projectId: string;
     projectName: string;
     workspaceKey: string;
+    projectInstructions: string;
+    projectMemory: string;
+    projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
     runtimeThreadToken: string | null;
+    branchHistory: string | null;
   };
   if (browserPreview) {
     persistent = false;
@@ -229,7 +275,11 @@ export async function POST(request: Request) {
       projectId: body.projectId,
       projectName: "Preview local",
       workspaceKey: "workspace",
+      projectInstructions: "",
+      projectMemory: "",
+      projectSources: [],
       runtimeThreadToken: null,
+      branchHistory: null,
     };
   } else {
     try {
@@ -381,6 +431,15 @@ export async function POST(request: Request) {
     "streaming",
     new Date(startedAt.getTime() + 1).toISOString(),
   );
+  assistantMessage.sources = userMessage.attachments.map((attachment) => ({
+    id: `source-file-${attachment.id}`,
+    kind: "file",
+    title: attachment.name.replace(/\p{C}+/gu, " ").trim() || "Archivo adjunto",
+    url: null,
+    domain: null,
+    snippet: null,
+    publishedAt: null,
+  }));
   let turnOutcome: "created" | "existing" = "created";
   if (persistent) {
     try {
@@ -417,16 +476,51 @@ export async function POST(request: Request) {
       body.assistantMessageId,
     )) {
       maintenanceActivity?.release();
+      const telemetry = new TurnTelemetry({
+        installationId: session.tenant.id,
+        userId: session.user.id,
+        projectId: body.projectId,
+        threadId: body.threadId,
+        localTurnId: body.assistantMessageId,
+        clientRequestId: body.userMessageId,
+        streamRequestId: randomUUID(),
+      }, { logger: operationalLogger });
+      telemetry.bindRuntimeThread(runtimeThreadId);
+      telemetry.reconnected();
+      let reconnectDetached = false;
       return followProjectedTurn(
         turnProjectionStore,
         body.threadId,
         body.assistantMessageId,
         assistantMessage,
         request.signal,
+        () => {
+          if (reconnectDetached) return;
+          reconnectDetached = true;
+          telemetry.disconnected();
+        },
       );
     }
   }
 
+  const streamTelemetry = new TurnTelemetry({
+    installationId: session.tenant.id,
+    userId: session.user.id,
+    projectId: body.projectId,
+    threadId: body.threadId,
+    localTurnId: body.assistantMessageId,
+    clientRequestId: body.userMessageId,
+    streamRequestId: randomUUID(),
+  }, { logger: operationalLogger });
+  let clientDetached = false;
+  const detachClient = () => {
+    if (clientDetached) return;
+    clientDetached = true;
+    streamTelemetry.disconnected();
+  };
+  request.signal.addEventListener("abort", detachClient, { once: true });
+  if (request.signal.aborted) detachClient();
+  const turnLifetime = new AbortController();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let runtimeThreadToken: string | null = null;
@@ -464,7 +558,7 @@ export async function POST(request: Request) {
         } else {
           assistantMessage = applyChatStreamEvent(assistantMessage, event);
         }
-        controller.enqueue(line(event));
+        if (!clientDetached) controller.enqueue(line(event));
       };
       const emitCodex = async (event: WorkerCodexTurnEvent, projection?: WorkerTurnProjection) => {
         if (event.type === "runtimeThread") {
@@ -512,10 +606,11 @@ export async function POST(request: Request) {
             approvalStore,
             turnMemory,
             turnDocuments,
-            request.signal,
+            turnLifetime.signal,
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
+            context,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
@@ -545,7 +640,7 @@ export async function POST(request: Request) {
           await projectionWriter?.flush();
         } catch (error) {
           operationalLogger.error("turn.projection_flush_failed", { error });
-          if (!request.signal.aborted) {
+          if (!clientDetached) {
             const event: ChatStreamEvent = {
               type: "error",
               message: "El torn ha acabat, però no s’ha pogut consolidar la recuperació.",
@@ -557,7 +652,7 @@ export async function POST(request: Request) {
         if (assistantMessage.status === "streaming") {
           assistantMessage = {
             ...assistantMessage,
-            status: request.signal.aborted ? "stopped" : "error",
+            status: "error",
           };
         }
         if (persistent) {
@@ -570,7 +665,7 @@ export async function POST(request: Request) {
             );
           } catch (error) {
             operationalLogger.error("thread.persistence_failed", { error });
-            if (!request.signal.aborted) {
+            if (!clientDetached) {
               await emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
             }
           }
@@ -597,8 +692,16 @@ export async function POST(request: Request) {
           });
         }
         maintenanceActivity?.release();
-        controller.close();
+        request.signal.removeEventListener("abort", detachClient);
+        if (!clientDetached) controller.close();
       }
+    },
+    cancel() {
+      // Losing the NDJSON consumer is not a stop command. The turn remains
+      // owned by the server, continues updating its durable projection and can
+      // be followed by a reconnect. Explicit cancellation is handled only by
+      // /api/runtime/turns/control through the worker turn registry.
+      detachClient();
     },
   });
   return new Response(stream, {

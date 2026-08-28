@@ -40,4 +40,17 @@ describe("backend CI contract", () => {
     expect(workflow).not.toMatch(/contents:\s*write/u);
     expect(workflow).not.toMatch(/persist-credentials:\s*true/u);
   });
+
+  it("collects readbacks only after the successful restricted deploy using trusted workflow context", async () => {
+    const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "deploy-arnall.yml"), "utf8");
+    const deploy = workflow.indexOf('root@"$DEPLOY_HOST" "deploy $TESTED_SHA"');
+    const collection = workflow.indexOf("Collect post-deploy release identity readbacks");
+
+    expect(deploy).toBeGreaterThan(-1);
+    expect(collection).toBeGreaterThan(deploy);
+    expect(workflow).toContain("CI_RUN_ID: ${{ github.event.workflow_run.id }}");
+    expect(workflow).toContain('root@"$DEPLOY_HOST" "collect-readbacks $TESTED_SHA $CI_RUN_ID" > /dev/null');
+    expect(workflow).toContain("[[ \"$TESTED_SHA\" =~ ^[0-9a-f]{40}$ ]]");
+    expect(workflow).toContain("[[ \"$CI_RUN_ID\" =~ ^[0-9]{6,20}$ ]]");
+  });
 });
