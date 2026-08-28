@@ -1,0 +1,140 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Sidebar } from "@/components/sidebar";
+import type { AuthSession } from "@/auth/types";
+import type { PublicInstallationBranding } from "@/config/installation-branding";
+import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+
+const branding: PublicInstallationBranding = {
+  installationId: "acme",
+  companyName: "Acme",
+  companySlug: "acme",
+  publicUrl: "https://acme.example.com",
+  productName: "AiBrain",
+  logoPath: "/logo.svg",
+  faviconPath: "/favicon.svg",
+  accentColor: "#000000",
+};
+
+const session: AuthSession = {
+  provider: "local",
+  user: { id: "user-1", name: "Ada Lovelace", email: "ada@example.com" },
+  tenant: { id: "tenant-1", name: "Acme" },
+  expiresAt: "2026-08-29T00:00:00.000Z",
+};
+
+function project(id: string, name: string, slug = name.toLocaleLowerCase()): WorkbenchProject {
+  return {
+    id,
+    name,
+    slug,
+    status: "active",
+    pinned: false,
+    instructions: "",
+    sources: [],
+    memory: { enabled: true, notes: "", updatedAt: null },
+    sharing: { visibility: "private", members: [] },
+    workspace: { id: `workspace-${id}`, label: name, hostType: "managed", status: "ready", isPrimary: true },
+    createdAt: "2026-08-28T08:00:00.000Z",
+    updatedAt: "2026-08-28T08:00:00.000Z",
+  };
+}
+
+function thread(id: string, projectId: string, title: string): WorkbenchThread {
+  return {
+    id,
+    projectId,
+    title,
+    status: "active",
+    pinned: false,
+    createdAt: "2026-08-28T08:00:00.000Z",
+    updatedAt: "2026-08-28T08:00:00.000Z",
+    messages: [],
+  };
+}
+
+function renderSidebar() {
+  const onNewThread = vi.fn();
+  const onOpenCommandPalette = vi.fn();
+  const onOpenAutomations = vi.fn();
+  const operations = project("project-operations", "Operaciones");
+  const product = project("project-product", "Producto");
+  const standalone = project("project-standalone", "Chats", STANDALONE_PROJECT_SLUG);
+
+  render(
+    <Sidebar
+      branding={branding}
+      session={session}
+      projects={[operations, product, standalone]}
+      threads={[
+        thread("thread-plan", operations.id, "Plan semanal"),
+        thread("thread-roadmap", product.id, "Roadmap"),
+        thread("thread-personal", standalone.id, "Recordatorio personal"),
+      ]}
+      activeProjectId={operations.id}
+      activeThreadId="thread-plan"
+      mobileOpen={false}
+      desktopOpen
+      busy={false}
+      threadActivityById={{}}
+      taskSummary={{ unread: 2, running: 1, needsAttention: 0 }}
+      onCloseMobile={vi.fn()}
+      onCloseDesktop={vi.fn()}
+      onOpenDesktop={vi.fn()}
+      onOpenCommandPalette={onOpenCommandPalette}
+      onOpenLibrary={vi.fn()}
+      onOpenTaskCenter={vi.fn()}
+      onOpenAutomations={onOpenAutomations}
+      onSelectProject={vi.fn()}
+      onSelectThread={vi.fn()}
+      onNewThread={onNewThread}
+      onNewProject={vi.fn()}
+      onProjectAction={vi.fn()}
+      onThreadAction={vi.fn()}
+      onOpenCustomization={vi.fn()}
+    />,
+  );
+
+  return { onNewThread, onOpenAutomations, onOpenCommandPalette };
+}
+
+afterEach(cleanup);
+
+describe("Sidebar", () => {
+  it("limits primary navigation to new chat, search and cron automations", () => {
+    const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
+    const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
+
+    expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
+    fireEvent.click(within(navigation).getByRole("button", { name: /Buscar/ }));
+    fireEvent.click(within(navigation).getByRole("button", { name: /Automatizaciones \(cron jobs\)/ }));
+    expect(onOpenCommandPalette).toHaveBeenCalledOnce();
+    expect(onOpenAutomations).toHaveBeenCalledOnce();
+    expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("Tareas")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Abrir preferencias" })).not.toBeInTheDocument();
+  });
+
+  it("nests every project chat below its project and keeps standalone chats separate", () => {
+    const { onNewThread } = renderSidebar();
+    const operationsChats = screen.getByLabelText("Chats de Operaciones");
+    const productChats = screen.getByLabelText("Chats de Producto");
+    const standaloneChats = screen.getByRole("region", { name: "Chats" });
+
+    expect(within(operationsChats).getByText("Plan semanal")).toBeInTheDocument();
+    expect(within(operationsChats).queryByText("Roadmap")).not.toBeInTheDocument();
+    expect(within(productChats).getByText("Roadmap")).toBeInTheDocument();
+    expect(within(standaloneChats).getByText("Recordatorio personal")).toBeInTheDocument();
+    expect(within(standaloneChats).queryByText("Plan semanal")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Nueva conversación en Operaciones" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nueva conversación independiente" }));
+    expect(onNewThread).toHaveBeenNthCalledWith(1, "project-operations");
+    expect(onNewThread).toHaveBeenNthCalledWith(2);
+  });
+});
