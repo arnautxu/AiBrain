@@ -15,6 +15,12 @@ import {
   type ConnectorPrincipal,
   type CredentialBinding,
 } from "@/connectors";
+import {
+  CODEX_MANAGED_APP_CONNECTOR_ID,
+  CODEX_MANAGED_APP_READ_SCOPE,
+  CodexManagedAppProvider,
+  codexManagedAppDefinition,
+} from "@/connectors/codex-managed-app-provider";
 
 const INSTALLATION_ID = "example-lab";
 const USER_ONE = "00000000-0000-4000-8000-000000000001";
@@ -259,6 +265,63 @@ describe("ConnectorRegistry", () => {
     await expect(registry.capabilities(principal(), { allowSharedCredentials: false }))
       .resolves.toEqual([expect.objectContaining({
         status: "revoked",
+        effectiveOperations: [],
+      })]);
+  });
+});
+
+describe("Codex managed App connector", () => {
+  const codexBinding = (overrides: Partial<CredentialBinding> = {}): CredentialBinding => ({
+    schemaVersion: 1,
+    connectorId: CODEX_MANAGED_APP_CONNECTOR_ID,
+    credentialRef: "codex-app:app-arnall-files",
+    installationId: INSTALLATION_ID,
+    userId: USER_ONE,
+    scopes: [CODEX_MANAGED_APP_READ_SCOPE],
+    status: "active",
+    version: 1,
+    ...overrides,
+  });
+
+  it("reads only the installed-app snapshot and exposes no provider reference", async () => {
+    const request = vi.fn(async () => ({ apps: [{ id: "app-arnall-files", enabled: true, callable: true }] }));
+    const provider = new CodexManagedAppProvider(async () => ({ request }), () => Date.parse("2026-08-28T10:00:00.000Z"));
+    const result = await provider.inspect({ principal: principal(), binding: codexBinding() });
+    expect(request).toHaveBeenCalledWith(
+      "app/installed",
+      { forceRefresh: false },
+      "connector-codex-app-list",
+      10_000,
+    );
+    expect(result).toMatchObject({ health: { status: "connected", code: null }, handle: { bindingVersion: 1 } });
+    expect(JSON.stringify(result)).not.toContain("credentialRef");
+    expect(JSON.stringify(result)).not.toContain("codex-app:");
+  });
+
+  it("fails closed for missing scope, shared bindings and an unavailable App", async () => {
+    const request = vi.fn(async () => ({ apps: [] }));
+    const provider = new CodexManagedAppProvider(async () => ({ request }));
+    await expect(provider.inspect({ principal: principal(), binding: codexBinding({ scopes: ["other.scope"] }) }))
+      .rejects.toMatchObject({ code: "CONNECTOR_SCOPE_MISSING" });
+    await expect(provider.inspect({ principal: principal(), binding: codexBinding({ userId: null }) }))
+      .rejects.toMatchObject({ code: "CODEX_APP_SHARED_BINDING_DENIED" });
+    await expect(provider.inspect({ principal: principal(), binding: codexBinding() }))
+      .resolves.toMatchObject({ health: { status: "reauth_required", code: "CODEX_APP_NOT_INSTALLED" } });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("never advertises the connector when Codex health is not connected", async () => {
+    const { store } = await fixture();
+    await store.put(codexBinding());
+    const provider = new CodexManagedAppProvider(async () => ({
+      request: async () => ({ apps: [{ id: "app-arnall-files", enabled: false, callable: false }] }),
+    }));
+    const registry = new ConnectorRegistry(store, [{ definition: codexManagedAppDefinition, credentialProvider: provider }]);
+    await expect(registry.capabilities(principal(), { allowSharedCredentials: false }))
+      .resolves.toEqual([expect.objectContaining({
+        connectorId: CODEX_MANAGED_APP_CONNECTOR_ID,
+        status: "degraded",
+        statusCode: "CODEX_APP_DISABLED",
         effectiveOperations: [],
       })]);
   });
