@@ -97,10 +97,12 @@ export interface AppServerTransport {
 
 export interface TransportEventJournal {
   loadCursor(): Promise<ReplayCursor | null>;
+  /** Last event durably projected by the application router. */
+  loadDeliveryCursor?(): Promise<ReplayCursor | null>;
   /** Must durably append before resolving. Duplicate event ids return false. */
   append(event: AppServerEvent): Promise<boolean>;
   /** Events received durably but not yet acknowledged by the application router. */
-  readUndelivered?(limit: number): Promise<AppServerEvent[]>;
+  readUndelivered?(limit: number, afterSequence?: number): Promise<AppServerEvent[]>;
   markDelivered?(event: AppServerEvent): Promise<void>;
 }
 
@@ -114,6 +116,10 @@ export class InMemoryTransportEventJournal implements TransportEventJournal {
     return this.cursor ? { ...this.cursor } : null;
   }
 
+  async loadDeliveryCursor() {
+    return this.deliveryCursor ? { ...this.deliveryCursor } : null;
+  }
+
   async append(event: AppServerEvent) {
     if (this.eventIds.has(event.eventId)) return false;
     this.eventIds.add(event.eventId);
@@ -122,8 +128,8 @@ export class InMemoryTransportEventJournal implements TransportEventJournal {
     return true;
   }
 
-  async readUndelivered(limit: number) {
-    const after = this.deliveryCursor?.sequence ?? 0;
+  async readUndelivered(limit: number, afterSequence = 0) {
+    const after = Math.max(this.deliveryCursor?.sequence ?? 0, afterSequence);
     return this.stored.filter((event) => event.sequence > after).slice(0, limit);
   }
 

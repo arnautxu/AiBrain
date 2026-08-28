@@ -112,7 +112,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
       .slice(0, limit);
   }
 
-  private async loadDeliveryCursor() {
+  async loadDeliveryCursor() {
     try {
       return await readValidatedJson(this.deliveryCursorPath, deliveryCursorSchema);
     } catch (error) {
@@ -121,8 +121,11 @@ export class FileTransportEventJournal implements TransportEventJournal {
     }
   }
 
-  async readUndelivered(limit: number) {
+  async readUndelivered(limit: number, afterSequence = 0) {
     if (!Number.isSafeInteger(limit) || limit < 1) throw new Error("Undelivered event limit must be positive.");
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) {
+      throw new Error("Undelivered event cursor must be a non-negative safe integer.");
+    }
     return this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
       const cursor = await this.loadDeliveryCursor();
       if (cursor) {
@@ -131,7 +134,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
           throw new TransportProtocolError("Transport delivery cursor does not match the durable event journal.");
         }
       }
-      return this.readEvents(cursor?.sequence ?? 0, limit);
+      return this.readEvents(Math.max(cursor?.sequence ?? 0, afterSequence), limit);
     });
   }
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   InMemoryTransportEventJournal,
+  type AppServerEvent,
   type AppServerRequest,
   type TransportEventJournal,
 } from "@/runtime/transport/contracts";
@@ -78,10 +79,17 @@ class FakeSocketFactory implements WebSocketFactory {
 class MemoryJournal implements TransportEventJournal {
   readonly events: Array<{ eventId: string; sequence: number }> = [];
 
-  constructor(private cursor: { eventId: string; sequence: number } | null = null) {}
+  constructor(
+    private cursor: { eventId: string; sequence: number } | null = null,
+    private readonly backlog: AppServerEvent[] = [],
+  ) {}
 
   async loadCursor() {
     return this.cursor;
+  }
+
+  async loadDeliveryCursor() {
+    return this.backlog.length > 0 ? null : this.cursor;
   }
 
   async append(event: { eventId: string; sequence: number }) {
@@ -90,6 +98,12 @@ class MemoryJournal implements TransportEventJournal {
     this.cursor = { eventId: event.eventId, sequence: event.sequence };
     return true;
   }
+
+  async readUndelivered(limit: number, afterSequence = 0) {
+    return this.backlog.filter((event) => event.sequence > afterSequence).slice(0, limit);
+  }
+
+  async markDelivered() {}
 }
 
 const credentialProvider = {
@@ -235,6 +249,39 @@ describe("WebSocketAppServerTransport contract", () => {
     });
     ready(second, "session-2");
     await settle();
+    await transport.close();
+  });
+
+  it("streams a durable backlog larger than the live event buffer", async () => {
+    const factory = new FakeSocketFactory();
+    const backlog = Array.from({ length: 5 }, (_, index): AppServerEvent => ({
+      eventId: `backlog-${index + 1}`,
+      sequence: index + 1,
+      occurredAt: "2026-08-28T00:00:00.000Z",
+      message: {
+        kind: "rpc-notification",
+        rpc: { method: "warning", params: { threadId: null, message: `event ${index + 1}` } },
+      },
+    }));
+    const journal = new MemoryJournal(
+      { eventId: "backlog-5", sequence: 5 },
+      backlog,
+    );
+    const transport = createTransport(factory, { journal, maxEventBuffer: 2 });
+    const connecting = transport.connect();
+    await settle();
+    const socket = factory.sockets[0];
+    socket.open();
+    ready(socket);
+    await connecting;
+
+    const received: number[] = [];
+    for await (const event of transport.events()) {
+      received.push(event.sequence);
+      if (received.length === backlog.length) break;
+    }
+    expect(received).toEqual([1, 2, 3, 4, 5]);
+    expect(socket.closeCalls).toEqual([]);
     await transport.close();
   });
 
