@@ -18,6 +18,11 @@ import type {
 } from "@/runtime/browser/types";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 import { featurePolicyForIdentity } from "@/settings/server-service";
+import {
+  assertBrowserApprovalEvidence,
+  type BrowserActionResourceSnapshot,
+  type BrowserInformedApprovalEvidence,
+} from "@/runtime/browser/action-evidence";
 
 export class BrowserServiceError extends Error {
   constructor(
@@ -292,13 +297,17 @@ export type BrowserAgentCommand =
   | { action: "tabs" }
   | { action: "downloads" };
 
-/** Closed, typed browser surface for server-owned Codex dynamic tools. */
-export async function executeBrowserAgentCommand(input: {
-  installationId: string;
-  userId: string;
-  threadId: string;
-  command: BrowserAgentCommand;
-}) {
+export type BrowserMutationCommand = Extract<
+  BrowserAgentCommand,
+  { action: "open" | "scroll" | "click" | "type" }
+>;
+
+function isBrowserMutation(command: BrowserAgentCommand): command is BrowserMutationCommand {
+  return command.action === "open" || command.action === "scroll" ||
+    command.action === "click" || command.action === "type";
+}
+
+async function agentRegistry(input: { installationId: string; userId: string }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
   await ensureBrowserEnabled(input.installationId, input.userId);
@@ -311,43 +320,72 @@ export async function executeBrowserAgentCommand(input: {
     }
     throw error;
   }
-  if (input.command.action === "open") {
-    await state.registry.agentNavigate(input.userId, input.threadId, input.command.url);
-    return { ok: true as const };
+  return state.registry;
+}
+
+/** Captures the exact page and target that a mutation approval describes. */
+export async function prepareBrowserAgentCommand(input: {
+  installationId: string;
+  userId: string;
+  threadId: string;
+  command: BrowserMutationCommand;
+}): Promise<BrowserActionResourceSnapshot> {
+  const registry = await agentRegistry(input);
+  return registry.prepareAgentMutation(input.userId, input.threadId, input.command);
+}
+
+/** Closed, typed browser surface for server-owned Codex dynamic tools. */
+export async function executeBrowserAgentCommand(input: {
+  installationId: string;
+  userId: string;
+  threadId: string;
+  command: BrowserAgentCommand;
+  approvalEvidence?: BrowserInformedApprovalEvidence;
+  expectedResource?: BrowserActionResourceSnapshot;
+}) {
+  const registry = await agentRegistry(input);
+  if (isBrowserMutation(input.command)) {
+    if (!input.approvalEvidence || !input.expectedResource) {
+      throw new BrowserServiceError(
+        "BROWSER_ACTION_APPROVAL_REQUIRED",
+        "Browser mutation requires informed approval evidence.",
+        409,
+      );
+    }
+    const evidence = assertBrowserApprovalEvidence(input.approvalEvidence);
+    if (evidence.installationId !== input.installationId || evidence.userId !== input.userId ||
+      evidence.actionKind !== input.command.action || evidence.resource.scopeId !== input.threadId ||
+      evidence.resource.kind !== input.expectedResource.kind ||
+      evidence.resource.origin !== input.expectedResource.origin ||
+      evidence.resource.scopeId !== input.expectedResource.scopeId ||
+      evidence.resource.generation !== input.expectedResource.generation ||
+      evidence.resource.version !== input.expectedResource.version ||
+      evidence.resource.locatorHash !== input.expectedResource.locatorHash ||
+      Date.parse(evidence.expiresAt) <= Date.now()) {
+      throw new BrowserServiceError(
+        "BROWSER_ACTION_EVIDENCE_MISMATCH",
+        "Browser action evidence is expired or does not match this execution.",
+        409,
+      );
+    }
+    return registry.executeAgentMutation(
+      input.userId,
+      input.threadId,
+      input.command,
+      input.expectedResource,
+      evidence.evidenceFingerprint,
+    );
   }
   if (input.command.action === "read") {
-    return state.registry.readPage(input.userId, input.threadId);
+    return registry.readPage(input.userId, input.threadId);
   }
   if (input.command.action === "screenshot") {
-    return state.registry.agentCaptureFrame(input.userId, input.threadId);
-  }
-  if (input.command.action === "scroll") {
-    await state.registry.agentScroll(
-      input.userId,
-      input.threadId,
-      input.command.deltaX,
-      input.command.deltaY,
-    );
-    return { ok: true as const };
-  }
-  if (input.command.action === "click") {
-    await state.registry.agentClick(input.userId, input.threadId, input.command.selector);
-    return { ok: true as const };
-  }
-  if (input.command.action === "type") {
-    await state.registry.agentType(
-      input.userId,
-      input.threadId,
-      input.command.selector,
-      input.command.text,
-      input.command.clear,
-    );
-    return { ok: true as const };
+    return registry.agentCaptureFrame(input.userId, input.threadId);
   }
   if (input.command.action === "tabs") {
-    return state.registry.listTabs(input.userId, input.threadId);
+    return registry.listTabs(input.userId, input.threadId);
   }
-  return state.registry.listDownloads(input.userId, input.threadId);
+  return registry.listDownloads(input.userId, input.threadId);
 }
 
 /** Stops only the selected employee browser without creating a service instance. */
