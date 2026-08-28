@@ -150,17 +150,20 @@ and restart-count readback.
 Using David and Arnau's already provisioned real identities, without recording
 credentials:
 
-1. verify each user reaches only their own workspace;
-2. create or select a private project/thread for each user;
-3. run one real Codex turn for each and record thread ID, runtime turn ID,
+1. inspect the login DOM and server capability response for QA/demo-only
+   markers or shortcuts; explicitly adjudicate the `data-installation="company-qa"`
+   marker reported in the master readback before proceeding;
+2. verify each user reaches only their own workspace;
+3. create or select a private project/thread for each user;
+4. run one real Codex turn for each and record thread ID, runtime turn ID,
    first-text time, terminal time and persisted terminal state;
-4. keep one thread active while the other user works to detect mixing;
-5. refresh/reconnect and verify the exact messages persist;
-6. attempt one unauthorized cross-user read/action and record the expected
+5. keep one thread active while the other user works to detect mixing;
+6. refresh/reconnect and verify the exact messages persist;
+7. attempt one unauthorized cross-user read/action and record the expected
    denial plus audit event;
-7. perform one approved bounded real action, then read its final URL, artifact
+8. perform one approved bounded real action, then read its final URL, artifact
    hash or publication receipt from the controlling store;
-8. correlate structured logs/audit with installation, user, thread, turn and
+9. correlate structured logs/audit with installation, user, thread, turn and
    release SHA.
 
 Redact credentials, tokens, cookies, private prompts and customer document
@@ -186,7 +189,7 @@ images, volumes, journals or backups during the rehearsal.
 
 ## 9. Current baseline evidence, not candidate acceptance
 
-At 2026-08-28 12:55 Europe/Madrid:
+At 2026-08-28 13:20 Europe/Madrid:
 
 - `origin/main`: `9fe848ae84ca808533dceb1c8a43779abe1e221a`;
 - the one-commit delta from `390bbb06…` changes only the Arnall deploy gateway
@@ -204,5 +207,8 @@ At 2026-08-28 12:55 Europe/Madrid:
 - live and ready returned HTTP 200; readiness reported 35.97% disk free and
   all storage/toolchain checks passing;
 - root redirected to `/login` with HTTP 307;
+- master readback reported anonymous `/api/auth/session` HTTP 401 and login DOM
+  `data-installation="company-qa"`; re-check both on the candidate because the
+  marker remains an acceptance risk, not a passed product gate;
 - this is the pre-integration baseline only. It does not validate the pending
   work-parity merge, dirty fixups, future workstream handoffs or final rollback.
