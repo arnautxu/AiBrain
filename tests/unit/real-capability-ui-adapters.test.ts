@@ -5,6 +5,8 @@ import {
 } from "@/ui/document-ui-adapter";
 import {
   controlBrowser,
+  BrowserUiRequestError,
+  isRecoverableBrowserViewerError,
   issueBrowserViewerToken,
   parseBrowserStatus,
   readBrowserFrame,
@@ -174,6 +176,21 @@ describe("browser UI adapter", () => {
     await expect(readBrowserFrame(threadId, issued.token)).resolves.toBeInstanceOf(Blob);
     await expect(sendBrowserViewerCommand(threadId, issued.token, { action: "navigate", url: "https://example.com/" })).resolves.toBeUndefined();
     await expect(controlBrowser("takeover")).resolves.toMatchObject({ state: { lifecycle: "ready" } });
+  });
+
+  it("classifies a fenced viewer session as recoverable without hiding authorization failures", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      error: "La sessió del visor ha canviat. S’està reconnectant.",
+      code: "BROWSER_GATEWAY_BINDING_INVALID",
+      retryable: true,
+    }, { status: 409 })));
+    const fenced = await readBrowserFrame(threadId, "stale-token").catch((error: unknown) => error);
+    expect(fenced).toBeInstanceOf(BrowserUiRequestError);
+    expect(fenced).toMatchObject({ status: 409, code: "BROWSER_GATEWAY_BINDING_INVALID", retryable: true });
+    expect(isRecoverableBrowserViewerError(fenced)).toBe(true);
+
+    const forbidden = new BrowserUiRequestError("Forbidden", 403, "BROWSER_GATEWAY_SIGNATURE_INVALID", false);
+    expect(isRecoverableBrowserViewerError(forbidden)).toBe(false);
   });
 });
 

@@ -144,17 +144,16 @@ main() {
 
   app_tag="${APP_REPOSITORY}:${revision}"
   egress_tag="${EGRESS_REPOSITORY}:${revision}"
-  docker build --pull --target runtime --build-arg "AIBRAIN_REVISION=${revision}" --tag "$app_tag" "$release_dir"
-  docker build --pull --target egress-gateway --build-arg "AIBRAIN_REVISION=${revision}" --tag "$egress_tag" "$release_dir"
+  DOCKER_BUILDKIT=1 docker build --pull --target runtime --build-arg "AIBRAIN_REVISION=${revision}" --tag "$app_tag" "$release_dir"
+  DOCKER_BUILDKIT=1 docker build --pull --target egress-gateway --build-arg "AIBRAIN_REVISION=${revision}" --tag "$egress_tag" "$release_dir"
   docker push "$app_tag"
   docker push "$egress_tag"
   app_image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$app_tag")"
   egress_image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$egress_tag")"
   [[ "$app_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "application image digest is unavailable"
   [[ "$egress_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "egress image digest is unavailable"
-  # Docker's compatibility builder materializes intermediate images. Remove
-  # only the dangling IDs created after this deployment started, before the
-  # release manager evaluates the storage-aware healthcheck.
+  # Keep compatibility cleanup for hosts upgrading from the legacy builder.
+  # BuildKit avoids materializing one full dangling image per Dockerfile step.
   remove_new_dangling_images "$dangling_before" "$dangling_after"
 
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"

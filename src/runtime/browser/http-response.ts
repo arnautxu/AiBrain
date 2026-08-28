@@ -20,9 +20,15 @@ export function browserRuntimeError(error: unknown, fallback: string) {
     );
   }
   if (error instanceof BrowserGatewayTokenError) {
+    const recoverable = error.code === "BROWSER_GATEWAY_BINDING_INVALID" ||
+      error.code === "BROWSER_GATEWAY_TOKEN_EXPIRED";
     return NextResponse.json(
-      { error: "La sessió del visor no és vàlida.", code: error.code, retryable: false },
-      { status: error.code === "BROWSER_GATEWAY_TOKEN_EXPIRED" ? 401 : 403 },
+      { error: "La sessió del visor ha canviat. S’està reconnectant.", code: error.code, retryable: recoverable },
+      {
+        status: error.code === "BROWSER_GATEWAY_TOKEN_EXPIRED"
+          ? 401
+          : recoverable ? 409 : 403,
+      },
     );
   }
   const code = error && typeof error === "object" && "code" in error

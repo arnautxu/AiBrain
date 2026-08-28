@@ -15,6 +15,7 @@ import {
 } from "@phosphor-icons/react";
 import {
   controlBrowser,
+  isRecoverableBrowserViewerError,
   issueBrowserViewerToken,
   readBrowserFrame,
   readBrowserStatus,
@@ -46,6 +47,7 @@ export function BrowserPanel({ threadId, open, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const frameUrlRef = useRef<string | null>(null);
+  const viewerTokenRef = useRef<BrowserViewerToken | null>(null);
 
   const replaceFrame = useCallback((blob: Blob) => {
     const next = URL.createObjectURL(blob);
@@ -58,11 +60,45 @@ export function BrowserPanel({ threadId, open, onClose }: {
     if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
   }, []);
 
+  useEffect(() => {
+    viewerTokenRef.current = viewerToken;
+  }, [viewerToken]);
+
   const refreshStatus = useCallback(async (signal?: AbortSignal) => {
     const next = await readBrowserStatus(signal);
     setStatus(next);
     return next;
   }, []);
+
+  const renewViewerToken = useCallback(async (control: boolean, signal?: AbortSignal) => {
+    if (!threadId) throw new Error("Abre una conversación antes de iniciar Computer Use.");
+    const current = await refreshStatus(signal);
+    if (current.state.lifecycle !== "ready" && current.state.lifecycle !== "human-control") {
+      throw new Error("El navegador privado se está recuperando.");
+    }
+    if (control && current.state.lifecycle !== "human-control") {
+      throw new Error("Vuelve a tomar el control del navegador para continuar.");
+    }
+    const next = await issueBrowserViewerToken(threadId, control, signal);
+    viewerTokenRef.current = next;
+    setViewerToken(next);
+    return next;
+  }, [refreshStatus, threadId]);
+
+  const withViewerRecovery = useCallback(async <Result,>(
+    control: boolean,
+    operation: (token: BrowserViewerToken) => Promise<Result>,
+  ) => {
+    const currentToken = viewerTokenRef.current;
+    if (!currentToken) throw new Error("El visor privado se está conectando.");
+    try {
+      return await operation(currentToken);
+    } catch (reason) {
+      if (!isRecoverableBrowserViewerError(reason)) throw reason;
+      const renewed = await renewViewerToken(control);
+      return operation(renewed);
+    }
+  }, [renewViewerToken]);
 
   useEffect(() => {
     if (!open) return;
@@ -90,7 +126,10 @@ export function BrowserPanel({ threadId, open, onClose }: {
     const controller = new AbortController();
     const refresh = () => {
       void issueBrowserViewerToken(threadId, status.state.lifecycle === "human-control", controller.signal)
-        .then(setViewerToken)
+        .then((next) => {
+          viewerTokenRef.current = next;
+          setViewerToken(next);
+        })
         .catch((reason: unknown) => {
           if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido abrir el visor.");
         });
@@ -110,7 +149,14 @@ export function BrowserPanel({ threadId, open, onClose }: {
     const refresh = () => {
       void readBrowserFrame(threadId, viewerToken.token, controller.signal)
         .then(replaceFrame)
-        .catch(() => undefined);
+        .catch((reason: unknown) => {
+          if (controller.signal.aborted || !isRecoverableBrowserViewerError(reason)) return;
+          void renewViewerToken(status?.state.lifecycle === "human-control", controller.signal)
+            .then((renewed) => readBrowserFrame(threadId, renewed.token, controller.signal))
+            .then(replaceFrame)
+            .then(() => setError(null))
+            .catch(() => undefined);
+        });
     };
     refresh();
     const interval = window.setInterval(refresh, 1_200);
@@ -118,7 +164,7 @@ export function BrowserPanel({ threadId, open, onClose }: {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [open, replaceFrame, status?.state.lifecycle, threadId, viewerToken]);
+  }, [open, renewViewerToken, replaceFrame, status?.state.lifecycle, threadId, viewerToken]);
 
   useEffect(() => {
     if (!open || status?.state.lifecycle !== "human-control") return;
@@ -134,7 +180,10 @@ export function BrowserPanel({ threadId, open, onClose }: {
     try {
       const next = await controlBrowser(action);
       setStatus(next);
-      if (action === "stop" || action === "release") setViewerToken(null);
+      if (action === "stop" || action === "release") {
+        viewerTokenRef.current = null;
+        setViewerToken(null);
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
     } finally {
@@ -147,7 +196,8 @@ export function BrowserPanel({ threadId, open, onClose }: {
     setBusy("navigate");
     setError(null);
     try {
-      await sendBrowserViewerCommand(threadId, viewerToken.token, { action: "navigate", url: address.trim() });
+      await withViewerRecovery(true, (token) =>
+        sendBrowserViewerCommand(threadId, token.token, { action: "navigate", url: address.trim() }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido abrir esa dirección.");
     } finally {
@@ -165,10 +215,11 @@ export function BrowserPanel({ threadId, open, onClose }: {
     setBusy("input");
     try {
       for (const pointerEvent of ["mousePressed", "mouseReleased"] as const) {
-        await sendBrowserViewerCommand(threadId, viewerToken.token, {
-          action: "input",
-          command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
-        });
+        await withViewerRecovery(true, (token) =>
+          sendBrowserViewerCommand(threadId, token.token, {
+            action: "input",
+            command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
+          }));
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido enviar el clic.");
@@ -181,14 +232,16 @@ export function BrowserPanel({ threadId, open, onClose }: {
     if (!threadId || !viewerToken || status?.state.lifecycle !== "human-control" || event.key.length > 128) return;
     event.preventDefault();
     try {
-      await sendBrowserViewerCommand(threadId, viewerToken.token, {
-        action: "input",
-        command: { kind: "key", event: "keyDown", key: event.key, code: event.code },
-      });
-      await sendBrowserViewerCommand(threadId, viewerToken.token, {
-        action: "input",
-        command: { kind: "key", event: "keyUp", key: event.key, code: event.code },
-      });
+      await withViewerRecovery(true, (token) =>
+        sendBrowserViewerCommand(threadId, token.token, {
+          action: "input",
+          command: { kind: "key", event: "keyDown", key: event.key, code: event.code },
+        }));
+      await withViewerRecovery(true, (token) =>
+        sendBrowserViewerCommand(threadId, token.token, {
+          action: "input",
+          command: { kind: "key", event: "keyUp", key: event.key, code: event.code },
+        }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido enviar la tecla.");
     }

@@ -23,6 +23,18 @@ export type BrowserUiStatus = {
 export type BrowserViewerToken = { token: string; browserSessionId: string };
 export type BrowserControlAction = "start" | "stop" | "takeover" | "release" | "heartbeat";
 
+export class BrowserUiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code: string | null,
+    readonly retryable: boolean,
+  ) {
+    super(message);
+    this.name = "BrowserUiRequestError";
+  }
+}
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const LIFECYCLES = new Set<BrowserLifecycle>(["stopped", "starting", "ready", "human-control", "recovering", "degraded"]);
 const CONTROLLERS = new Set<BrowserController>(["none", "agent", "human"]);
@@ -77,16 +89,26 @@ export function parseBrowserStatus(value: unknown): BrowserUiStatus | null {
   };
 }
 
-async function errorMessage(response: Response) {
+async function responseError(response: Response) {
   const body = record(await response.json().catch(() => null));
   const message = typeof body?.error === "string" ? body.error : "El navegador privado no está disponible.";
   const retryAfter = response.headers.get("Retry-After");
-  return response.status === 429 && retryAfter ? `${message} Reinténtalo en ${retryAfter} s.` : message;
+  return new BrowserUiRequestError(
+    response.status === 429 && retryAfter ? `${message} Reinténtalo en ${retryAfter} s.` : message,
+    response.status,
+    typeof body?.code === "string" ? body.code : null,
+    body?.retryable === true,
+  );
+}
+
+export function isRecoverableBrowserViewerError(error: unknown) {
+  return error instanceof BrowserUiRequestError && error.retryable &&
+    (error.status === 401 || error.status === 409 || error.status === 503);
 }
 
 export async function readBrowserStatus(signal?: AbortSignal) {
   const response = await fetch("/api/runtime/browser", { cache: "no-store", signal });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await responseError(response);
   const status = parseBrowserStatus(await response.json().catch(() => null));
   if (!status) throw new Error("El estado del navegador no cumple el contrato seguro.");
   return status;
@@ -99,7 +121,7 @@ export async function controlBrowser(action: BrowserControlAction, signal?: Abor
     body: JSON.stringify({ action }),
     signal,
   });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await responseError(response);
   const status = parseBrowserStatus(await response.json().catch(() => null));
   if (!status) throw new Error("El control del navegador no cumple el contrato seguro.");
   return status;
@@ -116,7 +138,7 @@ export async function issueBrowserViewerToken(threadId: string, control: boolean
     }),
     signal,
   });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await responseError(response);
   const body = record(await response.json().catch(() => null));
   if (!body || typeof body.token !== "string" || body.token.length < 20 ||
       typeof body.browserSessionId !== "string" || !UUID.test(body.browserSessionId)) {
@@ -131,7 +153,7 @@ export async function readBrowserFrame(threadId: string, token: string, signal?:
     cache: "no-store",
     signal,
   });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await responseError(response);
   if (response.headers.get("Content-Type") !== "image/png") {
     throw new Error("El visor ha devuelto un formato inesperado.");
   }
@@ -150,5 +172,5 @@ export async function sendBrowserViewerCommand(
     body: JSON.stringify({ threadId, ...command }),
     signal,
   });
-  if (!response.ok) throw new Error(await errorMessage(response));
+  if (!response.ok) throw await responseError(response);
 }
