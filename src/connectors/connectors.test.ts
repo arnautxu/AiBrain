@@ -17,10 +17,14 @@ import {
 } from "@/connectors";
 import {
   CODEX_MANAGED_APP_CONNECTOR_ID,
+  CODEX_MANAGED_APP_EXECUTE_SCOPE,
   CODEX_MANAGED_APP_READ_SCOPE,
   CodexManagedAppProvider,
   codexManagedAppDefinition,
 } from "@/connectors/codex-managed-app-provider";
+import { CodexManagedAppAction } from "@/connectors/codex-managed-app-action";
+import type { CodexManagedAppActionConfig } from "@/config/installation-schema";
+import { FileApprovalStore } from "@/runtime/approval-store";
 
 const INSTALLATION_ID = "example-lab";
 const USER_ONE = "00000000-0000-4000-8000-000000000001";
@@ -324,5 +328,129 @@ describe("Codex managed App connector", () => {
         statusCode: "CODEX_APP_DISABLED",
         effectiveOperations: [],
       })]);
+  });
+});
+
+describe("Codex managed App action", () => {
+  const config: CodexManagedAppActionConfig = {
+    appId: "app-arnall-files",
+    server: "arnall-erp",
+    tool: "sync-confirmed-export",
+    arguments: { mode: "approved" },
+    correlationField: "executionId",
+    readback: {
+      server: "arnall-erp",
+      tool: "read-sync-status",
+      arguments: { detail: "status" },
+      correlationArgument: "executionId",
+    },
+  };
+
+  async function actionFixture(overrides: {
+    binding?: Partial<CredentialBinding>;
+    responses?: unknown[];
+  } = {}) {
+    const { root, dataRoot, store } = await fixture();
+    const usersRoot = path.join(root, "users");
+    await mkdir(path.join(usersRoot, USER_ONE), { recursive: true, mode: 0o700 });
+    const approvals = new FileApprovalStore({ installationId: INSTALLATION_ID, userId: USER_ONE, usersRoot });
+    await store.put({
+      schemaVersion: 1,
+      connectorId: CODEX_MANAGED_APP_CONNECTOR_ID,
+      credentialRef: "codex-app:app-arnall-files",
+      installationId: INSTALLATION_ID,
+      userId: USER_ONE,
+      scopes: [CODEX_MANAGED_APP_READ_SCOPE, CODEX_MANAGED_APP_EXECUTE_SCOPE],
+      status: "active",
+      version: 1,
+      ...overrides.binding,
+    });
+    const responses = overrides.responses ?? [
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { structuredContent: { executionId: "execution-1" }, content: [] },
+      { structuredContent: { executionId: "execution-1" }, content: [] },
+    ];
+    const request = vi.fn(async () => {
+      const response = responses.shift();
+      if (response instanceof Error) throw response;
+      return response;
+    });
+    const action = new CodexManagedAppAction(
+      store,
+      approvals,
+      principal(),
+      config,
+      async () => ({ request } as never),
+      SHA_A,
+      SHA_B,
+    );
+    const locator = {
+      installationId: INSTALLATION_ID,
+      userId: USER_ONE,
+      threadId: "thread-connector-action",
+      turnId: "turn-connector-action",
+      itemId: "item-connector-action",
+      approvalId: "approval-connector-action",
+    };
+    return { action, approvals, locator, request, dataRoot };
+  }
+
+  it("executes the fixed MCP action once after an exact approved receipt and correlated readback", async () => {
+    const { action, approvals, locator, request } = await actionFixture();
+    const prepared = await action.prepare(locator);
+    await expect(approvals.approveConnectorApproval(prepared.receipt)).resolves.toMatchObject({ outcome: "approved" });
+    await expect(action.execute(prepared)).resolves.toMatchObject({ outcome: "executed", value: { correlation: "execution-1" } });
+    expect(request).toHaveBeenNthCalledWith(3, "mcpServer/tool/call", {
+      threadId: locator.threadId,
+      server: "arnall-erp",
+      tool: "sync-confirmed-export",
+      arguments: { mode: "approved" },
+    }, "connector-codex-action", 10_000);
+    expect(request).toHaveBeenNthCalledWith(4, "mcpServer/tool/call", {
+      threadId: locator.threadId,
+      server: "arnall-erp",
+      tool: "read-sync-status",
+      arguments: { detail: "status", executionId: "execution-1" },
+    }, "connector-codex-readback", 10_000);
+    await expect(action.execute(prepared)).resolves.toMatchObject({ outcome: "replayed" });
+    expect(request).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(prepared)).not.toContain("credentialRef");
+    expect(JSON.stringify(prepared)).not.toContain("sync-confirmed-export");
+  });
+
+  it("fails closed for another user and missing execute scope before calling a tool", async () => {
+    const crossUser = await actionFixture({ binding: { userId: USER_TWO } });
+    await expect(crossUser.action.prepare(crossUser.locator))
+      .rejects.toMatchObject({ code: "CONNECTOR_BINDING_NOT_FOUND" });
+    expect(crossUser.request).not.toHaveBeenCalled();
+
+    const missingScope = await actionFixture({ binding: { scopes: [CODEX_MANAGED_APP_READ_SCOPE] } });
+    await expect(missingScope.action.prepare(missingScope.locator))
+      .rejects.toMatchObject({ code: "CONNECTOR_SCOPE_MISSING" });
+    expect(missingScope.request).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks the receipt failed when the provider errors or readback is absent", async () => {
+    const providerError = await actionFixture({ responses: [
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { isError: true, content: [] },
+    ] });
+    const first = await providerError.action.prepare(providerError.locator);
+    await providerError.approvals.approveConnectorApproval(first.receipt);
+    await expect(providerError.action.execute(first)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
+
+    const absentReadback = await actionFixture({ responses: [
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
+      { structuredContent: { executionId: "execution-2" }, content: [] },
+      { structuredContent: {}, content: [] },
+    ] });
+    const second = await absentReadback.action.prepare(absentReadback.locator);
+    await absentReadback.approvals.approveConnectorApproval(second.receipt);
+    await expect(absentReadback.action.execute(second)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
+    await expect(absentReadback.approvals.readConnectorApproval(absentReadback.locator))
+      .resolves.toMatchObject({ status: "failed" });
   });
 });

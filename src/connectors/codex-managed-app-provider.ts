@@ -9,9 +9,11 @@ import {
   type CredentialBinding,
 } from "@/connectors/contracts";
 import type { ConnectorCredentialProvider, RegisteredConnector } from "@/connectors/registry";
+import type { McpServerToolCallParams } from "../../contracts/codex/0.149.1/types/v2/McpServerToolCallParams";
 
 export const CODEX_MANAGED_APP_CONNECTOR_ID = "codex-managed-app";
 export const CODEX_MANAGED_APP_READ_SCOPE = "app.installed.read";
+export const CODEX_MANAGED_APP_EXECUTE_SCOPE = "mcp.tool.call";
 
 const CREDENTIAL_REF_PREFIX = "codex-app:";
 const APP_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -24,6 +26,11 @@ export const codexManagedAppDefinition: ConnectorDefinition = {
     requiredScopes: [CODEX_MANAGED_APP_READ_SCOPE],
     mutating: false,
     approval: "never",
+  }, {
+    id: "execute-allowlisted-action",
+    requiredScopes: [CODEX_MANAGED_APP_READ_SCOPE, CODEX_MANAGED_APP_EXECUTE_SCOPE],
+    mutating: true,
+    approval: "required",
   }],
 };
 
@@ -31,6 +38,12 @@ export type CodexInstalledAppTransport = {
   request(
     method: "app/installed",
     params: { forceRefresh: false },
+    purpose: string,
+    timeoutMs?: number,
+  ): Promise<unknown>;
+  request(
+    method: "mcpServer/tool/call",
+    params: McpServerToolCallParams,
     purpose: string,
     timeoutMs?: number,
   ): Promise<unknown>;
@@ -50,6 +63,10 @@ function parseCredentialRef(credentialRef: string) {
     throw new ConnectorError("CODEX_APP_CREDENTIAL_REF_INVALID", "Codex app credential reference is invalid.");
   }
   return appId;
+}
+
+export function codexManagedAppIdForBinding(credentialRef: string) {
+  return parseCredentialRef(credentialRef);
 }
 
 function parseInstalledApps(value: unknown): InstalledApp[] {

@@ -74,6 +74,21 @@ Shared Codex authentication used for the current Arnall QA phase is a temporary
 runtime configuration choice; it does not change these connector isolation
 rules and should not be reused for customer email or CRM identities.
 
+## Arnall Codex MCP action gate
+
+The only implemented mutation path is disabled unless the installation supplies
+one reviewed `connectors.codexManagedAppAction` manifest. It must name one
+already callable Codex App (`appId`), one fixed MCP `server` and `tool`, static
+non-secret arguments, and one fixed readback tool with the configured
+correlation field. Browser requests cannot choose any of those values.
+
+This is the sole missing Arnall input: one approved action manifest for a
+personal Codex App/MCP connection. Its binding needs only `app.installed.read`
+and `mcp.tool.call`; the real provider OAuth scopes remain the App owner's
+choice and must not be invented here. Until that manifest and personal binding
+are present, the UI hides the connector and the API returns
+`CODEX_APP_ACTION_NOT_CONFIGURED`.
+
 ## Adding a connector
 
 1. Define typed read and mutation operations.
