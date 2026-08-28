@@ -198,7 +198,11 @@ restricted deploy returns successfully. The workflow supplies the immutable
 source, rechecks live/ready, resolves the running app and ingress-gateway IDs
 through the active release Compose file, and atomically stores a private
 `acceptance-release-readbacks.json` package with the five relative evidence
-paths and hashes. It prints neither the artifacts nor Docker output.
+paths, hashes and CI run ID. It prints neither the artifacts nor Docker output.
+Before receiving an archive, the deploy gateway also verifies that the host
+Node runtime can execute the typed collector. A retry never overwrites this
+directory: it succeeds only after revalidating the package, all five hashes,
+the requested SHA and CI run ID; any mismatch is fail-closed.
 
 ```bash
 npm run acceptance:verify -- --manifest /private/evidence/manifest.json \
