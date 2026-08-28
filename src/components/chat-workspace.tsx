@@ -48,6 +48,7 @@ import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-cont
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
+import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -105,7 +106,7 @@ type ChatWorkspaceProps = {
   onExportConversation: (format: "markdown" | "json") => void;
   onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
   managedAppActionEnabled: boolean;
-  managedAppApprovalId: string | null;
+  managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   showAdvancedControls: boolean;
 };
@@ -238,6 +239,7 @@ function AssistantMessage({
   onFreezePublication,
   onDecidePublication,
   managedAppAction,
+  managedAppApprovalKeys,
 }: {
   message: ChatMessage;
   showActivity: boolean;
@@ -255,8 +257,8 @@ function AssistantMessage({
     enabled: boolean;
     threadId: string;
     onPrepared: (descriptor: ManagedAppActionDescriptor) => void;
-    approvalId: string | null;
   } | null;
+  managedAppApprovalKeys: readonly string[];
 }) {
   const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.sources?.length) || Boolean(message.toolResults?.length);
@@ -264,8 +266,8 @@ function AssistantMessage({
 
   return (
     <article className="message-enter group">
-      {showActivity || managedAppAction ? (
-        <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} />
+      {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
+        <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -400,7 +402,7 @@ export function ChatWorkspace({
   onExportConversation,
   onResultAction,
   managedAppActionEnabled,
-  managedAppApprovalId,
+  managedAppApprovalKeys,
   onManagedAppPrepared,
   showAdvancedControls,
 }: ChatWorkspaceProps) {
@@ -616,11 +618,11 @@ export function ChatWorkspace({
                       publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
                       onFreezePublication={onFreezePublication}
                       onDecidePublication={onDecidePublication}
+                      managedAppApprovalKeys={managedAppApprovalKeys}
                       managedAppAction={managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
                         enabled: true,
                         threadId: thread.id,
                         onPrepared: onManagedAppPrepared,
-                        approvalId: managedAppApprovalId,
                       } : null}
                     />
                   )}

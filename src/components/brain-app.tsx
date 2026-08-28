@@ -38,9 +38,11 @@ import {
 } from "@/lib/chat-contract";
 import {
   loadManagedAppCapability,
+  managedAppActionKey,
   resolveManagedAppAction,
   type ManagedAppActionDescriptor,
   type ManagedAppActionOutcome,
+  type ManagedAppActionTarget,
 } from "@/ui/codex-managed-app-ui";
 import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
 import {
@@ -124,11 +126,40 @@ type StoredSelection = {
   threadByProject: Record<string, string>;
 };
 
-type PendingManagedAppAction = {
-  threadId: string;
-  messageId: string;
-  descriptor: ManagedAppActionDescriptor;
-};
+export type ManagedAppActionRegistry = Readonly<Record<string, ManagedAppActionDescriptor>>;
+
+export function managedAppApprovalKey(locator: Pick<ManagedAppActionTarget, "threadId" | "turnId" | "itemId" | "approvalId"> | ApprovalItem) {
+  return managedAppActionKey({
+    threadId: locator.threadId,
+    turnId: locator.turnId,
+    itemId: locator.itemId,
+    approvalId: "approvalId" in locator ? locator.approvalId : locator.id,
+  });
+}
+
+export function rememberManagedAppAction(
+  registry: ManagedAppActionRegistry,
+  descriptor: ManagedAppActionDescriptor,
+): ManagedAppActionRegistry {
+  return { ...registry, [managedAppApprovalKey(descriptor.locator)]: descriptor };
+}
+
+export function managedAppActionForApproval(
+  registry: ManagedAppActionRegistry,
+  approval: ApprovalItem,
+) {
+  return registry[managedAppApprovalKey(approval)] ?? null;
+}
+
+export function forgetManagedAppAction(
+  registry: ManagedAppActionRegistry,
+  approval: ApprovalItem,
+): ManagedAppActionRegistry {
+  const key = managedAppApprovalKey(approval);
+  if (!registry[key]) return registry;
+  const { [key]: _removed, ...retained } = registry;
+  return retained;
+}
 
 function managedAppOutcomeResult(approvalId: string, outcome: ManagedAppActionOutcome): ToolResult {
   const completed = outcome === "executed" || outcome === "replayed";
@@ -492,7 +523,7 @@ export function BrainApp({
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const [managedAppAvailable, setManagedAppAvailable] = useState(false);
-  const [pendingManagedAppAction, setPendingManagedAppAction] = useState<PendingManagedAppAction | null>(null);
+  const [managedAppActions, setManagedAppActions] = useState<ManagedAppActionRegistry>({});
   const [clientTurnReadbacks, setClientTurnReadbacks] = useState<Record<string, ClientTurnPerformanceReadback>>({});
   const threadByProjectRef = useRef<Record<string, string>>({});
   const turnControllersRef = useRef(new Map<string, {
@@ -577,10 +608,6 @@ export function BrainApp({
   useEffect(() => {
     activeSelectionRef.current = { projectId: activeProjectId, threadId: activeThreadId };
   }, [activeProjectId, activeThreadId]);
-
-  useEffect(() => {
-    setPendingManagedAppAction((current) => current?.threadId === activeThreadId ? current : null);
-  }, [activeThreadId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -1457,24 +1484,23 @@ export function BrainApp({
     decision: ApprovalDecision,
   ) => {
     if (!activeThreadId) return;
-    const pendingManaged = pendingManagedAppAction;
-    if (pendingManaged && pendingManaged.descriptor.approval.id === selectedApproval.id) {
-      if (pendingManaged.threadId !== activeThreadId || pendingManaged.messageId !== messageId ||
-          pendingManaged.descriptor.locator.threadId !== activeThreadId ||
-          pendingManaged.descriptor.locator.turnId !== messageId) {
-        setPendingManagedAppAction(null);
+    const managedAppAction = managedAppActionForApproval(managedAppActions, selectedApproval);
+    if (managedAppAction) {
+      if (managedAppAction.locator.threadId !== activeThreadId || managedAppAction.locator.turnId !== messageId) {
         setNotice("La acción conectada ya no corresponde a esta conversación.");
         return;
       }
-      const result = await resolveManagedAppAction(fetch, pendingManaged.descriptor, {
+      const result = await resolveManagedAppAction(fetch, managedAppAction, {
         threadId: activeThreadId,
         turnId: messageId,
-      }, decision).catch(() => null);
-      setPendingManagedAppAction(null);
-      if (!result) {
-        setNotice("La acción conectada no se ha podido confirmar.");
+      }, decision);
+      if (result.state === "recoverable") {
+        setNotice(result.stage === "current-thread"
+          ? "Vuelve a la conversación original para resolver esta acción conectada."
+          : "La acción conectada sigue pendiente. Puedes volver a intentarlo.");
         return;
       }
+      setManagedAppActions((current) => forgetManagedAppAction(current, selectedApproval));
       setThreads((current) => updateThreadMessage(current, activeThreadId, messageId, (message) => ({
         ...message,
         approvals: message.approvals.map((approval) => approval.id === selectedApproval.id ? result.approval : approval),
@@ -1513,7 +1539,7 @@ export function BrainApp({
           approval.id === selectedApproval.id ? { ...approval, status } : approval),
       }),
     ));
-  }, [activeThreadId, pendingManagedAppAction]);
+  }, [activeThreadId, managedAppActions]);
 
   const prepareManagedAppAction = useCallback((descriptor: ManagedAppActionDescriptor) => {
     if (!activeThreadId || descriptor.locator.threadId !== activeThreadId ||
@@ -1525,7 +1551,7 @@ export function BrainApp({
         descriptor.approval,
       ],
     })));
-    setPendingManagedAppAction({ threadId: activeThreadId, messageId: descriptor.locator.turnId, descriptor });
+    setManagedAppActions((current) => rememberManagedAppAction(current, descriptor));
   }, [activeThreadId]);
 
   const persistProjectPatch = useCallback(async (
@@ -1858,7 +1884,9 @@ export function BrainApp({
         onExportConversation={exportConversation}
         onResultAction={persistResultAction}
         managedAppActionEnabled={managedAppAvailable}
-        managedAppApprovalId={pendingManagedAppAction?.threadId === activeThreadId ? pendingManagedAppAction.descriptor.approval.id : null}
+        managedAppApprovalKeys={Object.values(managedAppActions)
+          .filter((descriptor) => descriptor.locator.threadId === activeThreadId)
+          .map((descriptor) => managedAppActionKey(descriptor.locator))}
         onManagedAppPrepared={prepareManagedAppAction}
         showAdvancedControls
       />

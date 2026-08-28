@@ -130,6 +130,21 @@ descriptor rejection, indeterminate visibility data and forbidden-field
 absence. This is local UI/contract evidence only: no Arnall manifest, binding,
 provider action or live readback was used.
 
+### Recovery safety
+
+The pending connector descriptor is retained in a client registry keyed by its
+complete thread, turn, item and approval locator. Visiting another thread does
+not downgrade the approval into a generic approval: returning to the original
+thread retains the same descriptor and fingerprint, and connector approvals
+never offer a session-wide permission. The registry is removed only after a
+valid terminal response.
+
+Network errors, non-OK responses and malformed approval or execute responses
+remain recoverable. They do not set a synthetic `denied` or `accepted` state,
+do not call the generic approval path, and allow a retry with the original
+descriptor. Focused local evidence is now 4 files and 14 tests, including the
+BrainApp registry, Activity rendering and adapter recovery cases.
+
 ## Adding a connector
 
 1. Define typed read and mutation operations.

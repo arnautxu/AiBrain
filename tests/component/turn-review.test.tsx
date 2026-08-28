@@ -119,7 +119,7 @@ describe("turn activity and Review", () => {
         }],
       }}
       onResolveApproval={vi.fn()}
-      managedAppAction={{ enabled: true, threadId: "thread-1", approvalId: "connector-approval", onPrepared: () => undefined }}
+      managedAppApprovalKeys={[JSON.stringify(["thread-1", "turn-1", "item-1", "connector-approval"])]}
     />);
 
     expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
