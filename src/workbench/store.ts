@@ -36,6 +36,8 @@ import {
   normalizeProjectMembers,
   resolveProjectAccess,
   resolveThreadAccess,
+  syncOwnSharedAccess,
+  syncSharedThreadAccess,
   threadSummary,
 } from "@/workbench/shared-access";
 
@@ -153,7 +155,9 @@ export async function getThread(session: AuthSession, threadId: string) {
 
 export async function createProject(session: AuthSession, name: string) {
   if (mode(session) === "filesystem") {
-    return (await filesystemStore(session)).createProject(session.user.id, name);
+    const project = await (await filesystemStore(session)).createProject(session.user.id, name);
+    await syncOwnSharedAccess(session);
+    return project;
   }
   return createDemoProject(session, name);
 }
@@ -172,7 +176,9 @@ export async function updateProject(
     const normalized = patch.sharing
       ? { ...patch, sharing: await normalizeProjectMembers(session, { ...access.project, sharing: patch.sharing }) }
       : patch;
-    return access.store.updateProject(access.ownerUserId, projectId, normalized);
+    const project = await access.store.updateProject(access.ownerUserId, projectId, normalized);
+    if (access.ownerUserId === session.user.id) await syncOwnSharedAccess(session);
+    return project;
   }
   assertWorkbenchId(projectId);
   return updateDemoProject(session, projectId, patch);
@@ -187,7 +193,9 @@ export async function createThread(
     assertFilesystemWorkbenchId(projectId);
     const access = await resolveProjectAccess(session, projectId);
     if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
-    return access.store.createThread(access.ownerUserId, projectId, title);
+    const thread = await access.store.createThread(access.ownerUserId, projectId, title);
+    await syncSharedThreadAccess(session, access.ownerUserId, projectId, thread.id);
+    return thread;
   }
   assertWorkbenchId(projectId);
   return createDemoThread(session, projectId, title);
@@ -217,7 +225,9 @@ export async function branchThread(
     assertFilesystemWorkbenchId(threadId);
     const access = await resolveThreadAccess(session, threadId);
     if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
-    return access.store.branchThread(access.ownerUserId, threadId, input);
+    const result = await access.store.branchThread(access.ownerUserId, threadId, input);
+    await syncSharedThreadAccess(session, access.ownerUserId, access.project.id, result.thread.id);
+    return result;
   }
   assertWorkbenchId(threadId);
   return branchDemoThread(session, threadId, input);

@@ -6,12 +6,15 @@ import type { AuthSession } from "@/auth/types";
 import { loadInstallationConfig } from "@/config/installation";
 import { UserProvisioner } from "@/users/provisioner";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
-import { loadSharedWorkbench, resolveProjectAccess } from "@/workbench/shared-access";
+import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
+import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
+import { createProject, createThread, updateProject } from "@/workbench/store";
 
 vi.mock("server-only", () => ({}));
 
 const ownerId = "00000000-0000-4000-8000-000000000011";
 const memberId = "00000000-0000-4000-8000-000000000012";
+const outsiderId = "00000000-0000-4000-8000-000000000014";
 let root = "";
 let previousConfig: string | undefined;
 
@@ -47,14 +50,32 @@ afterEach(async () => {
 });
 
 describe("shared project visibility", () => {
-  it("shows a shared project only to a provisioned member with matching email", async () => {
+  it("authorizes a durable shared-project grant before opening the owner snapshot", async () => {
     const installation = await loadInstallationConfig();
     const provisioner = new UserProvisioner(installation);
     await provisioner.provision({ userId: ownerId, email: "owner@example.com", displayName: "Owner" });
     await provisioner.provision({ userId: memberId, email: "member@example.com", displayName: "Member" });
-    const store = FileWorkbenchStore.fromInstallation(installation);
-    const project = await store.createProject(ownerId, "Plan compartido");
-    await store.updateProject(ownerId, project.id, {
+    await provisioner.provision({ userId: outsiderId, email: "outsider@example.com", displayName: "Outsider" });
+    const ownerSession: AuthSession = {
+      provider: "local",
+      user: { id: ownerId, name: "Owner", email: "owner@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const memberSession: AuthSession = {
+      provider: "local",
+      user: { id: memberId, name: "Member", email: "member@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const outsiderSession: AuthSession = {
+      provider: "local",
+      user: { id: outsiderId, name: "Outsider", email: "outsider@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const project = await createProject(ownerSession, "Plan compartido");
+    await updateProject(ownerSession, project.id, {
       sharing: {
         visibility: "shared",
         members: [{
@@ -67,17 +88,37 @@ describe("shared project visibility", () => {
         }],
       },
     });
-    await store.createThread(ownerId, project.id, "Conversación visible");
-    const session: AuthSession = {
-      provider: "local",
-      user: { id: memberId, name: "Member", email: "member@example.com" },
-      tenant: { id: "shared-qa", name: "Shared QA" },
-      expiresAt: "2026-08-29T00:00:00.000Z",
-    };
-    const snapshot = await loadSharedWorkbench(session);
+    const thread = await createThread(ownerSession, project.id, "Conversación visible");
+
+    const readSpy = vi.spyOn(
+      FileWorkbenchStore.prototype as unknown as { read: (userId: string) => unknown },
+      "read",
+    );
+    const outsiderSnapshot = await loadSharedWorkbench(outsiderSession);
+    expect(outsiderSnapshot.projects.some((item) => item.id === project.id)).toBe(false);
+    expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+
+    readSpy.mockClear();
+    await expect(resolveProjectAccess(outsiderSession, project.id)).rejects.toThrow("Projecte no trobat");
+    expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+
+    readSpy.mockClear();
+    const access = await resolveProjectAccess(memberSession, project.id);
+    expect(access.ownerUserId).toBe(ownerId);
+    expect(access.provenance).toMatchObject({ source: "shared-access-index" });
+    expect(readSpy.mock.calls.map(([userId]) => userId)).toContain(ownerId);
+
+    const threadAccess = await resolveThreadAccess(memberSession, thread.id);
+    expect(threadAccess.provenance).toMatchObject({ source: "shared-access-index" });
+
+    const snapshot = await loadSharedWorkbench(memberSession);
     expect(snapshot.projects.some((item) => item.id === project.id)).toBe(true);
     expect(snapshot.threads.some((item) => item.projectId === project.id)).toBe(true);
-    await expect(resolveProjectAccess({ ...session, user: { ...session.user, email: "other@example.com" } }, project.id))
+    await expect(resolveProjectAccess({ ...memberSession, user: { ...memberSession.user, email: "other@example.com" } }, project.id))
       .rejects.toThrow("Projecte no trobat");
+
+    const audit = await new FileSharedAccessIndex({ dataRoot: installation.paths.dataRoot, installationId: installation.installationId }).readAudit();
+    expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "denied" && entry.payload.actorUserId === outsiderId)).toBe(true);
+    expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
   });
 });
