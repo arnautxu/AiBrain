@@ -132,7 +132,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByText("Trabajar")).toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
     expect(screen.queryByRole("button", { name: /Abrir contexto/ })).not.toBeInTheDocument();
-    for (const removed of ["Nueva conversación", "Analizar información", "Crear un documento", "Resumir contenido", "Comprueba los datos importantes antes de usarlos.", "Planificar", "Preguntar", "↵ enviar"]) {
+    for (const removed of ["Analizar información", "Crear un documento", "Resumir contenido", "Comprueba los datos importantes antes de usarlos.", "Planificar", "Preguntar", "↵ enviar"]) {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
     expect(screen.queryByLabelText("Abrir preferencias")).not.toBeInTheDocument();

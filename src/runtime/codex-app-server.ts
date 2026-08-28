@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type {
+  ActivityFileChange,
   ActivityItem,
   ApprovalDecision,
   ApprovalItem,
@@ -181,12 +182,27 @@ function joinedStrings(value: unknown) {
   return strings.length > 0 ? strings.join("\n") : null;
 }
 
+function fileActivityChanges(changes: unknown): ActivityItem["files"] {
+  if (!Array.isArray(changes)) return undefined;
+  const files = changes.flatMap((change) => {
+    if (
+      !isRecord(change) ||
+      typeof change.path !== "string" ||
+      change.path.length === 0 ||
+      change.path.length > 2_048 ||
+      change.path.includes("\0") ||
+      !isRecord(change.kind)
+    ) return [];
+    const type = change.kind.type;
+    if (type !== "add" && type !== "update" && type !== "delete") return [];
+    return [{ path: change.path, change: type } satisfies ActivityFileChange];
+  });
+  return files.length > 0 ? files : undefined;
+}
+
 function fileChangeSummary(changes: unknown) {
-  if (!Array.isArray(changes)) return null;
-  const paths = changes.flatMap((change) =>
-    isRecord(change) && typeof change.path === "string" ? [change.path] : [],
-  );
-  return paths.length > 0 ? paths.join(", ") : null;
+  const files = fileActivityChanges(changes);
+  return files?.map((file) => file.path).join(", ") ?? null;
 }
 
 function compactRuntimeText(value: unknown, maximum: number) {
@@ -430,10 +446,12 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
   }
 
   if (item.type === "fileChange") {
+    const files = fileActivityChanges(item.changes);
     return {
       id: item.id,
       kind: "file",
       label: status === "running" ? "Preparant canvis" : "Canvis de fitxers",
+      ...(files ? { files } : {}),
       ...(fileChangeSummary(item.changes)
         ? { detail: fileChangeSummary(item.changes) ?? undefined }
         : {}),

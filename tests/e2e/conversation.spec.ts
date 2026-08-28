@@ -79,14 +79,19 @@ test("the existing chat route streams a complete turn and persists it in preview
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
-  const liveActivity = page.locator("details").filter({ has: page.locator("summary .activity-shimmer") });
-  await expect(liveActivity).not.toHaveAttribute("open", "");
-  await expect(liveActivity.locator("summary .activity-shimmer")).toHaveText(/Pensando|Editando archivos|Preparando el plan/);
-  await liveActivity.locator("summary").click();
-  await expect(liveActivity).toHaveAttribute("open", "");
-  await expect(liveActivity.getByText(/Pensando|Editando archivos|Preparando el plan/, { exact: true }).last()).toBeVisible();
+  const liveActivity = page.getByTestId("turn-thinking-steps").last();
+  const liveActivityTrigger = liveActivity.getByRole("button", { name: "Ocultar el proceso de trabajo" });
+  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "true");
+  await expect(liveActivityTrigger.locator(".thinking-steps-shimmer")).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
+  await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
+  const completedActivity = page.getByTestId("turn-thinking-steps").last();
+  const completedActivityTrigger = completedActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+  await expect(completedActivityTrigger).toHaveAttribute("aria-expanded", "false");
+  await completedActivityTrigger.click();
+  await expect(completedActivity.getByRole("button", { name: "Ocultar el proceso de trabajo" })).toHaveAttribute("aria-expanded", "true");
+  await expect(completedActivity.getByText("Analizando la petición", { exact: true })).toBeVisible();
 
   await page.waitForTimeout(250);
   await page.reload();

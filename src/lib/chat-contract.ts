@@ -24,7 +24,13 @@ export type ActivityItem = {
   label: string;
   detail?: string;
   output?: string;
+  files?: ActivityFileChange[];
   status: ActivityStatus;
+};
+
+export type ActivityFileChange = {
+  path: string;
+  change: "add" | "update" | "delete";
 };
 
 export type TurnSourceKind = "web" | "file" | "app";
@@ -389,6 +395,17 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
 
 export function isActivityItem(value: unknown): value is ActivityItem {
   if (!isRecord(value)) return false;
+  const validFiles = !("files" in value) || value.files === undefined || (
+    value.kind === "file" &&
+    Array.isArray(value.files) && value.files.length > 0 && value.files.length <= 100 && value.files.every((file) =>
+      isRecord(file) &&
+      typeof file.path === "string" &&
+      file.path.length > 0 &&
+      file.path.length <= 2_048 &&
+      !file.path.includes("\0") &&
+      (file.change === "add" || file.change === "update" || file.change === "delete")
+    )
+  );
   return (
     typeof value.id === "string" &&
     (value.kind === "system" ||
@@ -402,6 +419,7 @@ export function isActivityItem(value: unknown): value is ActivityItem {
     typeof value.label === "string" &&
     hasOptionalString(value, "detail") &&
     hasOptionalString(value, "output") &&
+    validFiles &&
     (value.status === "pending" ||
       value.status === "running" ||
       value.status === "waiting" ||

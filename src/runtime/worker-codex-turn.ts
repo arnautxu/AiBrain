@@ -540,6 +540,22 @@ export async function runWorkerCodexTurn(
           );
           return;
         }
+        if (method === "item/fileChange/patchUpdated" && isRecord(params)) {
+          const itemId = notificationItemId(params);
+          if (!itemId || !Array.isArray(params.changes)) return;
+          const activity = itemActivity({
+            item: {
+              id: itemId,
+              type: "fileChange",
+              status: "inProgress",
+              changes: params.changes,
+            },
+          }, false);
+          if (activity) {
+            await upsertActivity(activity, { envelope, key: `file-change:${itemId}` });
+          }
+          return;
+        }
         if (method === "item/reasoning/summaryTextDelta") {
           const itemId = notificationItemId(params);
           const delta = notificationDelta(params);
@@ -737,6 +753,7 @@ export async function runWorkerCodexTurn(
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
+      summary: "detailed",
       }, `turn-start:${chatRequest.assistantMessageId}`, 60_000, async (result) => {
         const resolvedTurnId = extractTurnId(result);
         if (!resolvedTurnId) throw new Error("Codex no ha iniciat el torn.");

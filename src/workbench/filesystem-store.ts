@@ -171,7 +171,7 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
   if (!isUuid(value.id)) return false;
   if (!isCanonicalIsoDate(value.createdAt)) return false;
   if (!value.activity.every((item) =>
-    hasExactKeys(item, ["id", "kind", "label", "status"], ["detail", "output"]))) return false;
+    hasExactKeys(item, ["id", "kind", "label", "status"], ["detail", "output", "files"]))) return false;
   if (!value.plan.every((item) => hasExactKeys(item, ["step", "status"]))) return false;
   if (!value.approvals.every((item) =>
     hasExactKeys(
@@ -1032,7 +1032,7 @@ export class FileWorkbenchStore {
     assertFilesystemWorkbenchId(messageId);
     return this.mutate(userId, (state) => {
       if (
-        !hasExactKeys(item, ["id", "kind", "label", "status"], ["detail", "output"]) ||
+        !hasExactKeys(item, ["id", "kind", "label", "status"], ["detail", "output", "files"]) ||
         !isActivityItem(item)
       ) {
         throw new WorkbenchPersistenceError("L’activitat no és vàlida.");

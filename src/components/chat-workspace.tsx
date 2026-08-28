@@ -201,6 +201,7 @@ function ResultActions({ message }: { message: ChatMessage }) {
 
 function AssistantMessage({
   message,
+  projectId,
   showActivity,
   onResolveApproval,
   publications,
@@ -210,6 +211,7 @@ function AssistantMessage({
   managedAppApprovalKeys,
 }: {
   message: ChatMessage;
+  projectId: string | undefined;
   showActivity: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
   publications: DocumentPublicationDraft[];
@@ -227,7 +229,7 @@ function AssistantMessage({
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} projectId={projectId} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -539,6 +541,7 @@ export function ChatWorkspace({
                   {message.role === "user" ? <UserMessage message={message} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
+                      projectId={project?.id}
                       showActivity={preferences.showActivityPanel}
                       onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
                       publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
