@@ -33,7 +33,6 @@ import {
   type ApprovalItem,
   type ChatMessage,
   type ChatInputAttachment,
-  type ComposerMode,
   type ToolResult,
 } from "@/lib/chat-contract";
 import {
@@ -429,6 +428,17 @@ function localThread(projectId: string, title: string): WorkbenchThread {
   };
 }
 
+export function newThreadDestination(
+  projects: readonly WorkbenchProject[],
+  projectId?: string,
+) {
+  if (projectId) {
+    return projects.find((project) => project.id === projectId && project.status === "active") ?? null;
+  }
+  return projects.find((project) =>
+    project.slug === STANDALONE_PROJECT_SLUG && project.status === "active") ?? null;
+}
+
 function localBranchThread(parent: WorkbenchThread, input: BranchThreadInput) {
   const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
   const target = parent.messages[targetIndex];
@@ -481,7 +491,6 @@ export function BrainApp({
   const [preferences, setPreferences] = useState<BrainPreferences>(() => preferencesFromManifest(manifest));
   const [prompt, setPrompt] = useState("");
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
-  const [composerMode, setComposerMode] = useState<ComposerMode>("agent");
   const [composerModel, setComposerModel] = useState<string | null>(null);
   const [composerEffort, setComposerEffort] = useState<RuntimeReasoningEffort | null>("low");
   // Keep the hosted Codex web tool available by default, matching Codex's
@@ -994,18 +1003,16 @@ export function BrainApp({
     }
   }, [initialWorkbench.persistence, markTaskRead, selectThread]);
 
-  const startNewThread = useCallback(() => {
+  const startNewThread = useCallback((projectId?: string) => {
     if (documentUploading) return;
-    const standaloneProject = projects.find((project) =>
-      project.slug === STANDALONE_PROJECT_SLUG && project.status === "active");
-    if (!standaloneProject) {
+    const destination = newThreadDestination(projects, projectId);
+    if (!destination) {
       setNotice("No se ha podido preparar el espacio de conversaciones.");
       return;
     }
-    if (activeProjectId) delete threadByProjectRef.current[activeProjectId];
-    delete threadByProjectRef.current[standaloneProject.id];
-    activeSelectionRef.current = { projectId: standaloneProject.id, threadId: null };
-    setActiveProjectId(standaloneProject.id);
+    delete threadByProjectRef.current[destination.id];
+    activeSelectionRef.current = { projectId: destination.id, threadId: null };
+    setActiveProjectId(destination.id);
     setActiveThreadId(null);
     setSelectedMessageId(null);
     setPrompt("");
@@ -1014,7 +1021,7 @@ export function BrainApp({
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, documentUploading, projects]);
+  }, [documentUploading, projects]);
 
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
@@ -1307,7 +1314,7 @@ export function BrainApp({
           showActivity: preferences.showActivityPanel,
         },
         options: {
-          mode: composerMode,
+          mode: "agent",
           model: composerModel,
           effort: composerEffort,
           webSearch,
@@ -1357,7 +1364,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerEffort, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1399,40 +1406,6 @@ export function BrainApp({
     void sendMessage(pending.content);
   }, [actionBusy, activeThreadId, pendingBranchSend, sendMessage, sending]);
 
-  const shareConversation = useCallback(async () => {
-    if (!activeThread || actionBusy) return;
-    setActionBusy(true);
-    try {
-      const response = await fetch(`/api/threads/${encodeURIComponent(activeThread.id)}/share`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: "{}",
-      });
-      const body: unknown = await response.json().catch(() => null);
-      const url = body && typeof body === "object" && "share" in body && body.share &&
-        typeof body.share === "object" && "url" in body.share && typeof body.share.url === "string"
-        ? body.share.url : null;
-      if (!response.ok || !url) throw new Error("No se ha podido crear la copia interna.");
-      const absolute = new URL(url, window.location.origin).toString();
-      await navigator.clipboard.writeText(absolute);
-      setNotice("Enlace interno copiado. Solo funciona para personas autenticadas de la empresa.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido compartir la conversación.");
-    } finally {
-      setActionBusy(false);
-    }
-  }, [actionBusy, activeThread]);
-
-  const exportConversation = useCallback((format: "markdown" | "json") => {
-    if (!activeThread) return;
-    const link = document.createElement("a");
-    link.href = `/api/threads/${encodeURIComponent(activeThread.id)}/export?format=${format}`;
-    link.download = "";
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-  }, [activeThread]);
-
   const stopActiveTurn = useCallback(async () => {
     const activeRun = activeThread ? turnControllersRef.current.get(activeThread.id) : null;
     const controller = activeRun?.controller;
@@ -1465,36 +1438,6 @@ export function BrainApp({
       controller?.abort();
     }
   }, [activeThread, initialWorkbench.persistence]);
-
-  const persistResultAction = useCallback(async (
-    message: ChatMessage,
-    action: "approved" | "pending" | "undo",
-  ) => {
-    if (!activeThreadId || actionBusy || sending) return;
-    if (action === "undo") {
-      setConfirmDialog({ kind: "undo-result", message });
-      return;
-    }
-    setActionBusy(true);
-    try {
-      const response = await fetch(`/api/threads/${activeThreadId}/messages/${message.id}/result`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action }),
-      });
-      const result: unknown = await response.json().catch(() => null);
-      if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
-        throw new Error("No se ha podido guardar la revisión.");
-      }
-      const updated = result.message as ChatMessage;
-      setThreads((current) => updateThreadMessage(current, activeThreadId, message.id, () => updated));
-      setNotice(action === "approved" ? "Resultado aprobado y guardado." : "Resultado marcado como pendiente.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar el resultado.");
-    } finally {
-      setActionBusy(false);
-    }
-  }, [actionBusy, activeThreadId, sending]);
 
   const resolveApproval = useCallback(async (
     messageId: string,
@@ -1731,11 +1674,6 @@ export function BrainApp({
     if (updated) setConfirmDialog(null);
   }, [activeThreadId, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage]);
 
-  const inspectMessage = useCallback((messageId: string) => {
-    setSelectedMessageId(messageId);
-    setActiveSideWindow("inspector");
-  }, []);
-
   const changePreference = useCallback(
     <Key extends keyof BrainPreferences>(key: Key, value: BrainPreferences[Key]) => {
       setPreferences((current) => ({ ...current, [key]: value }));
@@ -1857,7 +1795,6 @@ export function BrainApp({
         thread={activeThread}
         hydrated={hydrated}
         prompt={prompt}
-        composerMode={composerMode}
         composerModel={composerModel}
         composerEffort={composerEffort}
         webSearch={webSearch}
@@ -1876,7 +1813,6 @@ export function BrainApp({
           : null}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
-        onComposerModeChange={setComposerMode}
         onComposerModelChange={setComposerModel}
         onComposerEffortChange={setComposerEffort}
         onWebSearchChange={setWebSearch}
@@ -1892,18 +1828,9 @@ export function BrainApp({
         onStop={() => void stopActiveTurn()}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
-        onOpenCustomization={() => setCustomizationOpen(true)}
         onOpenProject={() => setProjectOpen(true)}
-        activeSideWindow={activeSideWindow}
-        canInspect={inspectorEnabled}
-        onInspectMessage={inspectMessage}
         onResolveApproval={resolveApproval}
-        onCreateVersion={(message) => void branchConversation(message, { kind: "branch", messageId: message.id }, false)}
         onEditMessage={(message, content) => void branchConversation(message, { kind: "edit", messageId: message.id, editedContent: content }, true)}
-        onRegenerate={(message) => void branchConversation(message, { kind: "retry", messageId: message.id }, true)}
-        onShareConversation={shareConversation}
-        onExportConversation={exportConversation}
-        onResultAction={persistResultAction}
         managedAppActionEnabled={managedAppAvailable}
         managedAppApprovalKeys={Object.values(managedAppActions)
           .filter((descriptor) => descriptor.locator.threadId === activeThreadId)
