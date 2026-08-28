@@ -46,7 +46,8 @@ export type BrowserInformedApprovalEvidence = Readonly<{
 
 export type BrowserActionReadback = Readonly<{
   schemaVersion: 1;
-  outcome: "applied";
+  outcome: "applied" | "dispatched";
+  verification: "type-value-matched" | "cdp-dispatch-acknowledged";
   actionKind: BrowserMutationAction;
   evidenceFingerprint: string;
   resource: BrowserActionResourceSnapshot;

@@ -143,6 +143,9 @@ class FakeCdpClient implements CdpClientLike {
     }
     if (method === "Runtime.evaluate" && scopedSessionId) {
       const targetId = this.sessionTargets.get(scopedSessionId);
+      if (String(params.expression).includes("verifiable")) {
+        return { result: { value: { verifiable: true, matched: true } } } as Result;
+      }
       return {
         result: {
           value: {
@@ -612,7 +615,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
-  it("revalidates the approved browser target before a mutation and returns applied readback", async () => {
+  it("revalidates the approved browser target and reports unprovable clicks as dispatched", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
     const client = new FakeCdpClient(() => child.exit());
@@ -628,7 +631,8 @@ describe("ChromeCdpRuntime private pipe", () => {
     const prepared = await runtime.prepareAgentMutation(THREAD_A, command);
     const applied = await runtime.executeAgentMutation(THREAD_A, command, prepared, "a".repeat(64));
     expect(applied).toMatchObject({
-      outcome: "applied",
+      outcome: "dispatched",
+      verification: "cdp-dispatch-acknowledged",
       actionKind: "click",
       evidenceFingerprint: "a".repeat(64),
       resource: expect.objectContaining({ scopeId: THREAD_A, locatorHash: expect.any(String) }),
@@ -643,6 +647,40 @@ describe("ChromeCdpRuntime private pipe", () => {
     await expect(runtime.executeAgentMutation(THREAD_A, command, stale, "b".repeat(64)))
       .rejects.toMatchObject({ code: "CHROME_ACTION_EVIDENCE_MISMATCH" });
     expect(client.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(3);
+    await runtime.stop();
+  });
+
+  it("verifies a cleared typed value without returning its secret and fails closed if readback fails", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    const command = { action: "type" as const, selector: "input[name=password]", text: "never-log-this", clear: true };
+    const prepared = await runtime.prepareAgentMutation(THREAD_A, command);
+    const applied = await runtime.executeAgentMutation(THREAD_A, command, prepared, "d".repeat(64));
+    expect(applied).toMatchObject({
+      outcome: "applied",
+      verification: "type-value-matched",
+      actionKind: "type",
+    });
+    expect(JSON.stringify(applied)).not.toContain("never-log-this");
+
+    const failedCommand = { ...command, text: "still-secret" };
+    const failedPrepared = await runtime.prepareAgentMutation(THREAD_A, failedCommand);
+    client.failOnOccurrence("Runtime.evaluate", 2, new CdpClientError(
+      "CDP_COMMAND_FAILED",
+      "Runtime.evaluate failed after Input.insertText.",
+    ));
+    await expect(runtime.executeAgentMutation(THREAD_A, failedCommand, failedPrepared, "e".repeat(64)))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    expect(client.commands.filter(({ method }) => method === "Input.insertText")).toHaveLength(2);
     await runtime.stop();
   });
 

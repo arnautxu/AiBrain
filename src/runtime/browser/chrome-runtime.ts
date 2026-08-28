@@ -859,43 +859,77 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       }
       await this.dispatchApprovedAgentMutation(page, command);
       this.assertAgentControl();
-      const resource = await this.actionResource(page, command, true);
+      if (command.action === "type" && command.clear) {
+        await this.verifyTypedValue(page, command.selector, command.text);
+        return Object.freeze({
+          schemaVersion: 1,
+          outcome: "applied" as const,
+          verification: "type-value-matched" as const,
+          actionKind: command.action,
+          evidenceFingerprint,
+          resource: expected,
+          observedAt: new Date(this.now()).toISOString(),
+        });
+      }
       return Object.freeze({
         schemaVersion: 1,
-        outcome: "applied",
+        outcome: "dispatched" as const,
+        verification: "cdp-dispatch-acknowledged" as const,
         actionKind: command.action,
         evidenceFingerprint,
-        resource,
+        resource: expected,
         observedAt: new Date(this.now()).toISOString(),
       });
     });
   }
 
+  private async verifyTypedValue(page: ThreadPage, selector: string | undefined, text: string | undefined) {
+    const safeSelector = validateSelector(selector ?? "");
+    const expected = text ?? "";
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `(() => {
+        const element = document.querySelector(${JSON.stringify(safeSelector)});
+        if (!element) return { verifiable: false, matched: false };
+        const expected = ${JSON.stringify(expected)};
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+          return { verifiable: true, matched: element.value === expected };
+        }
+        if (element instanceof HTMLElement && element.isContentEditable) {
+          return { verifiable: true, matched: element.textContent === expected };
+        }
+        return { verifiable: false, matched: false };
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    if (evaluated.exceptionDetails || !isRecord(evaluated.result?.value) ||
+      typeof evaluated.result.value.verifiable !== "boolean" ||
+      typeof evaluated.result.value.matched !== "boolean") {
+      throw new ChromeRuntimeError(
+        "CHROME_ACTION_READBACK_UNAVAILABLE",
+        "Browser action readback is unavailable after typing.",
+      );
+    }
+    if (!evaluated.result.value.verifiable || !evaluated.result.value.matched) {
+      throw new ChromeRuntimeError(
+        "CHROME_ACTION_READBACK_MISMATCH",
+        "Browser typed value could not be verified after dispatch.",
+      );
+    }
+  }
+
   private async actionResource(
     page: ThreadPage,
     command: BrowserMutationCommand,
-    readback = false,
   ): Promise<BrowserActionResourceSnapshot> {
     validateThreadId(page.threadId);
     if (command.action === "open") {
-      let destination = validateBrowserNavigationUrl(command.url ?? "");
+      const destination = validateBrowserNavigationUrl(command.url ?? "");
       await this.networkPolicy.assertAllowed(destination);
-      if (readback) {
-        const observed = await this.requireBrowser().send<{
-          result?: { value?: unknown };
-          exceptionDetails?: unknown;
-        }>("Runtime.evaluate", {
-          expression: "({ url: location.href, title: document.title })",
-          returnByValue: true,
-          awaitPromise: false,
-          userGesture: false,
-        }, { sessionId: page.sessionId });
-        if (observed.exceptionDetails || !isRecord(observed.result?.value) ||
-          typeof observed.result.value.url !== "string") {
-          throw new ChromeRuntimeError("CHROME_ACTION_READBACK_UNAVAILABLE", "Browser action readback is unavailable.");
-        }
-        destination = validateBrowserNavigationUrl(observed.result.value.url);
-      }
       const parsed = destination === "about:blank" ? null : new URL(destination);
       const origin = parsed?.origin ?? "about:blank";
       const sanitizedUrl = parsed ? `${parsed.origin}${parsed.pathname}`.slice(0, 1_200) : "about:blank";
@@ -906,8 +940,8 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         scopeId: page.threadId,
         generation: page.documentGeneration,
         version: page.documentVersion,
-        locatorHash: browserEvidenceHash({ action: command.action, destination, readback }),
-        locatorSummary: `${readback ? "observed" : "open"} ${sanitizedUrl}`,
+        locatorHash: browserEvidenceHash({ action: command.action, destination }),
+        locatorSummary: `open ${sanitizedUrl}`,
       });
     }
     const selector = command.action === "click" || command.action === "type"
@@ -982,7 +1016,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       scopeId: page.threadId,
       generation: page.documentGeneration,
       version: page.documentVersion,
-      locatorHash: browserEvidenceHash({ ...locator, readback }),
+      locatorHash: browserEvidenceHash(locator),
       locatorSummary: selector
         ? `${selector.slice(0, 300)} · ${locator.tag || "element"}${locator.role ? ` role=${locator.role}` : ""}${locator.name ? ` · ${locator.name}` : ""}`
         : `${command.action} ${sanitizedUrl}`,
