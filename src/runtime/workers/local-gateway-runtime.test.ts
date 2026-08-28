@@ -192,8 +192,11 @@ describe("private per-user worker gateway", () => {
         },
       },
       journal,
-      heartbeatIntervalMs: 50,
-      heartbeatTimeoutMs: 100,
+      // Keep this integration fixture responsive without treating transient CI
+      // scheduler stalls as a network failure. Heartbeat timeout behaviour is
+      // covered by the dedicated transport tests.
+      heartbeatIntervalMs: 100,
+      heartbeatTimeoutMs: 2_000,
       reconnectBaseDelayMs: 5,
       reconnectMaxDelayMs: 20,
       reconnectJitterRatio: 0,
