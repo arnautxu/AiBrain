@@ -51,6 +51,10 @@ const assistantMessageId = "00000000-0000-4000-8000-000000000041";
 const fingerprint = "a".repeat(64);
 const memoryId = "00000000-0000-4000-8000-000000000051";
 const documentUploadId = "00000000-0000-4000-8000-000000000061";
+const installationPaths = {
+  companyContextRoot: "/company-context",
+  sourceReadRoot: "/source-knowledge",
+};
 
 function memoryDependencies(
   overrides: {
@@ -241,9 +245,9 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId },
+      config: { installationId, paths: installationPaths },
       handle: {
-        roots: { workspace, staging },
+        roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") },
       },
       client,
     };
@@ -312,16 +316,28 @@ describe("worker Codex turn", () => {
     expect(turnStart?.params).toMatchObject({
       threadId: "runtime-thread-1",
       clientUserMessageId: userMessageId,
-      runtimeWorkspaceRoots: [path.join(workspace, "projects", projectId)],
+      runtimeWorkspaceRoots: [
+        path.join(workspace, "projects", projectId),
+        workspace,
+        path.join(userRoot, "artifacts"),
+        "/company-context",
+        "/source-knowledge",
+        path.join(staging, "threads"),
+      ],
     });
     expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "text", text: expect.stringContaining("server-attached documents") }),
         expect.objectContaining({ type: "text", text: expect.stringContaining("server-derived attachment") }),
-      ]));
+    ]));
     expect(JSON.stringify(turnStart?.params)).not.toContain(documentPath);
-    expect(JSON.stringify(turnStart?.params)).not.toContain(staging);
+    expect(JSON.stringify(turnStart?.params)).not.toContain(path.join(staging, "tmp"));
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
+    expect(JSON.stringify(turnStart?.params)).not.toContain('"/"');
+    expect((turnStart?.params as { sandboxPolicy?: unknown }).sandboxPolicy).toMatchObject({
+      type: "workspaceWrite",
+      writableRoots: [path.join(workspace, "projects", projectId)],
+    });
     const threadStart = calls.find((call) => call.method === "thread/start");
     expect(threadStart?.params).not.toHaveProperty("projectId");
     expect(threadStart?.params).toMatchObject({ config: { web_search: "live" } });
@@ -344,6 +360,7 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
     expect(instructions).toContain("La cerca web en viu està disponible");
+    expect(instructions).toContain("no tiene acceso al disco físico del Mac");
     expect(instructions).toContain("BEGIN AIBRAIN UI PROJECT CONTEXT JSON");
     expect(instructions).toContain(JSON.stringify({
       currentProject: { id: projectId, name: "Testing 1" },
@@ -377,7 +394,7 @@ describe("worker Codex turn", () => {
     const staging = path.join(userRoot, "staging");
     await import("node:fs/promises").then(async ({ mkdir }) => {
       await mkdir(workspace, { mode: 0o700 });
-      await mkdir(staging, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
     });
     const calls: string[] = [];
     const client = {
@@ -432,8 +449,8 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId },
-      handle: { roots: { workspace, staging } },
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
       client,
     };
     const events: Array<Record<string, unknown>> = [];
@@ -472,7 +489,7 @@ describe("worker Codex turn", () => {
     const staging = path.join(userRoot, "staging");
     await import("node:fs/promises").then(async ({ mkdir }) => {
       await mkdir(workspace, { mode: 0o700 });
-      await mkdir(staging, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
     });
     let handlers: {
       onServerRequest(request: unknown, envelope: unknown): Promise<unknown>;
@@ -571,8 +588,8 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId },
-      handle: { roots: { workspace, staging } },
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
       client,
     };
     const approvalStore = {

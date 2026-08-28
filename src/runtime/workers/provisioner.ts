@@ -348,6 +348,9 @@ export class WorkerProvisioner {
         for (const directory of directories) {
           await ensureDescendantTree(roots.userRoot, directory);
         }
+        // Uploads are exposed only through this read-only child mount; the
+        // separate staging temporary remains the worker's writable scratch space.
+        await ensureDescendantTree(roots.userRoot, path.join(roots.staging, "threads"));
         await this.synchronizeSharedCodexAuth(roots, userId);
 
         const expected = {
@@ -512,6 +515,7 @@ export function buildWorkerLaunchContext(
       runtimeReadOnly: Object.freeze([
         config.paths.companyContextRoot,
         config.paths.sourceReadRoot,
+        path.join(expectedRoots.staging, "threads"),
       ]),
       runtimeReadWrite: Object.freeze([
         expectedRoots.codexHome,

@@ -8,7 +8,7 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 
 - Next.js, el publicador documental y los App Servers ejecutan como UID/GID no-root configurable; el root filesystem del contenedor es read-only y todas las capabilities están eliminadas.
 - `sourceReadRoot` es un bind mount `ro` para Next.js y los workers.
-- `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only y `dataRoot` queda oculto. Solo se reexponen el contexto corporativo/documental de lectura, los tres Markdown privados del empleado y sus raíces runtime/workspace/staging/artifacts/audit. Perfiles Chromium, sesiones, backups y carpetas de otros empleados no son legibles; `publish-rw` se reemplaza por un mount vacío read-only.
+- `publishWriteRoot` solo es writable por el proceso servidor/publicador. Cada App Server se ejecuta con `bubblewrap`: el root se vuelve read-only y `dataRoot` queda oculto. Solo se reexponen el contexto corporativo y `source-ro` de lectura, los tres Markdown privados del empleado, su workspace/artefactos privados y `staging/threads` de ese empleado en solo lectura; `staging/tmp` queda como temporal privado escribible. Perfiles Chromium, sesiones, backups y carpetas de otros empleados no son legibles; `publish-rw` se reemplaza por un mount vacío read-only.
 - El arranque falla si el host no puede crear ese namespace o si `source-ro` es writable. No hay fallback de worker sin aislamiento.
 - No se monta `docker.sock`, no se usan redes/volúmenes externos y todos sus nombres son obligatoriamente únicos por instalación.
 - Chromium usa un canal CDP heredado por proceso (`--remote-debugging-pipe`),
@@ -42,6 +42,19 @@ El stack de QA está en `infra/hetzner/compose.yaml` y su procedimiento reproduc
 /srv/aibrain/source-ro/                repositorio documental oficial, solo lectura
 /srv/aibrain/publish-rw/               destino oficial, escritura solo server-side confirmada
 ```
+
+## Alcance real de archivos
+
+El worker remoto puede listar y leer las raíces autorizadas anteriores, pero no
+el disco físico del Mac u otro ordenador personal. Para consultar archivos del
+equipo del empleado deben pasar por un desktop bridge autorizado o estar
+sincronizados/montados explícitamente en una raíz de lectura aprobada, como
+`sourceReadRoot`. La respuesta del agente debe declarar ese límite y nunca
+fingir acceso local.
+
+La política del turno mantiene escrituras y borrados fuera de esas raíces de
+lectura: sólo el workspace del proyecto actual puede ser writable cuando la
+política y la aprobación correspondiente lo permiten.
 
 Los límites de CPU, memoria, PIDs, descriptores, tmpfs y arranques de navegador
 protegen frente a saturación. `AIBRAIN_DOCUMENT_MAX_CONVERSIONS` limita los

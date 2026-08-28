@@ -91,6 +91,22 @@ type EmitEvent = (
   projection?: WorkerTurnProjection,
 ) => Promise<void>;
 
+function readableFilesDeveloperInstructions() {
+  return [
+    "## Alcance de archivos autorizado",
+    "Puedes listar y leer sin aprobación el workspace privado del empleado, los archivos del proyecto y sus artefactos, el contexto y conocimiento corporativo de solo lectura, la fuente documental corporativa de solo lectura y los documentos subidos por este empleado.",
+    "Las escrituras, borrados y cambios siguen sujetos a la política del turno y solo pueden afectar al workspace del proyecto actual.",
+    "Este runtime remoto no tiene acceso al disco físico del Mac u otro ordenador personal del usuario. Para consultar esos archivos hace falta un desktop bridge autorizado o que estén sincronizados o montados en una raíz de lectura aprobada; nunca afirmes que puedes verlos si no lo están.",
+  ].join("\n");
+}
+
+function uniqueAbsoluteRoots(roots: readonly string[]) {
+  if (roots.some((root) => !path.isAbsolute(root) || root === path.parse(root).root)) {
+    throw new RuntimeNotReadyError("Las raíces de archivos autorizadas no son válidas.");
+  }
+  return [...new Set(roots)];
+}
+
 function projectDeveloperInstructions(
   guidance: Pick<AgentThreadRuntimeContext,
     "projectId" | "projectName" | "projectInstructions" | "projectMemory" | "projectSources" | "visibleProjects"
@@ -302,6 +318,15 @@ export async function runWorkerCodexTurn(
     runtime.handle.roots.workspace,
     path.posix.join("projects", chatRequest.projectId),
   );
+  const uploadedDocuments = await resolveWorkerOwnedPath(runtime.handle.roots.staging, "threads");
+  const runtimeWorkspaceRoots = uniqueAbsoluteRoots([
+    projectWorkspace,
+    runtime.handle.roots.workspace,
+    runtime.handle.roots.artifacts,
+    runtime.config.paths.companyContextRoot,
+    runtime.config.paths.sourceReadRoot,
+    uploadedDocuments,
+  ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   const account = await runtime.client.connection(projectWorkspace);
   if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
@@ -354,13 +379,14 @@ export async function runWorkerCodexTurn(
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
-    runtimeWorkspaceRoots: [projectWorkspace],
+    runtimeWorkspaceRoots,
     approvalPolicy: runtimeConfig.approvalPolicy,
     approvalsReviewer: "user",
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
     developerInstructions: [
       buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
+      readableFilesDeveloperInstructions(),
       projectDeveloperInstructions(projectGuidance),
       preparedMemory.developerInstructions,
     ].filter(Boolean).join("\n\n"),
@@ -705,7 +731,7 @@ export async function runWorkerCodexTurn(
         })),
       ],
       cwd: projectWorkspace,
-      runtimeWorkspaceRoots: [projectWorkspace],
+      runtimeWorkspaceRoots,
       approvalPolicy: runtimeConfig.approvalPolicy,
       approvalsReviewer: "user",
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
