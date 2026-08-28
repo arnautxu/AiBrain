@@ -8,25 +8,17 @@ import {
   CaretRight,
   ChatCircleDots,
   Check,
-  CheckCircle,
   Copy,
-  DownloadSimple,
-  DotsThree,
   FolderOpen,
   File as FileIcon,
   Globe,
   Image as ImageIcon,
   ImagesSquare,
-  List,
   Paperclip,
   Plus,
-  GitBranch,
   MagicWand,
   PencilSimple,
-  ArrowClockwise,
-  ShareNetwork,
   SidebarSimple,
-  SlidersHorizontal,
   SpinnerGap,
   Stop,
   WarningCircle,
@@ -36,15 +28,15 @@ import {
 import { GuidedActions } from "@/components/guided-actions";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { ThinkingOrb } from "thinking-orbs";
-import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
-import type { BrainManifest, BrainPreferences, BrainWindowId } from "@/config/brain";
+import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage } from "@/lib/chat-contract";
+import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
-import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-controls";
+import { VoiceDictationControl } from "@/components/voice-controls";
 import { StreamRecoveryBanner } from "@/components/stream-recovery-banner";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
@@ -58,7 +50,6 @@ type ChatWorkspaceProps = {
   thread: WorkbenchThread | null;
   hydrated: boolean;
   prompt: string;
-  composerMode: ComposerMode;
   composerModel: string | null;
   composerEffort: RuntimeReasoningEffort | null;
   webSearch: boolean;
@@ -75,7 +66,6 @@ type ChatWorkspaceProps = {
   streamRecovery: { attempt: number } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
-  onComposerModeChange: (value: ComposerMode) => void;
   onComposerModelChange: (value: string | null) => void;
   onComposerEffortChange: (value: RuntimeReasoningEffort | null) => void;
   onWebSearchChange: (value: boolean) => void;
@@ -91,22 +81,13 @@ type ChatWorkspaceProps = {
   onStop: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
-  onOpenCustomization: () => void;
   onOpenProject: () => void;
-  activeSideWindow: Exclude<BrainWindowId, "chat" | "runtime"> | null;
-  canInspect: boolean;
-  onInspectMessage: (messageId: string) => void;
   onResolveApproval: (
     messageId: string,
     approval: ApprovalItem,
     decision: ApprovalDecision,
   ) => Promise<void>;
-  onCreateVersion: (message: ChatMessage) => void;
   onEditMessage: (message: ChatMessage, content: string) => void;
-  onRegenerate: (message: ChatMessage) => void;
-  onShareConversation: () => Promise<void>;
-  onExportConversation: (format: "markdown" | "json") => void;
-  onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
   managedAppActionEnabled: boolean;
   managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
@@ -192,37 +173,16 @@ function ComposerPicker({
   );
 }
 
-function ResultActions({ message, onCreateVersion, onRegenerate, onResultAction }: { message: ChatMessage; onCreateVersion: () => void; onRegenerate: () => void; onResultAction: (action: "approved" | "pending" | "undo") => Promise<void> }) {
+function ResultActions({ message }: { message: ChatMessage }) {
   const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const approved = message.activity.some((item) => item.id === "result-review" && item.label === "Resultat aprovat");
   const copyResult = async () => {
     await navigator.clipboard.writeText(message.content);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
-  const downloadResult = () => {
-    const blob = new Blob([message.content], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `resultado-aibrain-${message.createdAt.slice(0, 10)}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-  const review = async () => {
-    setBusy(true);
-    try { await onResultAction(approved ? "pending" : "approved"); } finally { setBusy(false); }
-  };
   return (
     <div className="mt-3 flex flex-wrap items-center gap-0.5 text-[var(--text-muted)]">
-      <button type="button" title={approved ? "Resultado aprobado" : "Aprobar resultado"} aria-label={approved ? "Resultado aprobado" : "Aprobar resultado"} disabled={busy} aria-pressed={approved} className={`result-action ${approved ? "text-[var(--positive)]" : ""}`} onClick={() => void review()}><CheckCircle size={14} weight={approved ? "fill" : "regular"} /></button>
-      <button type="button" title="Copiar resultado" aria-label="Copiar resultado" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
-      <button type="button" title="Descargar resultado" aria-label="Descargar resultado" className="result-action" onClick={downloadResult}><DownloadSimple size={14} /></button>
-      <ReadAloudControl text={message.content} />
-      <button type="button" title="Regenerar respuesta" aria-label="Regenerar respuesta" className="result-action" onClick={onRegenerate}><ArrowClockwise size={14} /></button>
-      <button type="button" title="Crear rama desde aquí" aria-label="Crear rama desde aquí" className="result-action" onClick={onCreateVersion}><GitBranch size={14} /></button>
-      {message.diff ? <button type="button" title="Deshacer cambios" aria-label="Deshacer cambios" className="result-action text-[var(--danger)]" onClick={() => void onResultAction("undo")}><ArrowUp size={14} className="rotate-[-90deg]" /></button> : null}
+      <button type="button" title="Copiar" aria-label="Copiar" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
     </div>
   );
 }
@@ -230,13 +190,7 @@ function ResultActions({ message, onCreateVersion, onRegenerate, onResultAction 
 function AssistantMessage({
   message,
   showActivity,
-  onInspect,
   onResolveApproval,
-  canInspect,
-  showInlineDiff,
-  onCreateVersion,
-  onRegenerate,
-  onResultAction,
   publications,
   onFreezePublication,
   onDecidePublication,
@@ -245,13 +199,7 @@ function AssistantMessage({
 }: {
   message: ChatMessage;
   showActivity: boolean;
-  onInspect: () => void;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
-  canInspect: boolean;
-  showInlineDiff: boolean;
-  onCreateVersion: () => void;
-  onRegenerate: () => void;
-  onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
   publications: DocumentPublicationDraft[];
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
@@ -262,14 +210,12 @@ function AssistantMessage({
   } | null;
   managedAppApprovalKeys: readonly string[];
 }) {
-  const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 ||
-    Boolean(message.diff) || Boolean(message.sources?.length) || Boolean(message.toolResults?.length);
   const hasExecution = message.activity.length > 0 || message.plan.length > 0;
 
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -307,14 +253,7 @@ function AssistantMessage({
         <DocumentPublicationCard key={draft.id} draft={draft} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
       ))}
 
-      {message.status === "complete" && message.content ? <ResultActions message={message} onCreateVersion={onCreateVersion} onRegenerate={onRegenerate} onResultAction={(action) => onResultAction(message, action)} /> : null}
-
-      {hasDetails && canInspect ? (
-        <button className="mt-2 flex min-h-9 items-center gap-1.5 rounded-md py-1 text-[10px] font-medium text-[var(--text-muted)] transition hover:text-[var(--text)]" onClick={onInspect}>
-          <List size={12} />
-          Revisar resultados
-        </button>
-      ) : null}
+      {message.status === "complete" && message.content ? <ResultActions message={message} /> : null}
     </article>
   );
 }
@@ -359,7 +298,6 @@ export function ChatWorkspace({
   thread,
   hydrated,
   prompt,
-  composerMode,
   composerModel,
   composerEffort,
   webSearch,
@@ -376,7 +314,6 @@ export function ChatWorkspace({
   streamRecovery,
   onRetryRuntime,
   onPromptChange,
-  onComposerModeChange,
   onComposerModelChange,
   onComposerEffortChange,
   onWebSearchChange,
@@ -392,18 +329,9 @@ export function ChatWorkspace({
   onStop,
   sidebarOpen,
   onToggleSidebar,
-  onOpenCustomization,
   onOpenProject,
-  activeSideWindow,
-  canInspect,
-  onInspectMessage,
   onResolveApproval,
-  onCreateVersion,
   onEditMessage,
-  onRegenerate,
-  onShareConversation,
-  onExportConversation,
-  onResultAction,
   managedAppActionEnabled,
   managedAppApprovalKeys,
   onManagedAppPrepared,
@@ -417,10 +345,9 @@ export function ChatWorkspace({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
-  const [composerPickerOpen, setComposerPickerOpen] = useState<"mode" | "model" | "effort" | "skill" | null>(null);
+  const [composerPickerOpen, setComposerPickerOpen] = useState<"model" | "effort" | "skill" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -433,15 +360,6 @@ export function ChatWorkspace({
     shouldStickToBottomRef.current = true;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [thread?.id]);
-
-  useEffect(() => {
-    if (!conversationMenuOpen) return;
-    const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConversationMenuOpen(false);
-    };
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
-  }, [conversationMenuOpen]);
 
   useEffect(() => {
     const textarea = composerRef.current;
@@ -575,21 +493,9 @@ export function ChatWorkspace({
           </button>
           <button type="button" disabled={standaloneConversation || !project} aria-label={standaloneConversation ? "Conversación sin proyecto" : `Abrir contexto de ${project?.name ?? "proyecto"}`} className="flex min-w-0 items-center gap-1.5 rounded-lg px-1 py-1 text-left transition hover:bg-[var(--surface-hover)] disabled:pointer-events-none" onClick={onOpenProject}>
             {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : <ChatCircleDots size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" />}
-            {!standaloneConversation ? <span className="hidden max-w-36 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name ?? "Proyecto"}</span> : null}
+            <span className="max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)]">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
             {thread && !standaloneConversation ? <CaretRight size={11} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" /> : null}
-            <span className="max-w-[52vw] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread?.title ?? (project ? "Nueva conversación" : "Inicio")}</span>
-          </button>
-        </div>
-
-        <div className="relative flex items-center gap-1">
-          {thread ? <button type="button" aria-label="Acciones de conversación" aria-haspopup="menu" aria-expanded={conversationMenuOpen} className="touch-target rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => setConversationMenuOpen((open) => !open)}><DotsThree size={18} weight="bold" /></button> : null}
-          {thread && conversationMenuOpen ? <div role="menu" aria-label="Acciones de conversación" className="menu-enter absolute right-0 top-full z-50 mt-1 w-56 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]">
-            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); void onShareConversation(); }}><ShareNetwork size={15} />Compartir copia interna</button>
-            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); onExportConversation("markdown"); }}><DownloadSimple size={15} />Exportar como Markdown</button>
-            <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-xl px-3 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => { setConversationMenuOpen(false); onExportConversation("json"); }}><DownloadSimple size={15} />Exportar como JSON</button>
-          </div> : null}
-          <button aria-label="Abrir preferencias" className="touch-target rounded-lg p-2 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}>
-            <SlidersHorizontal size={16} />
+            {thread ? <span className="max-w-[52vw] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</span> : null}
           </button>
         </div>
       </header>
@@ -611,13 +517,7 @@ export function ChatWorkspace({
                     <AssistantMessage
                       message={message}
                       showActivity={preferences.showActivityPanel}
-                      onInspect={() => onInspectMessage(message.id)}
                       onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
-                      canInspect={canInspect}
-                      showInlineDiff={activeSideWindow !== "inspector"}
-                      onCreateVersion={() => onCreateVersion(message)}
-                      onRegenerate={() => onRegenerate(message)}
-                      onResultAction={onResultAction}
                       publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
                       onFreezePublication={onFreezePublication}
                       onDecidePublication={onDecidePublication}
@@ -634,22 +534,9 @@ export function ChatWorkspace({
             </div>
             <div ref={bottomRef} className="h-8" />
           </div>
-        ) : (
-          <section className="mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(8rem,26vh,12rem)] text-center md:px-8">
-            <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">¿En qué trabajamos?</h1>
-            <div className="mt-[clamp(14rem,27vh,16rem)] flex w-full flex-wrap justify-center gap-1.5 md:mt-[clamp(15rem,27vh,17rem)]">
-              {[
-                ["Analizar información", "Encuentra riesgos, claves y próximos pasos"],
-                ["Crear un documento", "Prepara un primer borrador listo para revisar"],
-                ["Resumir contenido", "Quédate con decisiones, fechas y acciones"],
-              ].map(([label, detail]) => (
-                <button key={label} type="button" title={detail} className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2 text-[12px] font-medium text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)]" onClick={() => { onPromptChange(`${label}: `); }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        ) : <section className="mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(8rem,26vh,12rem)] text-center md:px-8" aria-label="Conversación vacía">
+          <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">¿En qué trabajamos?</h1>
+        </section>}
       </div>
 
       <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "!absolute inset-x-0 top-[clamp(15.6rem,42vh,21.25rem)] z-10"} px-3 md:px-6`}>
@@ -715,23 +602,8 @@ export function ChatWorkspace({
             <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><Plus size={15} /></button>
-                {showAdvancedControls ? (
-                  <ComposerPicker
-                    ariaLabel="Modo del turno"
-                    value={composerMode}
-                    valueLabel={{ agent: "Trabajar", plan: "Planificar", ask: "Preguntar" }[composerMode]}
-                    options={[
-                      ...(manifest.composer.modes.includes("agent") ? [{ value: "agent", label: "Trabajar", detail: "Prepara y ejecuta el trabajo" }] : []),
-                      ...(manifest.composer.modes.includes("plan") ? [{ value: "plan", label: "Planificar", detail: "Propone los pasos antes de actuar" }] : []),
-                      ...(manifest.composer.modes.includes("ask") ? [{ value: "ask", label: "Preguntar", detail: "Responde sin ejecutar acciones" }] : []),
-                    ]}
-                    open={composerPickerOpen === "mode"}
-                    placement={hasMessages ? "above" : "below"}
-                    disabled={sending}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "mode" : null); }}
-                    onSelect={(value) => onComposerModeChange(value as ComposerMode)}
-                  />
-                ) : null}
+                <span className="rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">Trabajar</span>
+                <span className="max-w-44 truncate text-[11px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <ComposerPicker
                     ariaLabel="Skill"
@@ -780,7 +652,6 @@ export function ChatWorkspace({
                     onSelect={(value) => onComposerEffortChange((value || null) as RuntimeReasoningEffort | null)}
                   />
                 ) : null}
-                <span className="composer-hint hidden text-[11px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 <VoiceDictationControl
                   value={prompt}
                   disabled={!project || sending || documentUploading}
@@ -795,9 +666,6 @@ export function ChatWorkspace({
                 )}
               </div>
             </div>
-          </div>
-          <div className={`${hasMessages ? "hidden" : "flex"} mt-2 h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]`}>
-            {sending ? <><ThinkingOrb state="working" size={20} aria-hidden="true" /><span>{preferences.assistantName} está trabajando</span></> : <span>Comprueba los datos importantes antes de usarlos.</span>}
           </div>
         </div>
       </div>
