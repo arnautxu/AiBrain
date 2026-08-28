@@ -175,6 +175,9 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
             <dt className="text-[var(--text-muted)]">Cadencia p50 / p95 / máxima</dt><dd className="font-medium tabular-nums">{milliseconds(performance.interPaintP50Ms)} / {milliseconds(performance.interPaintP95Ms)} / {milliseconds(performance.interPaintMaxMs)}</dd>
             <dt className="text-[var(--text-muted)]">Estado terminal pintado</dt><dd className="font-medium tabular-nums">{performance.terminal ? `${performance.terminal} · ${milliseconds(performance.sendIntentToTerminalPaintMs)}` : "—"}</dd>
             <dt className="text-[var(--text-muted)]">Reconexión → snapshot/catch-up p95</dt><dd className="font-medium tabular-nums">{milliseconds(performance.reconnectToSnapshotVisibleP95Ms)} / {milliseconds(performance.reconnectToCaughtUpP95Ms)}</dd>
+            <dt className="text-[var(--text-muted)]">Stream abierto / último evento / idle</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.responseOpenedAtMs)} / {milliseconds(performance.transport.lastEventAtMs)} / {milliseconds(performance.transport.idleObservedAtMs)}</dd>
+            <dt className="text-[var(--text-muted)]">Cierre HTTP / recuperación / snapshot</dt><dd className="font-medium tabular-nums">{performance.transport.closeReason ?? "—"} / {performance.transport.recoveryAttempts} / {milliseconds(performance.transport.snapshotObservedAtMs)}</dd>
+            <dt className="text-[var(--text-muted)]">Banner de recuperación</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.bannerShownAtMs)}</dd>
           </dl>
         </div>
       ) : tab === "sources" ? (

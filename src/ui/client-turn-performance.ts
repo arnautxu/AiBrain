@@ -1,4 +1,5 @@
 import type { ChatStreamEvent } from "@/lib/chat-contract";
+import type { ChatStreamRecoveryMeasurement } from "@/ui/recoverable-chat-stream";
 
 const MAX_PAINT_GAPS = 128;
 
@@ -20,6 +21,7 @@ export type ClientTurnPerformanceReadback = Readonly<{
   reconnectToCaughtUpP50Ms: number | null;
   reconnectToCaughtUpP95Ms: number | null;
   reconnectToCaughtUpMaxMs: number | null;
+  transport: ChatStreamRecoveryMeasurement;
 }>;
 
 export type ClientPaintScheduler = Readonly<{
@@ -68,6 +70,18 @@ export class ClientTurnPerformance {
   private reconnectCount = 0;
   private readonly reconnectSnapshotVisible: number[] = [];
   private readonly reconnectCaughtUp: number[] = [];
+  private transport: ChatStreamRecoveryMeasurement = {
+    responseOpenedAtMs: null,
+    lastEventAtMs: null,
+    idleObservedAtMs: null,
+    closedAtMs: null,
+    closeCode: null,
+    closeReason: null,
+    recoveryStartedAtMs: null,
+    recoveryAttempts: 0,
+    snapshotObservedAtMs: null,
+    bannerShownAtMs: null,
+  };
 
   constructor(
     private readonly onReadback: (readback: ClientTurnPerformanceReadback) => void,
@@ -101,6 +115,11 @@ export class ClientTurnPerformance {
     this.scheduleTerminal(terminal);
   }
 
+  transportMeasured(measurement: ChatStreamRecoveryMeasurement) {
+    this.transport = measurement;
+    this.publish();
+  }
+
   readback(): ClientTurnPerformanceReadback {
     const interPaint = summary(this.interPaintGaps);
     const reconnectSnapshot = summary(this.reconnectSnapshotVisible);
@@ -125,6 +144,7 @@ export class ClientTurnPerformance {
       reconnectToCaughtUpP50Ms: reconnectCaughtUp.p50,
       reconnectToCaughtUpP95Ms: reconnectCaughtUp.p95,
       reconnectToCaughtUpMaxMs: reconnectCaughtUp.max,
+      transport: this.transport,
     };
   }
 
