@@ -6,6 +6,7 @@ import type { AuthSession } from "@/auth/types";
 import { isWorkspaceAdmin } from "@/admin/server-service";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { loadInstallationConfig } from "@/config/installation";
+import { codexManagedAppCapabilities } from "@/connectors/server-service";
 import { MarkdownPermissionProvider } from "@/permissions";
 import type { PermissionAction } from "@/permissions/types";
 import { readRuntimeConfig } from "@/runtime/config";
@@ -141,7 +142,7 @@ async function appCatalogue(session: AuthSession, isAdmin: boolean) {
     isAdmin,
   );
 
-  return [
+  const builtInApps = [
     {
       id: "codex-runtime",
       label: "Asistente de trabajo",
@@ -212,6 +213,34 @@ async function appCatalogue(session: AuthSession, isAdmin: boolean) {
       canAdminChange: false,
       configurationHint: null,
     },
+  ] satisfies AppCatalogueItem[];
+
+  // A connector has no settings placeholder: it appears only after a personal
+  // binding is present and the server-only provider has verified it callable.
+  // The read-only API retains explicit failure codes for an operator without
+  // advertising a non-working application in the employee UI.
+  const connectedApps = await codexManagedAppCapabilities(session)
+    .then((capabilities) => capabilities.filter((capability) => capability.status === "connected"))
+    .catch(() => []);
+  return [
+    ...builtInApps,
+    ...connectedApps.map((capability) => ({
+      id: capability.connectorId,
+      label: capability.label,
+      description: "Disponibilidad de una aplicación MCP ya autenticada por Codex.",
+      kind: "connector" as const,
+      status: "connected" as const,
+      statusDetail: "Conectada y disponible para la operación de lectura publicada.",
+      scopes: ["Disponibilidad de la aplicación instalada"],
+      permissionActions: ["consult" as const],
+      approvalRequired: false,
+      installationEnabled: true,
+      userEnabled: true,
+      effectiveEnabled: true,
+      canUserChange: false,
+      canAdminChange: false,
+      configurationHint: null,
+    })),
   ] satisfies AppCatalogueItem[];
 }
 
