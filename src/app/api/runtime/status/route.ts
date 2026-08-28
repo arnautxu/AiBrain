@@ -81,7 +81,11 @@ export async function GET(request: Request) {
           path.posix.join("projects", projectContext.projectId ?? "default"),
         );
         await mkdir(workspace, { recursive: true, mode: 0o700 });
-        return { connection: await worker.client.connectionSummary(), workspace };
+        const [connection, capabilities] = await Promise.all([
+          worker.client.connectionSummary(),
+          worker.client.capabilities(),
+        ]);
+        return { connection: { ...connection, ...capabilities }, workspace };
       })());
       workerWorkspace = runtimeConnection.workspace;
       const connection = runtimeConnection.connection;

@@ -174,6 +174,25 @@ export class WorkerAppServerClient {
     };
   }
 
+  /**
+   * Reads only the capability flags that control whether the composer can
+   * offer a live tool.  Keeping this separate from `connection()` lets the
+   * readiness route report the actual web-search availability without waiting
+   * for the optional model, skill, rate-limit, and usage catalogs.
+   */
+  async capabilities(): Promise<Pick<CodexConnection, "webSearch" | "imageGeneration">> {
+    await this.initialize();
+    const result = await this.router.request(randomRequest(
+      "modelProvider/capabilities/read",
+      {},
+      "capabilities",
+    ), 10_000).catch(() => null);
+    return {
+      webSearch: isRecord(result) && result.webSearch === true,
+      imageGeneration: isRecord(result) && result.imageGeneration === true,
+    };
+  }
+
   async resolvedSkills(cwd: string): Promise<ResolvedSkill[]> {
     await this.initialize();
     return parseSkills(await this.router.request(randomRequest(
