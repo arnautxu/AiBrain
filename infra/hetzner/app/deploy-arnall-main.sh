@@ -94,7 +94,27 @@ main() {
   local target_config="${CONFIG_DIR}/installation.target-${short_revision}.json"
   local compose_file current_compose current_revision current_short
   local app_tag egress_tag app_image egress_image free_bytes
-  local dangling_before dangling_after manager_args
+  local dangling_before="" dangling_after="" manager_args
+  local release_prepared=0
+
+  cleanup_incomplete_release() {
+    local status="$?"
+
+    set +e
+    if (( status != 0 )) && [[ -n "$dangling_before" && -f "$dangling_before" ]]; then
+      remove_new_dangling_images "$dangling_before" "$dangling_after"
+    fi
+    rm -f "$archive" "$target_env" "$target_config"
+    [[ -z "$dangling_before" ]] || rm -f "$dangling_before"
+    [[ -z "$dangling_after" ]] || rm -f "$dangling_after"
+
+    if (( status != 0 && release_prepared == 1 )); then
+      if [[ ! -f "$STATE_FILE" ]] || ! jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
+        rm -rf --one-file-system -- "$release_dir"
+      fi
+    fi
+    exit "$status"
+  }
 
   umask 077
   install -d -m 0700 -o root -g root "$RELEASE_ROOT" "$RELEASES_DIR" "$incoming_dir" "$CONFIG_DIR"
@@ -111,10 +131,20 @@ main() {
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
     exit 0
   fi
-  [[ ! -e "$release_dir" ]] || fail "release directory already exists for a non-current revision"
+
+  if [[ -e "$release_dir" ]]; then
+    [[ -d "$release_dir" && ! -L "$release_dir" ]] || fail "non-current release path is not a directory"
+    rm -rf --one-file-system -- "$release_dir"
+  fi
+
+  free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
+  [[ "$free_bytes" =~ ^[0-9]+$ && "$free_bytes" -ge "$MIN_FREE_BYTES" ]] || fail "insufficient free disk for a bounded image build"
+
+  trap cleanup_incomplete_release EXIT
 
   dd if=/dev/stdin of="$archive" bs=1M count=65 iflag=fullblock status=none
   validate_archive "$archive"
+  release_prepared=1
   install -d -m 0700 -o root -g root "$release_dir"
   tar --extract --file="$archive" --directory="$release_dir" --no-same-owner
   rm -f "$archive"
@@ -130,9 +160,6 @@ main() {
   [[ -f "${release_dir}/config/installations/arnall.qa.example.json" ]] || fail "release archive has no Arnall installation config"
   [[ -d "${release_dir}/config/company-context/arnall" ]] || fail "release archive has no Arnall company context"
   chmod 0644 "$compose_file" "${release_dir}/infra/hetzner/browser/seccomp_profile.json"
-
-  free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
-  [[ "$free_bytes" =~ ^[0-9]+$ && "$free_bytes" -ge "$MIN_FREE_BYTES" ]] || fail "insufficient free disk for a bounded image build"
 
   install -d -m 0755 -o root -g root "${RELEASE_ROOT}/node_modules"
   if [[ ! -f "${RELEASE_ROOT}/node_modules/js-yaml/package.json" ]]; then
@@ -208,6 +235,7 @@ main() {
     > "${CONFIG_DIR}/last-deployment.json.pending"
   chmod 0600 "${CONFIG_DIR}/last-deployment.json.pending"
   mv -f "${CONFIG_DIR}/last-deployment.json.pending" "${CONFIG_DIR}/last-deployment.json"
+  trap - EXIT
   printf 'ARNALL_DEPLOY_OK revision=%s\n' "$revision"
 }
 
