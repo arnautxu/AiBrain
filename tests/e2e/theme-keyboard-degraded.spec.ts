@@ -120,3 +120,42 @@ test("runtime failures and offline state fail closed and recover explicitly", as
   await expect(page.getByText("Sin conexión")).toBeHidden();
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 });
+
+test("a successful runtime check cancels its unavailable deadline", async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeSetTimeout = window.setTimeout.bind(window);
+    window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
+      nativeSetTimeout(handler, timeout === 40_000 ? 100 : timeout, ...args)) as typeof window.setTimeout;
+  });
+  await page.route("**/api/runtime/status**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      tenantId: "example-lab-dev",
+      projectId: "018f5f68-4a6e-7abc-8def-0123456789ab",
+      projectName: "Trabajo interno",
+      mode: "demo",
+      codex: "disabled",
+      isolated: true,
+      ready: true,
+      authMode: null,
+      planType: null,
+      processWarm: false,
+      rateLimit: null,
+      usage: null,
+      workspaceName: "workspace",
+      model: null,
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      models: [],
+      skills: [],
+      capabilities: { webSearch: false, imageInput: true, imageGeneration: false },
+    }),
+  }));
+
+  await login(page);
+  await page.waitForTimeout(200);
+  await expect(page.getByText("El servicio no está disponible. Puedes revisar el historial.")).toHaveCount(0);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Comprobar disponibilidad");
+  await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
+});
