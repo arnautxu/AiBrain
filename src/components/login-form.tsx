@@ -98,6 +98,13 @@ export function LoginForm({
     }
   }
 
+  function returnToLogin() {
+    setPasswordChangeRequired(false);
+    setPassword("");
+    setConfirmation("");
+    setError(null);
+  }
+
   async function changeInitialPassword(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading("password-change");
@@ -120,7 +127,13 @@ export function LoginForm({
       router.replace("/");
       router.refresh();
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
+      const message = currentError instanceof Error ? currentError.message : "Error desconocido.";
+      if (message === "El canvi de contrasenya ha caducat.") {
+        returnToLogin();
+        setError("El canvi de contrasenya ha caducat. Torna a iniciar sessió per continuar.");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(null);
     }
@@ -281,6 +294,15 @@ export function LoginForm({
               <p className="text-[11px] leading-5 text-[var(--text-muted)]">Entre 12 y 128 caracteres, con al menos una letra y un número.</p>
               <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
                 {loading ? "Actualizando…" : "Actualizar y entrar"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                disabled={loading !== null}
+                className="w-full"
+                onClick={returnToLogin}
+              >
+                Volver al inicio de sesión
               </Button>
             </form>
           ) : null}
