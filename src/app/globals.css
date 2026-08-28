@@ -351,10 +351,52 @@ button:disabled {
 }
 
 .composer-shadow:focus-within {
+  border-color: color-mix(in srgb, var(--text) 16%, transparent);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.075),
     0 2px 8px rgba(0, 0, 0, 0.05),
     0 4px 80px 8px rgba(0, 0, 0, 0.035);
+}
+
+.composer-measurement {
+  min-height: 44px;
+  padding: 10px;
+  color: transparent;
+  font-size: 16px;
+  line-height: 26px;
+}
+
+.composer-add-icon {
+  display: grid;
+  place-items: center;
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-tool-active .composer-add-icon {
+  transform: rotate(45deg);
+}
+
+.composer-submit {
+  transition-property: background-color, color, opacity, transform;
+  transition-duration: 180ms;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.composer-submit-icon {
+  display: grid;
+  place-items: center;
+  animation: composer-action-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes composer-action-enter {
+  from {
+    opacity: 0;
+    transform: translateY(3px) scale(0.82);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 /* Shared employee-work surfaces. New capabilities should feel like one calm
@@ -467,7 +509,7 @@ button:disabled {
 
 @media (max-width: 479px) {
   .composer-compact {
-    min-height: 60px;
+    min-height: 92px;
     gap: 0.125rem;
   }
 
@@ -477,9 +519,8 @@ button:disabled {
   }
 
   .composer-compact .composer-textarea {
-    min-height: 44px !important;
-    height: 44px !important;
-    padding: 9px 4px;
+    min-height: 44px;
+    padding: 9px 4px 7px;
     font-size: 16px;
     line-height: 26px;
   }
@@ -495,43 +536,32 @@ button:disabled {
 
 .composer-compact {
   display: flex;
-  min-height: 52px;
-  align-items: center;
-  padding: 6px;
+  min-height: 92px;
+  align-items: stretch;
+  padding: 8px;
 }
 
-.composer-compact .composer-controls,
+.composer-compact .composer-controls {
+  display: flex;
+}
+
 .composer-compact .composer-controls-start {
-  display: contents;
+  display: flex;
 }
 
 .composer-compact .composer-textarea {
-  order: 1;
-  width: auto;
+  width: 100%;
   min-width: 0;
-  min-height: 38px !important;
-  height: 38px !important;
-  flex: 1 1 auto;
-  padding-top: 7px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  padding-top: 9px;
   padding-bottom: 7px;
-  line-height: 24px;
+  line-height: 26px;
 }
 
 .composer-textarea:focus,
 .composer-textarea:focus-visible {
   outline: none;
-}
-
-.composer-compact .composer-add-button {
-  order: 0;
-}
-
-.composer-compact .composer-controls-start > .composer-picker {
-  order: 2;
-}
-
-.composer-compact .composer-controls-end {
-  order: 3;
 }
 
 .composer-compact .composer-hint {

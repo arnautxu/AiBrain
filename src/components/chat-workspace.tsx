@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -351,6 +351,7 @@ export function ChatWorkspace({
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const composerShellRef = useRef<HTMLDivElement>(null);
+  const composerMeasurementRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
@@ -371,12 +372,25 @@ export function ChatWorkspace({
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [thread?.id]);
 
-  useEffect(() => {
+  const resizeComposer = useCallback(() => {
     const textarea = composerRef.current;
-    if (!textarea) return;
-    textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
-  }, [prompt]);
+    const measurement = composerMeasurementRef.current;
+    if (!textarea || !measurement) return;
+    const minHeight = thread?.messages.length ? 44 : 56;
+    textarea.style.height = `${Math.min(Math.max(measurement.scrollHeight, minHeight), 192)}px`;
+  }, [thread?.messages.length]);
+
+  useLayoutEffect(() => {
+    resizeComposer();
+  }, [prompt, resizeComposer]);
+
+  useEffect(() => {
+    const shell = composerShellRef.current;
+    if (!shell || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(resizeComposer);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, [resizeComposer]);
 
   const hasMessages = Boolean(thread?.messages.length);
   const guideVisible = guidedActionsOpen;
@@ -555,7 +569,7 @@ export function ChatWorkspace({
           <div
             ref={composerShellRef}
             data-testid="composer"
-            className={`composer-shadow relative rounded-[28px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "flex min-h-[128px] flex-col justify-end"} ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[28px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[128px] justify-end"} ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
@@ -589,6 +603,13 @@ export function ChatWorkspace({
                 ))}
               </div>
             ) : null}
+            <div
+              ref={composerMeasurementRef}
+              aria-hidden="true"
+              className="composer-measurement pointer-events-none invisible absolute inset-x-2 top-2 whitespace-pre-wrap [overflow-wrap:anywhere]"
+            >
+              {`${prompt}\u200b`}
+            </div>
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
@@ -599,7 +620,7 @@ export function ChatWorkspace({
               disabled={!project}
               onChange={(event) => onPromptChange(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   if (!sending && !documentUploading && prompt.trim() && runtimeReady) {
                     shouldStickToBottomRef.current = true;
@@ -610,7 +631,7 @@ export function ChatWorkspace({
             />
             <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
-                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><Plus size={15} /></button>
+                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 <span className="composer-mode-chip rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">Trabajar</span>
                 <span className="composer-destination max-w-44 truncate text-[11px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
@@ -668,11 +689,23 @@ export function ChatWorkspace({
                   onChange={onPromptChange}
                   onNotice={onComposerNotice}
                 />
-                {sending ? (
-                  <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-8 sm:rounded-full" onClick={onStop}><Stop size={11} weight="fill" /></button>
-                ) : (
-                  <button aria-label="Enviar mensaje" className="grid size-11 place-items-center rounded-xl bg-[var(--brain-accent)] text-[var(--brain-contrast)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full" disabled={!project || !prompt.trim() || !runtimeReady || documentUploading} onClick={() => { shouldStickToBottomRef.current = true; onSend(); }}><ArrowUp size={13} weight="bold" /></button>
-                )}
+                <button
+                  aria-label={sending ? "Detener respuesta" : "Enviar mensaje"}
+                  className={`composer-submit grid size-11 place-items-center rounded-xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full ${sending ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--brain-accent)] text-[var(--brain-contrast)]"}`}
+                  disabled={sending ? false : !project || !prompt.trim() || !runtimeReady || documentUploading}
+                  onClick={() => {
+                    if (sending) {
+                      onStop();
+                      return;
+                    }
+                    shouldStickToBottomRef.current = true;
+                    onSend();
+                  }}
+                >
+                  <span key={sending ? "stop" : "send"} className="composer-submit-icon" aria-hidden="true">
+                    {sending ? <Stop size={11} weight="fill" /> : <ArrowUp size={13} weight="bold" />}
+                  </span>
+                </button>
               </div>
             </div>
           </div>
