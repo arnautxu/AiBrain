@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -341,6 +341,35 @@ describe("closed browser dynamic tools", () => {
       "reserved", "approval_requested", "approval_resolved", "executing", "indeterminate",
     ]);
     expect(audit.at(-1)?.payload.success).toBe(false);
+  });
+
+  it("keeps a typed secret out of the response, record and audit when post-dispatch readback fails", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const secret = "never-persist-this";
+    const execute = vi.fn(async () => {
+      const error = new Error("readback unavailable after Input.insertText") as Error & { code: string };
+      error.code = "CHROME_ACTION_READBACK_UNAVAILABLE";
+      throw error;
+    });
+    const response = await handleBrowserDynamicToolCall(
+      request("type", { selector: "input[name=password]", text: secret, clear: true }),
+      context(approvalStore, execute, [], {
+        callStore,
+        emitApproval: async (item) => {
+          if (item.status === "pending") {
+            await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item), "accept");
+          }
+        },
+      }),
+    );
+    expect(response).toMatchObject({ success: false });
+    expect(JSON.stringify(response)).not.toContain(secret);
+    expect(JSON.stringify(await callStore.readAudit())).not.toContain(secret);
+    const records = (await readdir(callStore.recordsRoot)).filter((name) => name.endsWith(".json"));
+    expect(records).toHaveLength(1);
+    expect(await readFile(path.join(callStore.recordsRoot, records[0] as string), "utf8")).not.toContain(secret);
+    expect(execute).toHaveBeenCalledOnce();
   });
 
   it("does not duplicate a pending approval or execute twice when the same call is replayed", async () => {
