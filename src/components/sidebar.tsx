@@ -27,6 +27,7 @@ import {
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { AuthSession } from "@/auth/types";
+import { TASK_CENTER_SHORTCUT_ARIA } from "@/components/use-task-center-shortcut";
 import { BrandMark, ThemeToggle } from "@/components/ui/primitives";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
 import {
@@ -292,7 +293,7 @@ export function Sidebar({
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={onNewThread}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
             <button aria-label="Mostrar proyectos" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}>{activeProject ? <FolderOpen size={18} weight="fill" /> : <Folder size={18} />}</button>
-            <button aria-label={taskSummary.unread ? `Tareas, ${taskSummary.unread} sin leer` : "Tareas"} className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+            <button aria-label={taskSummary.unread ? `Tareas, ${taskSummary.unread} sin leer` : "Tareas"} aria-keyshortcuts={TASK_CENTER_SHORTCUT_ARIA} title="Abrir o cerrar Tareas (⌘⌥U / Ctrl+Alt+U)" className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
               <Bell size={18} weight={taskSummary.needsAttention ? "fill" : "regular"} />
               {taskSummary.unread ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 grid min-w-4 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[8px] font-bold leading-4 text-[var(--brain-contrast)]">{taskSummary.unread > 9 ? "9+" : taskSummary.unread}</span> : taskSummary.running ? <span aria-hidden="true" className="absolute right-1 top-1 size-2 rounded-full bg-[var(--text-subtle)]" /> : null}
             </button>
@@ -322,7 +323,7 @@ export function Sidebar({
             <Books size={17} />
             <span className="min-w-0 flex-1 text-[13px]">Biblioteca</span>
           </button>
-          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+          <button aria-keyshortcuts={TASK_CENTER_SHORTCUT_ARIA} title="Abrir o cerrar Tareas (⌘⌥U / Ctrl+Alt+U)" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
             <Bell size={17} weight={taskSummary.needsAttention ? "fill" : "regular"} />
             <span className="min-w-0 flex-1 text-[13px]">Tareas</span>
             {taskSummary.running ? <SpinnerGap aria-label={`${taskSummary.running} ${taskSummary.running === 1 ? "tarea en curso" : "tareas en curso"}`} size={13} className="motion-safe:animate-spin" /> : null}
