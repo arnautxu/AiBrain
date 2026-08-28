@@ -475,6 +475,23 @@ describe("WorkerRuntimeRegistry", () => {
     await registry.close();
   });
 
+  it("stops a worker when its gateway never starts", async () => {
+    const { config } = await fixture();
+    const runtime = new FakeRuntime(async () => new Promise<never>(() => undefined));
+    const registry = new WorkerRuntimeRegistry({
+      config,
+      factory: { create: () => runtime },
+      workerConnectTimeoutMs: 10,
+    });
+
+    await expect(registry.start(syntheticUser(1))).rejects.toThrow(
+      "Worker transport did not connect in time.",
+    );
+    expect(runtime.transport.closeCalls).toBe(1);
+    expect(runtime.stopCalls).toBe(1);
+    await registry.close();
+  });
+
   it("recovers durable roots in a new registry and rejects factory object reuse", async () => {
     const { config } = await fixture();
     const firstFactory = new RecordingFactory();
