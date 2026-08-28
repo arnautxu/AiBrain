@@ -146,14 +146,12 @@ export class CodexManagedAppAction {
     if (!visible || visible.status !== "resolved" || visible.decision !== "accept") {
       throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_PENDING", "Connector action requires one explicit approved pending item.");
     }
-    const current = await this.approvals.readConnectorApproval(locator);
-    if (current?.status !== "executed") {
-      const approved = await this.approvals.approveConnectorApprovalForLocator({ locator, authorizationFingerprint: input.authorizationFingerprint });
-      if (approved.outcome !== "approved" && approved.outcome !== "already-approved") {
-        throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval is not available for execution.");
-      }
+    const approved = await this.approvals.approveConnectorApprovalByLocator(locator, input.authorizationFingerprint);
+    if (approved.outcome !== "approved" && approved.outcome !== "already-approved" &&
+        approved.record?.status !== "executed" && approved.record?.status !== "indeterminate") {
+      throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval is not available for execution.");
     }
-    return this.approvals.executeConnectorApprovalForLocator({ locator, authorizationFingerprint: input.authorizationFingerprint,
+    return this.approvals.executeConnectorApprovalByLocator(locator, input.authorizationFingerprint, {
       revalidate: async () => {
         try {
           await this.revalidate(authorization);

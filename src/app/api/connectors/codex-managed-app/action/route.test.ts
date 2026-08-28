@@ -35,8 +35,8 @@ describe("Codex managed action route", () => {
     expect(prepare).toHaveBeenCalledWith({ installationId: session.tenant.id, userId: session.user.id, ...locator });
   });
 
-  it("rejects browser supplied receipt, authorization, server, tool, or arguments", async () => {
-    for (const forbidden of ["receipt", "authorization", "auth", "server", "tool", "args", "arguments"]) {
+  it("rejects browser supplied receipt, snapshot, authorization, server, tool, or arguments", async () => {
+    for (const forbidden of ["receipt", "snapshot", "authorization", "auth", "server", "tool", "args", "arguments"]) {
       const response = await POST(new Request("https://example.test/api/connectors/codex-managed-app/action", { method: "POST", body: JSON.stringify({ operation: "execute", locator, authorizationFingerprint: fingerprint, [forbidden]: "x" }) }));
       expect(response.status).toBe(400);
     }
