@@ -10,6 +10,7 @@ import {
 } from "@/connectors/contracts";
 import type { ConnectorCredentialProvider, RegisteredConnector } from "@/connectors/registry";
 import type { McpServerToolCallParams } from "../../contracts/codex/0.149.1/types/v2/McpServerToolCallParams";
+import type { ListMcpServerStatusParams } from "../../contracts/codex/0.149.1/types/v2/ListMcpServerStatusParams";
 
 export const CODEX_MANAGED_APP_CONNECTOR_ID = "codex-managed-app";
 export const CODEX_MANAGED_APP_READ_SCOPE = "app.installed.read";
@@ -44,6 +45,12 @@ export type CodexInstalledAppTransport = {
   request(
     method: "mcpServer/tool/call",
     params: McpServerToolCallParams,
+    purpose: string,
+    timeoutMs?: number,
+  ): Promise<unknown>;
+  request(
+    method: "mcpServerStatus/list",
+    params: ListMcpServerStatusParams,
     purpose: string,
     timeoutMs?: number,
   ): Promise<unknown>;
