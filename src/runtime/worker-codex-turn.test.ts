@@ -122,7 +122,7 @@ describe("worker Codex turn", () => {
     mocked.maintenanceReleases = 0;
   });
 
-  it("uses a user-scoped worker, stable client message id and routed turn events", async () => {
+  it("keeps live web search and the private browser exposed for a current Arnall query", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-turn-"));
     const workspace = path.join(userRoot, "workspace");
     const staging = path.join(userRoot, "staging");
@@ -160,7 +160,7 @@ describe("worker Codex turn", () => {
           planType: "team",
           models: [],
           skills: [],
-          webSearch: false,
+          webSearch: true,
           imageGeneration: false,
           processWarm: true,
           rateLimit: null,
@@ -238,6 +238,8 @@ describe("worker Codex turn", () => {
 
     const events: Array<Record<string, unknown>> = [];
     const request = chatRequest();
+    request.message = "Quin és l'horari d'avui de la botiga Arnall de Palamós? Cerca'l a la web oficial.";
+    request.options.webSearch = true;
     request.options.documentUploadIds = [documentUploadId];
     const turnPermissions = permissions([{
       ruleId: "documents.read",
@@ -307,6 +309,7 @@ describe("worker Codex turn", () => {
     expect(JSON.stringify(turnStart?.params)).not.toContain("legacy-must-not-be-used");
     const threadStart = calls.find((call) => call.method === "thread/start");
     expect(threadStart?.params).not.toHaveProperty("projectId");
+    expect(threadStart?.params).toMatchObject({ config: { web_search: "live" } });
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
       expect.objectContaining({
         type: "namespace",
@@ -325,6 +328,7 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
+    expect(instructions).toContain("La cerca web en viu està disponible");
     expect(instructions.indexOf(`Policy fingerprint: ${fingerprint}`))
       .toBeLessThan(instructions.indexOf("BEGIN AIBRAIN EXPLICIT MEMORY JSON DATA"));
     expect(boundTurn).toBe("runtime-turn-1");

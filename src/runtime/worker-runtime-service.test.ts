@@ -182,6 +182,28 @@ describe("worker App Server client", () => {
     await client.close();
   });
 
+  it("reads the live web-search capability without loading the full catalog", async () => {
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+
+    await expect(client.capabilities()).resolves.toEqual({
+      webSearch: true,
+      imageGeneration: false,
+    });
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "modelProvider/capabilities/read",
+    )).toHaveLength(1);
+    expect(transport.sent.some((item) =>
+      item.kind === "rpc-request" && [
+        "model/list",
+        "skills/list",
+        "account/rateLimits/read",
+        "account/usage/read",
+      ].includes(item.rpc.method),
+    )).toBe(false);
+    await client.close();
+  });
+
   it("reuses a persistent App Server that was initialized by an earlier client", async () => {
     const transport = new FakeTransport(true);
     const client = new WorkerAppServerClient(handle(transport));
