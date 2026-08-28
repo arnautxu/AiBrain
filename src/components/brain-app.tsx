@@ -44,7 +44,11 @@ import {
   type ManagedAppActionOutcome,
   type ManagedAppActionTarget,
 } from "@/ui/codex-managed-app-ui";
-import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
+import {
+  consumeRecoverableChatStream,
+  type ChatStreamRecoveryState,
+} from "@/ui/recoverable-chat-stream";
+import { createChatReattachRequest } from "@/ui/chat-reattach-request";
 import {
   ClientTurnPerformance,
   type ClientTurnPerformanceReadback,
@@ -120,6 +124,12 @@ type ConfirmDialogState =
   | { kind: "archive-project"; project: WorkbenchProject }
   | { kind: "archive-thread"; thread: WorkbenchThread }
   | { kind: "undo-result"; message: ChatMessage };
+
+type StreamRecoveryNotice = {
+  threadId: string;
+  assistantMessageId: string;
+  attempt: number;
+};
 
 type StoredSelection = {
   activeProjectId: string | null;
@@ -446,14 +456,6 @@ function localBranchThread(parent: WorkbenchThread, input: BranchThreadInput) {
   };
 }
 
-async function chatError(response: Response) {
-  const body: unknown = await response.json().catch(() => null);
-  if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
-    return body.error;
-  }
-  return "El servicio no está disponible en este momento.";
-}
-
 export function BrainApp({
   branding,
   manifest,
@@ -521,6 +523,7 @@ export function BrainApp({
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [streamRecoveryNotice, setStreamRecoveryNotice] = useState<StreamRecoveryNotice | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const [managedAppAvailable, setManagedAppAvailable] = useState(false);
   const [managedAppActions, setManagedAppActions] = useState<ManagedAppActionRegistry>({});
@@ -1133,13 +1136,13 @@ export function BrainApp({
   }, [publications]);
 
   const handleStream = useCallback(async (
-    response: Response,
+    request: (signal: AbortSignal) => Promise<Response>,
     threadId: string,
     assistantMessageId: string,
     signal: AbortSignal,
     performance: ClientTurnPerformance,
+    startedAt: number,
   ) => {
-    if (!response.ok) throw new Error(await chatError(response));
     const dispatcher = createChatEventFrameDispatcher((event) => {
       setThreads((current) => updateThreadMessage(
         current,
@@ -1149,9 +1152,29 @@ export function BrainApp({
       ));
     }, undefined, { onEventApplied: (event) => performance.eventApplied(event) });
     try {
-      await consumeChatEventStream(response, dispatcher.dispatch, { signal });
+      await consumeRecoverableChatStream({
+        request,
+        signal,
+        startedAt,
+        onEvent: dispatcher.dispatch,
+        onMeasurement: (measurement) => performance.transportMeasured(measurement),
+        onRecoveryState: (state: ChatStreamRecoveryState) => {
+          if (state.state === "recovering") {
+            performance.reconnectStarted();
+            return;
+          }
+          if (state.state === "stalled") {
+            setStreamRecoveryNotice({ threadId, assistantMessageId, attempt: state.attempt });
+            return;
+          }
+          setStreamRecoveryNotice((current) => current?.threadId === threadId &&
+            current.assistantMessageId === assistantMessageId ? null : current);
+        },
+      });
     } finally {
       dispatcher.close();
+      setStreamRecoveryNotice((current) => current?.threadId === threadId &&
+        current.assistantMessageId === assistantMessageId ? null : current);
     }
   }, []);
 
@@ -1268,38 +1291,32 @@ export function BrainApp({
         controller,
       });
       const streamRequestedAt = performance.now();
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: controller.signal,
-        body: JSON.stringify({
-          projectId: activeProject.id,
-          threadId,
-          userMessageId: userMessage.id,
-          assistantMessageId: assistantId,
-          message: runtimeContent,
-          ...(visibleContent !== runtimeContent ? { displayMessage: visibleContent } : {}),
-          preferences: {
-            tone: preferences.tone,
-            language: manifest.identity.language,
-            showActivity: preferences.showActivityPanel,
-          },
-          options: {
-            mode: composerMode,
-            model: composerModel,
-            effort: composerEffort,
-            webSearch,
-            imageGeneration,
-            skill: selectedSkill,
-            attachments,
-            ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
-          },
-        }),
+      // This serialized request is deliberately reused verbatim for every
+      // reattach, preserving the server's idempotency key and turn identity.
+      const chatRequest = JSON.stringify({
+        projectId: activeProject.id,
+        threadId,
+        userMessageId: userMessage.id,
+        assistantMessageId: assistantId,
+        message: runtimeContent,
+        ...(visibleContent !== runtimeContent ? { displayMessage: visibleContent } : {}),
+        preferences: {
+          tone: preferences.tone,
+          language: manifest.identity.language,
+          showActivity: preferences.showActivityPanel,
+        },
+        options: {
+          mode: composerMode,
+          model: composerModel,
+          effort: composerEffort,
+          webSearch,
+          imageGeneration,
+          skill: selectedSkill,
+          attachments,
+          ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
+        },
       });
-      if (response.headers.get("X-AiBrain-Idempotent-Replay") === "true") {
-        clientTurnPerformance.reconnectStarted(streamRequestedAt);
-      }
-      await handleStream(response, threadId, assistantId, controller.signal, clientTurnPerformance);
+      await handleStream(createChatReattachRequest(chatRequest), threadId, assistantId, controller.signal, clientTurnPerformance, streamRequestedAt);
       succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {
@@ -1853,6 +1870,9 @@ export function BrainApp({
         runtimeStatus={effectiveRuntimeStatus}
         appPolicy={appPolicy}
         networkOnline={networkOnline}
+        streamRecovery={streamRecoveryNotice?.threadId === activeThreadId
+          ? { attempt: streamRecoveryNotice.attempt }
+          : null}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
         onComposerModeChange={setComposerMode}
