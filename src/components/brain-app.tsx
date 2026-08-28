@@ -36,6 +36,10 @@ import {
   type ComposerMode,
 } from "@/lib/chat-contract";
 import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
+import {
+  ClientTurnPerformance,
+  type ClientTurnPerformanceReadback,
+} from "@/ui/client-turn-performance";
 import { createChatEventFrameDispatcher } from "@/ui/frame-event-dispatcher";
 import {
   stageDocument,
@@ -112,6 +116,22 @@ type StoredSelection = {
   activeProjectId: string | null;
   threadByProject: Record<string, string>;
 };
+
+const MAX_CLIENT_TURN_READBACKS = 24;
+
+function retainClientTurnReadback(
+  current: Record<string, ClientTurnPerformanceReadback>,
+  messageId: string,
+  readback: ClientTurnPerformanceReadback,
+) {
+  const next = { ...current, [messageId]: readback };
+  const ids = Object.keys(next);
+  while (ids.length > MAX_CLIENT_TURN_READBACKS) {
+    const oldest = ids.shift();
+    if (oldest) delete next[oldest];
+  }
+  return next;
+}
 
 function createMessage(
   id: string,
@@ -444,6 +464,7 @@ export function BrainApp({
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
+  const [clientTurnReadbacks, setClientTurnReadbacks] = useState<Record<string, ClientTurnPerformanceReadback>>({});
   const threadByProjectRef = useRef<Record<string, string>>({});
   const turnControllersRef = useRef(new Map<string, {
     assistantMessageId: string;
@@ -1045,6 +1066,7 @@ export function BrainApp({
     threadId: string,
     assistantMessageId: string,
     signal: AbortSignal,
+    performance: ClientTurnPerformance,
   ) => {
     if (!response.ok) throw new Error(await chatError(response));
     const dispatcher = createChatEventFrameDispatcher((event) => {
@@ -1054,7 +1076,7 @@ export function BrainApp({
         assistantMessageId,
         (message) => applyChatStreamEvent(message, event),
       ));
-    });
+    }, undefined, { onEventApplied: (event) => performance.eventApplied(event) });
     try {
       await consumeChatEventStream(response, dispatcher.dispatch, { signal });
     } finally {
@@ -1077,11 +1099,13 @@ export function BrainApp({
     const reservationKey = initialThreadId ?? `project:${activeProject.id}:new`;
     if (turnReservationsRef.current.has(reservationKey)) return;
     turnReservationsRef.current.add(reservationKey);
+    const sendIntentAt = performance.now();
     if (!initialThreadId) setDraftStarting(true);
     let thread = activeThread && activeThread.status === "active" &&
       activeThread.projectId === activeProject.id ? activeThread : null;
     let assistantMessage: ChatMessage | null = null;
     let controller: AbortController | null = null;
+    let clientTurnPerformance: ClientTurnPerformance | null = null;
     let ownsVisibleComposer = true;
     let succeeded = false;
     try {
@@ -1123,6 +1147,11 @@ export function BrainApp({
       );
       const threadId = thread.id;
       const assistantId = assistantMessage.id;
+      clientTurnPerformance = new ClientTurnPerformance(
+        (readback) => setClientTurnReadbacks((current) => retainClientTurnReadback(current, assistantId, readback)),
+        undefined,
+        sendIntentAt,
+      );
       setRunningThreadIds((current) => {
         const next = new Set(current);
         next.add(threadId);
@@ -1167,6 +1196,7 @@ export function BrainApp({
         assistantMessageId: assistantId,
         controller,
       });
+      const streamRequestedAt = performance.now();
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1195,11 +1225,15 @@ export function BrainApp({
           },
         }),
       });
-      await handleStream(response, threadId, assistantId, controller.signal);
+      if (response.headers.get("X-AiBrain-Idempotent-Replay") === "true") {
+        clientTurnPerformance.reconnectStarted(streamRequestedAt);
+      }
+      await handleStream(response, threadId, assistantId, controller.signal, clientTurnPerformance);
       succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {
         const stopped = controller?.signal.aborted === true;
+        clientTurnPerformance?.terminalStateApplied(stopped ? "stopped" : "error");
         const failedThreadId = thread.id;
         const failedMessageId = assistantMessage.id;
         setThreads((current) => updateThreadMessage(
@@ -1744,6 +1778,7 @@ export function BrainApp({
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
         <DetailsPanel
           message={selectedMessage}
+          performance={selectedMessage ? clientTurnReadbacks[selectedMessage.id] ?? null : null}
           open
           onClose={() => setActiveSideWindow(null)}
           onResolveApproval={(approvalId, decision) => {
