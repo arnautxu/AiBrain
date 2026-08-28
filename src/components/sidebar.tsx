@@ -299,7 +299,6 @@ export function Sidebar({
           <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}>
             <MagnifyingGlass size={17} />
             <span className="min-w-0 flex-1 text-[13px]">Buscar</span>
-            <kbd className="rounded border border-[var(--border)] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-subtle)]">⌘K</kbd>
           </button>
           <button aria-label="Automatizaciones (cron jobs)" title="Gestionar automatizaciones cron" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
             <CalendarBlank size={17} />

@@ -117,6 +117,7 @@ describe("Sidebar", () => {
     expect(onOpenAutomations).toHaveBeenCalledOnce();
     expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("Tareas")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("⌘K")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abrir preferencias" })).not.toBeInTheDocument();
   });
 

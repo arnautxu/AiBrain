@@ -40,6 +40,9 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByText("Trabajar", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Modo del turno" })).toHaveCount(0);
   await expect(page.getByLabel("Destino de la conversación")).toContainText(primaryProject);
+  await expect(page.getByTestId("project-breadcrumb")).toContainText(primaryProject);
+  await expect(page.getByRole("button", { name: /Abrir contexto/ })).toHaveCount(0);
+  await expect(page.getByText("⌘K", { exact: true })).toHaveCount(0);
 
   const addMenuButton = page.getByRole("button", { name: "Añadir al mensaje" });
   await addMenuButton.click();
