@@ -515,13 +515,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   }
 
   async captureFrame(threadId: string): Promise<BrowserFrame> {
-    const result = await this.withThreadPageRecovery(threadId, async (page) =>
-      this.requireBrowser().send<{ data: string }>("Page.captureScreenshot", {
-        format: "png",
-        fromSurface: true,
-        captureBeyondViewport: false,
-      }, { sessionId: page.sessionId }), (error) =>
-      error instanceof CdpClientError && error.code === "CDP_COMMAND_FAILED");
+    const result = await this.withThreadPageRecovery(threadId, (page) => this.captureScreenshot(page));
     if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
       throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
     }
@@ -1032,13 +1026,12 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private async withThreadPageRecovery<Result>(
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
-    recoverable: (error: unknown) => boolean = isRecoverableThreadSessionError,
   ): Promise<Result> {
     const page = await this.requireThreadPage(threadId);
     try {
       return await operation(page);
     } catch (error) {
-      if (!recoverable(error)) throw error;
+      if (!isRecoverableThreadSessionError(error)) throw error;
       if (this.threadPages.get(threadId) === page) {
         this.threadPages.delete(threadId);
         await this.closeThreadPage(page);
@@ -1046,6 +1039,25 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       const replacement = await this.requireThreadPage(threadId);
       return operation(replacement);
     }
+  }
+
+  private async captureScreenshot(page: ThreadPage) {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        return await this.requireBrowser().send<{ data: string }>("Page.captureScreenshot", {
+          format: "png",
+          fromSurface: true,
+          captureBeyondViewport: false,
+        }, { sessionId: page.sessionId });
+      } catch (error) {
+        if (!(error instanceof CdpClientError) || error.code !== "CDP_COMMAND_FAILED") throw error;
+        lastError = error;
+        if (isRecoverableThreadSessionError(error) || attempt === 2) throw error;
+        await wait(250 * (attempt + 1));
+      }
+    }
+    throw lastError;
   }
 
   private async waitForReadablePage(page: ThreadPage, assertController: () => void) {

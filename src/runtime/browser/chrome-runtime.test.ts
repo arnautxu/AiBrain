@@ -498,12 +498,38 @@ describe("ChromeCdpRuntime private pipe", () => {
     const staleTarget = runtime.targetIdFor(THREAD_A);
     client.failNext("Page.captureScreenshot", new CdpClientError(
       "CDP_COMMAND_FAILED",
-      "Page.captureScreenshot failed.",
+      "Page.captureScreenshot failed: Not attached to an active page",
     ));
 
     await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
     expect(runtime.targetIdFor(THREAD_A)).not.toBe(staleTarget);
     await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://example.test/recover");
+    expect(client.commands.filter(({ method }) => method === "Page.captureScreenshot")).toHaveLength(2);
+    await runtime.stop();
+  });
+
+  it("retries a transient screenshot on the same target so read selectors stay valid", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.agentNavigate(THREAD_A, "https://example.test/transient");
+    await runtime.readPage(THREAD_A);
+    const target = runtime.targetIdFor(THREAD_A);
+    client.failNext("Page.captureScreenshot", new CdpClientError(
+      "CDP_COMMAND_FAILED",
+      "Page.captureScreenshot failed.",
+    ));
+
+    await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
+    expect(runtime.targetIdFor(THREAD_A)).toBe(target);
     expect(client.commands.filter(({ method }) => method === "Page.captureScreenshot")).toHaveLength(2);
     await runtime.stop();
   });

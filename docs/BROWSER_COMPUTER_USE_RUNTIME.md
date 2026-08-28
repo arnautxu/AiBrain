@@ -181,10 +181,12 @@ guessing page markup; `click` scrolls the approved element into view before
 dispatching input. The selectors are rebuilt by every read, never persisted as
 authority and never relax the explicit mutation approval.
 
-Screenshots are idempotent reads. A generic stale-page CDP failure therefore
-recreates only that thread target and retries once; navigation state restores
-the last safe URL. Mutating calls retain the narrower stale-session predicate
-so an indeterminate click or type is never replayed broadly.
+Screenshots are idempotent reads. A generic transient CDP failure is retried up
+to three times on the same target so selectors returned by the preceding read
+remain valid. Only an explicit stale-page/session failure recreates that thread
+target; navigation state then restores the last safe URL. Mutating calls retain
+the narrow stale-session predicate so an indeterminate click or type is never
+replayed broadly.
 
 The loopback proxy is not an unauthenticated local capability. It generates a
 new 256-bit password per runtime and returns a Basic challenge. Chrome receives
