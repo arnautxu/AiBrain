@@ -29,6 +29,13 @@ type TurnActivityProps = {
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
 };
 
+const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
+  "Resultat aprovat": "Resultado aprobado",
+  "Resultat pendent de revisió": "Resultado pendiente de revisión",
+  "Revertint els canvis": "Deshaciendo los cambios",
+  "Canvis revertits i verificats": "Cambios deshechos y verificados",
+};
+
 function ActivityIcon({ item }: { item: ActivityItem }) {
   if (item.status === "running" || item.status === "waiting") {
     return <SpinnerGap size={13} className="motion-safe:animate-spin" />;
@@ -46,25 +53,21 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
   return <Check {...props} weight="bold" />;
 }
 
+function activeActivityLabel(item: ActivityItem) {
+  return {
+    command: "Ejecutando comando",
+    file: "Editando archivos",
+    reasoning: "Pensando",
+    web: "Buscando en la web",
+    tool: "Usando herramienta",
+    agent: "Coordinando agentes",
+    plan: "Preparando el plan",
+    system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
+  }[item.kind];
+}
+
 function friendlyActivity(item: ActivityItem) {
-  const systemLabels: Record<string, string> = {
-    "Resultat aprovat": "Resultado aprobado",
-    "Resultat pendent de revisió": "Resultado pendiente de revisión",
-    "Revertint els canvis": "Deshaciendo los cambios",
-    "Canvis revertits i verificats": "Cambios deshechos y verificados",
-  };
-  if (item.status === "running" || item.status === "waiting") {
-    return {
-      command: "Ejecutando comando",
-      file: "Editando archivos",
-      reasoning: "Pensando",
-      web: "Buscando en la web",
-      tool: "Usando herramienta",
-      agent: "Coordinando agentes",
-      plan: "Preparando el plan",
-      system: systemLabels[item.label] ?? item.label,
-    }[item.kind];
-  }
+  if (item.status === "running" || item.status === "waiting") return activeActivityLabel(item);
   if (item.status === "failed") return `No se ha podido completar: ${item.label}`;
   if (item.status === "stopped") return `Paso detenido: ${item.label}`;
   if (item.status === "pending") return `Pendiente: ${item.label}`;
@@ -76,8 +79,17 @@ function friendlyActivity(item: ActivityItem) {
     tool: "Herramienta completada",
     agent: "Coordinación completada",
     plan: "Pasos preparados",
-    system: systemLabels[item.label] ?? item.label,
+    system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
   }[item.kind];
+}
+
+function currentActivityLabel(message: ChatMessage) {
+  for (let index = message.activity.length - 1; index >= 0; index -= 1) {
+    const item = message.activity[index];
+    if (item.status === "running" || item.status === "waiting") return activeActivityLabel(item);
+  }
+  const latestItem = message.activity.at(-1);
+  return latestItem ? activeActivityLabel(latestItem) : "Pensando";
 }
 
 function ApprovalCard({
@@ -139,7 +151,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
   if (!hasDetails) return null;
   const executionLabel = message.status === "streaming"
-    ? "Trabajando"
+    ? currentActivityLabel(message)
     : message.status === "stopped"
       ? "Pensamiento interrumpido"
       : message.status === "error"
@@ -150,13 +162,12 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 || message.activity.length > 0 ? (
         <details
-          key={`${compact ? "panel" : "turn"}-${message.status}`}
           className="group/execution"
-          open={compact || message.status === "streaming" ? true : undefined}
+          open={compact ? true : undefined}
         >
           <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg py-1 text-[16px] font-normal leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
             {message.status === "streaming" ? <SpinnerGap size={14} className="motion-safe:animate-spin" /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
-            <span className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
+            <span aria-live="polite" className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
             <span aria-hidden className="transition group-open/execution:rotate-90">›</span>
           </summary>
           <div className="mt-3 space-y-4 border-l border-[var(--border-subtle)] pl-4">
