@@ -23,7 +23,7 @@
     "test:a11y": "playwright test --project=accessibility",
     "acceptance:verify": "tsx scripts/verify-live-acceptance.ts",
     "acceptance:release-evidence": "tsx scripts/create-predeploy-release-evidence.ts",
-    "acceptance:collect-release-readbacks": "tsx scripts/collect-release-readbacks.ts",
+    "acceptance:collect-release-readbacks": "node --experimental-strip-types scripts/collect-release-readbacks.ts",
     "test:soak": "tsx scripts/soak.ts",
     "test:soak:qa": "tsx scripts/soak.ts --qa",
     "test:coverage": "vitest run --coverage",
