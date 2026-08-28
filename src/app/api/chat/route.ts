@@ -467,6 +467,12 @@ export async function POST(request: Request) {
     }
   }
 
+  let clientDetached = request.signal.aborted;
+  const detachClient = () => {
+    clientDetached = true;
+  };
+  request.signal.addEventListener("abort", detachClient, { once: true });
+  const turnLifetime = new AbortController();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       let runtimeThreadToken: string | null = null;
@@ -504,7 +510,7 @@ export async function POST(request: Request) {
         } else {
           assistantMessage = applyChatStreamEvent(assistantMessage, event);
         }
-        controller.enqueue(line(event));
+        if (!clientDetached) controller.enqueue(line(event));
       };
       const emitCodex = async (event: WorkerCodexTurnEvent, projection?: WorkerTurnProjection) => {
         if (event.type === "runtimeThread") {
@@ -552,7 +558,7 @@ export async function POST(request: Request) {
             approvalStore,
             turnMemory,
             turnDocuments,
-            request.signal,
+            turnLifetime.signal,
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
@@ -586,7 +592,7 @@ export async function POST(request: Request) {
           await projectionWriter?.flush();
         } catch (error) {
           operationalLogger.error("turn.projection_flush_failed", { error });
-          if (!request.signal.aborted) {
+          if (!clientDetached) {
             const event: ChatStreamEvent = {
               type: "error",
               message: "El torn ha acabat, però no s’ha pogut consolidar la recuperació.",
@@ -598,7 +604,7 @@ export async function POST(request: Request) {
         if (assistantMessage.status === "streaming") {
           assistantMessage = {
             ...assistantMessage,
-            status: request.signal.aborted ? "stopped" : "error",
+            status: "error",
           };
         }
         if (persistent) {
@@ -611,7 +617,7 @@ export async function POST(request: Request) {
             );
           } catch (error) {
             operationalLogger.error("thread.persistence_failed", { error });
-            if (!request.signal.aborted) {
+            if (!clientDetached) {
               await emit({ type: "error", message: "El torn ha acabat, però no s’ha pogut persistir." });
             }
           }
@@ -638,8 +644,16 @@ export async function POST(request: Request) {
           });
         }
         maintenanceActivity?.release();
-        controller.close();
+        request.signal.removeEventListener("abort", detachClient);
+        if (!clientDetached) controller.close();
       }
+    },
+    cancel() {
+      // Losing the NDJSON consumer is not a stop command. The turn remains
+      // owned by the server, continues updating its durable projection and can
+      // be followed by a reconnect. Explicit cancellation is handled only by
+      // /api/runtime/turns/control through the worker turn registry.
+      detachClient();
     },
   });
   return new Response(stream, {
