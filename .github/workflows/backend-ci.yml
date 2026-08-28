@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - Arnau
       - codex/aibrain-backend-definitivo
 
 permissions:
@@ -48,6 +49,7 @@ jobs:
         run: |
           npm run infra:validate
           bash -n infra/hetzner/app/deploy-arnall-main.sh
+          bash -n infra/hetzner/app/deploy-arnau-preview.sh
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=critical
       - name: Audit complete dependency tree

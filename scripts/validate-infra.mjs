@@ -55,6 +55,9 @@ const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
 const arnallDeployGateway = read("infra/hetzner/app/deploy-arnall-main.sh");
 const arnallDeployWorkflow = read(".github/workflows/deploy-arnall.yml");
+const arnauPreviewDeployGateway = read("infra/hetzner/app/deploy-arnau-preview.sh");
+const arnauPreviewDeployWorkflow = read(".github/workflows/deploy-arnau-preview.yml");
+const arnauPreviewInstallation = JSON.parse(read("config/installations/arnau.preview.example.json"));
 const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway, arnallDeployGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
@@ -78,6 +81,26 @@ forbidMatch(arnallDeployGateway, /install[^\n]*-(?:o|g) 10001/u, "Arnall deploy 
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful Backend CI");
 requireMatch(arnallDeployWorkflow, /head_sha[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnall deployment does not transmit the immutable tested revision");
 requireMatch(arnallDeployWorkflow, /StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnall deployment does not pin the SSH host identity");
+forbidMatch(arnauPreviewDeployGateway, /(?:docker\s+(?:system|builder|image)\s+prune|docker\s+volume\s+(?:rm|prune)|aibrain-company-qa|arnall\.graphikai\.com|BGreenly)/iu, "Arnau preview deploy gateway contains a broad cleanup or production tenant reference");
+requireMatch(arnauPreviewDeployGateway, /readonly INSTALLATION_ID="arnau-preview"[\s\S]*readonly COMPOSE_PROJECT="aibrain-arnau-preview"/u, "Arnau preview gateway is not pinned to its isolated installation");
+requireMatch(arnauPreviewDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,120}\^deploy\\ \(\[0-9a-f\]\{40\}\)\$/u, "Arnau preview gateway does not constrain the forced SSH command");
+requireMatch(arnauPreviewDeployGateway, /config\/installations\/arnau\.preview\.example\.json/u, "Arnau preview gateway does not require its installation config");
+requireMatch(arnauPreviewDeployGateway, /aibrain-arnau-deploy-gateway/u, "Arnau preview gateway does not self-update its isolated entrypoint");
+requireMatch(arnauPreviewDeployWorkflow, /workflow_run:[\s\S]*Backend CI[\s\S]*branches:[\s\S]*- Arnau[\s\S]*conclusion == 'success'/u, "Arnau preview deployment is not gated on successful branch CI");
+requireMatch(arnauPreviewDeployWorkflow, /head_branch == 'Arnau'[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnau preview deployment does not transmit the tested Arnau revision");
+requireMatch(arnauPreviewDeployWorkflow, /ARNAU_PREVIEW_DEPLOY_SSH_KEY[\s\S]*StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnau preview deployment does not use and pin its restricted identity");
+if (arnauPreviewInstallation.installationId !== "arnau-preview") failures.push("Arnau preview installation has the wrong installationId");
+if (arnauPreviewInstallation.publicUrl !== "https://arnau.167.233.146.105.sslip.io") failures.push("Arnau preview installation has the wrong public URL");
+for (const [key, value] of Object.entries({
+  dataRoot: "/var/lib/aibrain/data",
+  companyContextRoot: "/var/lib/aibrain/data/company-context",
+  usersRoot: "/var/lib/aibrain/data/users",
+  sourceReadRoot: "/srv/aibrain/source-ro",
+  publishWriteRoot: "/srv/aibrain/publish-rw",
+  backupsRoot: "/var/lib/aibrain/data/backups",
+})) {
+  if (arnauPreviewInstallation.paths?.[key] !== value) failures.push(`Arnau preview paths.${key} does not match Compose`);
+}
 
 requireMatch(dockerfile, /@openai\/codex@0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
 forbidMatch(dockerfile, /ARG CODEX_VERSION/u, "Dockerfile permits the App Server contract version to be overridden");

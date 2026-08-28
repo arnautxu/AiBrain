@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "installationId": "arnau-preview",
+  "companyName": "Arnall",
+  "companySlug": "arnall",
+  "publicUrl": "https://arnau.167.233.146.105.sslip.io",
+  "branding": {
+    "productName": "Arnall AI · Arnau",
+    "logoPath": "/branding/aibrain/logo.svg",
+    "faviconPath": "/branding/aibrain/favicon.svg",
+    "accentColor": "#315ee7"
+  },
+  "paths": {
+    "dataRoot": "/var/lib/aibrain/data",
+    "companyContextRoot": "/var/lib/aibrain/data/company-context",
+    "usersRoot": "/var/lib/aibrain/data/users",
+    "sourceReadRoot": "/srv/aibrain/source-ro",
+    "publishWriteRoot": "/srv/aibrain/publish-rw",
+    "backupsRoot": "/var/lib/aibrain/data/backups"
+  }
+}
