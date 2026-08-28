@@ -12,7 +12,11 @@ import type {
   TransportHealth,
 } from "@/runtime/transport";
 import { MaintenanceCoordinator } from "@/operations/maintenance";
-import { WorkerAppServerClient } from "@/runtime/worker-runtime-service";
+import {
+  registerWorkerTurnCancellation,
+  requestPendingWorkerTurnCancellation,
+  WorkerAppServerClient,
+} from "@/runtime/worker-runtime-service";
 import type { WorkerRuntimeHandle, WorkerRoots } from "@/runtime/workers/types";
 
 class AsyncEvents implements AsyncIterable<AppServerEvent> {
@@ -127,6 +131,35 @@ function handle(transport: AppServerTransport): WorkerRuntimeHandle {
 }
 
 describe("worker App Server client", () => {
+  it("carries an immediate stop intent into the worker once its App Server thread is registered", () => {
+    const runtimeGlobals = globalThis as typeof globalThis & {
+      __aibrainWorkerRuntimeService?: unknown;
+      __aibrainPendingWorkerTurnCancellations?: Map<string, number>;
+    };
+    const previousService = runtimeGlobals.__aibrainWorkerRuntimeService;
+    const previousPending = runtimeGlobals.__aibrainPendingWorkerTurnCancellations;
+    delete runtimeGlobals.__aibrainWorkerRuntimeService;
+    runtimeGlobals.__aibrainPendingWorkerTurnCancellations = new Map();
+    const userId = "00000000-0000-4000-8000-000000000001";
+    const localTurnId = "00000000-0000-4000-8000-000000000041";
+
+    try {
+      expect(requestPendingWorkerTurnCancellation(userId, localTurnId)).toBe(true);
+      runtimeGlobals.__aibrainWorkerRuntimeService = {
+        clients: new Map([[userId, {}]]),
+        activeTurnCancellations: new Map(),
+      };
+      const cancel = vi.fn();
+      registerWorkerTurnCancellation(userId, "runtime-thread-1", localTurnId, cancel);
+      expect(cancel).toHaveBeenCalledWith(false);
+    } finally {
+      if (previousService === undefined) delete runtimeGlobals.__aibrainWorkerRuntimeService;
+      else runtimeGlobals.__aibrainWorkerRuntimeService = previousService;
+      if (previousPending === undefined) delete runtimeGlobals.__aibrainPendingWorkerTurnCancellations;
+      else runtimeGlobals.__aibrainPendingWorkerTurnCancellations = previousPending;
+    }
+  });
+
   it("initializes exactly once and reads the catalog over the scoped transport", async () => {
     const transport = new FakeTransport();
     const client = new WorkerAppServerClient(handle(transport));

@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { isTurnControlRequest, type TurnControlRequest } from "@/lib/chat-contract";
 
-const mocked = vi.hoisted(() => ({ cancel: vi.fn(() => true) }));
+const mocked = vi.hoisted(() => ({
+  cancel: vi.fn(() => true),
+  queueCancellation: vi.fn(() => true),
+}));
 vi.mock("server-only", () => ({}));
 vi.mock("@/runtime/worker-runtime-service", () => ({
   cancelWorkerTurnLocally: mocked.cancel,
+  requestPendingWorkerTurnCancellation: mocked.queueCancellation,
   workerAppServerForUser: vi.fn(),
 }));
 
-import { executeTurnControl, TurnControlError } from "@/runtime/turn-control";
+import { cancelPendingWorkerTurn, executeTurnControl, TurnControlError } from "@/runtime/turn-control";
 
 const identity = {
   installationId: "qa-company",
@@ -138,7 +142,85 @@ describe("turn control", () => {
       identity.userId,
       identity.runtimeThreadId,
       assistantMessageId,
+      true,
     );
+  });
+
+  it("cancels and persists a stop before App Server has assigned a runtime turn id", async () => {
+    mocked.cancel.mockClear();
+    mocked.cancel.mockReturnValueOnce(true);
+    const persisted: unknown[] = [];
+    const control: Extract<TurnControlRequest, { action: "stop" }> = {
+      action: "stop",
+      threadId: "00000000-0000-4000-8000-000000000021",
+      assistantMessageId,
+      clientRequestId,
+    };
+
+    await expect(cancelPendingWorkerTurn(
+      {
+        installationId: identity.installationId,
+        userId: identity.userId,
+        runtimeThreadId: identity.runtimeThreadId,
+      },
+      control,
+      async (event) => { persisted.push(event); },
+    )).resolves.toEqual({
+      action: "stop",
+      runtimeTurnId: null,
+      activeRunnerCancelled: true,
+    });
+    expect(mocked.cancel).toHaveBeenCalledWith(
+      identity.userId,
+      identity.runtimeThreadId,
+      assistantMessageId,
+      false,
+    );
+    expect(persisted).toMatchObject([
+      { type: "activity", item: { id: `stop:${clientRequestId}`, status: "stopped" } },
+      { type: "stopped" },
+    ]);
+  });
+
+  it("does not claim a pending stop when no matching local worker turn exists", async () => {
+    mocked.cancel.mockReturnValueOnce(false);
+    mocked.queueCancellation.mockReturnValueOnce(false);
+    await expect(cancelPendingWorkerTurn(
+      {
+        installationId: identity.installationId,
+        userId: identity.userId,
+        runtimeThreadId: identity.runtimeThreadId,
+      },
+      {
+        action: "stop",
+        threadId: "00000000-0000-4000-8000-000000000021",
+        assistantMessageId,
+        clientRequestId,
+      },
+      vi.fn(),
+    )).rejects.toMatchObject({ code: "TURN_CONTROL_NOT_ACTIVE" });
+  });
+
+  it("queues an immediate stop before App Server has returned a thread id", async () => {
+    mocked.queueCancellation.mockClear();
+    mocked.queueCancellation.mockReturnValueOnce(true);
+    const persisted: unknown[] = [];
+    await expect(cancelPendingWorkerTurn(
+      {
+        installationId: identity.installationId,
+        userId: identity.userId,
+        runtimeThreadId: null,
+      },
+      {
+        action: "stop",
+        threadId: "00000000-0000-4000-8000-000000000021",
+        assistantMessageId,
+        clientRequestId,
+      },
+      async (event) => { persisted.push(event); },
+    )).resolves.toMatchObject({ action: "stop", runtimeTurnId: null });
+    expect(mocked.queueCancellation).toHaveBeenCalledWith(identity.userId, assistantMessageId);
+    expect(persisted).toHaveLength(2);
   });
 
   it("rejects an inconsistent steer response", async () => {

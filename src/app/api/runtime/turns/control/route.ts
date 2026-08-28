@@ -5,7 +5,7 @@ import { isSameOriginMutation } from "@/auth/request-security";
 import { loadInstallationConfig } from "@/config/installation";
 import { isTurnControlRequest } from "@/lib/chat-contract";
 import { readThreadToken } from "@/runtime/thread-token";
-import { controlWorkerTurn, TurnControlError } from "@/runtime/turn-control";
+import { cancelPendingWorkerTurn, controlWorkerTurn, TurnControlError } from "@/runtime/turn-control";
 import { WorkbenchNotFoundError } from "@/workbench/errors";
 import { workbenchErrorResponse } from "@/workbench/http";
 import { getThreadRuntimeContext } from "@/workbench/store";
@@ -55,11 +55,22 @@ export async function POST(request: Request) {
         { status: 409 },
       );
     }
-    if (!projection.runtimeThreadToken || !projection.runtimeTurnId) {
-      return NextResponse.json(
-        { error: "El torn encara no té una identitat de runtime controlable." },
-        { status: 409 },
-      );
+    const persistAccepted = async (event: Parameters<typeof projections.applyLocalEvent>[2]) => {
+      await projections.applyLocalEvent(body.threadId, body.assistantMessageId, event);
+    };
+    if (!projection.runtimeThreadToken) {
+      if (body.action !== "stop") {
+        return NextResponse.json(
+          { error: "El torn encara no té una identitat de runtime controlable." },
+          { status: 409 },
+        );
+      }
+      await cancelPendingWorkerTurn({
+        installationId: installation.installationId,
+        userId: session.user.id,
+        runtimeThreadId: null,
+      }, body, persistAccepted);
+      return NextResponse.json({ ok: true, action: body.action, idempotent: false });
     }
     const runtimeThreadId = readThreadToken(
       projection.runtimeThreadToken,
@@ -80,14 +91,27 @@ export async function POST(request: Request) {
       }
     }
 
+    if (!projection.runtimeTurnId) {
+      if (body.action !== "stop") {
+        return NextResponse.json(
+          { error: "El torn encara no té una identitat de runtime controlable." },
+          { status: 409 },
+        );
+      }
+      await cancelPendingWorkerTurn({
+        installationId: installation.installationId,
+        userId: session.user.id,
+        runtimeThreadId,
+      }, body, persistAccepted);
+      return NextResponse.json({ ok: true, action: body.action, idempotent: false });
+    }
+
     await controlWorkerTurn({
       installationId: installation.installationId,
       userId: session.user.id,
       runtimeThreadId,
       runtimeTurnId: projection.runtimeTurnId,
-    }, body, async (event) => {
-      await projections.applyLocalEvent(body.threadId, body.assistantMessageId, event);
-    });
+    }, body, persistAccepted);
     return NextResponse.json({ ok: true, action: body.action, idempotent: false });
   } catch (error) {
     if (error instanceof TurnControlError) {

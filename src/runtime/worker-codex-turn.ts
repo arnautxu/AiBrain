@@ -67,6 +67,7 @@ import {
 import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
+import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
   parseTurnTokenUsage,
@@ -292,6 +293,55 @@ export async function runWorkerCodexTurn(
     authenticatedUserId,
     permissions,
   );
+  const activities = new Map<string, ActivityItem>();
+  const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
+    activities.set(item.id, item);
+    if (chatRequest.preferences.showActivity) await emit({ type: "activity", item }, projection);
+  };
+  let activeRuntimePhaseId: string | null = null;
+  const completeRuntimePhase = async (
+    id: string,
+    overrides: Partial<Pick<ActivityItem, "label" | "detail">> = {},
+    projection?: WorkerTurnProjection,
+  ) => {
+    const current = activities.get(id);
+    if (!current) return;
+    if (current.status !== "running" && current.status !== "waiting") {
+      if ((overrides.label && overrides.label !== current.label) ||
+          (overrides.detail && overrides.detail !== current.detail)) {
+        await upsertActivity({ ...current, ...overrides }, projection);
+      }
+      return;
+    }
+    await upsertActivity({ ...current, ...overrides, status: "complete" }, projection);
+    if (activeRuntimePhaseId === id) activeRuntimePhaseId = null;
+  };
+  const setRuntimePhase = async (
+    id: string,
+    label: string,
+    detail?: string,
+    projection?: WorkerTurnProjection,
+  ) => {
+    const existing = activities.get(id);
+    if (activeRuntimePhaseId === id && existing?.status === "running" &&
+        existing.label === label && existing.detail === detail) return;
+    if (activeRuntimePhaseId && activeRuntimePhaseId !== id) {
+      await completeRuntimePhase(activeRuntimePhaseId, {}, projection && {
+        ...projection,
+        key: `${projection.key}:previous`,
+      });
+    }
+    activeRuntimePhaseId = id;
+    await upsertActivity({
+      id,
+      kind: "system",
+      label,
+      ...(detail ? { detail } : {}),
+      status: "running",
+    }, projection);
+  };
+
+  await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
   const preparedMemory = await prepareTurnMemory(memory, {
     installationId,
     userId: authenticatedUserId,
@@ -299,6 +349,8 @@ export async function runWorkerCodexTurn(
     turnId: chatRequest.assistantMessageId,
     permissionFingerprint: permissions.fingerprint,
   });
+  await completeRuntimePhase("runtime-context", { label: "Context preparat" });
+  await setRuntimePhase("runtime-connect", "Connectant amb Codex", "Worker privat i sessió d’App Server");
 
   const runtime = await workerAppServerForUser(authenticatedUserId, maintenanceActivity);
   if (runtime.config.installationId !== installationId) {
@@ -330,18 +382,9 @@ export async function runWorkerCodexTurn(
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   const account = await runtime.client.connection(projectWorkspace);
   if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
-
-  const activities = new Map<string, ActivityItem>();
-  const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
-    activities.set(item.id, item);
-    if (chatRequest.preferences.showActivity) await emit({ type: "activity", item }, projection);
-  };
-  await upsertActivity({
-    id: "codex-connected",
-    kind: "system",
+  await completeRuntimePhase("runtime-connect", {
     label: "Codex connectat",
     detail: account.planType ? `Pla ${account.planType}` : "Sessió dedicada verificada",
-    status: "complete",
   });
 
   let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
@@ -392,24 +435,20 @@ export async function runWorkerCodexTurn(
     ].filter(Boolean).join("\n\n"),
   };
   let recovered: RecoveredTurn | null = null;
-  const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
-    const resolvedThreadId = extractThreadId(result);
-    if (!resolvedThreadId) throw new Error("Codex no ha retornat cap thread vàlid.");
-    await emit({
-      type: "runtimeThread",
-      threadToken: issueThreadToken(installationId, authenticatedUserId, resolvedThreadId),
-    });
-    recovered = recoveredTurn(result, chatRequest.userMessageId);
-    if (!recovered) return;
-    await emit({ type: "runtimeTurn", turnId: recovered.id });
-    const text = recoveredAgentText(recovered);
+  const projectRecoveredTurn = async (
+    recoveredTurnState: RecoveredTurn,
+    envelope: AppServerEvent,
+    keyPrefix = "recovery",
+  ) => {
+    await emit({ type: "runtimeTurn", turnId: recoveredTurnState.id });
+    const text = recoveredAgentText(recoveredTurnState);
     if (text !== null) {
       await emit(
         { type: "content", value: text },
-        { envelope, key: `recovery:content:${recovered.id}` },
+        { envelope, key: `${keyPrefix}:content:${recoveredTurnState.id}` },
       );
     }
-    for (const item of recovered.items) {
+    for (const item of recoveredTurnState.items) {
       if (item.type === "imageGeneration") {
         await persistGeneratedImage(
           { item },
@@ -426,22 +465,42 @@ export async function runWorkerCodexTurn(
         if (chatRequest.preferences.showActivity) {
           await emit(
             { type: "activity", item: activity },
-            { envelope, key: `recovery:activity:${activity.id}` },
+            { envelope, key: `${keyPrefix}:activity:${activity.id}` },
           );
         }
       }
     }
-    if (recovered.status === "completed") {
-      await emit({ type: "done" }, { envelope, key: `recovery:done:${recovered.id}` });
-    } else if (recovered.status === "failed") {
+    if (recoveredTurnState.status === "completed") {
+      await emit({ type: "done" }, { envelope, key: `${keyPrefix}:done:${recoveredTurnState.id}` });
+    } else if (recoveredTurnState.status === "failed") {
       await emit(
-        { type: "error", message: recovered.error ?? "El torn recuperat ha fallat." },
-        { envelope, key: `recovery:error:${recovered.id}` },
+        { type: "error", message: recoveredTurnState.error ?? "El torn recuperat ha fallat." },
+        { envelope, key: `${keyPrefix}:error:${recoveredTurnState.id}` },
       );
-    } else if (recovered.status === "interrupted") {
-      await emit({ type: "stopped" }, { envelope, key: `recovery:stopped:${recovered.id}` });
+    } else if (recoveredTurnState.status === "interrupted") {
+      await emit({ type: "stopped" }, { envelope, key: `${keyPrefix}:stopped:${recoveredTurnState.id}` });
     }
   };
+  const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
+    const resolvedThreadId = extractThreadId(result);
+    if (!resolvedThreadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+    await completeRuntimePhase("runtime-thread", {
+      label: runtimeThreadId ? "Conversa recuperada" : "Conversa oberta",
+      detail: "App Server ha confirmat el fil",
+    }, { envelope, key: "runtime-phase:thread-ready" });
+    await emit({
+      type: "runtimeThread",
+      threadToken: issueThreadToken(installationId, authenticatedUserId, resolvedThreadId),
+    });
+    recovered = recoveredTurn(result, chatRequest.userMessageId);
+    if (!recovered) return;
+    await projectRecoveredTurn(recovered, envelope);
+  };
+  await setRuntimePhase(
+    "runtime-thread",
+    runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
+    runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
+  );
   const threadResult = runtimeThreadId
     ? await runtime.client.request("thread/resume", {
         threadId: runtimeThreadId,
@@ -471,13 +530,22 @@ export async function runWorkerCodexTurn(
 
   let runtimeTurnId: string | null = null;
   let remoteInterruptConfirmed = false;
+  let turnStartRequested = false;
+  let remoteInterruptPromise: Promise<void> | null = null;
   const turnController = new AbortController();
   const forwardExternalAbort = () => turnController.abort();
   const turnSignal = turnController.signal;
-  let finishTurn!: (status: { status: string | null; error: string | null }) => void;
-  const turnFinished = new Promise<{ status: string | null; error: string | null }>((resolve) => {
-    finishTurn = resolve;
+  type FinishedTurn = { status: string | null; error: string | null };
+  let terminalTurnStatus: FinishedTurn | null = null;
+  let resolveFinishedTurn!: (status: FinishedTurn) => void;
+  const turnFinished = new Promise<FinishedTurn>((resolve) => {
+    resolveFinishedTurn = resolve;
   });
+  const finishTurn = (status: FinishedTurn) => {
+    if (terminalTurnStatus) return;
+    terminalTurnStatus = status;
+    resolveFinishedTurn(status);
+  };
   let stoppedEmitted = false;
 
   const registration = runtime.client.router.registerTurn(
@@ -486,9 +554,127 @@ export async function runWorkerCodexTurn(
     {
       onNotification: async (notification: ServerNotification, envelope: AppServerEvent) => {
         const { method, params } = notification;
+        const phaseProjection = (key: string): WorkerTurnProjection => ({
+          envelope,
+          key: `runtime-phase:${key}`,
+        });
+        if (method === "turn/started") {
+          await completeRuntimePhase("runtime-turn-start", {
+            label: "Torn iniciat",
+            detail: "App Server ha acceptat la petició",
+          }, phaseProjection("turn-started"));
+          await setRuntimePhase(
+            "runtime-awaiting-model",
+            "Esperant activitat del model",
+            "El torn ja està actiu a Codex",
+            phaseProjection("awaiting-model"),
+          );
+          return;
+        }
+        if (method === "thread/status/changed" && isRecord(params) && isRecord(params.status) &&
+            params.status.type === "active") {
+          const flags = Array.isArray(params.status.activeFlags)
+            ? params.status.activeFlags.filter((flag) => typeof flag === "string")
+            : [];
+          const flagLabels = flags.map((flag) => flag === "waitingOnApproval"
+            ? "Esperant aprovació"
+            : flag === "waitingOnUserInput" ? "Esperant resposta de l’usuari" : flag);
+          await setRuntimePhase(
+            "runtime-model-active",
+            "Codex està treballant",
+            flagLabels.length ? flagLabels.join(" · ") : "Activitat confirmada per App Server",
+            phaseProjection("thread-active"),
+          );
+          return;
+        }
+        if (method === "item/reasoning/summaryPartAdded") {
+          await setRuntimePhase(
+            "runtime-reasoning",
+            "Preparant el resum del raonament",
+            "Codex ha iniciat una nova part del resum",
+            phaseProjection("reasoning-summary-part"),
+          );
+          return;
+        }
+        if (method === "item/reasoning/textDelta") {
+          await setRuntimePhase(
+            "runtime-reasoning",
+            "Codex està raonant",
+            "Esperant el resum publicable",
+            phaseProjection("reasoning-private"),
+          );
+          return;
+        }
+        if (method === "model/verification") {
+          await setRuntimePhase(
+            "runtime-model-verification",
+            "Verificant el model",
+            "Comprovació informada per App Server",
+            phaseProjection("model-verification"),
+          );
+          return;
+        }
+        if (method === "model/rerouted" && isRecord(params)) {
+          await setRuntimePhase(
+            "runtime-model-reroute",
+            "Canviant de model",
+            typeof params.toModel === "string" ? `Continuant amb ${params.toModel}` : "Codex ha redirigit el torn",
+            phaseProjection("model-rerouted"),
+          );
+          return;
+        }
+        if (method === "model/safetyBuffering/updated" && isRecord(params) && params.showBufferingUi === true) {
+          await setRuntimePhase(
+            "runtime-safety-buffering",
+            "Verificant la resposta",
+            "Control de seguretat en curs",
+            phaseProjection("safety-buffering"),
+          );
+          return;
+        }
+        if (method === "rawResponseItem/completed" && isRecord(params) && isRecord(params.item)) {
+          if (params.item.type === "reasoning" && Array.isArray(params.item.summary)) {
+            const summary = params.item.summary.flatMap((part) =>
+              isRecord(part) && part.type === "summary_text" && typeof part.text === "string"
+                ? [part.text.trim()]
+                : []).filter(Boolean).join("\n\n").slice(0, 12_000);
+            if (summary) {
+              if (activeRuntimePhaseId) {
+                await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("raw-reasoning-summary"));
+              }
+              await upsertActivity({
+                id: typeof params.item.id === "string" ? params.item.id : `reasoning:${envelope.eventId}`,
+                kind: "reasoning",
+                label: "Raonament completat",
+                detail: summary,
+                status: "complete",
+              }, phaseProjection("raw-reasoning-summary-item"));
+              return;
+            }
+          }
+          await setRuntimePhase(
+            "runtime-response-processing",
+            "Processant la resposta del model",
+            typeof params.item.type === "string" ? `Element ${params.item.type} rebut` : "Element rebut",
+            phaseProjection("raw-response-item"),
+          );
+          return;
+        }
+        if (method === "rawResponse/completed") {
+          await setRuntimePhase(
+            "runtime-response-processing",
+            "Resposta del model rebuda",
+            "Codex està preparant el resultat final",
+            phaseProjection("raw-response-completed"),
+          );
+          return;
+        }
         if (method === "item/agentMessage/delta") {
           const delta = notificationDelta(params);
           if (delta) {
+            if (activeRuntimePhaseId) {
+              await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
+            }
             telemetry.delta();
             await emit(
               { type: "delta", value: delta },
@@ -505,6 +691,9 @@ export async function runWorkerCodexTurn(
           return;
         }
         if (method === "item/started" || method === "item/completed") {
+          if (method === "item/started" && activeRuntimePhaseId) {
+            await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("item-started"));
+          }
           if (method === "item/completed") {
             await persistGeneratedImage(
               params,
@@ -560,6 +749,9 @@ export async function runWorkerCodexTurn(
           const itemId = notificationItemId(params);
           const delta = notificationDelta(params);
           if (!itemId || !delta) return;
+          if (activeRuntimePhaseId) {
+            await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("reasoning-summary-text"));
+          }
           const current = activities.get(itemId) ?? {
             id: itemId,
             kind: "reasoning",
@@ -599,6 +791,9 @@ export async function runWorkerCodexTurn(
           return;
         }
         if (method === "turn/completed") {
+          if (activeRuntimePhaseId) {
+            await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("turn-completed"));
+          }
           const status = completedTurnStatus(params) ?? {
             status: null,
             error: "Resposta incompleta de Codex.",
@@ -687,12 +882,33 @@ export async function runWorkerCodexTurn(
     authenticatedUserId,
     threadId,
     chatRequest.assistantMessageId,
-    () => {
-      remoteInterruptConfirmed = true;
+    (confirmed) => {
+      remoteInterruptConfirmed = confirmed;
       turnController.abort();
     },
   );
 
+  const confirmRemoteInterrupt = () => {
+    if (remoteInterruptPromise) return remoteInterruptPromise;
+    if (!runtimeTurnId) return Promise.resolve();
+    remoteInterruptPromise = runtime.client.request(
+      "turn/interrupt",
+      { threadId, turnId: runtimeTurnId },
+      `turn-interrupt:${chatRequest.assistantMessageId}`,
+      5_000,
+    ).then(() => {
+      remoteInterruptConfirmed = true;
+      finishTurn({ status: "interrupted", error: null });
+    }).catch((error: unknown) => {
+      finishTurn({
+        status: "failed",
+        error: error instanceof Error
+          ? `No s’ha pogut confirmar la interrupció: ${error.message}`
+          : "No s’ha pogut confirmar la interrupció.",
+      });
+    });
+    return remoteInterruptPromise;
+  };
   const interrupt = () => {
     telemetry.cancellationRequested();
     if (remoteInterruptConfirmed) {
@@ -700,30 +916,39 @@ export async function runWorkerCodexTurn(
       return;
     }
     if (!runtimeTurnId) {
-      finishTurn({ status: "failed", error: "El torn encara no tenia un identificador interrompible." });
+      if (!turnStartRequested) finishTurn({ status: "interrupted", error: null });
       return;
     }
-    void runtime.client.request(
-      "turn/interrupt",
-      { threadId, turnId: runtimeTurnId },
-      `turn-interrupt:${chatRequest.assistantMessageId}`,
-      5_000,
-    ).catch((error: unknown) => finishTurn({
-      status: "failed",
-      error: error instanceof Error
-        ? `No s’ha pogut confirmar la interrupció: ${error.message}`
-        : "No s’ha pogut confirmar la interrupció.",
-    }));
+    void confirmRemoteInterrupt();
   };
   turnSignal.addEventListener("abort", interrupt, { once: true });
   if (turnSignal.aborted) interrupt();
   try {
+    if (turnSignal.aborted) {
+      const completed = await turnFinished;
+      if (completed.status === "interrupted" && !stoppedEmitted) await emit({ type: "stopped" });
+      telemetry.finish(completed.status === "interrupted" ? "stopped" : "error");
+      return;
+    }
     if (recoveredState?.status === "inProgress") {
       runtimeTurnId = recoveredState.id;
       registration.bindRuntimeTurn(recoveredState.id);
       telemetry.bindRuntimeTurn(recoveredState.id);
+      await setRuntimePhase(
+        "runtime-awaiting-model",
+        "Torn recuperat",
+        "Escoltant els esdeveniments d’App Server",
+      );
     } else {
-      const turnResult = await runtime.client.request("turn/start", {
+      turnStartRequested = true;
+      await setRuntimePhase(
+        "runtime-turn-start",
+        "Iniciant el torn",
+        "Enviant la petició al model",
+      );
+      let turnResult: JsonValue;
+      try {
+        turnResult = await runtime.client.request("turn/start", {
       threadId,
       clientUserMessageId: chatRequest.userMessageId,
       input: [
@@ -761,13 +986,81 @@ export async function runWorkerCodexTurn(
         registration.bindRuntimeTurn(resolvedTurnId);
         telemetry.bindRuntimeTurn(resolvedTurnId);
         await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
+        await completeRuntimePhase("runtime-turn-start", {
+          label: "Torn iniciat",
+          detail: "App Server ha confirmat la petició",
+        });
+        if (!terminalTurnStatus) {
+          await setRuntimePhase(
+            "runtime-awaiting-model",
+            "Esperant activitat del model",
+            "El torn ja està actiu a Codex",
+          );
+        }
+        if (turnSignal.aborted && !remoteInterruptConfirmed) {
+          await confirmRemoteInterrupt();
+        }
       }, maintenanceActivity);
+      } catch (error) {
+        if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "turn/start") throw error;
+        await setRuntimePhase(
+          "runtime-turn-recovery",
+          "Recuperant el torn",
+          "La confirmació ha trigat massa; comprovant el fil sense repetir la petició",
+        );
+        let recoveryEnvelope: AppServerEvent | null = null;
+        const recoveredResult = await runtime.client.request(
+          "thread/read",
+          { threadId, includeTurns: true },
+          `turn-recover:${chatRequest.assistantMessageId}`,
+          15_000,
+          (_result, envelope) => { recoveryEnvelope = envelope; },
+        );
+        const recoveredAfterTimeout = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+        if (!recoveredAfterTimeout) {
+          await upsertActivity({
+            id: "runtime-turn-recovery",
+            kind: "system",
+            label: "No s’ha pogut recuperar el torn",
+            detail: "App Server no ha retornat cap torn associat a aquesta petició",
+            status: "failed",
+          });
+          throw error;
+        }
+        runtimeTurnId = recoveredAfterTimeout.id;
+        telemetry.bindRuntimeTurn(recoveredAfterTimeout.id);
+        await completeRuntimePhase("runtime-turn-recovery", {
+          label: "Torn recuperat",
+          detail: "Continuant amb el torn existent, sense duplicar-lo",
+        });
+        if (recoveredAfterTimeout.status !== "inProgress") {
+          if (!recoveryEnvelope) throw new Error("App Server no ha proporcionat evidència de recuperació.");
+          await projectRecoveredTurn(recoveredAfterTimeout, recoveryEnvelope, "timeout-recovery");
+          telemetry.finish(
+            recoveredAfterTimeout.status === "completed"
+              ? "completed"
+              : recoveredAfterTimeout.status === "interrupted" ? "stopped" : "error",
+          );
+          return;
+        }
+        registration.bindRuntimeTurn(recoveredAfterTimeout.id);
+        await emit({ type: "runtimeTurn", turnId: recoveredAfterTimeout.id });
+        if (!terminalTurnStatus) {
+          await setRuntimePhase(
+            "runtime-awaiting-model",
+            "Torn recuperat",
+            "Escoltant els esdeveniments d’App Server",
+          );
+        }
+        turnResult = { turn: { id: recoveredAfterTimeout.id } };
+      }
       runtimeTurnId ??= extractTurnId(turnResult);
       if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
       registration.bindRuntimeTurn(runtimeTurnId);
       telemetry.bindRuntimeTurn(runtimeTurnId);
     }
     const completed = await turnFinished;
+    if (activeRuntimePhaseId) await completeRuntimePhase(activeRuntimePhaseId);
     if (completed.status === "failed") {
       telemetry.finish("error");
       return;

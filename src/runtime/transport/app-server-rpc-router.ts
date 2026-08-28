@@ -18,6 +18,17 @@ type PendingRequest = {
   beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>;
 };
 
+export class AppServerRequestTimeoutError extends Error {
+  constructor(
+    readonly method: ClientRequest["method"],
+    readonly requestId: string | number,
+    readonly timeoutMs: number,
+  ) {
+    super(`App Server request timed out: ${method}.`);
+    this.name = "AppServerRequestTimeoutError";
+  }
+}
+
 export type AppServerTurnHandlers = {
   onNotification(notification: ServerNotification, event: AppServerEvent): void | Promise<void>;
   onServerRequest(request: ServerRequest, event: AppServerEvent): JsonValue | Promise<JsonValue>;
@@ -176,7 +187,7 @@ export class AppServerRpcRouter {
     });
     const timeout = setTimeout(() => {
       this.pending.delete(rpc.id);
-      reject(new Error(`App Server request timed out: ${rpc.method}.`));
+      reject(new AppServerRequestTimeoutError(rpc.method, rpc.id, timeoutMs));
     }, timeoutMs);
     timeout.unref?.();
     this.pending.set(rpc.id, { resolve, reject, timeout, beforeResolve });

@@ -12,6 +12,12 @@ const ASSISTANT_MESSAGE = "0198b9f0-6631-7000-8000-000000000412";
 const STEER_REQUEST = "0198b9f0-6631-7000-8000-000000000413";
 const STEER_MESSAGE = "0198b9f0-6631-7000-8000-000000000414";
 const STOP_REQUEST = "0198b9f0-6631-7000-8000-000000000415";
+const PENDING_ASSISTANT_MESSAGE = "0198b9f0-6631-7000-8000-000000000416";
+const PENDING_USER_MESSAGE = "0198b9f0-6631-7000-8000-000000000417";
+const PENDING_STOP_REQUEST = "0198b9f0-6631-7000-8000-000000000418";
+const IMMEDIATE_ASSISTANT_MESSAGE = "0198b9f0-6631-7000-8000-000000000419";
+const IMMEDIATE_USER_MESSAGE = "0198b9f0-6631-7000-8000-000000000420";
+const IMMEDIATE_STOP_REQUEST = "0198b9f0-6631-7000-8000-000000000421";
 const auth = vi.hoisted(() => ({ session: null as AuthSession | null }));
 const controls = vi.hoisted(() => ({ calls: [] as Array<{ request: Record<string, unknown> }> }));
 
@@ -43,6 +49,24 @@ vi.mock("@/runtime/turn-control", async (importOriginal) => {
       });
       if (request.action === "stop") await persist({ type: "stopped" });
       return { action: request.action };
+    }),
+    cancelPendingWorkerTurn: vi.fn(async (
+      _identity: unknown,
+      request: Record<string, unknown>,
+      persist: (event: unknown) => Promise<void>,
+    ) => {
+      controls.calls.push({ request });
+      await persist({
+        type: "activity",
+        item: {
+          id: `${request.action}:${request.clientRequestId}`,
+          kind: "system",
+          label: "Control acceptat",
+          status: "stopped",
+        },
+      });
+      await persist({ type: "stopped" });
+      return { action: request.action, runtimeTurnId: null, activeRunnerCancelled: true };
     }),
   };
 });
@@ -88,6 +112,8 @@ describe("turn control route", () => {
   let root: string;
   let previousConfig: string | undefined;
   let threadId: string;
+  let pendingThreadId: string;
+  let immediateThreadId: string;
 
   beforeAll(async () => {
     previousConfig = process.env.AIBRAIN_INSTALLATION_CONFIG;
@@ -146,6 +172,10 @@ describe("turn control route", () => {
     const project = await workbench.createProject(USER_A, "Contract Review");
     const thread = await workbench.createThread(USER_A, project.id, "Review turn");
     threadId = thread.id;
+    const pendingThread = await workbench.createThread(USER_A, project.id, "Pending review turn");
+    pendingThreadId = pendingThread.id;
+    const immediateThread = await workbench.createThread(USER_A, project.id, "Immediate stop turn");
+    immediateThreadId = immediateThread.id;
     const assistant = message(ASSISTANT_MESSAGE, "assistant", "streaming");
     await workbench.beginThreadTurn(
       USER_A,
@@ -165,6 +195,27 @@ describe("turn control route", () => {
       issueThreadToken("control-lab", USER_A, "runtime-thread-control"),
     );
     await projections.setRuntimeTurnId(threadId, ASSISTANT_MESSAGE, "runtime-turn-control");
+    const pendingAssistant = message(PENDING_ASSISTANT_MESSAGE, "assistant", "streaming");
+    await workbench.beginThreadTurn(
+      USER_A,
+      pendingThreadId,
+      message(PENDING_USER_MESSAGE, "user", "complete"),
+      pendingAssistant,
+    );
+    await projections.initialize(pendingThreadId, pendingAssistant);
+    await projections.setRuntimeThreadToken(
+      pendingThreadId,
+      PENDING_ASSISTANT_MESSAGE,
+      issueThreadToken("control-lab", USER_A, "runtime-thread-pending-control"),
+    );
+    const immediateAssistant = message(IMMEDIATE_ASSISTANT_MESSAGE, "assistant", "streaming");
+    await workbench.beginThreadTurn(
+      USER_A,
+      immediateThreadId,
+      message(IMMEDIATE_USER_MESSAGE, "user", "complete"),
+      immediateAssistant,
+    );
+    await projections.initialize(immediateThreadId, immediateAssistant);
   });
 
   afterAll(async () => {
@@ -232,5 +283,36 @@ describe("turn control route", () => {
     }));
     expect(await replay.json()).toEqual({ ok: true, action: "stop", idempotent: true });
     expect(controls.calls.filter((call) => call.request.action === "stop")).toHaveLength(1);
+  });
+
+  it("stops a local App Server turn before its runtime turn id is available", async () => {
+    const route = await import("@/app/api/runtime/turns/control/route");
+    auth.session = session(USER_A);
+    const stopped = await route.POST(request({
+      action: "stop",
+      threadId: pendingThreadId,
+      assistantMessageId: PENDING_ASSISTANT_MESSAGE,
+      clientRequestId: PENDING_STOP_REQUEST,
+    }));
+
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toEqual({ ok: true, action: "stop", idempotent: false });
+    expect(controls.calls.some((call) =>
+      call.request.assistantMessageId === PENDING_ASSISTANT_MESSAGE && call.request.action === "stop"))
+      .toBe(true);
+  });
+
+  it("accepts an immediate stop before App Server has returned a thread id", async () => {
+    const route = await import("@/app/api/runtime/turns/control/route");
+    auth.session = session(USER_A);
+    const stopped = await route.POST(request({
+      action: "stop",
+      threadId: immediateThreadId,
+      assistantMessageId: IMMEDIATE_ASSISTANT_MESSAGE,
+      clientRequestId: IMMEDIATE_STOP_REQUEST,
+    }));
+
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toEqual({ ok: true, action: "stop", idempotent: false });
   });
 });
