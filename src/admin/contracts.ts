@@ -139,7 +139,7 @@ export function isWorkspaceAdminCommand(value: unknown): value is WorkspaceAdmin
     return Object.keys(value).length === 6 && typeof value.groupId === "string" && UUID.test(value.groupId) &&
       typeof value.name === "string" && value.name.trim().length > 0 && value.name.length <= 80 &&
       typeof value.description === "string" && value.description.length <= 300 &&
-      Array.isArray(value.memberIds) && value.memberIds.length <= 500 && value.memberIds.every((id) => typeof id === "string" && UUID.test(id)) &&
+      Array.isArray(value.memberIds) && value.memberIds.every((id) => typeof id === "string" && UUID.test(id)) &&
       new Set(value.memberIds).size === value.memberIds.length && isWorkspacePolicy(value.policy);
   }
   return value.action === "delete-group" && Object.keys(value).length === 2 && typeof value.groupId === "string" && UUID.test(value.groupId);

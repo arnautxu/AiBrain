@@ -35,8 +35,8 @@ and the document workflow. Runtime health is combined with the live
 Web search, image generation, skills and the managed browser have two durable
 enablement gates: an installation gate and a per-employee gate. The effective
 state is the intersection of both. `PATCH /api/settings` may change the
-employee gate for the authenticated user. Only a user listed in
-`AIBRAIN_USAGE_ADMIN_USER_IDS` may change an installation gate. The chat and
+employee gate for the authenticated user. Only a durable `workspace-owner` or
+`workspace-admin` assignment may change an installation gate. The chat and
 browser server paths enforce these gates; hiding a control in the UI is not an
 authorization boundary.
 

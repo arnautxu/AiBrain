@@ -111,6 +111,11 @@ export async function resolveServerTurnPermissions(
     userId: identity.userId,
     usersRoot: installation.paths.usersRoot,
   });
+  const workspace = await workspacePolicyForIdentity(
+    installation.installationId,
+    identity.userId,
+    installation,
+  );
   const provider = new MarkdownPermissionProvider({
     installations: [{
       installationId: installation.installationId,
@@ -128,12 +133,10 @@ export async function resolveServerTurnPermissions(
     identity.userId,
     {
       turnId: identity.turnId,
-      // Roles are deliberately not an authentication or authorization concern in V1.
-      roleId: null,
+      roleId: workspace.roleId,
       projectId: identity.projectId,
     },
   );
-  const workspace = await workspacePolicyForIdentity(installation.installationId, identity.userId, installation);
   if (!workspace.policy.capabilities.respond) {
     throw new PermissionResolutionError(
       "PERMISSION_POLICY_DENIED",
@@ -151,7 +154,7 @@ export async function resolveServerTurnPermissions(
       ? { ruleId: "documents.publish", action: "publish" as const, instruction: "Workspace group policy blocks publication." }
       : null,
   ].filter((item): item is NonNullable<typeof item> => item !== null);
-  if (denied.length === 0) return { ...resolved, roleId: workspace.roleId };
+  if (denied.length === 0) return resolved;
   const policyFingerprint = permissionFingerprint(workspace.policy);
   const rules = [
     ...resolved.rules,

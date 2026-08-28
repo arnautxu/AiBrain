@@ -64,7 +64,7 @@ function role(value: unknown, context: ValidationContext): WorkspaceRole {
 function group(value: unknown, context: ValidationContext): WorkspaceGroup {
   const item = expectStrictRecord(value, ["id", "name", "description", "memberIds", "policy", "createdAt", "updatedAt"], context);
   const memberIds = expectArray(item.memberIds, context.at("memberIds"), (id, itemContext) =>
-    expectString(id, itemContext, { minLength: 36, maxLength: 36, pattern: UUID }), { maxLength: 500 });
+    expectString(id, itemContext, { minLength: 36, maxLength: 36, pattern: UUID }));
   if (new Set(memberIds).size !== memberIds.length) context.at("memberIds").fail("member ids must be unique");
   const createdAt = expectIsoDate(item.createdAt, context.at("createdAt"));
   const updatedAt = expectIsoDate(item.updatedAt, context.at("updatedAt"));
@@ -97,10 +97,13 @@ export const workspaceAdminStateSchema = defineVersionedSchema<WorkspaceAdminSta
   parse(record, context) {
     const roles = expectArray(record.roles, context.at("roles"), role, { maxLength: 3 });
     const groups = expectArray(record.groups, context.at("groups"), group, { maxLength: 200 });
-    const assignments = expectArray(record.assignments, context.at("assignments"), assignment, { maxLength: 5_000 });
+    const assignments = expectArray(record.assignments, context.at("assignments"), assignment);
     if (new Set(roles.map(({ id }) => id)).size !== roles.length || roles.length !== 3) context.at("roles").fail("all built-in roles are required exactly once");
     if (new Set(groups.map(({ id }) => id)).size !== groups.length) context.at("groups").fail("group ids must be unique");
     if (new Set(assignments.map(({ userId }) => userId)).size !== assignments.length) context.at("assignments").fail("user assignments must be unique");
+    if (assignments.length > 0 && !assignments.some(({ roleId }) => roleId === "workspace-owner")) {
+      context.at("assignments").fail("at least one workspace owner is required");
+    }
     return {
       schemaVersion: 1,
       installationId: expectString(record.installationId, context.at("installationId"), { minLength: 2, maxLength: 63, pattern: INSTALLATION_ID }),
@@ -140,12 +143,18 @@ function roles(): WorkspaceRole[] {
 }
 
 function configuredAdmins() {
-  return (process.env.AIBRAIN_ADMIN_USER_IDS ?? process.env.AIBRAIN_USAGE_ADMIN_USER_IDS ?? "")
-    .split(",").map((value) => value.trim()).filter((value) => UUID.test(value));
+  return [...new Set((process.env.AIBRAIN_ADMIN_USER_IDS ?? "")
+    .split(",").map((value) => value.trim()).filter((value) => UUID.test(value)))];
 }
 
 function initialState(installationId: string, userIds: readonly string[]): WorkspaceAdminState {
-  const admins = configuredAdmins();
+  const provisioned = new Set(userIds);
+  const admins = configuredAdmins().filter((userId) => provisioned.has(userId));
+  if (userIds.length > 0 && admins.length === 0) {
+    throw new Error(
+      "Workspace owner bootstrap is required: configure AIBRAIN_ADMIN_USER_IDS with a provisioned user before creating workspace-admin state.",
+    );
+  }
   return workspaceAdminStateSchema.parse({
     schemaVersion: 1,
     installationId,
@@ -193,14 +202,13 @@ export class FileWorkspaceAdminStore {
 
   private reconcile(state: WorkspaceAdminState, userIds: readonly string[]) {
     const known = new Set(userIds);
-    const admins = configuredAdmins();
     state.assignments = state.assignments.filter(({ userId }) => known.has(userId));
     for (const userId of userIds) {
       const current = state.assignments.find((item) => item.userId === userId);
       if (current) continue;
       state.assignments.push({
         userId,
-        roleId: admins.includes(userId) ? "workspace-admin" : "workspace-member",
+        roleId: "workspace-member",
       });
     }
     for (const group of state.groups) group.memberIds = group.memberIds.filter((id) => known.has(id));
