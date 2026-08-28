@@ -15,7 +15,7 @@ same immutable Git SHA, except repository-preservation rows that terminate at
 
 | Mandatory acceptance | Current state | Evidence | Required closing evidence |
 | --- | --- | --- | --- |
-| Remote, branches and worktrees reconciled | validated locally | Inventory in [execution board](PROJECT_EXECUTION_BOARD.md) at `origin/main=390bbb06…` | Repeat fetch/status/worktree/graph immediately before final integration |
+| Remote, branches and worktrees reconciled | validated locally | Inventory in [execution board](PROJECT_EXECUTION_BOARD.md) at `origin/main=9fe848ae…`; the remote advanced once during the audit | Repeat fetch/status/worktree/graph immediately before final integration |
 | David and Arnau changes preserved | validated locally | Original `integrated-qa` is clean/ahead 2; `today-integration` retains 64 modifications; no worktree deleted | Final pre-merge status readback showing no dropped commit or working-tree file |
 | Small reviewable integration units | implemented | G0 exists; I1-I4 are decomposed on the board | One commit or reviewed merge per unit, with exact diff and owner |
 | Release-candidate branch and SHA fixed | not started | No final branch/SHA received | Record branch, base, merge-base, full SHA and tree hash |
@@ -25,11 +25,11 @@ same immutable Git SHA, except repository-preservation rows that terminate at
 
 | Mandatory acceptance | Current state | Evidence | Required closing evidence |
 | --- | --- | --- | --- |
-| Contracts generated and versioned | validated locally | Current baseline CI ran `contracts:verify`; [HTTP catalog](../contracts/aibrain/v1/http-routes.json) and [UI schema](../contracts/aibrain/v1/ui-backend.schema.json) exist | Same gates green on candidate; new routes/types have schemas, examples and tests |
-| Typecheck, lint, unit/integration/contract tests | validated live | [CI 33157502708](https://github.com/arnautxu/AiBrain/actions/runs/33157502708) is green for current main `390bbb06…` | New CI run green for candidate SHA |
-| Filesystem/restart E2E | validated live | CI 33157502708 filesystem/restart job green for current main | New candidate run and exact job URL |
-| Real Office/PDF/text/image matrix | validated live | CI 33157502708 document job green for current main | New candidate run and exact job URL |
-| Clean immutable container builds and audits | validated live | CI 33157502708 container and audit steps green for current main | Candidate image digests, SBOM/scan or configured audit evidence, zero unresolved critical findings |
+| Contracts generated and versioned | validated locally | CI 33164764500 passed `contracts:verify` for current `main=9fe848ae…`; [HTTP catalog](../contracts/aibrain/v1/http-routes.json) and [UI schema](../contracts/aibrain/v1/ui-backend.schema.json) exist | Same gates green on candidate; new routes/types have schemas, examples and tests |
+| Typecheck, lint, unit/integration/contract tests | validated live | [CI 33164764500](https://github.com/arnautxu/AiBrain/actions/runs/33164764500) passed for current `main=9fe848ae…` | Repeat on final candidate and retain exact job URL |
+| Filesystem/restart E2E | validated live | CI 33164764500 filesystem/restart job passed for current `main=9fe848ae…` | Repeat on final candidate and retain exact job URL |
+| Real Office/PDF/text/image matrix | validated live | CI 33164764500 document job passed for current `main=9fe848ae…` | Repeat on final candidate and retain exact job URL |
+| Clean immutable container builds and audits | validated live | CI 33164764500 passed clean app/gateway builds and both audits for current `main=9fe848ae…` | Candidate image digests, audits/SBOM/scan evidence and zero unresolved critical findings |
 | Visual and accessibility acceptance | not started | Historical work-parity results do not cover the final integration; 57 dirty snapshots are pending review | Deterministic candidate visual/a11y run, reviewed diffs, no unexplained retry |
 
 ## Product acceptance
@@ -48,8 +48,8 @@ same immutable Git SHA, except repository-preservation rows that terminate at
 
 | Mandatory acceptance | Current state | Evidence | Required closing evidence |
 | --- | --- | --- | --- |
-| CI-gated immutable deployment | validated live | Current main deploy [33157794229](https://github.com/arnautxu/AiBrain/actions/runs/33157794229) logged SHA `390bbb06…`; app digest `sha256:59c402…`, gateway digest `sha256:6b8ead…` | Equivalent log and host release-state readback for candidate |
-| Live and ready after deployment | validated live | Current [live](https://arnall.graphikai.com/api/health/live) and [ready](https://arnall.graphikai.com/api/health/ready) return 200 | Candidate post-deploy and post-restart payloads, timestamps and all required checks/components pass |
+| CI-gated immutable deployment | validated live | Deploy [33165012869](https://github.com/arnautxu/AiBrain/actions/runs/33165012869) logged exact current SHA `9fe848ae…` and two immutable digests | Equivalent log and host release-state readback for candidate |
+| Live and ready after deployment | validated live | Current [live](https://arnall.graphikai.com/api/health/live) and [ready](https://arnall.graphikai.com/api/health/ready) returned 200 after the `9fe848ae…` deploy; process start `2026-08-28T10:54:16.471Z`, all checks/components `OK` | Candidate post-deploy and post-restart payloads, timestamps and all required checks/components pass |
 | Running SHA independently read back | implemented | Deploy log identifies current SHA; public health omits revision | Host `release-state.json` plus running OCI labels/digests equal candidate SHA; retain sanitized output |
 | Rollback logic and documentation | validated locally | [release manager tests](../tests/unit/release-manager.test.ts) are in CI; [release documentation](RELEASES.md) defines digest/revision checks and recovery | Candidate/previous state inputs reviewed and local test slice green |
 | Rollback exercised on Arnall | not started | No deliberate rollback-and-return evidence for the future candidate | Roll candidate B back to preserved A, read back A health/SHA/data, then re-promote B and repeat all critical health/identity checks |
@@ -67,4 +67,3 @@ The release coordinator may declare done only when the evidence packet contains:
 6. two-user isolation and real-turn/action evidence;
 7. rollback-to-A and return-to-B evidence;
 8. final `main`, remote and worktree readback.
-

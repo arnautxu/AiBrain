@@ -186,9 +186,17 @@ images, volumes, journals or backups during the rehearsal.
 
 ## 9. Current baseline evidence, not candidate acceptance
 
-At 2026-08-28 12:43 Europe/Madrid:
+At 2026-08-28 12:55 Europe/Madrid:
 
-- `origin/main`: `390bbb06c1dac491b89b3c2a133713c6439584bb`;
+- `origin/main`: `9fe848ae84ca808533dceb1c8a43779abe1e221a`;
+- the one-commit delta from `390bbb06…` changes only the Arnall deploy gateway
+  and adds its contract test;
+- [Backend CI 33164764500](https://github.com/arnautxu/AiBrain/actions/runs/33164764500) passed all four jobs for `9fe848ae…`;
+- [Deploy 33165012869](https://github.com/arnautxu/AiBrain/actions/runs/33165012869) logged `ARNALL_DEPLOY_OK` for `9fe848ae…`;
+- current app digest: `sha256:671d7f652efcec9133099790fca6fec036b77ae28a3ff3f4d0271dae00855c9f`;
+- current gateway digest: `sha256:926117c1caa82e4b212d7ab5cadeaf722de1edb7ca1ac44f7f4f2f18431c0c09`;
+- post-deploy process start: `2026-08-28T10:54:16.471Z`; live and ready returned HTTP 200, 33.97% disk free and all required checks/components `OK`;
+- the prior fully green and deployed baseline was `390bbb06c1dac491b89b3c2a133713c6439584bb`;
 - [Backend CI 33157502708](https://github.com/arnautxu/AiBrain/actions/runs/33157502708): success, four jobs;
 - [Deploy 33157794229](https://github.com/arnautxu/AiBrain/actions/runs/33157794229): success and `ARNALL_DEPLOY_OK` for that SHA;
 - app digest logged: `sha256:59c402d472ddf7f21208141f435b9f62b70d4ff0f205dea57be7bac2d69399fa`;
@@ -198,4 +206,3 @@ At 2026-08-28 12:43 Europe/Madrid:
 - root redirected to `/login` with HTTP 307;
 - this is the pre-integration baseline only. It does not validate the pending
   work-parity merge, dirty fixups, future workstream handoffs or final rollback.
-
