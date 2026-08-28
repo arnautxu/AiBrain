@@ -434,6 +434,7 @@ export function BrainApp({
   useEffect(() => {
     if (!hydrated || !networkOnline) return;
     const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     const query = activeProjectId ? `?projectId=${encodeURIComponent(activeProjectId)}` : "";
     setRuntimeStatus((current) => ({ ...current, codex: "checking", ready: false }));
     void fetch(`/api/runtime/status${query}`, { signal: controller.signal, cache: "no-store" })
@@ -449,7 +450,10 @@ export function BrainApp({
           setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
         }
       });
-    return () => controller.abort();
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
 
   const style = useMemo<BrainStyle>(() => {

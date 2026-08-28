@@ -14,6 +14,19 @@ import {
 
 export const runtime = "nodejs";
 
+const RUNTIME_STATUS_TIMEOUT_MS = 12_000;
+
+function waitForRuntimeStatus<T>(operation: Promise<T>) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error("Runtime status timed out.")), RUNTIME_STATUS_TIMEOUT_MS);
+    timeout.unref?.();
+  });
+  return Promise.race([operation, deadline]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
 export async function GET(request: Request) {
   const session = await getSession();
   if (!session) {
@@ -61,7 +74,7 @@ export async function GET(request: Request) {
 
   if (config.mode === "codex") {
     try {
-      const worker = await workerAppServerForUser(session.user.id);
+      const worker = await waitForRuntimeStatus(workerAppServerForUser(session.user.id));
       workerWorkspace = await resolveWorkerOwnedPath(
         worker.handle.roots.workspace,
         path.posix.join("projects", projectContext.projectId ?? "default"),
