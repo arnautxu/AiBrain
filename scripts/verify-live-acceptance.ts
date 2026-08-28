@@ -370,7 +370,13 @@ function parseReadback(
 ): string | null {
   try {
     const value = JSON.parse(contents.toString("utf8")) as unknown;
-    if (!isRecord(value) || !hasOnlyKeys(value, Object.keys(expected))) return `release_identity_source_invalid:${label}`;
+    if (!isRecord(value) || !hasOnlyKeys(value, [...Object.keys(expected), "capturedAt", "provenance"])
+      || typeof value.capturedAt !== "string" || !validTimestamp(value.capturedAt)
+      || !isRecord(value.provenance) || !hasOnlyKeys(value.provenance, ["kind", "sha256"])
+      || !["file", "docker-command"].includes(String(value.provenance.kind))
+      || typeof value.provenance.sha256 !== "string" || !sha256Pattern.test(value.provenance.sha256)) {
+      return `release_identity_source_invalid:${label}`;
+    }
     return Object.entries(expected).every(([key, expectedValue]) => value[key] === expectedValue)
       ? null
       : `release_identity_source_mismatch:${label}`;

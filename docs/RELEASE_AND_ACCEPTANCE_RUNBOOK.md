@@ -170,6 +170,28 @@ app/gateway OCI inspections (`release:app-oci-inspect` and
 with the manifest and with one another. Verify them against the reviewed
 candidate checkout, not an arbitrary working directory:
 
+Do not hand-write those five artifacts. Save a sanitized CI source with exactly
+`schemaVersion`, `workflow: "Backend CI"`, `conclusion: "success"`, `headSha`
+and the numeric GitHub `runId`; it must contain no credentials or logs. On the
+host, after the authorized deployment, collect all five artifacts from that
+source, the versioned `release-state.json`, and the same Docker inspect/OCI
+label commands used by `manage-release`:
+
+```bash
+npm run acceptance:collect-release-readbacks -- \
+  --output-root /private/evidence \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --ci-source /private/evidence/backend-ci-source.json \
+  --release-state /etc/aibrain/company-qa/release-state.json \
+  --docker-bin /usr/bin/docker \
+  --app-container "$APP_CONTAINER_ID" \
+  --gateway-container "$GATEWAY_CONTAINER_ID"
+```
+
+It is read-only: it aborts if a source is missing, contains secret-shaped
+material, or disagrees with the candidate/state/OCI label. Each output carries
+its source, a source-or-command fingerprint and capture time.
+
 ```bash
 npm run acceptance:verify -- --manifest /private/evidence/manifest.json \
   --evidence-root /private/evidence \

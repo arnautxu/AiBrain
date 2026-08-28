@@ -14,6 +14,7 @@ import {
   type AcceptanceManifest,
 } from "../../scripts/verify-live-acceptance";
 import { createPredeployReleaseEvidence } from "../../scripts/create-predeploy-release-evidence";
+import { collectReleaseReadbacks, type ReleaseReadbackRoute } from "../../scripts/collect-release-readbacks";
 
 const roots: string[] = [];
 const releaseSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: process.cwd(), encoding: "utf8" }).trim();
@@ -104,30 +105,35 @@ function artifactPath(gateId: string, kind: string, route: string): string {
     : `${gateId}-${kind}.json`;
 }
 
-function releaseReadback(route: string): Record<string, unknown> {
-  const appOciDigest = `sha256:${"b".repeat(64)}`;
-  const gatewayOciDigest = `sha256:${"c".repeat(64)}`;
-  switch (route) {
-    case "release:ci-readback":
-      return { schemaVersion: 1, kind: "aibrain-release-ci-readback", source: "ci", candidateSha: releaseSha, ciSha: releaseSha };
-    case "release:deploy-state":
-      return { schemaVersion: 1, kind: "aibrain-release-deploy-state-readback", source: "deploy-state", ciSha: releaseSha, deploySha: releaseSha, appOciDigest, gatewayOciDigest };
-    case "release:runtime-readback":
-      return { schemaVersion: 1, kind: "aibrain-release-runtime-readback", source: "runtime", deploySha: releaseSha, runtimeSha: releaseSha, appOciRevision: releaseSha, gatewayOciRevision: releaseSha };
-    case "release:app-oci-inspect":
-      return { schemaVersion: 1, kind: "aibrain-release-oci-inspect", source: "oci-inspect", component: "app", revision: releaseSha, digest: appOciDigest };
-    case "release:gateway-oci-inspect":
-      return { schemaVersion: 1, kind: "aibrain-release-oci-inspect", source: "oci-inspect", component: "gateway", revision: releaseSha, digest: gatewayOciDigest };
-    default:
-      throw new Error(`Unexpected release readback route: ${route}`);
-  }
-}
-
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-live-acceptance-"));
   roots.push(root);
   const evidenceRoot = path.join(root, "evidence");
   await mkdir(evidenceRoot, { recursive: true, mode: 0o700 });
+  const appImage = `registry.example.test/aibrain@sha256:${"b".repeat(64)}`;
+  const gatewayImage = `registry.example.test/aibrain-gateway@sha256:${"c".repeat(64)}`;
+  const ciSource = path.join(root, "backend-ci.json");
+  const releaseState = path.join(root, "release-state.json");
+  await writeFile(ciSource, `${JSON.stringify({ schemaVersion: 1, workflow: "Backend CI", conclusion: "success", headSha: releaseSha, runId: "33165012869" })}\n`, { mode: 0o600 });
+  await writeFile(releaseState, `${JSON.stringify({ schemaVersion: 3, current: { revision: releaseSha, image: appImage, egressImage: gatewayImage } })}\n`, { mode: 0o600 });
+  const releaseArtifacts = new Map((await collectReleaseReadbacks({
+    candidateSha: releaseSha,
+    ciSourcePath: ciSource,
+    releaseStatePath: releaseState,
+    appContainer: "a".repeat(12),
+    gatewayContainer: "b".repeat(12),
+    capturedAt: "2026-08-28T10:05:00.000Z",
+    command: {
+      run: async (args) => {
+        const target = args.at(-1);
+        const image = target === "a".repeat(12) || target === appImage ? appImage : gatewayImage;
+        if (args.includes("{{.Config.Image}}")) return image;
+        if (args.some((arg) => arg.includes("org.opencontainers.image.revision"))) return releaseSha;
+        if (args.includes("{{json .RepoDigests}}")) return JSON.stringify([image]);
+        throw new Error(`Unexpected Docker command: ${args.join(" ")}`);
+      },
+    },
+  })).map((artifact) => [artifact.route, artifact.value]));
   const artifacts = new Map<string, string>();
   for (const gateId of REQUIRED_LIVE_GATES) {
     for (const { kind, route } of gateEvidence[gateId]) {
@@ -142,7 +148,7 @@ async function fixture() {
           gatewayOciRevision: releaseSha,
           appOciDigest: `sha256:${"b".repeat(64)}`,
           gatewayOciDigest: `sha256:${"c".repeat(64)}`,
-        }, process.cwd()))}\n` : `${JSON.stringify(releaseReadback(route))}\n`
+        }, process.cwd()))}\n` : `${JSON.stringify(releaseArtifacts.get(route as ReleaseReadbackRoute))}\n`
         : `${JSON.stringify({ gateId, kind, route, target: CANONICAL_LIVE_TARGET, releaseSha })}\n`;
       await writeFile(path.join(evidenceRoot, artifact), contents, { mode: 0o600 });
       artifacts.set(artifact, sha256(contents));
