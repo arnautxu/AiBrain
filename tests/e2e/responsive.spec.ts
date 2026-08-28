@@ -9,6 +9,8 @@ const viewports = [
   { width: 600, height: 900 },
   { width: 390, height: 844 },
   { width: 375, height: 812 },
+  { width: 320, height: 568 },
+  { width: 844, height: 390 },
 ];
 
 async function login(page: Page) {
@@ -29,8 +31,20 @@ for (const viewport of viewports) {
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(viewport.width + 1);
 
     if (viewport.width < 768) {
+      const header = await page.getByTestId("mobile-app-header").boundingBox();
+      expect(header).not.toBeNull();
+      expect(header!.x).toBeGreaterThanOrEqual(0);
+      expect(header!.x + header!.width).toBeLessThanOrEqual(viewport.width + 1);
+
       await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+
+      const sidebarAction = page.getByRole("button", { name: /Acciones de/ }).first();
+      await expect(sidebarAction).toBeVisible();
+      const sidebarActionTarget = await sidebarAction.boundingBox();
+      expect(sidebarActionTarget).not.toBeNull();
+      expect(sidebarActionTarget!.width).toBeGreaterThanOrEqual(44);
+      expect(sidebarActionTarget!.height).toBeGreaterThanOrEqual(44);
     }
     const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
     await accountButton.click();

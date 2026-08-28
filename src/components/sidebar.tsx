@@ -320,13 +320,13 @@ export function Sidebar({
                 const menuOpen = threadMenuId === thread.id;
                 return (
                   <div key={thread.id} className="relative group/thread">
-                    <button aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-9 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
+                    <button aria-current={active ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-11 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                       <ChatCircleDots size={15} weight={active ? "fill" : "regular"} />
                       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </button>
-                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                   </div>
                 );
@@ -343,7 +343,7 @@ export function Sidebar({
           <section aria-labelledby="projects-label" className="mt-4 border-t border-[var(--border-subtle)] pt-2">
             <div className="flex items-center justify-between px-3 pb-1 pt-2">
               <h2 id="projects-label" className="text-[11px] font-semibold text-[var(--text-subtle)]">Proyectos</h2>
-              <button aria-label="Crear proyecto" className="rounded-md p-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onNewProject}><Plus size={14} /></button>
+              <button aria-label="Crear proyecto" className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onNewProject}><Plus size={14} /></button>
             </div>
             <div className="space-y-0.5">
               {activeProjects.length === 0 ? (
@@ -360,18 +360,18 @@ export function Sidebar({
                   .filter((activity): activity is ThreadActivity => Boolean(activity));
                 return (
                   <div key={project.id} className="relative group">
-                    <button aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-9 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectProject(project.id)}>
+                    <button aria-current={active ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-11 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectProject(project.id)}>
                       {active ? <FolderOpen size={16} weight="fill" /> : <Folder size={16} />}
                       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </button>
-                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                     <div aria-label={`Chats de ${project.name}`} className="ml-5 border-l border-[var(--border-subtle)] pl-1">
                       <div className="flex items-center justify-between px-2 py-1">
                         <span className="text-[10px] font-medium text-[var(--text-subtle)]">Chats</span>
-                        <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="rounded-md p-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={13} /></button>
+                        <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={13} /></button>
                       </div>
                       <div className="space-y-0.5">
                         {activeProjectThreads.length === 0 ? <p className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">Aún no hay conversaciones.</p> : activeProjectThreads.map((thread) => {
@@ -379,13 +379,13 @@ export function Sidebar({
                           const threadMenuOpen = threadMenuId === thread.id;
                           return (
                             <div key={thread.id} className="relative group/thread">
-                              <button aria-current={threadActive ? "page" : undefined} className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 pr-8 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
+                              <button aria-current={threadActive ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center gap-2 rounded-lg px-2 py-1.5 pr-11 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                                 <ChatCircleDots size={14} weight={threadActive ? "fill" : "regular"} />
                                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
-                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="absolute right-0 top-0 rounded-md p-1.5 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
+                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
                               {threadMenuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                             </div>
                           );
