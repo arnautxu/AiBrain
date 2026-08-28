@@ -22,6 +22,7 @@
     "test:visual": "playwright test --project=visual-desktop --project=visual-mobile --project=visual-matrix",
     "test:a11y": "playwright test --project=accessibility",
     "acceptance:verify": "tsx scripts/verify-live-acceptance.ts",
+    "acceptance:release-evidence": "tsx scripts/create-predeploy-release-evidence.ts",
     "test:soak": "tsx scripts/soak.ts",
     "test:soak:qa": "tsx scripts/soak.ts --qa",
     "test:coverage": "vitest run --coverage",

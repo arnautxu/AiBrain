@@ -5,6 +5,11 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import Ajv2020, { type ErrorObject } from "ajv/dist/2020.js";
 import schema from "../tests/acceptance/live-acceptance.schema.json";
+import {
+  PREDEPLOY_RELEASE_EVIDENCE_KIND,
+  PREDEPLOY_RELEASE_EVIDENCE_VERSION,
+  type PredeployReleaseEvidence,
+} from "./create-predeploy-release-evidence";
 
 export const CANONICAL_LIVE_TARGET = "https://arnall.graphikai.com";
 
@@ -188,6 +193,9 @@ export type AcceptanceEvaluation = {
 
 const validator = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
 const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
+const shaPattern = /^[0-9a-f]{40}$/u;
+const sha256Pattern = /^[0-9a-f]{64}$/u;
+const ociDigestPattern = /^sha256:[0-9a-f]{64}$/u;
 const secretPatterns = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/iu,
   /\b(?:cookie|password|secret|access[_-]?token|refresh[_-]?token)\s*[:=]\s*\S+/iu,
@@ -283,6 +291,63 @@ function validateConnectorActionGate(gate: AcceptanceGate | undefined, manifest:
   if (gate.evidence.some((evidence) => evidence.kind === "audit")) reasons.push("connector_generic_audit_rejected");
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  return Object.keys(value).length === keys.length && Object.keys(value).every((key) => keys.includes(key));
+}
+
+function matchesFingerprint(value: unknown, expectedPath: string): boolean {
+  return isRecord(value)
+    && hasOnlyKeys(value, ["path", "sha256"])
+    && value.path === expectedPath
+    && typeof value.sha256 === "string"
+    && sha256Pattern.test(value.sha256);
+}
+
+function validateReleaseIdentityEvidence(
+  contents: Buffer,
+  manifest: AcceptanceManifest,
+  label: string,
+): string | null {
+  let record: unknown;
+  try {
+    record = JSON.parse(contents.toString("utf8"));
+  } catch {
+    return `release_identity_evidence_invalid:${label}`;
+  }
+  if (!isRecord(record)
+    || !hasOnlyKeys(record, ["schemaVersion", "kind", "releaseSha", "identity", "backup", "rollback"])
+    || record.schemaVersion !== PREDEPLOY_RELEASE_EVIDENCE_VERSION
+    || record.kind !== PREDEPLOY_RELEASE_EVIDENCE_KIND
+    || record.releaseSha !== manifest.releaseSha
+    || !isRecord(record.identity)
+    || !hasOnlyKeys(record.identity, ["candidateSha", "ciSha", "deploySha", "runtimeSha", "appOciRevision", "gatewayOciRevision", "appOciDigest", "gatewayOciDigest"])
+    || !isRecord(record.backup)
+    || !hasOnlyKeys(record.backup, ["orchestrator", "restoreCli", "verificationRequired", "isolatedRestoreRequired"])
+    || !isRecord(record.rollback)
+    || !hasOnlyKeys(record.rollback, ["manager", "previousReleaseRequired"])) {
+    return `release_identity_evidence_invalid:${label}`;
+  }
+
+  const identity = record.identity as PredeployReleaseEvidence["identity"];
+  if (Object.entries(manifest.releaseIdentity).some(([key, value]) => identity[key as keyof AcceptanceManifest["releaseIdentity"]] !== value)
+    || !ociDigestPattern.test(identity.appOciDigest)
+    || !ociDigestPattern.test(identity.gatewayOciDigest)
+    || Object.entries(manifest.releaseIdentity).some(([, value]) => !shaPattern.test(value))
+    || !matchesFingerprint(record.backup.orchestrator, "scripts/orchestrate-backup.mjs")
+    || !matchesFingerprint(record.backup.restoreCli, "scripts/backup.ts")
+    || record.backup.verificationRequired !== true
+    || record.backup.isolatedRestoreRequired !== true
+    || !matchesFingerprint(record.rollback.manager, "scripts/manage-release.mjs")
+    || record.rollback.previousReleaseRequired !== true) {
+    return `release_identity_evidence_mismatch:${label}`;
+  }
+  return null;
+}
+
 async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: string | undefined): Promise<string[]> {
   if (!evidenceRoot) return ["evidence_root_missing"];
   const reasons: string[] = [];
@@ -319,6 +384,10 @@ async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: s
         }
         const contents = await readFile(candidate);
         if (digest(contents) !== evidence.sha256) reasons.push(`evidence_digest_mismatch:${label}`);
+        else if (gate.id === "release-identity-readiness" && evidence.kind === "release" && evidence.route === "release:identity") {
+          const reason = validateReleaseIdentityEvidence(contents, manifest, label);
+          if (reason) reasons.push(reason);
+        }
       } catch {
         reasons.push(`evidence_unreadable:${label}`);
       }
