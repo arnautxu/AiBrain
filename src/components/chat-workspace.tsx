@@ -47,6 +47,7 @@ import { TurnSourceChips } from "@/components/turn-sources";
 import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-controls";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
+import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -103,6 +104,9 @@ type ChatWorkspaceProps = {
   onShareConversation: () => Promise<void>;
   onExportConversation: (format: "markdown" | "json") => void;
   onResultAction: (message: ChatMessage, action: "approved" | "pending" | "undo") => Promise<void>;
+  managedAppActionEnabled: boolean;
+  managedAppApprovalId: string | null;
+  onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   showAdvancedControls: boolean;
 };
 
@@ -233,6 +237,7 @@ function AssistantMessage({
   publications,
   onFreezePublication,
   onDecidePublication,
+  managedAppAction,
 }: {
   message: ChatMessage;
   showActivity: boolean;
@@ -246,6 +251,12 @@ function AssistantMessage({
   publications: DocumentPublicationDraft[];
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
+  managedAppAction: {
+    enabled: boolean;
+    threadId: string;
+    onPrepared: (descriptor: ManagedAppActionDescriptor) => void;
+    approvalId: string | null;
+  } | null;
 }) {
   const hasDetails = message.activity.length > 0 || message.plan.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.sources?.length) || Boolean(message.toolResults?.length);
@@ -253,8 +264,8 @@ function AssistantMessage({
 
   return (
     <article className="message-enter group">
-      {showActivity ? (
-        <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} />
+      {showActivity || managedAppAction ? (
+        <TurnActivity message={message} showDiff={showInlineDiff} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -388,6 +399,9 @@ export function ChatWorkspace({
   onShareConversation,
   onExportConversation,
   onResultAction,
+  managedAppActionEnabled,
+  managedAppApprovalId,
+  onManagedAppPrepared,
   showAdvancedControls,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -403,6 +417,7 @@ export function ChatWorkspace({
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [conversationMenuOpen, setConversationMenuOpen] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
+  const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
   useEffect(() => {
     if (!shouldStickToBottomRef.current && !sending) return;
@@ -601,6 +616,12 @@ export function ChatWorkspace({
                       publications={publications.filter((draft) => draft.turnId === message.id && draft.threadId === thread.id)}
                       onFreezePublication={onFreezePublication}
                       onDecidePublication={onDecidePublication}
+                      managedAppAction={managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
+                        enabled: true,
+                        threadId: thread.id,
+                        onPrepared: onManagedAppPrepared,
+                        approvalId: managedAppApprovalId,
+                      } : null}
                     />
                   )}
                 </div>

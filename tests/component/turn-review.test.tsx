@@ -107,6 +107,26 @@ describe("turn activity and Review", () => {
     expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
   });
 
+  it("keeps connector outcomes auditable and removes session-wide approval", () => {
+    const connectorApproval = { ...message.approvals[0], id: "connector-approval", title: "Confirmar acción conectada" };
+    render(<TurnActivity
+      message={{
+        ...message,
+        approvals: [connectorApproval],
+        toolResults: [{
+          id: "managed-app:connector-approval", kind: "app", title: "Acción conectada", status: "failed",
+          summary: "indeterminate", output: null, sourceIds: [], createdAt: "2026-08-28T12:00:00.000Z",
+        }],
+      }}
+      onResolveApproval={vi.fn()}
+      managedAppAction={{ enabled: true, threadId: "thread-1", approvalId: "connector-approval", onPrepared: () => undefined }}
+    />);
+
+    expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Acción conectada"));
+    expect(screen.getByText("indeterminate")).toBeVisible();
+  });
+
   it("renders an inspectable file diff and activity tabs", () => {
     render(<DetailsPanel message={message} open onClose={vi.fn()} onResolveApproval={vi.fn()} />);
 

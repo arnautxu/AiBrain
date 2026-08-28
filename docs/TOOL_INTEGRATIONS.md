@@ -94,6 +94,42 @@ choice and must not be invented here. Until that manifest and personal binding
 are present, the UI hides the connector and the API returns
 `CODEX_APP_ACTION_NOT_CONFIGURED`.
 
+## P0 authenticated UI consumer
+
+Baseline `9ecc0d8d272add8a16b40e77b2541b9433a43ae1` exposed the safe capability
+and action routes but had no browser consumer. A user could not initiate the
+allowlisted action, see its pending approval, or review the safe terminal
+outcome in the normal thread Activity/Tools surface.
+
+The UI now reads `GET /api/connectors` after authentication and renders the
+control only when `codex-managed-app` is `connected` and
+`execute-allowlisted-action` is effective. It sends prepare only with the
+active thread and current turn IDs, adds the returned normal `ApprovalItem` to
+the visible message state, and reuses the approval endpoint. Only `accept`
+continues to execute with the exact locator and authorization fingerprint.
+Decline and session-wide approval both deny the connector action and never
+call execute. A cross-thread descriptor is dropped locally before any request.
+
+The only visible readback is the safe outcome `executed`, `replayed`,
+`indeterminate` or `denied` in the existing tool-results panel. The browser
+never renders or exports the receipt, authorization snapshot, credential
+reference, server, tool, arguments or provider correlation.
+
+Focused client evidence:
+
+```text
+npx vitest run tests/unit/codex-managed-app-ui.test.ts \
+  tests/component/managed-app-action-control.test.tsx \
+  tests/component/turn-review.test.tsx
+3 files passed, 10 tests passed
+```
+
+The fake-fetch tests cover missing/connected capability gating,
+prepare→pending→accept→execute, decline without execute, stale cross-thread
+descriptor rejection, indeterminate visibility data and forbidden-field
+absence. This is local UI/contract evidence only: no Arnall manifest, binding,
+provider action or live readback was used.
+
 ## Adding a connector
 
 1. Define typed read and mutation operations.
