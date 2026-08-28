@@ -439,7 +439,9 @@ export function BrainApp({
       if (disposed) return;
       setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
       controller.abort();
-    }, 25_000);
+    // The server caps this request at 35 seconds. Keep the browser deadline
+    // slightly above it so a cold, valid Codex worker can report its result.
+    }, 40_000);
     const query = activeProjectId ? `?projectId=${encodeURIComponent(activeProjectId)}` : "";
     setRuntimeStatus((current) => ({ ...current, codex: "checking", ready: false }));
     void fetch(`/api/runtime/status${query}`, { signal: controller.signal, cache: "no-store" })

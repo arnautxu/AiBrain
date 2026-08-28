@@ -144,6 +144,21 @@ export class WorkerAppServerClient {
     return this.cachedConnection;
   }
 
+  /**
+   * Returns the verified account state without waiting for the optional model,
+   * skill, usage, and capability catalog. This keeps the readiness endpoint
+   * bounded during a cold worker start; those details are loaded on demand by
+   * `connection()` when a turn needs them.
+   */
+  async connectionSummary(): Promise<CodexConnection> {
+    await this.initialize();
+    if (!this.account) throw new Error("Codex did not return account state.");
+    return {
+      ...this.account,
+      processWarm: true,
+    };
+  }
+
   async resolvedSkills(cwd: string): Promise<ResolvedSkill[]> {
     await this.initialize();
     return parseSkills(await this.router.request(randomRequest(
