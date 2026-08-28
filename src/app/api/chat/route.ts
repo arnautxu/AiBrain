@@ -266,6 +266,7 @@ export async function POST(request: Request) {
     projectInstructions: string;
     projectMemory: string;
     projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
+    visibleProjects: readonly { id: string; name: string }[];
     runtimeThreadToken: string | null;
     branchHistory: string | null;
   };
@@ -278,6 +279,7 @@ export async function POST(request: Request) {
       projectInstructions: "",
       projectMemory: "",
       projectSources: [],
+      visibleProjects: [{ id: body.projectId, name: "Preview local" }],
       runtimeThreadToken: null,
       branchHistory: null,
     };

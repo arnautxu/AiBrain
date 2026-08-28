@@ -22,6 +22,20 @@ export type ThreadRuntimeContext = {
   branchHistory: string | null;
 };
 
+/**
+ * The project catalogue the authenticated user can actually see in the
+ * workbench sidebar. This is deliberately separate from runtime workspaces,
+ * thread snapshots and other filesystem identifiers.
+ */
+export type VisibleProjectReference = {
+  id: string;
+  name: string;
+};
+
+export type AgentThreadRuntimeContext = ThreadRuntimeContext & {
+  visibleProjects: readonly VisibleProjectReference[];
+};
+
 export function branchHistory(thread: StoredThread) {
   if (!thread.lineage || thread.runtimeThreadToken || thread.messages.length === 0) return null;
   return thread.messages.map((message) => {
