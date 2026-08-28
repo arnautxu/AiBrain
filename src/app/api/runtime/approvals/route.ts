@@ -20,7 +20,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   }
   const body: unknown = await request.json().catch(() => null);
-  if (!isApprovalResolutionRequest(body)) {
+  const approvalResolution = isApprovalResolutionRequest(body) ? body : null;
+  const connectorResolution = isConnectorApprovalResolutionRequest(body) ? body : null;
+  if (!approvalResolution && !connectorResolution) {
     return NextResponse.json(
       { error: "La decisió d’aprovació no és vàlida." },
       { status: 400 },
@@ -40,29 +42,46 @@ export async function POST(request: Request) {
     const locator = {
       installationId: installation.installationId,
       userId: session.user.id,
-      threadId: body.threadId,
-      turnId: body.turnId,
-      itemId: body.itemId,
-      approvalId: body.approvalId,
+      threadId: (connectorResolution ?? approvalResolution).threadId,
+      turnId: (connectorResolution ?? approvalResolution).turnId,
+      itemId: (connectorResolution ?? approvalResolution).itemId,
+      approvalId: (connectorResolution ?? approvalResolution).approvalId,
     };
     const connector = await store.readConnectorApproval(locator);
     if (connector) {
-      if (!isConnectorApprovalResolutionRequest(body)) {
+      if (!connectorResolution) {
         return NextResponse.json(
-          { error: "Les approvals de connector només admeten una acceptació amb el fingerprint original." },
+          { error: "Les approvals de connector requereixen el fingerprint original." },
           { status: 403 },
         );
       }
-      const result = await store.approveConnectorApprovalByLocator(locator, body.authorizationFingerprint);
-      if (result.outcome === "approved" || result.outcome === "already-approved") {
-        return NextResponse.json({ ok: true, status: "approved" });
+      if (connectorResolution.decision === "accept") {
+        const result = await store.approveConnectorApprovalByLocator(locator, connectorResolution.authorizationFingerprint);
+        if (result.outcome === "approved" || result.outcome === "already-approved") {
+          return NextResponse.json({ ok: true, status: "approved" });
+        }
+        return NextResponse.json(
+          { error: "Aquesta approval de connector ja no està pendent." },
+          { status: 403 },
+        );
+      }
+      // acceptForSession is intentionally a denial: connector approvals never grant a session permission.
+      const result = await store.denyConnectorApprovalByLocator(locator, connectorResolution.authorizationFingerprint);
+      if (result.outcome === "denied" || result.outcome === "already-denied") {
+        return NextResponse.json({ ok: true, status: "denied" });
       }
       return NextResponse.json(
         { error: "Aquesta approval de connector ja no està pendent." },
         { status: 403 },
       );
     }
-    const result = await store.resolve(locator, body.decision);
+    if (!approvalResolution) {
+      return NextResponse.json(
+        { error: "Aquesta approval de connector no existeix per a la sessió autenticada." },
+        { status: 404 },
+      );
+    }
+    const result = await store.resolve(locator, approvalResolution.decision);
     if (result.outcome === "resolved" || result.outcome === "already-resolved") {
       return NextResponse.json({ ok: true, status: "resolved" });
     }
