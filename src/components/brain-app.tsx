@@ -12,6 +12,7 @@ import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { LibraryPanel } from "@/components/library-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
+import { useTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
@@ -1592,6 +1593,12 @@ export function BrainApp({
     }
     setMobileSidebarOpen((current) => !current);
   }, []);
+
+  const toggleTaskCenter = useCallback(() => {
+    setTaskCenterOpen((current) => !current);
+  }, []);
+
+  useTaskCenterShortcut(toggleTaskCenter);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
