@@ -6,6 +6,8 @@ import type {
   ChatRequest,
   ChatStreamEvent,
   PlanStep,
+  ToolResult,
+  TurnSource,
 } from "@/lib/chat-contract";
 import type { ApprovalRequestType } from "@/runtime/approval-store";
 import type { RuntimeConfig } from "@/runtime/config";
@@ -185,6 +187,225 @@ function fileChangeSummary(changes: unknown) {
     isRecord(change) && typeof change.path === "string" ? [change.path] : [],
   );
   return paths.length > 0 ? paths.join(", ") : null;
+}
+
+function compactRuntimeText(value: unknown, maximum: number) {
+  if (typeof value !== "string") return null;
+  const compact = value.replace(/\s+/gu, " ").trim();
+  return compact ? compact.slice(0, maximum) : null;
+}
+
+function runtimeUrl(value: unknown) {
+  if (typeof value !== "string" || value.length > 2_048) return null;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function runtimeDate(value: unknown) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.valueOf()) ? null : parsed.toISOString();
+}
+
+function sourceId(itemId: string, url: string) {
+  return `source-${createHash("sha256").update(`${itemId}\0${url}`).digest("hex").slice(0, 32)}`;
+}
+
+function sourceFromRecord(value: unknown, itemId: string, kind: TurnSource["kind"]): TurnSource | null {
+  if (!isRecord(value)) return null;
+  const parsedUrl = runtimeUrl(value.url ?? value.link ?? value.uri);
+  if (!parsedUrl) return null;
+  const title = compactRuntimeText(value.title ?? value.name, 240) ?? parsedUrl.hostname;
+  const snippet = compactRuntimeText(
+    value.snippet ?? value.excerpt ?? value.description ?? value.text,
+    2_000,
+  );
+  const publishedAt = runtimeDate(
+    value.publishedAt ?? value.published_at ?? value.publicationDate ?? value.date,
+  );
+  return {
+    id: sourceId(itemId, parsedUrl.href),
+    kind,
+    title,
+    url: parsedUrl.href,
+    domain: parsedUrl.hostname,
+    snippet,
+    publishedAt,
+  };
+}
+
+function candidateRecords(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.filter(isRecord).slice(0, 100);
+  if (!isRecord(value)) return [];
+  for (const key of ["results", "items", "sources", "data"]) {
+    if (Array.isArray(value[key])) return value[key].filter(isRecord).slice(0, 100);
+  }
+  return [value];
+}
+
+function parsedJson(value: unknown) {
+  if (typeof value !== "string" || value.length > 100_000) return null;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+/** Extracts only source metadata that the runtime actually supplied. */
+export function itemSources(params: unknown): TurnSource[] {
+  if (!isRecord(params) || !isRecord(params.item) || typeof params.item.id !== "string") return [];
+  const item = params.item;
+  const itemId = String(item.id);
+  const records: Record<string, unknown>[] = [];
+  let kind: TurnSource["kind"] = "app";
+  if (item.type === "webSearch") {
+    kind = "web";
+    records.push(...candidateRecords(item.results));
+    if (isRecord(item.action) && item.action.type === "openPage" && runtimeUrl(item.action.url)) {
+      records.push({ url: item.action.url });
+    }
+  } else if (item.type === "mcpToolCall" && isRecord(item.result)) {
+    records.push(...candidateRecords(item.result.structuredContent));
+    if (Array.isArray(item.result.content)) {
+      for (const content of item.result.content) {
+        if (!isRecord(content)) continue;
+        records.push(content);
+        if (isRecord(content.resource)) records.push(content.resource);
+      }
+    }
+  } else if (item.type === "dynamicToolCall" && Array.isArray(item.contentItems)) {
+    kind = item.namespace === "aibrain_browser" ? "web" : "app";
+    for (const content of item.contentItems) {
+      if (!isRecord(content) || content.type !== "inputText") continue;
+      records.push(...candidateRecords(parsedJson(content.text)));
+    }
+  } else {
+    return [];
+  }
+  const unique = new Map<string, TurnSource>();
+  for (const record of records) {
+    const source = sourceFromRecord(record, itemId, kind);
+    if (source?.url) unique.set(source.url, source);
+  }
+  return [...unique.values()].slice(0, 100);
+}
+
+function safeRuntimeOutput(value: unknown) {
+  if (typeof value === "string") return value.slice(0, 64_000);
+  if (value === null || value === undefined) return null;
+  try {
+    return JSON.stringify(value, null, 2).slice(0, 64_000);
+  } catch {
+    return null;
+  }
+}
+
+function mcpOutput(result: unknown) {
+  if (!isRecord(result)) return null;
+  const parts: string[] = [];
+  if (Array.isArray(result.content)) {
+    for (const entry of result.content) {
+      if (isRecord(entry) && typeof entry.text === "string") parts.push(entry.text);
+    }
+  }
+  if (parts.length > 0) return parts.join("\n\n").slice(0, 64_000);
+  return safeRuntimeOutput(result.structuredContent);
+}
+
+function toolResultStatus(item: Record<string, unknown>, completed: boolean): ToolResult["status"] {
+  if (item.status === "failed" || item.success === false) return "failed";
+  if (item.status === "declined") return "stopped";
+  if (item.status === "completed" || completed) return "complete";
+  return "running";
+}
+
+function itemObservedAt(params: Record<string, unknown>, fallback: string) {
+  const timestamp = params.completedAtMs ?? params.startedAtMs;
+  if (typeof timestamp === "number" && Number.isFinite(timestamp)) {
+    const date = new Date(timestamp);
+    if (!Number.isNaN(date.valueOf())) return date.toISOString();
+  }
+  return fallback;
+}
+
+/** Projects one reviewable tool result without interpreting assistant prose as tool output. */
+export function itemToolResult(
+  params: unknown,
+  completed: boolean,
+  observedAt: string,
+): ToolResult | null {
+  if (!isRecord(params) || !isRecord(params.item)) return null;
+  const item = params.item;
+  if (typeof item.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(item.id)) return null;
+  const sources = itemSources(params);
+  const common = {
+    id: item.id,
+    status: toolResultStatus(item, completed),
+    sourceIds: sources.map((source) => source.id),
+    createdAt: itemObservedAt(params, observedAt),
+  };
+  if (item.type === "commandExecution") {
+    const command = compactRuntimeText(item.command, 240);
+    return {
+      ...common,
+      kind: "command",
+      title: command ?? "Comando de terminal",
+      summary: typeof item.exitCode === "number" ? `Código de salida ${item.exitCode}` : null,
+      output: safeRuntimeOutput(item.aggregatedOutput),
+    };
+  }
+  if (item.type === "fileChange") {
+    const paths = fileChangeSummary(item.changes);
+    return {
+      ...common,
+      kind: "file",
+      title: "Cambios en archivos",
+      summary: compactRuntimeText(paths, 4_000),
+      output: null,
+    };
+  }
+  if (item.type === "webSearch") {
+    const query = compactRuntimeText(item.query, 240);
+    return {
+      ...common,
+      kind: "web",
+      title: query ? `Búsqueda: ${query}` : "Búsqueda web",
+      summary: sources.length ? `${sources.length} ${sources.length === 1 ? "fuente consultada" : "fuentes consultadas"}` : "Sin fuentes enlazables en los metadatos",
+      output: null,
+    };
+  }
+  if (item.type === "mcpToolCall") {
+    const appContext = isRecord(item.appContext) ? item.appContext : null;
+    const app = compactRuntimeText(appContext?.appName, 100);
+    const tool = compactRuntimeText(appContext?.actionName ?? item.tool, 120) ?? "Herramienta";
+    const error = isRecord(item.error) ? compactRuntimeText(item.error.message, 4_000) : null;
+    return {
+      ...common,
+      kind: "app",
+      title: app ? `${app} · ${tool}` : tool,
+      summary: error ?? compactRuntimeText(item.server, 4_000),
+      output: mcpOutput(item.result),
+    };
+  }
+  if (item.type === "dynamicToolCall") {
+    const browser = item.namespace === "aibrain_browser";
+    const content = Array.isArray(item.contentItems)
+      ? item.contentItems.flatMap((entry) => isRecord(entry) && entry.type === "inputText" && typeof entry.text === "string" ? [entry.text] : [])
+      : [];
+    return {
+      ...common,
+      kind: browser ? "browser" : "app",
+      title: `${browser ? "Navegador" : "Herramienta"} · ${compactRuntimeText(item.tool, 120) ?? "acción"}`,
+      summary: compactRuntimeText(item.namespace, 4_000),
+      output: content.length ? content.join("\n\n").slice(0, 64_000) : null,
+    };
+  }
+  return null;
 }
 
 export function itemActivity(params: unknown, completed: boolean): ActivityItem | null {

@@ -58,6 +58,7 @@ import {
 } from "@/operations/maintenance";
 import { recordTurnUsage } from "@/usage/server-service";
 import type { TokenUsageBreakdown } from "@/usage/contracts";
+import { featurePolicyForUser } from "@/settings/server-service";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -150,6 +151,8 @@ function message(
     diff: "",
     attachments: [],
     artifacts: [],
+    sources: [],
+    toolResults: [],
   };
 }
 
@@ -215,13 +218,37 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
 
+  try {
+    const featurePolicy = await featurePolicyForUser(session);
+    const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
+      ? "búsqueda web"
+      : body.options.imageGeneration && !featurePolicy["image-generation"]
+        ? "generación de imágenes"
+        : body.options.skill && !featurePolicy.skills ? "skills" : null;
+    if (disabledFeature) {
+      return NextResponse.json({
+        error: `La capacidad ${disabledFeature} está desactivada en Configuración.`,
+        code: "FEATURE_DISABLED",
+      }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+    }
+  } catch {
+    return NextResponse.json({
+      error: "No se ha podido verificar la política de aplicaciones.",
+      code: "FEATURE_POLICY_UNAVAILABLE",
+    }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
+  }
+
   const browserPreview = isBrowserPreviewWorkbench();
   let persistent = !browserPreview;
   let context: {
     projectId: string;
     projectName: string;
     workspaceKey: string;
+    projectInstructions: string;
+    projectMemory: string;
+    projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
     runtimeThreadToken: string | null;
+    branchHistory: string | null;
   };
   if (browserPreview) {
     persistent = false;
@@ -229,7 +256,11 @@ export async function POST(request: Request) {
       projectId: body.projectId,
       projectName: "Preview local",
       workspaceKey: "workspace",
+      projectInstructions: "",
+      projectMemory: "",
+      projectSources: [],
       runtimeThreadToken: null,
+      branchHistory: null,
     };
   } else {
     try {
@@ -381,6 +412,15 @@ export async function POST(request: Request) {
     "streaming",
     new Date(startedAt.getTime() + 1).toISOString(),
   );
+  assistantMessage.sources = userMessage.attachments.map((attachment) => ({
+    id: `source-file-${attachment.id}`,
+    kind: "file",
+    title: attachment.name.replace(/\p{C}+/gu, " ").trim() || "Archivo adjunto",
+    url: null,
+    domain: null,
+    snippet: null,
+    publishedAt: null,
+  }));
   let turnOutcome: "created" | "existing" = "created";
   if (persistent) {
     try {
@@ -516,6 +556,7 @@ export async function POST(request: Request) {
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
+            context,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
