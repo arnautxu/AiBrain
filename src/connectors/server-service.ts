@@ -52,7 +52,6 @@ export async function codexManagedAppCapabilities(
   }
   const registry = new ConnectorRegistry(
     new FileConnectorBindingStore(installation.installationId, installation.paths.dataRoot),
-    new FileConnectorAuthorizationStore(installation.installationId, installation.paths.dataRoot),
     [codexManagedAppRegistration(async (userId) => (await workerAppServerForUser(userId)).client)],
   );
   return registry.capabilities(principal, { allowSharedCredentials: false });
@@ -71,6 +70,7 @@ export async function codexManagedAppActionForSession(session: AuthSession) {
   const transportForUser = async (userId: string) => (await workerAppServerForUser(userId)).client;
   return new CodexManagedAppAction(
     new FileConnectorBindingStore(installation.installationId, installation.paths.dataRoot),
+    new FileConnectorAuthorizationStore(installation.installationId, installation.paths.dataRoot),
     new FileApprovalStore({
       installationId: installation.installationId,
       userId: session.user.id,

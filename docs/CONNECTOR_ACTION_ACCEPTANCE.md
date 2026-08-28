@@ -54,3 +54,21 @@ not an exactly-once guarantee. It needs an Auth-coordinated state-machine or
 provider idempotency expansion. The remaining single Arnall input is one
 reviewed `connectors.codexManagedAppAction` manifest for the intended personal
 Codex App/MCP connection.
+
+## P0 corrective evidence
+
+Baseline `511bc31297f18ff88a74f4fbb238572934d4a915` had three reproducible
+compile errors: nullable execute input in the route, an authorization store
+passed into `ConnectorRegistry`, and a missing action constructor argument.
+Its authorization store checked only the leaf file, so a symlinked parent could
+redirect private snapshots outside `dataRoot`.
+
+The correction wires the store only into action construction, narrows the
+execute value, and creates/checks each parent as a real private directory with
+canonical containment under `dataRoot` before lock or file access. The focused
+corrective validation is `npx tsc --noEmit` plus route/integration tests: 19
+passed. It proves symlink rejection on both read and write, and cross-user or
+cross-installation isolation. The visible item remains `kind: "command"` for
+the current UI contract; the durable `ApprovalRecord.requestType` is
+`connector`. No connector-specific UI kind is claimed. C2's crash hook/state
+machine is unchanged and remains the Auth-owned replacement/merge point.

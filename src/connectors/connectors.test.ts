@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -377,9 +377,10 @@ describe("Codex managed App action", () => {
       if (response instanceof Error) throw response;
       return response;
     });
+    const authorizations = new FileConnectorAuthorizationStore(INSTALLATION_ID, dataRoot);
     const action = new CodexManagedAppAction(
       store,
-      new FileConnectorAuthorizationStore(INSTALLATION_ID, dataRoot),
+      authorizations,
       approvals,
       principal(),
       config,
@@ -395,7 +396,7 @@ describe("Codex managed App action", () => {
       itemId: "item-connector-action",
       approvalId: "approval-connector-action",
     };
-    return { action, approvals, locator, request, dataRoot };
+    return { action, approvals, authorizations, locator, request, dataRoot };
   }
 
   it("creates a visible durable pending item then executes the fixed action after normal approval", async () => {
@@ -477,6 +478,25 @@ describe("Codex managed App action", () => {
       execute: () => { effects += 1; return "replayed-after-crash"; },
     })).resolves.toMatchObject({ outcome: "executed" });
     expect(effects).toBe(2);
+  });
+
+  it("contains authorization snapshots under a real dataRoot and isolates user and installation paths", async () => {
+    const { action, authorizations, locator, dataRoot } = await actionFixture();
+    const descriptor = await action.prepare(locator);
+    await expect(authorizations.read({ ...locator, userId: USER_TWO }, descriptor.authorizationFingerprint))
+      .rejects.toMatchObject({ code: "CONNECTOR_AUTHORIZATION_NOT_FOUND" });
+    await expect(new FileConnectorAuthorizationStore("other-lab", dataRoot).read(locator, descriptor.authorizationFingerprint))
+      .rejects.toMatchObject({ code: "CONNECTOR_AUTHORIZATION_INSTALLATION_MISMATCH" });
+
+    const userDirectory = path.join(dataRoot, "connectors", "authorizations", INSTALLATION_ID, USER_ONE);
+    const outside = path.join(dataRoot, "outside");
+    await mkdir(outside, { recursive: true, mode: 0o700 });
+    await rm(userDirectory, { recursive: true, force: true });
+    await symlink(outside, userDirectory);
+    await expect(authorizations.read(locator, descriptor.authorizationFingerprint))
+      .rejects.toMatchObject({ code: "CONNECTOR_AUTHORIZATION_PATH_UNSAFE" });
+    await expect(action.prepare(locator))
+      .rejects.toMatchObject({ code: "CONNECTOR_AUTHORIZATION_PATH_UNSAFE" });
   });
 });
 

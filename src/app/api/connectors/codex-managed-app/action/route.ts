@@ -65,7 +65,10 @@ export async function POST(request: Request) {
         headers: { "Cache-Control": "private, no-store" },
       });
     }
-    const result = await action.execute(execute);
+    if (!execute) {
+      return NextResponse.json({ error: "La acción del conector no es válida." }, { status: 400 });
+    }
+    const result = await action.execute({ ...execute, operation: "execute-allowlisted-action" });
     return NextResponse.json({ schemaVersion: 1, outcome: result.outcome }, {
       headers: { "Cache-Control": "private, no-store" },
     });

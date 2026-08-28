@@ -1,4 +1,4 @@
-import { lstat, readFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { connectorFingerprint } from "@/connectors/canonical";
 import { ConnectorError, type ConnectorAuthorizationSnapshot } from "@/connectors/contracts";
@@ -80,11 +80,51 @@ function missing(error: unknown) {
 
 export class FileConnectorAuthorizationStore {
   private readonly root: string;
+  private readonly dataRoot: string;
   private readonly locks: ResourceLockManager;
 
   constructor(private readonly installationId: string, dataRoot: string) {
-    this.root = path.join(path.resolve(dataRoot), "connectors", "authorizations", installationId);
-    this.locks = new ResourceLockManager({ rootDirectory: path.join(path.resolve(dataRoot), "connectors", "authorization-locks") });
+    this.dataRoot = path.resolve(dataRoot);
+    this.root = path.join(this.dataRoot, "connectors", "authorizations", installationId);
+    this.locks = new ResourceLockManager({ rootDirectory: path.join(this.dataRoot, "connectors", "authorization-locks") });
+  }
+
+  private async assertDirectory(directory: string, canonicalDataRoot: string) {
+    const metadata = await lstat(directory);
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new ConnectorError("CONNECTOR_AUTHORIZATION_PATH_UNSAFE", "Authorization storage parent is unsafe.");
+    }
+    if ((metadata.mode & 0o077) !== 0) {
+      throw new ConnectorError("CONNECTOR_AUTHORIZATION_PATH_UNSAFE", "Authorization storage parent permissions are unsafe.");
+    }
+    const canonical = await realpath(directory);
+    const relative = path.relative(canonicalDataRoot, canonical);
+    if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new ConnectorError("CONNECTOR_AUTHORIZATION_PATH_UNSAFE", "Authorization storage parent escapes dataRoot.");
+    }
+  }
+
+  private async prepareParents(userId: string) {
+    const rootMetadata = await lstat(this.dataRoot);
+    if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
+      throw new ConnectorError("CONNECTOR_AUTHORIZATION_PATH_UNSAFE", "Authorization dataRoot is unsafe.");
+    }
+    const canonicalDataRoot = await realpath(this.dataRoot);
+    const parents = [
+      path.join(this.dataRoot, "connectors"),
+      path.join(this.dataRoot, "connectors", "authorizations"),
+      this.root,
+      path.join(this.root, userId),
+      path.join(this.dataRoot, "connectors", "authorization-locks"),
+    ];
+    for (const directory of parents) {
+      try {
+        await mkdir(directory, { mode: 0o700 });
+      } catch (error) {
+        if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) throw error;
+      }
+      await this.assertDirectory(directory, canonicalDataRoot);
+    }
   }
 
   private pathFor(locatorValue: ApprovalLocator) {
@@ -105,6 +145,7 @@ export class FileConnectorAuthorizationStore {
 
   async put(locatorValue: ApprovalLocator, authorization: ConnectorAuthorizationSnapshot) {
     const filePath = this.pathFor(locatorValue);
+    await this.prepareParents(locatorValue.userId);
     return this.locks.withLock(`connector-authorization:${filePath}`, async () => {
       try {
         const existing = await this.readExact(locatorValue);
@@ -123,6 +164,7 @@ export class FileConnectorAuthorizationStore {
 
   async read(locatorValue: ApprovalLocator, authorizationFingerprint: string) {
     const filePath = this.pathFor(locatorValue);
+    await this.prepareParents(locatorValue.userId);
     return this.locks.withLock(`connector-authorization:${filePath}`, async () => {
       let stored: StoredConnectorAuthorization;
       try {
