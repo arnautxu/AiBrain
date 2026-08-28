@@ -49,7 +49,7 @@ export const BROWSER_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([
     {
       type: "function",
       name: "read",
-      description: "Read the current private tab URL, title and bounded visible text.",
+      description: "Read the current private tab URL, title, bounded visible text and clickable links. Use an exact returned link selector for click; never guess a selector.",
       inputSchema: emptySchema,
     },
     {
@@ -75,7 +75,7 @@ export const BROWSER_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([
     {
       type: "function",
       name: "click",
-      description: "Click the center of one element selected by CSS in the current private tab. Requires approval.",
+      description: "Click the center of one element selected by CSS in the current private tab. Prefer an exact selector returned by read. Requires approval.",
       inputSchema: {
         type: "object",
         properties: { selector: { type: "string", minLength: 1, maxLength: 1000 } },

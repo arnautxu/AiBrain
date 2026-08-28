@@ -31,6 +31,9 @@ const MAX_QUARANTINE_ENTRIES = 1_024;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MAX_PAGE_TEXT_CHARS = 20_000;
+const MAX_PAGE_LINKS = 40;
+const MAX_PAGE_LINK_TEXT_CHARS = 240;
+const MAX_PAGE_LINK_HREF_CHARS = 1_200;
 const MAX_SELECTOR_BYTES = 1_000;
 const MAX_TYPE_TEXT_BYTES = 32_000;
 const MAX_LISTED_DOWNLOADS = 100;
@@ -517,7 +520,8 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         format: "png",
         fromSurface: true,
         captureBeyondViewport: false,
-      }, { sessionId: page.sessionId }));
+      }, { sessionId: page.sessionId }), (error) =>
+      error instanceof CdpClientError && error.code === "CDP_COMMAND_FAILED");
     if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
       throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
     }
@@ -560,6 +564,9 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       const response = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
         url: destination,
       }, { sessionId: page.sessionId });
+      if (!response.errorText && !response.isDownload) {
+        await this.waitForReadablePage(page, assertController);
+      }
       navigatedPage = page;
       return response;
     });
@@ -598,6 +605,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   }
 
   async readPage(threadId: string): Promise<BrowserPageSnapshot> {
+    const marker = `aibrain-${threadId.replaceAll("-", "")}`;
     this.assertAgentControl();
     const evaluated = await this.withThreadPageRecovery(threadId, async (page) => {
       this.assertAgentControl();
@@ -605,7 +613,44 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
         result?: { value?: unknown };
         exceptionDetails?: unknown;
       }>("Runtime.evaluate", {
-        expression: `(() => ({url: location.href, title: document.title, text: (document.body?.innerText ?? document.documentElement?.innerText ?? "").slice(0, ${MAX_PAGE_TEXT_CHARS})}))()`,
+        expression: `(() => {
+          const marker = ${JSON.stringify(marker)};
+          const visible = (element) => {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+          };
+          for (const previous of document.querySelectorAll("a[data-aibrain-link]")) previous.removeAttribute("data-aibrain-link");
+          const candidates = [];
+          for (const anchor of document.querySelectorAll("a[href]")) {
+            if (candidates.length >= 400 || !visible(anchor)) continue;
+            let destination;
+            try { destination = new URL(anchor.href); } catch { continue; }
+            if ((destination.protocol !== "http:" && destination.protocol !== "https:") ||
+              destination.href.length > ${MAX_PAGE_LINK_HREF_CHARS}) continue;
+            const text = (anchor.innerText || anchor.getAttribute("aria-label") || anchor.title || destination.href).trim();
+            const priority = destination.pathname.includes("/noticias/") || anchor.closest("article")
+              ? 0 : text.length >= 40 ? 1 : anchor.closest("main") ? 2 : 3;
+            candidates.push({ anchor, destination, text, priority, order: candidates.length });
+          }
+          candidates.sort((left, right) => left.priority - right.priority || left.order - right.order);
+          const links = [];
+          for (const candidate of candidates.slice(0, ${MAX_PAGE_LINKS})) {
+            const target = marker + "-" + links.length;
+            candidate.anchor.setAttribute("data-aibrain-link", target);
+            links.push({
+              text: candidate.text.slice(0, ${MAX_PAGE_LINK_TEXT_CHARS}),
+              href: candidate.destination.href,
+              selector: 'a[data-aibrain-link="' + target + '"]',
+            });
+          }
+          return {
+            url: location.href,
+            title: document.title,
+            text: (document.body?.innerText ?? document.documentElement?.innerText ?? "").slice(0, ${MAX_PAGE_TEXT_CHARS}),
+            links,
+          };
+        })()`,
         returnByValue: true,
         awaitPromise: false,
         userGesture: false,
@@ -620,10 +665,27 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     this.assertAgentControl();
     if (typeof value.url !== "string" || value.url.length > 8_192 ||
       typeof value.title !== "string" || value.title.length > 1_000 ||
-      typeof value.text !== "string" || value.text.length > MAX_PAGE_TEXT_CHARS) {
+      typeof value.text !== "string" || value.text.length > MAX_PAGE_TEXT_CHARS ||
+      !Array.isArray(value.links) || value.links.length > MAX_PAGE_LINKS) {
       throw new ChromeRuntimeError("CHROME_PAGE_READ_FAILED", "Chrome returned an invalid page snapshot.");
     }
-    return Object.freeze({ schemaVersion: 1, url: value.url, title: value.title, text: value.text });
+    const links = value.links.map((entry) => {
+      if (!isRecord(entry) || typeof entry.text !== "string" || entry.text.length > MAX_PAGE_LINK_TEXT_CHARS ||
+        typeof entry.href !== "string" || entry.href.length > MAX_PAGE_LINK_HREF_CHARS ||
+        typeof entry.selector !== "string" || entry.selector.length > MAX_SELECTOR_BYTES ||
+        !/^a\[data-aibrain-link="aibrain-[0-9a-f]{32}-\d{1,2}"\]$/u.test(entry.selector)) {
+        throw new ChromeRuntimeError("CHROME_PAGE_READ_FAILED", "Chrome returned an invalid clickable link.");
+      }
+      validateBrowserNavigationUrl(entry.href);
+      return Object.freeze({ text: entry.text, href: entry.href, selector: entry.selector });
+    });
+    return Object.freeze({
+      schemaVersion: 1,
+      url: value.url,
+      title: value.title,
+      text: value.text,
+      links: Object.freeze(links),
+    });
   }
 
   async listTabs(threadId: string) {
@@ -674,6 +736,7 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     await this.withThreadPageRecovery(threadId, async (page) => {
       this.assertAgentControl();
       const nodeId = await this.querySelector(page, safeSelector);
+      await this.requireBrowser().send("DOM.scrollIntoViewIfNeeded", { nodeId }, { sessionId: page.sessionId });
       const result = await this.requireBrowser().send<{
         model?: { border?: number[] };
       }>("DOM.getBoxModel", { nodeId }, { sessionId: page.sessionId });
@@ -969,18 +1032,43 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private async withThreadPageRecovery<Result>(
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
+    recoverable: (error: unknown) => boolean = isRecoverableThreadSessionError,
   ): Promise<Result> {
     const page = await this.requireThreadPage(threadId);
     try {
       return await operation(page);
     } catch (error) {
-      if (!isRecoverableThreadSessionError(error)) throw error;
+      if (!recoverable(error)) throw error;
       if (this.threadPages.get(threadId) === page) {
         this.threadPages.delete(threadId);
         await this.closeThreadPage(page);
       }
       const replacement = await this.requireThreadPage(threadId);
       return operation(replacement);
+    }
+  }
+
+  private async waitForReadablePage(page: ThreadPage, assertController: () => void) {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      assertController();
+      const evaluated = await this.requireBrowser().send<{
+        result?: { value?: unknown };
+        exceptionDetails?: unknown;
+      }>("Runtime.evaluate", {
+        expression: `(() => ({
+          readyState: document.readyState,
+          textLength: (document.body?.innerText ?? "").length,
+          linkCount: document.querySelectorAll("a[href]").length,
+        }))()`,
+        returnByValue: true,
+        awaitPromise: false,
+        userGesture: false,
+      }, { sessionId: page.sessionId });
+      const value = evaluated.result?.value;
+      if (!isRecord(value) || typeof value.readyState !== "string") return;
+      if (attempt >= 5 && value.readyState === "complete" &&
+        Number(value.textLength) >= 20 && Number(value.linkCount) >= 1) return;
+      await wait(100);
     }
   }
 

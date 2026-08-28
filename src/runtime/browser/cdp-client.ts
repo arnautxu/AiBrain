@@ -9,6 +9,7 @@ export const PRIVATE_CDP_METHODS = [
   "DOM.getBoxModel",
   "DOM.getDocument",
   "DOM.querySelector",
+  "DOM.scrollIntoViewIfNeeded",
   "Fetch.continueRequest",
   "Fetch.continueWithAuth",
   "Fetch.disable",

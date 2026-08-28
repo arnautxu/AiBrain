@@ -92,7 +92,7 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
     return this.captureFrame(threadId);
   }
   async readPage() {
-    return { schemaVersion: 1 as const, url: "about:blank", title: "", text: "" };
+    return { schemaVersion: 1 as const, url: "about:blank", title: "", text: "", links: [] };
   }
   async listTabs(threadId: string) {
     return [{ id: threadId, url: "about:blank", title: "", active: true as const }];

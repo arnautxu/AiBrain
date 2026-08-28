@@ -131,6 +131,11 @@ class FakeCdpClient implements CdpClientLike {
             url: targetId ? this.targetUrls.get(targetId) ?? "about:blank" : "about:blank",
             title: "Synthetic page",
             text: "Untrusted synthetic page text",
+            links: [{
+              text: "Synthetic story",
+              href: "https://example.test/story",
+              selector: `a[data-aibrain-link="aibrain-${THREAD_A.replaceAll("-", "")}-0"]`,
+            }],
           },
         },
       } as Result;
@@ -363,10 +368,15 @@ describe("ChromeCdpRuntime private pipe", () => {
     await expect(runtime.readPage(THREAD_A)).resolves.toMatchObject({
       url: "https://agent.example.test/path",
       title: "Synthetic page",
+      links: [{ text: "Synthetic story", href: "https://example.test/story" }],
     });
     await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
     await runtime.agentScroll(THREAD_A, 0, 250);
     await runtime.agentClick(THREAD_A, "button[type=submit]");
+    expect(client.commands).toContainEqual(expect.objectContaining({
+      method: "DOM.scrollIntoViewIfNeeded",
+      params: { nodeId: 2 },
+    }));
     await runtime.agentType(THREAD_A, "input[name=email]", "person@example.test", true);
     await expect(runtime.listTabs(THREAD_A)).resolves.toEqual([
       expect.objectContaining({ id: THREAD_A, url: "https://agent.example.test/path", active: true }),
@@ -488,7 +498,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     const staleTarget = runtime.targetIdFor(THREAD_A);
     client.failNext("Page.captureScreenshot", new CdpClientError(
       "CDP_COMMAND_FAILED",
-      "Page.captureScreenshot failed: Not attached to an active page",
+      "Page.captureScreenshot failed.",
     ));
 
     await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
