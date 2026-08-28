@@ -22,7 +22,8 @@ export async function POST(request: Request) {
   const body: unknown = await request.json().catch(() => null);
   const approvalResolution = isApprovalResolutionRequest(body) ? body : null;
   const connectorResolution = isConnectorApprovalResolutionRequest(body) ? body : null;
-  if (!approvalResolution && !connectorResolution) {
+  const resolution = connectorResolution ?? approvalResolution;
+  if (!resolution) {
     return NextResponse.json(
       { error: "La decisió d’aprovació no és vàlida." },
       { status: 400 },
@@ -42,10 +43,10 @@ export async function POST(request: Request) {
     const locator = {
       installationId: installation.installationId,
       userId: session.user.id,
-      threadId: (connectorResolution ?? approvalResolution).threadId,
-      turnId: (connectorResolution ?? approvalResolution).turnId,
-      itemId: (connectorResolution ?? approvalResolution).itemId,
-      approvalId: (connectorResolution ?? approvalResolution).approvalId,
+      threadId: resolution.threadId,
+      turnId: resolution.turnId,
+      itemId: resolution.itemId,
+      approvalId: resolution.approvalId,
     };
     const connector = await store.readConnectorApproval(locator);
     if (connector) {
