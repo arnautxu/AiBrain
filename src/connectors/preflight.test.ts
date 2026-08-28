@@ -66,8 +66,8 @@ function dependencies(overrides: Partial<CodexManagedAppPreflightDependencies> =
     resolveBinding: async () => binding(),
     inspectApp: async () => ({ status: "connected", code: null }),
     listMcpInventory: async () => [
-      { name: "action-server", tools: ["action-tool"] },
-      { name: "readback-server", tools: ["readback-tool"] },
+      { name: "action-server", tools: ["action-tool"], authStatus: "oAuth" },
+      { name: "readback-server", tools: ["readback-tool"], authStatus: "bearerToken" },
     ],
     ...overrides,
   };
@@ -129,15 +129,15 @@ describe("runCodexManagedAppPreflight", () => {
       inspectApp: async () => ({ status: "degraded", code: "CODEX_APP_DISABLED" }),
     }));
     const actionMissing = await runCodexManagedAppPreflight(userId, dependencies({
-      listMcpInventory: async () => [{ name: "readback-server", tools: ["readback-tool"] }],
+      listMcpInventory: async () => [{ name: "readback-server", tools: ["readback-tool"], authStatus: "oAuth" }],
     }));
     const readbackMissing = await runCodexManagedAppPreflight(userId, dependencies({
-      listMcpInventory: async () => [{ name: "action-server", tools: ["action-tool"] }],
+      listMcpInventory: async () => [{ name: "action-server", tools: ["action-tool"], authStatus: "oAuth" }],
     }));
     const toolsMissing = await runCodexManagedAppPreflight(userId, dependencies({
       listMcpInventory: async () => [
-        { name: "action-server", tools: [] },
-        { name: "readback-server", tools: [] },
+        { name: "action-server", tools: [], authStatus: "oAuth" },
+        { name: "readback-server", tools: [], authStatus: "oAuth" },
       ],
     }));
 
@@ -148,10 +148,57 @@ describe("runCodexManagedAppPreflight", () => {
     expect(toolsMissing.checks.readback).toEqual({ ok: false, code: "MCP_READBACK_TOOL_UNAVAILABLE" });
   });
 
+  it("fails closed when visible tools report notLoggedIn auth, including one shared action/readback server", async () => {
+    const sharedServerInstallation: InstallationConfig = {
+      ...installation,
+      connectors: {
+        codexManagedAppAction: {
+          ...installation.connectors!.codexManagedAppAction,
+          readback: { ...installation.connectors!.codexManagedAppAction.readback, server: "action-server" },
+        },
+      },
+    };
+    const report = await runCodexManagedAppPreflight(userId, dependencies({
+      loadInstallation: async () => sharedServerInstallation,
+      // Baseline before this correction: these visible tools made ready=true.
+      listMcpInventory: async () => [{
+        name: "action-server",
+        tools: ["action-tool", "readback-tool"],
+        authStatus: "notLoggedIn",
+      }],
+    }));
+
+    expect(report.ready).toBe(false);
+    expect(report.checks.action).toEqual({ ok: false, code: "MCP_ACTION_AUTH_UNAVAILABLE" });
+    expect(report.checks.readback).toEqual({ ok: false, code: "MCP_READBACK_AUTH_UNAVAILABLE" });
+  });
+
+  it("accepts bearer, OAuth, and explicit no-auth support while rejecting unknown auth", async () => {
+    const bearer = await runCodexManagedAppPreflight(userId, dependencies({
+      listMcpInventory: async () => [
+        { name: "action-server", tools: ["action-tool"], authStatus: "bearerToken" },
+        { name: "readback-server", tools: ["readback-tool"], authStatus: "unsupported" },
+      ],
+    }));
+    const unknown = await runCodexManagedAppPreflight(userId, dependencies({
+      listMcpInventory: async () => [
+        { name: "action-server", tools: ["action-tool"], authStatus: "unknown" },
+        { name: "readback-server", tools: ["readback-tool"], authStatus: "oAuth" },
+      ],
+    }));
+
+    expect(bearer.ready).toBe(true);
+    expect(unknown.ready).toBe(false);
+    expect(unknown.checks.action).toEqual({ ok: false, code: "MCP_ACTION_AUTH_UNAVAILABLE" });
+  });
+
   it("never serializes binding, manifest arguments, names, or a provider secret into the operator artifact", async () => {
     const report = await runCodexManagedAppPreflight(userId, dependencies({
       resolveBinding: async () => binding({ credentialRef: "codex-app:top-secret-app", scopes: ["secret.scope", CODEX_MANAGED_APP_READ_SCOPE, CODEX_MANAGED_APP_EXECUTE_SCOPE] }),
-      listMcpInventory: async () => [{ name: "action-server", tools: ["action-tool"] }, { name: "readback-server", tools: ["readback-tool"] }],
+      listMcpInventory: async () => [
+        { name: "action-server", tools: ["action-tool"], authStatus: "oAuth" },
+        { name: "readback-server", tools: ["readback-tool"], authStatus: "bearerToken" },
+      ],
     }));
     const artifact = JSON.stringify(report);
 
@@ -160,6 +207,8 @@ describe("runCodexManagedAppPreflight", () => {
     expect(artifact).not.toContain("action-server");
     expect(artifact).not.toContain("safe");
     expect(artifact).not.toContain("secret.scope");
+    expect(artifact).not.toContain("oAuth");
+    expect(artifact).not.toContain("bearerToken");
     expect(JSON.parse(artifact)).toEqual(report);
   });
 });

@@ -6,6 +6,7 @@ import {
 } from "@/connectors/codex-managed-app-provider";
 import type { ConnectorHealthStatus, ConnectorPrincipal, CredentialBinding } from "@/connectors/contracts";
 import type { InstallationConfig } from "@/config/installation-schema";
+import type { McpAuthStatus } from "../../contracts/codex/0.149.1/types/v2/McpAuthStatus";
 
 export type ConnectorPreflightCheck = {
   ok: boolean;
@@ -34,6 +35,7 @@ export type CodexManagedAppPreflightReport = {
 type McpInventoryEntry = {
   name: string;
   tools: readonly string[];
+  authStatus: McpAuthStatus;
 };
 
 export type CodexManagedAppPreflightDependencies = {
@@ -86,10 +88,33 @@ function requiredScopesPresent(binding: CredentialBinding) {
     binding.scopes.includes(CODEX_MANAGED_APP_EXECUTE_SCOPE);
 }
 
-function inventoryCheck(inventory: readonly McpInventoryEntry[], server: string, tool: string, prefix: string) {
-  const entry = inventory.find((candidate) => candidate.name === server);
-  if (!entry) return failed(`${prefix}_SERVER_UNAVAILABLE`);
+type InventoryServerCheck =
+  | { entry: McpInventoryEntry; authReady: boolean }
+  | { entry: null; authReady: false };
+
+function inventoryCheck(
+  serverChecks: ReadonlyMap<string, InventoryServerCheck>,
+  server: string,
+  tool: string,
+  prefix: string,
+) {
+  const checked = serverChecks.get(server);
+  if (!checked || !checked.entry) return failed(`${prefix}_SERVER_UNAVAILABLE`);
+  if (!checked.authReady) return failed(`${prefix}_AUTH_UNAVAILABLE`);
+  const entry = checked.entry;
   return entry.tools.includes(tool) ? CHECK_OK : failed(`${prefix}_TOOL_UNAVAILABLE`);
+}
+
+function inventoryServerChecks(inventory: readonly McpInventoryEntry[], servers: readonly string[]) {
+  const checks = new Map<string, InventoryServerCheck>();
+  for (const server of servers) {
+    if (checks.has(server)) continue;
+    const entry = inventory.find((candidate) => candidate.name === server) ?? null;
+    checks.set(server, entry
+      ? { entry, authReady: entry.authStatus === "bearerToken" || entry.authStatus === "oAuth" || entry.authStatus === "unsupported" }
+      : { entry: null, authReady: false });
+  }
+  return checks;
 }
 
 /**
@@ -226,14 +251,18 @@ export async function runCodexManagedAppPreflight(
       action: failed("MCP_INVENTORY_UNAVAILABLE"), readback: failed("MCP_INVENTORY_UNAVAILABLE"),
     });
   }
+  // Each configured server is evaluated at most once. `unsupported` is the
+  // generated contract's explicit no-auth state; unknown and notLoggedIn are
+  // intentionally not treated as an implicit public-server exemption.
+  const serverChecks = inventoryServerChecks(inventory, [config.server, config.readback.server]);
   return report({
     manifest: CHECK_OK,
     localUser: CHECK_OK,
     executePolicy: CHECK_OK,
     binding: CHECK_OK,
     app: CHECK_OK,
-    action: inventoryCheck(inventory, config.server, config.tool, "MCP_ACTION"),
-    readback: inventoryCheck(inventory, config.readback.server, config.readback.tool, "MCP_READBACK"),
+    action: inventoryCheck(serverChecks, config.server, config.tool, "MCP_ACTION"),
+    readback: inventoryCheck(serverChecks, config.readback.server, config.readback.tool, "MCP_READBACK"),
   });
 }
 

@@ -3,7 +3,7 @@ import {
   runCodexManagedAppPreflight,
   unavailableCodexManagedAppPreflight,
 } from "../src/connectors/preflight";
-import { codexManagedAppPreflightDependencies } from "../src/connectors/preflight-server";
+import { codexManagedAppPreflightRuntimeDependencies } from "../src/connectors/preflight-runtime";
 
 function userIdFromArguments() {
   const position = process.argv.indexOf("--user-id");
@@ -15,7 +15,7 @@ function userIdFromArguments() {
 }
 
 async function main() {
-  const report = await runCodexManagedAppPreflight(userIdFromArguments(), codexManagedAppPreflightDependencies());
+  const report = await runCodexManagedAppPreflight(userIdFromArguments(), codexManagedAppPreflightRuntimeDependencies());
   process.stdout.write(`${JSON.stringify(report)}\n`);
   if (!report.ready) process.exitCode = 1;
 }
