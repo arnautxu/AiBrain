@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  --stream-gap: 60ms;
+  --stream-fade: 350ms;
+  --stream-blur: 1px;
+  --stream-ease: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
   --installation-accent: #315ee7;
   --canvas: #ffffff;
@@ -751,6 +755,19 @@ button:disabled {
   animation: caret 0.8s steps(2, start) infinite;
 }
 
+.t-stream-w {
+  opacity: 0;
+  filter: blur(var(--stream-blur));
+  transition:
+    opacity var(--stream-fade) var(--stream-ease),
+    filter var(--stream-fade) var(--stream-ease);
+}
+
+.t-stream-w.is-in {
+  opacity: 1;
+  filter: blur(0);
+}
+
 .message-enter {
   animation: message-enter 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
@@ -850,6 +867,12 @@ button:disabled {
   .activity-shimmer {
     color: var(--text);
     background: none;
+  }
+
+  .t-stream-w {
+    opacity: 1 !important;
+    filter: none !important;
+    transition: none !important;
   }
 
   *,
