@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { promisify } from "node:util";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -47,6 +49,11 @@ const GATE_REQUIREMENTS: Record<string, {
     routes: ["GET /api/health/live", "GET /api/health/ready"],
     evidence: [
       { kind: "release", route: "release:identity" },
+      { kind: "release", route: "release:ci-readback" },
+      { kind: "release", route: "release:deploy-state" },
+      { kind: "release", route: "release:runtime-readback" },
+      { kind: "release", route: "release:app-oci-inspect" },
+      { kind: "release", route: "release:gateway-oci-inspect" },
       { kind: "http", route: "GET /api/health/live" },
       { kind: "http", route: "GET /api/health/ready" },
     ],
@@ -196,6 +203,14 @@ const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
 const shaPattern = /^[0-9a-f]{40}$/u;
 const sha256Pattern = /^[0-9a-f]{64}$/u;
 const ociDigestPattern = /^sha256:[0-9a-f]{64}$/u;
+const execFileAsync = promisify(execFile);
+const RELEASE_READBACK_ROUTES = [
+  "release:ci-readback",
+  "release:deploy-state",
+  "release:runtime-readback",
+  "release:app-oci-inspect",
+  "release:gateway-oci-inspect",
+] as const;
 const secretPatterns = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/iu,
   /\b(?:cookie|password|secret|access[_-]?token|refresh[_-]?token)\s*[:=]\s*\S+/iu,
@@ -307,11 +322,11 @@ function matchesFingerprint(value: unknown, expectedPath: string): boolean {
     && sha256Pattern.test(value.sha256);
 }
 
-function validateReleaseIdentityEvidence(
+function parseReleaseIdentityEvidence(
   contents: Buffer,
   manifest: AcceptanceManifest,
   label: string,
-): string | null {
+): PredeployReleaseEvidence | string {
   let record: unknown;
   try {
     record = JSON.parse(contents.toString("utf8"));
@@ -345,12 +360,119 @@ function validateReleaseIdentityEvidence(
     || record.rollback.previousReleaseRequired !== true) {
     return `release_identity_evidence_mismatch:${label}`;
   }
+  return record as unknown as PredeployReleaseEvidence;
+}
+
+function parseReadback(
+  contents: Buffer,
+  label: string,
+  expected: Record<string, unknown>,
+): string | null {
+  try {
+    const value = JSON.parse(contents.toString("utf8")) as unknown;
+    if (!isRecord(value) || !hasOnlyKeys(value, Object.keys(expected))) return `release_identity_source_invalid:${label}`;
+    return Object.entries(expected).every(([key, expectedValue]) => value[key] === expectedValue)
+      ? null
+      : `release_identity_source_mismatch:${label}`;
+  } catch {
+    return `release_identity_source_invalid:${label}`;
+  }
+}
+
+async function verifyCheckoutFingerprints(
+  manifest: AcceptanceManifest,
+  evidence: PredeployReleaseEvidence,
+  checkoutRoot: string | undefined,
+): Promise<string | null> {
+  if (!checkoutRoot) return "release_identity_checkout_missing";
+  let root: string;
+  try {
+    root = await realpath(checkoutRoot);
+    if (!(await lstat(root)).isDirectory()) return "release_identity_checkout_missing";
+    const { stdout } = await execFileAsync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" });
+    if (stdout.trim() !== manifest.releaseSha) return "release_identity_checkout_revision_mismatch";
+    await execFileAsync("git", ["-C", root, "diff", "--quiet", "HEAD", "--", "scripts/orchestrate-backup.mjs", "scripts/backup.ts", "scripts/manage-release.mjs"]);
+  } catch (error) {
+    if (isRecord(error) && error.code === 1) return "release_identity_checkout_dirty";
+    return "release_identity_checkout_unverifiable";
+  }
+  const expected = [
+    ["scripts/orchestrate-backup.mjs", evidence.backup.orchestrator.sha256],
+    ["scripts/backup.ts", evidence.backup.restoreCli.sha256],
+    ["scripts/manage-release.mjs", evidence.rollback.manager.sha256],
+  ] as const;
+  for (const [scriptPath, fingerprint] of expected) {
+    try {
+      const stat = await lstat(path.join(root, scriptPath));
+      if (!stat.isFile() || stat.isSymbolicLink()) return `release_identity_checkout_file_invalid:${scriptPath}`;
+      if (digest(await readFile(path.join(root, scriptPath))) !== fingerprint) {
+        return `release_identity_checkout_fingerprint_mismatch:${scriptPath}`;
+      }
+    } catch {
+      return `release_identity_checkout_file_unreadable:${scriptPath}`;
+    }
+  }
   return null;
 }
 
-async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: string | undefined): Promise<string[]> {
+async function verifyReleaseIdentitySources(
+  manifest: AcceptanceManifest,
+  artifacts: Map<string, { label: string; contents: Buffer }>,
+  checkoutRoot: string | undefined,
+): Promise<string[]> {
+  const reasons: string[] = [];
+  const predeploy = artifacts.get("release:identity");
+  if (!predeploy) return ["release_identity_gate_blocked:predeploy_missing"];
+  const parsed = parseReleaseIdentityEvidence(predeploy.contents, manifest, predeploy.label);
+  if (typeof parsed === "string") return [parsed];
+
+  const missing = RELEASE_READBACK_ROUTES.filter((route) => !artifacts.has(route));
+  if (missing.length > 0) {
+    return [`release_identity_gate_blocked:independent_sources_missing:${missing.join(",")}`];
+  }
+  const identity = manifest.releaseIdentity;
+  const expectedByRoute: Record<(typeof RELEASE_READBACK_ROUTES)[number], Record<string, unknown>> = {
+    "release:ci-readback": {
+      schemaVersion: 1, kind: "aibrain-release-ci-readback", source: "ci",
+      candidateSha: identity.candidateSha, ciSha: identity.ciSha,
+    },
+    "release:deploy-state": {
+      schemaVersion: 1, kind: "aibrain-release-deploy-state-readback", source: "deploy-state",
+      ciSha: identity.ciSha, deploySha: identity.deploySha,
+      appOciDigest: parsed.identity.appOciDigest, gatewayOciDigest: parsed.identity.gatewayOciDigest,
+    },
+    "release:runtime-readback": {
+      schemaVersion: 1, kind: "aibrain-release-runtime-readback", source: "runtime",
+      deploySha: identity.deploySha, runtimeSha: identity.runtimeSha,
+      appOciRevision: identity.appOciRevision, gatewayOciRevision: identity.gatewayOciRevision,
+    },
+    "release:app-oci-inspect": {
+      schemaVersion: 1, kind: "aibrain-release-oci-inspect", source: "oci-inspect", component: "app",
+      revision: identity.appOciRevision, digest: parsed.identity.appOciDigest,
+    },
+    "release:gateway-oci-inspect": {
+      schemaVersion: 1, kind: "aibrain-release-oci-inspect", source: "oci-inspect", component: "gateway",
+      revision: identity.gatewayOciRevision, digest: parsed.identity.gatewayOciDigest,
+    },
+  };
+  for (const route of RELEASE_READBACK_ROUTES) {
+    const artifact = artifacts.get(route)!;
+    const reason = parseReadback(artifact.contents, artifact.label, expectedByRoute[route]);
+    if (reason) reasons.push(reason);
+  }
+  const checkoutReason = await verifyCheckoutFingerprints(manifest, parsed, checkoutRoot);
+  if (checkoutReason) reasons.push(checkoutReason);
+  return reasons;
+}
+
+async function verifyEvidenceFiles(
+  manifest: AcceptanceManifest,
+  options: { evidenceRoot?: string; checkoutRoot?: string },
+): Promise<string[]> {
+  const evidenceRoot = options.evidenceRoot;
   if (!evidenceRoot) return ["evidence_root_missing"];
   const reasons: string[] = [];
+  const releaseArtifacts = new Map<string, { label: string; contents: Buffer }>();
   let root: string;
   try {
     root = await realpath(evidenceRoot);
@@ -384,21 +506,21 @@ async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: s
         }
         const contents = await readFile(candidate);
         if (digest(contents) !== evidence.sha256) reasons.push(`evidence_digest_mismatch:${label}`);
-        else if (gate.id === "release-identity-readiness" && evidence.kind === "release" && evidence.route === "release:identity") {
-          const reason = validateReleaseIdentityEvidence(contents, manifest, label);
-          if (reason) reasons.push(reason);
+        else if (gate.id === "release-identity-readiness" && evidence.kind === "release") {
+          releaseArtifacts.set(evidence.route, { label, contents });
         }
       } catch {
         reasons.push(`evidence_unreadable:${label}`);
       }
     }
   }
+  reasons.push(...await verifyReleaseIdentitySources(manifest, releaseArtifacts, options.checkoutRoot ?? process.cwd()));
   return reasons;
 }
 
 export async function evaluateAcceptance(
   input: unknown,
-  options: { evidenceRoot?: string } = {},
+  options: { evidenceRoot?: string; checkoutRoot?: string } = {},
 ): Promise<AcceptanceEvaluation> {
   const manifestSha256 = digest(canonicalJson(input));
   if (!validator(input)) {
@@ -526,7 +648,7 @@ export async function evaluateAcceptance(
   if (manifest.failures.some(({ severity, status }) => status === "open" && (severity === "critical" || severity === "high"))) {
     reasons.push("open_critical_or_high_failure");
   }
-  reasons.push(...await verifyEvidenceFiles(manifest, options.evidenceRoot));
+  reasons.push(...await verifyEvidenceFiles(manifest, options));
 
   const uniqueReasons = [...new Set(reasons)];
   return {
@@ -591,9 +713,10 @@ async function main(): Promise<void> {
   };
   const manifestPath = value("--manifest");
   const evidenceRoot = value("--evidence-root");
+  const checkoutRoot = value("--checkout-root");
   const format = value("--format") ?? "markdown";
   if (!manifestPath || !["markdown", "json"].includes(format)) {
-    process.stderr.write("Usage: npm run acceptance:verify -- --manifest <json> --evidence-root <dir> [--format markdown|json]\n");
+    process.stderr.write("Usage: npm run acceptance:verify -- --manifest <json> --evidence-root <dir> [--checkout-root <verified-candidate-dir>] [--format markdown|json]\n");
     process.exitCode = 64;
     return;
   }
@@ -602,7 +725,7 @@ async function main(): Promise<void> {
     throw new Error("Acceptance manifest must be a private regular file, not a link.");
   }
   const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
-  const result = await evaluateAcceptance(parsed, { evidenceRoot });
+  const result = await evaluateAcceptance(parsed, { evidenceRoot, checkoutRoot });
   process.stdout.write(format === "json" ? `${JSON.stringify(result, null, 2)}\n` : renderAcceptanceReport(result));
   process.exitCode = result.verdict === "accepted" ? 0 : 2;
 }

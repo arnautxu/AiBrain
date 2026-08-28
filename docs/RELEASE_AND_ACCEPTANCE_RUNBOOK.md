@@ -141,7 +141,7 @@ All current values must equal the candidate. Then capture HTTP 200 JSON from
 component must pass. The public payload currently omits revision, so it cannot
 replace host release-state and OCI-label readback.
 
-Before accepting the packet, create the private `release:identity` evidence
+Before accepting the packet, create the private `release:identity` preparation
 artifact from the recorded values:
 
 ```bash
@@ -159,11 +159,29 @@ npm run acceptance:release-evidence -- \
 
 The command hashes the reviewed backup orchestrator, restore CLI and release
 manager and records the required verification, isolated-restore and
-previous-release rollback posture. It never connects to Arnall and is
+previous-release rollback posture. It never connects to Arnall and can never
+make the live identity gate pass by itself.
+
+The same private evidence root must also contain independently collected, typed
+readbacks for CI (`release:ci-readback`), deploy state
+(`release:deploy-state`), runtime (`release:runtime-readback`) and separate
+app/gateway OCI inspections (`release:app-oci-inspect` and
+`release:gateway-oci-inspect`). Their revisions and OCI digests must correlate
+with the manifest and with one another. Verify them against the reviewed
+candidate checkout, not an arbitrary working directory:
+
+```bash
+npm run acceptance:verify -- --manifest /private/evidence/manifest.json \
+  --evidence-root /private/evidence \
+  --checkout-root /private/candidate-checkout
+```
+
+The verifier requires that checkout's Git `HEAD` to equal the candidate SHA,
+that the three operational scripts are clean, and that their actual SHA-256
+fingerprints match the preparation artifact. If only the preparation artifact
+exists, it reports the release identity gate as blocked. This remains
 preparation evidence only: it does not replace an executed backup verification,
-isolated restore or rollback rehearsal in Section 8. The acceptance verifier
-rejects a generic `release:identity` JSON or any artifact whose identities, OCI
-digests or backup/rollback posture do not match the manifest contract.
+isolated restore or rollback rehearsal in Section 8.
 
 ## 7. Restart and product acceptance
 

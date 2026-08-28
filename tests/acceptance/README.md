@@ -6,7 +6,7 @@ Inventory base: `d381ccf836516f91464f20225403996e7e8158d1`.
 
 | Area | Existing evidence | Classification before this harness | Next live gate |
 |---|---|---|---|
-| HTTP/contracts | Versioned route/schema and CI workflow contract tests | Local/CI prefilter | Candidate, CI, deploy, runtime and both OCI revisions must equal one SHA; readiness evidence covers both health routes |
+| HTTP/contracts | Versioned route/schema and CI workflow contract tests | Local/CI prefilter | Candidate checkout, CI, deploy state, runtime and separate app/gateway OCI inspections must correlate to one SHA; readiness evidence covers both health routes |
 | Functional desktop/mobile | Playwright flows, responsive states and 14 E2E specs | Local demo prefilter; Playwright starts `127.0.0.1` with demo auth/runtime | Run against Arnall with real auth and no route interception |
 | Accessibility/visual | 5 accessibility specs, 4 visual suites and one visual matrix | Local demo prefilter | Coordinated serial live/browser slot after functional gates |
 | Performance/concurrency | Synthetic high-frequency stream and intercepted concurrent conversations | Local synthetic prefilter | Measure navigation, input, TTFT, stream gaps, total turn, reconnect and tool readback against declared p95 budgets |
@@ -23,7 +23,7 @@ that false-acceptance path. It deliberately does not claim any live gate has run
 
 ## Required live sequence
 
-1. `release-identity-readiness`: exact canonical target, TLS/readiness and equality of candidate, CI, deploy, runtime, app OCI and gateway OCI SHAs.
+1. `release-identity-readiness`: exact canonical target, TLS/readiness, a verified candidate checkout, and independent CI, deploy-state, runtime and app/gateway OCI readbacks correlated to one SHA. A predeploy declaration alone blocks this gate.
 2. `threat-model-contracts`: route/schema/security contracts on the candidate SHA.
 3. `functional-desktop-mobile`, then `accessibility` and `visual` in the coordinated slot.
 4. `performance-concurrency` with all required p95 metrics recorded and at or below a declared budget.
