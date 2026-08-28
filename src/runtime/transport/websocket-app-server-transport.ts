@@ -176,6 +176,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   private cursor: ReplayCursor | null = null;
   private cursorLoaded = false;
   private deliveryLoaded = false;
+  private durableBacklogTargetSequence = 0;
   private reconnectAttempt = 0;
   private pendingReconnectFloorMs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -257,14 +258,12 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   }
 
   private async loadDurableDeliveryBacklog() {
-    if (!this.deliveryLoaded && this.journal.readUndelivered) {
-      const pending = await this.journal.readUndelivered(this.options.maxEventBuffer + 1);
-      if (pending.length > this.options.maxEventBuffer) {
-        throw new TransportBackpressureError("Durable event backlog exceeds the in-memory delivery buffer.");
-      }
-      for (const event of pending) {
-        if (!this.eventQueue.push(event)) throw new TransportBackpressureError("Transport event buffer is full.");
-      }
+    if (!this.deliveryLoaded && this.journal.loadDeliveryCursor) {
+      const delivered = await this.journal.loadDeliveryCursor();
+      const receivedSequence = this.cursor?.sequence ?? 0;
+      this.durableBacklogTargetSequence = (delivered?.sequence ?? 0) < receivedSequence
+        ? receivedSequence
+        : 0;
     }
     this.deliveryLoaded = true;
   }
@@ -310,8 +309,25 @@ export class WebSocketAppServerTransport implements AppServerTransport {
     return submission.promise;
   }
 
-  events() {
-    return this.eventQueue;
+  async *events() {
+    if (this.journal.readUndelivered && this.durableBacklogTargetSequence > 0) {
+      let yieldedThrough = 0;
+      const pageSize = Math.min(this.options.maxEventBuffer, 256);
+      while (yieldedThrough < this.durableBacklogTargetSequence) {
+        const pending = await this.journal.readUndelivered(pageSize, yieldedThrough);
+        const page = pending.filter((event) => event.sequence <= this.durableBacklogTargetSequence);
+        if (page.length === 0) {
+          throw new TransportProtocolError(
+            "Durable event backlog does not reach the received transport cursor.",
+          );
+        }
+        for (const event of page) {
+          yieldedThrough = event.sequence;
+          yield event;
+        }
+      }
+    }
+    for await (const event of this.eventQueue) yield event;
   }
 
   async acknowledge(event: AppServerEvent) {
