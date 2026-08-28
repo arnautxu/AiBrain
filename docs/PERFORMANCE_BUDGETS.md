@@ -85,6 +85,27 @@ npx vitest run
 3 files passed, 6 tests passed, 1.43 s
 ```
 
+### Three-second idle causal check
+
+Candidate `689c610b5b70478d9104eb09bbb643bc0b4360e3` was checked with a
+controlled clock in `src/runtime/transport/websocket-app-server-transport.test.ts`.
+The measured internal timeline is: `t=0` private gateway WebSocket opens,
+resumes and is ready; at `t=3000 ms` it has sent no heartbeat (the configured
+default is 15 s), has no close code/reason, stays `connected` and has made zero
+reconnect attempts. The private worker gateway is loopback
+`ws://127.0.0.1:<ephemeral>/app-server` in
+`src/runtime/workers/local-gateway-runtime.ts`; it cannot be the public NDJSON
+EOF path.
+
+The public browser path is POST NDJSON, not WebSocket. Its incomplete-EOF
+recovery belongs to `src/ui/app-server-ui-adapter.ts`: `reader.read()` ending
+without `done`, `stopped` or `error` currently returns normally instead of
+reattaching the same turn snapshot. Do not reduce the internal 15 s heartbeat
+without evidence of an internal loopback close. The runtime transport already
+reconnects with exponential backoff+jitter and resumes its durable event cursor;
+the UI recovery must reattach to the existing thread/assistant-message IDs
+without resubmitting input.
+
 The post-change TypeScript check, targeted ESLint check and contract verification
 passed. A combined post-change lifecycle run completed 36 assertions in eight
 files, while the two timing-heavy integration files hit their fixed 25 s and
