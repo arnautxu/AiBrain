@@ -35,6 +35,10 @@ class ControlledScheduler {
     next[1].callback();
   }
 
+  hasPending() {
+    return this.timers.size > 0;
+  }
+
   private runDue() {
     let due = [...this.timers.entries()].filter(([, timer]) => timer.at <= this.nowMs)
       .sort(([, left], [, right]) => left.at - right.at)[0];
@@ -170,5 +174,47 @@ describe("recoverable chat stream", () => {
     expect(first).toHaveBeenCalledTimes(2);
     expect(eventsA.map((event) => event.type)).toEqual(["snapshot", "done"]);
     expect(eventsB).toEqual([{ type: "done" }]);
+  });
+
+  it("preserves a sanitized server error after retrying a temporary HTTP failure", async () => {
+    const scheduler = new ControlledScheduler();
+    const request = vi.fn(async () => Response.json({
+      error: "Servicio sintético no disponible.",
+      internal: "must not be shown",
+    }, { status: 503 }));
+    const run = consumeRecoverableChatStream({
+      request,
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      onRecoveryState: () => undefined,
+      onMeasurement: () => undefined,
+      scheduler: scheduler.api,
+      startedAt: 0,
+    });
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await vi.waitFor(() => expect(scheduler.hasPending()).toBe(true));
+      scheduler.runNext();
+    }
+
+    await expect(run).rejects.toThrow("Servicio sintético no disponible.");
+    expect(request).toHaveBeenCalledTimes(5);
+  });
+
+  it("returns a non-retryable server error immediately", async () => {
+    const scheduler = new ControlledScheduler();
+    const request = vi.fn(async () => Response.json({ error: "La petición no es válida." }, { status: 400 }));
+    const run = consumeRecoverableChatStream({
+      request,
+      signal: new AbortController().signal,
+      onEvent: () => undefined,
+      onRecoveryState: () => undefined,
+      onMeasurement: () => undefined,
+      scheduler: scheduler.api,
+      startedAt: 0,
+    });
+
+    await expect(run).rejects.toThrow("La petición no es válida.");
+    expect(request).toHaveBeenCalledTimes(1);
   });
 });

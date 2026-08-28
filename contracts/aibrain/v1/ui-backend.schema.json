@@ -144,6 +144,73 @@
         "status": { "enum": ["pending", "accepted", "accepted_session", "declined"] }
       }
     },
+    "ConnectorCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectorId", "label", "status", "statusCode", "checkedAt", "effectiveOperations", "approvalRequiredOperations"],
+      "properties": {
+        "connectorId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "status": { "enum": ["connected", "degraded", "reauth_required", "revoked", "not_configured"] },
+        "statusCode": { "type": ["string", "null"], "maxLength": 160 },
+        "checkedAt": { "oneOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }] },
+        "effectiveOperations": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } },
+        "approvalRequiredOperations": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "minLength": 1, "maxLength": 160 } }
+      }
+    },
+    "ConnectorCapabilitiesResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schemaVersion", "connectors"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "connectors": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/ConnectorCapability" } }
+      }
+    },
+    "ConnectorActionLocator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["threadId", "turnId", "itemId", "approvalId"],
+      "properties": {
+        "threadId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+        "turnId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+        "itemId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" },
+        "approvalId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" }
+      }
+    },
+    "ConnectorActionDescriptor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operation", "locator", "authorizationFingerprint", "approval"],
+      "properties": {
+        "operation": { "const": "execute-allowlisted-action" },
+        "locator": { "$ref": "#/$defs/ConnectorActionLocator" },
+        "authorizationFingerprint": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "approval": { "$ref": "#/$defs/ApprovalItem" }
+      }
+    },
+    "ConnectorActionResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "descriptor"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "descriptor": { "$ref": "#/$defs/ConnectorActionDescriptor" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schemaVersion", "outcome"],
+          "properties": {
+            "schemaVersion": { "const": 1 },
+            "outcome": { "enum": ["executed", "replayed", "indeterminate"] }
+          }
+        }
+      ]
+    },
     "ChatAttachment": {
       "type": "object",
       "additionalProperties": false,

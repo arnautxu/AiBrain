@@ -245,6 +245,9 @@ async function appCatalogue(session: AuthSession, isAdmin: boolean) {
 }
 
 export async function featurePolicyForUser(session: AuthSession) {
+  if (session.provider === "demo") {
+    return Object.fromEntries(CONTROLLABLE_APP_IDS.map((id) => [id, true])) as Record<ControllableAppId, boolean>;
+  }
   const { store } = await context(session);
   const [user, installation, workspacePolicy] = await Promise.all([
     store.readUser(session.user.id),

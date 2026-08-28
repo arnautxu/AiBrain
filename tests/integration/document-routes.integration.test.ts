@@ -89,8 +89,8 @@ describe("authenticated document routes", () => {
     ]);
     const installation = await loadInstallationConfig();
     const provisioner = new UserProvisioner(installation);
-    await provisioner.provision({ userId: USER_A, email: "a@example.test", displayName: "User A" });
-    await provisioner.provision({ userId: USER_B, email: "b@example.test", displayName: "User B" });
+    await provisioner.provision({ userId: USER_A, email: `${USER_A.slice(-3)}@example.test`, displayName: "User A" });
+    await provisioner.provision({ userId: USER_B, email: `${USER_B.slice(-3)}@example.test`, displayName: "User B" });
     const workbench = FileWorkbenchStore.fromInstallation(installation);
     const project = await workbench.createProject(USER_A, "Document Operations");
     threadId = (await workbench.createThread(USER_A, project.id, "Private upload")).id;
