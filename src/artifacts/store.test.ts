@@ -1,9 +1,11 @@
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderArtifactHtml } from "@/artifacts/rendering";
 import { AdvancedArtifactNotFoundError, AdvancedArtifactPersistenceError, FileAdvancedArtifactStore } from "@/artifacts/store";
+
+vi.mock("server-only", () => ({}));
 
 const roots: string[] = [];
 const userA = "0198b9f0-6631-7000-8000-000000000201";
