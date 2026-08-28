@@ -313,6 +313,18 @@ describe("FileApprovalStore", () => {
     expect((await approvals.approveConnectorApproval(tampered)).outcome).toBe("denied");
     expect(await approvals.readConnectorApproval(locator(item))).toMatchObject({ status: "denied" });
 
+    const locatorFingerprintItem = approval("connector-locator-fingerprint", "thread-locator", "turn-locator", "item-locator");
+    await approvals.prepareConnectorApproval({
+      locator: locator(locatorFingerprintItem),
+      authorizationFingerprint: fingerprint("f"),
+    });
+    expect((await approvals.approveConnectorApprovalByLocator(
+      locator(locatorFingerprintItem),
+      fingerprint("0"),
+    )).outcome).toBe("denied");
+    expect(await approvals.readConnectorApproval(locator(locatorFingerprintItem)))
+      .toMatchObject({ status: "denied" });
+
     const crossUserItem = approval("connector-cross-user", "thread-cross", "turn-cross", "item-cross");
     const crossUserReceipt = receiptFrom(await approvals.prepareConnectorApproval({
       locator: locator(crossUserItem),

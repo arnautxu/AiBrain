@@ -181,6 +181,16 @@ export type ApprovalResolutionRequest = {
   decision: ApprovalDecision;
 };
 
+/** The connector approval route accepts only this one explicit action. */
+export type ConnectorApprovalResolutionRequest = {
+  approvalId: string;
+  threadId: string;
+  turnId: string;
+  itemId: string;
+  decision: "accept";
+  authorizationFingerprint: string;
+};
+
 export type TurnControlRequest =
   | {
       action: "stop";
@@ -445,6 +455,21 @@ export function isApprovalResolutionRequest(
     (value.decision === "accept" ||
       value.decision === "acceptForSession" ||
       value.decision === "decline")
+  );
+}
+
+export function isConnectorApprovalResolutionRequest(
+  value: unknown,
+): value is ConnectorApprovalResolutionRequest {
+  if (!isRecord(value) || Object.keys(value).length !== 6) return false;
+  return (
+    isOpaqueRuntimeId(value.approvalId) &&
+    isOpaqueRuntimeId(value.threadId) &&
+    isOpaqueRuntimeId(value.turnId) &&
+    isOpaqueRuntimeId(value.itemId) &&
+    value.decision === "accept" &&
+    typeof value.authorizationFingerprint === "string" &&
+    /^[0-9a-f]{64}$/u.test(value.authorizationFingerprint)
   );
 }
 

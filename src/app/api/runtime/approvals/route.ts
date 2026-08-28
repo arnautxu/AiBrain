@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
-import { isApprovalResolutionRequest } from "@/lib/chat-contract";
+import {
+  isApprovalResolutionRequest,
+  isConnectorApprovalResolutionRequest,
+} from "@/lib/chat-contract";
 import { loadInstallationConfig } from "@/config/installation";
 import { FileApprovalStore } from "@/runtime/approval-store";
 
@@ -34,14 +37,32 @@ export async function POST(request: Request) {
       userId: session.user.id,
       usersRoot: installation.paths.usersRoot,
     });
-    const result = await store.resolve({
+    const locator = {
       installationId: installation.installationId,
       userId: session.user.id,
       threadId: body.threadId,
       turnId: body.turnId,
       itemId: body.itemId,
       approvalId: body.approvalId,
-    }, body.decision);
+    };
+    const connector = await store.readConnectorApproval(locator);
+    if (connector) {
+      if (!isConnectorApprovalResolutionRequest(body)) {
+        return NextResponse.json(
+          { error: "Les approvals de connector només admeten una acceptació amb el fingerprint original." },
+          { status: 403 },
+        );
+      }
+      const result = await store.approveConnectorApprovalByLocator(locator, body.authorizationFingerprint);
+      if (result.outcome === "approved" || result.outcome === "already-approved") {
+        return NextResponse.json({ ok: true, status: "approved" });
+      }
+      return NextResponse.json(
+        { error: "Aquesta approval de connector ja no està pendent." },
+        { status: 403 },
+      );
+    }
+    const result = await store.resolve(locator, body.decision);
     if (result.outcome === "resolved" || result.outcome === "already-resolved") {
       return NextResponse.json({ ok: true, status: "resolved" });
     }
