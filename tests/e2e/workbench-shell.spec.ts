@@ -22,8 +22,8 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByTestId("composer")).toBeVisible();
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Automatizaciones (cron jobs)" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Biblioteca|Tareas|Programadas/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Tareas programadas" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });
@@ -66,8 +66,8 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await page.keyboard.press("Meta+K");
   const search = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeVisible();
-  await expect(search.getByRole("option", { name: /Abrir Review/ })).toBeVisible();
-  await expect(search.getByRole("option", { name: /Abrir Computer Use/ })).toBeVisible();
+  await expect(search.getByRole("option", { name: /Abrir cambios y resultados/ })).toBeVisible();
+  await expect(search.getByRole("option", { name: /Abrir navegador/ })).toBeVisible();
   await search.getByRole("textbox").fill(primaryProject);
   await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");

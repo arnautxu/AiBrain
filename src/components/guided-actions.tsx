@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  CaretDown,
+  CaretUp,
   ChartBar,
   CheckCircle,
   FileText,
@@ -143,10 +145,17 @@ export function GuidedActions({
   const [second, setSecond] = useState("");
   const [goal, setGoal] = useState("");
   const [savedTemplates, setSavedTemplates] = useState<ProjectTemplate[]>([]);
+  const [showAllActions, setShowAllActions] = useState(false);
   const selected = useMemo(() => actions.find((action) => action.id === selectedId) ?? null, [selectedId]);
   const formCopy = selected ? copy[selected.id] : null;
   const ready = Boolean(selected && source.trim() && goal.trim() && (selected.id !== "compare" || second.trim()));
   const storageKey = projectId ? `aibrain.project.${projectId}.guided-templates.v1` : null;
+  const quickTemplates = useMemo(
+    () => [...savedTemplates, ...projectTemplates]
+      .filter((template, index, templates) => templates.findIndex((candidate) => candidate.label === template.label) === index)
+      .slice(0, 3),
+    [savedTemplates],
+  );
 
   useEffect(() => {
     if (!storageKey) return;
@@ -186,14 +195,17 @@ export function GuidedActions({
   if (!selected || !formCopy) {
     return (
       <section className="mx-auto flex min-h-full w-full max-w-[860px] flex-col justify-center px-5 py-10 md:px-10">
-        {onCancel ? <button type="button" className="mb-7 flex min-h-10 w-fit items-center gap-2 rounded-lg px-2 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={onCancel}><ArrowLeft size={12} /> Volver a la conversación</button> : null}
+        {onCancel ? <button type="button" className="mb-7 flex min-h-10 w-fit items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={onCancel}><ArrowLeft size={13} /> Volver a la conversación</button> : null}
         <h1 className="max-w-2xl text-balance text-[32px] font-semibold leading-[1.05] tracking-[-.04em] text-[var(--text)] md:text-[42px]">¿Qué quieres conseguir?</h1>
-        <p className="mt-4 max-w-[62ch] text-[14px] leading-6 text-[var(--text-secondary)]">Elige una acción. Te pediremos solo la información necesaria y prepararemos el trabajo dentro de {projectName}.</p>
+        <p className="mt-4 max-w-[62ch] text-[15px] leading-6 text-[var(--text-secondary)]">Elige un punto de partida. Te pediremos solo la información necesaria y prepararemos el trabajo dentro de {projectName}.</p>
+        <ol aria-label="Cómo funciona" className="guided-trace mt-6 grid max-w-2xl grid-cols-3">
+          {["Define el objetivo", "Añade información", "Revisa el resultado"].map((step, index) => <li key={step} className="guided-trace-step"><span>{index + 1}</span><strong>{step}</strong></li>)}
+        </ol>
         {onWriteDirectly ? <button type="button" className="mt-4 min-h-10 w-fit rounded-lg px-2 py-2 text-[12px] font-medium text-[var(--text)] underline decoration-[var(--border-strong)] underline-offset-4" onClick={onWriteDirectly}>Prefiero escribir directamente</button> : null}
         <div className="mt-8">
           <p className="text-[12px] font-semibold text-[var(--text)]">Plantillas rápidas de {projectName}</p>
           <div className="mt-3 grid gap-2 md:grid-cols-3">
-            {[...savedTemplates, ...projectTemplates].map((template) => (
+            {quickTemplates.map((template) => (
               <button key={template.label} type="button" className="rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-left transition hover:border-[var(--border-strong)] hover:bg-[var(--surface-muted)]" onClick={() => selectTemplate(template)}>
                 <span className="block text-[13px] font-semibold text-[var(--text)]">{template.label}</span>
                 <span className="mt-1.5 block text-[12px] leading-5 text-[var(--text-secondary)]">{template.detail}</span>
@@ -201,12 +213,15 @@ export function GuidedActions({
             ))}
           </div>
         </div>
-        <div className="mt-9 divide-y divide-[var(--border-subtle)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)]">
+        <button type="button" aria-expanded={showAllActions} className="mt-5 flex min-h-11 w-fit items-center gap-2 rounded-xl px-2 text-[13px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-muted)]" onClick={() => setShowAllActions((visible) => !visible)}>
+          {showAllActions ? <CaretUp size={14} /> : <CaretDown size={14} />}{showAllActions ? "Ocultar otras acciones" : "Ver todas las acciones"}
+        </button>
+        {showAllActions ? <div className="mt-2 divide-y divide-[var(--border-subtle)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)]">
           {actions.map((action) => {
             const Icon = action.icon;
-            return <button type="button" key={action.id} className="group flex min-h-14 w-full items-center gap-4 bg-[var(--surface-raised)] px-5 py-4 text-left transition hover:bg-[var(--surface-muted)] focus-visible:z-10 md:px-6" onClick={() => setSelectedId(action.id)}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text)] transition group-hover:bg-[var(--brain-accent-soft)] group-hover:text-[var(--brain-accent)]"><Icon size={16} /></span><span className="min-w-0 flex-1 md:grid md:grid-cols-[130px_1fr] md:items-center md:gap-5"><span className="text-[14px] font-semibold text-[var(--text)]">{action.label}</span><span><span className="block text-[12px] leading-5 text-[var(--text-secondary)]">{action.detail}</span><span className="mt-1 block text-[11px] leading-4 text-[var(--text-muted)]">{action.result}</span></span></span><ArrowRight size={15} className="shrink-0 text-[var(--text-muted)] transition group-hover:translate-x-1 group-hover:text-[var(--text)]" /></button>;
+            return <button type="button" key={action.id} className="group flex min-h-14 w-full items-center gap-4 bg-[var(--surface-raised)] px-5 py-4 text-left transition hover:bg-[var(--surface-muted)] focus-visible:z-10 md:px-6" onClick={() => setSelectedId(action.id)}><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text)] transition group-hover:bg-[var(--brain-accent-soft)] group-hover:text-[var(--brain-accent)]"><Icon size={16} /></span><span className="min-w-0 flex-1 md:grid md:grid-cols-[130px_1fr] md:items-center md:gap-5"><span className="text-[14px] font-semibold text-[var(--text)]">{action.label}</span><span><span className="block text-[13px] leading-5 text-[var(--text-secondary)]">{action.detail}</span><span className="mt-1 block text-[12px] leading-5 text-[var(--text-muted)]">{action.result}</span></span></span><ArrowRight size={15} className="shrink-0 text-[var(--text-muted)] transition group-hover:translate-x-1 group-hover:text-[var(--text)]" /></button>;
           })}
-        </div>
+        </div> : null}
       </section>
     );
   }

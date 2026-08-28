@@ -16,6 +16,7 @@ import {
   NotePencil,
   Plus,
   PushPin,
+  Question,
   SidebarSimple,
   SignOut,
   SpinnerGap,
@@ -204,6 +205,7 @@ export function Sidebar({
   const [archivedStandaloneThreadsOpen, setArchivedStandaloneThreadsOpen] = useState(false);
   const [archivedProjectThreadsOpen, setArchivedProjectThreadsOpen] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const profileMenuRef = useRef<HTMLDivElement>(null);
   const railOpenButtonRef = useRef<HTMLButtonElement>(null);
   const desktopCloseButtonRef = useRef<HTMLButtonElement>(null);
@@ -232,6 +234,7 @@ export function Sidebar({
     setProjectMenuId(null);
     setThreadMenuId(null);
     setProfileMenuOpen(false);
+    setHelpOpen(false);
   };
 
   useEffect(() => {
@@ -241,7 +244,10 @@ export function Sidebar({
       setProfileMenuOpen(false);
     };
     const closeProfileMenuOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setProfileMenuOpen(false);
+      if (event.key === "Escape") {
+        setProfileMenuOpen(false);
+        setHelpOpen(false);
+      }
     };
     document.addEventListener("pointerdown", closeProfileMenu);
     document.addEventListener("keydown", closeProfileMenuOnEscape);
@@ -279,7 +285,7 @@ export function Sidebar({
           <div className="mt-2 flex flex-col items-center gap-1">
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={() => onNewThread()}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
-            <button aria-label="Automatizaciones (cron jobs)" title="Automatizaciones (cron jobs)" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}><CalendarBlank size={18} /></button>
+            <button aria-label="Tareas programadas" title="Tareas programadas" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}><CalendarBlank size={18} /></button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-1">
             <button aria-label={`${session.user.name}. Mostrar cuenta`} className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}><UserCircle size={21} /></button>
@@ -300,16 +306,16 @@ export function Sidebar({
             <MagnifyingGlass size={17} />
             <span className="min-w-0 flex-1 text-[13px]">Buscar</span>
           </button>
-          <button aria-label="Automatizaciones (cron jobs)" title="Gestionar automatizaciones cron" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
+          <button aria-label="Tareas programadas" title="Gestionar tareas programadas" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
             <CalendarBlank size={17} />
-            <span className="min-w-0 flex-1 text-[13px]">Automatizaciones</span>
+            <span className="min-w-0 flex-1 text-[13px]">Tareas programadas</span>
           </button>
         </nav>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <section aria-labelledby="standalone-conversations-label">
             <div className="flex items-center justify-between px-3 pb-1 pt-2">
-              <h2 id="standalone-conversations-label" className="text-[11px] font-semibold text-[var(--text-subtle)]">Chats</h2>
+              <h2 id="standalone-conversations-label" className="text-[12px] font-semibold text-[var(--text-subtle)]">Chats</h2>
               <button disabled={!standaloneProject || busy} aria-label="Nueva conversación independiente" className="rounded-md p-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40" onClick={() => onNewThread()}><Plus size={14} /></button>
             </div>
             <div className="space-y-0.5">
@@ -324,7 +330,7 @@ export function Sidebar({
                       <ChatCircleDots size={15} weight={active ? "fill" : "regular"} />
                       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
-                      {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
+                      {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </button>
                     <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
@@ -342,7 +348,7 @@ export function Sidebar({
 
           <section aria-labelledby="projects-label" className="mt-4 border-t border-[var(--border-subtle)] pt-2">
             <div className="flex items-center justify-between px-3 pb-1 pt-2">
-              <h2 id="projects-label" className="text-[11px] font-semibold text-[var(--text-subtle)]">Proyectos</h2>
+              <h2 id="projects-label" className="text-[12px] font-semibold text-[var(--text-subtle)]">Proyectos</h2>
               <button aria-label="Crear proyecto" className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onNewProject}><Plus size={14} /></button>
             </div>
             <div className="space-y-0.5">
@@ -370,7 +376,7 @@ export function Sidebar({
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                     <div aria-label={`Chats de ${project.name}`} className="ml-5 border-l border-[var(--border-subtle)] pl-1">
                       <div className="flex items-center justify-between px-2 py-1">
-                        <span className="text-[10px] font-medium text-[var(--text-subtle)]">Chats</span>
+                        <span className="text-[12px] font-medium text-[var(--text-subtle)]">Chats</span>
                         <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={13} /></button>
                       </div>
                       <div className="space-y-0.5">
@@ -417,18 +423,20 @@ export function Sidebar({
             <div role="menu" aria-label="Cuenta y preferencias" className="menu-enter absolute inset-x-2 bottom-[calc(100%-2px)] z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]">
               <div className="flex items-center gap-2.5 px-3 py-2.5 text-[var(--text)]" role="presentation">
                 <UserCircle size={22} className="shrink-0 text-[var(--text-subtle)]" />
-                <div className="min-w-0"><p className="truncate text-[12px] font-semibold">{session.user.name}</p><p className="truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</p></div>
+                <div className="min-w-0"><p className="truncate text-[12px] font-semibold">{session.user.name}</p><p className="truncate text-[12px] text-[var(--text-subtle)]">{branding.companyName}</p></div>
               </div>
               <div className="my-1 border-t border-[var(--border-subtle)]" />
               <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { setProfileMenuOpen(false); onOpenCustomization(); }}><GearSix size={16} />Configuración</button>
+              <button role="menuitem" aria-expanded={helpOpen} aria-controls="account-help" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => setHelpOpen((open) => !open)}><Question size={16} />Ayuda</button>
+              {helpOpen ? <div id="account-help" role="note" className="mx-1 mb-1 rounded-[14px] bg-[var(--surface-muted)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-secondary)]"><p className="font-semibold text-[var(--text)]">Cómo empezar</p><p className="mt-1">Escribe lo que necesitas o abre “Acciones guiadas” desde el botón +. Podrás revisar los cambios antes de utilizarlos.</p></div> : null}
               <div className="flex min-h-10 items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><span className="min-w-0 flex-1">Tema rápido</span><ThemeToggle className="!size-8" /></div>
               <div className="my-1 border-t border-[var(--border-subtle)]" />
               <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={16} />Cerrar sesión</button>
             </div>
           ) : null}
-          <button aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-expanded={profileMenuOpen} className={`flex w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); setProfileMenuOpen((open) => !open); }}>
+          <button aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-expanded={profileMenuOpen} className={`flex w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); if (profileMenuOpen) setHelpOpen(false); setProfileMenuOpen((open) => !open); }}>
             <UserCircle size={20} className="shrink-0 text-[var(--text-subtle)]" />
-            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[10px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
           </button>
         </div>
         </div>

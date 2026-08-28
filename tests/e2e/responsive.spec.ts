@@ -26,9 +26,21 @@ for (const viewport of viewports) {
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     const composer = await page.getByTestId("composer").boundingBox();
+    const emptyHeading = await page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" }).boundingBox();
     expect(composer).not.toBeNull();
+    expect(emptyHeading).not.toBeNull();
     expect(composer!.x).toBeGreaterThanOrEqual(0);
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(composer!.y - (emptyHeading!.y + emptyHeading!.height)).toBeGreaterThanOrEqual(16);
+
+    await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+    await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
+    await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
+    await expect(page.getByTestId("composer")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Ver todas las acciones" })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+    await page.getByRole("button", { name: "Prefiero escribir directamente" }).click();
+    await expect(page.getByTestId("composer")).toBeVisible();
 
     if (viewport.width < 768) {
       const header = await page.getByTestId("mobile-app-header").boundingBox();

@@ -195,7 +195,7 @@ describe("turn activity and Review", () => {
   it("renders an inspectable file diff and activity tabs", () => {
     render(<DetailsPanel message={message} open onClose={vi.fn()} onResolveApproval={vi.fn()} />);
 
-    expect(screen.getByRole("heading", { name: "Review del turno" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeInTheDocument();
     expect(screen.getAllByText("resultado.txt")).toHaveLength(2);
     expect(screen.getAllByText("+1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("−1").length).toBeGreaterThan(0);

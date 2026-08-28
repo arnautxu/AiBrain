@@ -30,7 +30,8 @@ test("turn approval and Review have no critical or serious axe violations", asyn
     )).toEqual([]);
   };
   await assertNoBlockingViolations();
-  await page.getByRole("button", { name: "Revisar resultados" }).click();
-  await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
+  await page.keyboard.press("Meta+K");
+  await page.getByRole("option", { name: /Abrir cambios y resultados/ }).click();
+  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
   await assertNoBlockingViolations();
 });

@@ -30,7 +30,8 @@ test("dark shell, guided actions, turn capabilities and Review have no blocking 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await assertNoBlockingViolations();
 
-  await page.getByRole("button", { name: "Abrir preferencias" }).click();
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("menuitem", { name: "Configuración" }).click();
   await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeVisible();
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
@@ -45,7 +46,8 @@ test("dark shell, guided actions, turn capabilities and Review have no blocking 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" })).toBeVisible();
   await assertNoBlockingViolations();
-  await page.getByRole("button", { name: "Revisar resultados" }).click();
-  await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
+  await page.keyboard.press("Meta+K");
+  await page.getByRole("option", { name: /Abrir cambios y resultados/ }).click();
+  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
   await assertNoBlockingViolations();
 });

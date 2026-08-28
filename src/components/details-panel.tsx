@@ -59,7 +59,7 @@ function parseDiff(diff: string): DiffFile[] {
 
 function DiffCode({ content }: { content: string }) {
   return (
-    <pre tabIndex={0} className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-[#1f201e] py-3 font-mono text-[9px] leading-[1.65] text-[#d9d8d4] outline-none">
+    <pre tabIndex={0} className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-[#1f201e] py-3 font-mono text-[12px] leading-[1.65] text-[#d9d8d4] outline-none">
       {content.split("\n").map((line, index) => {
         const kind = line.startsWith("+") && !line.startsWith("+++")
           ? "addition"
@@ -131,7 +131,7 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
   return (
     <aside
       ref={panelRef}
-      aria-label="Review del turno"
+      aria-label="Cambios y resultados del turno"
       aria-modal={open && mobileOverlay ? "true" : undefined}
       role={open && mobileOverlay ? "dialog" : undefined}
       tabIndex={open && mobileOverlay ? -1 : undefined}
@@ -140,21 +140,21 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <GitDiff size={15} className="shrink-0 text-[var(--text-secondary)]" />
-          <h2 aria-label="Review del turno" className="truncate text-[13px] font-semibold text-[var(--text)]">Resultados</h2>
-          {pending > 0 ? <span className="rounded-md bg-[var(--warning-soft)] px-1.5 py-0.5 text-[8px] font-semibold text-[var(--warning)]">{pending} {pending === 1 ? "pendiente" : "pendientes"}</span> : null}
+          <h2 aria-label="Cambios y resultados del turno" className="truncate text-[13px] font-semibold text-[var(--text)]">Cambios y resultados</h2>
+          {pending > 0 ? <span className="rounded-md bg-[var(--warning-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--warning)]">{pending} {pending === 1 ? "pendiente" : "pendientes"}</span> : null}
         </div>
-        <button type="button" aria-label="Cerrar Review" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={15} /></button>
+        <button type="button" aria-label="Cerrar cambios y resultados" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={15} /></button>
       </header>
 
       <div className="flex h-10 shrink-0 items-end gap-1 border-b border-[var(--border)] px-3">
         <button type="button" aria-pressed={tab === "changes"} className={`review-tab ${tab === "changes" ? "review-tab-active" : ""}`} onClick={() => setTab("changes")}>
-          Cambios {files.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{files.length}</span> : null}
+          Cambios {files.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{files.length}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
-          Actividad {message?.activity.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.activity.length}</span> : null}
+          Actividad {message?.activity.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.activity.length}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "sources"} className={`review-tab ${tab === "sources" ? "review-tab-active" : ""}`} onClick={() => setTab("sources")}>
-          Fuentes {message?.sources?.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.sources.length}</span> : null}
+          Fuentes {message?.sources?.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.sources.length}</span> : null}
         </button>
         {performance ? <button type="button" aria-pressed={tab === "performance"} className={`review-tab ${tab === "performance" ? "review-tab-active" : ""}`} onClick={() => setTab("performance")}>Rendimiento</button> : null}
       </div>
@@ -163,14 +163,14 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
         <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
           <div className="max-w-56">
             <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><ListChecks size={18} /></span>
-            <p className="mt-3 text-[11px] font-semibold text-[var(--text)]">Selecciona una respuesta</p>
-            <p className="mt-1.5 text-[9px] leading-4 text-[var(--text)]">Review muestra los cambios, la actividad y las aprobaciones del turno.</p>
+            <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Selecciona una respuesta</p>
+            <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">Aquí podrás revisar qué se ha hecho, qué archivos han cambiado y si hay alguna decisión pendiente.</p>
           </div>
         </div>
       ) : tab === "performance" && performance ? (
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 text-[11px] text-[var(--text)]">
-          <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">Métricas de pintura del cliente</p><p className="mt-1 text-[9px] leading-4 text-[var(--text-muted)]">Sin texto, prompts, tokens, IDs ni errores.</p></div><button type="button" aria-label="Descargar métricas del cliente" title="Descargar métricas del cliente" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={downloadPerformance}><DownloadSimple size={15} /></button></div>
-          <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[10px]">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 text-[12px] text-[var(--text)]">
+          <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">Métricas de pintura del cliente</p><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Sin texto, prompts, tokens, IDs ni errores.</p></div><button type="button" aria-label="Descargar métricas del cliente" title="Descargar métricas del cliente" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={downloadPerformance}><DownloadSimple size={15} /></button></div>
+          <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[12px]">
             <dt className="text-[var(--text-muted)]">Intento → primer delta pintado</dt><dd className="font-medium tabular-nums">{milliseconds(performance.sendIntentToFirstDeltaPaintMs)}</dd>
             <dt className="text-[var(--text-muted)]">Cadencia p50 / p95 / máxima</dt><dd className="font-medium tabular-nums">{milliseconds(performance.interPaintP50Ms)} / {milliseconds(performance.interPaintP95Ms)} / {milliseconds(performance.interPaintMaxMs)}</dd>
             <dt className="text-[var(--text-muted)]">Estado terminal pintado</dt><dd className="font-medium tabular-nums">{performance.terminal ? `${performance.terminal} · ${milliseconds(performance.sendIntentToTerminalPaintMs)}` : "—"}</dd>
@@ -182,19 +182,19 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
         </div>
       ) : tab === "sources" ? (
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-3 flex items-center gap-2 px-1 text-[11px] font-semibold text-[var(--text)]"><Globe size={14} />Fuentes entregadas por el runtime</div>
+          <div className="mb-3 flex items-center gap-2 px-1 text-[12px] font-semibold text-[var(--text)]"><Globe size={14} />Fuentes utilizadas</div>
           <TurnSourceList sources={message.sources ?? []} />
         </div>
       ) : tab === "changes" ? (
         files.length ? (
           <div className="flex min-h-0 flex-1 flex-col">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3.5 py-2.5">
-              <div className="flex items-center gap-2 text-[9px] font-medium">
+              <div className="flex items-center gap-2 text-[12px] font-medium">
                 <span className="text-[var(--positive)]">+{additions}</span>
                 <span className="text-[var(--danger)]">−{deletions}</span>
                 <span className="text-[var(--text)]">{files.length} {files.length === 1 ? "archivo" : "archivos"}</span>
               </div>
-              <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-md px-2 py-1 text-[9px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-muted)]" onClick={() => void copyDiff()}>
+              <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-muted)]" onClick={() => void copyDiff()}>
                 {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar diff"}
               </button>
             </div>
@@ -203,14 +203,14 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
               {files.map((file, index) => (
                 <button type="button" key={`${file.path}-${index}`} className={`flex min-h-10 items-center gap-2 rounded-lg px-2.5 py-2 text-left transition ${activeFile === index ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setActiveFile(index)}>
                   <FileCode size={13} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate font-mono text-[9px]">{file.path}</span>
-                  <span className="flex shrink-0 gap-1.5 font-mono text-[8px] font-semibold text-[var(--text)]"><span>+{file.additions}</span><span>−{file.deletions}</span></span>
+                  <span className="min-w-0 flex-1 truncate font-mono text-[12px]">{file.path}</span>
+                  <span className="flex shrink-0 gap-1.5 font-mono text-[11px] font-semibold text-[var(--text)]"><span>+{file.additions}</span><span>−{file.deletions}</span></span>
                 </button>
               ))}
             </div>
 
             <div className="flex min-h-0 flex-1 flex-col bg-[#1f201e]">
-              <div className="flex h-8 shrink-0 items-center border-b border-white/10 px-3.5 font-mono text-[8px] text-[#aaa9a5]">{files[activeFile]?.path}</div>
+              <div className="flex h-9 shrink-0 items-center border-b border-white/10 px-3.5 font-mono text-[11px] text-[#aaa9a5]">{files[activeFile]?.path}</div>
               {files[activeFile] ? <DiffCode content={files[activeFile].content} /> : null}
             </div>
           </div>
@@ -218,9 +218,9 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
           <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
             <div className="max-w-56">
               <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--positive-soft)] text-[var(--positive)]"><ShieldCheck size={18} /></span>
-              <p className="mt-3 text-[11px] font-semibold text-[var(--text)]">Sin cambios en archivos</p>
-              <p className="mt-1.5 text-[9px] leading-4 text-[var(--text)]">Este turno no ha producido ningún diff. Consulta Actividad para ver qué se ha ejecutado.</p>
-              <button type="button" className="mt-3 min-h-10 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[9px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => setTab("activity")}>Abrir Actividad</button>
+              <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Sin cambios en archivos</p>
+              <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">Esta respuesta no ha modificado ningún archivo. Consulta Actividad para ver qué se ha hecho.</p>
+              <button type="button" className="mt-3 min-h-10 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => setTab("activity")}>Abrir Actividad</button>
             </div>
           </div>
         )
