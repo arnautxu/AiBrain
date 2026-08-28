@@ -12,6 +12,7 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   await login(page);
   const composer = page.getByTestId("composer");
   const textarea = page.getByRole("textbox", { name: "Mensaje" });
+  await expect(page.getByText("Conectando con el servicio…", { exact: true })).toHaveCount(0);
   await expect.poll(() => composer.evaluate((element) => getComputedStyle(element.parentElement?.parentElement ?? element).position)).toBe("absolute");
   const initialComposerBox = await composer.boundingBox();
   const initialControlsBox = await composer.locator(".composer-controls").boundingBox();
