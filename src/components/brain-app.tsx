@@ -34,7 +34,14 @@ import {
   type ChatMessage,
   type ChatInputAttachment,
   type ComposerMode,
+  type ToolResult,
 } from "@/lib/chat-contract";
+import {
+  loadManagedAppCapability,
+  resolveManagedAppAction,
+  type ManagedAppActionDescriptor,
+  type ManagedAppActionOutcome,
+} from "@/ui/codex-managed-app-ui";
 import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
 import {
   ClientTurnPerformance,
@@ -116,6 +123,26 @@ type StoredSelection = {
   activeProjectId: string | null;
   threadByProject: Record<string, string>;
 };
+
+type PendingManagedAppAction = {
+  threadId: string;
+  messageId: string;
+  descriptor: ManagedAppActionDescriptor;
+};
+
+function managedAppOutcomeResult(approvalId: string, outcome: ManagedAppActionOutcome): ToolResult {
+  const completed = outcome === "executed" || outcome === "replayed";
+  return {
+    id: `managed-app:${approvalId}`,
+    kind: "app",
+    title: "Acción conectada",
+    status: completed ? "complete" : outcome === "denied" ? "stopped" : "failed",
+    summary: outcome,
+    output: null,
+    sourceIds: [],
+    createdAt: new Date().toISOString(),
+  };
+}
 
 const MAX_CLIENT_TURN_READBACKS = 24;
 
@@ -464,6 +491,8 @@ export function BrainApp({
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
+  const [managedAppAvailable, setManagedAppAvailable] = useState(false);
+  const [pendingManagedAppAction, setPendingManagedAppAction] = useState<PendingManagedAppAction | null>(null);
   const [clientTurnReadbacks, setClientTurnReadbacks] = useState<Record<string, ClientTurnPerformanceReadback>>({});
   const threadByProjectRef = useRef<Record<string, string>>({});
   const turnControllersRef = useRef(new Map<string, {
@@ -509,6 +538,17 @@ export function BrainApp({
   }, [defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
 
   useEffect(() => {
+    if (!hydrated) return;
+    let active = true;
+    void loadManagedAppCapability(fetch).then((available) => {
+      if (active) setManagedAppAvailable(available);
+    }).catch(() => {
+      if (active) setManagedAppAvailable(false);
+    });
+    return () => { active = false; };
+  }, [hydrated]);
+
+  useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
     const snapshot: WorkbenchSnapshot = {
       persistence: "browser-preview",
@@ -537,6 +577,10 @@ export function BrainApp({
   useEffect(() => {
     activeSelectionRef.current = { projectId: activeProjectId, threadId: activeThreadId };
   }, [activeProjectId, activeThreadId]);
+
+  useEffect(() => {
+    setPendingManagedAppAction((current) => current?.threadId === activeThreadId ? current : null);
+  }, [activeThreadId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -1413,6 +1457,34 @@ export function BrainApp({
     decision: ApprovalDecision,
   ) => {
     if (!activeThreadId) return;
+    const pendingManaged = pendingManagedAppAction;
+    if (pendingManaged && pendingManaged.descriptor.approval.id === selectedApproval.id) {
+      if (pendingManaged.threadId !== activeThreadId || pendingManaged.messageId !== messageId ||
+          pendingManaged.descriptor.locator.threadId !== activeThreadId ||
+          pendingManaged.descriptor.locator.turnId !== messageId) {
+        setPendingManagedAppAction(null);
+        setNotice("La acción conectada ya no corresponde a esta conversación.");
+        return;
+      }
+      const result = await resolveManagedAppAction(fetch, pendingManaged.descriptor, {
+        threadId: activeThreadId,
+        turnId: messageId,
+      }, decision).catch(() => null);
+      setPendingManagedAppAction(null);
+      if (!result) {
+        setNotice("La acción conectada no se ha podido confirmar.");
+        return;
+      }
+      setThreads((current) => updateThreadMessage(current, activeThreadId, messageId, (message) => ({
+        ...message,
+        approvals: message.approvals.map((approval) => approval.id === selectedApproval.id ? result.approval : approval),
+        toolResults: [
+          ...(message.toolResults ?? []).filter((item) => item.id !== `managed-app:${selectedApproval.id}`),
+          managedAppOutcomeResult(selectedApproval.id, result.outcome),
+        ],
+      })));
+      return;
+    }
     const response = await fetch("/api/runtime/approvals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1441,6 +1513,19 @@ export function BrainApp({
           approval.id === selectedApproval.id ? { ...approval, status } : approval),
       }),
     ));
+  }, [activeThreadId, pendingManagedAppAction]);
+
+  const prepareManagedAppAction = useCallback((descriptor: ManagedAppActionDescriptor) => {
+    if (!activeThreadId || descriptor.locator.threadId !== activeThreadId ||
+        descriptor.locator.turnId !== descriptor.approval.turnId) return;
+    setThreads((current) => updateThreadMessage(current, activeThreadId, descriptor.locator.turnId, (message) => ({
+      ...message,
+      approvals: [
+        ...message.approvals.filter((approval) => approval.id !== descriptor.approval.id),
+        descriptor.approval,
+      ],
+    })));
+    setPendingManagedAppAction({ threadId: activeThreadId, messageId: descriptor.locator.turnId, descriptor });
   }, [activeThreadId]);
 
   const persistProjectPatch = useCallback(async (
@@ -1772,6 +1857,9 @@ export function BrainApp({
         onShareConversation={shareConversation}
         onExportConversation={exportConversation}
         onResultAction={persistResultAction}
+        managedAppActionEnabled={managedAppAvailable}
+        managedAppApprovalId={pendingManagedAppAction?.threadId === activeThreadId ? pendingManagedAppAction.descriptor.approval.id : null}
+        onManagedAppPrepared={prepareManagedAppAction}
         showAdvancedControls
       />
 

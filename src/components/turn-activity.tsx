@@ -21,6 +21,8 @@ import type {
   ApprovalItem,
   ChatMessage,
 } from "@/lib/chat-contract";
+import { ManagedAppActionControl } from "@/components/managed-app-action-control";
+import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { ToolResultList } from "@/components/tool-result-list";
 
 type TurnActivityProps = {
@@ -28,6 +30,12 @@ type TurnActivityProps = {
   compact?: boolean;
   showDiff?: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
+  managedAppAction?: {
+    enabled: boolean;
+    threadId: string;
+    onPrepared: (descriptor: ManagedAppActionDescriptor) => void;
+    approvalId: string | null;
+  } | null;
 };
 
 const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
@@ -96,9 +104,11 @@ function currentActivityLabel(message: ChatMessage) {
 function ApprovalCard({
   approval,
   onResolve,
+  connectorApproval = false,
 }: {
   approval: ApprovalItem;
   onResolve: (decision: ApprovalDecision) => void;
+  connectorApproval?: boolean;
 }) {
   const pending = approval.status === "pending";
   const result = {
@@ -136,7 +146,7 @@ function ApprovalCard({
       {pending ? (
         <div className="flex flex-wrap justify-end gap-1.5 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2">
           <button type="button" className="min-h-9 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
-          {approval.kind === "command" ? (
+          {approval.kind === "command" && !connectorApproval ? (
             <button type="button" className="min-h-9 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("acceptForSession")}>Durante esta tarea</button>
           ) : null}
           <button type="button" className="min-h-9 rounded-lg bg-[var(--brain-accent-strong)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir</button>
@@ -148,10 +158,10 @@ function ApprovalCard({
   );
 }
 
-export function TurnActivity({ message, compact = false, showDiff = true, onResolveApproval }: TurnActivityProps) {
+export function TurnActivity({ message, compact = false, showDiff = true, onResolveApproval, managedAppAction = null }: TurnActivityProps) {
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
-  if (!hasDetails) return null;
+  if (!hasDetails && !managedAppAction) return null;
   const executionLabel = message.status === "streaming"
     ? currentActivityLabel(message)
     : message.status === "stopped"
@@ -226,10 +236,17 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval, decision)} />
+        <ApprovalCard key={approval.id} approval={approval} connectorApproval={approval.id === managedAppAction?.approvalId} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       <ToolResultList results={message.toolResults ?? []} />
+
+      {managedAppAction ? <ManagedAppActionControl
+        enabled={managedAppAction.enabled}
+        threadId={managedAppAction.threadId}
+        message={message}
+        onPrepared={managedAppAction.onPrepared}
+      /> : null}
 
       {message.diff && showDiff ? (
         <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
