@@ -755,10 +755,12 @@ contiene `tools.execute | execute | allow`. Ausencia o `deny` se rechaza
 server-side antes del store; la UI puede observar el item ya `declined`, pero no
 puede convertir esa denegación de `PERMISSIONS.md` en una concesión humana.
 
-Las herramientas browser mutantes (`open`, `scroll`, `click`, `type`) siempre
-generan una approval `kind: "browser"` ligada a user/thread/turn/call y al
-fingerprint de `PERMISSIONS.md`. `read`, `screenshot`, `tabs` y `downloads` son
-solo lectura, pero siguen necesitando permiso server-side. El resultado se
+Todas las interacciones (`open`, `scroll`, `click`, `type`) se ligan a evidencia
+server-side del destino y al fingerprint de `PERMISSIONS.md`, pero solo las que
+pueden enviar, publicar, comprar/pagar, borrar, cambiar cuenta o datos, o exponer
+credenciales/pago generan una approval `kind: "browser"`. `read`, `screenshot`,
+`tabs` y `downloads` son solo lectura, pero siguen necesitando permiso
+server-side. El resultado se
 deduplica por call: un replay completado devuelve el mismo resultado y una
 acción que quedó `executing` tras crash no se repite automáticamente.
 

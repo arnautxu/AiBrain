@@ -253,6 +253,9 @@ describe("server turn permission preflight", () => {
     expect(webInstructions).toContain("La cerca web en viu està disponible");
     expect(webInstructions).toContain("quan els fets puguin haver canviat");
     expect(webInstructions).toContain("inclou enllaços");
+    expect(webInstructions).toContain("La navegació web ordinària");
+    expect(webInstructions).toContain("no necessita aprovació");
+    expect(webInstructions).toContain("Demana aprovació només abans d'un efecte extern sensible");
 
     const mismatchedRequest = chatRequest("bb2bbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb");
     expect(() => assertCodexTurnPermissionBinding(

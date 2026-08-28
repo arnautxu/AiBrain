@@ -153,6 +153,7 @@ describe("closed browser dynamic tools", () => {
     });
     expect((BROWSER_DYNAMIC_TOOLS[0] as { tools: Array<{ name: string }> }).tools.map(({ name }) => name))
       .toEqual(["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
+    expect(BROWSER_DYNAMIC_TOOLS[0]?.description).toContain("Routine navigation and interaction run without approval");
   });
 
   it("runs permissioned reads without approval and returns the durable cached result on replay", async () => {
@@ -186,13 +187,53 @@ describe("closed browser dynamic tools", () => {
     expect(serializedAudit).toContain(FINGERPRINT);
   });
 
-  it("persists explicit mutation approval without blocking a different turn", async () => {
+  it("opens, scrolls, navigates by click and types ordinary text without approval", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn(async ({ command }: ExecutedBrowserCommand) => ({ action: command.action }));
+    const emitted: ApprovalItem[] = [];
+    const prepare = vi.fn(async ({ threadId, command }: {
+      threadId: string;
+      command: BrowserAgentCommand;
+    }) => ({
+      kind: "browser-page" as const,
+      origin: command.action === "open" ? new URL(command.url).origin : "https://example.test",
+      sanitizedUrl: command.action === "open"
+        ? `${new URL(command.url).origin}${new URL(command.url).pathname}`
+        : "https://example.test/current",
+      scopeId: threadId,
+      generation: 3,
+      version: browserEvidenceHash({ threadId, version: 3 }),
+      locatorHash: browserEvidenceHash({ action: command.action }),
+      locatorSummary: command.action === "click"
+        ? "a[data-aibrain-link=story] · a · Story"
+        : command.action === "type"
+          ? "input[name=q] · input · Search"
+          : `${command.action} https://example.test/current`,
+    }));
+    const calls = [
+      request("open", { url: "https://example.test/story" }, { callId: "routine-open" }),
+      request("scroll", { deltaX: 0, deltaY: 600 }, { callId: "routine-scroll" }),
+      request("click", { selector: "a[data-aibrain-link=story]" }, { callId: "routine-click" }),
+      request("type", { selector: "input[name=q]", text: "RN Sport", clear: true }, { callId: "routine-type" }),
+    ];
+    for (const input of calls) {
+      await expect(handleBrowserDynamicToolCall(
+        input,
+        context(approvalStore, execute, emitted, { prepare: prepare as never }),
+      )).resolves.toMatchObject({ success: true });
+    }
+    expect(emitted).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(4);
+    expect(execute.mock.calls.every(([input]) => Boolean(!input.approvalEvidence && input.expectedResource))).toBe(true);
+  });
+
+  it("persists explicit sensitive-effect approval without blocking a different turn", async () => {
     const { approvalStore } = await fixture();
     const execute = vi.fn(async ({ command }: { command: { action: string } }) => ({ action: command.action }));
     const emitted: ApprovalItem[] = [];
     let durableAtEmission = false;
     const pending = handleBrowserDynamicToolCall(
-      request("open", { url: "https://example.test/approved" }),
+      request("click", { selector: "button[type=submit]" }),
       context(approvalStore, execute, emitted, {
         emitApproval: async (item) => {
           if (item.status === "pending") {
@@ -211,7 +252,7 @@ describe("closed browser dynamic tools", () => {
       permissionFingerprint: FINGERPRINT,
       threadId: "runtime-thread-a",
       turnId: "runtime-turn-a",
-      itemId: "call-open",
+      itemId: "call-click",
     });
     expect(durableAtEmission).toBe(true);
 

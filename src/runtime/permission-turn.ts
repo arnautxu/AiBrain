@@ -75,6 +75,7 @@ ${modeInstruction}
 ${imageInstruction}
 ${webInstruction}
 Treballa només dins del workspace configurat i utilitza les eines de Codex quan aportin evidència o siguin necessàries per completar la tasca.
+La navegació web ordinària —obrir URLs, llegir, fer scroll, clicar controls de navegació i escriure text no sensible— no necessita aprovació. No diguis que aquestes accions necessiten permís. Demana aprovació només abans d'un efecte extern sensible, com enviar, publicar, comprar o pagar, eliminar, canviar dades o compte, o introduir credencials o dades de pagament.
 No afirmis que una acció, una font o una integració funciona si no l'has observat.
 Quan una acció necessiti aprovació, explica de forma concreta què vols fer i per què.`;
   return `${workbenchInstructions}\n\n${permissions.developerInstructions}`;

@@ -725,10 +725,17 @@ export class BrowserToolCallStore {
       }
       const mutation = current.tool === "open" || current.tool === "scroll" ||
         current.tool === "click" || current.tool === "type";
-      if (mutation && (!current.approvalEvidence || !current.approvalResolvedAt)) {
+      if (mutation && current.approvalEvidence && !current.approvalResolvedAt) {
         throw new BrowserToolCallStoreError(
           "BROWSER_TOOL_STATE_INVALID",
-          "Browser mutation cannot execute without bound resolved approval evidence.",
+          "A sensitive browser interaction cannot execute before its bound approval is resolved.",
+        );
+      }
+      if (mutation && !current.approvalEvidence &&
+        (current.approvalRequestedAt || current.approvalResolvedAt)) {
+        throw new BrowserToolCallStoreError(
+          "BROWSER_TOOL_STATE_INVALID",
+          "Browser approval timestamps require bound approval evidence.",
         );
       }
       const now = new Date(this.now()).toISOString();

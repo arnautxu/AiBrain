@@ -20,6 +20,8 @@ import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 import { featurePolicyForIdentity } from "@/settings/server-service";
 import {
   assertBrowserApprovalEvidence,
+  browserEvidenceHash,
+  browserInteractionRequiresApproval,
   type BrowserActionResourceSnapshot,
   type BrowserInformedApprovalEvidence,
 } from "@/runtime/browser/action-evidence";
@@ -345,35 +347,56 @@ export async function executeBrowserAgentCommand(input: {
 }) {
   const registry = await agentRegistry(input);
   if (isBrowserMutation(input.command)) {
-    if (!input.approvalEvidence || !input.expectedResource) {
+    if (!input.expectedResource) {
       throw new BrowserServiceError(
-        "BROWSER_ACTION_APPROVAL_REQUIRED",
-        "Browser mutation requires informed approval evidence.",
+        "BROWSER_ACTION_TARGET_EVIDENCE_REQUIRED",
+        "Browser interaction requires server-bound target evidence.",
         409,
       );
     }
-    const evidence = assertBrowserApprovalEvidence(input.approvalEvidence);
-    if (evidence.installationId !== input.installationId || evidence.userId !== input.userId ||
-      evidence.actionKind !== input.command.action || evidence.resource.scopeId !== input.threadId ||
-      evidence.resource.kind !== input.expectedResource.kind ||
-      evidence.resource.origin !== input.expectedResource.origin ||
-      evidence.resource.scopeId !== input.expectedResource.scopeId ||
-      evidence.resource.generation !== input.expectedResource.generation ||
-      evidence.resource.version !== input.expectedResource.version ||
-      evidence.resource.locatorHash !== input.expectedResource.locatorHash ||
-      Date.parse(evidence.expiresAt) <= Date.now()) {
+    const approvalRequired = browserInteractionRequiresApproval(input.command, input.expectedResource);
+    if (approvalRequired && !input.approvalEvidence) {
       throw new BrowserServiceError(
-        "BROWSER_ACTION_EVIDENCE_MISMATCH",
-        "Browser action evidence is expired or does not match this execution.",
+        "BROWSER_ACTION_APPROVAL_REQUIRED",
+        "Sensitive browser interaction requires explicit approval.",
         409,
       );
+    }
+    let evidenceFingerprint: string;
+    if (input.approvalEvidence) {
+      const evidence = assertBrowserApprovalEvidence(input.approvalEvidence);
+      if (evidence.installationId !== input.installationId || evidence.userId !== input.userId ||
+        evidence.actionKind !== input.command.action || evidence.resource.scopeId !== input.threadId ||
+        evidence.resource.kind !== input.expectedResource.kind ||
+        evidence.resource.origin !== input.expectedResource.origin ||
+        evidence.resource.scopeId !== input.expectedResource.scopeId ||
+        evidence.resource.generation !== input.expectedResource.generation ||
+        evidence.resource.version !== input.expectedResource.version ||
+        evidence.resource.locatorHash !== input.expectedResource.locatorHash ||
+        Date.parse(evidence.expiresAt) <= Date.now()) {
+        throw new BrowserServiceError(
+          "BROWSER_ACTION_EVIDENCE_MISMATCH",
+          "Browser action evidence is expired or does not match this execution.",
+          409,
+        );
+      }
+      evidenceFingerprint = evidence.evidenceFingerprint;
+    } else {
+      evidenceFingerprint = browserEvidenceHash({
+        mode: "routine",
+        installationId: input.installationId,
+        userId: input.userId,
+        threadId: input.threadId,
+        actionKind: input.command.action,
+        resource: input.expectedResource,
+      });
     }
     return registry.executeAgentMutation(
       input.userId,
       input.threadId,
       input.command,
       input.expectedResource,
-      evidence.evidenceFingerprint,
+      evidenceFingerprint,
     );
   }
   if (input.command.action === "read") {
