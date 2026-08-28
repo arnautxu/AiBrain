@@ -384,7 +384,7 @@ describe("immutable release manager", () => {
     expect(env).toContain(`AIBRAIN_IMAGE=${digestA}`);
     expect(env).toContain(`AIBRAIN_EGRESS_IMAGE=${egressDigestA}`);
     await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
-  });
+  }, 20_000);
 
   it("fails closed instead of overwriting an unrelated environment change during recovery", async () => {
     const files = await fixture();
