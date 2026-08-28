@@ -31,6 +31,7 @@ import {
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
 import { MarkdownMessage } from "@/components/markdown-message";
+import { ThinkingOrb } from "thinking-orbs";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
@@ -240,10 +241,13 @@ function AssistantMessage({
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
-        <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" aria-label="Pensando"><SpinnerGap size={14} className="motion-safe:animate-spin" /><span className="activity-shimmer">Pensando…</span></div>
+        <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" role="status">
+          <ThinkingOrb state="working" size={20} aria-hidden="true" />
+          <span className="activity-shimmer">Pensando…</span>
+        </div>
       ) : message.content ? (
         <div className="mt-4 max-w-[76ch] text-[16px] leading-7 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
-          <MarkdownMessage>{message.content}</MarkdownMessage>
+          <MarkdownMessage streaming={message.status === "streaming"}>{message.content}</MarkdownMessage>
           {message.status === "streaming" ? <span className="stream-caret ml-0.5 inline-block h-4 w-[2px] bg-[var(--brain-accent)] align-middle" /> : null}
         </div>
       ) : null}
@@ -703,7 +707,7 @@ export function ChatWorkspace({
             </div>
           </div>
           <div className={`${hasMessages ? "hidden" : "flex"} mt-2 h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]`}>
-            {sending ? <><SpinnerGap size={11} className="motion-safe:animate-spin" />{preferences.assistantName} está trabajando</> : <span>Comprueba los datos importantes antes de usarlos.</span>}
+            {sending ? <><ThinkingOrb state="working" size={20} aria-hidden="true" /><span>{preferences.assistantName} está trabajando</span></> : <span>Comprueba los datos importantes antes de usarlos.</span>}
           </div>
         </div>
       </div>
