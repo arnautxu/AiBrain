@@ -3,9 +3,13 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
+  Bell,
+  Books,
+  CalendarBlank,
   CaretDown,
   CaretRight,
   ChatCircleDots,
+  CheckCircle,
   DotsThree,
   Folder,
   FolderOpen,
@@ -16,11 +20,14 @@ import {
   PushPin,
   SidebarSimple,
   SignOut,
+  SpinnerGap,
   UserCircle,
+  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import type { AuthSession } from "@/auth/types";
+import { TASK_CENTER_SHORTCUT_ARIA } from "@/components/use-task-center-shortcut";
 import { BrandMark, ThemeToggle } from "@/components/ui/primitives";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
 import {
@@ -29,6 +36,7 @@ import {
   type WorkbenchThread,
 } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import type { ThreadActivity } from "@/workbench/thread-activity";
 
 export type ProjectMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
 export type ThreadMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
@@ -43,10 +51,15 @@ type SidebarProps = {
   mobileOpen: boolean;
   desktopOpen: boolean;
   busy: boolean;
+  threadActivityById: Record<string, ThreadActivity>;
+  taskSummary: { unread: number; running: number; needsAttention: number };
   onCloseMobile: () => void;
   onCloseDesktop: () => void;
   onOpenDesktop: () => void;
   onOpenCommandPalette: () => void;
+  onOpenLibrary: () => void;
+  onOpenTaskCenter: () => void;
+  onOpenAutomations: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
   onNewThread: () => void;
@@ -55,6 +68,61 @@ type SidebarProps = {
   onThreadAction: (thread: WorkbenchThread, action: ThreadMenuAction) => void;
   onOpenCustomization: () => void;
 };
+
+const threadStateCopy: Record<ThreadActivity["state"], string> = {
+  idle: "Sin actividad pendiente",
+  running: "Trabajando",
+  needs_attention: "Necesita tu atención",
+  completed: "Trabajo completado",
+  failed: "La ejecución ha fallado",
+};
+
+function ThreadActivitySignal({ activity }: { activity: ThreadActivity | undefined }) {
+  if (!activity || (activity.state === "idle" && activity.unreadCount === 0)) return null;
+  const label = threadStateCopy[activity.state];
+  return (
+    <span className="flex shrink-0 items-center gap-1" title={label}>
+      {activity.unreadCount > 0 ? (
+        <span
+          aria-label={`${activity.unreadCount} ${activity.unreadCount === 1 ? "actualización sin leer" : "actualizaciones sin leer"}`}
+          className="grid min-w-4 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[9px] font-bold leading-4 text-[var(--brain-contrast)]"
+        >
+          {activity.unreadCount > 9 ? "9+" : activity.unreadCount}
+        </span>
+      ) : null}
+      <span aria-label={label} className={`grid size-4 place-items-center rounded-full ${
+        activity.state === "needs_attention" || activity.state === "failed"
+          ? "text-[var(--danger)]"
+          : activity.state === "completed"
+            ? "text-[var(--brain-accent-on-soft)]"
+            : "text-[var(--text-subtle)]"
+      }`}>
+        {activity.state === "running" ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : null}
+        {activity.state === "needs_attention" || activity.state === "failed" ? <WarningCircle size={13} weight="fill" /> : null}
+        {activity.state === "completed" ? <CheckCircle size={13} weight="fill" /> : null}
+      </span>
+    </span>
+  );
+}
+
+function ProjectActivitySignal({ activities }: { activities: ThreadActivity[] }) {
+  const running = activities.filter((activity) => activity.state === "running").length;
+  const attention = activities.filter((activity) => activity.state === "needs_attention" || activity.state === "failed").length;
+  const unread = activities.reduce((total, activity) => total + activity.unreadCount, 0);
+  if (!running && !attention && !unread) return null;
+  const label = attention
+    ? `${attention} ${attention === 1 ? "conversación necesita" : "conversaciones necesitan"} atención`
+    : running
+      ? `${running} ${running === 1 ? "conversación trabajando" : "conversaciones trabajando"}`
+      : `${unread} ${unread === 1 ? "actualización sin leer" : "actualizaciones sin leer"}`;
+  return (
+    <span aria-label={label} title={label} className="flex shrink-0 items-center gap-1 text-[var(--text-subtle)]">
+      {attention ? <WarningCircle size={12} weight="fill" className="text-[var(--danger)]" /> : null}
+      {!attention && running ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : null}
+      {unread ? <span className="grid min-w-4 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[9px] font-bold leading-4 text-[var(--brain-contrast)]">{unread > 9 ? "9+" : unread}</span> : null}
+    </span>
+  );
+}
 
 function relativeDate(date: string) {
   const parsed = new Date(date);
@@ -118,10 +186,15 @@ export function Sidebar({
   mobileOpen,
   desktopOpen,
   busy,
+  threadActivityById,
+  taskSummary,
   onCloseMobile,
   onCloseDesktop,
   onOpenDesktop,
   onOpenCommandPalette,
+  onOpenLibrary,
+  onOpenTaskCenter,
+  onOpenAutomations,
   onSelectProject,
   onSelectThread,
   onNewThread,
@@ -220,6 +293,10 @@ export function Sidebar({
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={onNewThread}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
             <button aria-label="Mostrar proyectos" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}>{activeProject ? <FolderOpen size={18} weight="fill" /> : <Folder size={18} />}</button>
+            <button aria-label={taskSummary.unread ? `Tareas, ${taskSummary.unread} sin leer` : "Tareas"} aria-keyshortcuts={TASK_CENTER_SHORTCUT_ARIA} title="Abrir o cerrar Tareas (⌘⌥U / Ctrl+Alt+U)" className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+              <Bell size={18} weight={taskSummary.needsAttention ? "fill" : "regular"} />
+              {taskSummary.unread ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 grid min-w-4 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[8px] font-bold leading-4 text-[var(--brain-contrast)]">{taskSummary.unread > 9 ? "9+" : taskSummary.unread}</span> : taskSummary.running ? <span aria-hidden="true" className="absolute right-1 top-1 size-2 rounded-full bg-[var(--text-subtle)]" /> : null}
+            </button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-1">
             <button aria-label="Abrir preferencias" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCustomization}><GearSix size={18} /></button>
@@ -242,6 +319,20 @@ export function Sidebar({
             <span className="min-w-0 flex-1 text-[13px]">Buscar</span>
             <kbd className="rounded border border-[var(--border)] bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-subtle)]">⌘K</kbd>
           </button>
+          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenLibrary}>
+            <Books size={17} />
+            <span className="min-w-0 flex-1 text-[13px]">Biblioteca</span>
+          </button>
+          <button aria-keyshortcuts={TASK_CENTER_SHORTCUT_ARIA} title="Abrir o cerrar Tareas (⌘⌥U / Ctrl+Alt+U)" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}>
+            <Bell size={17} weight={taskSummary.needsAttention ? "fill" : "regular"} />
+            <span className="min-w-0 flex-1 text-[13px]">Tareas</span>
+            {taskSummary.running ? <SpinnerGap aria-label={`${taskSummary.running} ${taskSummary.running === 1 ? "tarea en curso" : "tareas en curso"}`} size={13} className="motion-safe:animate-spin" /> : null}
+            {taskSummary.unread ? <span aria-label={`${taskSummary.unread} ${taskSummary.unread === 1 ? "tarea sin leer" : "tareas sin leer"}`} className="grid min-w-5 place-items-center rounded-full bg-[var(--brain-accent)] px-1 text-[9px] font-bold leading-5 text-[var(--brain-contrast)]">{taskSummary.unread > 99 ? "99+" : taskSummary.unread}</span> : null}
+          </button>
+          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
+            <CalendarBlank size={17} />
+            <span className="min-w-0 flex-1 text-[13px]">Programadas</span>
+          </button>
         </nav>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -261,7 +352,8 @@ export function Sidebar({
                     <button aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-9 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                       <ChatCircleDots size={15} weight={active ? "fill" : "regular"} />
                       <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
-                      {thread.pinned ? <PushPin size={10} weight="fill" /> : <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span>}
+                      <ThreadActivitySignal activity={threadActivityById[thread.id]} />
+                      {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </button>
                     <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
@@ -288,11 +380,16 @@ export function Sidebar({
               ) : activeProjects.map((project) => {
                 const active = project.id === activeProjectId;
                 const menuOpen = projectMenuId === project.id;
+                const projectActivities = threads
+                  .filter((thread) => thread.projectId === project.id && thread.status === "active")
+                  .map((thread) => threadActivityById[thread.id])
+                  .filter((activity): activity is ThreadActivity => Boolean(activity));
                 return (
                   <div key={project.id} className="relative group">
                     <button aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-9 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectProject(project.id)}>
                       {active ? <FolderOpen size={16} weight="fill" /> : <Folder size={16} />}
                       <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
+                      <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </button>
                     <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
@@ -318,7 +415,8 @@ export function Sidebar({
                       <button aria-current={active ? "page" : undefined} className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-9 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                         <ChatCircleDots size={15} weight={active ? "fill" : "regular"} />
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
-                        {thread.pinned ? <PushPin size={10} weight="fill" /> : <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span>}
+                        <ThreadActivitySignal activity={threadActivityById[thread.id]} />
+                        {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[9px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                       </button>
                       <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="absolute right-1 top-1 rounded-md p-2 text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                       {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}

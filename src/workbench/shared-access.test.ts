@@ -1,0 +1,124 @@
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuthSession } from "@/auth/types";
+import { loadInstallationConfig } from "@/config/installation";
+import { UserProvisioner } from "@/users/provisioner";
+import { FileWorkbenchStore } from "@/workbench/filesystem-store";
+import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
+import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
+import { createProject, createThread, updateProject } from "@/workbench/store";
+
+vi.mock("server-only", () => ({}));
+
+const ownerId = "00000000-0000-4000-8000-000000000011";
+const memberId = "00000000-0000-4000-8000-000000000012";
+const outsiderId = "00000000-0000-4000-8000-000000000014";
+let root = "";
+let previousConfig: string | undefined;
+
+beforeEach(async () => {
+  root = await mkdtemp(path.join(os.tmpdir(), "aibrain-shared-"));
+  const dataRoot = path.join(root, "data");
+  await mkdir(dataRoot, { mode: 0o700 });
+  const configPath = path.join(root, "installation.json");
+  await writeFile(configPath, JSON.stringify({
+    schemaVersion: 1,
+    installationId: "shared-qa",
+    companyName: "Shared QA",
+    companySlug: "shared-qa",
+    publicUrl: "http://localhost:3000",
+    branding: { productName: "AiBrain", logoPath: "/logo.svg", faviconPath: "/favicon.ico", accentColor: "#111111" },
+    paths: {
+      dataRoot,
+      companyContextRoot: path.join(dataRoot, "company"),
+      usersRoot: path.join(dataRoot, "users"),
+      sourceReadRoot: path.join(root, "source"),
+      publishWriteRoot: path.join(root, "publish"),
+      backupsRoot: path.join(dataRoot, "backups"),
+    },
+  }));
+  previousConfig = process.env.AIBRAIN_INSTALLATION_CONFIG;
+  process.env.AIBRAIN_INSTALLATION_CONFIG = configPath;
+});
+
+afterEach(async () => {
+  if (previousConfig === undefined) delete process.env.AIBRAIN_INSTALLATION_CONFIG;
+  else process.env.AIBRAIN_INSTALLATION_CONFIG = previousConfig;
+  await rm(root, { recursive: true, force: true });
+});
+
+describe("shared project visibility", () => {
+  it("authorizes a durable shared-project grant before opening the owner snapshot", async () => {
+    const installation = await loadInstallationConfig();
+    const provisioner = new UserProvisioner(installation);
+    await provisioner.provision({ userId: ownerId, email: "owner@example.com", displayName: "Owner" });
+    await provisioner.provision({ userId: memberId, email: "member@example.com", displayName: "Member" });
+    await provisioner.provision({ userId: outsiderId, email: "outsider@example.com", displayName: "Outsider" });
+    const ownerSession: AuthSession = {
+      provider: "local",
+      user: { id: ownerId, name: "Owner", email: "owner@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const memberSession: AuthSession = {
+      provider: "local",
+      user: { id: memberId, name: "Member", email: "member@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const outsiderSession: AuthSession = {
+      provider: "local",
+      user: { id: outsiderId, name: "Outsider", email: "outsider@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
+    const project = await createProject(ownerSession, "Plan compartido");
+    await updateProject(ownerSession, project.id, {
+      sharing: {
+        visibility: "shared",
+        members: [{
+          id: "00000000-0000-4000-8000-000000000013",
+          email: "member@example.com",
+          name: "Member",
+          role: "viewer",
+          status: "active",
+          addedAt: "2026-08-28T10:00:00.000Z",
+        }],
+      },
+    });
+    const thread = await createThread(ownerSession, project.id, "Conversación visible");
+
+    const readSpy = vi.spyOn(
+      FileWorkbenchStore.prototype as unknown as { read: (userId: string) => unknown },
+      "read",
+    );
+    const outsiderSnapshot = await loadSharedWorkbench(outsiderSession);
+    expect(outsiderSnapshot.projects.some((item) => item.id === project.id)).toBe(false);
+    expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+
+    readSpy.mockClear();
+    await expect(resolveProjectAccess(outsiderSession, project.id)).rejects.toThrow("Projecte no trobat");
+    expect(readSpy.mock.calls.map(([userId]) => userId)).not.toContain(ownerId);
+
+    readSpy.mockClear();
+    const access = await resolveProjectAccess(memberSession, project.id);
+    expect(access.ownerUserId).toBe(ownerId);
+    expect(access.provenance).toMatchObject({ source: "shared-access-index" });
+    expect(readSpy.mock.calls.map(([userId]) => userId)).toContain(ownerId);
+
+    const threadAccess = await resolveThreadAccess(memberSession, thread.id);
+    expect(threadAccess.provenance).toMatchObject({ source: "shared-access-index" });
+
+    const snapshot = await loadSharedWorkbench(memberSession);
+    expect(snapshot.projects.some((item) => item.id === project.id)).toBe(true);
+    expect(snapshot.threads.some((item) => item.projectId === project.id)).toBe(true);
+    await expect(resolveProjectAccess({ ...memberSession, user: { ...memberSession.user, email: "other@example.com" } }, project.id))
+      .rejects.toThrow("Projecte no trobat");
+
+    const audit = await new FileSharedAccessIndex({ dataRoot: installation.paths.dataRoot, installationId: installation.installationId }).readAudit();
+    expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "denied" && entry.payload.actorUserId === outsiderId)).toBe(true);
+    expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
+  });
+});

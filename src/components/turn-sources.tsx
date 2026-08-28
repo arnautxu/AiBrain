@@ -1,0 +1,76 @@
+"use client";
+
+import { CalendarBlank, File, Globe, LinkSimple } from "@phosphor-icons/react";
+import type { TurnSource } from "@/lib/chat-contract";
+
+function sourceLabel(source: TurnSource) {
+  return source.domain ?? (source.kind === "file" ? "Archivo adjunto" : "Aplicación");
+}
+
+function sourceIcon(source: TurnSource, size = 14) {
+  return source.kind === "web"
+    ? <Globe size={size} />
+    : source.kind === "file" ? <File size={size} /> : <LinkSimple size={size} />;
+}
+
+export function TurnSourceChips({ sources }: { sources: readonly TurnSource[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <section aria-label="Fuentes de la respuesta" className="mt-4">
+      <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Fuentes</h3>
+      <div className="flex flex-wrap gap-2">
+        {sources.map((source, index) => {
+          const content = (
+            <>
+              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-secondary)]">{sourceIcon(source, 12)}</span>
+              <span className="max-w-48 truncate">{source.title}</span>
+              <span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{index + 1}</span>
+            </>
+          );
+          const className = "inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)]";
+          return source.url ? (
+            <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className={className} aria-label={`Abrir fuente ${index + 1}: ${source.title}`}>{content}</a>
+          ) : (
+            <span key={source.id} className={className} aria-label={`Fuente ${index + 1}: ${source.title}`}>{content}</span>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+export function TurnSourceList({ sources }: { sources: readonly TurnSource[] }) {
+  if (sources.length === 0) {
+    return (
+      <div className="grid min-h-52 place-items-center px-5 py-8 text-center">
+        <div className="max-w-60">
+          <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Globe size={18} /></span>
+          <p className="mt-3 text-[12px] font-semibold text-[var(--text)]">Sin fuentes verificables</p>
+          <p className="mt-1.5 text-[11px] leading-5 text-[var(--text-muted)]">Este turno no ha entregado URLs ni archivos como metadatos. AiBrain no crea citas a partir del texto de la respuesta.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <ol aria-label="Fuentes del turno" className="space-y-2.5">
+      {sources.map((source, index) => (
+        <li key={source.id} className="rounded-[16px] border border-[var(--border)] bg-[var(--surface-raised)] p-3">
+          <div className="flex items-start gap-2.5">
+            <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{sourceIcon(source)}</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[12px] font-semibold leading-5 text-[var(--text)]">{index + 1}. {source.title}</p>
+                <span className="shrink-0 rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[9px] font-medium text-[var(--text-muted)]">{sourceLabel(source)}</span>
+              </div>
+              {source.snippet ? <p className="mt-1.5 text-[11px] leading-[18px] text-[var(--text-muted)]">{source.snippet}</p> : null}
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[var(--text-subtle)]">
+                {source.publishedAt ? <span className="inline-flex items-center gap-1"><CalendarBlank size={11} />{new Intl.DateTimeFormat("es", { dateStyle: "medium" }).format(new Date(source.publishedAt))}</span> : null}
+                {source.url ? <a href={source.url} target="_blank" rel="noreferrer" className="inline-flex min-h-8 items-center gap-1 rounded-full px-2 font-medium text-[var(--brain-accent)] hover:bg-[var(--surface-hover)]"><LinkSimple size={11} />Abrir fuente</a> : <span>Fuente local, sin enlace</span>}
+              </div>
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}

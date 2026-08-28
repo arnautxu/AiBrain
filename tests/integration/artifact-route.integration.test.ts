@@ -68,7 +68,13 @@ describe("private generated artifact route", () => {
     const first = await route.GET(new Request("http://localhost/artifact"), context);
     expect(first.status).toBe(200);
     expect(first.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(first.headers.get("Content-Disposition")).toContain("inline");
     expect(Buffer.from(await first.arrayBuffer()).toString("utf8")).toBe("private-image");
+
+    const download = await route.GET(new Request("http://localhost/artifact?download=1"), context);
+    expect(download.status).toBe(200);
+    expect(download.headers.get("Content-Disposition")).toContain("attachment");
+    expect(download.headers.get("X-Content-Type-Options")).toBe("nosniff");
 
     state.session = null;
     expect((await route.GET(new Request("http://localhost/artifact"), context)).status).toBe(401);
