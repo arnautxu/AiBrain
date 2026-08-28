@@ -30,9 +30,11 @@ export type ConnectorApprovalStatus =
   | "authorized"
   | "approval_requested"
   | "approved"
+  | "executing"
   | "executed"
   | "denied"
-  | "failed";
+  | "failed"
+  | "indeterminate";
 
 export type ApprovalLocator = {
   installationId: string;
@@ -304,7 +306,7 @@ export const connectorApprovalRecordSchema = defineVersionedSchema<ConnectorAppr
       expiresAt: expectIsoDate(record.expiresAt, context.at("expiresAt")),
       status: expectOneOf(
         record.status,
-        ["authorized", "approval_requested", "approved", "executed", "denied", "failed"] as const,
+        ["authorized", "approval_requested", "approved", "executing", "executed", "denied", "failed", "indeterminate"] as const,
         context.at("status"),
       ),
       authorizedAt: expectIsoDate(record.authorizedAt, context.at("authorizedAt")),
@@ -329,11 +331,11 @@ export const connectorApprovalRecordSchema = defineVersionedSchema<ConnectorAppr
       (parsed.requestedAt === null || parsed.approvedAt !== null || parsed.completedAt !== null)) {
       context.fail("requested connector approvals require requestedAt only");
     }
-    if (parsed.status === "approved" &&
+    if (["approved", "executing"].includes(parsed.status) &&
       (parsed.requestedAt === null || parsed.approvedAt === null || parsed.completedAt !== null)) {
-      context.fail("approved connector approvals require requestedAt and approvedAt only");
+      context.fail("approved and executing connector approvals require requestedAt and approvedAt only");
     }
-    if (["executed", "denied", "failed"].includes(parsed.status) &&
+    if (["executed", "denied", "failed", "indeterminate"].includes(parsed.status) &&
       (parsed.requestedAt === null || parsed.completedAt === null)) {
       context.fail("completed connector approvals require requestedAt and completedAt");
     }
@@ -362,7 +364,7 @@ export const connectorApprovalJournalEventSchema: StorageSchema<ConnectorApprova
       ...parseLocator(record, context),
       eventType: expectOneOf(
         record.eventType,
-        ["authorized", "approval_requested", "approved", "executed", "denied", "failed"] as const,
+        ["authorized", "approval_requested", "approved", "executing", "executed", "denied", "failed", "indeterminate"] as const,
         context.at("eventType"),
       ),
       authorizationFingerprint: expectAuthorizationFingerprint(
@@ -776,14 +778,18 @@ export class FileApprovalStore {
     );
   }
 
-  private async appendConnectorEvent(record: ConnectorApprovalRecord, eventType: ConnectorApprovalStatus) {
-    const occurredAt = eventType === "authorized"
+  private async appendConnectorEvent(
+    record: ConnectorApprovalRecord,
+    eventType: ConnectorApprovalStatus,
+    occurredAtOverride?: string,
+  ) {
+    const occurredAt = occurredAtOverride ?? (eventType === "authorized"
       ? record.authorizedAt
       : eventType === "approval_requested"
         ? record.requestedAt ?? record.authorizedAt
-        : eventType === "approved"
+        : eventType === "approved" || eventType === "executing"
           ? record.approvedAt ?? record.requestedAt ?? record.authorizedAt
-          : record.completedAt ?? record.approvedAt ?? record.requestedAt ?? record.authorizedAt;
+          : record.completedAt ?? record.approvedAt ?? record.requestedAt ?? record.authorizedAt);
     const event: ConnectorApprovalJournalEvent = {
       schemaVersion: 1,
       installationId: record.installationId,
@@ -814,15 +820,18 @@ export class FileApprovalStore {
         ? now
         : record.requestedAt ?? now,
       approvedAt: status === "approved" ? now : record.approvedAt,
-      completedAt: ["executed", "denied", "failed"].includes(status) ? now : null,
+      completedAt: ["executed", "denied", "failed", "indeterminate"].includes(status) ? now : null,
     });
     await this.writeConnectorUnlocked(updated);
-    await this.appendConnectorEvent(updated, status);
+    await this.appendConnectorEvent(updated, status, now);
     return updated;
   }
 
   private async expireConnectorUnlocked(record: ConnectorApprovalRecord) {
-    if (["executed", "denied", "failed"].includes(record.status) ||
+    if (record.status === "executing") {
+      return this.updateConnectorStatus(record, "indeterminate");
+    }
+    if (["executed", "denied", "failed", "indeterminate"].includes(record.status) ||
       new Date(record.expiresAt).valueOf() > this.now()) {
       return record;
     }
@@ -853,7 +862,7 @@ export class FileApprovalStore {
       if (existing) {
         const current = await this.expireConnectorUnlocked(existing);
         if (current.authorizationFingerprint !== authorizationFingerprint &&
-            !["executed", "denied", "failed"].includes(current.status)) {
+            !["executed", "denied", "failed", "indeterminate"].includes(current.status)) {
           const denied = await this.updateConnectorStatus(current, "denied");
           return { outcome: "denied" as const, record: denied, receipt: null };
         }
@@ -952,7 +961,7 @@ export class FileApprovalStore {
         return { outcome: "fingerprint-mismatch" as const, record };
       }
       if (record.status === "denied") return { outcome: "already-denied" as const, record };
-      if (["executed", "failed"].includes(record.status)) {
+      if (["executed", "failed", "indeterminate"].includes(record.status)) {
         return { outcome: "not-pending" as const, record };
       }
       return { outcome: "denied" as const, record: await this.updateConnectorStatus(record, "denied") };
@@ -964,7 +973,7 @@ export class FileApprovalStore {
     receipt: ConnectorApprovalReceipt,
   ) {
     if (!this.connectorReceiptMatches(record, receipt)) {
-      if (["executed", "denied", "failed"].includes(record.status)) {
+      if (["executed", "denied", "failed", "indeterminate"].includes(record.status)) {
         return { outcome: "not-pending" as const, record };
       }
       return { outcome: "denied" as const, record: await this.updateConnectorStatus(record, "denied") };
@@ -977,8 +986,9 @@ export class FileApprovalStore {
   }
 
   /**
-   * Performs the last authorization check under the durable receipt lock, then
-   * executes once. Any mismatch, expiry, or failed revalidation fails closed.
+   * Performs the last authorization check under the durable receipt lock. The
+   * dispatch is at-most-once; a post-dispatch failure is indeterminate and is
+   * never replayed automatically.
    */
   async executeConnectorApproval<T>(
     receiptInput: ConnectorApprovalReceipt,
@@ -993,50 +1003,91 @@ export class FileApprovalStore {
       const found = await this.readConnectorUnlocked(receipt);
       if (!found) return { outcome: "not-found" as const, record: null, value: undefined };
       const record = await this.expireConnectorUnlocked(found);
-      if (!this.connectorReceiptMatches(record, receipt)) {
-        if (["executed", "denied", "failed"].includes(record.status)) {
-          return { outcome: "not-pending" as const, record, value: undefined };
-        }
+      return this.executeConnectorApprovalUnlocked(record, receipt, options);
+    });
+  }
+
+  /**
+   * Server-only execution entry point for connector adapters. It resolves the
+   * durable receipt from the session-scoped locator, so HTTP never transports it.
+   */
+  async executeConnectorApprovalByLocator<T>(
+    locatorInput: ApprovalLocator,
+    authorizationFingerprintInput: string,
+    options: {
+      revalidate: () => boolean | Promise<boolean>;
+      execute: () => T | Promise<T>;
+    },
+  ) {
+    const locator = this.assertLocator(locatorInput);
+    const authorizationFingerprint = expectAuthorizationFingerprint(
+      authorizationFingerprintInput,
+      new ValidationContext("ConnectorApprovalExecution", "authorizationFingerprint"),
+    );
+    await this.prepare();
+    return this.locks.withLock(this.connectorLockKey(locator), async () => {
+      const found = await this.readConnectorUnlocked(locator);
+      if (!found) return { outcome: "not-found" as const, record: null, value: undefined };
+      const record = await this.expireConnectorUnlocked(found);
+      if (record.authorizationFingerprint !== authorizationFingerprint) {
+        return { outcome: "fingerprint-mismatch" as const, record, value: undefined };
+      }
+      return this.executeConnectorApprovalUnlocked(record, this.connectorReceipt(record), options);
+    });
+  }
+
+  private async executeConnectorApprovalUnlocked<T>(
+    record: ConnectorApprovalRecord,
+    receipt: ConnectorApprovalReceipt,
+    options: {
+      revalidate: () => boolean | Promise<boolean>;
+      execute: () => T | Promise<T>;
+    },
+  ) {
+    if (!this.connectorReceiptMatches(record, receipt)) {
+      if (["executed", "denied", "failed", "indeterminate"].includes(record.status)) {
+        return { outcome: "not-pending" as const, record, value: undefined };
+      }
+      return {
+        outcome: "denied" as const,
+        record: await this.updateConnectorStatus(record, "denied"),
+        value: undefined,
+      };
+    }
+    if (record.status === "executed") return { outcome: "replayed" as const, record, value: undefined };
+    if (record.status === "indeterminate") return { outcome: "indeterminate" as const, record, value: undefined };
+    if (record.status !== "approved") return { outcome: "not-pending" as const, record, value: undefined };
+    try {
+      if (!await options.revalidate()) {
         return {
           outcome: "denied" as const,
           record: await this.updateConnectorStatus(record, "denied"),
           value: undefined,
         };
       }
-      if (record.status === "executed") return { outcome: "replayed" as const, record, value: undefined };
-      if (record.status !== "approved") return { outcome: "not-pending" as const, record, value: undefined };
-      try {
-        if (!await options.revalidate()) {
-          return {
-            outcome: "denied" as const,
-            record: await this.updateConnectorStatus(record, "denied"),
-            value: undefined,
-          };
-        }
-      } catch (error) {
-        await this.updateConnectorStatus(record, "failed");
-        throw new ApprovalStoreError(
-          "CONNECTOR_APPROVAL_REVALIDATION_FAILED",
-          "Connector authorization could not be revalidated.",
-          { cause: error },
-        );
-      }
-      try {
-        const value = await options.execute();
-        return {
-          outcome: "executed" as const,
-          record: await this.updateConnectorStatus(record, "executed"),
-          value,
-        };
-      } catch (error) {
-        await this.updateConnectorStatus(record, "failed");
-        throw new ApprovalStoreError(
-          "CONNECTOR_APPROVAL_EXECUTION_FAILED",
-          "Connector execution failed after authorization.",
-          { cause: error },
-        );
-      }
-    });
+    } catch (error) {
+      await this.updateConnectorStatus(record, "failed");
+      throw new ApprovalStoreError(
+        "CONNECTOR_APPROVAL_REVALIDATION_FAILED",
+        "Connector authorization could not be revalidated.",
+        { cause: error },
+      );
+    }
+    const executing = await this.updateConnectorStatus(record, "executing");
+    try {
+      const value = await options.execute();
+      return {
+        outcome: "executed" as const,
+        record: await this.updateConnectorStatus(executing, "executed"),
+        value,
+      };
+    } catch {
+      return {
+        outcome: "indeterminate" as const,
+        record: await this.updateConnectorStatus(executing, "indeterminate"),
+        value: undefined,
+      };
+    }
   }
 
   async readConnectorApproval(locatorInput: ApprovalLocator) {
