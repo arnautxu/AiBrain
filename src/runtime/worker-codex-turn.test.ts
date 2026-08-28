@@ -115,6 +115,18 @@ function permissions(rules: ResolvedPermissions["rules"] = []): ResolvedPermissi
   };
 }
 
+function projectGuidance() {
+  return {
+    projectId,
+    projectName: "Testing 1",
+    projectInstructions: "",
+    projectMemory: "",
+    projectSources: [],
+    visibleProjects: [{ id: projectId, name: "Testing 1" }],
+    branchHistory: null,
+  };
+}
+
 describe("worker Codex turn", () => {
   beforeEach(() => {
     mocked.runtime = null;
@@ -291,6 +303,9 @@ describe("worker Codex turn", () => {
       }],
       new AbortController().signal,
       async (event) => { events.push(event); },
+      undefined,
+      "AiBrain",
+      projectGuidance(),
     );
 
     const turnStart = calls.find((call) => call.method === "turn/start");
@@ -329,6 +344,13 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
     expect(instructions).toContain("La cerca web en viu està disponible");
+    expect(instructions).toContain("BEGIN AIBRAIN UI PROJECT CONTEXT JSON");
+    expect(instructions).toContain(JSON.stringify({
+      currentProject: { id: projectId, name: "Testing 1" },
+      visibleProjects: [{ id: projectId, name: "Testing 1" }],
+    }));
+    expect(instructions).not.toContain("workspaceKey");
+    expect(instructions).not.toContain("snapshot-uuid-not-a-project");
     expect(instructions.indexOf(`Policy fingerprint: ${fingerprint}`))
       .toBeLessThan(instructions.indexOf("BEGIN AIBRAIN EXPLICIT MEMORY JSON DATA"));
     expect(boundTurn).toBe("runtime-turn-1");

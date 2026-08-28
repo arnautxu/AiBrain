@@ -88,7 +88,7 @@ afterEach(async () => {
 describe("local workbench routing", () => {
   it("routes a local authenticated session only to the per-user filesystem store", async () => {
     const { session } = await fixture();
-    const { createProject, loadWorkbench } = await import("@/workbench/store");
+    const { createProject, createThread, getThreadRuntimeContext, loadWorkbench } = await import("@/workbench/store");
     const initial = await loadWorkbench(session);
     expect(initial).toMatchObject({ persistence: "filesystem", threads: [] });
     expect(initial.projects).toEqual([
@@ -100,6 +100,12 @@ describe("local workbench routing", () => {
       expect.objectContaining({ slug: STANDALONE_PROJECT_SLUG }),
       expect.objectContaining({ id: project.id }),
     ]));
+    const thread = await createThread(session, project.id, "Hi");
+    await expect(getThreadRuntimeContext(session, thread.id)).resolves.toMatchObject({
+      projectId: project.id,
+      projectName: "Local only",
+      visibleProjects: [{ id: project.id, name: "Local only" }],
+    });
     expect(forbidden).not.toHaveBeenCalled();
   });
 });

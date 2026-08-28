@@ -29,8 +29,12 @@ import type {
   BranchThreadInput,
   UpdateProjectInput,
   UpdateThreadInput,
+  WorkbenchProject,
   WorkbenchListQuery,
+  WorkbenchSnapshot,
 } from "@/workbench/types";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
+import type { AgentThreadRuntimeContext, ThreadRuntimeContext } from "@/workbench/internal";
 import {
   loadSharedWorkbench,
   normalizeProjectMembers,
@@ -77,6 +81,28 @@ function sharedPage<Item>(items: Item[], query: WorkbenchListQuery, scope: strin
       ? Buffer.from(JSON.stringify({ v: 1, offset: nextOffset, fingerprint }), "utf8").toString("base64url")
       : null,
   };
+}
+
+function compareVisibleProjects(left: WorkbenchProject, right: WorkbenchProject) {
+  return Number(right.pinned) - Number(left.pinned)
+    || right.updatedAt.localeCompare(left.updatedAt)
+    || left.id.localeCompare(right.id);
+}
+
+/** Mirrors the active project section of the UI sidebar, using only the
+ * server-authorized workbench snapshot for this session. */
+export function visibleProjectReferences(snapshot: Pick<WorkbenchSnapshot, "projects">) {
+  return snapshot.projects
+    .filter((project) => project.status === "active" && project.slug !== STANDALONE_PROJECT_SLUG)
+    .toSorted(compareVisibleProjects)
+    .map(({ id, name }) => ({ id, name }));
+}
+
+function withVisibleProjects(
+  context: ThreadRuntimeContext,
+  snapshot: Pick<WorkbenchSnapshot, "projects">,
+): AgentThreadRuntimeContext {
+  return { ...context, visibleProjects: visibleProjectReferences(snapshot) };
 }
 
 async function filesystemStore(session: AuthSession) {
@@ -243,15 +269,27 @@ export async function getProjectRuntimeContext(session: AuthSession, projectId: 
   return getDemoProjectRuntimeContext(session, projectId);
 }
 
-export async function getThreadRuntimeContext(session: AuthSession, threadId: string) {
+export async function getThreadRuntimeContext(
+  session: AuthSession,
+  threadId: string,
+): Promise<AgentThreadRuntimeContext> {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
     const access = await resolveThreadAccess(session, threadId);
     if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
-    return access.store.getThreadRuntimeContext(access.ownerUserId, threadId);
+    return withVisibleProjects(
+      await access.store.getThreadRuntimeContext(access.ownerUserId, threadId),
+      await loadSharedWorkbench(session),
+    );
   }
   assertWorkbenchId(threadId);
-  return getDemoThreadRuntimeContext(session, threadId);
+  return withVisibleProjects(
+    await getDemoThreadRuntimeContext(session, threadId),
+    await loadDemoWorkbench(
+      session,
+      isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
+    ),
+  );
 }
 
 export async function beginThreadTurn(
