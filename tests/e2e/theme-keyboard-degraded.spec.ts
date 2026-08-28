@@ -125,7 +125,7 @@ test("a successful runtime check cancels its unavailable deadline", async ({ pag
   await page.addInitScript(() => {
     const nativeSetTimeout = window.setTimeout.bind(window);
     window.setTimeout = ((handler: TimerHandler, timeout?: number, ...args: unknown[]) =>
-      nativeSetTimeout(handler, timeout === 40_000 ? 100 : timeout, ...args)) as typeof window.setTimeout;
+      nativeSetTimeout(handler, timeout === 40_000 ? 1_000 : timeout, ...args)) as typeof window.setTimeout;
   });
   await page.route("**/api/runtime/status**", (route) => route.fulfill({
     status: 200,
@@ -154,7 +154,7 @@ test("a successful runtime check cancels its unavailable deadline", async ({ pag
   }));
 
   await login(page);
-  await page.waitForTimeout(200);
+  await page.waitForTimeout(1_200);
   await expect(page.getByText("El servicio no está disponible. Puedes revisar el historial.")).toHaveCount(0);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Comprobar disponibilidad");
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
