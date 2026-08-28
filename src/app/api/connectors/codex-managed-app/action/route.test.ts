@@ -47,6 +47,6 @@ describe("Codex managed action route", () => {
     execute.mockResolvedValue({ outcome: "executed" });
     const response = await POST(new Request("https://example.test/api/connectors/codex-managed-app/action", { method: "POST", body: JSON.stringify({ operation: "execute", locator, authorizationFingerprint: fingerprint }) }));
     expect(response.status).toBe(200);
-    expect(execute).toHaveBeenCalledWith({ operation: "execute", locator, authorizationFingerprint: fingerprint });
+    expect(execute).toHaveBeenCalledWith({ operation: "execute-allowlisted-action", locator, authorizationFingerprint: fingerprint });
   });
 });
