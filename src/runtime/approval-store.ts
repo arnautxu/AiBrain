@@ -101,9 +101,6 @@ export class ApprovalStoreError extends Error {
   }
 }
 
-/** Test-only fault injection for the unavoidable external-side-effect crash window. */
-export class ConnectorApprovalCrashWindowError extends Error {}
-
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
     error &&

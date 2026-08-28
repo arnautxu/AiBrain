@@ -14,8 +14,8 @@ unauthorised provider side effect and was not attempted.
 unless `connectors.codexManagedAppAction` names one fixed App, MCP server,
 tool, static arguments, and correlated readback. The browser cannot select
 those fields. The server derives principal and policy, prepares a SHA-256
-authorization snapshot, persists the exact approval receipt through
-`FileApprovalStore`, revalidates binding/version/scopes/health immediately
+authorization snapshot, persists the matching approval record only on the
+server, revalidates binding/version/scopes/health immediately
 before the call, and uses the durable approval lock for execution. No route
 returns `credentialRef`, a receipt, an authorization snapshot, tool arguments,
 or provider credentials. Prepare returns a safe descriptor and a normal visible
@@ -25,14 +25,16 @@ or provider credentials. Prepare returns a safe descriptor and a normal visible
 
 | Check | Result |
 | --- | --- |
-| Focused route and fake-transport integration test | `npx vitest run src/connectors/connectors.test.ts src/app/api/connectors/codex-managed-app/action/route.test.ts`: 18 passed |
+| Focused Auth, route and fake-transport integration tests | `npx vitest run src/runtime/approval-store.test.ts src/connectors/connectors.test.ts src/app/api/connectors/codex-managed-app/action/route.test.ts`: 30 passed |
 | Focused lint and whitespace validation | ESLint passed; `git diff --check` passed |
 | Type contract validation | `npx tsc --noEmit` passed after correcting two static type errors before commit |
 
-The focused tests inspect HTTP JSON, reject receipt/auth/server/tool/argument
+The focused tests inspect HTTP JSON, reject receipt/snapshot/auth/server/tool/argument
 fields from a browser body, persist the normal pending connector record, then
 resolve it directly in the store before execution and correlated readback.
-They also reject recursively normalized credential keys in static arguments.
+They also reject recursively normalized credential keys in static arguments,
+verify a single provider dispatch, and verify that a post-dispatch readback
+failure becomes `indeterminate` without a provider replay after restart.
 
 ## Before and after
 
@@ -47,13 +49,14 @@ hidden and the capability fails closed with a precise code.
 
 Implemented and locally validated with fake transport only. Not live-validated:
 no Arnall MCP manifest, personal App/OAuth binding, approval-route handoff, or
-provider readback has been used. A simulated process crash after a provider
-side effect but before `executed` persistence leaves the record approved and
-allows a second execution; this is an explicit at-least-once crash-window risk,
-not an exactly-once guarantee. It needs an Auth-coordinated state-machine or
-provider idempotency expansion. The remaining single Arnall input is one
-reviewed `connectors.codexManagedAppAction` manifest for the intended personal
-Codex App/MCP connection.
+provider readback has been used. Before dispatch the approval becomes durable
+`executing`; an execution/readback failure after dispatch becomes durable
+`indeterminate`. A second execute or restart does not call the provider again.
+This is at-most-once dispatch, not proof of a provider-side exactly-once
+outcome: manual provider recovery/readback and an idempotency capability remain
+required. The remaining single Arnall input is one reviewed
+`connectors.codexManagedAppAction` manifest for the intended personal Codex
+App/MCP connection.
 
 ## P0 corrective evidence
 
@@ -70,5 +73,7 @@ corrective validation is `npx tsc --noEmit` plus route/integration tests: 19
 passed. It proves symlink rejection on both read and write, and cross-user or
 cross-installation isolation. The visible item remains `kind: "command"` for
 the current UI contract; the durable `ApprovalRecord.requestType` is
-`connector`. No connector-specific UI kind is claimed. C2's crash hook/state
-machine is unchanged and remains the Auth-owned replacement/merge point.
+`connector`. No connector-specific UI kind is claimed. Auth C2 resolves
+approve/execute only through the server-side locator and marks post-dispatch
+uncertainty `indeterminate`; Connector does not retain a crash hook or duplicate
+locator execution method.

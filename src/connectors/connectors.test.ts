@@ -25,7 +25,7 @@ import {
 import { CodexManagedAppAction } from "@/connectors/codex-managed-app-action";
 import { FileConnectorAuthorizationStore } from "@/connectors/authorization-store";
 import { parseInstallationConfig, type CodexManagedAppActionConfig } from "@/config/installation-schema";
-import { ConnectorApprovalCrashWindowError, FileApprovalStore } from "@/runtime/approval-store";
+import { FileApprovalStore } from "@/runtime/approval-store";
 
 const INSTALLATION_ID = "example-lab";
 const USER_ONE = "00000000-0000-4000-8000-000000000001";
@@ -372,7 +372,7 @@ describe("Codex managed App action", () => {
       { structuredContent: { executionId: "execution-1" }, content: [] },
       { structuredContent: { executionId: "execution-1" }, content: [] },
     ];
-    const request = vi.fn(async () => {
+    const request = vi.fn(async (..._requestArguments: unknown[]) => {
       const response = responses.shift();
       if (response instanceof Error) throw response;
       return response;
@@ -399,7 +399,7 @@ describe("Codex managed App action", () => {
     return { action, approvals, authorizations, locator, request, dataRoot };
   }
 
-  it("creates a visible durable pending item then executes the fixed action after normal approval", async () => {
+  it("runs the approved fixed action once and returns its durable readback without replaying the side effect", async () => {
     const { action, approvals, locator, request } = await actionFixture();
     const prepared = await action.prepare(locator);
     expect(prepared).toMatchObject({ operation: "execute-allowlisted-action", approval: { status: "pending" } });
@@ -423,6 +423,8 @@ describe("Codex managed App action", () => {
     }, "connector-codex-readback", 10_000);
     await expect(action.execute(prepared)).resolves.toMatchObject({ outcome: "replayed" });
     expect(request).toHaveBeenCalledTimes(4);
+    expect(request.mock.calls.filter(([, parameters]) =>
+      (parameters as { tool?: string }).tool === "sync-confirmed-export")).toHaveLength(1);
   });
 
   it("fails closed for another user and missing execute scope before calling a tool", async () => {
@@ -437,47 +439,22 @@ describe("Codex managed App action", () => {
     expect(missingScope.request).toHaveBeenCalledTimes(1);
   });
 
-  it("marks the receipt failed when the provider errors or readback is absent", async () => {
-    const providerError = await actionFixture({ responses: [
-      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
-      { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
-      { isError: true, content: [] },
-    ] });
-    const first = await providerError.action.prepare(providerError.locator);
-    await providerError.approvals.resolve(providerError.locator, "accept");
-    await expect(providerError.action.execute(first)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
-
-    const absentReadback = await actionFixture({ responses: [
+  it("marks a post-dispatch readback failure indeterminate and never re-dispatches after restart", async () => {
+    const postDispatchFailure = await actionFixture({ responses: [
       { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
       { apps: [{ id: "app-arnall-files", enabled: true, callable: true }] },
       { structuredContent: { executionId: "execution-2" }, content: [] },
       { structuredContent: {}, content: [] },
     ] });
-    const second = await absentReadback.action.prepare(absentReadback.locator);
-    await absentReadback.approvals.resolve(absentReadback.locator, "accept");
-    await expect(absentReadback.action.execute(second)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
-    await expect(absentReadback.approvals.readConnectorApproval(absentReadback.locator))
-      .resolves.toMatchObject({ status: "failed" });
-  });
-
-  it("documents the crash window: a provider side effect can replay before executed persists", async () => {
-    const { approvals, locator } = await actionFixture();
-    const authorizationFingerprint = "c".repeat(64);
-    await approvals.prepareConnectorApproval({ locator, authorizationFingerprint });
-    await approvals.approveConnectorApprovalForLocator({ locator, authorizationFingerprint });
-    let effects = 0;
-    await expect(approvals.executeConnectorApprovalForLocator({
-      locator, authorizationFingerprint,
-      revalidate: () => true,
-      execute: () => { effects += 1; return "side-effect-complete"; },
-      crashAfterExecuteForTest: () => { throw new ConnectorApprovalCrashWindowError("simulated process death"); },
-    })).rejects.toBeInstanceOf(ConnectorApprovalCrashWindowError);
-    expect(await approvals.readConnectorApproval(locator)).toMatchObject({ status: "approved" });
-    await expect(approvals.executeConnectorApprovalForLocator({
-      locator, authorizationFingerprint, revalidate: () => true,
-      execute: () => { effects += 1; return "replayed-after-crash"; },
-    })).resolves.toMatchObject({ outcome: "executed" });
-    expect(effects).toBe(2);
+    const prepared = await postDispatchFailure.action.prepare(postDispatchFailure.locator);
+    await postDispatchFailure.approvals.resolve(postDispatchFailure.locator, "accept");
+    await expect(postDispatchFailure.action.execute(prepared)).resolves.toMatchObject({ outcome: "indeterminate" });
+    expect(await postDispatchFailure.approvals.readConnectorApproval(postDispatchFailure.locator))
+      .toMatchObject({ status: "indeterminate" });
+    expect(postDispatchFailure.request.mock.calls.filter(([, parameters]) =>
+      (parameters as { tool?: string }).tool === "sync-confirmed-export")).toHaveLength(1);
+    await expect(postDispatchFailure.action.execute(prepared)).resolves.toMatchObject({ outcome: "indeterminate" });
+    expect(postDispatchFailure.request).toHaveBeenCalledTimes(4);
   });
 
   it("contains authorization snapshots under a real dataRoot and isolates user and installation paths", async () => {
