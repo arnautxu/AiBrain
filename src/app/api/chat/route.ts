@@ -234,24 +234,27 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
 
-  try {
-    const featurePolicy = await featurePolicyForUser(session);
-    const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
-      ? "búsqueda web"
-      : body.options.imageGeneration && !featurePolicy["image-generation"]
-        ? "generación de imágenes"
-        : body.options.skill && !featurePolicy.skills ? "skills" : null;
-    if (disabledFeature) {
+  const requestsControlledFeature = body.options.webSearch || body.options.imageGeneration || Boolean(body.options.skill);
+  if (requestsControlledFeature) {
+    try {
+      const featurePolicy = await featurePolicyForUser(session);
+      const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
+        ? "búsqueda web"
+        : body.options.imageGeneration && !featurePolicy["image-generation"]
+          ? "generación de imágenes"
+          : body.options.skill && !featurePolicy.skills ? "skills" : null;
+      if (disabledFeature) {
+        return NextResponse.json({
+          error: `La capacidad ${disabledFeature} está desactivada en Configuración.`,
+          code: "FEATURE_DISABLED",
+        }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+      }
+    } catch {
       return NextResponse.json({
-        error: `La capacidad ${disabledFeature} está desactivada en Configuración.`,
-        code: "FEATURE_DISABLED",
-      }, { status: 403, headers: { "Cache-Control": "private, no-store" } });
+        error: "No se ha podido verificar la política de aplicaciones.",
+        code: "FEATURE_POLICY_UNAVAILABLE",
+      }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
     }
-  } catch {
-    return NextResponse.json({
-      error: "No se ha podido verificar la política de aplicaciones.",
-      code: "FEATURE_POLICY_UNAVAILABLE",
-    }, { status: 503, headers: { "Cache-Control": "private, no-store" } });
   }
 
   const browserPreview = isBrowserPreviewWorkbench();
