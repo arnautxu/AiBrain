@@ -150,7 +150,7 @@ function configuredAdmins() {
 function initialState(installationId: string, userIds: readonly string[]): WorkspaceAdminState {
   const provisioned = new Set(userIds);
   const admins = configuredAdmins().filter((userId) => provisioned.has(userId));
-  if (userIds.length > 0 && admins.length === 0) {
+  if (admins.length === 0) {
     throw new Error(
       "Workspace owner bootstrap is required: configure AIBRAIN_ADMIN_USER_IDS with a provisioned user before creating workspace-admin state.",
     );
