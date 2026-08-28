@@ -9,11 +9,13 @@ import type {
   MemoryTurnAuditEvent,
   WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
+import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 
 const mocked = vi.hoisted(() => ({
   runtime: null as unknown,
   maintenanceReleases: 0,
   maintenanceLease: null as unknown,
+  cancelTurn: null as ((remoteInterruptConfirmed: boolean) => void) | null,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({
@@ -37,7 +39,15 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
     if (lease !== mocked.maintenanceLease) throw new Error("Worker activity lease was not forwarded.");
     return mocked.runtime;
   },
-  registerWorkerTurnCancellation: () => () => undefined,
+  registerWorkerTurnCancellation: (
+    _userId: string,
+    _runtimeThreadId: string,
+    _localTurnId: string,
+    cancel: (remoteInterruptConfirmed: boolean) => void,
+  ) => {
+    mocked.cancelTurn = cancel;
+    return () => { mocked.cancelTurn = null; };
+  },
 }));
 
 import { runWorkerCodexTurn } from "@/runtime/worker-codex-turn";
@@ -136,6 +146,7 @@ describe("worker Codex turn", () => {
     mocked.runtime = null;
     mocked.maintenanceLease = null;
     mocked.maintenanceReleases = 0;
+    mocked.cancelTurn = null;
   });
 
   it("keeps live web search and the private browser exposed for a current Arnall query", async () => {
@@ -212,6 +223,55 @@ describe("worker Codex turn", () => {
           } as never);
           queueMicrotask(() => {
             void (async () => {
+              await handlers?.onNotification({
+                method: "turn/started",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turn: { id: "runtime-turn-1", status: "inProgress", items: [], error: null },
+                },
+              });
+              await handlers?.onNotification({
+                method: "item/reasoning/summaryPartAdded",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  itemId: "reasoning-1",
+                  summaryIndex: 0,
+                },
+              });
+              await handlers?.onNotification({
+                method: "item/reasoning/textDelta",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  itemId: "reasoning-1",
+                  delta: "private reasoning must not be exposed",
+                  contentIndex: 0,
+                },
+              });
+              await handlers?.onNotification({
+                method: "item/reasoning/summaryTextDelta",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  itemId: "reasoning-1",
+                  delta: "Analitzant la petició",
+                  summaryIndex: 0,
+                },
+              });
+              await handlers?.onNotification({
+                method: "rawResponseItem/completed",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  item: {
+                    id: "reasoning-raw-1",
+                    type: "reasoning",
+                    summary: [{ type: "summary_text", text: "Resum final verificat" }],
+                    encrypted_content: null,
+                  },
+                },
+              });
               await handlers?.onNotification({
                 method: "item/agentMessage/delta",
                 params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "Fet" },
@@ -410,7 +470,261 @@ describe("worker Codex turn", () => {
       },
     });
     expect(events).toContainEqual({ type: "done" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ label: "Preparant el context", status: "running" }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ label: "Preparant el resum del raonament" }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ kind: "reasoning", detail: "Analitzant la petició" }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ kind: "reasoning", detail: "Resum final verificat" }),
+    }));
+    expect(JSON.stringify(events)).not.toContain("private reasoning must not be exposed");
     expect(mocked.maintenanceReleases).toBe(1);
+  });
+
+  it("interrupts App Server when stop is requested while turn/start is still resolving", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-pending-stop-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    const calls: string[] = [];
+    const client = {
+      router: {
+        registerTurn(runtimeThreadId: string, localTurnId: string) {
+          return {
+            threadId: runtimeThreadId,
+            localTurnId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connection() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-pending-stop" } };
+          await beforeResolve?.(result as never, {
+            eventId: "pending-thread-response",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          expect(mocked.cancelTurn).not.toBeNull();
+          mocked.cancelTurn!(false);
+          const result = { turn: { id: "runtime-turn-pending-stop" } };
+          await beforeResolve?.(result as never, {
+            eventId: "pending-turn-response",
+            sequence: 2,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/interrupt") return {};
+        throw new Error(`Unexpected request ${method}`);
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls).toEqual(["thread/start", "turn/start", "turn/interrupt"]);
+    expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-pending-stop" });
+    expect(events).toContainEqual({ type: "stopped" });
+    expect(events).not.toContainEqual({ type: "done" });
+  });
+
+  it("recovers a timed-out turn/start from App Server without creating a duplicate turn", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-timeout-recovery-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> | void } | null = null;
+    const calls: string[] = [];
+    const client = {
+      router: {
+        registerTurn(runtimeThreadId: string, localTurnId: string, value: typeof handlers) {
+          handlers = value;
+          return {
+            threadId: runtimeThreadId,
+            localTurnId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connection() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-timeout" } };
+          await beforeResolve?.(result as never, {
+            eventId: "timeout-thread-response",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          throw new AppServerRequestTimeoutError("turn/start", purpose, 60_000);
+        }
+        if (method === "thread/read") {
+          const result = {
+            thread: {
+              id: "runtime-thread-timeout",
+              turns: [{
+                id: "runtime-turn-timeout",
+                status: "inProgress",
+                error: null,
+                items: [{ type: "userMessage", id: "user-item", clientId: userMessageId, content: [] }],
+              }],
+            },
+          };
+          queueMicrotask(() => {
+            void handlers?.onNotification({
+              method: "turn/completed",
+              params: {
+                threadId: "runtime-thread-timeout",
+                turn: { id: "runtime-turn-timeout", status: "completed", items: [], error: null },
+              },
+            }, {
+              eventId: "timeout-turn-completed",
+              sequence: 3,
+              occurredAt: new Date().toISOString(),
+              message: { kind: "rpc-notification", rpc: {} },
+            });
+          });
+          return result;
+        }
+        throw new Error(`Unexpected request ${method}`);
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls).toEqual(["thread/start", "turn/start", "thread/read"]);
+    expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-timeout" });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({
+        id: "runtime-turn-recovery",
+        label: "Torn recuperat",
+        status: "complete",
+      }),
+    }));
+    expect(events).toContainEqual({ type: "done" });
   });
 
   it("recovers a completed clientUserMessageId from thread history without starting it twice", async () => {

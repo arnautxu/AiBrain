@@ -84,6 +84,7 @@ function renderWorkspace(
     publications={[]}
     documentUploading={false}
     sending={false}
+    stopping={false}
     runtimeStatus={{ ...initialRuntimeStatus, mode: "demo", codex: "disabled", ready: true }}
     appPolicy={{ webSearch: true, imageGeneration: true, skills: true }}
     networkOnline
@@ -158,6 +159,17 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("button", { name: "Enviar mensaje" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Detener respuesta" }));
     expect(onStop).toHaveBeenCalledOnce();
+  });
+
+  it("prevents duplicate stop requests while App Server confirms cancellation", () => {
+    const onStop = vi.fn();
+    renderWorkspace(null, project, { sending: true, stopping: true, onStop });
+
+    const button = screen.getByRole("button", { name: "Deteniendo respuesta" });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    fireEvent.click(button);
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("keeps only copy below a response while retaining sensitive approval cards", () => {

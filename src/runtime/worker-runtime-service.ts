@@ -24,6 +24,7 @@ import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 
 const CATALOG_TTL_MS = 60_000;
+const PENDING_TURN_CANCELLATION_TTL_MS = 5 * 60_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -215,14 +216,24 @@ type RuntimeServiceState = {
   clients: Map<string, WorkerAppServerClient>;
   activeTurnCancellations: Map<string, {
     runtimeThreadId: string;
-    cancelAfterRemoteInterrupt(): void;
+    cancelAfterRemoteInterrupt(remoteInterruptConfirmed: boolean): void;
   }>;
 };
 
 const runtimeGlobal = globalThis as typeof globalThis & {
   __aibrainWorkerRuntimeService?: RuntimeServiceState;
   __aibrainWorkerRuntimeServicePromise?: Promise<RuntimeServiceState>;
+  __aibrainPendingWorkerTurnCancellations?: Map<string, number>;
 };
+
+function pendingTurnCancellations() {
+  const pending = runtimeGlobal.__aibrainPendingWorkerTurnCancellations ??= new Map<string, number>();
+  const expiredBefore = Date.now() - PENDING_TURN_CANCELLATION_TTL_MS;
+  for (const [key, requestedAt] of pending) {
+    if (requestedAt < expiredBefore) pending.delete(key);
+  }
+  return pending;
+}
 
 async function serviceState(): Promise<RuntimeServiceState> {
   const config = await loadInstallationConfig();
@@ -344,8 +355,11 @@ export async function stopWorkerRuntimeForUser(userId: string) {
   }
   for (const [key, registration] of state.activeTurnCancellations) {
     if (!key.startsWith(`${userId}:`)) continue;
-    registration.cancelAfterRemoteInterrupt();
+    registration.cancelAfterRemoteInterrupt(true);
     state.activeTurnCancellations.delete(key);
+  }
+  for (const key of pendingTurnCancellations().keys()) {
+    if (key.startsWith(`${userId}:`)) pendingTurnCancellations().delete(key);
   }
   return state.registry.stop(userId);
 }
@@ -368,7 +382,7 @@ export function registerWorkerTurnCancellation(
   userId: string,
   runtimeThreadId: string,
   localTurnId: string,
-  cancelAfterRemoteInterrupt: () => void,
+  cancelAfterRemoteInterrupt: (remoteInterruptConfirmed: boolean) => void,
 ) {
   const state = runtimeGlobal.__aibrainWorkerRuntimeService;
   if (!state || !state.clients.has(userId) || !runtimeThreadId || !localTurnId) {
@@ -380,6 +394,9 @@ export function registerWorkerTurnCancellation(
   }
   const registration = { runtimeThreadId, cancelAfterRemoteInterrupt };
   state.activeTurnCancellations.set(key, registration);
+  if (pendingTurnCancellations().delete(key)) {
+    cancelAfterRemoteInterrupt(false);
+  }
   return () => {
     if (state.activeTurnCancellations.get(key) === registration) {
       state.activeTurnCancellations.delete(key);
@@ -391,10 +408,27 @@ export function cancelWorkerTurnLocally(
   userId: string,
   runtimeThreadId: string,
   localTurnId: string,
+  remoteInterruptConfirmed = true,
 ) {
   const state = runtimeGlobal.__aibrainWorkerRuntimeService;
   const registration = state?.activeTurnCancellations.get(activeTurnKey(userId, localTurnId));
   if (!registration || registration.runtimeThreadId !== runtimeThreadId) return false;
-  registration.cancelAfterRemoteInterrupt();
+  registration.cancelAfterRemoteInterrupt(remoteInterruptConfirmed);
+  return true;
+}
+
+export function requestPendingWorkerTurnCancellation(
+  userId: string,
+  localTurnId: string,
+) {
+  const state = runtimeGlobal.__aibrainWorkerRuntimeService;
+  if (!localTurnId) return false;
+  const key = activeTurnKey(userId, localTurnId);
+  const registration = state?.activeTurnCancellations.get(key);
+  if (registration) {
+    registration.cancelAfterRemoteInterrupt(false);
+    return true;
+  }
+  pendingTurnCancellations().set(key, Date.now());
   return true;
 }

@@ -504,6 +504,7 @@ export function BrainApp({
   const [documentUploading, setDocumentUploading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const [runningThreadIds, setRunningThreadIds] = useState<Set<string>>(() => new Set());
+  const [stoppingThreadIds, setStoppingThreadIds] = useState<Set<string>>(() => new Set());
   const [draftStarting, setDraftStarting] = useState(false);
   const [threadReadMarkers, setThreadReadMarkers] = useState<Record<string, ThreadReadMarker>>({});
   const [actionBusy, setActionBusy] = useState(false);
@@ -1418,6 +1419,8 @@ export function BrainApp({
       controller?.abort();
       return;
     }
+    if (stoppingThreadIds.has(activeThread.id)) return;
+    setStoppingThreadIds((current) => new Set(current).add(activeThread.id));
     try {
       const response = await fetch("/api/runtime/turns/control", {
         method: "POST",
@@ -1429,15 +1432,25 @@ export function BrainApp({
           clientRequestId: crypto.randomUUID(),
         }),
       });
-      if (!response.ok && response.status !== 409) {
-        setNotice("No s’ha pogut confirmar l’aturada amb el runtime.");
+      if (!response.ok) {
+        const payload: unknown = await response.json().catch(() => null);
+        const message = payload && typeof payload === "object" && "error" in payload &&
+          typeof payload.error === "string"
+          ? payload.error
+          : "No s’ha pogut confirmar l’aturada amb el runtime.";
+        setNotice(message);
       }
     } catch {
       setNotice("S’ha perdut la connexió mentre s’aturava el torn.");
     } finally {
       controller?.abort();
+      setStoppingThreadIds((current) => {
+        const next = new Set(current);
+        next.delete(activeThread.id);
+        return next;
+      });
     }
-  }, [activeThread, initialWorkbench.persistence]);
+  }, [activeThread, initialWorkbench.persistence, stoppingThreadIds]);
 
   const resolveApproval = useCallback(async (
     messageId: string,
@@ -1805,6 +1818,7 @@ export function BrainApp({
         publications={publications}
         documentUploading={documentUploading}
         sending={sending}
+        stopping={activeThread ? stoppingThreadIds.has(activeThread.id) : false}
         runtimeStatus={effectiveRuntimeStatus}
         appPolicy={appPolicy}
         networkOnline={networkOnline}

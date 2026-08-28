@@ -4,6 +4,7 @@ import type { ActivityItem, ChatStreamEvent, TurnControlRequest } from "@/lib/ch
 import type { JsonValue } from "@/runtime/transport";
 import {
   cancelWorkerTurnLocally,
+  requestPendingWorkerTurnCancellation,
   workerAppServerForUser,
   type WorkerAppServerClient,
 } from "@/runtime/worker-runtime-service";
@@ -20,6 +21,10 @@ type TurnControlIdentity = {
   userId: string;
   runtimeThreadId: string;
   runtimeTurnId: string;
+};
+
+type PendingTurnControlIdentity = Omit<TurnControlIdentity, "runtimeTurnId" | "runtimeThreadId"> & {
+  runtimeThreadId: string | null;
 };
 
 type PersistAccepted = (event: ChatStreamEvent) => void | Promise<void>;
@@ -55,6 +60,41 @@ function assertSteerResponse(value: unknown, expectedTurnId: string) {
   }
 }
 
+async function persistAcceptedStop(
+  request: Extract<TurnControlRequest, { action: "stop" }>,
+  persistAccepted: PersistAccepted,
+) {
+  await persistAccepted({ type: "activity", item: acceptedActivity(request) });
+  await persistAccepted({ type: "stopped" });
+}
+
+export async function cancelPendingWorkerTurn(
+  identity: PendingTurnControlIdentity,
+  request: Extract<TurnControlRequest, { action: "stop" }>,
+  persistAccepted: PersistAccepted,
+) {
+  const activeRunnerCancelled = identity.runtimeThreadId
+    ? cancelWorkerTurnLocally(
+        identity.userId,
+        identity.runtimeThreadId,
+        request.assistantMessageId,
+        false,
+      )
+    : false;
+  const cancellationAccepted = activeRunnerCancelled || requestPendingWorkerTurnCancellation(
+    identity.userId,
+    request.assistantMessageId,
+  );
+  if (!cancellationAccepted) {
+    throw new TurnControlError(
+      "TURN_CONTROL_NOT_ACTIVE",
+      "El worker encara no té un torn local que es pugui aturar.",
+    );
+  }
+  await persistAcceptedStop(request, persistAccepted);
+  return { action: request.action, runtimeTurnId: null, activeRunnerCancelled } as const;
+}
+
 export async function executeTurnControl(
   client: Pick<WorkerAppServerClient, "request">,
   identity: TurnControlIdentity,
@@ -80,13 +120,13 @@ export async function executeTurnControl(
     threadId: identity.runtimeThreadId,
     turnId: identity.runtimeTurnId,
   }, `turn-interrupt:${request.clientRequestId}`, 10_000, async (_value: JsonValue) => {
-    await persistAccepted({ type: "activity", item: activity });
-    await persistAccepted({ type: "stopped" });
+    await persistAcceptedStop(request, persistAccepted);
   });
   const activeRunnerCancelled = cancelWorkerTurnLocally(
     identity.userId,
     identity.runtimeThreadId,
     request.assistantMessageId,
+    true,
   );
   return {
     action: request.action,

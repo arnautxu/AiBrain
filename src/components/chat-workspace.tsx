@@ -59,6 +59,7 @@ type ChatWorkspaceProps = {
   publications: DocumentPublicationDraft[];
   documentUploading: boolean;
   sending: boolean;
+  stopping: boolean;
   runtimeStatus: RuntimeStatus;
   appPolicy: { webSearch: boolean; imageGeneration: boolean; skills: boolean };
   networkOnline: boolean;
@@ -321,6 +322,7 @@ export function ChatWorkspace({
   publications,
   documentUploading,
   sending,
+  stopping,
   runtimeStatus,
   appPolicy,
   networkOnline,
@@ -693,9 +695,10 @@ export function ChatWorkspace({
                   onNotice={onComposerNotice}
                 />
                 <button
-                  aria-label={sending ? "Detener respuesta" : "Enviar mensaje"}
+                  aria-label={sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
+                  aria-busy={stopping || undefined}
                   className={`composer-submit grid size-11 place-items-center rounded-xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full ${sending ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--brain-accent)] text-[var(--brain-contrast)]"}`}
-                  disabled={sending ? false : !project || !prompt.trim() || !runtimeReady || documentUploading}
+                  disabled={sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
                   onClick={() => {
                     if (sending) {
                       onStop();

@@ -6,7 +6,10 @@ import type {
   AppServerTransport,
   TransportHealth,
 } from "@/runtime/transport/contracts";
-import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
+import {
+  AppServerRequestTimeoutError,
+  AppServerRpcRouter,
+} from "@/runtime/transport/app-server-rpc-router";
 
 class EventQueue implements AsyncIterable<AppServerEvent> {
   private values: AppServerEvent[] = [];
@@ -64,6 +67,23 @@ function event(sequence: number, message: AppServerEvent["message"]): AppServerE
 }
 
 describe("AppServerRpcRouter", () => {
+  it("returns a typed timeout so callers can recover without resubmitting a turn", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    const result = router.request(
+      { method: "turn/start", id: "slow-turn", params: { threadId: "thread-a", input: [] } },
+      5,
+    );
+
+    await expect(result).rejects.toMatchObject({
+      name: "AppServerRequestTimeoutError",
+      method: "turn/start",
+      requestId: "slow-turn",
+      timeoutMs: 5,
+    } satisfies Partial<AppServerRequestTimeoutError>);
+    await router.close();
+  });
+
   it("resolves concurrent RPC responses by id even when they arrive out of order", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
