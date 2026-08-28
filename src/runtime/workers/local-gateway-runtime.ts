@@ -557,7 +557,22 @@ export class PrivateWorkerGateway {
 
   private async acceptRequest(socket: WebSocket, request: AppServerRequest) {
     const canonical = JSON.stringify(request);
-    const accepted = await this.requests.accept(request.clientRequestId, sha256(canonical));
+    const canonicalHash = sha256(canonical);
+    const prior = await this.requests.latest(request.clientRequestId);
+    if (
+      request.kind === "rpc-response"
+      && prior?.status === "completed"
+      && prior.canonicalHash !== canonicalHash
+      && encodedResponseScopeDigest(request.clientRequestId) !== undefined
+    ) {
+      // The response has already produced durable progress in Codex. During
+      // client-journal recovery the original turn route may no longer exist,
+      // so the router cannot reproduce the exact approval decision. Re-ACK
+      // the completed idempotency key without dispatching the replacement.
+      this.sendAccepted(socket, request.clientRequestId);
+      return;
+    }
+    const accepted = await this.requests.accept(request.clientRequestId, canonicalHash);
     if (accepted.existing && accepted.record.status === "accepted") {
       if (request.kind === "rpc-response") {
         const scopeDigest = await this.responseScopeDigest(request, true);
