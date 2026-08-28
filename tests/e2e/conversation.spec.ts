@@ -80,7 +80,13 @@ test("the existing chat route streams a complete turn and persists it in preview
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
   await expect(page.getByText("Trabajando", { exact: true })).toBeVisible();
   await expect(page.getByText("Trabajando", { exact: true })).toHaveClass(/activity-shimmer/);
-  await expect(page.getByText(/Pensando|Editando archivos|Ejecutando comando/, { exact: true }).first()).toBeVisible();
+  const execution = page.locator("details").filter({ hasText: "Trabajando" }).first();
+  await expect(execution).not.toHaveAttribute("open", "");
+  const activeStep = page.getByText(/Pensando|Editando archivos|Ejecutando comando/, { exact: true }).first();
+  await expect(activeStep).toBeHidden();
+  await page.getByText("Trabajando", { exact: true }).click();
+  await expect(execution).toHaveAttribute("open", "");
+  await expect(activeStep).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
 

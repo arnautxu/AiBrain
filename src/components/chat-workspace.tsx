@@ -248,7 +248,6 @@ function AssistantMessage({
       ) : message.content ? (
         <div className="mt-4 max-w-[76ch] text-[16px] leading-7 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
           <MarkdownMessage streaming={message.status === "streaming"}>{message.content}</MarkdownMessage>
-          {message.status === "streaming" ? <span className="stream-caret ml-0.5 inline-block h-4 w-[2px] bg-[var(--brain-accent)] align-middle" /> : null}
         </div>
       ) : null}
 
