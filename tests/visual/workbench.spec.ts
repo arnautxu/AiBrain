@@ -3,7 +3,8 @@ import { expect, test, type Page } from "@playwright/test";
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 
 async function login(page: Page) {
-  const origin = "http://127.0.0.1:3100";
+  await page.goto("/login");
+  const origin = new URL(page.url()).origin;
   const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
     data: { userId: demoUserId },
     headers: { Origin: origin },
@@ -19,6 +20,79 @@ async function openMobileDrawerIfNeeded(page: Page) {
   if ((page.viewportSize()?.width ?? 1440) >= 768) return;
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+}
+
+async function installAdministrationRoutes(page: Page) {
+  const policy = {
+    apps: { "web-search": true, "image-generation": true, skills: true, "managed-browser": true },
+    capabilities: { consult: true, respond: true, execute: true, publish: true },
+  };
+  const role = {
+    id: "workspace-owner", name: "Propietario", description: "Administra el espacio de trabajo.",
+    canManageWorkspace: true, policy,
+  };
+  await page.route("**/api/settings", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      account: { userId: "example-user", displayName: "Alex Example", email: "alex@example.test", provider: "demo", expiresAt: "2099-01-01T00:00:00.000Z" },
+      company: { installationId: "example-laboratory", name: "Example Laboratory", isAdmin: true },
+      apps: [],
+      notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
+      permissions: [],
+      privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" },
+      browser: { profileScope: "private_per_employee", networkPolicy: "public_http_https_only", privateNetworkAllowed: false, mutationsRequireApproval: true, downloadsArePrivate: true },
+    }),
+  }));
+  await page.route("**/api/settings/team", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ members: [] }) }));
+  await page.route("**/api/usage/me", (route) => route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+  await page.route("**/api/usage/company", (route) => route.fulfill({ status: 503, contentType: "application/json", body: "{}" }));
+  await page.route("**/api/admin", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      installationId: "example-laboratory",
+      companyName: "Example Laboratory",
+      currentUserRoleId: "workspace-owner",
+      identityProvisioning: { mode: "local-profile-only", emailDelivery: false, detail: "El alta se completa en el servidor de la empresa." },
+      roles: [role],
+      groups: [{
+        id: "018f5f68-4a6e-7abc-8def-0123456789c1", name: "Operaciones", description: "Equipo de operaciones internas.",
+        memberIds: ["018f5f68-4a6e-7abc-8def-0123456789c2"], policy,
+        createdAt: "2026-08-20T09:00:00.000Z", updatedAt: "2026-08-27T09:00:00.000Z",
+      }],
+      members: [{
+        userId: "018f5f68-4a6e-7abc-8def-0123456789c2", displayName: "Alex Example", email: "alex@example.test",
+        enabled: true, workerId: "worker-alex", workerState: "running", workerHealthy: true,
+        roleId: "workspace-owner", groupIds: ["018f5f68-4a6e-7abc-8def-0123456789c1"],
+        usage: { turns: 18, inputTokens: "24500", outputTokens: "8200" },
+      }],
+      audit: [{
+        schemaVersion: 1, installationId: "example-laboratory", actorUserId: "example-user",
+        action: "group.updated", targetType: "group", targetId: "018f5f68-4a6e-7abc-8def-0123456789c1",
+        summary: "Se revisaron los permisos del grupo Operaciones.", occurredAt: "2026-08-27T09:30:00.000Z", sequence: 1,
+      }],
+    }),
+  }));
+}
+
+async function installCompletedTurnRoute(page: Page) {
+  await page.route("**/api/chat", (route) => route.fulfill({
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+    body: [
+      { type: "plan", explanation: "Preparando un resumen claro", steps: [
+        { step: "Entender el objetivo", status: "completed" },
+        { step: "Revisar el contenido", status: "completed" },
+        { step: "Preparar el resultado", status: "in_progress" },
+      ] },
+      { type: "activity", item: { id: "summary-ready", kind: "reasoning", label: "Contenido revisado", detail: "Se han identificado las ideas principales", status: "complete" } },
+      { type: "delta", value: "## Vista previa\n\nHe preparado una respuesta sintética con las tres ideas más importantes.\n\n### Resumen\n\n- Objetivo identificado.\n- Información ordenada.\n- Próximos pasos listos para revisar." },
+      { type: "done" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n",
+  }));
 }
 
 test("employee shell light", async ({ page }) => {
@@ -46,7 +120,7 @@ test("preferences dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   await page.getByRole("button", { name: "Abrir preferencias" }).click();
-  const preferences = page.getByRole("dialog", { name: /Preferencias de/ });
+  const preferences = page.getByRole("dialog", { name: /Configuración de/ });
   await expect(preferences).toBeVisible();
   await preferences.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
@@ -92,6 +166,50 @@ test("command palette light", async ({ page }) => {
   await expect(page).toHaveScreenshot("command-palette-light.png", { fullPage: true });
 });
 
+test("library surface light", async ({ page }) => {
+  await login(page);
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: "Biblioteca", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Biblioteca" })).toBeVisible();
+  await expect(page.getByText("Cargando biblioteca…")).toBeHidden();
+  await expect(page).toHaveScreenshot("library-surface-light.png", { fullPage: true });
+});
+
+test("task center surface dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: "Tareas", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeVisible();
+  await expect(page).toHaveScreenshot("task-center-surface-dark.png", { fullPage: true });
+});
+
+test("scheduled work surface light", async ({ page }) => {
+  await login(page);
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: "Programadas", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Tareas programadas" })).toBeVisible();
+  await expect(page.getByText("Cargando tareas…")).toBeHidden();
+  await expect(page).toHaveScreenshot("scheduled-work-surface-light.png", { fullPage: true });
+});
+
+test("project context surface light", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: /Abrir contexto de/ }).click();
+  await expect(page.getByRole("dialog", { name: "Configurar proyecto" })).toBeVisible();
+  await expect(page).toHaveScreenshot("project-context-surface-light.png", { fullPage: true });
+});
+
+test("team administration surface dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await installAdministrationRoutes(page);
+  await login(page);
+  await page.getByRole("button", { name: "Abrir preferencias" }).click();
+  await page.getByRole("button", { name: "Equipo", exact: true }).click();
+  await expect(page.getByText("Centro de administración", { exact: true })).toBeVisible();
+  await expect(page).toHaveScreenshot("team-administration-surface-dark.png", { fullPage: true });
+});
+
 test("create project dialog light", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
@@ -109,6 +227,7 @@ test("employee shell mobile drawer", async ({ page }, testInfo) => {
 });
 
 test("completed conversation", async ({ page }) => {
+  await installCompletedTurnRoute(page);
   await login(page);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
@@ -126,6 +245,7 @@ test("completed conversation", async ({ page }) => {
 
 test("completed conversation dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
+  await installCompletedTurnRoute(page);
   await login(page);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();

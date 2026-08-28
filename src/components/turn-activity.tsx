@@ -21,6 +21,7 @@ import type {
   ApprovalItem,
   ChatMessage,
 } from "@/lib/chat-contract";
+import { ToolResultList } from "@/components/tool-result-list";
 
 type TurnActivityProps = {
   message: ChatMessage;
@@ -148,7 +149,8 @@ function ApprovalCard({
 }
 
 export function TurnActivity({ message, compact = false, showDiff = true, onResolveApproval }: TurnActivityProps) {
-  const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
+  const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
+    Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails) return null;
   const executionLabel = message.status === "streaming"
     ? currentActivityLabel(message)
@@ -226,6 +228,8 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       {message.approvals.map((approval) => (
         <ApprovalCard key={approval.id} approval={approval} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
+
+      <ToolResultList results={message.toolResults ?? []} />
 
       {message.diff && showDiff ? (
         <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
