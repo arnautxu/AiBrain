@@ -56,7 +56,7 @@ const productionRunbook = read("docs/PRODUCTION.md");
 const arnallDeployGateway = read("infra/hetzner/app/deploy-arnall-main.sh");
 const arnallDeployWorkflow = read(".github/workflows/deploy-arnall.yml");
 const arnauPreviewDeployGateway = read("infra/hetzner/app/deploy-arnau-preview.sh");
-const arnauPreviewDeployWorkflow = read(".github/workflows/backend-ci.yml");
+const arnauPreviewDeployWorkflow = read(".github/workflows/deploy-arnau-preview.yml");
 const arnauPreviewInstallation = JSON.parse(read("config/installations/arnau.preview.example.json"));
 const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway, arnallDeployGateway].join("\n");
 
@@ -86,8 +86,8 @@ requireMatch(arnauPreviewDeployGateway, /readonly INSTALLATION_ID="arnau-preview
 requireMatch(arnauPreviewDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,120}\^deploy\\ \(\[0-9a-f\]\{40\}\)\$/u, "Arnau preview gateway does not constrain the forced SSH command");
 requireMatch(arnauPreviewDeployGateway, /config\/installations\/arnau\.preview\.example\.json/u, "Arnau preview gateway does not require its installation config");
 requireMatch(arnauPreviewDeployGateway, /aibrain-arnau-deploy-gateway/u, "Arnau preview gateway does not self-update its isolated entrypoint");
-requireMatch(arnauPreviewDeployWorkflow, /deploy-arnau-preview:[\s\S]*github\.ref == 'refs\/heads\/Arnau'[\s\S]*needs:[\s\S]*- quality[\s\S]*- e2e[\s\S]*- documents[\s\S]*- containers/u, "Arnau preview deployment is not gated on every successful branch CI job");
-requireMatch(arnauPreviewDeployWorkflow, /deploy-arnau-preview:[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnau preview deployment does not transmit the tested Arnau revision");
+requireMatch(arnauPreviewDeployWorkflow, /push:[\s\S]*branches:[\s\S]*- Arnau[\s\S]*ci:[\s\S]*uses: \.\/\.github\/workflows\/backend-ci\.yml[\s\S]*deploy:[\s\S]*needs:[\s\S]*- ci/u, "Arnau preview deployment is not gated on the complete reusable CI suite");
+requireMatch(arnauPreviewDeployWorkflow, /deploy:[\s\S]*git archive --format=tar "\$TESTED_SHA"/u, "Arnau preview deployment does not transmit the tested Arnau revision");
 requireMatch(arnauPreviewDeployWorkflow, /ARNAU_PREVIEW_DEPLOY_SSH_KEY[\s\S]*StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnau preview deployment does not use and pin its restricted identity");
 if (arnauPreviewInstallation.installationId !== "arnau-preview") failures.push("Arnau preview installation has the wrong installationId");
 if (arnauPreviewInstallation.publicUrl !== "https://arnau.167.233.146.105.sslip.io") failures.push("Arnau preview installation has the wrong public URL");
