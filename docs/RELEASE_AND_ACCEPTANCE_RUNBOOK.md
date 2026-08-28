@@ -192,6 +192,14 @@ It is read-only: it aborts if a source is missing, contains secret-shaped
 material, or disagrees with the candidate/state/OCI label. Each output carries
 its source, a source-or-command fingerprint and capture time.
 
+For the protected Arnall workflow, this collection is automatic only after the
+restricted deploy returns successfully. The workflow supplies the immutable
+`workflow_run` SHA and numeric run ID; the host regenerates the sanitized CI
+source, rechecks live/ready, resolves the running app and ingress-gateway IDs
+through the active release Compose file, and atomically stores a private
+`acceptance-release-readbacks.json` package with the five relative evidence
+paths and hashes. It prints neither the artifacts nor Docker output.
+
 ```bash
 npm run acceptance:verify -- --manifest /private/evidence/manifest.json \
   --evidence-root /private/evidence \

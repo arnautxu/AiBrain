@@ -82,10 +82,8 @@ sync_company_context() {
   done < <(find "$source" -maxdepth 1 -type f -name '*.md' -print0)
 }
 
-main() {
-  [[ "$(id -u)" == "0" ]] || fail "deployment gateway must run as root"
-  [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^deploy\ ([0-9a-f]{40})$ ]] || fail "unsupported deploy command"
-  local revision="${BASH_REMATCH[1]}"
+deploy_release() {
+  local revision="$1"
   local short_revision="${revision:0:7}"
   local release_dir="${RELEASES_DIR}/${revision}"
   local incoming_dir="${RELEASE_ROOT}/incoming"
@@ -237,6 +235,83 @@ main() {
   mv -f "${CONFIG_DIR}/last-deployment.json.pending" "${CONFIG_DIR}/last-deployment.json"
   trap - EXIT
   printf 'ARNALL_DEPLOY_OK revision=%s\n' "$revision"
+}
+
+collect_release_readbacks() {
+  local revision="$1" run_id="$2"
+  local release_dir="${RELEASES_DIR}/${revision}"
+  local compose_file="${STATE_FILE}.active.compose.yaml"
+  local evidence_parent="${CONFIG_DIR}/acceptance"
+  local evidence_root="${evidence_parent}/${revision}"
+  local staging app_container gateway_container captured_at
+
+  [[ -f "$STATE_FILE" ]] || fail "release state is unavailable"
+  require_root_owned_file "$STATE_FILE"
+  require_root_owned_file "$ACTIVE_ENV"
+  require_root_owned_file "$compose_file"
+  [[ -d "$release_dir" && ! -L "$release_dir" ]] || fail "candidate release directory is unavailable"
+  [[ -f "${release_dir}/scripts/collect-release-readbacks.ts" ]] || fail "candidate release has no readback collector"
+  jq -e --arg revision "$revision" '.schemaVersion == 3 and .current.revision == $revision' "$STATE_FILE" >/dev/null \
+    || fail "release state does not match the requested candidate"
+  [[ "$run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
+
+  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
+  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
+  app_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q app)"
+  gateway_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q ingress-gateway)"
+  [[ "$app_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "application container is unavailable"
+  [[ "$gateway_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "gateway container is unavailable"
+
+  install -d -m 0700 -o root -g root "$evidence_parent"
+  [[ ! -e "$evidence_root" ]] || fail "acceptance release evidence already exists"
+  staging="$(mktemp -d "${evidence_parent}/.${revision}.XXXXXX")"
+  umask 077
+  jq -n --arg revision "$revision" --arg runId "$run_id" \
+    '{schemaVersion:1,workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$runId}' \
+    > "${staging}/backend-ci-source.json"
+  chmod 0600 "${staging}/backend-ci-source.json"
+  node --experimental-strip-types "${release_dir}/scripts/collect-release-readbacks.ts" \
+    --output-root "$staging" \
+    --candidate-sha "$revision" \
+    --ci-source "${staging}/backend-ci-source.json" \
+    --release-state "$STATE_FILE" \
+    --docker-bin /usr/bin/docker \
+    --app-container "$app_container" \
+    --gateway-container "$gateway_container"
+  for artifact in release-ci-readback.json release-deploy-state.json release-runtime-readback.json release-app-oci-inspect.json release-gateway-oci-inspect.json; do
+    require_root_owned_file "${staging}/${artifact}"
+  done
+  captured_at="$(jq -r '.capturedAt' "${staging}/release-ci-readback.json")"
+  [[ "$captured_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || fail "collector capture time is invalid"
+  jq -n --arg releaseSha "$revision" --arg capturedAt "$captured_at" \
+    --arg ciHash "$(sha256sum "${staging}/release-ci-readback.json" | awk '{print $1}')" \
+    --arg deployHash "$(sha256sum "${staging}/release-deploy-state.json" | awk '{print $1}')" \
+    --arg runtimeHash "$(sha256sum "${staging}/release-runtime-readback.json" | awk '{print $1}')" \
+    --arg appHash "$(sha256sum "${staging}/release-app-oci-inspect.json" | awk '{print $1}')" \
+    --arg gatewayHash "$(sha256sum "${staging}/release-gateway-oci-inspect.json" | awk '{print $1}')" \
+    '{schemaVersion:1,releaseSha:$releaseSha,capturedAt:$capturedAt,evidence:[
+      {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
+      {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
+      {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
+      {kind:"release",route:"release:app-oci-inspect",artifactPath:"release-app-oci-inspect.json",sha256:$appHash},
+      {kind:"release",route:"release:gateway-oci-inspect",artifactPath:"release-gateway-oci-inspect.json",sha256:$gatewayHash}
+    ]}' > "${staging}/acceptance-release-readbacks.json"
+  chmod 0600 "${staging}/acceptance-release-readbacks.json"
+  require_root_owned_file "${staging}/acceptance-release-readbacks.json"
+  mv "$staging" "$evidence_root"
+}
+
+main() {
+  [[ "$(id -u)" == "0" ]] || fail "deployment gateway must run as root"
+  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
+    deploy_release "${BASH_REMATCH[1]}"
+    return
+  fi
+  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^collect-readbacks\ ([0-9a-f]{40})\ ([0-9]{6,20})$ ]]; then
+    collect_release_readbacks "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  fi
+  fail "unsupported gateway command"
 }
 
 main "$@"
