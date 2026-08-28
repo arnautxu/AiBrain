@@ -787,3 +787,35 @@ npm run infra:validate
   clicables priorizados con selectores exactos, scroll previo al clic y retry
   idempotente de screenshot. La aceptación pendiente es repetir el prompt
   exacto de SPORT y comprobar que la URL final ya es una noticia.
+
+## Cierre de Computer Use y aceptación pública — 2026-08-28
+
+- `844073d` expuso enlaces visibles con selectores exactos; `918a631` conservó
+  esos targets durante retries; `6a614dc` dejó de cerrar targets internos de
+  Chromium, reservó capacidad CDP y serializó navegación, frames e input sin
+  healthchecks intrusivos. `783d17a` estabilizó el margen temporal del test de
+  rollback sin eliminar ninguna aserción.
+- CI `33131588573` quedó verde: 119 ficheros pasados + 2 omitidos, 574 tests
+  pasados + 4 omitidos, typecheck, lint, contratos Codex 0.149.1, build Next,
+  auditorías con cero vulnerabilidades, E2E filesystem/restart, imágenes
+  Docker limpias y matriz real Office/PDF/texto/imagen. Deploy
+  `33131836147` promovió la revisión exacta
+  `783d17ae604b601a1c7fbba7b75d3f9c0bffe675`.
+- Aceptación pública exacta sobre el thread
+  `a0ede2a1-a7c8-4a9b-830f-60e8d5716e23`: el prompt de SPORT terminó con
+  HTTP 200, `done`, cero errores y actividades `open`, `read`, `click`, `read`
+  y `tabs` completas. Las dos approvals se resolvieron y la navegación
+  persistida terminó en
+  `https://www.sport.es/es/noticias/barca/barca-busca-mejor-lamine-encuentra-133716965`;
+  el frame final fue un PNG real 1440x813 de esa noticia.
+- Prueba simultánea del visor: navegación de SPORT 200 en 7,219 s, frames
+  finales de 134.092 bytes, runtime sano, sin rotación, OOM ni restart.
+  Readiness pública confirmó Codex, browser, documentos y todos los roots.
+- Medición final de cuatro líneas: primer texto 15.219 ms, tramo visible
+  2.666 ms, total 22.741 ms y diez eventos de texto. El streaming se entrega
+  inmediatamente; la latencia dominante es anterior al primer token del
+  modelo/App Server.
+- Settings público carga Appearance, Skills, Team y Usage. Usage file-backed
+  leyó siete turns y 111.244 tokens de la instalación; el porcentaje del plan
+  queda deliberadamente en `—` porque el App Server no devuelve una ventana de
+  rate limit para la suscripción compartida.
