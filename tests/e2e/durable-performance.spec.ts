@@ -25,11 +25,12 @@ test("a delayed high-frequency stream stays interactive, ordered and duplicate-f
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
 
-  const preferencesTrigger = page.getByRole("button", { name: "Abrir preferencias" });
-  await preferencesTrigger.click();
+  const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
+  await accountButton.click();
+  await page.getByRole("menuitem", { name: "Configuración" }).click();
   await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(preferencesTrigger).toBeFocused();
+  await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeHidden();
 
   releaseResponse();
   await expect(page.getByRole("heading", { name: "Resultado de rendimiento" })).toBeVisible();

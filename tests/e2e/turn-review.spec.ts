@@ -8,7 +8,7 @@ async function login(page: Page) {
   await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
 }
 
-test("plan, command, diff, Review and approval decisions consume the typed turn contract", async ({ page }) => {
+test("plan, command, diff and approval decisions consume the typed turn contract inline", async ({ page }) => {
   const decisions: unknown[] = [];
   await page.route("**/api/runtime/approvals", async (route) => {
     decisions.push(route.request().postDataJSON());
@@ -57,14 +57,9 @@ test("plan, command, diff, Review and approval decisions consume the typed turn 
     { approvalId: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", decision: "decline" },
   ]);
 
-  await page.getByRole("button", { name: "Revisar resultados" }).click();
-  await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
-  const review = page.locator("aside.review-panel");
-  await expect(review.getByText("resultado.txt", { exact: true }).first()).toBeVisible();
-  await expect(review.getByText("+Completado")).toBeVisible();
-  await review.getByRole("button", { name: /Actividad/ }).click();
-  await review.getByText("Ver salida").click();
-  await expect(review.getByText("status: clean")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copiar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
+  await expect(page.getByText("Incluidos en este turno")).toBeVisible();
 });
 
 test("a network failure is announced without an unhandled page error", async ({ page }) => {

@@ -176,7 +176,20 @@ function ComposerPicker({
 function ResultActions({ message }: { message: ChatMessage }) {
   const [copied, setCopied] = useState(false);
   const copyResult = async () => {
-    await navigator.clipboard.writeText(message.content);
+    try {
+      await navigator.clipboard.writeText(message.content);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = message.content;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      const copiedWithFallback = document.execCommand("copy");
+      textarea.remove();
+      if (!copiedWithFallback) return;
+    }
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
   };
