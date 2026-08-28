@@ -665,7 +665,7 @@ export function ChatWorkspace({
                   />
                 ) : null}
                 {canUseWeb ? (
-                  <button type="button" aria-label="Buscar en la web" title="Buscar en la web" aria-pressed={webSearch} className={`composer-tool composer-toggle ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={14} /><span>Web</span></button>
+                  <button type="button" aria-label="Alternar búsqueda web" title="Buscar en la web" aria-pressed={webSearch} className={`composer-tool composer-toggle ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={14} /><span>Web</span></button>
                 ) : null}
                 {canGenerateImages ? (
                   <button type="button" aria-label="Crear imagen" title="Crear imagen" aria-pressed={imageGeneration} className={`composer-tool composer-toggle ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={14} /><span>Imagen</span></button>
