@@ -21,6 +21,7 @@
     "test:e2e:ui": "playwright test --project=chromium-desktop",
     "test:visual": "playwright test --project=visual-desktop --project=visual-mobile --project=visual-matrix",
     "test:a11y": "playwright test --project=accessibility",
+    "acceptance:verify": "tsx scripts/verify-live-acceptance.ts",
     "test:soak": "tsx scripts/soak.ts",
     "test:soak:qa": "tsx scripts/soak.ts --qa",
     "test:coverage": "vitest run --coverage",
