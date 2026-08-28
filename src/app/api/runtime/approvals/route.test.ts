@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   sameOrigin: true,
   readConnectorApproval: vi.fn(),
   approveConnectorApprovalByLocator: vi.fn(),
+  denyConnectorApprovalByLocator: vi.fn(),
   resolve: vi.fn(),
 }));
 
@@ -29,6 +30,7 @@ vi.mock("@/runtime/approval-store", () => ({
   FileApprovalStore: class FileApprovalStore {
     readConnectorApproval = mocks.readConnectorApproval;
     approveConnectorApprovalByLocator = mocks.approveConnectorApprovalByLocator;
+    denyConnectorApprovalByLocator = mocks.denyConnectorApprovalByLocator;
     resolve = mocks.resolve;
   },
 }));
@@ -62,9 +64,11 @@ describe("runtime connector approval route", () => {
     mocks.sameOrigin = true;
     mocks.readConnectorApproval.mockReset();
     mocks.approveConnectorApprovalByLocator.mockReset();
+    mocks.denyConnectorApprovalByLocator.mockReset();
     mocks.resolve.mockReset();
     mocks.readConnectorApproval.mockResolvedValue(null);
     mocks.approveConnectorApprovalByLocator.mockResolvedValue({ outcome: "approved" });
+    mocks.denyConnectorApprovalByLocator.mockResolvedValue({ outcome: "denied" });
     mocks.resolve.mockResolvedValue({ outcome: "resolved" });
   });
 
@@ -86,11 +90,21 @@ describe("runtime connector approval route", () => {
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
 
-  it("rejects decline, acceptForSession, cancel, and client-supplied receipts for connector approvals", async () => {
+  it("closes decline, cancel, and acceptForSession durably and never promotes a session permission", async () => {
     mocks.readConnectorApproval.mockResolvedValue({ status: "approval_requested" });
-    expect((await POST(request({ ...routing, decision: "decline" }))).status).toBe(403);
-    expect((await POST(request({ ...routing, decision: "acceptForSession" }))).status).toBe(403);
-    expect((await POST(request({ ...routing, decision: "cancel" }))).status).toBe(400);
+    for (const decision of ["decline", "cancel", "acceptForSession"] as const) {
+      const response = await POST(request({ ...routing, decision, authorizationFingerprint: fingerprint }));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true, status: "denied" });
+    }
+    expect(mocks.denyConnectorApprovalByLocator).toHaveBeenCalledTimes(3);
+    expect(mocks.denyConnectorApprovalByLocator).toHaveBeenLastCalledWith(expect.any(Object), fingerprint);
+    expect(mocks.approveConnectorApprovalByLocator).not.toHaveBeenCalled();
+    expect(mocks.resolve).not.toHaveBeenCalled();
+  });
+
+  it("rejects client-supplied receipts without mutating the connector approval", async () => {
+    mocks.readConnectorApproval.mockResolvedValue({ status: "approval_requested" });
     expect((await POST(request({
       ...routing,
       decision: "accept",
@@ -98,16 +112,25 @@ describe("runtime connector approval route", () => {
       receiptId: "b".repeat(64),
     }))).status).toBe(403);
     expect(mocks.approveConnectorApprovalByLocator).not.toHaveBeenCalled();
+    expect(mocks.denyConnectorApprovalByLocator).not.toHaveBeenCalled();
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
 
-  it("is idempotent for an approved retry and fails closed on a fingerprint mismatch", async () => {
+  it("is idempotent for approved and denied retries, then blocks accept after denial", async () => {
     mocks.readConnectorApproval.mockResolvedValue({ status: "approved" });
     mocks.approveConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "already-approved" });
     const replay = await POST(request({ ...routing, decision: "accept", authorizationFingerprint: fingerprint }));
     expect(replay.status).toBe(200);
 
-    mocks.approveConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "denied" });
+    mocks.denyConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "denied" });
+    expect((await POST(request({ ...routing, decision: "decline", authorizationFingerprint: fingerprint }))).status).toBe(200);
+    mocks.denyConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "already-denied" });
+    expect((await POST(request({ ...routing, decision: "decline", authorizationFingerprint: fingerprint }))).status).toBe(200);
+
+    mocks.approveConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "not-pending" });
+    expect((await POST(request({ ...routing, decision: "accept", authorizationFingerprint: fingerprint }))).status).toBe(403);
+
+    mocks.approveConnectorApprovalByLocator.mockResolvedValueOnce({ outcome: "fingerprint-mismatch" });
     const mismatched = await POST(request({ ...routing, decision: "accept", authorizationFingerprint: "b".repeat(64) }));
     expect(mismatched.status).toBe(403);
   });
