@@ -357,44 +357,48 @@ button:disabled {
     0 4px 80px 8px rgba(0, 0, 0, 0.035);
 }
 
-.composer-compact {
+.composer-shell {
   display: flex;
-  min-height: 52px;
-  align-items: center;
-  padding: 6px;
+  min-height: 96px;
+  flex-direction: column;
 }
 
-.composer-compact .composer-controls,
-.composer-compact .composer-controls-start {
-  display: contents;
+.composer-stage-empty {
+  top: calc(clamp(15.6rem, 42vh, 21.25rem) + 7.25rem);
+  transform: translateY(-100%);
 }
 
-.composer-compact .composer-textarea {
-  order: 1;
-  width: auto;
-  min-width: 0;
-  min-height: 38px !important;
-  height: 38px !important;
-  flex: 1 1 auto;
-  padding-top: 7px;
-  padding-bottom: 7px;
-  line-height: 24px;
+.composer-textarea {
+  flex: 0 0 auto;
+  transition: height 120ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.composer-compact .composer-add-button {
-  order: 0;
+.composer-controls {
+  min-height: 36px;
 }
 
-.composer-compact .composer-controls-start > .composer-picker {
-  order: 2;
+.composer-toggle {
+  width: auto !important;
+  min-width: max-content;
+  gap: 0.35rem;
+  padding-inline: 0.55rem;
+  font-size: 10px;
+  font-weight: 600;
 }
 
-.composer-compact .composer-controls-end {
-  order: 3;
+.agent-status-orb {
+  display: inline-grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  vertical-align: middle;
 }
 
-.composer-compact .composer-hint {
-  display: none;
+.agent-status-orb canvas {
+  display: block;
+  width: 20px !important;
+  height: 20px !important;
 }
 
 .markdown-body {
@@ -738,6 +742,7 @@ button:disabled {
 }
 
 .activity-shimmer {
+  display: inline-block;
   color: transparent;
   background: linear-gradient(
     90deg,
@@ -746,8 +751,11 @@ button:disabled {
     var(--text-muted) 72%
   );
   background-size: 220% 100%;
+  background-position: 200% 0;
+  background-repeat: no-repeat;
   background-clip: text;
   -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
   animation: activity-text-shimmer 1.65s ease-in-out infinite;
 }
 
@@ -756,8 +764,10 @@ button:disabled {
 }
 
 .t-stream-w {
+  display: inline-block;
   opacity: 0;
   filter: blur(var(--stream-blur));
+  will-change: opacity, filter;
   transition:
     opacity var(--stream-fade) var(--stream-ease),
     filter var(--stream-fade) var(--stream-ease);
@@ -766,6 +776,10 @@ button:disabled {
 .t-stream-w.is-in {
   opacity: 1;
   filter: blur(0);
+}
+
+.reasoning-stream .markdown-body p {
+  margin: 0;
 }
 
 .message-enter {
@@ -867,12 +881,17 @@ button:disabled {
   .activity-shimmer {
     color: var(--text);
     background: none;
+    -webkit-text-fill-color: currentColor;
   }
 
   .t-stream-w {
     opacity: 1 !important;
     filter: none !important;
     transition: none !important;
+  }
+
+  .composer-textarea {
+    transition: none;
   }
 
   *,

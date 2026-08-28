@@ -21,6 +21,8 @@ import type {
   ApprovalItem,
   ChatMessage,
 } from "@/lib/chat-contract";
+import { AgentStatusOrb } from "@/components/agent-status-orb";
+import { MarkdownMessage } from "@/components/markdown-message";
 
 type TurnActivityProps = {
   message: ChatMessage;
@@ -31,7 +33,7 @@ type TurnActivityProps = {
 
 function ActivityIcon({ item }: { item: ActivityItem }) {
   if (item.status === "running" || item.status === "waiting") {
-    return <SpinnerGap size={13} className="motion-safe:animate-spin" />;
+    return <AgentStatusOrb kind={item.kind} />;
   }
   if (item.status === "failed" || item.status === "stopped") return <X size={12} weight="bold" />;
 
@@ -145,6 +147,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       : message.status === "error"
         ? "Trabajo interrumpido"
         : "Trabajo completado";
+  const activeActivity = [...message.activity].reverse().find((item) => item.status === "running" || item.status === "waiting");
 
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
@@ -155,7 +158,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
           open={compact || message.status === "streaming" ? true : undefined}
         >
           <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg py-1 text-[16px] font-normal leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
-            {message.status === "streaming" ? <SpinnerGap size={14} className="motion-safe:animate-spin" /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
+            {message.status === "streaming" ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
             <span className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
             <span aria-hidden className="transition group-open/execution:rotate-90">›</span>
           </summary>
@@ -196,7 +199,11 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
               </span>
               <div className="min-w-0 flex-1">
                 <p className={`text-[14px] font-medium leading-5 text-[var(--text)] ${item.status === "running" || item.status === "waiting" ? "activity-shimmer" : ""}`}>{friendlyActivity(item)}</p>
-                {item.detail ? <p className="mt-0.5 text-[12px] leading-[18px] text-[var(--text-muted)]">{item.detail}</p> : null}
+                {item.detail ? item.kind === "reasoning" ? (
+                  <div className="reasoning-stream mt-1 text-[12px] leading-[18px] text-[var(--text-muted)]" aria-live={item.status === "running" || item.status === "waiting" ? "polite" : undefined}>
+                    <MarkdownMessage streaming={item.status === "running" || item.status === "waiting"}>{item.detail}</MarkdownMessage>
+                  </div>
+                ) : <p className="mt-0.5 text-[12px] leading-[18px] text-[var(--text-muted)]">{item.detail}</p> : null}
                 {item.output ? (
                   <details className="mt-2">
                     <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>

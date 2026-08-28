@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailsPanel } from "@/components/details-panel";
 import { TurnActivity } from "@/components/turn-activity";
@@ -52,26 +52,36 @@ afterEach(cleanup);
 
 describe("turn activity and Review", () => {
   it("shows safe live activity labels with shimmer while a turn is running", () => {
-    render(<TurnActivity
-      message={{
-        ...message,
-        status: "streaming",
-        plan: [],
-        approvals: [],
-        diff: "",
-        activity: [
-          { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "running" },
-          { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
-          { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
-        ],
-      }}
-      onResolveApproval={vi.fn()}
-    />);
+    vi.useFakeTimers();
+    try {
+      const { container } = render(<TurnActivity
+        message={{
+          ...message,
+          status: "streaming",
+          plan: [],
+          approvals: [],
+          diff: "",
+          activity: [
+            { ...message.activity[0], id: "reasoning-1", kind: "reasoning", detail: "Analizando el contexto", status: "running" },
+            { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
+            { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
+          ],
+        }}
+        onResolveApproval={vi.fn()}
+      />);
 
-    expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
+      expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
+      expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
+      expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
+      expect(screen.getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
+      expect(container.querySelectorAll(".agent-status-orb")).toHaveLength(4);
+      expect(container.querySelectorAll(".reasoning-stream .t-stream-w")).toHaveLength(3);
+      expect(container.querySelectorAll(".reasoning-stream .t-stream-w.is-in")).toHaveLength(0);
+      act(() => vi.advanceTimersByTime(60));
+      expect(container.querySelectorAll(".reasoning-stream .t-stream-w.is-in")).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("presents plan, command output, diff and approval decisions in employee language", () => {

@@ -31,7 +31,7 @@ import {
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
 import { MarkdownMessage } from "@/components/markdown-message";
-import { ThinkingOrb } from "thinking-orbs";
+import { AgentStatusOrb } from "@/components/agent-status-orb";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, ComposerMode } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences, BrainWindowId } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
@@ -242,7 +242,7 @@ function AssistantMessage({
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
         <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" role="status">
-          <ThinkingOrb state="working" size={20} aria-hidden="true" />
+          <AgentStatusOrb kind="reasoning" />
           <span className="activity-shimmer">Pensando…</span>
         </div>
       ) : message.content ? (
@@ -378,7 +378,9 @@ export function ChatWorkspace({
     const textarea = composerRef.current;
     if (!textarea) return;
     textarea.style.height = "0px";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 192)}px`;
+    const nextHeight = Math.min(Math.max(textarea.scrollHeight, 42), 192);
+    textarea.style.height = `${nextHeight}px`;
+    textarea.style.overflowY = textarea.scrollHeight > 192 ? "auto" : "hidden";
   }, [prompt]);
 
   const hasMessages = Boolean(thread?.messages.length);
@@ -569,14 +571,14 @@ export function ChatWorkspace({
         )}
       </div>
 
-      <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "!absolute inset-x-0 top-[clamp(15.6rem,42vh,21.25rem)] z-10"} px-3 md:px-6`}>
+      <div className={`${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "composer-stage-empty !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className={`relative mx-auto ${hasMessages ? "max-w-[610px]" : "max-w-[768px]"}`}>
-          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
+          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><AgentStatusOrb kind="connecting" /><span className="activity-shimmer">Conectando con el servicio…</span></div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
-            className={`composer-shadow relative rounded-[28px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[128px]"} ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
+            className={`composer-shell composer-shadow relative rounded-[28px] border bg-[var(--surface-raised)] p-2 ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
@@ -602,7 +604,7 @@ export function ChatWorkspace({
                 ))}
                 {documents.map((document) => (
                   <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <AgentStatusOrb kind="file" /> : <FileIcon size={12} />}</span>
                     <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[8px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
                     {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[8px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
                     <button type="button" aria-label={`Quitar ${document.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
@@ -613,7 +615,7 @@ export function ChatWorkspace({
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
-              className="composer-textarea max-h-52 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
+              className="composer-textarea min-h-[42px] max-h-48 w-full resize-none overflow-y-hidden bg-transparent px-3 py-2 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
               placeholder={project ? `Escribe a ${preferences.assistantName}…` : "Crea un proyecto para empezar…"}
               rows={1}
               value={prompt}
@@ -629,8 +631,8 @@ export function ChatWorkspace({
                 }
               }}
             />
-            <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
-              <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
+            <div className="composer-controls mt-1 flex items-center gap-2 px-1 pb-0.5">
+              <div className="composer-controls-start flex min-w-0 flex-1 flex-wrap items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><Plus size={15} /></button>
                 {showAdvancedControls ? (
                   <ComposerPicker
@@ -643,7 +645,7 @@ export function ChatWorkspace({
                       ...(manifest.composer.modes.includes("ask") ? [{ value: "ask", label: "Pregunta", detail: "Responde sin ejecutar" }] : []),
                     ]}
                     open={composerPickerOpen === "mode"}
-                    placement={hasMessages ? "above" : "below"}
+                    placement="above"
                     disabled={sending}
                     onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "mode" : null); }}
                     onSelect={(value) => onComposerModeChange(value as ComposerMode)}
@@ -656,16 +658,18 @@ export function ChatWorkspace({
                     valueLabel={runtimeStatus.skills.find((skill) => skill.id === selectedSkill)?.label ?? "Sin skill"}
                     options={[{ value: "", label: "Sin skill" }, ...runtimeStatus.skills.map((skill) => ({ value: skill.id, label: skill.label, icon: <Wrench size={12} /> }))]}
                     open={composerPickerOpen === "skill"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
+                    placement="above"
                     disabled={sending}
                     onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "skill" : null); }}
                     onSelect={(value) => onSelectedSkillChange(value || null)}
                   />
                 ) : null}
-                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
-              </div>
-              <div className="composer-controls-end flex shrink-0 items-center gap-2">
+                {canUseWeb ? (
+                  <button type="button" aria-label="Buscar en la web" title="Buscar en la web" aria-pressed={webSearch} className={`composer-tool composer-toggle ${webSearch ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={14} /><span>Web</span></button>
+                ) : null}
+                {canGenerateImages ? (
+                  <button type="button" aria-label="Crear imagen" title="Crear imagen" aria-pressed={imageGeneration} className={`composer-tool composer-toggle ${imageGeneration ? "composer-tool-active" : ""}`} disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={14} /><span>Imagen</span></button>
+                ) : null}
                 {showAdvancedControls && manifest.composer.modelSelection ? (
                   <ComposerPicker
                     ariaLabel="Modelo"
@@ -676,8 +680,7 @@ export function ChatWorkspace({
                       ...runtimeStatus.models.map((model) => ({ value: model.id, label: model.label, detail: model.isDefault ? "Predeterminado" : undefined })),
                     ]}
                     open={composerPickerOpen === "model"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
+                    placement="above"
                     disabled={sending || runtimeStatus.models.length === 0}
                     onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "model" : null); }}
                     onSelect={(value) => onComposerModelChange(value || null)}
@@ -690,13 +693,15 @@ export function ChatWorkspace({
                     valueLabel={composerEffort ? effortLabels[composerEffort] : "Automático"}
                     options={[{ value: "", label: "Automático" }, ...effortOptions.map((effort) => ({ value: effort, label: effortLabels[effort] }))]}
                     open={composerPickerOpen === "effort"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
+                    placement="above"
                     disabled={sending}
                     onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "effort" : null); }}
                     onSelect={(value) => onComposerEffortChange((value || null) as RuntimeReasoningEffort | null)}
                   />
                 ) : null}
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
+              </div>
+              <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <span className="composer-hint hidden text-[9px] text-[var(--text-subtle)] md:block">↵ enviar · ⇧↵ nueva línea</span>
                 {sending ? (
                   <button aria-label="Detener respuesta" className="grid size-11 place-items-center rounded-xl bg-[var(--text)] text-[var(--surface)] transition active:scale-95 sm:size-8 sm:rounded-full" onClick={onStop}><Stop size={11} weight="fill" /></button>
@@ -707,7 +712,7 @@ export function ChatWorkspace({
             </div>
           </div>
           <div className={`${hasMessages ? "hidden" : "flex"} mt-2 h-3 items-center justify-center gap-1.5 text-[10px] text-[var(--text-subtle)]`}>
-            {sending ? <><ThinkingOrb state="working" size={20} aria-hidden="true" /><span>{preferences.assistantName} está trabajando</span></> : <span>Comprueba los datos importantes antes de usarlos.</span>}
+            {sending ? <><AgentStatusOrb kind="system" /><span className="activity-shimmer">{preferences.assistantName} está trabajando</span></> : <span>Comprueba los datos importantes antes de usarlos.</span>}
           </div>
         </div>
       </div>
