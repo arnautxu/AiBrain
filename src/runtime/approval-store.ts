@@ -903,18 +903,54 @@ export class FileApprovalStore {
       const found = await this.readConnectorUnlocked(receipt);
       if (!found) return { outcome: "not-found" as const, record: null };
       const record = await this.expireConnectorUnlocked(found);
-      if (!this.connectorReceiptMatches(record, receipt)) {
+      return this.approveConnectorUnlocked(record, receipt);
+    });
+  }
+
+  /**
+   * Authenticated HTTP routes resolve the opaque receipt only from a locator
+   * scoped to the session. The browser supplies the visible fingerprint, but
+   * never receives or submits the durable receipt itself.
+   */
+  async approveConnectorApprovalByLocator(
+    locatorInput: ApprovalLocator,
+    authorizationFingerprintInput: string,
+  ) {
+    const locator = this.assertLocator(locatorInput);
+    const authorizationFingerprint = expectAuthorizationFingerprint(
+      authorizationFingerprintInput,
+      new ValidationContext("ConnectorApprovalResolution", "authorizationFingerprint"),
+    );
+    await this.prepare();
+    return this.locks.withLock(this.connectorLockKey(locator), async () => {
+      const found = await this.readConnectorUnlocked(locator);
+      if (!found) return { outcome: "not-found" as const, record: null };
+      const record = await this.expireConnectorUnlocked(found);
+      if (record.authorizationFingerprint !== authorizationFingerprint) {
         if (["executed", "denied", "failed"].includes(record.status)) {
           return { outcome: "not-pending" as const, record };
         }
         return { outcome: "denied" as const, record: await this.updateConnectorStatus(record, "denied") };
       }
-      if (record.status === "approval_requested") {
-        return { outcome: "approved" as const, record: await this.updateConnectorStatus(record, "approved") };
-      }
-      if (record.status === "approved") return { outcome: "already-approved" as const, record };
-      return { outcome: "not-pending" as const, record };
+      return this.approveConnectorUnlocked(record, this.connectorReceipt(record));
     });
+  }
+
+  private async approveConnectorUnlocked(
+    record: ConnectorApprovalRecord,
+    receipt: ConnectorApprovalReceipt,
+  ) {
+    if (!this.connectorReceiptMatches(record, receipt)) {
+      if (["executed", "denied", "failed"].includes(record.status)) {
+        return { outcome: "not-pending" as const, record };
+      }
+      return { outcome: "denied" as const, record: await this.updateConnectorStatus(record, "denied") };
+    }
+    if (record.status === "approval_requested") {
+      return { outcome: "approved" as const, record: await this.updateConnectorStatus(record, "approved") };
+    }
+    if (record.status === "approved") return { outcome: "already-approved" as const, record };
+    return { outcome: "not-pending" as const, record };
   }
 
   /**
