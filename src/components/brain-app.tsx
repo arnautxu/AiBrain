@@ -9,6 +9,10 @@ import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { MemoryPanel } from "@/components/memory-panel";
+import { ProjectPanel } from "@/components/project-panel";
+import { LibraryPanel } from "@/components/library-panel";
+import { TaskCenterPanel } from "@/components/task-center-panel";
+import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -48,6 +52,7 @@ import {
   type RuntimeStatus,
 } from "@/lib/runtime-status";
 import {
+  branchThreadRequest,
   createProjectRequest,
   createThreadRequest,
   updateProjectRequest,
@@ -56,6 +61,7 @@ import {
 import {
   isWorkbenchSnapshot,
   STANDALONE_PROJECT_SLUG,
+  type BranchThreadInput,
   type UpdateProjectInput,
   type UpdateThreadInput,
   type WorkbenchProject,
@@ -63,6 +69,22 @@ import {
   type WorkbenchThread,
 } from "@/workbench/types";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
+import { isSettingsSnapshot, type SettingsSnapshot } from "@/settings/contracts";
+import {
+  getThreadActivity,
+  isThreadReadMarker,
+  latestThreadReadMarker,
+  type ThreadActivity,
+  type ThreadReadMarker,
+} from "@/workbench/thread-activity";
+import {
+  DEFAULT_TASK_NOTIFICATION_PREFERENCES,
+  deriveTaskCenterItems,
+  isTaskCenterPayload,
+  type TaskCenterItem,
+  type TaskCenterPayload,
+  type TaskNotificationPreferences,
+} from "@/task-center/contracts";
 
 type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
 
@@ -109,6 +131,8 @@ function createMessage(
     diff: "",
     attachments: [],
     artifacts: [],
+    sources: [],
+    toolResults: [],
   };
 }
 
@@ -233,6 +257,42 @@ function loadSelection(key: string): StoredSelection {
   }
 }
 
+function loadThreadReadMarkers(key: string, threads: WorkbenchThread[]) {
+  let stored: Record<string, ThreadReadMarker> = {};
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      stored = Object.fromEntries(Object.entries(value).filter(
+        (entry): entry is [string, ThreadReadMarker] => isThreadReadMarker(entry[1]),
+      ));
+    }
+  } catch {
+    // A damaged marker cache is replaced with the visible snapshot below.
+  }
+
+  for (const thread of threads) {
+    if (stored[thread.id]) continue;
+    const marker = latestThreadReadMarker(thread);
+    if (marker) stored[thread.id] = marker;
+  }
+  return stored;
+}
+
+function loadTaskCenterCache(key: string): TaskCenterPayload {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (isTaskCenterPayload(value)) return value;
+  } catch {
+    // Invalid browser-preview state is replaced by the empty safe default.
+  }
+  return {
+    tasks: [],
+    readTaskIds: [],
+    preferences: DEFAULT_TASK_NOTIFICATION_PREFERENCES,
+    continuity: "worker_required",
+  };
+}
+
 function localProject(projects: WorkbenchProject[], name: string): WorkbenchProject {
   const normalized = name.normalize("NFD").replace(/[\u0300-\u036f]/g, "")
     .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "projecte";
@@ -250,6 +310,10 @@ function localProject(projects: WorkbenchProject[], name: string): WorkbenchProj
     slug,
     status: "active",
     pinned: false,
+    instructions: "",
+    sources: [],
+    memory: { enabled: true, notes: "", updatedAt: null },
+    sharing: { visibility: "private", members: [] },
     workspace: {
       id: crypto.randomUUID(),
       label: "Workspace principal",
@@ -276,6 +340,33 @@ function localThread(projectId: string, title: string): WorkbenchThread {
   };
 }
 
+function localBranchThread(parent: WorkbenchThread, input: BranchThreadInput) {
+  const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
+  const target = parent.messages[targetIndex];
+  if (!target) throw new Error("No se ha encontrado el mensaje.");
+  let prefixEnd = targetIndex;
+  let draftMessage: string | null = null;
+  if (input.kind === "edit") {
+    if (target.role !== "user" || !input.editedContent?.trim()) throw new Error("Este mensaje no se puede editar.");
+    prefixEnd = targetIndex - 1;
+    draftMessage = input.editedContent.trim();
+  } else if (input.kind === "retry") {
+    const userIndex = parent.messages.findLastIndex((message, index) => index < targetIndex && message.role === "user");
+    if (target.role !== "assistant" || userIndex < 0) throw new Error("Esta respuesta no se puede regenerar.");
+    prefixEnd = userIndex - 1;
+    draftMessage = parent.messages[userIndex].content;
+  } else if (target.role !== "assistant") throw new Error("La rama debe partir de una respuesta.");
+  const suffix = input.kind === "edit" ? "editada" : input.kind === "retry" ? "regenerada" : "rama";
+  return {
+    thread: {
+      ...localThread(parent.projectId, `${parent.title.replace(/ · (?:editada|regenerada|rama)$/u, "")} · ${suffix}`.slice(0, 120)),
+      messages: structuredClone(parent.messages.slice(0, prefixEnd + 1)),
+      lineage: { parentThreadId: parent.id, branchedFromMessageId: target.id, kind: input.kind },
+    },
+    draftMessage,
+  };
+}
+
 async function chatError(response: Response) {
   const body: unknown = await response.json().catch(() => null);
   if (body && typeof body === "object" && "error" in body && typeof body.error === "string") {
@@ -299,6 +390,8 @@ export function BrainApp({
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.workbench.preview.v1`;
   const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
+  const threadReadKey = `aibrain.${session.tenant.id}.${session.user.id}.thread-read.v1`;
+  const taskCenterKey = `aibrain.${session.tenant.id}.${session.user.id}.task-center.v1`;
   const [projects, setProjects] = useState(initialWorkbench.projects);
   const [threads, setThreads] = useState(initialWorkbench.threads);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -320,22 +413,49 @@ export function BrainApp({
   const [publications, setPublications] = useState<DocumentPublicationDraft[]>([]);
   const [documentUploading, setDocumentUploading] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [runningThreadIds, setRunningThreadIds] = useState<Set<string>>(() => new Set());
+  const [draftStarting, setDraftStarting] = useState(false);
+  const [threadReadMarkers, setThreadReadMarkers] = useState<Record<string, ThreadReadMarker>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [taskCenterPayload, setTaskCenterPayload] = useState<TaskCenterPayload>({
+    tasks: [],
+    readTaskIds: [],
+    preferences: DEFAULT_TASK_NOTIFICATION_PREFERENCES,
+    continuity: "worker_required",
+  });
+  const [taskCenterBusy, setTaskCenterBusy] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
+  const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
   const [networkOnline, setNetworkOnline] = useState(true);
   const [runtimeRetry, setRuntimeRetry] = useState(0);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const threadByProjectRef = useRef<Record<string, string>>({});
-  const abortRef = useRef<AbortController | null>(null);
+  const turnControllersRef = useRef(new Map<string, {
+    assistantMessageId: string;
+    controller: AbortController;
+  }>());
+  const turnReservationsRef = useRef(new Set<string>());
+  const activeSelectionRef = useRef<{ projectId: string | null; threadId: string | null }>({
+    projectId: null,
+    threadId: null,
+  });
+  const taskStatusRef = useRef(new Map<string, TaskCenterItem["status"]>());
+  const taskPreferencesRef = useRef<TaskNotificationPreferences>(DEFAULT_TASK_NOTIFICATION_PREFERENCES);
+  const taskCenterInitializedRef = useRef(false);
 
   useEffect(() => {
     const snapshot = initialWorkbench.persistence === "browser-preview"
@@ -355,10 +475,16 @@ export function BrainApp({
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
     setPreferences(loadPreferences(preferencesKey, defaultPreferences));
+    setThreadReadMarkers(loadThreadReadMarkers(threadReadKey, snapshot.threads));
+    if (initialWorkbench.persistence === "browser-preview") {
+      const taskCenter = loadTaskCenterCache(taskCenterKey);
+      setTaskCenterPayload(taskCenter);
+      taskPreferencesRef.current = taskCenter.preferences;
+    }
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
-  }, [defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey]);
+  }, [defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
@@ -385,6 +511,10 @@ export function BrainApp({
       threadByProject: threadByProjectRef.current,
     } satisfies StoredSelection));
   }, [activeProjectId, activeThreadId, hydrated, preferences, preferencesKey, selectionKey]);
+
+  useEffect(() => {
+    activeSelectionRef.current = { projectId: activeProjectId, threadId: activeThreadId };
+  }, [activeProjectId, activeThreadId]);
 
   useEffect(() => {
     if (!notice) return;
@@ -425,11 +555,142 @@ export function BrainApp({
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads],
   );
+  const threadActivityById = useMemo(() => Object.fromEntries(threads.map((thread) => [
+    thread.id,
+    getThreadActivity(
+      thread,
+      threadReadMarkers[thread.id] ?? null,
+      runningThreadIds.has(thread.id),
+    ),
+  ])) as Record<string, ThreadActivity>, [runningThreadIds, threadReadMarkers, threads]);
+  const sending = activeThread
+    ? runningThreadIds.has(activeThread.id) || activeThread.messages.some((message) =>
+        message.role === "assistant" && message.status === "streaming")
+    : draftStarting;
   const selectedMessage = useMemo(
     () => activeThread?.messages.find((message) => message.id === selectedMessageId) ??
       activeThread?.messages.findLast((message) => message.role === "assistant") ?? null,
     [activeThread, selectedMessageId],
   );
+  const taskCenterItems = useMemo(() => {
+    const local = deriveTaskCenterItems({ projects, threads }, taskCenterPayload.readTaskIds);
+    const merged = initialWorkbench.persistence === "browser-preview"
+      ? new Map(taskCenterPayload.tasks.map((task) => [task.id, task]))
+      : new Map(local.map((task) => [task.id, task]));
+    for (const task of initialWorkbench.persistence === "browser-preview" ? local : taskCenterPayload.tasks) {
+      merged.set(task.id, task);
+    }
+    return [...merged.values()].sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id));
+  }, [initialWorkbench.persistence, projects, taskCenterPayload.readTaskIds, taskCenterPayload.tasks, threads]);
+  const taskSummary = useMemo(() => ({
+    unread: taskCenterItems.filter((task) => task.unread).length,
+    running: taskCenterItems.filter((task) => task.status === "running").length,
+    needsAttention: taskCenterItems.filter((task) => task.status === "needs_attention").length,
+  }), [taskCenterItems]);
+
+  const applyTaskCenterPayload = useCallback((payload: TaskCenterPayload, notify = true) => {
+    const previous = taskStatusRef.current;
+    const shouldNotify = taskCenterInitializedRef.current && notify;
+    const fresh = shouldNotify ? payload.tasks.filter((task) => {
+      if (!task.unread || task.threadId === activeSelectionRef.current.threadId) return false;
+      const prior = previous.get(task.id);
+      return prior === "running" || (prior === undefined && task.status !== "running");
+    }) : [];
+    taskStatusRef.current = new Map(payload.tasks.map((task) => [task.id, task.status]));
+    taskCenterInitializedRef.current = true;
+    taskPreferencesRef.current = payload.preferences;
+    setTaskCenterPayload(payload);
+
+    const newest = fresh[0];
+    if (!newest) return;
+    if (payload.preferences.inApp) {
+      setNotice(newest.status === "needs_attention"
+        ? `Una tarea necesita tu atención: ${newest.threadTitle}`
+        : newest.status === "completed"
+          ? `Tarea completada: ${newest.threadTitle}`
+          : `Una tarea ha terminado con error: ${newest.threadTitle}`);
+    }
+    if (payload.preferences.desktop && typeof Notification !== "undefined" && Notification.permission === "granted") {
+      const notification = new Notification(
+        newest.status === "needs_attention" ? "AiBrain necesita tu atención" :
+          newest.status === "completed" ? "AiBrain ha terminado una tarea" : "Una tarea de AiBrain ha fallado",
+        { body: newest.threadTitle, tag: newest.id },
+      );
+      notification.onclick = () => {
+        window.focus();
+        setTaskCenterOpen(true);
+        notification.close();
+      };
+    }
+  }, []);
+
+  const refreshTaskCenter = useCallback(async (notify = true) => {
+    const response = await fetch("/api/task-center", { cache: "no-store" });
+    const value: unknown = await response.json().catch(() => null);
+    if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido actualizar el centro de tareas.");
+    applyTaskCenterPayload(value, notify);
+    return value;
+  }, [applyTaskCenterPayload]);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined") setNotificationPermission(Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
+    void refreshTaskCenter(false).catch(() => {
+      setNotice("El historial de tareas no se ha podido sincronizar. Tus conversaciones siguen disponibles.");
+    });
+  }, [hydrated, initialWorkbench.persistence, refreshTaskCenter]);
+
+  useEffect(() => {
+    if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
+    taskStatusRef.current = new Map(taskCenterItems.map((task) => [task.id, task.status]));
+    taskCenterInitializedRef.current = true;
+  }, [hydrated, initialWorkbench.persistence, taskCenterItems]);
+
+  useEffect(() => {
+    if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
+    const refresh = () => void refreshTaskCenter(true).catch(() => undefined);
+    const interval = window.setInterval(refresh, taskSummary.running ? 5_000 : 30_000);
+    const onVisibility = () => { if (document.visibilityState === "visible") refresh(); };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [hydrated, initialWorkbench.persistence, refreshTaskCenter, taskSummary.running]);
+
+  useEffect(() => {
+    taskPreferencesRef.current = taskCenterPayload.preferences;
+    if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
+    localStorage.setItem(taskCenterKey, JSON.stringify({ ...taskCenterPayload, tasks: taskCenterItems }));
+  }, [hydrated, initialWorkbench.persistence, taskCenterItems, taskCenterKey, taskCenterPayload]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    localStorage.setItem(threadReadKey, JSON.stringify(threadReadMarkers));
+  }, [hydrated, threadReadKey, threadReadMarkers]);
+
+  useEffect(() => {
+    if (!activeThread) return;
+    const marker = latestThreadReadMarker(activeThread);
+    if (!marker) return;
+    setThreadReadMarkers((current) => {
+      const previous = current[activeThread.id];
+      if (previous?.messageId === marker.messageId && previous.phase === marker.phase) return current;
+      return { ...current, [activeThread.id]: marker };
+    });
+  }, [activeThread]);
+
+  useEffect(() => () => {
+    for (const run of turnControllersRef.current.values()) run.controller.abort();
+    turnControllersRef.current.clear();
+    turnReservationsRef.current.clear();
+  }, []);
 
   useEffect(() => {
     if (!hydrated || !networkOnline) return;
@@ -464,6 +725,43 @@ export function BrainApp({
     };
   }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    const controller = new AbortController();
+    void fetch("/api/settings", { signal: controller.signal, cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value: unknown) => {
+        if (isSettingsSnapshot(value)) setSettingsSnapshot(value);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [hydrated]);
+
+  const effectiveRuntimeStatus = useMemo<RuntimeStatus>(() => {
+    const enabled = (id: string) => settingsSnapshot?.apps.find((app) => app.id === id)?.effectiveEnabled ?? true;
+    return {
+      ...runtimeStatus,
+      capabilities: {
+        ...runtimeStatus.capabilities,
+        webSearch: runtimeStatus.capabilities.webSearch && enabled("web-search"),
+        imageGeneration: runtimeStatus.capabilities.imageGeneration && enabled("image-generation"),
+      },
+      skills: enabled("skills") ? runtimeStatus.skills : [],
+    };
+  }, [runtimeStatus, settingsSnapshot]);
+
+  const appPolicy = useMemo(() => ({
+    webSearch: settingsSnapshot?.apps.find((app) => app.id === "web-search")?.effectiveEnabled ?? true,
+    imageGeneration: settingsSnapshot?.apps.find((app) => app.id === "image-generation")?.effectiveEnabled ?? true,
+    skills: settingsSnapshot?.apps.find((app) => app.id === "skills")?.effectiveEnabled ?? true,
+  }), [settingsSnapshot]);
+
+  useEffect(() => {
+    if (!appPolicy.webSearch || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.webSearch)) setWebSearch(false);
+    if (!appPolicy.imageGeneration || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.imageGeneration)) setImageGeneration(false);
+    if (!appPolicy.skills || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && selectedSkill && !runtimeStatus.skills.some((skill) => skill.id === selectedSkill))) setSelectedSkill(null);
+  }, [appPolicy, runtimeStatus, selectedSkill]);
+
   const style = useMemo<BrainStyle>(() => {
     return {
       "--brain-accent": branding.accentColor,
@@ -476,8 +774,8 @@ export function BrainApp({
   }, [branding.accentColor, preferences.corners]);
 
   const selectProject = useCallback((projectId: string) => {
-    if (sending || documentUploading) {
-      setNotice("Detén la respuesta actual antes de cambiar de proyecto.");
+    if (documentUploading) {
+      setNotice("Espera a que termine de prepararse el documento antes de cambiar de proyecto.");
       return;
     }
     const project = projects.find((candidate) => candidate.id === projectId && candidate.status === "active");
@@ -487,6 +785,7 @@ export function BrainApp({
     const remembered = threads.find((thread) =>
       thread.id === rememberedId && thread.projectId === projectId && thread.status === "active");
     const thread = remembered ?? firstActiveThread(threads, projectId);
+    activeSelectionRef.current = { projectId, threadId: thread?.id ?? null };
     setActiveProjectId(projectId);
     setActiveThreadId(thread?.id ?? null);
     setPendingRuntimeContext(null);
@@ -495,15 +794,16 @@ export function BrainApp({
     setSelectedMessageId(null);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, activeThreadId, documentUploading, projects, sending, threads]);
+  }, [activeProjectId, activeThreadId, documentUploading, projects, threads]);
 
   const selectThread = useCallback((threadId: string) => {
-    if (sending || documentUploading) {
-      setNotice("Detén la respuesta actual antes de cambiar de conversación.");
+    if (documentUploading) {
+      setNotice("Espera a que termine de prepararse el documento antes de cambiar de conversación.");
       return;
     }
     const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
     if (!thread) return;
+    activeSelectionRef.current = { projectId: thread.projectId, threadId: thread.id };
     setActiveProjectId(thread.projectId);
     setActiveThreadId(thread.id);
     setPendingRuntimeContext(null);
@@ -512,10 +812,93 @@ export function BrainApp({
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
-  }, [documentUploading, sending, threads]);
+  }, [documentUploading, threads]);
+
+  const updateTaskCenter = useCallback(async (
+    body: { action: "mark_read"; taskIds: string[] } |
+      { action: "preferences"; preferences: TaskNotificationPreferences },
+  ) => {
+    setTaskCenterBusy(true);
+    try {
+      if (initialWorkbench.persistence === "browser-preview") {
+        setTaskCenterPayload((current) => {
+          if (body.action === "preferences") {
+            taskPreferencesRef.current = body.preferences;
+            return { ...current, preferences: body.preferences };
+          }
+          const readTaskIds = [...new Set([...current.readTaskIds, ...body.taskIds])];
+          return {
+            ...current,
+            readTaskIds,
+            tasks: current.tasks.map((task) => body.taskIds.includes(task.id)
+              ? { ...task, unread: false }
+              : task),
+          };
+        });
+        return;
+      }
+      const response = await fetch("/api/task-center", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const value: unknown = await response.json().catch(() => null);
+      if (!response.ok || !isTaskCenterPayload(value)) {
+        throw new Error("No se ha podido guardar el centro de tareas.");
+      }
+      applyTaskCenterPayload(value, false);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.");
+    } finally {
+      setTaskCenterBusy(false);
+    }
+  }, [applyTaskCenterPayload, initialWorkbench.persistence]);
+
+  const markTaskRead = useCallback((taskId: string) => {
+    void updateTaskCenter({ action: "mark_read", taskIds: [taskId] });
+  }, [updateTaskCenter]);
+
+  const markAllTasksRead = useCallback(() => {
+    const taskIds = taskCenterItems.filter((task) => task.unread).map((task) => task.id);
+    if (taskIds.length) void updateTaskCenter({ action: "mark_read", taskIds });
+  }, [taskCenterItems, updateTaskCenter]);
+
+  const requestDesktopNotifications = useCallback(async () => {
+    if (typeof Notification === "undefined") {
+      setNotificationPermission("unsupported");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      void updateTaskCenter({
+        action: "preferences",
+        preferences: { ...taskPreferencesRef.current, desktop: true },
+      });
+    } else {
+      setNotice("Los avisos del navegador no se han activado.");
+    }
+  }, [updateTaskCenter]);
+
+  const openTaskConversation = useCallback(async (task: TaskCenterItem) => {
+    if (task.unread) markTaskRead(task.id);
+    setTaskCenterOpen(false);
+    selectThread(task.threadId);
+    if (initialWorkbench.persistence === "browser-preview") return;
+    try {
+      const response = await fetch("/api/workbench", { cache: "no-store" });
+      const value: unknown = await response.json().catch(() => null);
+      if (!response.ok || !value || typeof value !== "object" || !("workbench" in value) ||
+        !isWorkbenchSnapshot(value.workbench)) return;
+      setProjects(value.workbench.projects);
+      setThreads(value.workbench.threads);
+    } catch {
+      // The already loaded conversation remains usable if this refresh fails.
+    }
+  }, [initialWorkbench.persistence, markTaskRead, selectThread]);
 
   const startNewThread = useCallback(() => {
-    if (sending || documentUploading) return;
+    if (documentUploading) return;
     const standaloneProject = projects.find((project) =>
       project.slug === STANDALONE_PROJECT_SLUG && project.status === "active");
     if (!standaloneProject) {
@@ -524,6 +907,7 @@ export function BrainApp({
     }
     if (activeProjectId) delete threadByProjectRef.current[activeProjectId];
     delete threadByProjectRef.current[standaloneProject.id];
+    activeSelectionRef.current = { projectId: standaloneProject.id, threadId: null };
     setActiveProjectId(standaloneProject.id);
     setActiveThreadId(null);
     setSelectedMessageId(null);
@@ -533,35 +917,7 @@ export function BrainApp({
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, documentUploading, projects, sending]);
-
-  const createVersionFromMessage = useCallback(async (message: ChatMessage) => {
-    if (!activeProject || sending || actionBusy || !message.content.trim()) return;
-    setActionBusy(true);
-    try {
-      const baseTitle = activeThread?.title ?? "Resultado";
-      const title = `${baseTitle.replace(/ · (?:nova versió|nueva versión)$/, "")} · nueva versión`.slice(0, 120);
-      const thread = initialWorkbench.persistence === "browser-preview"
-        ? localThread(activeProject.id, title)
-        : await createThreadRequest(activeProject.id, title);
-      setThreads((current) => [thread, ...current]);
-      setActiveThreadId(thread.id);
-      threadByProjectRef.current[activeProject.id] = thread.id;
-      setSelectedMessageId(null);
-      setPrompt([
-        "Quiero crear una nueva versión de este resultado. Pregúntame qué quiero cambiar.",
-      ].join("\n"));
-      setPendingRuntimeContext(`Resultado de partida que debe conservarse intacto:\n\n${message.content.slice(0, 12_000)}`);
-      setAttachments([]);
-      setDocuments([]);
-      setActiveSideWindow(null);
-      setNotice("Nueva versión preparada en una conversación separada. El original se conserva.");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido preparar una nueva versión.");
-    } finally {
-      setActionBusy(false);
-    }
-  }, [actionBusy, activeProject, activeThread?.title, initialWorkbench.persistence, sending]);
+  }, [activeProjectId, documentUploading, projects]);
 
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
@@ -712,10 +1068,20 @@ export function BrainApp({
       : prompt)).trim();
     if (!visibleContent || !runtimeContent || sending || documentUploading || !activeProject || activeProject.status !== "active") return;
 
-    setSending(true);
+    const initialThreadId = activeThread?.id ?? null;
+    const selectionAtStart = {
+      projectId: activeProject.id,
+      threadId: initialThreadId,
+    };
+    const reservationKey = initialThreadId ?? `project:${activeProject.id}:new`;
+    if (turnReservationsRef.current.has(reservationKey)) return;
+    turnReservationsRef.current.add(reservationKey);
+    if (!initialThreadId) setDraftStarting(true);
     let thread = activeThread && activeThread.status === "active" &&
       activeThread.projectId === activeProject.id ? activeThread : null;
     let assistantMessage: ChatMessage | null = null;
+    let controller: AbortController | null = null;
+    let ownsVisibleComposer = true;
     let succeeded = false;
     try {
       if (!thread) {
@@ -723,9 +1089,15 @@ export function BrainApp({
         thread = initialWorkbench.persistence === "browser-preview"
           ? localThread(activeProject.id, title)
           : await createThreadRequest(activeProject.id, title);
+        setDraftStarting(false);
         setThreads((current) => [thread as WorkbenchThread, ...current]);
-        setActiveThreadId(thread.id);
-        threadByProjectRef.current[activeProject.id] = thread.id;
+        ownsVisibleComposer = activeSelectionRef.current.projectId === selectionAtStart.projectId &&
+          activeSelectionRef.current.threadId === selectionAtStart.threadId;
+        if (ownsVisibleComposer) {
+          activeSelectionRef.current = { projectId: activeProject.id, threadId: thread.id };
+          setActiveThreadId(thread.id);
+          threadByProjectRef.current[activeProject.id] = thread.id;
+        }
       }
 
       const startedAt = new Date();
@@ -750,6 +1122,11 @@ export function BrainApp({
       );
       const threadId = thread.id;
       const assistantId = assistantMessage.id;
+      setRunningThreadIds((current) => {
+        const next = new Set(current);
+        next.add(threadId);
+        return next;
+      });
       if (readyDocuments.length) {
         setPublications((current) => [
           ...current.filter((candidate) => !readyDocuments.some((document) => document.uploadId === candidate.uploadId)),
@@ -776,14 +1153,19 @@ export function BrainApp({
             messages: [...candidate.messages, userMessage, assistantMessage as ChatMessage],
           }
         : candidate));
-      setSelectedMessageId(assistantId);
-      setPrompt("");
-      setPendingRuntimeContext(null);
-      setAttachments([]);
-      setDocuments([]);
+      if (ownsVisibleComposer) {
+        setSelectedMessageId(assistantId);
+        setPrompt("");
+        setPendingRuntimeContext(null);
+        setAttachments([]);
+        setDocuments([]);
+      }
 
-      const controller = new AbortController();
-      abortRef.current = controller;
+      controller = new AbortController();
+      turnControllersRef.current.set(threadId, {
+        assistantMessageId: assistantId,
+        controller,
+      });
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -816,7 +1198,7 @@ export function BrainApp({
       succeeded = true;
     } catch (error) {
       if (thread && assistantMessage) {
-        const stopped = abortRef.current?.signal.aborted === true;
+        const stopped = controller?.signal.aborted === true;
         const failedThreadId = thread.id;
         const failedMessageId = assistantMessage.id;
         setThreads((current) => updateThreadMessage(
@@ -835,17 +1217,105 @@ export function BrainApp({
         setNotice(error instanceof Error ? error.message : "No se ha podido crear la conversación.");
       }
     } finally {
-      setSending(false);
-      abortRef.current = null;
+      if (thread) {
+        const threadId = thread.id;
+        if (controller && turnControllersRef.current.get(threadId)?.controller === controller) {
+          turnControllersRef.current.delete(threadId);
+        }
+        setRunningThreadIds((current) => {
+          if (!current.has(threadId)) return current;
+          const next = new Set(current);
+          next.delete(threadId);
+          return next;
+        });
+      }
+      turnReservationsRef.current.delete(reservationKey);
+      if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
   }, [activeProject, activeThread, attachments, composerEffort, composerMode, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
+  const branchConversation = useCallback(async (
+    message: ChatMessage,
+    input: BranchThreadInput,
+    autoSend: boolean,
+  ) => {
+    if (!activeThread || sending || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const result = initialWorkbench.persistence === "browser-preview"
+        ? localBranchThread(activeThread, input)
+        : await branchThreadRequest(activeThread.id, input);
+      setThreads((current) => [result.thread, ...current]);
+      setActiveProjectId(result.thread.projectId);
+      setActiveThreadId(result.thread.id);
+      threadByProjectRef.current[result.thread.projectId] = result.thread.id;
+      setSelectedMessageId(null);
+      setPrompt(result.draftMessage ?? "");
+      setPendingRuntimeContext(null);
+      setAttachments([]);
+      setDocuments([]);
+      setActiveSideWindow(null);
+      if (autoSend && result.draftMessage) {
+        setPendingBranchSend({ threadId: result.thread.id, content: result.draftMessage });
+      } else {
+        setNotice("Rama creada. La conversación original se conserva intacta.");
+      }
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido crear la rama.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeThread, initialWorkbench.persistence, sending]);
+
+  useEffect(() => {
+    if (!pendingBranchSend || pendingBranchSend.threadId !== activeThreadId || sending || actionBusy) return;
+    const pending = pendingBranchSend;
+    setPendingBranchSend(null);
+    void sendMessage(pending.content);
+  }, [actionBusy, activeThreadId, pendingBranchSend, sendMessage, sending]);
+
+  const shareConversation = useCallback(async () => {
+    if (!activeThread || actionBusy) return;
+    setActionBusy(true);
+    try {
+      const response = await fetch(`/api/threads/${encodeURIComponent(activeThread.id)}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      const body: unknown = await response.json().catch(() => null);
+      const url = body && typeof body === "object" && "share" in body && body.share &&
+        typeof body.share === "object" && "url" in body.share && typeof body.share.url === "string"
+        ? body.share.url : null;
+      if (!response.ok || !url) throw new Error("No se ha podido crear la copia interna.");
+      const absolute = new URL(url, window.location.origin).toString();
+      await navigator.clipboard.writeText(absolute);
+      setNotice("Enlace interno copiado. Solo funciona para personas autenticadas de la empresa.");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido compartir la conversación.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [actionBusy, activeThread]);
+
+  const exportConversation = useCallback((format: "markdown" | "json") => {
+    if (!activeThread) return;
+    const link = document.createElement("a");
+    link.href = `/api/threads/${encodeURIComponent(activeThread.id)}/export?format=${format}`;
+    link.download = "";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, [activeThread]);
+
   const stopActiveTurn = useCallback(async () => {
-    const controller = abortRef.current;
+    const activeRun = activeThread ? turnControllersRef.current.get(activeThread.id) : null;
+    const controller = activeRun?.controller;
     const activeAssistant = activeThread
       ? [...activeThread.messages].reverse().find((message) =>
-          message.role === "assistant" && message.status === "streaming")
+          message.role === "assistant" && message.status === "streaming" &&
+          (!activeRun || message.id === activeRun.assistantMessageId))
       : null;
     if (initialWorkbench.persistence !== "filesystem" || !activeThread || !activeAssistant) {
       controller?.abort();
@@ -947,9 +1417,8 @@ export function BrainApp({
       const updated: WorkbenchProject = initialWorkbench.persistence === "browser-preview"
         ? {
             ...project,
+            ...patch,
             ...(patch.name !== undefined ? { name: patch.name.trim() } : {}),
-            ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
-            ...(patch.status !== undefined ? { status: patch.status } : {}),
             updatedAt: new Date().toISOString(),
           }
         : await updateProjectRequest(project.id, patch);
@@ -1029,18 +1498,30 @@ export function BrainApp({
   }, [initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, textDialog]);
 
   const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction) => {
+    if (action === "archive" && threads.some((thread) =>
+      thread.projectId === project.id &&
+      (threadActivityById[thread.id]?.state === "running" ||
+        threadActivityById[thread.id]?.state === "needs_attention"))) {
+      setNotice("Detén o resuelve las conversaciones en curso antes de archivar el proyecto.");
+      return;
+    }
     if (action === "rename") setTextDialog({ kind: "rename-project", project });
     else if (action === "archive") setConfirmDialog({ kind: "archive-project", project });
     else if (action === "restore") void persistProjectPatch(project, { status: "active" });
     else void persistProjectPatch(project, { pinned: action === "pin" });
-  }, [persistProjectPatch]);
+  }, [persistProjectPatch, threadActivityById, threads]);
 
   const handleThreadAction = useCallback((thread: WorkbenchThread, action: ThreadMenuAction) => {
+    const workState = threadActivityById[thread.id]?.state;
+    if (action === "archive" && (workState === "running" || workState === "needs_attention")) {
+      setNotice("Detén o resuelve esta conversación antes de archivarla.");
+      return;
+    }
     if (action === "rename") setTextDialog({ kind: "rename-thread", thread });
     else if (action === "archive") setConfirmDialog({ kind: "archive-thread", thread });
     else if (action === "restore") void persistThreadPatch(thread, { status: "active" });
     else void persistThreadPatch(thread, { pinned: action === "pin" });
-  }, [persistThreadPatch]);
+  }, [persistThreadPatch, threadActivityById]);
 
   const confirmAction = useCallback(async () => {
     if (!confirmDialog) return;
@@ -1101,7 +1582,8 @@ export function BrainApp({
   const enabledWindows = manifest.windows.filter((window) =>
     window.enabled && (window.id === "chat" || window.id === "inspector" || window.id === "browser"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-  const browserEnabled = enabledWindows.some((window) => window.id === "browser");
+  const browserEnabled = enabledWindows.some((window) => window.id === "browser") &&
+    (settingsSnapshot?.apps.find((app) => app.id === "managed-browser")?.effectiveEnabled ?? true);
 
   const toggleSidebar = useCallback(() => {
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -1120,7 +1602,7 @@ export function BrainApp({
         setCommandPaletteOpen((current) => !current);
         return;
       }
-      if (modifier && key === "n" && !sending) {
+      if (modifier && key === "n") {
         event.preventDefault();
         startNewThread();
         return;
@@ -1134,6 +1616,9 @@ export function BrainApp({
       if (commandPaletteOpen) setCommandPaletteOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (memoryOpen) setMemoryOpen(false);
+      else if (libraryOpen) setLibraryOpen(false);
+      else if (taskCenterOpen) setTaskCenterOpen(false);
+      else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
       else if (activeSideWindow) setActiveSideWindow(null);
@@ -1149,8 +1634,10 @@ export function BrainApp({
     confirmDialog,
     customizationOpen,
     memoryOpen,
+    libraryOpen,
+    taskCenterOpen,
+    automationsOpen,
     mobileSidebarOpen,
-    sending,
     startNewThread,
     textDialog,
   ]);
@@ -1174,11 +1661,16 @@ export function BrainApp({
         activeThreadId={activeThreadId}
         mobileOpen={mobileSidebarOpen}
         desktopOpen={desktopSidebarOpen}
-        busy={actionBusy || sending}
+        busy={actionBusy}
+        threadActivityById={threadActivityById}
+        taskSummary={taskSummary}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
         onOpenDesktop={() => setDesktopSidebarOpen(true)}
         onOpenCommandPalette={() => setCommandPaletteOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
+        onOpenTaskCenter={() => setTaskCenterOpen(true)}
+        onOpenAutomations={() => setAutomationsOpen(true)}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onNewThread={startNewThread}
@@ -1206,7 +1698,8 @@ export function BrainApp({
         publications={publications}
         documentUploading={documentUploading}
         sending={sending}
-        runtimeStatus={runtimeStatus}
+        runtimeStatus={effectiveRuntimeStatus}
+        appPolicy={appPolicy}
         networkOnline={networkOnline}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
@@ -1227,11 +1720,16 @@ export function BrainApp({
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
         onOpenCustomization={() => setCustomizationOpen(true)}
+        onOpenProject={() => setProjectOpen(true)}
         activeSideWindow={activeSideWindow}
         canInspect={inspectorEnabled}
         onInspectMessage={inspectMessage}
         onResolveApproval={resolveApproval}
-        onCreateVersion={(message) => void createVersionFromMessage(message)}
+        onCreateVersion={(message) => void branchConversation(message, { kind: "branch", messageId: message.id }, false)}
+        onEditMessage={(message, content) => void branchConversation(message, { kind: "edit", messageId: message.id, editedContent: content }, true)}
+        onRegenerate={(message) => void branchConversation(message, { kind: "retry", messageId: message.id }, true)}
+        onShareConversation={shareConversation}
+        onExportConversation={exportConversation}
         onResultAction={persistResultAction}
         showAdvancedControls
       />
@@ -1247,7 +1745,7 @@ export function BrainApp({
         />
       ) : null}
 
-      {activeSideWindow === "browser" ? (
+      {browserEnabled && activeSideWindow === "browser" ? (
         <BrowserPanel
           threadId={activeThreadId}
           open
@@ -1259,9 +1757,10 @@ export function BrainApp({
         productName={branding.productName}
         open={customizationOpen}
         preferences={preferences}
-        runtimeStatus={runtimeStatus}
+        runtimeStatus={effectiveRuntimeStatus}
         selectedSkill={selectedSkill}
         onSelectedSkillChange={setSelectedSkill}
+        onSettingsSnapshot={setSettingsSnapshot}
         onChange={changePreference}
         onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}
@@ -1272,9 +1771,50 @@ export function BrainApp({
         onClose={() => setMemoryOpen(false)}
       />
 
+      <ProjectPanel
+        key={`${activeProject?.id ?? "none"}:${activeProject?.updatedAt ?? "none"}`}
+        project={activeProject && activeProject.slug !== STANDALONE_PROJECT_SLUG ? activeProject : null}
+        open={projectOpen}
+        onClose={() => setProjectOpen(false)}
+        onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
+      />
+
+      <LibraryPanel
+        open={libraryOpen}
+        projects={projects}
+        threads={threads}
+        onClose={() => setLibraryOpen(false)}
+        onOpenConversation={(threadId, messageId) => {
+          setLibraryOpen(false);
+          selectThread(threadId);
+          setSelectedMessageId(messageId);
+          window.setTimeout(() => document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+        }}
+      />
+
+      <TaskCenterPanel
+        open={taskCenterOpen}
+        tasks={taskCenterItems}
+        preferences={taskCenterPayload.preferences}
+        notificationPermission={notificationPermission}
+        busy={taskCenterBusy}
+        onClose={() => setTaskCenterOpen(false)}
+        onOpenConversation={(task) => void openTaskConversation(task)}
+        onMarkRead={markTaskRead}
+        onMarkAllRead={markAllTasksRead}
+        onPreferencesChange={(next) => void updateTaskCenter({ action: "preferences", preferences: next })}
+        onRequestDesktopNotifications={() => void requestDesktopNotifications()}
+      />
+
+      <AutomationsPanel
+        open={automationsOpen}
+        projects={projects}
+        onClose={() => setAutomationsOpen(false)}
+      />
+
       <CommandPalette
         open={commandPaletteOpen}
-        busy={actionBusy || sending}
+        busy={actionBusy}
         projects={projects}
         threads={threads}
         activeProjectId={activeProjectId}
@@ -1289,6 +1829,22 @@ export function BrainApp({
         onOpenBrowser={() => setActiveSideWindow("browser")}
         onOpenCustomization={() => setCustomizationOpen(true)}
         onOpenMemory={() => setMemoryOpen(true)}
+        onOpenLibrary={() => setLibraryOpen(true)}
+        onOpenSearchResult={(result) => {
+          if (result.type === "memory") {
+            setMemoryOpen(true);
+            return;
+          }
+          if (result.threadId) {
+            selectThread(result.threadId);
+            if (result.messageId) {
+              setSelectedMessageId(result.messageId);
+              window.setTimeout(() => document.getElementById(`message-${result.messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+            }
+            return;
+          }
+          if (result.projectId) selectProject(result.projectId);
+        }}
       />
 
       {textDialogCopy ? (

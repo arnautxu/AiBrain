@@ -4,9 +4,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Browser,
+  Books,
   BookOpenText,
   ChatCircleDots,
   Command,
+  File,
   Folder,
   ListChecks,
   MagnifyingGlass,
@@ -15,10 +17,15 @@ import {
 } from "@phosphor-icons/react";
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import {
+  buildGlobalSearchResults,
+  isGlobalSearchResult,
+  type GlobalSearchResult,
+} from "@/library/contracts";
 
 type PaletteItem = {
   id: string;
-  group: "Acciones" | "Proyectos" | "Conversaciones";
+  group: "Acciones" | "Proyectos" | "Conversaciones" | "Resultados";
   label: string;
   detail: string;
   icon: ReactNode;
@@ -44,6 +51,8 @@ type CommandPaletteProps = {
   onOpenBrowser: () => void;
   onOpenCustomization: () => void;
   onOpenMemory: () => void;
+  onOpenLibrary: () => void;
+  onOpenSearchResult: (result: GlobalSearchResult) => void;
 };
 
 function searchable(value: string) {
@@ -70,9 +79,14 @@ export function CommandPalette({
   onOpenBrowser,
   onOpenCustomization,
   onOpenMemory,
+  onOpenLibrary,
+  onOpenSearchResult,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([]);
+  const [searchResultQuery, setSearchResultQuery] = useState("");
+  const [searching, setSearching] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalFocus(open, onClose, inputRef);
 
@@ -90,6 +104,15 @@ export function CommandPalette({
         shortcut: "⌘N",
         run: onNewThread,
       }] : []),
+      {
+        id: "action:library",
+        group: "Acciones",
+        label: "Abrir biblioteca",
+        detail: "Archivos, imágenes y resultados descargables",
+        icon: <Books size={16} />,
+        keywords: "biblioteca library archivos documentos imagenes resultados descargas",
+        run: onOpenLibrary,
+      },
       {
         id: "action:new-project",
         group: "Acciones",
@@ -166,6 +189,7 @@ export function CommandPalette({
     onNewThread,
     onOpenCustomization,
     onOpenMemory,
+    onOpenLibrary,
     onOpenBrowser,
     onOpenInspector,
     onSelectProject,
@@ -177,8 +201,72 @@ export function CommandPalette({
   const visibleItems = useMemo(() => {
     const normalized = searchable(query.trim());
     if (!normalized) return items;
-    return items.filter((item) => searchable(`${item.label} ${item.detail} ${item.keywords}`).includes(normalized));
-  }, [items, query]);
+    const matchingActions = items.filter((item) => item.group === "Acciones" &&
+      searchable(`${item.label} ${item.detail} ${item.keywords}`).includes(normalized));
+    if (normalized.length < 2) {
+      return items.filter((item) => searchable(`${item.label} ${item.detail} ${item.keywords}`).includes(normalized));
+    }
+    const currentResults = searchResultQuery === query.trim() ? searchResults : [];
+    const resultItems: PaletteItem[] = currentResults.map((result) => ({
+      id: `search:${result.id}`,
+      group: "Resultados",
+      label: result.title,
+      detail: result.snippet || ({
+        project: "Proyecto",
+        thread: "Conversación",
+        message: "Mensaje",
+        file: "Archivo",
+        artifact: "Resultado generado",
+        memory: "Memoria",
+        activity: "Actividad",
+        source: "Fuente",
+        tool: "Resultado de herramienta",
+      }[result.type]),
+      icon: result.type === "project" ? <Folder size={16} /> :
+        result.type === "thread" || result.type === "message" ? <ChatCircleDots size={16} /> :
+          result.type === "memory" ? <BookOpenText size={16} /> :
+            result.type === "activity" || result.type === "tool" ? <ListChecks size={16} /> : <File size={16} />,
+      keywords: result.type,
+      run: () => onOpenSearchResult(result),
+    }));
+    return [...matchingActions, ...resultItems];
+  }, [items, onOpenSearchResult, query, searchResultQuery, searchResults]);
+
+  useEffect(() => {
+    const value = query.trim();
+    if (!open || value.length < 2) {
+      return;
+    }
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => {
+      setSearching(true);
+      void fetch(`/api/search?q=${encodeURIComponent(value)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      }).then(async (response) => {
+        const body: unknown = await response.json().catch(() => null);
+        if (response.ok && body && typeof body === "object" && "results" in body &&
+            Array.isArray(body.results) && body.results.every(isGlobalSearchResult)) {
+          return body.results;
+        }
+        return buildGlobalSearchResults({ projects, threads }, value);
+      }).then((results) => {
+        setSearchResults(results);
+        setSearchResultQuery(value);
+      }).catch(() => {
+        if (!controller.signal.aborted) {
+          setSearchResults(buildGlobalSearchResults({ projects, threads }, value));
+          setSearchResultQuery(value);
+        }
+      }).finally(() => {
+        if (!controller.signal.aborted) setSearching(false);
+      });
+    }, 180);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [open, projects, query, threads]);
 
   useEffect(() => {
     if (!open) return;
@@ -268,12 +356,16 @@ export function CommandPalette({
                 </button>
               </div>
             );
-          }) : (
+          }) : searching ? (
+            <div className="grid min-h-44 place-items-center px-6 text-center" role="status">
+              <div><span className="mx-auto block size-5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text)] motion-reduce:animate-none" /><p className="mt-3 text-[11px] text-[var(--text-subtle)]">Buscando en conversaciones, archivos y memoria…</p></div>
+            </div>
+          ) : (
             <div className="grid min-h-44 place-items-center px-6 text-center">
               <div>
                 <span className="mx-auto grid size-9 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><Command size={17} /></span>
                 <p className="mt-3 text-[12px] font-semibold text-[var(--text)]">Sin resultados</p>
-                <p className="mt-1 text-[10px] text-[var(--text-subtle)]">Prueba con el nombre de un proyecto, una conversación o una acción.</p>
+                <p className="mt-1 text-[10px] text-[var(--text-subtle)]">Prueba con palabras de un mensaje, archivo, resultado o recuerdo.</p>
               </div>
             </div>
           )}
