@@ -66,6 +66,7 @@ import {
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
+import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import type { ThreadRuntimeContext } from "@/workbench/internal";
 import {
   parseTurnTokenUsage,
@@ -241,6 +242,14 @@ export async function runWorkerCodexTurn(
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
+  const telemetry = new TurnTelemetry({
+    installationId,
+    userId: authenticatedUserId,
+    projectId: chatRequest.projectId,
+    threadId: chatRequest.threadId,
+    localTurnId: chatRequest.assistantMessageId,
+    clientRequestId: chatRequest.userMessageId,
+  }, { logger: operationalLogger });
   try {
   if (runtimeConfig.mode !== "codex") {
     throw new RuntimeNotReadyError("El runtime real de Codex no està activat.");
@@ -405,9 +414,19 @@ export async function runWorkerCodexTurn(
       }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+  telemetry.bindRuntimeThread(threadId);
+  if (runtimeThreadId) telemetry.resumed();
   recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
-  if (recoveredState && recoveredState.status !== "inProgress") return;
+  if (recoveredState && recoveredState.status !== "inProgress") {
+    telemetry.bindRuntimeTurn(recoveredState.id);
+    telemetry.finish(
+      recoveredState.status === "completed"
+        ? "completed"
+        : recoveredState.status === "interrupted" ? "stopped" : "error",
+    );
+    return;
+  }
 
   let runtimeTurnId: string | null = null;
   let remoteInterruptConfirmed = false;
@@ -418,8 +437,6 @@ export async function runWorkerCodexTurn(
   const turnFinished = new Promise<{ status: string | null; error: string | null }>((resolve) => {
     finishTurn = resolve;
   });
-  const runtimeStartedAt = performance.now();
-  let firstDeltaAt: number | null = null;
   let stoppedEmitted = false;
 
   const registration = runtime.client.router.registerTurn(
@@ -431,7 +448,7 @@ export async function runWorkerCodexTurn(
         if (method === "item/agentMessage/delta") {
           const delta = notificationDelta(params);
           if (delta) {
-            firstDeltaAt ??= performance.now();
+            telemetry.delta();
             await emit(
               { type: "delta", value: delta },
               { envelope, key: `delta:${notificationItemId(params) ?? "agent"}` },
@@ -620,6 +637,7 @@ export async function runWorkerCodexTurn(
   );
 
   const interrupt = () => {
+    telemetry.cancellationRequested();
     if (remoteInterruptConfirmed) {
       finishTurn({ status: "interrupted", error: null });
       return;
@@ -646,6 +664,7 @@ export async function runWorkerCodexTurn(
     if (recoveredState?.status === "inProgress") {
       runtimeTurnId = recoveredState.id;
       registration.bindRuntimeTurn(recoveredState.id);
+      telemetry.bindRuntimeTurn(recoveredState.id);
     } else {
       const turnResult = await runtime.client.request("turn/start", {
       threadId,
@@ -682,33 +701,31 @@ export async function runWorkerCodexTurn(
         if (!resolvedTurnId) throw new Error("Codex no ha iniciat el torn.");
         runtimeTurnId = resolvedTurnId;
         registration.bindRuntimeTurn(resolvedTurnId);
+        telemetry.bindRuntimeTurn(resolvedTurnId);
         await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
       }, maintenanceActivity);
       runtimeTurnId ??= extractTurnId(turnResult);
       if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
       registration.bindRuntimeTurn(runtimeTurnId);
+      telemetry.bindRuntimeTurn(runtimeTurnId);
     }
     const completed = await turnFinished;
-    if (completed.status === "failed") return;
-    if (completed.status === "interrupted" || turnSignal.aborted) {
-      if (!stoppedEmitted) await emit({ type: "stopped" });
+    if (completed.status === "failed") {
+      telemetry.finish("error");
       return;
     }
-    const totalMs = Math.round(performance.now() - runtimeStartedAt);
-    const firstTextMs = firstDeltaAt === null ? null : Math.round(firstDeltaAt - runtimeStartedAt);
+    if (completed.status === "interrupted" || turnSignal.aborted) {
+      if (!stoppedEmitted) await emit({ type: "stopped" });
+      telemetry.finish("stopped");
+      return;
+    }
+    const metrics = telemetry.finish("completed");
     await upsertActivity({
       id: "runtime-performance",
       kind: "system",
       label: "Rendiment del torn",
-      detail: `${firstTextMs === null ? "Sense text incremental" : `Primer text ${firstTextMs} ms`} · Total ${totalMs} ms · Worker calent`,
+      detail: `${metrics.serverFirstDeltaMs === null ? "Sense text incremental" : `Primer text ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker calent`,
       status: "complete",
-    });
-    operationalLogger.info("codex.turn_metrics", {
-      installationId,
-      userId: authenticatedUserId,
-      projectId: chatRequest.projectId,
-      firstTextMs,
-      totalMs,
     });
   } finally {
     turnSignal.removeEventListener("abort", interrupt);
@@ -716,6 +733,9 @@ export async function runWorkerCodexTurn(
     unregisterCancellation();
     registration.dispose();
   }
+  } catch (error) {
+    telemetry.finish("error");
+    throw error;
   } finally {
     if (ownsMaintenanceActivity) maintenanceActivity.release();
   }

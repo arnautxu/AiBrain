@@ -35,16 +35,22 @@ a controlled benchmark.
 | Input latency | key/paste event → next painted composer value | p95 ≤ 100 ms; no task > 200 ms | not started | Browser `performance.mark` and `requestAnimationFrame`; UI owner. |
 | Navigation latency | navigation intent → destination shell painted and interactive | p95 ≤ 500 ms for cached shell; otherwise comparative budget | not started | Browser marks per sidebar/search/project/thread transition; UI owner. |
 | TTI | document navigation start → composer focused and usable | comparative budget | not started | Must be collected in the real Arnall browser, not inferred from server logs. |
-| App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | implemented | `codex.turn_metrics.firstTextMs` and the internal usage record. This is not visible TTFT. |
+| App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | validated locally | Private `codex.turn_metrics.serverFirstDeltaMs` is measured at the server notification boundary. This is not visible TTFT. `src/runtime/turn-telemetry.test.ts` fixes the clock and verifies the calculation. |
 | Visible TTFT | send intent → first agent text painted | comparative budget | not started | Requires a client send mark and a post-paint mark for the first `delta`. Never substitute first server delta. |
-| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | not started | Add bounded client samples: count, p50/p95 gap, longest gap. |
-| Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | Server total and durable usage duration exist; client paint/persistence correlation is pending. |
-| Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | not started | Existing tests prove functional correctness, not elapsed reconnect time. Add timestamps around handshake, replay and projection catch-up. |
+| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | implemented | Private `codex.turn_metrics` includes server-side delta count plus inter-delta p50/p95/max. Client paint cadence is still pending. |
+| Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | `codex.turn_metrics.totalMs` is server runtime elapsed; the durable usage record retains request total. Client paint/persistence correlation is pending. |
+| Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | `codex.turn_lifecycle` correlates `disconnected`, `reconnected` and `resumed` without payloads. It is event evidence, not yet the end-to-end client catch-up latency. |
 | Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | not started | Browser owner must also preserve `indeterminate`; runtime must log the phase timestamps without command/body/secrets. |
 
 ## Reproducible local evidence on the authorized base
 
-Base: `d381ccf836516f91464f20225403996e7e8158d1`.
+Historical lifecycle baseline: `d381ccf836516f91464f20225403996e7e8158d1`.
+
+Telemetry P0 candidate base: `f2c48dc9d84c8876bfd0432f4f09f1b648d59da0`.
+Before this candidate extension, `codex.turn_metrics` emitted only
+`firstTextMs` and `totalMs` when a turn completed; it had no cadence summary,
+terminal state or stream lifecycle record. The private fields described below
+are the server-side replacement, not a visible TTFT measurement.
 
 Focused lifecycle slice:
 
@@ -68,6 +74,17 @@ vitest run src/app/api/chat/route.test.ts
 1 file passed, 1 test passed
 ```
 
+Telemetry focal regression on the candidate extension:
+
+```text
+npx vitest run
+  src/runtime/turn-telemetry.test.ts
+  src/runtime/worker-codex-turn.test.ts
+  src/app/api/chat/route.test.ts
+
+3 files passed, 6 tests passed, 1.43 s
+```
+
 The post-change TypeScript check, targeted ESLint check and contract verification
 passed. A combined post-change lifecycle run completed 36 assertions in eight
 files, while the two timing-heavy integration files hit their fixed 25 s and
@@ -82,6 +99,22 @@ The desktop Codex binary inspected on the development Mac reports
 `0.149.0-alpha.4.3`; that process is not the Arnall worker and is not accepted as
 live AiBrain evidence. Production's entrypoint must continue rejecting a binary
 that differs from the generated contract version.
+
+## Private runtime telemetry readback
+
+The existing server-only operational logger emits two bounded JSON records per
+correlation, never a public route or client payload. `codex.turn_lifecycle`
+records `resumed`, `reconnected`, `disconnected` and `cancel_requested` with
+opaque installation/user/project/thread/turn/request IDs and request elapsed
+time. `codex.turn_metrics` records terminal `completed`, `error` or `stopped`,
+server first-delta time, delta count, inter-delta p50/p95/max, server total and
+lifecycle counts. It deliberately excludes prompt/message/content fields,
+model output, token data, error text, file paths and credentials.
+
+Operators read these records only from the existing authenticated operational
+log sink or an approved server-side acceptance artifact. A visible TTFT or
+paint cadence must continue to come from the client benchmark, not these server
+records.
 
 ## Historical live observations, not current acceptance
 

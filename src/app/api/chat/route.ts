@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
@@ -52,6 +53,7 @@ import {
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
 import { operationalLogger } from "@/operations/server-logger";
+import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import {
   MaintenanceModeError,
   type MaintenanceActivityLease,
@@ -180,25 +182,39 @@ function followProjectedTurn(
   assistantMessageId: string,
   initial: ChatMessage,
   signal: AbortSignal,
+  onDisconnect: () => void,
 ) {
+  let clientDetached = false;
+  const detach = () => {
+    if (clientDetached) return;
+    clientDetached = true;
+    onDisconnect();
+  };
   const replay = new ReadableStream<Uint8Array>({
     async start(controller) {
+      signal.addEventListener("abort", detach, { once: true });
+      if (signal.aborted) detach();
       let lastUpdatedAt = "";
       let current = initial;
-      controller.enqueue(line({ type: "snapshot", message: current }));
-      const deadline = Date.now() + 10 * 60_000;
-      while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
-        await delay(100, signal);
-        const projection = await store.read(threadId, assistantMessageId);
-        if (!projection) break;
-        current = projection.message;
-        if (projection.updatedAt !== lastUpdatedAt) {
-          lastUpdatedAt = projection.updatedAt;
-          controller.enqueue(line({ type: "snapshot", message: current }));
+      try {
+        controller.enqueue(line({ type: "snapshot", message: current }));
+        const deadline = Date.now() + 10 * 60_000;
+        while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
+          await delay(100, signal);
+          const projection = await store.read(threadId, assistantMessageId);
+          if (!projection) break;
+          current = projection.message;
+          if (projection.updatedAt !== lastUpdatedAt) {
+            lastUpdatedAt = projection.updatedAt;
+            controller.enqueue(line({ type: "snapshot", message: current }));
+          }
         }
+        if (!clientDetached) controller.close();
+      } finally {
+        signal.removeEventListener("abort", detach);
       }
-      controller.close();
     },
+    cancel: detach,
   });
   return new Response(replay, { headers: replayHeaders() });
 }
@@ -457,21 +473,50 @@ export async function POST(request: Request) {
       body.assistantMessageId,
     )) {
       maintenanceActivity?.release();
+      const telemetry = new TurnTelemetry({
+        installationId: session.tenant.id,
+        userId: session.user.id,
+        projectId: body.projectId,
+        threadId: body.threadId,
+        localTurnId: body.assistantMessageId,
+        clientRequestId: body.userMessageId,
+        streamRequestId: randomUUID(),
+      }, { logger: operationalLogger });
+      telemetry.bindRuntimeThread(runtimeThreadId);
+      telemetry.reconnected();
+      let reconnectDetached = false;
       return followProjectedTurn(
         turnProjectionStore,
         body.threadId,
         body.assistantMessageId,
         assistantMessage,
         request.signal,
+        () => {
+          if (reconnectDetached) return;
+          reconnectDetached = true;
+          telemetry.disconnected();
+        },
       );
     }
   }
 
-  let clientDetached = request.signal.aborted;
+  const streamTelemetry = new TurnTelemetry({
+    installationId: session.tenant.id,
+    userId: session.user.id,
+    projectId: body.projectId,
+    threadId: body.threadId,
+    localTurnId: body.assistantMessageId,
+    clientRequestId: body.userMessageId,
+    streamRequestId: randomUUID(),
+  }, { logger: operationalLogger });
+  let clientDetached = false;
   const detachClient = () => {
+    if (clientDetached) return;
     clientDetached = true;
+    streamTelemetry.disconnected();
   };
   request.signal.addEventListener("abort", detachClient, { once: true });
+  if (request.signal.aborted) detachClient();
   const turnLifetime = new AbortController();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
