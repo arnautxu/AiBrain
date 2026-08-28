@@ -43,6 +43,7 @@ same immutable Git SHA, except repository-preservation rows that terminate at
 | Permissions are server-enforced | validated locally | [permission turn tests](../src/runtime/permission-turn.test.ts), [permission provider tests](../src/permissions/markdown-permission-provider.test.ts) | Candidate allows one authorized operation and denies one unauthorized cross-user or policy-blocked operation, both audited |
 | One real action completes | validated locally | Historical browser action is recorded in [backend progress](AIBRAIN_BACKEND_PROGRESS.md); implementation in [browser server service](../src/runtime/browser/server-service.ts) | Candidate performs an approved, bounded action; final URL/artifact/receipt is read back from the controlling store |
 | Observability identifies the same user/thread/turn/release | implemented | Health, release state, alerts and usage/audit components exist | Correlated candidate evidence from release state, health, structured logs/audit and persisted turn; no secrets in evidence |
+| No unintended QA/demo surface | implemented | Master readback reported login `data-installation="company-qa"`; the dirty settings policy contains a demo shortcut | Acceptance decision and candidate readback proving installation metadata and server-side capability/role policy expose only intended production behavior |
 
 ## Release, live and rollback
 
