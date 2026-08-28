@@ -12,9 +12,23 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   await login(page);
   const composer = page.getByTestId("composer");
   const textarea = page.getByRole("textbox", { name: "Mensaje" });
+  await expect.poll(() => composer.evaluate((element) => getComputedStyle(element.parentElement?.parentElement ?? element).position)).toBe("absolute");
+  const initialComposerBox = await composer.boundingBox();
+  const initialControlsBox = await composer.locator(".composer-controls").boundingBox();
 
   await textarea.fill("Primera línea\nSegunda línea\nTercera línea\nCuarta línea");
-  expect(await textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
+  await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
+  const grownComposerBox = await composer.boundingBox();
+  const textareaBox = await textarea.boundingBox();
+  const controlsBox = await composer.locator(".composer-controls").boundingBox();
+  expect(initialComposerBox).not.toBeNull();
+  expect(initialControlsBox).not.toBeNull();
+  expect(grownComposerBox).not.toBeNull();
+  expect(textareaBox).not.toBeNull();
+  expect(controlsBox).not.toBeNull();
+  expect(grownComposerBox!.y).toBeLessThan(initialComposerBox!.y);
+  expect(Math.abs((controlsBox!.y + controlsBox!.height) - (initialControlsBox!.y + initialControlsBox!.height))).toBeLessThanOrEqual(2);
+  expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 
   await page.getByLabel("Seleccionar archivos para adjuntar").setInputFiles({
@@ -38,6 +52,25 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   await page.reload();
   await expect(page.locator("article.flex.justify-end").filter({ hasText: "Primera línea" })).toBeVisible();
   await expect(page.getByText("Respuesta detenida.")).toBeVisible();
+});
+
+test("the mobile composer keeps every control below its growing text area", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+
+  const composer = page.getByTestId("composer");
+  const textarea = page.getByRole("textbox", { name: "Mensaje" });
+  await textarea.fill("Primera línea\nSegunda línea\nTercera línea\nCuarta línea");
+  await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
+
+  const textareaBox = await textarea.boundingBox();
+  const controlsBox = await composer.locator(".composer-controls").boundingBox();
+  expect(textareaBox).not.toBeNull();
+  expect(controlsBox).not.toBeNull();
+  expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
+  await expect(page.getByRole("button", { name: "Añadir al mensaje" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
 test("the existing chat route streams a complete turn and persists it in preview storage", async ({ page }) => {
