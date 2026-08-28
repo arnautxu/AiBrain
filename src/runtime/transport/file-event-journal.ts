@@ -161,9 +161,16 @@ export class FileTransportEventJournal implements TransportEventJournal {
       const retainAfter = Math.max(0, validated.sequence - this.maxRetainedDeliveredEvents);
       await this.journal.compact((entries) => {
         if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
-        return entries
+        const retained = entries
           .map((entry) => entry.payload)
           .filter((persisted) => persisted.sequence > retainAfter);
+        // A large recovery backlog advances one event at a time. Rewriting the
+        // complete journal for every acknowledgement creates quadratic I/O,
+        // so compact only after at least one retention window is reclaimable.
+        if (entries.length - retained.length < this.maxRetainedDeliveredEvents) {
+          return undefined;
+        }
+        return retained;
       });
     });
   }
