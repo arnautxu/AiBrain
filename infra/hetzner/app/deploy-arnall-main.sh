@@ -16,6 +16,9 @@ readonly EGRESS_REPOSITORY="${REGISTRY}/aibrain-company-qa-egress"
 readonly CONTEXT_ROOT="/var/lib/docker/volumes/aibrain-company-qa-data/_data/company-context"
 readonly MAX_ARCHIVE_BYTES=$((64 * 1024 * 1024))
 readonly MIN_FREE_BYTES=$((12 * 1024 * 1024 * 1024))
+readback_staging=""
+readback_evidence_parent=""
+readback_revision=""
 
 fail() {
   printf 'ARNALL_DEPLOY_FAILED: %s\n' "$1" >&2
@@ -38,10 +41,20 @@ require_root_owned_directory() {
 }
 
 require_release_readback_runtime() {
-  node --experimental-strip-types --input-type=module --eval '
+  node --input-type=module --eval '
     const major = Number.parseInt(process.versions.node.split(".")[0], 10);
     if (!Number.isInteger(major) || major < 22) process.exit(64);
   ' >/dev/null 2>&1 || fail "host Node runtime cannot execute the release readback collector"
+}
+
+cleanup_readback_staging() {
+  local status="$?"
+  set +e
+  if [[ -n "${readback_staging:-}" && -d "$readback_staging" && ! -L "$readback_staging" \
+    && "$readback_staging" == "${readback_evidence_parent}/.${readback_revision}."* ]]; then
+    rm -rf --one-file-system -- "$readback_staging"
+  fi
+  exit "$status"
 }
 
 validate_archive() {
@@ -321,23 +334,16 @@ collect_release_readbacks() {
   local compose_file="${STATE_FILE}.active.compose.yaml"
   local evidence_parent="${CONFIG_DIR}/acceptance"
   local evidence_root="${evidence_parent}/${revision}"
-  local staging="" app_container gateway_container captured_at
-
-  cleanup_readback_staging() {
-    local status="$?"
-    set +e
-    if [[ -n "$staging" && -d "$staging" && ! -L "$staging" && "$staging" == "${evidence_parent}/.${revision}."* ]]; then
-      rm -rf --one-file-system -- "$staging"
-    fi
-    exit "$status"
-  }
+  local app_container gateway_container captured_at
+  readback_evidence_parent="$evidence_parent"
+  readback_revision="$revision"
 
   [[ -f "$STATE_FILE" ]] || fail "release state is unavailable"
   require_root_owned_file "$STATE_FILE"
   require_root_owned_file "$ACTIVE_ENV"
   require_root_owned_file "$compose_file"
   [[ -d "$release_dir" && ! -L "$release_dir" ]] || fail "candidate release directory is unavailable"
-  [[ -f "${release_dir}/scripts/collect-release-readbacks.ts" ]] || fail "candidate release has no readback collector"
+  [[ -f "${release_dir}/scripts/collect-release-readbacks.mjs" ]] || fail "candidate release has no readback collector"
   jq -e --arg revision "$revision" '.schemaVersion == 3 and .current.revision == $revision' "$STATE_FILE" >/dev/null \
     || fail "release state does not match the requested candidate"
   [[ "$run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
@@ -357,44 +363,46 @@ collect_release_readbacks() {
   [[ "$gateway_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "gateway container is unavailable"
 
   umask 077
-  staging="$(mktemp -d "${evidence_parent}/.${revision}.XXXXXX")"
+  readback_staging="$(mktemp -d "${evidence_parent}/.${revision}.XXXXXX")"
   trap cleanup_readback_staging EXIT
-  chmod 0700 "$staging"
-  require_root_owned_directory "$staging"
+  chmod 0700 "$readback_staging"
+  require_root_owned_directory "$readback_staging"
   jq -n --arg revision "$revision" --arg runId "$run_id" \
     '{schemaVersion:1,workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$runId}' \
-    > "${staging}/backend-ci-source.json"
-  chmod 0600 "${staging}/backend-ci-source.json"
-  node --experimental-strip-types "${release_dir}/scripts/collect-release-readbacks.ts" \
-    --output-root "$staging" \
+    > "${readback_staging}/backend-ci-source.json"
+  chmod 0600 "${readback_staging}/backend-ci-source.json"
+  node "${release_dir}/scripts/collect-release-readbacks.mjs" \
+    --output-root "$readback_staging" \
     --candidate-sha "$revision" \
-    --ci-source "${staging}/backend-ci-source.json" \
+    --ci-source "${readback_staging}/backend-ci-source.json" \
     --release-state "$STATE_FILE" \
     --docker-bin /usr/bin/docker \
     --app-container "$app_container" \
     --gateway-container "$gateway_container"
   for artifact in release-ci-readback.json release-deploy-state.json release-runtime-readback.json release-app-oci-inspect.json release-gateway-oci-inspect.json; do
-    require_root_owned_file "${staging}/${artifact}"
+    require_root_owned_file "${readback_staging}/${artifact}"
   done
-  captured_at="$(jq -r '.capturedAt' "${staging}/release-ci-readback.json")"
+  captured_at="$(jq -r '.capturedAt' "${readback_staging}/release-ci-readback.json")"
   [[ "$captured_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || fail "collector capture time is invalid"
   jq -n --arg releaseSha "$revision" --arg runId "$run_id" --arg capturedAt "$captured_at" \
-    --arg ciHash "$(sha256sum "${staging}/release-ci-readback.json" | awk '{print $1}')" \
-    --arg deployHash "$(sha256sum "${staging}/release-deploy-state.json" | awk '{print $1}')" \
-    --arg runtimeHash "$(sha256sum "${staging}/release-runtime-readback.json" | awk '{print $1}')" \
-    --arg appHash "$(sha256sum "${staging}/release-app-oci-inspect.json" | awk '{print $1}')" \
-    --arg gatewayHash "$(sha256sum "${staging}/release-gateway-oci-inspect.json" | awk '{print $1}')" \
+    --arg ciHash "$(sha256sum "${readback_staging}/release-ci-readback.json" | awk '{print $1}')" \
+    --arg deployHash "$(sha256sum "${readback_staging}/release-deploy-state.json" | awk '{print $1}')" \
+    --arg runtimeHash "$(sha256sum "${readback_staging}/release-runtime-readback.json" | awk '{print $1}')" \
+    --arg appHash "$(sha256sum "${readback_staging}/release-app-oci-inspect.json" | awk '{print $1}')" \
+    --arg gatewayHash "$(sha256sum "${readback_staging}/release-gateway-oci-inspect.json" | awk '{print $1}')" \
     '{schemaVersion:1,releaseSha:$releaseSha,ciRunId:$runId,capturedAt:$capturedAt,evidence:[
       {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
       {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
       {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
       {kind:"release",route:"release:app-oci-inspect",artifactPath:"release-app-oci-inspect.json",sha256:$appHash},
       {kind:"release",route:"release:gateway-oci-inspect",artifactPath:"release-gateway-oci-inspect.json",sha256:$gatewayHash}
-    ]}' > "${staging}/acceptance-release-readbacks.json"
-  chmod 0600 "${staging}/acceptance-release-readbacks.json"
-  require_root_owned_file "${staging}/acceptance-release-readbacks.json"
-  mv "$staging" "$evidence_root"
-  staging=""
+    ]}' > "${readback_staging}/acceptance-release-readbacks.json"
+  chmod 0600 "${readback_staging}/acceptance-release-readbacks.json"
+  require_root_owned_file "${readback_staging}/acceptance-release-readbacks.json"
+  mv "$readback_staging" "$evidence_root"
+  readback_staging=""
+  readback_evidence_parent=""
+  readback_revision=""
   trap - EXIT
 }
 
