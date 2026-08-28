@@ -144,6 +144,29 @@ describe("worker App Server client", () => {
     await client.close();
   });
 
+  it("reports the verified account without waiting for the optional catalog", async () => {
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+
+    await expect(client.connectionSummary()).resolves.toMatchObject({
+      connected: true,
+      planType: "team",
+      processWarm: true,
+      models: [],
+      skills: [],
+    });
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && [
+        "model/list",
+        "skills/list",
+        "modelProvider/capabilities/read",
+        "account/rateLimits/read",
+        "account/usage/read",
+      ].includes(item.rpc.method),
+    )).toHaveLength(0);
+    await client.close();
+  });
+
   it("requires an admitted maintenance lease before sending turn/start to the gateway", async () => {
     const transport = new FakeTransport();
     const maintenance = new MaintenanceCoordinator();

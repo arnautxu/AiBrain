@@ -81,7 +81,7 @@ export async function GET(request: Request) {
           path.posix.join("projects", projectContext.projectId ?? "default"),
         );
         await mkdir(workspace, { recursive: true, mode: 0o700 });
-        return { connection: await worker.client.connection(workspace), workspace };
+        return { connection: await worker.client.connectionSummary(), workspace };
       })());
       workerWorkspace = runtimeConnection.workspace;
       const connection = runtimeConnection.connection;
