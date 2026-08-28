@@ -50,6 +50,8 @@ describe("backend CI contract", () => {
     expect(collection).toBeGreaterThan(deploy);
     expect(workflow).toContain("CI_RUN_ID: ${{ github.event.workflow_run.id }}");
     expect(workflow).toContain('root@"$DEPLOY_HOST" "collect-readbacks $TESTED_SHA $CI_RUN_ID" > /dev/null');
+    expect(workflow).toContain('root@"$DEPLOY_HOST" "bootstrap-admin $BOOTSTRAP_ADMIN_USER_ID"');
+    expect(workflow).toContain("vars.ARNALL_BOOTSTRAP_ADMIN_USER_ID != ''");
     expect(workflow).toContain("[[ \"$TESTED_SHA\" =~ ^[0-9a-f]{40}$ ]]");
     expect(workflow).toContain("[[ \"$CI_RUN_ID\" =~ ^[0-9]{6,20}$ ]]");
   });

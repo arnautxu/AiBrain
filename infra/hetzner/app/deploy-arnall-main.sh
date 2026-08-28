@@ -406,6 +406,52 @@ collect_release_readbacks() {
   trap - EXIT
 }
 
+bootstrap_workspace_admin() {
+  local user_id="$1"
+  local compose_file="${STATE_FILE}.active.compose.yaml"
+  local runtime_env="${CONFIG_DIR}/runtime.env"
+  local app_container temporary
+
+  [[ "$user_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] \
+    || fail "workspace bootstrap user id is invalid"
+  require_root_owned_file "$ACTIVE_ENV"
+  require_root_owned_file "$compose_file"
+  require_root_owned_file "$runtime_env"
+  grep -qx "AIBRAIN_RUNTIME_ENV_FILE=${runtime_env}" "$ACTIVE_ENV" \
+    || fail "active runtime env is outside the Arnall configuration boundary"
+
+  app_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q app)"
+  [[ "$app_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "application container is unavailable"
+  docker exec "$app_container" test -f "/var/lib/aibrain/data/users/${user_id}/user.json" \
+    || fail "workspace bootstrap user is not provisioned"
+  if docker exec "$app_container" test -e /var/lib/aibrain/data/workspace-admin/state.json; then
+    printf 'ARNALL_ADMIN_BOOTSTRAP_ALREADY_INITIALIZED\n'
+    return
+  fi
+
+  umask 077
+  temporary="$(mktemp "${runtime_env}.pending.XXXXXX")"
+  awk -v user_id="$user_id" '
+    BEGIN { replaced = 0 }
+    /^AIBRAIN_ADMIN_USER_IDS=/ { print "AIBRAIN_ADMIN_USER_IDS=" user_id; replaced = 1; next }
+    { print }
+    END { if (!replaced) print "AIBRAIN_ADMIN_USER_IDS=" user_id }
+  ' "$runtime_env" > "$temporary"
+  chmod 0600 "$temporary"
+  chown root:root "$temporary"
+  mv -f "$temporary" "$runtime_env"
+
+  docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" up -d --no-deps --force-recreate app >/dev/null
+  for _ in $(seq 1 30); do
+    if curl --fail --silent --show-error --max-time 5 https://arnall.graphikai.com/api/health/ready >/dev/null 2>&1; then
+      printf 'ARNALL_ADMIN_BOOTSTRAP_READY user_id=%s\n' "$user_id"
+      return
+    fi
+    sleep 2
+  done
+  fail "application did not become ready after workspace admin bootstrap"
+}
+
 main() {
   [[ "$(id -u)" == "0" ]] || fail "deployment gateway must run as root"
   if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
@@ -414,6 +460,10 @@ main() {
   fi
   if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^collect-readbacks\ ([0-9a-f]{40})\ ([0-9]{6,20})$ ]]; then
     collect_release_readbacks "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    return
+  fi
+  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^bootstrap-admin\ ([0-9a-f-]{36})$ ]]; then
+    bootstrap_workspace_admin "${BASH_REMATCH[1]}"
     return
   fi
   fail "unsupported gateway command"

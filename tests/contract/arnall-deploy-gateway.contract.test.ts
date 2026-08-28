@@ -65,6 +65,17 @@ describe("Arnall deployment gateway contract", () => {
     expect(runtimeCheck).toBeLessThan(promotion);
   });
 
+  it("bootstraps an owner only through the restricted gateway and only for a provisioned user", async () => {
+    const gateway = await readFile(gatewayPath, "utf8");
+
+    expect(gateway).toContain("^bootstrap-admin\\ ([0-9a-f-]{36})$");
+    expect(gateway).toContain('test -f "/var/lib/aibrain/data/users/${user_id}/user.json"');
+    expect(gateway).toContain("test -e /var/lib/aibrain/data/workspace-admin/state.json");
+    expect(gateway).toContain('grep -qx "AIBRAIN_RUNTIME_ENV_FILE=${runtime_env}" "$ACTIVE_ENV"');
+    expect(gateway).toContain('print "AIBRAIN_ADMIN_USER_IDS=" user_id');
+    expect(gateway).toContain("--force-recreate app");
+  });
+
   it("is idempotent only for a matching final package and removes failed staging evidence", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
     expect(gateway).toContain('validate_existing_release_readbacks "$revision" "$run_id" "$evidence_root"');

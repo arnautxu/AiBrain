@@ -74,6 +74,21 @@ jobs:
             -o UserKnownHostsFile="$RUNNER_TEMP/arnall-ssh/known_hosts" \
             root@"$DEPLOY_HOST" "deploy $TESTED_SHA"
 
+      - name: Bootstrap the durable Arnall workspace owner when requested
+        if: steps.current.outputs.deploy == 'true' && vars.ARNALL_BOOTSTRAP_ADMIN_USER_ID != ''
+        env:
+          DEPLOY_HOST: ${{ vars.ARNALL_DEPLOY_HOST }}
+          BOOTSTRAP_ADMIN_USER_ID: ${{ vars.ARNALL_BOOTSTRAP_ADMIN_USER_ID }}
+        run: |
+          [[ "$BOOTSTRAP_ADMIN_USER_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]]
+          ssh \
+            -i "$RUNNER_TEMP/arnall-ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$RUNNER_TEMP/arnall-ssh/known_hosts" \
+            root@"$DEPLOY_HOST" "bootstrap-admin $BOOTSTRAP_ADMIN_USER_ID"
+
       - name: Collect post-deploy release identity readbacks
         if: steps.current.outputs.deploy == 'true'
         env:
