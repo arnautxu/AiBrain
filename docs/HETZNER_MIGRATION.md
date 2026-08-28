@@ -6,6 +6,12 @@ En los ejemplos, sustituye `<installation>` por un slug nuevo y `<git-sha>` por 
 
 ## 1. Preparar release y configuración
 
+Instala Docker Engine, Compose V2 y Buildx desde los paquetes del host antes de
+recibir ningún archivo de release. Verifica `docker version`, `docker compose
+version` y `docker buildx version`; el preflight falla antes de crear una
+release si falta alguno. En Ubuntu 26.04 el complemento se instala con el
+paquete `docker-buildx` y no requiere reiniciar Docker ni contenedores activos.
+
 ```bash
 install -d -m 0750 /opt/aibrain-<installation>/releases/<git-sha>
 install -d -m 0750 /etc/aibrain/<installation>

@@ -60,6 +60,10 @@ class FakeCdpClient implements CdpClientLike {
   private nextTarget = 1;
   private nextSession = 1;
   private readonly commandFailures = new Map<string, Error[]>();
+  private readonly commandBlocks = new Map<string, Array<{
+    started: () => void;
+    wait: Promise<void>;
+  }>>();
 
   constructor(
     private readonly onBrowserClose: () => void,
@@ -76,6 +80,11 @@ class FakeCdpClient implements CdpClientLike {
     const failures = this.commandFailures.get(method);
     const failure = failures?.shift();
     if (failure) throw failure;
+    const block = this.commandBlocks.get(method)?.shift();
+    if (block) {
+      block.started();
+      await block.wait;
+    }
     if (method === "Browser.getVersion") {
       if (this.versionFailure) throw this.versionFailure;
       return { product: "HeadlessChrome/140.0.0.0" } as Result;
@@ -172,6 +181,17 @@ class FakeCdpClient implements CdpClientLike {
     const failures = this.commandFailures.get(method) ?? [];
     failures.push(error);
     this.commandFailures.set(method, failures);
+  }
+
+  blockNext(method: string) {
+    let markStarted!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const wait = new Promise<void>((resolve) => { release = resolve; });
+    const blocks = this.commandBlocks.get(method) ?? [];
+    blocks.push({ started: markStarted, wait });
+    this.commandBlocks.set(method, blocks);
+    return { started, release };
   }
 
   async close() {
@@ -303,15 +323,22 @@ describe("ChromeCdpRuntime private pipe", () => {
       targetInfo: { targetId: "worker-unowned", type: "service_worker", url: "https://popup.example.test/sw.js" },
     });
     client.emitEvent("Target.targetCreated", {
+      targetInfo: { targetId: "tab-unowned", type: "tab", url: "https://popup.example.test" },
+    });
+    client.emitEvent("Target.targetCreated", {
       targetInfo: { targetId: "page-unowned", type: "page", url: "about:blank" },
     });
-    await eventually(() => ["popup-unowned", "worker-unowned", "page-unowned"].every((targetId) =>
-      client.commands.some((command) => command.method === "Target.closeTarget" && command.params.targetId === targetId)));
+    await eventually(() => client.commands.some((command) =>
+      command.method === "Target.closeTarget" && command.params.targetId === "popup-unowned"));
+    expect(client.commands.some((command) => command.method === "Target.closeTarget" &&
+      (command.params.targetId === "worker-unowned" || command.params.targetId === "tab-unowned"))).toBe(false);
 
     const [frameA, frameB] = await Promise.all([
       runtime.captureFrame(THREAD_A),
       runtime.captureFrame(THREAD_B),
     ]);
+    expect(client.commands.some((command) =>
+      command.method === "Target.closeTarget" && command.params.targetId === "page-unowned")).toBe(true);
     const targetA = runtime.targetIdFor(THREAD_A) as string;
     const targetB = runtime.targetIdFor(THREAD_B) as string;
     const sessionA = client.sessionForTarget(targetA) as string;
@@ -505,6 +532,35 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(runtime.targetIdFor(THREAD_A)).not.toBe(staleTarget);
     await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://example.test/recover");
     expect(client.commands.filter(({ method }) => method === "Page.captureScreenshot")).toHaveLength(2);
+    await runtime.stop();
+  });
+
+  it("serializes viewer work behind navigation and keeps health checks non-intrusive while busy", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    const navigationBlock = client.blockNext("Page.navigate");
+    const navigation = runtime.agentNavigate(THREAD_A, "https://example.test/busy");
+    await navigationBlock.started;
+    const frame = runtime.agentCaptureFrame(THREAD_A);
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    expect(client.commands.some(({ method }) => method === "Page.captureScreenshot")).toBe(false);
+    const versionChecks = client.commands.filter(({ method }) => method === "Browser.getVersion").length;
+    await expect(runtime.health()).resolves.toMatchObject({ healthy: true });
+    expect(client.commands.filter(({ method }) => method === "Browser.getVersion")).toHaveLength(versionChecks);
+    navigationBlock.release();
+    await navigation;
+    await expect(frame).resolves.toMatchObject({ mediaType: "image/png" });
+    expect(client.commands.findIndex(({ method }) => method === "Page.captureScreenshot"))
+      .toBeGreaterThan(client.commands.findIndex(({ method }) => method === "Page.navigate"));
     await runtime.stop();
   });
 

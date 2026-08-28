@@ -26,7 +26,10 @@ import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+\.\d+$/u;
 const MAX_SCREENSHOT_BYTES = 20 * 1024 * 1024;
-const MAX_INTERCEPTED_REQUESTS = 64;
+// Leave headroom in the bounded CDP command queue for navigation, health and
+// viewer traffic while a request-heavy page is resolving its subresources.
+const MAX_INTERCEPTED_REQUESTS = 24;
+const MAX_QUEUED_BROWSER_OPERATIONS = 64;
 const MAX_QUARANTINE_ENTRIES = 1_024;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -408,11 +411,18 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
   private detachedUnsubscribe: (() => void) | null = null;
   private targetCreatedUnsubscribe: (() => void) | null = null;
   private targetDestroyedUnsubscribe: (() => void) | null = null;
-  private readonly discoveredTargets = new Map<string, { type: string; openerId: string | null }>();
+  private readonly discoveredTargets = new Map<string, {
+    type: string;
+    openerId: string | null;
+    url: string | null;
+  }>();
   private readonly pendingOwnedTargets = new Set<string>();
   private readonly closingTargetIds = new Set<string>();
   private readonly unownedTargetClosures = new Set<Promise<void>>();
   private targetCreations = 0;
+  private operationTail: Promise<void> = Promise.resolve();
+  private activeOperations = 0;
+  private queuedOperations = 0;
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
     validateRuntimeContext(context);
@@ -497,6 +507,17 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
       }
       if (this.lastProxyAuthFailure) {
         return { healthy: false, detail: `Chrome loopback proxy authentication failed: ${this.lastProxyAuthFailure}` };
+      }
+      // Page navigation and frame capture share one inherited CDP pipe. A
+      // status poll must not inject another command while that pipe is busy or
+      // mistake normal page work for a dead browser and fence the live session.
+      if (this.activeOperations > 0 || this.queuedOperations > 0) {
+        return {
+          healthy: true,
+          detail: this.egressProxy
+            ? `Chrome ${this.browserVersion} is processing a private browser operation with pinned loopback egress.`
+            : `Chrome ${this.browserVersion} is processing a private browser operation.`,
+        };
       }
       const version = await this.browserClient.send<{ product: string }>("Browser.getVersion");
       const current = extractBrowserVersion(version.product);
@@ -1027,17 +1048,42 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
   ): Promise<Result> {
-    const page = await this.requireThreadPage(threadId);
-    try {
-      return await operation(page);
-    } catch (error) {
-      if (!isRecoverableThreadSessionError(error)) throw error;
-      if (this.threadPages.get(threadId) === page) {
-        this.threadPages.delete(threadId);
-        await this.closeThreadPage(page);
+    return this.withExclusiveBrowserOperation(async () => {
+      const page = await this.requireThreadPage(threadId);
+      try {
+        return await operation(page);
+      } catch (error) {
+        if (!isRecoverableThreadSessionError(error)) throw error;
+        if (this.threadPages.get(threadId) === page) {
+          this.threadPages.delete(threadId);
+          await this.closeThreadPage(page);
+        }
+        const replacement = await this.requireThreadPage(threadId);
+        return operation(replacement);
       }
-      const replacement = await this.requireThreadPage(threadId);
-      return operation(replacement);
+    });
+  }
+
+  private async withExclusiveBrowserOperation<Result>(operation: () => Promise<Result>) {
+    if (this.queuedOperations >= MAX_QUEUED_BROWSER_OPERATIONS) {
+      throw new ChromeRuntimeError(
+        "CHROME_OPERATION_BACKPRESSURE",
+        "Browser operation capacity is saturated; retry with backoff.",
+      );
+    }
+    const previous = this.operationTail;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    this.operationTail = previous.catch(() => undefined).then(() => gate);
+    this.queuedOperations += 1;
+    await previous.catch(() => undefined);
+    this.queuedOperations -= 1;
+    this.activeOperations += 1;
+    try {
+      return await operation();
+    } finally {
+      this.activeOperations -= 1;
+      release();
     }
   }
 
@@ -1305,9 +1351,15 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
     const info = value.targetInfo;
     if (typeof info.targetId !== "string" || !/^[A-Za-z0-9._-]{1,256}$/u.test(info.targetId) ||
         typeof info.type !== "string" || info.type.length > 64) return;
+    // Worker, service-worker and Chromium's internal `tab` targets are not
+    // independent visible pages. Closing them as if they were popups can tear
+    // down the page target that owns the current navigation. Track only pages;
+    // the application still exposes exclusively its thread-owned target.
+    if (info.type !== "page") return;
     const openerId = typeof info.openerId === "string" ? info.openerId : null;
-    this.discoveredTargets.set(info.targetId, { type: info.type, openerId });
-    if (info.type !== "page" || openerId || this.targetCreations === 0) {
+    const url = typeof info.url === "string" && info.url.length <= 8_192 ? info.url : null;
+    this.discoveredTargets.set(info.targetId, { type: info.type, openerId, url });
+    if (openerId && this.targetCreations === 0) {
       this.queueUnownedTargetClosure(info.targetId);
     }
   }
@@ -1343,8 +1395,10 @@ export class ChromeCdpRuntime implements InteractiveManagedBrowserRuntime {
 
   private async reconcileUnownedTargets() {
     if (this.targetCreations > 0) return;
-    for (const targetId of this.discoveredTargets.keys()) {
-      if (!this.ownsTarget(targetId)) this.queueUnownedTargetClosure(targetId);
+    for (const [targetId, target] of this.discoveredTargets) {
+      if (!this.ownsTarget(targetId) && (target.openerId || target.url === "about:blank")) {
+        this.queueUnownedTargetClosure(targetId);
+      }
     }
     await Promise.allSettled([...this.unownedTargetClosures]);
   }
