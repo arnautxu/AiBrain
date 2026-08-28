@@ -42,10 +42,7 @@ describe("filesystem workbench lifecycle routes", () => {
     root = await mkdtemp(path.join(tmpdir(), "aibrain-workbench-routes-"));
     const dataRoot = path.join(root, "data");
     const usersRoot = path.join(dataRoot, "users");
-    await Promise.all([
-      mkdir(path.join(usersRoot, USER_A), { recursive: true, mode: 0o700 }),
-      mkdir(path.join(usersRoot, USER_B), { recursive: true, mode: 0o700 }),
-    ]);
+    await mkdir(dataRoot, { recursive: true, mode: 0o700 });
     const configPath = path.join(root, "installation.json");
     await writeFile(configPath, `${JSON.stringify({
       schemaVersion: 1,
@@ -69,6 +66,21 @@ describe("filesystem workbench lifecycle routes", () => {
       },
     }, null, 2)}\n`, "utf8");
     process.env.AIBRAIN_INSTALLATION_CONFIG = configPath;
+    const [{ loadInstallationConfig }, { UserProvisioner }] = await Promise.all([
+      import("@/config/installation"),
+      import("@/users/provisioner"),
+    ]);
+    const provisioner = new UserProvisioner(await loadInstallationConfig());
+    await provisioner.provision({
+      userId: USER_A,
+      email: `${USER_A.slice(-3)}@example.test`,
+      displayName: "User 301",
+    });
+    await provisioner.provision({
+      userId: USER_B,
+      email: `${USER_B.slice(-3)}@example.test`,
+      displayName: "User 302",
+    });
   });
 
   afterAll(async () => {

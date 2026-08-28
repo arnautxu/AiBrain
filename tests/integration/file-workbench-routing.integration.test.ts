@@ -32,7 +32,7 @@ async function fixture() {
   roots.push(root);
   const dataRoot = path.join(root, "data");
   const usersRoot = path.join(dataRoot, "users");
-  await mkdir(path.join(usersRoot, USER_ID), { recursive: true, mode: 0o700 });
+  await mkdir(dataRoot, { recursive: true, mode: 0o700 });
   const configPath = path.join(root, "installation.json");
   await writeFile(configPath, `${JSON.stringify({
     schemaVersion: 1,
@@ -56,6 +56,15 @@ async function fixture() {
     },
   }, null, 2)}\n`, "utf8");
   process.env.AIBRAIN_INSTALLATION_CONFIG = configPath;
+  const [{ loadInstallationConfig }, { UserProvisioner }] = await Promise.all([
+    import("@/config/installation"),
+    import("@/users/provisioner"),
+  ]);
+  await new UserProvisioner(await loadInstallationConfig()).provision({
+    userId: USER_ID,
+    email: "synthetic@example.test",
+    displayName: "Synthetic User",
+  });
   const session: AuthSession = {
     provider: "local",
     user: {

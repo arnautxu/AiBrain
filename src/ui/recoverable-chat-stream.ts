@@ -37,6 +37,13 @@ export class ChatStreamRecoveryError extends Error {
   }
 }
 
+class ChatStreamHttpError extends Error {
+  constructor(message: string, readonly retryable: boolean) {
+    super(message);
+    this.name = "ChatStreamHttpError";
+  }
+}
+
 export type ChatStreamRecoveryScheduler = Readonly<{
   now: () => number;
   setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
@@ -76,6 +83,18 @@ function retryableResponse(response: Response) {
   return response.status === 408 || response.status === 429 || response.status >= 500;
 }
 
+async function responseFailure(response: Response) {
+  let message = "No se ha podido completar la solicitud.";
+  if (response.headers.get("content-type")?.includes("application/json")) {
+    const payload: unknown = await response.clone().json().catch(() => null);
+    if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") {
+      const candidate = payload.error.trim();
+      if (candidate) message = candidate.slice(0, 280);
+    }
+  }
+  return new ChatStreamHttpError(message, retryableResponse(response));
+}
+
 function emptyMeasurement(): ChatStreamRecoveryMeasurement {
   return {
     responseOpenedAtMs: null,
@@ -105,6 +124,7 @@ export async function consumeRecoverableChatStream(options: {
   let measurement = emptyMeasurement();
   let recoveryAttempt = 0;
   let recovered = false;
+  let lastHttpFailure: ChatStreamHttpError | null = null;
   const elapsed = () => Math.max(0, Math.round(scheduler.now() - startedAt));
   const publish = () => options.onMeasurement(measurement);
   const update = (next: Partial<ChatStreamRecoveryMeasurement>) => {
@@ -125,7 +145,9 @@ export async function consumeRecoverableChatStream(options: {
       update({ responseOpenedAtMs: elapsed() });
       if (!response.ok) {
         update({ closedAtMs: elapsed(), closeReason: "http-error" });
-        if (!retryableResponse(response)) throw new ChatStreamRecoveryError();
+        const failure = await responseFailure(response);
+        lastHttpFailure = failure;
+        if (!failure.retryable) throw failure;
       } else {
         idleTimer = scheduler.setTimeout(() => {
           update({ idleObservedAtMs: elapsed() });
@@ -154,14 +176,14 @@ export async function consumeRecoverableChatStream(options: {
         update({ closedAtMs: elapsed(), closeReason: "aborted" });
         throw error;
       }
-      if (error instanceof ChatStreamRecoveryError) throw error;
+      if (error instanceof ChatStreamRecoveryError || error instanceof ChatStreamHttpError) throw error;
       update({ closedAtMs: elapsed(), closeReason: "read-error" });
     } finally {
       if (idleTimer !== null) scheduler.clearTimeout(idleTimer);
     }
 
     recoveryAttempt += 1;
-    if (recoveryAttempt > MAX_RECOVERY_ATTEMPTS) throw new ChatStreamRecoveryError();
+    if (recoveryAttempt > MAX_RECOVERY_ATTEMPTS) throw lastHttpFailure ?? new ChatStreamRecoveryError();
     update({
       recoveryAttempts: recoveryAttempt,
       recoveryStartedAtMs: measurement.recoveryStartedAtMs ?? elapsed(),

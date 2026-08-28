@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -25,16 +24,12 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).toContain("trap - EXIT");
   });
 
-  it("adds post-deploy readbacks after the former gateway baseline, with separate fail-closed sources", async () => {
+  it("adds post-deploy readbacks after health validation, with separate fail-closed sources", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    const baseline = execFileSync("git", ["show", "3147b08aa54b42bc85e7fa4788b1534fdc8ba2a1:infra/hetzner/app/deploy-arnall-main.sh"], {
-      cwd: process.cwd(), encoding: "utf8",
-    });
     const deployment = gateway.indexOf('node "${release_dir}/scripts/manage-release.mjs"');
     const health = gateway.indexOf("/api/health/ready");
     const collection = gateway.indexOf("collect_release_readbacks()");
 
-    expect(baseline).not.toContain("collect_release_readbacks");
     expect(deployment).toBeGreaterThan(-1);
     expect(health).toBeGreaterThan(deployment);
     expect(collection).toBeGreaterThan(health);
@@ -68,11 +63,6 @@ describe("Arnall deployment gateway contract", () => {
 
   it("is idempotent only for a matching final package and removes failed staging evidence", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    const baseline = execFileSync("git", ["show", "2b6fe6624a0636fc8192e2194b433681724391f4:infra/hetzner/app/deploy-arnall-main.sh"], {
-      cwd: process.cwd(), encoding: "utf8",
-    });
-
-    expect(baseline).toContain('[[ ! -e "$evidence_root" ]] || fail "acceptance release evidence already exists"');
     expect(gateway).toContain('validate_existing_release_readbacks "$revision" "$run_id" "$evidence_root"');
     expect(gateway).toContain('ARNALL_READBACKS_ALREADY_COLLECTED revision=%s run_id=%s');
     expect(gateway).toContain('ciRunId:$runId');

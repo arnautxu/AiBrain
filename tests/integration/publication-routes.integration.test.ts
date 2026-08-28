@@ -146,8 +146,8 @@ describe("server-side publication routes", () => {
     ]);
     const installation = await loadInstallationConfig();
     const provisioner = new UserProvisioner(installation);
-    await provisioner.provision({ userId: USER_A, email: "a@example.test", displayName: "User A" });
-    await provisioner.provision({ userId: USER_B, email: "b@example.test", displayName: "User B" });
+    await provisioner.provision({ userId: USER_A, email: `${USER_A.slice(-3)}@example.test`, displayName: "User A" });
+    await provisioner.provision({ userId: USER_B, email: `${USER_B.slice(-3)}@example.test`, displayName: "User B" });
     const policyPath = path.join(installation.paths.usersRoot, USER_A, "PERMISSIONS.md");
     await chmod(policyPath, 0o600);
     await writeFile(policyPath, allowPublishPolicy(USER_A), { mode: 0o600 });
