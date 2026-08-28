@@ -161,7 +161,7 @@ function ComposerPicker({
                 {option.icon ? <span className="grid size-5 shrink-0 place-items-center text-[var(--text-subtle)]">{option.icon}</span> : null}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12px] font-medium">{option.label}</span>
-                  {option.detail ? <span className="mt-0.5 block truncate text-[10px] text-[var(--text-subtle)]">{option.detail}</span> : null}
+                  {option.detail ? <span className="mt-0.5 block truncate text-[12px] text-[var(--text-subtle)]">{option.detail}</span> : null}
                 </span>
                 <Check size={13} weight="bold" className={selected ? "opacity-100" : "opacity-0"} />
               </button>
@@ -195,7 +195,7 @@ function ResultActions({ message }: { message: ChatMessage }) {
   };
   return (
     <div className="mt-3 flex flex-wrap items-center gap-0.5 text-[var(--text-muted)]">
-      <button type="button" title="Copiar" aria-label="Copiar" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[9px]">Copiado</span> : null}</button>
+      <button type="button" title="Copiar" aria-label="Copiar" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[12px]">Copiado</span> : null}</button>
     </div>
   );
 }
@@ -247,13 +247,13 @@ function AssistantMessage({
       <TurnSourceChips sources={message.sources ?? []} />
 
       {message.status === "error" ? (
-        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[11px] text-[var(--danger)]" role="alert">
+        <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
           <span>No se ha podido completar esta respuesta. Inténtalo de nuevo.</span>
         </div>
       ) : null}
 
-      {message.status === "stopped" ? <p className="mt-3 text-[10px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
+      {message.status === "stopped" ? <p className="mt-3 text-[12px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
 
       {message.artifacts.length ? (
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -282,7 +282,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
-              <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[9px] text-[var(--text)]">
+              <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[12px] text-[var(--text)]">
                 <ImageIcon size={11} /><span className="truncate">{attachment.name}</span>
               </span>
             ))}
@@ -397,6 +397,7 @@ export function ChatWorkspace({
   }, [resizeComposer]);
 
   const hasMessages = Boolean(thread?.messages.length);
+  const composerEngaged = Boolean(prompt.trim() || attachments.length || documents.length);
   const guideVisible = guidedActionsOpen;
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canAttachDocuments = runtimeStatus.mode === "codex";
@@ -491,7 +492,7 @@ export function ChatWorkspace({
       } else if (canAttachDocuments) {
         documentFiles.push(file);
       } else {
-        onComposerNotice(`${file.name} no es compatible con este runtime.`);
+        onComposerNotice(`${file.name} no es compatible con el servicio actual.`);
       }
     }
     if (images.length) await addImages(images);
@@ -534,7 +535,7 @@ export function ChatWorkspace({
             <div className="space-y-4"><div className="h-20 rounded-xl bg-[var(--surface-muted)] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[var(--surface-hover)] motion-safe:animate-pulse" /></div>
           </div>
         ) : guideVisible ? (
-          <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? "Proyecto"} onCancel={() => setGuidedActionsOpen(false)} onStart={(message, summary) => { setGuidedActionsOpen(false); onSend(message, summary); }} />
+          <GuidedActions projectId={project?.id ?? null} projectName={project?.name ?? "Proyecto"} onCancel={() => setGuidedActionsOpen(false)} onWriteDirectly={() => setGuidedActionsOpen(false)} onStart={(message, summary) => { setGuidedActionsOpen(false); onSend(message, summary); }} />
         ) : hasMessages ? (
           <div className="mobile-chat-content mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
@@ -562,12 +563,12 @@ export function ChatWorkspace({
             </div>
             <div ref={bottomRef} className="h-8" />
           </div>
-        ) : <section className="mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 pt-[clamp(8rem,26vh,12rem)] text-center md:px-8" aria-label="Conversación vacía">
+        ) : <section className={`chat-empty-state mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 text-center md:px-8 ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía">
           <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">¿En qué trabajamos?</h1>
         </section>}
       </div>
 
-      <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "!absolute inset-x-0 bottom-[calc(100%-clamp(15.6rem,42vh,21.25rem))] z-10"} px-3 md:px-6`}>
+      {!guideVisible ? <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
@@ -594,15 +595,15 @@ export function ChatWorkspace({
                 {attachments.map((attachment) => (
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><ImageIcon size={12} /></span>
-                    <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[8px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
+                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[11px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
                     <button type="button" aria-label={`Quitar ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>
                 ))}
                 {documents.map((document) => (
                   <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
-                    <span className="min-w-0"><span className="block truncate text-[9px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[8px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
-                    {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[8px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
+                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
+                    {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
                     <button type="button" aria-label={`Quitar ${document.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
                   </div>
                 ))}
@@ -637,11 +638,11 @@ export function ChatWorkspace({
             <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                <span className="composer-mode-chip rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">Trabajar</span>
-                <span className="composer-destination max-w-44 truncate text-[11px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
+                <span className="composer-mode-chip rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)]">Trabajar</span>
+                <span className="composer-destination max-w-44 truncate text-[12px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <ComposerPicker
-                    ariaLabel="Skill"
+                    ariaLabel="Herramienta"
                     value={selectedSkill ?? ""}
                     valueLabel={runtimeStatus.skills.find((skill) => skill.id === selectedSkill)?.label ?? "Sin herramienta"}
                     options={[{ value: "", label: "Sin herramienta" }, ...runtimeStatus.skills.map((skill) => ({ value: skill.id, label: skill.label, icon: <Wrench size={12} /> }))]}
@@ -658,11 +659,11 @@ export function ChatWorkspace({
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 {showAdvancedControls && manifest.composer.modelSelection ? (
                   <ComposerPicker
-                    ariaLabel="Modelo"
+                    ariaLabel="Forma de trabajo"
                     value={composerModel ?? ""}
-                    valueLabel={selectedModelOption?.label ?? runtimeStatus.model ?? "Modelo automático"}
+                    valueLabel={selectedModelOption?.label ?? runtimeStatus.model ?? "Automático recomendado"}
                     options={[
-                      { value: "", label: runtimeStatus.model ?? "Modelo automático", detail: "Predeterminado" },
+                      { value: "", label: runtimeStatus.model ?? "Automático recomendado", detail: "Recomendado" },
                       ...runtimeStatus.models.map((model) => ({ value: model.id, label: model.label, detail: model.isDefault ? "Predeterminado" : undefined })),
                     ]}
                     open={composerPickerOpen === "model"}
@@ -675,7 +676,7 @@ export function ChatWorkspace({
                 ) : null}
                 {showAdvancedControls && manifest.composer.modelSelection && runtimeStatus.mode === "codex" ? (
                   <ComposerPicker
-                    ariaLabel="Nivel de razonamiento"
+                    ariaLabel="Profundidad del trabajo"
                     value={composerEffort ?? ""}
                     valueLabel={composerEffort ? effortLabels[composerEffort] : "Automático"}
                     options={[{ value: "", label: "Automático" }, ...effortOptions.map((effort) => ({ value: effort, label: effortLabels[effort] }))]}
@@ -716,7 +717,7 @@ export function ChatWorkspace({
             </div>
           </div>
         </div>
-      </div>
+      </div> : null}
     </main>
   );
 }

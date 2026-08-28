@@ -9,6 +9,10 @@ import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("@/components/ui/primitives", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/components/ui/primitives")>();
+  return { ...original, ThemeToggle: () => <button type="button">Cambiar tema</button> };
+});
 
 const branding: PublicInstallationBranding = {
   installationId: "acme",
@@ -106,19 +110,29 @@ function renderSidebar() {
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("limits primary navigation to new chat, search and cron automations", () => {
+  it("limits primary navigation to new chat, search and scheduled tasks", () => {
     const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
     fireEvent.click(within(navigation).getByRole("button", { name: /Buscar/ }));
-    fireEvent.click(within(navigation).getByRole("button", { name: /Automatizaciones \(cron jobs\)/ }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Tareas programadas" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();
     expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("Tareas")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("⌘K")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abrir preferencias" })).not.toBeInTheDocument();
+  });
+
+  it("offers contextual help from the account menu", () => {
+    renderSidebar();
+
+    fireEvent.click(screen.getByRole("button", { name: /Abrir menú de cuenta/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Ayuda" }));
+
+    expect(screen.getByRole("note")).toHaveTextContent("Acciones guiadas");
+    expect(screen.getByRole("note")).toHaveTextContent("revisar los cambios");
   });
 
   it("nests every project chat below its project and keeps standalone chats separate", () => {

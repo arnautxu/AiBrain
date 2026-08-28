@@ -112,9 +112,9 @@ export const baseBrainManifest: BrainManifest = {
   },
   windows: [
     { id: "chat", label: "Workbench", enabled: true },
-    { id: "inspector", label: "Review", enabled: true },
-    { id: "browser", label: "Computer Use", enabled: true },
-    { id: "runtime", label: "Runtime", enabled: true },
+    { id: "inspector", label: "Cambios y resultados", enabled: true },
+    { id: "browser", label: "Navegador", enabled: true },
+    { id: "runtime", label: "Entorno", enabled: true },
   ],
 };
 
@@ -156,8 +156,8 @@ export const operationsBrainManifest: BrainManifest = {
   },
   windows: [
     { id: "chat", label: "Trabajo", enabled: true },
-    { id: "inspector", label: "Review", enabled: true },
-    { id: "browser", label: "Computer Use", enabled: true },
+    { id: "inspector", label: "Cambios y resultados", enabled: true },
+    { id: "browser", label: "Navegador", enabled: true },
     { id: "runtime", label: "Entorno", enabled: true },
   ],
 };

@@ -139,6 +139,25 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByLabelText("Abrir preferencias")).not.toBeInTheDocument();
   });
 
+  it("replaces the composer with a focused guided flow and reveals secondary actions on request", () => {
+    renderWorkspace();
+
+    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Acciones guiadas" }));
+
+    expect(screen.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeInTheDocument();
+    expect(screen.queryByTestId("composer")).not.toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Cómo funciona" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Informe de seguimiento/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Analiza" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Ver todas las acciones" }));
+    expect(screen.getByRole("button", { name: /^Analiza/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Prefiero escribir directamente" }));
+    expect(screen.getByTestId("composer")).toBeInTheDocument();
+  });
+
   it("submits with Enter while preserving composition and multiline input", () => {
     const onSend = vi.fn();
     renderWorkspace(null, project, { prompt: "Prepara el resum", onSend });

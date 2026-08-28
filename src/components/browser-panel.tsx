@@ -71,7 +71,7 @@ export function BrowserPanel({ threadId, open, onClose }: {
   }, []);
 
   const renewViewerToken = useCallback(async (control: boolean, signal?: AbortSignal) => {
-    if (!threadId) throw new Error("Abre una conversación antes de iniciar Computer Use.");
+    if (!threadId) throw new Error("Abre una conversación antes de iniciar el navegador.");
     const current = await refreshStatus(signal);
     if (current.state.lifecycle !== "ready" && current.state.lifecycle !== "human-control") {
       throw new Error("El navegador privado se está recuperando.");
@@ -252,12 +252,12 @@ export function BrowserPanel({ threadId, open, onClose }: {
   const canView = lifecycle === "ready" || humanControl;
 
   return (
-    <aside className={`fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] transition-transform xl:static xl:w-[520px] xl:shrink-0 xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`} aria-label="Computer Use">
+    <aside className={`fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] transition-transform xl:static xl:w-[520px] xl:shrink-0 xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`} aria-label="Navegador">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3.5">
         <Browser size={16} className="text-[var(--text-secondary)]" />
-        <h2 className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--text)]">Computer Use</h2>
-        <span className="text-[9px] font-medium text-[var(--text-muted)]">{lifecycle ? lifecycleCopy[lifecycle] : "Conectando…"}</span>
-        <button type="button" aria-label="Cerrar Computer Use" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={15} /></button>
+        <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--text)]">Navegador</h2>
+        <span className="text-[12px] font-medium text-[var(--text-muted)]">{lifecycle ? lifecycleCopy[lifecycle] : "Conectando…"}</span>
+        <button type="button" aria-label="Cerrar navegador" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={15} /></button>
       </header>
 
       <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2">
@@ -271,7 +271,7 @@ export function BrowserPanel({ threadId, open, onClose }: {
       {humanControl ? (
         <form className="flex gap-2 border-b border-[var(--border-subtle)] px-3 py-2" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <label className="sr-only" htmlFor="browser-address">Dirección web</label>
-          <input id="browser-address" type="url" className="min-h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[11px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" value={address} onChange={(event) => setAddress(event.target.value)} />
+          <input id="browser-address" type="url" className="min-h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[13px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" value={address} onChange={(event) => setAddress(event.target.value)} />
           <button type="submit" className="browser-action" disabled={busy !== null}><PaperPlaneTilt size={13} />Abrir</button>
         </form>
       ) : null}
@@ -281,18 +281,18 @@ export function BrowserPanel({ threadId, open, onClose }: {
           // eslint-disable-next-line @next/next/no-img-element -- authenticated blob URLs cannot be optimized by next/image.
           <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={humanControl ? 0 : -1} onClick={(event) => void clickFrame(event)} onKeyDown={(event) => void keyFrame(event)} className={`max-h-full max-w-full rounded-md border border-black/15 bg-white object-contain shadow-sm outline-none ${humanControl ? "cursor-crosshair focus:ring-2 focus:ring-[var(--brain-accent)]" : ""}`} />
         ) : lifecycle === "starting" || lifecycle === "recovering" || !status ? (
-          <div className="flex items-center gap-2 text-[11px] text-[#343431]" role="status"><SpinnerGap size={16} className="motion-safe:animate-spin" />Preparando el navegador aislado…</div>
+          <div className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={16} className="motion-safe:animate-spin" />Preparando el navegador privado…</div>
         ) : (
-          <div className="max-w-xs text-center text-[11px] leading-5 text-[#343431]"><Browser size={25} className="mx-auto mb-2" /><p>{threadId ? "Inicia el navegador cuando necesites ver o controlar una tarea web." : "Abre una conversación antes de iniciar Computer Use."}</p></div>
+          <div className="max-w-xs text-center text-[13px] leading-5 text-[var(--text-secondary)]"><Browser size={25} className="mx-auto mb-2" /><p>{threadId ? "Inicia el navegador cuando necesites ver o controlar una tarea web." : "Abre una conversación antes de iniciar el navegador."}</p></div>
         )}
-        {busy === "input" ? <span className="absolute bottom-5 right-5 rounded-full bg-black/75 px-2.5 py-1 text-[9px] text-white">Enviando interacción…</span> : null}
+        {busy === "input" ? <span className="absolute bottom-5 right-5 rounded-full bg-black/75 px-2.5 py-1 text-[12px] text-white">Enviando interacción…</span> : null}
       </div>
 
-      {error ? <div className="flex items-start gap-2 border-t border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[10px] text-[var(--danger)]" role="alert"><WarningCircle size={14} className="mt-0.5 shrink-0" /><span>{error}</span></div> : null}
-      {status?.runtime?.detail ? <div className="border-t border-[var(--border)] px-3 py-2 text-[9px] text-[var(--text-muted)]">{status.runtime.detail}</div> : null}
+      {error ? <div className="flex items-start gap-2 border-t border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert"><WarningCircle size={14} className="mt-0.5 shrink-0" /><span>{error}</span></div> : null}
+      {status?.runtime?.detail ? <div className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--text-muted)]">{status.runtime.detail}</div> : null}
       {status?.state.downloads.length ? <footer className="max-h-28 overflow-y-auto border-t border-[var(--border)] px-3 py-2">
-        <p className="mb-1.5 text-[9px] font-semibold text-[var(--text)]">Descargas</p>
-        {status.state.downloads.map((download) => <div key={download.id} className="flex items-center gap-2 py-1 text-[9px] text-[var(--text-muted)]"><DownloadSimple size={12} /><span className="min-w-0 flex-1 truncate">{download.fileName}</span><span>{download.status === "complete" ? "Completada" : download.status === "active" ? "En curso" : "Fallida"}</span></div>)}
+        <p className="mb-1.5 text-[12px] font-semibold text-[var(--text)]">Descargas</p>
+        {status.state.downloads.map((download) => <div key={download.id} className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-muted)]"><DownloadSimple size={12} /><span className="min-w-0 flex-1 truncate">{download.fileName}</span><span>{download.status === "complete" ? "Completada" : download.status === "active" ? "En curso" : "Fallida"}</span></div>)}
       </footer> : null}
     </aside>
   );

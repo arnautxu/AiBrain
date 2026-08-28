@@ -126,8 +126,8 @@ export function CommandPalette({
       ...(inspectorEnabled ? [{
         id: "action:inspector",
         group: "Acciones" as const,
-        label: "Abrir Review",
-        detail: "Progreso, decisiones y cambios del resultado",
+        label: "Abrir cambios y resultados",
+        detail: "Revisa el progreso, las decisiones y los archivos modificados",
         icon: <ListChecks size={16} />,
         keywords: "review inspector canvis diff activitat aprovacions",
         run: onOpenInspector,
@@ -135,8 +135,8 @@ export function CommandPalette({
       ...(browserEnabled ? [{
         id: "action:browser",
         group: "Acciones" as const,
-        label: "Abrir Computer Use",
-        detail: "Navegador aislado para tareas web",
+        label: "Abrir navegador",
+        detail: "Ve o controla las tareas que se hacen en la web",
         icon: <Browser size={16} />,
         keywords: "browser navegador web computer use",
         run: onOpenBrowser,
