@@ -11,6 +11,7 @@
     "target",
     "releaseSha",
     "releaseIdentity",
+    "tenantId",
     "startedAt",
     "completedAt",
     "actors",
@@ -24,6 +25,7 @@
     "target": { "type": "string", "minLength": 1, "maxLength": 200 },
     "releaseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
     "releaseIdentity": { "$ref": "#/$defs/releaseIdentity" },
+    "tenantId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
     "startedAt": { "$ref": "#/$defs/timestamp" },
     "completedAt": { "$ref": "#/$defs/timestamp" },
     "actors": {
@@ -63,12 +65,13 @@
       "additionalProperties": false,
       "required": ["kind", "artifactPath", "sha256", "capturedAt", "route", "releaseSha"],
       "properties": {
-        "kind": { "enum": ["http", "ui", "contract", "release", "turn", "approval", "readback", "file", "library", "search", "memory", "metric", "restart", "reconnect", "isolation", "log", "backup", "restore", "rollback", "accessibility", "visual"] },
+        "kind": { "enum": ["http", "ui", "contract", "release", "turn", "approval", "readback", "file", "library", "search", "memory", "metric", "restart", "reconnect", "isolation", "log", "backup", "restore", "rollback", "accessibility", "visual", "audit", "connector-oauth", "connector-approval", "connector-execution", "connector-readback"] },
         "artifactPath": { "type": "string", "minLength": 1, "maxLength": 300 },
         "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
         "capturedAt": { "$ref": "#/$defs/timestamp" },
         "route": { "type": "string", "minLength": 1, "maxLength": 300 },
-        "releaseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+        "releaseSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "connectorCorrelation": { "$ref": "#/$defs/connectorCorrelation" }
       }
     },
     "latency": {
@@ -96,6 +99,42 @@
         "runtimeSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "appOciRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
         "gatewayOciRevision": { "type": "string", "pattern": "^[0-9a-f]{40}$" }
+      }
+    },
+    "connectorAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectorId", "provider", "tenantId", "actorId", "credentialReference", "authorization", "providerLive", "operationId", "operationType", "approvalId", "executionId", "executionCount", "providerReadbackId"],
+      "properties": {
+        "connectorId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "tenantId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "actorId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "credentialReference": { "type": "string", "pattern": "^[a-z0-9_-]{0,127}$" },
+        "authorization": { "enum": ["oauth", "none"] },
+        "providerLive": { "type": "boolean" },
+        "operationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "operationType": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "approvalId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "executionId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "executionCount": { "type": "integer", "minimum": 0 },
+        "providerReadbackId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" }
+      }
+    },
+    "connectorCorrelation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["connectorId", "provider", "tenantId", "actorId", "credentialReference", "operationId", "approvalId", "executionId", "providerReadbackId"],
+      "properties": {
+        "connectorId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "provider": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "tenantId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "actorId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{1,63}$" },
+        "credentialReference": { "type": "string", "pattern": "^[a-z0-9_-]{0,127}$" },
+        "operationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "approvalId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "executionId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" },
+        "providerReadbackId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{2,127}$" }
       }
     },
     "gate": {
@@ -138,6 +177,7 @@
         },
         "latencyMs": { "$ref": "#/$defs/latency" },
         "latencyBudgetMs": { "$ref": "#/$defs/latency" },
+        "connectorAction": { "$ref": "#/$defs/connectorAction" },
         "evidence": {
           "type": "array",
           "minItems": 1,

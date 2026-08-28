@@ -8,6 +8,7 @@ import {
   REQUIRED_LIVE_GATES,
   evaluateAcceptance,
   renderAcceptanceReport,
+  type ConnectorAction,
   type AcceptanceEvidence,
   type AcceptanceManifest,
 } from "../../scripts/verify-live-acceptance";
@@ -16,6 +17,22 @@ const roots: string[] = [];
 const releaseSha = "a".repeat(40);
 const startedAt = "2026-08-28T10:00:00.000Z";
 const completedAt = "2026-08-28T10:10:00.000Z";
+const tenantId = "arnall";
+const connectorAction: ConnectorAction = {
+  connectorId: "crm",
+  provider: "attio",
+  tenantId,
+  actorId: "david",
+  credentialReference: "oauthref-arnall-david",
+  authorization: "oauth",
+  providerLive: true,
+  operationId: "operation-create-note-001",
+  operationType: "create-note",
+  approvalId: "approval-create-note-001",
+  executionId: "execution-create-note-001",
+  executionCount: 1,
+  providerReadbackId: "provider-note-001",
+};
 const gateRoutes: Record<string, string[]> = {
   "release-identity-readiness": ["GET /api/health/live", "GET /api/health/ready"],
   "threat-model-contracts": ["contract:live-acceptance"],
@@ -27,7 +44,7 @@ const gateRoutes: Record<string, string[]> = {
   "two-user-isolation": ["GET /api/workbench"],
   "real-turn": ["POST /api/chat", "GET /api/runtime/status"],
   "files-search-library-memory": ["POST /api/threads/{threadId}/documents", "GET /api/library", "GET /api/search", "GET /api/memory"],
-  "real-action-approval-readback": ["POST /api/runtime/approvals"],
+  "real-action-approval-readback": ["POST /api/runtime/approvals", "connector:operation", "connector:provider-readback"],
   "logs-backup-rollback": ["operations:logs", "backup:verify", "backup:restore", "release:rollback"],
 };
 const gateEvidence: Record<string, Array<Pick<AcceptanceEvidence, "kind" | "route">>> = {
@@ -57,8 +74,10 @@ const gateEvidence: Record<string, Array<Pick<AcceptanceEvidence, "kind" | "rout
     { kind: "memory", route: "GET /api/memory" },
   ],
   "real-action-approval-readback": [
-    { kind: "approval", route: "POST /api/runtime/approvals" },
-    { kind: "readback", route: "action:readback" },
+    { kind: "connector-oauth", route: "connector:oauth" },
+    { kind: "connector-approval", route: "POST /api/runtime/approvals" },
+    { kind: "connector-execution", route: "connector:operation" },
+    { kind: "connector-readback", route: "connector:provider-readback" },
   ],
   "logs-backup-rollback": [
     { kind: "log", route: "operations:logs" },
@@ -96,6 +115,7 @@ function manifest(artifacts: Map<string, string>): AcceptanceManifest {
     environment: "live",
     target: CANONICAL_LIVE_TARGET,
     releaseSha,
+    tenantId,
     releaseIdentity: {
       candidateSha: releaseSha,
       ciSha: releaseSha,
@@ -143,6 +163,7 @@ function manifest(artifacts: Map<string, string>): AcceptanceManifest {
           toolReadbackP95Ms: 1_500,
         },
       } : {}),
+      ...(id === "real-action-approval-readback" ? { connectorAction } : {}),
       evidence: gateEvidence[id].map(({ kind, route }) => ({
         kind,
         artifactPath: `${id}-${kind}.json`,
@@ -150,6 +171,19 @@ function manifest(artifacts: Map<string, string>): AcceptanceManifest {
         capturedAt: "2026-08-28T10:05:00.000Z",
         route,
         releaseSha,
+        ...(id === "real-action-approval-readback" ? {
+          connectorCorrelation: {
+            connectorId: connectorAction.connectorId,
+            provider: connectorAction.provider,
+            tenantId: connectorAction.tenantId,
+            actorId: connectorAction.actorId,
+            credentialReference: connectorAction.credentialReference,
+            operationId: connectorAction.operationId,
+            approvalId: connectorAction.approvalId,
+            executionId: connectorAction.executionId,
+            providerReadbackId: connectorAction.providerReadbackId,
+          },
+        } : {}),
       })),
       failures: [],
     })),
@@ -214,8 +248,6 @@ describe("live acceptance evidence contract", () => {
     turn.actorIds = ["david"];
     turn.routes = ["acceptance:real-turn"];
     turn.evidence = turn.evidence.filter(({ kind }) => kind === "turn");
-    const action = bypass.gates.find(({ id }) => id === "real-action-approval-readback")!;
-    action.evidence = action.evidence.filter(({ kind }) => kind === "readback");
     const operations = bypass.gates.find(({ id }) => id === "logs-backup-rollback")!;
     operations.evidence = operations.evidence.filter(({ kind }) => kind !== "restore");
     bypass.gates.find(({ id }) => id === "performance-concurrency")!.latencyBudgetMs!.ttftP95Ms = 100;
@@ -227,9 +259,75 @@ describe("live acceptance evidence contract", () => {
       "required_actors_missing:real-turn",
       "required_route_missing:real-turn:POST /api/chat",
       "required_evidence_missing:real-turn:readback:GET /api/runtime/status",
-      "required_evidence_missing:real-action-approval-readback:approval:POST /api/runtime/approvals",
       "required_evidence_missing:logs-backup-rollback:restore:backup:restore",
       "performance_budget_exceeded:ttftP95Ms",
+    ]));
+  });
+
+  it("rejects connector health or capability evidence as an action", async () => {
+    const files = await fixture();
+    const healthOnly = manifest(files.artifacts);
+    const action = healthOnly.gates.find(({ id }) => id === "real-action-approval-readback")!;
+    action.routes = ["GET /api/runtime/status"];
+    action.evidence = [{
+      kind: "http",
+      artifactPath: "real-action-approval-readback-connector-oauth.json",
+      sha256: files.artifacts.get("real-action-approval-readback-connector-oauth.json")!,
+      capturedAt: "2026-08-28T10:05:00.000Z",
+      route: "GET /api/runtime/status",
+      releaseSha,
+    }];
+    const result = await evaluateAcceptance(healthOnly, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      "required_route_missing:real-action-approval-readback:POST /api/runtime/approvals",
+      "connector_evidence_missing:connector-oauth",
+      "connector_evidence_missing:connector-execution",
+      "connector_evidence_missing:connector-readback",
+    ]));
+  });
+
+  it("rejects a generic audit and a connector action without provider readback", async () => {
+    const files = await fixture();
+    const genericAudit = manifest(files.artifacts);
+    const action = genericAudit.gates.find(({ id }) => id === "real-action-approval-readback")!;
+    action.evidence = [{
+      kind: "audit",
+      artifactPath: "real-action-approval-readback-connector-oauth.json",
+      sha256: files.artifacts.get("real-action-approval-readback-connector-oauth.json")!,
+      capturedAt: "2026-08-28T10:05:00.000Z",
+      route: "audit:connector",
+      releaseSha,
+    }];
+    let result = await evaluateAcceptance(genericAudit, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      "connector_generic_audit_rejected",
+      "connector_evidence_missing:connector-readback",
+    ]));
+
+    const noReadback = manifest(files.artifacts);
+    const liveAction = noReadback.gates.find(({ id }) => id === "real-action-approval-readback")!;
+    liveAction.evidence = liveAction.evidence.filter(({ kind }) => kind !== "connector-readback");
+    result = await evaluateAcceptance(noReadback, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toContain("connector_evidence_missing:connector-readback");
+  });
+
+  it("fails explicitly when OAuth, credential reference or a live provider is absent", async () => {
+    const files = await fixture();
+    const unavailable = manifest(files.artifacts);
+    const action = unavailable.gates.find(({ id }) => id === "real-action-approval-readback")!.connectorAction!;
+    action.authorization = "none";
+    action.credentialReference = "";
+    action.providerLive = false;
+    const result = await evaluateAcceptance(unavailable, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      "connector_oauth_missing",
+      "connector_credential_missing",
+      "connector_provider_not_live",
+      "connector_correlation_mismatch:connector-oauth:credentialReference",
     ]));
   });
 

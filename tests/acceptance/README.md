@@ -14,7 +14,7 @@ Inventory base: `d381ccf836516f91464f20225403996e7e8158d1`.
 | Two users | Multi-user acceptance covers four turns and isolation | Local fake App Server; not two real Arnall identities | David/Arnau positive flows plus negative cross-user reads/mutations |
 | Real turn | Opt-in real App Server smoke/resume/cancel spec | Local opt-in; not bound to the Arnall release | Authenticated David+Arnau turn, stream, runtime readback and logs on the same SHA |
 | Files/search/library/memory | Unit and route integration slices | Local synthetic fixtures | Both users upload/use/search/library/memory with typed evidence for each route |
-| Approval/action/readback | Durable approval and browser tool unit/integration coverage | Local synthetic execution; no real live action readback | One reversible real action, exact approval evidence and independent post-action readback |
+| Connector/action/readback | Durable approval and browser tool unit/integration coverage | Local synthetic execution; no real provider action | One OAuth-authorized live provider operation with tenant/actor/release correlation, exactly-once execution and provider readback; health/capability/audit/connected states do not qualify |
 | Logs/backup/rollback | Logging, backup orchestration and release manager tests | Local/simulated operational prefilter | Live log correlation plus typed backup, restore and rollback evidence |
 
 There was no `tests/security` directory, canonical live manifest or machine gate that
@@ -31,7 +31,7 @@ that false-acceptance path. It deliberately does not claim any live gate has run
 6. `two-user-isolation` using the two real roles and negative cross-user operations.
 7. `real-turn` for both users through the real runtime, not merely a listening port.
 8. `files-search-library-memory` end to end for both users on persisted live data.
-9. `real-action-approval-readback` using one reversible, authorized action and a separate readback.
+9. `real-action-approval-readback` using one reversible provider action with OAuth credential reference, durable approval, exactly-once execution and provider readback, all correlated to actor, tenant and release.
 10. `logs-backup-rollback` with log, backup, restore and rollback evidence from the same release window.
 
 Usage:
