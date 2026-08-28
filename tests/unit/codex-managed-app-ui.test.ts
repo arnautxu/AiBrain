@@ -41,7 +41,7 @@ describe("codex managed app UI adapter", () => {
     const prepared = await prepareManagedAppAction(fetcher, target);
     expect(prepared?.approval.status).toBe("pending");
     const result = await resolveManagedAppAction(fetcher, prepared!, { threadId: target.threadId, turnId: target.turnId }, "accept");
-    expect(result).toEqual({ outcome: "executed", approval: { ...descriptor.approval, status: "accepted" } });
+    expect(result).toEqual({ state: "terminal", outcome: "executed", approval: { ...descriptor.approval, status: "accepted" } });
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(JSON.parse(String(fetcher.mock.calls[2]?.[1]?.body))).toEqual({ operation: "execute", locator: target, authorizationFingerprint: fingerprint });
     expect(JSON.stringify(result)).not.toMatch(/receipt|authorizationSnapshot|credentialRef|server|tool|arguments|correlation/i);
@@ -50,13 +50,13 @@ describe("codex managed app UI adapter", () => {
   it("declines without execute and clears cross-thread stale descriptors without any request", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => response({ ok: true, status: "denied" }));
     const declined = await resolveManagedAppAction(fetcher, descriptor, { threadId: target.threadId, turnId: target.turnId }, "decline");
-    expect(declined.outcome).toBe("denied");
+    expect(declined).toMatchObject({ state: "terminal", outcome: "denied", approval: { status: "declined" } });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(String(fetcher.mock.calls[0]?.[0])).toBe("/api/runtime/approvals");
 
     fetcher.mockClear();
     const stale = await resolveManagedAppAction(fetcher, descriptor, { threadId: "thread-other", turnId: target.turnId }, "accept");
-    expect(stale).toMatchObject({ outcome: "denied", approval: { status: "declined" } });
+    expect(stale).toEqual({ state: "recoverable", stage: "current-thread" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -65,7 +65,43 @@ describe("codex managed app UI adapter", () => {
       ? response({ ok: true, status: "approved" })
       : response({ schemaVersion: 1, outcome: "indeterminate", correlation: "must-not-leak" }));
     const result = await resolveManagedAppAction(fetcher, descriptor, { threadId: target.threadId, turnId: target.turnId }, "accept");
-    expect(result.outcome).toBe("indeterminate");
+    expect(result).toMatchObject({ state: "terminal", outcome: "indeterminate" });
     expect(JSON.stringify(result)).not.toContain("must-not-leak");
+  });
+
+  it("keeps the same descriptor recoverable after approval or execute failures", async () => {
+    const approvalFailure = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => response({ error: "unavailable" }, 503));
+    await expect(resolveManagedAppAction(approvalFailure, descriptor, target, "accept"))
+      .resolves.toEqual({ state: "recoverable", stage: "approval" });
+    expect(approvalFailure).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(String(approvalFailure.mock.calls[0]?.[1]?.body))).toEqual({
+      ...target,
+      authorizationFingerprint: fingerprint,
+      decision: "accept",
+    });
+
+    let executeAttempts = 0;
+    const retryingFetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (input === "/api/runtime/approvals") return response({ ok: true, status: "approved" });
+      executeAttempts += 1;
+      return executeAttempts === 1
+        ? response({ error: "temporary" }, 500)
+        : response({ schemaVersion: 1, outcome: "replayed" });
+    });
+    const first = await resolveManagedAppAction(retryingFetcher, descriptor, target, "accept");
+    expect(first).toEqual({ state: "recoverable", stage: "execute" });
+    const retry = await resolveManagedAppAction(retryingFetcher, descriptor, target, "accept");
+    expect(retry).toMatchObject({ state: "terminal", outcome: "replayed" });
+    expect(JSON.parse(String(retryingFetcher.mock.calls[1]?.[1]?.body))).toEqual(
+      JSON.parse(String(retryingFetcher.mock.calls[3]?.[1]?.body)),
+    );
+  });
+
+  it("does not invent a terminal result for malformed execute JSON", async () => {
+    const fetcher = vi.fn(async (input: RequestInfo | URL) => input === "/api/runtime/approvals"
+      ? response({ ok: true, status: "approved" })
+      : new Response("not-json", { status: 200, headers: { "Content-Type": "application/json" } }));
+    await expect(resolveManagedAppAction(fetcher, descriptor, target, "accept"))
+      .resolves.toEqual({ state: "recoverable", stage: "execute" });
   });
 });

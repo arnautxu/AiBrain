@@ -23,6 +23,7 @@ import type {
 } from "@/lib/chat-contract";
 import { ManagedAppActionControl } from "@/components/managed-app-action-control";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
+import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import { ToolResultList } from "@/components/tool-result-list";
 
 type TurnActivityProps = {
@@ -34,8 +35,9 @@ type TurnActivityProps = {
     enabled: boolean;
     threadId: string;
     onPrepared: (descriptor: ManagedAppActionDescriptor) => void;
-    approvalId: string | null;
   } | null;
+  /** Connector identity remains available while the employee visits another thread. */
+  managedAppApprovalKeys?: readonly string[];
 };
 
 const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
@@ -158,7 +160,14 @@ function ApprovalCard({
   );
 }
 
-export function TurnActivity({ message, compact = false, showDiff = true, onResolveApproval, managedAppAction = null }: TurnActivityProps) {
+export function TurnActivity({
+  message,
+  compact = false,
+  showDiff = true,
+  onResolveApproval,
+  managedAppAction = null,
+  managedAppApprovalKeys = [],
+}: TurnActivityProps) {
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
@@ -236,7 +245,7 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} connectorApproval={approval.id === managedAppAction?.approvalId} onResolve={(decision) => onResolveApproval(approval, decision)} />
+        <ApprovalCard key={approval.id} approval={approval} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       <ToolResultList results={message.toolResults ?? []} />

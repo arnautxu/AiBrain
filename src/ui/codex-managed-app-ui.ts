@@ -21,6 +21,14 @@ export type ManagedAppActionDescriptor = Readonly<{
 
 export type ManagedAppActionOutcome = "executed" | "replayed" | "indeterminate" | "denied";
 
+export type ManagedAppActionResolution =
+  | Readonly<{ state: "terminal"; outcome: ManagedAppActionOutcome; approval: ApprovalItem }>
+  | Readonly<{ state: "recoverable"; stage: "approval" | "execute" | "current-thread" }>;
+
+export function managedAppActionKey(locator: ManagedAppActionTarget) {
+  return JSON.stringify([locator.threadId, locator.turnId, locator.itemId, locator.approvalId]);
+}
+
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -56,6 +64,17 @@ async function json(response: Response) {
   return response.json().catch(() => null) as Promise<unknown>;
 }
 
+function approvalResponseIsValid(value: unknown, status: "approved" | "denied") {
+  return record(value) && value.ok === true && value.status === status;
+}
+
+function outcome(value: unknown): ManagedAppActionOutcome | null {
+  if (!record(value) || typeof value.outcome !== "string") return null;
+  return (["executed", "replayed", "indeterminate", "denied"] as const).includes(value.outcome as ManagedAppActionOutcome)
+    ? value.outcome as ManagedAppActionOutcome
+    : null;
+}
+
 export async function loadManagedAppCapability(fetcher: FetchLike) {
   const response = await fetcher("/api/connectors", { cache: "no-store" });
   return response.ok && managedAppAvailable(await json(response));
@@ -83,27 +102,36 @@ export async function resolveManagedAppAction(
   prepared: ManagedAppActionDescriptor,
   current: Pick<ManagedAppActionTarget, "threadId" | "turnId">,
   decision: ApprovalDecision,
-): Promise<{ outcome: ManagedAppActionOutcome; approval: ApprovalItem }> {
+): Promise<ManagedAppActionResolution> {
   if (prepared.locator.threadId !== current.threadId || prepared.locator.turnId !== current.turnId) {
-    return { outcome: "denied", approval: { ...prepared.approval, status: "declined" } };
+    return { state: "recoverable", stage: "current-thread" };
   }
   const approvalDecision = decision === "accept" ? "accept" : "decline";
-  const approvalResponse = await fetcher("/api/runtime/approvals", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...prepared.locator, authorizationFingerprint: prepared.authorizationFingerprint, decision: approvalDecision }),
-  });
-  if (!approvalResponse.ok) return { outcome: "denied", approval: { ...prepared.approval, status: "declined" } };
-  if (approvalDecision === "decline") return { outcome: "denied", approval: { ...prepared.approval, status: "declined" } };
-  const executeResponse = await fetcher("/api/connectors/codex-managed-app/action", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ operation: "execute", locator: prepared.locator, authorizationFingerprint: prepared.authorizationFingerprint }),
-  });
-  const body = await json(executeResponse);
-  const outcome = record(body) && typeof body.outcome === "string" &&
-    (["executed", "replayed", "indeterminate", "denied"] as const).includes(body.outcome as ManagedAppActionOutcome)
-    ? body.outcome as ManagedAppActionOutcome
-    : "denied";
-  return { outcome, approval: { ...prepared.approval, status: "accepted" } };
+  try {
+    const approvalResponse = await fetcher("/api/runtime/approvals", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...prepared.locator, authorizationFingerprint: prepared.authorizationFingerprint, decision: approvalDecision }),
+    });
+    if (!approvalResponse.ok || !approvalResponseIsValid(await json(approvalResponse), approvalDecision === "accept" ? "approved" : "denied")) {
+      return { state: "recoverable", stage: "approval" };
+    }
+  } catch {
+    return { state: "recoverable", stage: "approval" };
+  }
+  if (approvalDecision === "decline") {
+    return { state: "terminal", outcome: "denied", approval: { ...prepared.approval, status: "declined" } };
+  }
+  try {
+    const executeResponse = await fetcher("/api/connectors/codex-managed-app/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ operation: "execute", locator: prepared.locator, authorizationFingerprint: prepared.authorizationFingerprint }),
+    });
+    const resolvedOutcome = executeResponse.ok ? outcome(await json(executeResponse)) : null;
+    if (!resolvedOutcome) return { state: "recoverable", stage: "execute" };
+    return { state: "terminal", outcome: resolvedOutcome, approval: { ...prepared.approval, status: "accepted" } };
+  } catch {
+    return { state: "recoverable", stage: "execute" };
+  }
 }
