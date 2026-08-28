@@ -48,6 +48,7 @@ Ejemplo de error:
 | `GET`, `PATCH` | `/api/settings` | Cuenta, apps reales, permisos, privacidad, red y preferencias persistentes |
 | `POST` | `/api/threads/{threadId}/messages/{messageId}/result` | Estado de revisión/reversión del resultado |
 | `GET` | `/api/projects/{projectId}/artifacts/{artifactId}` | Artefacto de imagen generado |
+| `GET` | `/api/projects/{projectId}/files?path={path}` | Vista autenticada del archivo actual del workspace |
 | `POST` | `/api/threads/{threadId}/documents` | Upload seguro, staging y preview |
 | `GET` | `/api/threads/{threadId}/documents/{uploadId}/preview/{fileName}` | Fichero privado de preview |
 | `POST` | `/api/threads/{threadId}/publications` | Congela un candidato para confirmación |
@@ -813,6 +814,8 @@ type GeneratedArtifact = {
 ```
 
 `GET /api/projects/{projectId}/artifacts/{artifactId}` responde bytes `image/png`, inline, con `Cache-Control: private, no-store`. La URL se reautoriza en cada request; no debe reutilizarse desde caché tras logout o cambio de empleado. IDs inválidos o artefactos ajenos/inexistentes responden `400` o `404` sin revelar paths.
+
+`GET /api/projects/{projectId}/files?path={path}` reautoriza el proyecto y confina la lectura a su workspace. Devuelve metadata y contenido acotado para texto/código; para imágenes y PDF devuelve una `previewUrl` del mismo endpoint con `raw=1`. Las respuestas no se cachean y una ruta absoluta emitida por Codex solo se acepta si resuelve dentro del workspace autorizado.
 
 Los documentos Office/PDF/texto/imagen no usan este contrato inline; usan la API de documentos siguiente.
 

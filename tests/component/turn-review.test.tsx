@@ -48,10 +48,13 @@ const message: ChatMessage = {
   artifacts: [],
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("turn activity and Review", () => {
-  it("keeps live activity compact, updates its shimmer label and opens details on demand", () => {
+  it("shows live progress, updates it in place and compacts it when the turn completes", () => {
     const liveMessage: ChatMessage = {
       ...message,
       status: "streaming",
@@ -59,21 +62,20 @@ describe("turn activity and Review", () => {
       approvals: [],
       diff: "",
       activity: [
-        { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "complete" },
-        { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
+        { ...message.activity[0], id: "reasoning-1", kind: "reasoning", label: "Raonament completat", detail: "Identificando el alcance exacto", status: "complete" },
+        { ...message.activity[0], id: "file-1", kind: "file", label: "Preparant canvis", detail: "src/components/turn-activity.tsx", status: "running" },
       ],
     };
-    const { container, rerender } = render(<TurnActivity
+    const { rerender } = render(<TurnActivity
       message={liveMessage}
       onResolveApproval={vi.fn()}
     />);
-    const details = container.querySelector("details");
-    const summary = container.querySelector("summary");
-    if (!details || !summary) throw new Error("Live activity details were not rendered");
+    let trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
 
-    expect(details).not.toHaveAttribute("open");
-    expect(within(summary).getByText("Editando archivos")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Respuesta preparada")).not.toBeVisible();
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveTextContent("Preparando cambios en src/components/turn-activity.tsx");
+    expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
+    expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
 
     rerender(<TurnActivity
       message={{
@@ -81,30 +83,93 @@ describe("turn activity and Review", () => {
         activity: [
           { ...liveMessage.activity[0] },
           { ...liveMessage.activity[1], status: "complete" },
-          { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
+          { ...message.activity[0], id: "command-1", kind: "command", label: "Executant una ordre", detail: "npm run typecheck", status: "running" },
         ],
       }}
       onResolveApproval={vi.fn()}
     />);
 
-    expect(details).not.toHaveAttribute("open");
-    expect(within(summary).getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
-    fireEvent.click(summary);
-    expect(details).toHaveAttribute("open");
-    expect(screen.getByText("Respuesta preparada")).toBeVisible();
+    trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveTextContent("Ejecutando: npm run typecheck");
+    expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
+
+    rerender(<TurnActivity
+      message={{
+        ...liveMessage,
+        status: "complete",
+        activity: [
+          { ...liveMessage.activity[0] },
+          { ...liveMessage.activity[1], status: "complete" },
+          { ...message.activity[0], id: "command-1", kind: "command", label: "Ordre executada", detail: "npm run typecheck", status: "complete" },
+        ],
+      }}
+      onResolveApproval={vi.fn()}
+    />);
+
+    trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveTextContent("Trabajo completado");
+    expect(trigger.querySelector(".thinking-steps-shimmer")).not.toBeInTheDocument();
+    expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
+    fireEvent.click(trigger);
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
   });
 
   it("presents plan, command output, diff and approval decisions in employee language", () => {
     const onResolve = vi.fn();
     render(<TurnActivity message={message} onResolveApproval={onResolve} />);
 
-    expect(screen.getByText("Plan")).toBeInTheDocument();
-    expect(screen.getByText("Comando completado")).toBeInTheDocument();
+    expect(screen.getByText("Revisar el proyecto")).toBeInTheDocument();
+    expect(screen.getByText("Comprobar estado")).toBeInTheDocument();
     expect(screen.getByText("Comprobación sintética terminada")).toBeInTheDocument();
     expect(screen.getByText("Cambios preparados")).toBeInTheDocument();
     const approval = screen.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
     fireEvent.click(within(approval).getByRole("button", { name: "Permitir" }));
     expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
+  });
+
+  it("opens the real edited file inside the activity", async () => {
+    const fetchPreview = vi.fn(async () => new Response(JSON.stringify({
+      file: {
+        path: "src/example.ts",
+        name: "example.ts",
+        kind: "text",
+        mimeType: "text/plain",
+        size: 26,
+        language: "TypeScript",
+        content: "export const ready = true;",
+        previewUrl: null,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchPreview);
+    render(<TurnActivity
+      projectId="00000000-0000-4000-8000-000000000001"
+      message={{
+        ...message,
+        status: "streaming",
+        plan: [],
+        approvals: [],
+        diff: "",
+        activity: [{
+          id: "file-preview-1",
+          kind: "file",
+          label: "Preparant canvis",
+          detail: "src/example.ts",
+          files: [{ path: "src/example.ts", change: "update" }],
+          status: "running",
+        }],
+      }}
+      onResolveApproval={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: /src\/example\.ts/ }));
+    expect(await screen.findByText("export const ready = true;")).toBeVisible();
+    expect(fetchPreview).toHaveBeenCalledWith(
+      "/api/projects/00000000-0000-4000-8000-000000000001/files?path=src%2Fexample.ts",
+      { headers: { Accept: "application/json" } },
+    );
   });
 
   it("keeps connector outcomes auditable and removes session-wide approval", () => {
@@ -135,6 +200,6 @@ describe("turn activity and Review", () => {
     expect(screen.getAllByText("+1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("−1").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /Actividad/ }));
-    expect(screen.getByText("Comando completado")).toBeInTheDocument();
+    expect(screen.getByText("Comprobar estado")).toBeInTheDocument();
   });
 });

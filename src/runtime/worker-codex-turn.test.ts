@@ -234,6 +234,19 @@ describe("worker Codex turn", () => {
                 },
               });
               await handlers?.onNotification({
+                method: "item/fileChange/patchUpdated",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  itemId: "file-change-1",
+                  changes: [{
+                    path: "src/example.ts",
+                    kind: { type: "update", move_path: null },
+                    diff: "",
+                  }],
+                },
+              });
+              await handlers?.onNotification({
                 method: "turn/completed",
                 params: { threadId: "runtime-thread-1", turn: { id: "runtime-turn-1", status: "completed", items: [], error: null } },
               });
@@ -324,6 +337,7 @@ describe("worker Codex turn", () => {
         "/source-knowledge",
         path.join(staging, "threads"),
       ],
+      summary: "detailed",
     });
     expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
       .toEqual(expect.arrayContaining([
@@ -373,6 +387,17 @@ describe("worker Codex turn", () => {
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
+    expect(events).toContainEqual({
+      type: "activity",
+      item: {
+        id: "file-change-1",
+        kind: "file",
+        label: "Preparant canvis",
+        detail: "src/example.ts",
+        files: [{ path: "src/example.ts", change: "update" }],
+        status: "running",
+      },
+    });
     expect(events).toContainEqual({
       type: "runtimeUsage",
       tokenUsage: {

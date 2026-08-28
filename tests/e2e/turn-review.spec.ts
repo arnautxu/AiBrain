@@ -21,6 +21,7 @@ test("plan, command, diff and approval decisions consume the typed turn contract
         { step: "Preparar el cambio", status: "in_progress" },
       ] },
       { type: "activity", item: { id: "command-qa", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
+      { type: "activity", item: { id: "file-qa", kind: "file", label: "Canvis de fitxers", detail: "src/resultado.ts", files: [{ path: "src/resultado.ts", change: "update" }], status: "complete" } },
       { type: "diff", value: "diff --git a/resultado.txt b/resultado.txt\n--- a/resultado.txt\n+++ b/resultado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
       { type: "approval", item: { id: "approval-command", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-command-qa", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
       { type: "approval", item: { id: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", kind: "file", title: "Aplicar cambio preparado", detail: "Modifica únicamente resultado.txt.", status: "pending" } },
@@ -33,6 +34,23 @@ test("plan, command, diff and approval decisions consume the typed turn contract
       body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
     });
   });
+  await page.route("**/api/projects/*/files?*", async (route) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ file: {
+        path: url.searchParams.get("path"),
+        name: "resultado.ts",
+        kind: "text",
+        mimeType: "text/plain",
+        size: 34,
+        language: "TypeScript",
+        content: "export const resultado = 'listo';",
+        previewUrl: null,
+      } }),
+    });
+  });
 
   await login(page);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Ejecuta el turno sintético de Review.");
@@ -40,11 +58,13 @@ test("plan, command, diff and approval decisions consume the typed turn contract
   const resultHeading = page.getByRole("heading", { name: "Resultado de la prueba" });
   await expect(resultHeading).toBeVisible();
   const assistantTurn = resultHeading.locator("xpath=ancestor::article");
-  await page.locator("summary").filter({ hasText: "Trabajo completado" }).click();
-  await expect(assistantTurn.getByText("Plan", { exact: true })).toBeVisible();
-  await expect(page.getByText("Comando completado")).toBeVisible();
+  await assistantTurn.getByRole("button", { name: "Mostrar el proceso de trabajo" }).click();
+  await expect(assistantTurn.getByText("Inspeccionar el proyecto", { exact: true })).toBeVisible();
+  await expect(page.getByText("Comprobar proyecto")).toBeVisible();
   await expect(page.getByText("Lectura sintética terminada")).toBeVisible();
-  await expect(page.getByText("Cambios preparados")).toBeVisible();
+  await page.getByRole("button", { name: /src\/resultado\.ts/ }).click();
+  await expect(page.getByText("export const resultado = 'listo';")).toBeVisible();
+  await expect(page.getByText("Cambios preparados", { exact: true })).toBeVisible();
 
   const commandApproval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
   await commandApproval.getByRole("button", { name: "Permitir", exact: true }).click();
@@ -57,7 +77,7 @@ test("plan, command, diff and approval decisions consume the typed turn contract
     { approvalId: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", decision: "decline" },
   ]);
 
-  await expect(page.getByRole("button", { name: "Copiar" })).toBeVisible();
+  await expect(page.locator('button.result-action[aria-label="Copiar"]')).toBeVisible();
   await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
   await expect(page.getByText("Incluidos en este turno")).toBeVisible();
 });

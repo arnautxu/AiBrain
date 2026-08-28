@@ -3,9 +3,7 @@
 import { useState } from "react";
 import {
   Brain,
-  CaretRight,
   Check,
-  Circle,
   FileCode,
   GitDiff,
   Globe,
@@ -28,9 +26,17 @@ import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import { ToolResultList } from "@/components/tool-result-list";
 import { AgentStatusOrb } from "@/components/agent-status-orb";
+import { WorkspaceFilePreview } from "@/components/workspace-file-preview";
+import {
+  ThinkingStep,
+  ThinkingSteps,
+  ThinkingStepsContent,
+  ThinkingStepsHeader,
+} from "@/components/ui/thinking-steps";
 
 type TurnActivityProps = {
   message: ChatMessage;
+  projectId?: string;
   compact?: boolean;
   showDiff?: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
@@ -50,6 +56,27 @@ const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
   "Canvis revertits i verificats": "Cambios deshechos y verificados",
 };
 
+const GENERIC_RUNTIME_LABELS = new Set([
+  "Executant una ordre",
+  "Ordre executada",
+  "Preparant canvis",
+  "Canvis de fitxers",
+  "Cercant al web",
+  "Cerca web completada",
+  "Raonant",
+  "Raonament completat",
+  "Preparant el pla",
+  "Pla preparat",
+  "Coordinant agents",
+  "Coordinació completada",
+]);
+
+function translatedRuntimeLabel(label: string) {
+  return label
+    .replace(/^Utilitzant /u, "Usando ")
+    .replace(/ completat$/u, " completado");
+}
+
 function ActivityIcon({ item }: { item: ActivityItem }) {
   if (item.status === "running" || item.status === "waiting") {
     return <SpinnerGap size={13} className="motion-safe:animate-spin" />;
@@ -67,43 +94,53 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
   return <Check {...props} weight="bold" />;
 }
 
-function activeActivityLabel(item: ActivityItem) {
-  return {
-    command: "Ejecutando comando",
-    file: "Editando archivos",
-    reasoning: "Pensando",
-    web: "Buscando en la web",
-    tool: "Usando herramienta",
-    agent: "Coordinando agentes",
-    plan: "Preparando el plan",
-    system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
-  }[item.kind];
-}
+function activityPresentation(item: ActivityItem) {
+  const detail = item.detail?.trim();
+  const active = item.status === "running" || item.status === "waiting";
+  const customLabel = item.label.trim() && !GENERIC_RUNTIME_LABELS.has(item.label)
+    ? SYSTEM_ACTIVITY_LABELS[item.label] ?? translatedRuntimeLabel(item.label)
+    : null;
+  let title = customLabel;
+  let secondaryDetail: string | undefined = detail;
 
-function friendlyActivity(item: ActivityItem) {
-  if (item.status === "running" || item.status === "waiting") return activeActivityLabel(item);
-  if (item.status === "failed") return `No se ha podido completar: ${item.label}`;
-  if (item.status === "stopped") return `Paso detenido: ${item.label}`;
-  if (item.status === "pending") return `Pendiente: ${item.label}`;
-  return {
-    command: "Comando completado",
-    file: "Cambios preparados",
-    reasoning: "Respuesta preparada",
-    web: "Información consultada",
-    tool: "Herramienta completada",
-    agent: "Coordinación completada",
-    plan: "Pasos preparados",
-    system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
-  }[item.kind];
+  if (!title) {
+    if (item.kind === "reasoning") {
+      title = detail || (active ? "Pensando" : "Razonamiento completado");
+      secondaryDetail = undefined;
+    } else if (item.kind === "command") {
+      title = detail ? `${active ? "Ejecutando" : "Ejecutado"}: ${detail}` : active ? "Ejecutando un comando" : "Comando completado";
+      secondaryDetail = undefined;
+    } else if (item.kind === "file") {
+      title = detail ? `${active ? "Preparando cambios en" : "Cambios preparados en"} ${detail}` : active ? "Editando archivos" : "Cambios preparados";
+      secondaryDetail = undefined;
+    } else if (item.kind === "web") {
+      title = detail ? `${active ? "Buscando" : "Búsqueda completada"}: ${detail}` : active ? "Buscando en la web" : "Información consultada";
+      secondaryDetail = undefined;
+    } else if (item.kind === "agent") {
+      title = detail ? `${active ? "Coordinando" : "Coordinación completada"}: ${detail}` : active ? "Coordinando agentes" : "Coordinación completada";
+      secondaryDetail = undefined;
+    } else {
+      title = {
+        tool: active ? "Usando herramienta" : "Herramienta completada",
+        plan: active ? "Preparando el plan" : "Plan preparado",
+        system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
+      }[item.kind];
+    }
+  }
+
+  if (item.status === "failed") title = `No se ha podido completar: ${title}`;
+  if (item.status === "stopped") title = `Paso detenido: ${title}`;
+  if (item.status === "pending") title = `Pendiente: ${title}`;
+  return { title, detail: secondaryDetail };
 }
 
 function currentActivityLabel(message: ChatMessage) {
   for (let index = message.activity.length - 1; index >= 0; index -= 1) {
     const item = message.activity[index];
-    if (item.status === "running" || item.status === "waiting") return activeActivityLabel(item);
+    if (item.status === "running" || item.status === "waiting") return activityPresentation(item).title;
   }
   const latestItem = message.activity.at(-1);
-  return latestItem ? activeActivityLabel(latestItem) : "Pensando";
+  return latestItem ? activityPresentation(latestItem).title : "Pensando";
 }
 
 function ApprovalCard({
@@ -165,13 +202,22 @@ function ApprovalCard({
 
 export function TurnActivity({
   message,
+  projectId,
   compact = false,
   showDiff = true,
   onResolveApproval,
   managedAppAction = null,
   managedAppApprovalKeys = [],
 }: TurnActivityProps) {
-  const [executionOpen, setExecutionOpen] = useState(compact);
+  const streaming = message.status === "streaming";
+  const [manualDisclosure, setManualDisclosure] = useState<{
+    status: ChatMessage["status"];
+    open: boolean;
+  } | null>(null);
+  const executionOpen = manualDisclosure?.status === message.status
+    ? manualDisclosure.open
+    : compact || streaming;
+
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
@@ -184,71 +230,81 @@ export function TurnActivity({
         : "Trabajo completado";
 
   const activeActivity = [...message.activity].reverse().find((item) => item.status === "running" || item.status === "waiting");
+  const visiblePlan = message.plan.filter((step) => step.status !== "pending");
+  const visibleActivity = message.activity.filter((item) => item.status !== "pending");
+  const visibleStepCount = visiblePlan.length + visibleActivity.length;
 
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 || message.activity.length > 0 ? (
-        <details
-          className="group/execution"
+        <ThinkingSteps
+          data-testid="turn-thinking-steps"
+          size="compact"
           open={executionOpen}
-          onToggle={(event) => setExecutionOpen(event.currentTarget.open)}
+          onOpenChange={(open) => setManualDisclosure({
+            status: message.status,
+            open,
+          })}
+          className="w-full"
         >
-          <summary className="codex-thinking-summary flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[14px] font-medium leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:bg-[var(--surface-hover)] focus-visible:outline-none [&::-webkit-details-marker]:hidden">
-            {message.status === "streaming" ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
-            <span aria-live="polite" className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
-            <span aria-hidden className="grid size-4 place-items-center text-[var(--text-subtle)] transition-transform duration-150 group-open/execution:rotate-90"><CaretRight size={11} weight="bold" /></span>
-          </summary>
-          <div className="codex-thinking-content mt-2.5 space-y-4 border-l border-[var(--border-subtle)] pl-4">
-            {message.plan.length > 0 ? (
-              <section>
-          <div className="mb-2.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--text)]">
-            <ListChecks size={15} />
-            Plan
-          </div>
-          <ol className="space-y-1.5">
-            {message.plan.map((step, index) => (
-              <li key={`${step.step}-${index}`} className="flex items-start gap-2.5 text-[13px] leading-5 text-[var(--text)]">
-                <span className={`mt-[3px] grid size-3.5 shrink-0 place-items-center rounded-full ${
-                  step.status === "completed"
-                    ? "bg-[var(--positive-soft)] text-[var(--positive)]"
-                    : step.status === "in_progress"
-                      ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"
-                      : "text-[var(--text-muted)]"
-                }`}>
-                  {step.status === "completed" ? <Check size={8} weight="bold" /> : step.status === "in_progress" ? <SpinnerGap size={8} className="motion-safe:animate-spin" /> : <Circle size={8} />}
-                </span>
-                <span>{step.step}</span>
-              </li>
+          <ThinkingStepsHeader
+            aria-label={`${executionOpen ? "Ocultar" : "Mostrar"} el proceso de trabajo`}
+            aria-live="polite"
+            indicator={message.status === "streaming"
+              ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} />
+              : message.status === "stopped" || message.status === "error"
+                ? <X size={14} />
+                : <Check size={14} />}
+            labelClassName={message.status === "streaming" ? "thinking-steps-shimmer" : undefined}
+            className={message.status === "complete" ? "codex-thinking-summary-complete max-w-full" : "max-w-full"}
+          >
+            {executionLabel}
+          </ThinkingStepsHeader>
+          <ThinkingStepsContent className="pt-1">
+            {visiblePlan.map((step, index) => (
+              <ThinkingStep
+                key={`${step.step}-${index}`}
+                indicator={streaming && step.status === "in_progress"
+                  ? <SpinnerGap size={12} className="motion-safe:animate-spin" />
+                  : <ListChecks size={12} />}
+                label={step.step}
+                status={streaming && step.status === "in_progress" ? "active" : "complete"}
+                delay={Math.min(index * 0.035, 0.18)}
+                isLast={index === visibleStepCount - 1}
+              />
             ))}
-          </ol>
-              </section>
-            ) : null}
 
-            {message.activity.length > 0 ? (
-              <section className="space-y-0.5">
-          {message.activity.map((item) => (
-            <div key={item.id} className={`flex items-start gap-2.5 px-1 py-2 ${item.status === "running" || item.status === "waiting" ? "activity-live-row" : ""}`}>
-              <span className={`mt-0.5 grid size-5 shrink-0 place-items-center rounded-md ${
-                item.status === "failed" ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-raised)] text-[var(--text)]"
-              }`}>
-                <ActivityIcon item={item} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className={`text-[14px] font-medium leading-5 text-[var(--text)] ${item.status === "running" || item.status === "waiting" ? "activity-shimmer" : ""}`}>{friendlyActivity(item)}</p>
-                {item.detail ? <p className="mt-0.5 text-[12px] leading-[18px] text-[var(--text-muted)]">{item.detail}</p> : null}
+            {visibleActivity.map((item, index) => {
+              const presentation = activityPresentation(item);
+              const stepIndex = visiblePlan.length + index;
+              return (
+                <ThinkingStep
+                  key={item.id}
+                  indicator={<ActivityIcon item={item} />}
+                  label={presentation.title}
+                  description={presentation.detail}
+                  status={item.status === "running" || item.status === "waiting" ? "active" : "complete"}
+                  delay={Math.min(stepIndex * 0.035, 0.18)}
+                  isLast={stepIndex === visibleStepCount - 1}
+                >
+                {projectId && item.kind === "file" && item.files?.length ? (
+                  <div className="mt-2">
+                    {item.files.map((file) => (
+                      <WorkspaceFilePreview key={`${file.change}:${file.path}`} projectId={projectId} file={file} />
+                    ))}
+                  </div>
+                ) : null}
                 {item.output ? (
                   <details className="mt-2">
                     <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
                     <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
                   </details>
                 ) : null}
-              </div>
-            </div>
-          ))}
-              </section>
-            ) : null}
-          </div>
-        </details>
+                </ThinkingStep>
+              );
+            })}
+          </ThinkingStepsContent>
+        </ThinkingSteps>
       ) : null}
 
       {message.approvals.map((approval) => (

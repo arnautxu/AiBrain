@@ -48,6 +48,8 @@
   --composer-width: 720px;
   --background: var(--canvas);
   --foreground: var(--text);
+  --muted: var(--surface-muted);
+  --muted-foreground: var(--text-muted);
 }
 
 :root[data-theme="dark"] {
@@ -892,25 +894,8 @@ button:disabled {
   animation: shimmer 1.5s infinite;
 }
 
-.activity-live-row {
-  position: relative;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-muted) 42%, transparent);
-}
-
-.codex-thinking-summary {
-  -webkit-tap-highlight-color: transparent;
-}
-
-.codex-thinking-summary .agent-status-orb {
-  width: 18px;
-  height: 18px;
-  flex-basis: 18px;
-  transform: scale(0.88);
-}
-
-.group\/execution[open] .codex-thinking-content {
-  animation: codex-thinking-enter 180ms cubic-bezier(0.2, 0, 0, 1) both;
+.codex-thinking-summary-complete {
+  animation: codex-thinking-settle 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .activity-shimmer {
@@ -988,13 +973,15 @@ button:disabled {
   }
 }
 
-@keyframes codex-thinking-enter {
+@keyframes codex-thinking-settle {
   from {
-    opacity: 0;
-    transform: translate3d(0, -4px, 0);
+    opacity: 0.62;
+    filter: blur(1px);
+    transform: translate3d(0, 2px, 0);
   }
   to {
     opacity: 1;
+    filter: blur(0);
     transform: translate3d(0, 0, 0);
   }
 }
@@ -1094,4 +1081,27 @@ button:disabled {
   .sidebar-item-action {
     opacity: 1;
   }
+}
+
+@theme inline {
+  --color-border: var(--border);
+  --color-hover: var(--surface-hover);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+}
+
+@keyframes thinking-steps-shimmer {
+  from { background-position: 0% 0; }
+  to { background-position: 100% 0; }
+}
+
+.thinking-steps-shimmer {
+  color: transparent;
+  background: linear-gradient(90deg, var(--text-muted) 0%, var(--text-muted) 35%, var(--text) 50%, var(--text-muted) 65%, var(--text-muted) 100%);
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  animation: thinking-steps-shimmer 1.5s ease-in-out infinite;
 }

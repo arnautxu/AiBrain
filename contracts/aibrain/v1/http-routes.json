@@ -22,6 +22,7 @@
     "GET /api/projects": "JsonObject",
     "GET /api/projects/{projectId}": "JsonObject",
     "GET /api/projects/{projectId}/artifacts/{artifactId}": "binary:image/png",
+    "GET /api/projects/{projectId}/files": "JsonObject",
     "GET /api/projects/{projectId}/threads": "JsonObject",
     "GET /api/runtime/browser": "BrowserStatus",
     "GET /api/runtime/browser/viewer/frame": "binary:image/png",

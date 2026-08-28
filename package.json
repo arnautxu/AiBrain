@@ -48,12 +48,17 @@
     "release:manage": "node scripts/manage-release.mjs"
   },
   "dependencies": {
+    "@base-ui/react": "^1.7.0",
     "@phosphor-icons/react": "2.1.10",
     "@supabase/supabase-js": "2.112.4",
     "ajv": "8.20.0",
     "busboy": "1.6.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^13.1.1",
     "js-yaml": "4.3.2",
     "jszip": "^3.10.1",
+    "lucide-react": "^1.35.0",
     "next": "16.3.2",
     "react": "19.2.8",
     "react-dom": "19.2.8",
@@ -61,6 +66,7 @@
     "remark-gfm": "4.0.1",
     "sanitize-html": "^2.17.5",
     "server-only": "0.0.1",
+    "tailwind-merge": "^3.6.0",
     "thinking-orbs": "^0.3.1",
     "ws": "8.21.3"
   },
