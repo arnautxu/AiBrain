@@ -10,13 +10,11 @@ import {
   expectArray,
   expectInteger,
   expectString,
-  readValidatedJson,
   recoverAtomicJsonFile,
   ResourceLockManager,
   type ValidationContext,
 } from "@/storage";
 import {
-  branchHistory,
   publicProject,
   publicThread,
   uniqueSlug,
@@ -32,7 +30,6 @@ import {
 } from "@/workbench/errors";
 import {
   isUuid,
-  isBranchThreadInput,
   isProjectName,
   isThreadTitle,
   isUpdateProjectInput,
@@ -66,17 +63,11 @@ const PROJECT_KEYS = [
   "slug",
   "status",
   "pinned",
-  "instructions",
-  "sources",
-  "memory",
-  "sharing",
   "workspace",
   "createdAt",
   "updatedAt",
   "workspaceKey",
 ] as const;
-const LEGACY_PROJECT_KEYS = PROJECT_KEYS.filter((key) =>
-  !["instructions", "sources", "memory", "sharing"].includes(key));
 const WORKSPACE_KEYS = ["id", "label", "hostType", "status", "isPrimary"] as const;
 const THREAD_KEYS = [
   "id",
@@ -89,7 +80,6 @@ const THREAD_KEYS = [
   "messages",
   "runtimeThreadToken",
 ] as const;
-const THREAD_OPTIONAL_KEYS = ["lineage"] as const;
 const MESSAGE_KEYS = [
   "id",
   "role",
@@ -167,7 +157,7 @@ function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
 }
 
 function isStrictChatMessage(value: unknown): value is ChatMessage {
-  if (!hasExactKeys(value, MESSAGE_KEYS, ["sources", "toolResults"]) || !isChatMessage(value)) return false;
+  if (!hasExactKeys(value, MESSAGE_KEYS) || !isChatMessage(value)) return false;
   if (!isUuid(value.id)) return false;
   if (!isCanonicalIsoDate(value.createdAt)) return false;
   if (!value.activity.every((item) =>
@@ -181,44 +171,33 @@ function isStrictChatMessage(value: unknown): value is ChatMessage {
     ))) return false;
   if (!value.attachments.every((item) =>
     hasExactKeys(item, ["id", "name", "mimeType", "size"]))) return false;
-  if (!(value.sources ?? []).every((item) =>
-    hasExactKeys(item, ["id", "kind", "title", "url", "domain", "snippet", "publishedAt"]))) return false;
-  if (!(value.toolResults ?? []).every((item) =>
-    hasExactKeys(item, ["id", "kind", "title", "status", "summary", "output", "sourceIds", "createdAt"]))) return false;
   return value.artifacts.every(hasExactArtifactKeys);
 }
 
 function parseProject(value: unknown, context: ValidationContext): StoredProject {
   const record = isPlainRecord(value) ? value : null;
-  const upgraded = record ? {
-    ...record,
-    instructions: record.instructions ?? "",
-    sources: record.sources ?? [],
-    memory: record.memory ?? { enabled: true, notes: "", updatedAt: null },
-    sharing: record.sharing ?? { visibility: "private", members: [] },
-  } : value;
   if (
-    !hasExactKeys(value, LEGACY_PROJECT_KEYS, ["instructions", "sources", "memory", "sharing"]) ||
+    !hasExactKeys(value, PROJECT_KEYS) ||
     !hasExactKeys(record?.workspace, WORKSPACE_KEYS) ||
-    !isWorkbenchProject(upgraded) ||
+    !isWorkbenchProject(value) ||
     typeof record?.workspaceKey !== "string" ||
     !WORKSPACE_KEY_PATTERN.test(record.workspaceKey) ||
-    !isCanonicalIsoDate(upgraded.createdAt) ||
-    !isCanonicalIsoDate(upgraded.updatedAt)
+    !isCanonicalIsoDate(value.createdAt) ||
+    !isCanonicalIsoDate(value.updatedAt)
   ) {
     context.fail("expected a strict stored project");
   }
-  if (Date.parse(upgraded.updatedAt) < Date.parse(upgraded.createdAt)) {
+  if (Date.parse(value.updatedAt) < Date.parse(value.createdAt)) {
     context.at("updatedAt").fail("must not precede createdAt");
   }
-  return upgraded as StoredProject;
+  return value as StoredProject;
 }
 
 function parseThread(value: unknown, context: ValidationContext): StoredThread {
   const record = isPlainRecord(value) ? value : null;
   const runtimeThreadToken = record?.runtimeThreadToken;
   if (
-    !hasExactKeys(value, THREAD_KEYS, THREAD_OPTIONAL_KEYS) ||
+    !hasExactKeys(value, THREAD_KEYS) ||
     !isWorkbenchThread(value) ||
     !isCanonicalIsoDate(value.createdAt) ||
     !isCanonicalIsoDate(value.updatedAt) ||
@@ -346,10 +325,6 @@ function newProject(name: string, slug: string): StoredProject {
     slug,
     status: "active",
     pinned: false,
-    instructions: "",
-    sources: [],
-    memory: { enabled: true, notes: "", updatedAt: null },
-    sharing: { visibility: "private", members: [] },
     workspace: {
       id: randomUUID(),
       label: name.trim(),
@@ -662,47 +637,6 @@ export class FileWorkbenchStore {
     return snapshot(state);
   }
 
-  /**
-   * Reads an already-provisioned workbench without creating state, locks, or
-   * standalone projects. This is reserved for offline maintenance commands.
-   */
-  async readExistingSnapshotForMaintenance(userId: string): Promise<WorkbenchSnapshot | null> {
-    const paths = this.paths(userId);
-    await assertSecureDirectory(this.usersRoot, "El directori d’usuaris");
-    await assertSecureDirectory(paths.userRoot, "L’usuari");
-    try {
-      await lstat(paths.stateRoot);
-    } catch (error) {
-      if (isNodeError(error, "ENOENT")) return null;
-      throw error;
-    }
-    await assertSecureDirectory(paths.stateRoot, "L’estat de l’usuari");
-    const [canonicalUsersRoot, canonicalUserRoot, canonicalStateRoot] = await Promise.all([
-      realpath(this.usersRoot),
-      realpath(paths.userRoot),
-      realpath(paths.stateRoot),
-    ]);
-    if (
-      canonicalUserRoot === canonicalUsersRoot ||
-      !inside(canonicalUsersRoot, canonicalUserRoot) ||
-      !inside(canonicalUserRoot, canonicalStateRoot)
-    ) {
-      throw new WorkbenchPersistenceError("La ruta de manteniment del workbench resol fora de l’usuari.");
-    }
-    await this.assertStateFileSafe(paths.statePath);
-    let state: WorkbenchState;
-    try {
-      state = await readValidatedJson(paths.statePath, workbenchStateSchema);
-    } catch (error) {
-      if (isNodeError(error, "ENOENT")) return null;
-      throw error;
-    }
-    if (state.installationId !== this.installationId || state.userId !== userId) {
-      throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
-    }
-    return snapshot(state);
-  }
-
   async listProjects(
     userId: string,
     query: WorkbenchListQuery,
@@ -785,10 +719,6 @@ export class FileWorkbenchStore {
       }
       if (patch.pinned !== undefined) project.pinned = patch.pinned;
       if (patch.status !== undefined) project.status = patch.status;
-      if (patch.instructions !== undefined) project.instructions = patch.instructions;
-      if (patch.sources !== undefined) project.sources = patch.sources;
-      if (patch.memory !== undefined) project.memory = patch.memory;
-      if (patch.sharing !== undefined) project.sharing = patch.sharing;
       project.updatedAt = new Date().toISOString();
       return publicProject(project);
     });
@@ -859,13 +789,7 @@ export class FileWorkbenchStore {
       projectId: project.id,
       projectName: project.name,
       workspaceKey: project.workspaceKey,
-      projectInstructions: project.instructions,
-      projectMemory: project.memory.enabled ? project.memory.notes : "",
-      projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
-        kind, name, url, excerpt, status,
-      })),
       runtimeThreadToken: null,
-      branchHistory: null,
     };
   }
 
@@ -884,72 +808,7 @@ export class FileWorkbenchStore {
     return {
       ...this.runtimeContext(state, thread.projectId),
       runtimeThreadToken: thread.runtimeThreadToken,
-      branchHistory: branchHistory(thread),
     };
-  }
-
-  async branchThread(
-    userId: string,
-    threadId: string,
-    input: import("@/workbench/types").BranchThreadInput,
-  ): Promise<import("@/workbench/types").BranchThreadResult> {
-    assertFilesystemWorkbenchId(threadId);
-    if (!isBranchThreadInput(input)) throw new WorkbenchValidationError("La branca no és vàlida.");
-    return this.mutate(userId, (state) => {
-      const parent = state.threads.find((candidate) => candidate.id === threadId);
-      if (!parent || parent.status !== "active") {
-        throw new WorkbenchNotFoundError("Fil actiu no trobat.");
-      }
-      const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
-      const target = parent.messages[targetIndex];
-      if (!target) throw new WorkbenchNotFoundError("Missatge no trobat.");
-
-      let prefixEnd = targetIndex;
-      let draftMessage: string | null = null;
-      if (input.kind === "edit") {
-        if (target.role !== "user" || !input.editedContent?.trim()) {
-          throw new WorkbenchValidationError("Només es poden editar missatges de l’usuari.");
-        }
-        prefixEnd = targetIndex - 1;
-        draftMessage = input.editedContent.trim();
-      } else if (input.kind === "retry") {
-        if (target.role !== "assistant") {
-          throw new WorkbenchValidationError("Només es poden regenerar respostes de l’assistent.");
-        }
-        const userIndex = parent.messages.findLastIndex(
-          (message, index) => index < targetIndex && message.role === "user",
-        );
-        if (userIndex < 0) throw new WorkbenchConflictError("La resposta no té cap petició per regenerar.");
-        prefixEnd = userIndex - 1;
-        draftMessage = parent.messages[userIndex].content;
-      } else if (target.role !== "assistant") {
-        throw new WorkbenchValidationError("La branca ha de començar des d’una resposta.");
-      }
-
-      const now = new Date().toISOString();
-      const suffix = input.kind === "edit" ? "editada" : input.kind === "retry" ? "regenerada" : "rama";
-      const title = `${parent.title.replace(/ · (?:editada|regenerada|rama)$/u, "")} · ${suffix}`.slice(0, 120);
-      const thread: StoredThread = {
-        id: randomUUID(),
-        projectId: parent.projectId,
-        title,
-        status: "active",
-        pinned: false,
-        createdAt: now,
-        updatedAt: now,
-        messages: structuredClone(parent.messages.slice(0, prefixEnd + 1)),
-        runtimeThreadToken: null,
-        lineage: {
-          parentThreadId: parent.id,
-          branchedFromMessageId: target.id,
-          kind: input.kind,
-        },
-      };
-      state.threads.push(thread);
-      const project = state.projects.find((candidate) => candidate.id === parent.projectId);
-      if (project) project.updatedAt = now;
-      return { thread: publicThread(thread), draftMessage };
-    });
   }
 
   async beginThreadTurn(

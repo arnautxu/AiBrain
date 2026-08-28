@@ -366,41 +366,6 @@ describe("WebSocketAppServerTransport contract", () => {
     await transport.close();
   });
 
-  it("does not self-close, reconnect, or heartbeat before a three-second idle boundary", async () => {
-    vi.useFakeTimers();
-    const factory = new FakeSocketFactory();
-    let now = 0;
-    const transport = new WebSocketAppServerTransport({
-      endpoint: "ws://127.0.0.1:4500/worker",
-      socketFactory: factory,
-      auth: { placement: "authorization-header", credentialProvider },
-      journal: new InMemoryTransportEventJournal(),
-      reconnectBaseDelayMs: 250,
-      reconnectJitterRatio: 0,
-      random: () => 0.5,
-      now: () => now,
-    });
-    const connecting = transport.connect();
-    await settle();
-    const first = factory.sockets[0];
-    first.open();
-    ready(first);
-    await connecting;
-
-    now = 3_000;
-    await vi.advanceTimersByTimeAsync(3_000);
-    expect(first.sent.filter((frame) => (frame as { type?: string }).type === "ping")).toHaveLength(0);
-    expect(first.closeCalls).toEqual([]);
-    expect((await transport.health())).toMatchObject({
-      healthy: true,
-      state: "connected",
-      reconnectAttempt: 0,
-      lastEventId: null,
-      lastEventSequence: null,
-    });
-    await transport.close();
-  });
-
   it("fails closed on malformed or binary frames", async () => {
     vi.useFakeTimers();
     const factory = new FakeSocketFactory();

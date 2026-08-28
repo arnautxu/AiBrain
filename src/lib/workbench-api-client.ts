@@ -10,8 +10,6 @@ import {
   type WorkbenchProject,
   type WorkbenchThread,
   type WorkbenchThreadSummary,
-  type BranchThreadInput,
-  type BranchThreadResult,
 } from "@/workbench/types";
 
 export type WorkbenchListRequest = Partial<WorkbenchListQuery>;
@@ -193,20 +191,4 @@ export function archiveThreadRequest(threadId: string) {
 
 export function restoreThreadRequest(threadId: string) {
   return updateThreadRequest(threadId, { status: "active" });
-}
-
-export async function branchThreadRequest(
-  threadId: string,
-  input: BranchThreadInput,
-): Promise<BranchThreadResult> {
-  const body = await responseBody(await fetch(`/api/threads/${encodeURIComponent(threadId)}/branch`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  }));
-  if (!isRecord(body) || !isWorkbenchThread(body.thread) ||
-    !(body.draftMessage === null || typeof body.draftMessage === "string")) {
-    throw new Error("El servidor ha retornat una branca no vàlida.");
-  }
-  return { thread: body.thread, draftMessage: body.draftMessage };
 }

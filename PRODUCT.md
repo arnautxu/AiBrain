@@ -45,10 +45,7 @@ configuració i infraestructura, no el codi.
   confirmació explícita, hash, control de conflicte, versió i auditoria.
 - Browser/Computer Use separa perfil, targets, descàrregues, viewer i takeover
   per usuari/thread.
-- Les respostes completades es poden convertir en visualitzacions tipades o
-  llocs interns sanejats. Cada versió és immutable; la publicació continua
-  exigint sessió d’empresa i no promet domini ni hosting públic.
-- App nativa, veu i vídeo són fora de V1. Les automatitzacions programades s'ofereixen només mitjançant el worker local explícit, sense promesa d'execució cloud.
+- App nativa, veu, vídeo i automatitzacions programades són fora de V1.
 
 ## Brand Commitments
 

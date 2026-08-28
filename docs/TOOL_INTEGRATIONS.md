@@ -23,27 +23,6 @@ Codex receives a tool capability and sanitized results. It never reads the
 secret file itself. The browser profile is not a general credential store for
 backend connectors.
 
-## Settings catalogue
-
-`GET /api/settings` is the employee-facing source of truth for capabilities
-that this installation actually publishes. It currently reports the Codex
-runtime, web search, image generation, installed skills, the managed browser
-and the document workflow. Runtime health is combined with the live
-`/api/runtime/status` response in the UI; a missing runtime/provider is shown as
-`not_configured`, never as a connected OAuth account.
-
-Web search, image generation, skills and the managed browser have two durable
-enablement gates: an installation gate and a per-employee gate. The effective
-state is the intersection of both. `PATCH /api/settings` may change the
-employee gate for the authenticated user. Only a durable `workspace-owner` or
-`workspace-admin` assignment may change an installation gate. The chat and
-browser server paths enforce these gates; hiding a control in the UI is not an
-authorization boundary.
-
-The same response exposes effective `PERMISSIONS.md` rules, privacy/isolation
-facts, browser network guarantees and notification preferences. Permission
-rules and network restrictions are intentionally read-only in this UI.
-
 ## Secret storage
 
 For the current dedicated-server architecture, secrets live in root-owned
@@ -73,77 +52,6 @@ all other contexts.
 Shared Codex authentication used for the current Arnall QA phase is a temporary
 runtime configuration choice; it does not change these connector isolation
 rules and should not be reused for customer email or CRM identities.
-
-## Arnall Codex MCP action gate
-
-The only implemented mutation path is disabled unless the installation supplies
-one reviewed `connectors.codexManagedAppAction` manifest. It must name one
-already callable Codex App (`appId`), one fixed MCP `server` and `tool`, static
-non-secret arguments, and one fixed readback tool with the configured
-correlation field. Browser requests cannot choose any of those values.
-
-The installation parser rejects credential-like keys recursively in static
-arguments (including normalized authorization, cookie, password, secret,
-access/refresh-token and API-key variants). Credentials belong only to a
-binding/provider boundary and are never configuration values.
-
-This is the sole missing Arnall input: one approved action manifest for a
-personal Codex App/MCP connection. Its binding needs only `app.installed.read`
-and `mcp.tool.call`; the real provider OAuth scopes remain the App owner's
-choice and must not be invented here. Until that manifest and personal binding
-are present, the UI hides the connector and the API returns
-`CODEX_APP_ACTION_NOT_CONFIGURED`.
-
-## P0 authenticated UI consumer
-
-Baseline `9ecc0d8d272add8a16b40e77b2541b9433a43ae1` exposed the safe capability
-and action routes but had no browser consumer. A user could not initiate the
-allowlisted action, see its pending approval, or review the safe terminal
-outcome in the normal thread Activity/Tools surface.
-
-The UI now reads `GET /api/connectors` after authentication and renders the
-control only when `codex-managed-app` is `connected` and
-`execute-allowlisted-action` is effective. It sends prepare only with the
-active thread and current turn IDs, adds the returned normal `ApprovalItem` to
-the visible message state, and reuses the approval endpoint. Only `accept`
-continues to execute with the exact locator and authorization fingerprint.
-Decline and session-wide approval both deny the connector action and never
-call execute. A cross-thread descriptor is dropped locally before any request.
-
-The only visible readback is the safe outcome `executed`, `replayed`,
-`indeterminate` or `denied` in the existing tool-results panel. The browser
-never renders or exports the receipt, authorization snapshot, credential
-reference, server, tool, arguments or provider correlation.
-
-Focused client evidence:
-
-```text
-npx vitest run tests/unit/codex-managed-app-ui.test.ts \
-  tests/component/managed-app-action-control.test.tsx \
-  tests/component/turn-review.test.tsx
-3 files passed, 10 tests passed
-```
-
-The fake-fetch tests cover missing/connected capability gating,
-prepare→pending→accept→execute, decline without execute, stale cross-thread
-descriptor rejection, indeterminate visibility data and forbidden-field
-absence. This is local UI/contract evidence only: no Arnall manifest, binding,
-provider action or live readback was used.
-
-### Recovery safety
-
-The pending connector descriptor is retained in a client registry keyed by its
-complete thread, turn, item and approval locator. Visiting another thread does
-not downgrade the approval into a generic approval: returning to the original
-thread retains the same descriptor and fingerprint, and connector approvals
-never offer a session-wide permission. The registry is removed only after a
-valid terminal response.
-
-Network errors, non-OK responses and malformed approval or execute responses
-remain recoverable. They do not set a synthetic `denied` or `accepted` state,
-do not call the generic approval path, and allow a retry with the original
-descriptor. Focused local evidence is now 4 files and 14 tests, including the
-BrainApp registry, Activity rendering and adapter recovery cases.
 
 ## Adding a connector
 

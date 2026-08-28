@@ -5,10 +5,6 @@ type FrameScheduler = {
   cancel: (handle: number) => void;
 };
 
-type FrameDispatcherOptions = {
-  onEventApplied?: (event: ChatStreamEvent) => void;
-};
-
 const browserScheduler: FrameScheduler = {
   request: (callback) => window.requestAnimationFrame(callback),
   cancel: (handle) => window.cancelAnimationFrame(handle),
@@ -17,7 +13,6 @@ const browserScheduler: FrameScheduler = {
 export function createChatEventFrameDispatcher(
   onEvent: (event: ChatStreamEvent) => void,
   scheduler: FrameScheduler = browserScheduler,
-  options: FrameDispatcherOptions = {},
 ) {
   let pendingDelta = "";
   let frame: number | null = null;
@@ -28,9 +23,7 @@ export function createChatEventFrameDispatcher(
     if (!pendingDelta || closed) return;
     const value = pendingDelta;
     pendingDelta = "";
-    const event: ChatStreamEvent = { type: "delta", value };
-    onEvent(event);
-    options.onEventApplied?.(event);
+    onEvent({ type: "delta", value });
   };
 
   return {
@@ -44,7 +37,6 @@ export function createChatEventFrameDispatcher(
       if (frame !== null) scheduler.cancel(frame);
       flush();
       onEvent(event);
-      options.onEventApplied?.(event);
     },
     close() {
       if (closed) return;

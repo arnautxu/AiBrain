@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { ProjectSource, WorkbenchProject, WorkbenchThread } from "@/workbench/types";
+import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 
 export type StoredProject = WorkbenchProject & {
   workspaceKey: string;
@@ -14,24 +14,8 @@ export type ThreadRuntimeContext = {
   projectId: string;
   projectName: string;
   workspaceKey: string;
-  projectInstructions: string;
-  projectMemory: string;
-  projectSources: Pick<ProjectSource, "kind" | "name" | "url" | "excerpt" | "status">[];
   runtimeThreadToken: string | null;
-  /** Full persisted history used only to start a branch without replaying the parent's final state. */
-  branchHistory: string | null;
 };
-
-export function branchHistory(thread: StoredThread) {
-  if (!thread.lineage || thread.runtimeThreadToken || thread.messages.length === 0) return null;
-  return thread.messages.map((message) => {
-    const role = message.role === "user" ? "USER" : "ASSISTANT";
-    const attachments = message.attachments.length
-      ? `\n[Attachments: ${message.attachments.map((item) => item.name).join(", ")}]`
-      : "";
-    return `${role}:\n${message.content}${attachments}`;
-  }).join("\n\n");
-}
 
 export function publicProject(project: StoredProject): WorkbenchProject {
   const { workspaceKey: _workspaceKey, ...visible } = project;

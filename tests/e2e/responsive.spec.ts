@@ -30,7 +30,7 @@ for (const viewport of viewports) {
 
     const preferencesTrigger = page.getByRole("button", { name: "Abrir preferencias" });
     await preferencesTrigger.click();
-    const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
+    const preferences = page.getByRole("dialog", { name: new RegExp("Preferencias de") });
     await expect(preferences).toBeVisible();
     await preferences.evaluate(async (element) => {
       await Promise.all(element.getAnimations().map((animation) => animation.finished));

@@ -1,6 +1,5 @@
 import { availableParallelism } from "node:os";
 import type {
-  ApprovalBoundManagedBrowserRuntime,
   BrowserPersistentState,
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
@@ -10,10 +9,6 @@ import type {
   InteractiveManagedBrowserRuntime,
   ManagedBrowserRuntime,
 } from "@/runtime/browser/types";
-import type {
-  BrowserActionResourceSnapshot,
-  BrowserMutationAction,
-} from "@/runtime/browser/action-evidence";
 import { BrowserSessionStore } from "@/runtime/browser/state-store";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 
@@ -322,48 +317,6 @@ export class BrowserRuntimeRegistry {
     await runtime.agentType(threadId, selector, text, clear);
   }
 
-  async prepareAgentMutation(
-    userId: string,
-    threadId: string,
-    command: Readonly<{
-      action: BrowserMutationAction;
-      url?: string;
-      selector?: string;
-      deltaX?: number;
-      deltaY?: number;
-      text?: string;
-      clear?: boolean;
-    }>,
-  ) {
-    validateBrowserThreadId(threadId);
-    const runtime = this.requireApprovalBoundRuntime(userId);
-    const state = await this.recoverExpired(userId);
-    this.assertAgentControl(userId, state);
-    return runtime.prepareAgentMutation(threadId, command);
-  }
-
-  async executeAgentMutation(
-    userId: string,
-    threadId: string,
-    command: Readonly<{
-      action: BrowserMutationAction;
-      url?: string;
-      selector?: string;
-      deltaX?: number;
-      deltaY?: number;
-      text?: string;
-      clear?: boolean;
-    }>,
-    expected: BrowserActionResourceSnapshot,
-    evidenceFingerprint: string,
-  ) {
-    validateBrowserThreadId(threadId);
-    const runtime = this.requireApprovalBoundRuntime(userId);
-    const state = await this.recoverExpired(userId);
-    this.assertAgentControl(userId, state);
-    return runtime.executeAgentMutation(threadId, command, expected, evidenceFingerprint);
-  }
-
   async navigate(userId: string, threadId: string, url: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireInteractiveRuntime(userId);
@@ -503,15 +456,6 @@ export class BrowserRuntimeRegistry {
       throw new Error("Browser runtime does not provide the closed agent tool contract.");
     }
     return runtime;
-  }
-
-  private requireApprovalBoundRuntime(userId: string) {
-    const runtime = this.requireAgentRuntime(userId);
-    if (!("prepareAgentMutation" in runtime) || typeof runtime.prepareAgentMutation !== "function" ||
-      !("executeAgentMutation" in runtime) || typeof runtime.executeAgentMutation !== "function") {
-      throw new Error("Browser runtime does not provide approval-bound mutation execution.");
-    }
-    return runtime as ApprovalBoundManagedBrowserRuntime;
   }
 
   private assertCurrentSession(userId: string, state: BrowserPersistentState) {

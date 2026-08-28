@@ -6,8 +6,6 @@ import {
   PermissionResolutionError,
   type ResolvedPermissions,
 } from "@/permissions";
-import { permissionFingerprint } from "@/permissions/canonical-json";
-import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
 
 export type ServerTurnPermissionIdentity = {
@@ -86,10 +84,9 @@ Quan una acció necessiti aprovació, explica de forma concreta què vols fer i 
  * canonical tools.execute rule. Human approval cannot override a DENY.
  */
 export function permissionAllowsGenericToolExecution(permissions: ResolvedPermissions) {
-  const rules = permissions.rules.filter((candidate) =>
+  const rule = permissions.rules.find((candidate) =>
     candidate.ruleId === "tools.execute" && candidate.action === "execute");
-  if (rules.some((rule) => rule.effect === "deny")) return false;
-  return rules.some((rule) => rule.effect === "allow");
+  return rule?.effect === "allow";
 }
 
 /**
@@ -111,11 +108,6 @@ export async function resolveServerTurnPermissions(
     userId: identity.userId,
     usersRoot: installation.paths.usersRoot,
   });
-  const workspace = await workspacePolicyForIdentity(
-    installation.installationId,
-    identity.userId,
-    installation,
-  );
   const provider = new MarkdownPermissionProvider({
     installations: [{
       installationId: installation.installationId,
@@ -128,66 +120,14 @@ export async function resolveServerTurnPermissions(
     }],
     auditSink,
   });
-  const resolved = await provider.resolveForUser(
+  return provider.resolveForUser(
     installation.installationId,
     identity.userId,
     {
       turnId: identity.turnId,
-      roleId: workspace.roleId,
+      // Roles are deliberately not an authentication or authorization concern in V1.
+      roleId: null,
       projectId: identity.projectId,
     },
   );
-  if (!workspace.policy.capabilities.respond) {
-    throw new PermissionResolutionError(
-      "PERMISSION_POLICY_DENIED",
-      "Workspace role or group policy denies assistant responses for this employee.",
-    );
-  }
-  const denied = [
-    !workspace.policy.capabilities.consult
-      ? { ruleId: "documents.read", action: "consult" as const, instruction: "Workspace group policy blocks consultation." }
-      : null,
-    !workspace.policy.capabilities.execute
-      ? { ruleId: "tools.execute", action: "execute" as const, instruction: "Workspace group policy blocks tool execution." }
-      : null,
-    !workspace.policy.capabilities.publish
-      ? { ruleId: "documents.publish", action: "publish" as const, instruction: "Workspace group policy blocks publication." }
-      : null,
-  ].filter((item): item is NonNullable<typeof item> => item !== null);
-  if (denied.length === 0) return resolved;
-  const policyFingerprint = permissionFingerprint(workspace.policy);
-  const rules = [
-    ...resolved.rules,
-    ...denied.map((rule) => ({
-      ...rule,
-      effect: "deny" as const,
-      sourceScope: "role" as const,
-      sourcePolicyVersion: 1,
-      precedence: 250,
-    })),
-  ];
-  const sources = [
-    ...resolved.sources,
-    { scope: "role" as const, precedence: 250, policyVersion: 1, fingerprint: policyFingerprint },
-  ];
-  const fingerprint = permissionFingerprint({
-    installationId: resolved.installationId,
-    userId: resolved.userId,
-    roleId: workspace.roleId,
-    projectId: resolved.projectId,
-    turnId: resolved.turnId,
-    sources,
-    rules,
-  });
-  return {
-    ...resolved,
-    roleId: workspace.roleId,
-    fingerprint,
-    sources,
-    rules,
-    developerInstructions: `${resolved.developerInstructions.replace(
-      `Policy fingerprint: ${resolved.fingerprint}`,
-      `Policy fingerprint: ${fingerprint}`,
-    )}\n# Workspace role and group restrictions\n${denied.map((rule) => `- DENY \`${rule.ruleId}\`: ${rule.instruction}`).join("\n")}\n`,
-  };
 }

@@ -24,10 +24,6 @@ forks or customer hardcodes.
 - Office, PDF, text and image uploads stream to private staging, are validated
   before isolated preview conversion, and can reach the official document root
   only through the server-side freeze/review/confirm publisher.
-- Completed answers can become limited, data-backed visualizations or sanitized
-  internal sites. Their versions are immutable, private to the employee and
-  exportable as HTML/ZIP; “publish” means authenticated internal access, not
-  public hosting.
 - Each employee has one persistent Chromium runtime. Threads receive separate
   page targets and download roots. CDP uses inherited process pipes only—no TCP
   listener or discovery file—and the viewer requires short, session- and
@@ -97,7 +93,6 @@ npm run test:browser:real
 - [Browser/Computer Use runtime](docs/BROWSER_COMPUTER_USE_RUNTIME.md)
 - [Document publisher](docs/DOCUMENT_PUBLISHER.md)
 - [Document storage and temporary recovery](docs/DOCUMENT_MAINTENANCE.md)
-- [Visualizations and internal sites](docs/ADVANCED_ARTIFACTS.md)
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Dedicated-server operation](docs/PRODUCTION.md)
 - [Isolated Hetzner QA runbook](docs/HETZNER_MIGRATION.md)

@@ -1,9 +1,3 @@
-import type {
-  BrowserActionReadback,
-  BrowserActionResourceSnapshot,
-  BrowserMutationAction,
-} from "@/runtime/browser/action-evidence";
-
 export const BROWSER_STATE_SCHEMA_VERSION = 1 as const;
 
 export type BrowserLifecycle =
@@ -152,35 +146,6 @@ export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime 
   agentScroll(threadId: string, deltaX: number, deltaY: number): Promise<void>;
   agentClick(threadId: string, selector: string): Promise<void>;
   agentType(threadId: string, selector: string, text: string, clear: boolean): Promise<void>;
-}
-
-export interface ApprovalBoundManagedBrowserRuntime extends InteractiveManagedBrowserRuntime {
-  prepareAgentMutation(
-    threadId: string,
-    command: Readonly<{
-      action: BrowserMutationAction;
-      url?: string;
-      selector?: string;
-      deltaX?: number;
-      deltaY?: number;
-      text?: string;
-      clear?: boolean;
-    }>,
-  ): Promise<BrowserActionResourceSnapshot>;
-  executeAgentMutation(
-    threadId: string,
-    command: Readonly<{
-      action: BrowserMutationAction;
-      url?: string;
-      selector?: string;
-      deltaX?: number;
-      deltaY?: number;
-      text?: string;
-      clear?: boolean;
-    }>,
-    expected: BrowserActionResourceSnapshot,
-    evidenceFingerprint: string,
-  ): Promise<BrowserActionReadback>;
 }
 
 export interface BrowserRuntimeFactory {

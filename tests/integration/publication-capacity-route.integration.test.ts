@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { publicationDecisionError } from "@/documents/publication-http";
+import { publicationDecisionError } from "@/app/api/threads/[threadId]/publications/[operationId]/route";
 import {
   PublicationStorageBackpressureError,
   PublicationStorageCapacityUnavailableError,
