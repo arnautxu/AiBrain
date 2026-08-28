@@ -17,6 +17,7 @@ import type {
   BrowserInputCommand,
 } from "@/runtime/browser/types";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
+import { featurePolicyForIdentity } from "@/settings/server-service";
 
 export class BrowserServiceError extends Error {
   constructor(
@@ -129,6 +130,17 @@ async function ensureEnabledUser(state: BrowserServiceState, userId: string) {
   }
 }
 
+async function ensureBrowserEnabled(installationId: string, userId: string) {
+  const policy = await featurePolicyForIdentity(installationId, userId);
+  if (!policy["managed-browser"]) {
+    throw new BrowserServiceError(
+      "BROWSER_FEATURE_DISABLED",
+      "The managed browser is disabled in Settings.",
+      403,
+    );
+  }
+}
+
 async function currentHandle(state: BrowserServiceState, userId: string) {
   await state.registry.start(userId);
   const handle = state.registry.get(userId);
@@ -148,6 +160,7 @@ export async function browserStatus(installationId: string, userId: string) {
   const state = await serviceState();
   ensureBinding(state, installationId, userId);
   await ensureEnabledUser(state, userId);
+  await ensureBrowserEnabled(installationId, userId);
   const health = await state.registry.health(userId);
   return {
     healthy: health.healthy,
@@ -164,11 +177,19 @@ export async function controlBrowser(
 ) {
   const state = await serviceState();
   ensureBinding(state, installationId, userId);
+  if (action !== "stop") await ensureBrowserEnabled(installationId, userId);
   if (action !== "stop") await ensureEnabledUser(state, userId);
   try {
     if (action === "start") await state.registry.start(userId);
-    else if (action === "stop") await state.registry.stop(userId);
-    else if (action === "takeover") await state.registry.takeOver(userId);
+    else if (action === "stop") {
+      await state.registry.stop(userId);
+      return {
+        healthy: false,
+        state: await state.registry.state(userId),
+        runtime: null,
+        runningInProcess: false,
+      };
+    } else if (action === "takeover") await state.registry.takeOver(userId);
     else if (action === "release") await state.registry.releaseTakeover(userId);
     else await state.registry.heartbeat(userId, "human");
     return browserStatus(installationId, userId);
@@ -190,6 +211,7 @@ export async function issueBrowserGatewayToken(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
   const { handle, persistent } = await currentHandle(state, input.userId);
   if (persistent.lifecycle !== "ready" && persistent.lifecycle !== "human-control") {
@@ -219,6 +241,7 @@ async function authorizeGateway(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
   const { handle } = await currentHandle(state, input.userId);
   state.tokens.verify(input.token, {
@@ -278,6 +301,7 @@ export async function executeBrowserAgentCommand(input: {
 }) {
   const state = await serviceState();
   ensureBinding(state, input.installationId, input.userId);
+  await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
   try {
     await state.registry.start(input.userId);
