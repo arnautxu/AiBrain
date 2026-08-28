@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import {
   Brain,
+  CaretRight,
   Check,
   Circle,
   FileCode,
@@ -25,6 +27,7 @@ import { ManagedAppActionControl } from "@/components/managed-app-action-control
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import { ToolResultList } from "@/components/tool-result-list";
+import { AgentStatusOrb } from "@/components/agent-status-orb";
 
 type TurnActivityProps = {
   message: ChatMessage;
@@ -168,6 +171,7 @@ export function TurnActivity({
   managedAppAction = null,
   managedAppApprovalKeys = [],
 }: TurnActivityProps) {
+  const [executionOpen, setExecutionOpen] = useState(compact);
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
@@ -179,19 +183,22 @@ export function TurnActivity({
         ? "Trabajo interrumpido"
         : "Trabajo completado";
 
+  const activeActivity = [...message.activity].reverse().find((item) => item.status === "running" || item.status === "waiting");
+
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 || message.activity.length > 0 ? (
         <details
           className="group/execution"
-          open={compact ? true : undefined}
+          open={executionOpen}
+          onToggle={(event) => setExecutionOpen(event.currentTarget.open)}
         >
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg py-1 text-[16px] font-normal leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
-            {message.status === "streaming" ? <SpinnerGap size={14} className="motion-safe:animate-spin" /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
+          <summary className="codex-thinking-summary flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[14px] font-medium leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:bg-[var(--surface-hover)] focus-visible:outline-none [&::-webkit-details-marker]:hidden">
+            {message.status === "streaming" ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
             <span aria-live="polite" className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
-            <span aria-hidden className="transition group-open/execution:rotate-90">›</span>
+            <span aria-hidden className="grid size-4 place-items-center text-[var(--text-subtle)] transition-transform duration-150 group-open/execution:rotate-90"><CaretRight size={11} weight="bold" /></span>
           </summary>
-          <div className="mt-3 space-y-4 border-l border-[var(--border-subtle)] pl-4">
+          <div className="codex-thinking-content mt-2.5 space-y-4 border-l border-[var(--border-subtle)] pl-4">
             {message.plan.length > 0 ? (
               <section>
           <div className="mb-2.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--text)]">
