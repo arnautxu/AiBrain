@@ -331,6 +331,21 @@ function parseStaticArguments(value: unknown, issuePath: string, issues: Install
   if (encoded.length > 16_384) {
     issues.push({ path: issuePath, message: "supera el máximo de 16384 bytes" });
   }
+  const inspect = (candidate: unknown, currentPath: string): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach((item, index) => inspect(item, `${currentPath}[${index}]`));
+      return;
+    }
+    if (!isRecord(candidate)) return;
+    for (const [key, nested] of Object.entries(candidate)) {
+      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+      if (/authorization|cookie|password|secret|accesstoken|refreshtoken|apikey/.test(normalized)) {
+        issues.push({ path: `${currentPath}.${key}`, message: "no se permiten claves de credenciales en argumentos estáticos" });
+      }
+      inspect(nested, `${currentPath}.${key}`);
+    }
+  };
+  inspect(value, issuePath);
   return structuredClone(value);
 }
 

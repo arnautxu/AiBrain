@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
-import type { PreparedCodexManagedAppAction } from "@/connectors/codex-managed-app-action";
 import { codexManagedAppActionForSession } from "@/connectors/server-service";
 
 export const runtime = "nodejs";
@@ -25,8 +24,15 @@ function prepareInput(value: unknown) {
 
 function executeInput(value: unknown) {
   if (!isRecord(value) || Object.keys(value).length !== 3 || value.operation !== "execute" ||
-      !isRecord(value.receipt) || !isRecord(value.authorization)) return null;
-  return { receipt: value.receipt, authorization: value.authorization };
+      !isRecord(value.locator) || typeof value.authorizationFingerprint !== "string" ||
+      !/^[a-f0-9]{64}$/.test(value.authorizationFingerprint)) return null;
+  const locator = value.locator;
+  const threadId = opaqueId(locator.threadId);
+  const turnId = opaqueId(locator.turnId);
+  const itemId = opaqueId(locator.itemId);
+  const approvalId = opaqueId(locator.approvalId);
+  if (Object.keys(locator).length !== 4 || !threadId || !turnId || !itemId || !approvalId) return null;
+  return { operation: "execute" as const, locator: { threadId, turnId, itemId, approvalId }, authorizationFingerprint: value.authorizationFingerprint };
 }
 
 function errorCode(error: unknown) {
@@ -55,13 +61,11 @@ export async function POST(request: Request) {
         userId: session.user.id,
         ...prepare,
       });
-      // The snapshot holds fingerprints only; it never includes tool arguments
-      // or credential references. Auth owns the separate approval transition.
-      return NextResponse.json({ schemaVersion: 1, receipt: result.receipt, authorization: result.authorization }, {
+      return NextResponse.json({ schemaVersion: 1, descriptor: result }, {
         headers: { "Cache-Control": "private, no-store" },
       });
     }
-    const result = await action.execute(execute as unknown as PreparedCodexManagedAppAction);
+    const result = await action.execute(execute);
     return NextResponse.json({ schemaVersion: 1, outcome: result.outcome }, {
       headers: { "Cache-Control": "private, no-store" },
     });

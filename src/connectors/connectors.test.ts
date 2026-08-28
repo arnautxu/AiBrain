@@ -23,8 +23,9 @@ import {
   codexManagedAppDefinition,
 } from "@/connectors/codex-managed-app-provider";
 import { CodexManagedAppAction } from "@/connectors/codex-managed-app-action";
-import type { CodexManagedAppActionConfig } from "@/config/installation-schema";
-import { FileApprovalStore } from "@/runtime/approval-store";
+import { FileConnectorAuthorizationStore } from "@/connectors/authorization-store";
+import { parseInstallationConfig, type CodexManagedAppActionConfig } from "@/config/installation-schema";
+import { ConnectorApprovalCrashWindowError, FileApprovalStore } from "@/runtime/approval-store";
 
 const INSTALLATION_ID = "example-lab";
 const USER_ONE = "00000000-0000-4000-8000-000000000001";
@@ -378,6 +379,7 @@ describe("Codex managed App action", () => {
     });
     const action = new CodexManagedAppAction(
       store,
+      new FileConnectorAuthorizationStore(INSTALLATION_ID, dataRoot),
       approvals,
       principal(),
       config,
@@ -396,10 +398,15 @@ describe("Codex managed App action", () => {
     return { action, approvals, locator, request, dataRoot };
   }
 
-  it("executes the fixed MCP action once after an exact approved receipt and correlated readback", async () => {
+  it("creates a visible durable pending item then executes the fixed action after normal approval", async () => {
     const { action, approvals, locator, request } = await actionFixture();
     const prepared = await action.prepare(locator);
-    await expect(approvals.approveConnectorApproval(prepared.receipt)).resolves.toMatchObject({ outcome: "approved" });
+    expect(prepared).toMatchObject({ operation: "execute-allowlisted-action", approval: { status: "pending" } });
+    expect(JSON.stringify(prepared)).not.toContain("receipt");
+    expect(JSON.stringify(prepared)).not.toContain("credentialRef");
+    expect(JSON.stringify(prepared)).not.toContain("sync-confirmed-export");
+    await expect(approvals.read(locator)).resolves.toMatchObject({ requestType: "connector", status: "pending" });
+    await approvals.resolve(locator, "accept");
     await expect(action.execute(prepared)).resolves.toMatchObject({ outcome: "executed", value: { correlation: "execution-1" } });
     expect(request).toHaveBeenNthCalledWith(3, "mcpServer/tool/call", {
       threadId: locator.threadId,
@@ -415,8 +422,6 @@ describe("Codex managed App action", () => {
     }, "connector-codex-readback", 10_000);
     await expect(action.execute(prepared)).resolves.toMatchObject({ outcome: "replayed" });
     expect(request).toHaveBeenCalledTimes(4);
-    expect(JSON.stringify(prepared)).not.toContain("credentialRef");
-    expect(JSON.stringify(prepared)).not.toContain("sync-confirmed-export");
   });
 
   it("fails closed for another user and missing execute scope before calling a tool", async () => {
@@ -438,7 +443,7 @@ describe("Codex managed App action", () => {
       { isError: true, content: [] },
     ] });
     const first = await providerError.action.prepare(providerError.locator);
-    await providerError.approvals.approveConnectorApproval(first.receipt);
+    await providerError.approvals.resolve(providerError.locator, "accept");
     await expect(providerError.action.execute(first)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
 
     const absentReadback = await actionFixture({ responses: [
@@ -448,9 +453,48 @@ describe("Codex managed App action", () => {
       { structuredContent: {}, content: [] },
     ] });
     const second = await absentReadback.action.prepare(absentReadback.locator);
-    await absentReadback.approvals.approveConnectorApproval(second.receipt);
+    await absentReadback.approvals.resolve(absentReadback.locator, "accept");
     await expect(absentReadback.action.execute(second)).rejects.toMatchObject({ code: "CONNECTOR_APPROVAL_EXECUTION_FAILED" });
     await expect(absentReadback.approvals.readConnectorApproval(absentReadback.locator))
       .resolves.toMatchObject({ status: "failed" });
+  });
+
+  it("documents the crash window: a provider side effect can replay before executed persists", async () => {
+    const { approvals, locator } = await actionFixture();
+    const authorizationFingerprint = "c".repeat(64);
+    await approvals.prepareConnectorApproval({ locator, authorizationFingerprint });
+    await approvals.approveConnectorApprovalForLocator({ locator, authorizationFingerprint });
+    let effects = 0;
+    await expect(approvals.executeConnectorApprovalForLocator({
+      locator, authorizationFingerprint,
+      revalidate: () => true,
+      execute: () => { effects += 1; return "side-effect-complete"; },
+      crashAfterExecuteForTest: () => { throw new ConnectorApprovalCrashWindowError("simulated process death"); },
+    })).rejects.toBeInstanceOf(ConnectorApprovalCrashWindowError);
+    expect(await approvals.readConnectorApproval(locator)).toMatchObject({ status: "approved" });
+    await expect(approvals.executeConnectorApprovalForLocator({
+      locator, authorizationFingerprint, revalidate: () => true,
+      execute: () => { effects += 1; return "replayed-after-crash"; },
+    })).resolves.toMatchObject({ outcome: "executed" });
+    expect(effects).toBe(2);
+  });
+});
+
+describe("installation action manifest secrets", () => {
+  const manifest: CodexManagedAppActionConfig = {
+    appId: "app-arnall-files", server: "arnall-erp", tool: "sync-confirmed-export", arguments: {}, correlationField: "executionId",
+    readback: { server: "arnall-erp", tool: "read-sync-status", arguments: {}, correlationArgument: "executionId" },
+  };
+  const installation = (argumentsValue: Record<string, unknown>) => ({
+    schemaVersion: 1, installationId: "example-lab", companyName: "Example", companySlug: "example-lab", publicUrl: "https://example.test",
+    branding: { productName: "Example", logoPath: "/logo.svg", faviconPath: "/favicon.ico", accentColor: "#112233" },
+    paths: { dataRoot: "/srv/example", companyContextRoot: "/srv/example/context", usersRoot: "/srv/example/users", sourceReadRoot: "/mnt/source", publishWriteRoot: "/mnt/publish", backupsRoot: "/srv/example/backups" },
+    connectors: { codexManagedAppAction: { ...manifest, arguments: argumentsValue } },
+  });
+
+  it("rejects recursively normalized credential keys from static arguments", () => {
+    for (const key of ["Authorization", "session_cookie", "db-password", "apiKey", "refresh_token", "nestedAccessToken"]) {
+      expect(() => parseInstallationConfig(installation({ safe: { [key]: "redacted" } }))).toThrow(/credenciales/);
+    }
   });
 });

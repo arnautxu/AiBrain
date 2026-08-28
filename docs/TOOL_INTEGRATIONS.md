@@ -82,6 +82,11 @@ already callable Codex App (`appId`), one fixed MCP `server` and `tool`, static
 non-secret arguments, and one fixed readback tool with the configured
 correlation field. Browser requests cannot choose any of those values.
 
+The installation parser rejects credential-like keys recursively in static
+arguments (including normalized authorization, cookie, password, secret,
+access/refresh-token and API-key variants). Credentials belong only to a
+binding/provider boundary and are never configuration values.
+
 This is the sole missing Arnall input: one approved action manifest for a
 personal Codex App/MCP connection. Its binding needs only `app.installed.read`
 and `mcp.tool.call`; the real provider OAuth scopes remain the App owner's
