@@ -14,7 +14,7 @@ import {
 
 export const runtime = "nodejs";
 
-const RUNTIME_STATUS_TIMEOUT_MS = 12_000;
+const RUNTIME_STATUS_TIMEOUT_MS = 35_000;
 
 function waitForRuntimeStatus<T>(operation: Promise<T>) {
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -74,13 +74,17 @@ export async function GET(request: Request) {
 
   if (config.mode === "codex") {
     try {
-      const worker = await waitForRuntimeStatus(workerAppServerForUser(session.user.id));
-      workerWorkspace = await resolveWorkerOwnedPath(
-        worker.handle.roots.workspace,
-        path.posix.join("projects", projectContext.projectId ?? "default"),
-      );
-      await mkdir(workerWorkspace, { recursive: true, mode: 0o700 });
-      const connection = await worker.client.connection(workerWorkspace);
+      const runtimeConnection = await waitForRuntimeStatus((async () => {
+        const worker = await workerAppServerForUser(session.user.id);
+        const workspace = await resolveWorkerOwnedPath(
+          worker.handle.roots.workspace,
+          path.posix.join("projects", projectContext.projectId ?? "default"),
+        );
+        await mkdir(workspace, { recursive: true, mode: 0o700 });
+        return { connection: await worker.client.connection(workspace), workspace };
+      })());
+      workerWorkspace = runtimeConnection.workspace;
+      const connection = runtimeConnection.connection;
       codex = connection.connected ? "connected" : "unavailable";
       authMode = connection.authMode;
       planType = connection.planType;

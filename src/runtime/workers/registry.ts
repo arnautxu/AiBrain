@@ -97,6 +97,7 @@ export type WorkerRuntimeRegistryOptions = {
   maxConcurrentStarts?: number;
   maxPendingStarts?: number;
   backpressureRetryAfterMs?: number;
+  workerConnectTimeoutMs?: number;
   maintenance?: MaintenanceCoordinator;
 };
 
@@ -112,6 +113,20 @@ function safeError(error: unknown) {
   return message
     .replace(/Bearer\s+\S+/giu, "Bearer [REDACTED]")
     .replace(/(token|secret|password)=\S+/giu, "$1=[REDACTED]");
+}
+
+function waitForWorkerConnection<T>(operation: Promise<T>, timeoutMs: number) {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(new Error("Worker transport did not connect in time.")),
+      timeoutMs,
+    );
+    timeout.unref?.();
+  });
+  return Promise.race([operation, deadline]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
 }
 
 function createEntry(userId: string): RegistryEntry {
@@ -151,6 +166,7 @@ export class WorkerRuntimeRegistry {
   readonly provisioner: WorkerProvisioner;
   private readonly factory: WorkerRuntimeFactory;
   private readonly starts: StartGate;
+  private readonly workerConnectTimeoutMs: number;
   private readonly maintenance: MaintenanceCoordinator | null;
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly runtimeOwners = new WeakMap<object, string>();
@@ -174,6 +190,10 @@ export class WorkerRuntimeRegistry {
     const retryAfterMs = positiveInteger(
       "backpressureRetryAfterMs",
       options.backpressureRetryAfterMs ?? 1_000,
+    );
+    this.workerConnectTimeoutMs = positiveInteger(
+      "workerConnectTimeoutMs",
+      options.workerConnectTimeoutMs ?? 10_000,
     );
     this.starts = new StartGate(maxConcurrentStarts, maxPendingStarts, retryAfterMs);
   }
@@ -312,7 +332,7 @@ export class WorkerRuntimeRegistry {
       this.assertExclusiveRuntime(entry.userId, runtime);
       entry.runtime = runtime;
       await runtime.start();
-      await runtime.transport.connect();
+      await waitForWorkerConnection(runtime.transport.connect(), this.workerConnectTimeoutMs);
       entry.handle = frozenHandle(this.config.installationId, entry.manifest, runtime.transport);
       entry.state = "running";
       return entry.handle;
