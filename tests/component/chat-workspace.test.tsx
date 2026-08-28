@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { baseBrainManifest, type BrainPreferences } from "@/config/brain";
@@ -61,7 +62,11 @@ function assistantMessage(): ChatMessage {
   };
 }
 
-function renderWorkspace(thread: WorkbenchThread | null = null, activeProject: WorkbenchProject | null = project) {
+function renderWorkspace(
+  thread: WorkbenchThread | null = null,
+  activeProject: WorkbenchProject | null = project,
+  overrides: Partial<ComponentProps<typeof ChatWorkspace>> = {},
+) {
   return render(<ChatWorkspace
     manifest={baseBrainManifest}
     preferences={preferences}
@@ -107,6 +112,7 @@ function renderWorkspace(thread: WorkbenchThread | null = null, activeProject: W
     managedAppApprovalKeys={[]}
     onManagedAppPrepared={vi.fn()}
     showAdvancedControls={false}
+    {...overrides}
   />);
 }
 
@@ -130,6 +136,28 @@ describe("chat workspace simplificado", () => {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
     expect(screen.queryByLabelText("Abrir preferencias")).not.toBeInTheDocument();
+  });
+
+  it("submits with Enter while preserving composition and multiline input", () => {
+    const onSend = vi.fn();
+    renderWorkspace(null, project, { prompt: "Prepara el resum", onSend });
+    const prompt = screen.getByRole("textbox", { name: "Mensaje" });
+
+    fireEvent.keyDown(prompt, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(prompt, { key: "Enter", shiftKey: true });
+    expect(onSend).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(prompt, { key: "Enter" });
+    expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("keeps one action control and exposes stop while the agent is working", () => {
+    const onStop = vi.fn();
+    renderWorkspace(null, project, { prompt: "Continua", sending: true, onStop });
+
+    expect(screen.queryByRole("button", { name: "Enviar mensaje" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Detener respuesta" }));
+    expect(onStop).toHaveBeenCalledOnce();
   });
 
   it("keeps only copy below a response while retaining sensitive approval cards", () => {
