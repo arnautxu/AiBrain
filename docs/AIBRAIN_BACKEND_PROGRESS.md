@@ -757,3 +757,33 @@ npm run infra:validate
   antes y después. Siguiente acción concreta: aceptación manual desde la UI;
   el commit UI-only `c2bece6` de Arnau puede integrarse después mediante merge
   normal sin cambiar este contrato de runtime.
+
+## Workbench de producto, rendimiento y Computer Use — 2026-08-28
+
+- `d5c1b68` eliminó el coste de persistir cada delta por separado: NDJSON se
+  emite inmediatamente y la proyección file-backed agrupa hasta 64 eventos o
+  24 ms. Medición pública con worker caliente: primer texto 8,5–9,0 s,
+  escritura visible 2,23–2,52 s y total 14,4–15,3 s. El tramo restante hasta el
+  primer token pertenece al modelo/App Server, no a una animación de UI.
+- El mismo checkpoint añadió conversaciones sin proyecto visible mediante un
+  workspace interno por usuario, y Settings con Appearance, Skills, Team y
+  Usage. Team y usage son APIs autenticadas file-backed; usage registra turns,
+  tokens y latencias por empleado/empresa sin inventar un porcentaje cuando la
+  suscripción ChatGPT no expone una ventana consumida.
+- `a07006e` documentó la flota white-label y los conectores: una imagen
+  inmutable común, configuración/secrets/Supabase/servidor por empresa y
+  rollout por digest. Email/CRM usan adapters server-side y ficheros secretos u
+  OAuth; las credenciales nunca viven en Markdown ni se entregan al worker.
+- `57f17e9` recuperó targets CDP obsoletos. `1754a7a` desplegó renovación
+  automática del token del visor tras rotación de proceso y activó BuildKit en
+  los siguientes deploys. CI `33128331671` y deploy `33128601226` pasaron; la
+  revisión activa fue comprobada por readback exacto y readiness pública.
+- Prueba pública del visor: SPORT cargó en PNG real 1440×813, 10/20 frames
+  directos válidos, una rotación de sesión recuperada y estado final sano. El
+  primer turno agent real terminó sin interrupción y resolvió tres approvals,
+  pero no se aceptó como acabado: `read` solo ofrecía texto y Codex adivinó dos
+  selectores inexistentes, por lo que no hizo clic.
+- El siguiente checkpoint añade espera acotada tras navegación, enlaces
+  clicables priorizados con selectores exactos, scroll previo al clic y retry
+  idempotente de screenshot. La aceptación pendiente es repetir el prompt
+  exacto de SPORT y comprobar que la URL final ya es una noticia.

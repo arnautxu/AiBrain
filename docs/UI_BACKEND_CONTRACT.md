@@ -1287,8 +1287,10 @@ Los errores browser añaden metadatos:
 ```
 
 - `401`: sesión ausente o token expirado;
-- `403`: sesión no local, binding/signature/capacidad inválida o instalación incorrecta;
-- `409`: runtime no iniciado o viewer aún no disponible;
+- `403`: sesión no local, signature/capacidad inválida o instalación incorrecta;
+- `409`: runtime no iniciado, viewer aún no disponible o token ligado a una
+  generación anterior; en este último caso la UI relee estado, solicita un
+  token nuevo y reintenta una sola vez;
 - `429`: saturación de arranques, con `Retry-After: 1`;
 - `503`: Chrome/CDP/store no disponible, normalmente `retryable: true`;
 - `400`: body, URL o input inválido, sin ejecutar el comando.

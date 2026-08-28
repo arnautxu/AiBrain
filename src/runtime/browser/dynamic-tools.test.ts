@@ -134,6 +134,7 @@ describe("closed browser dynamic tools", () => {
       url: "https://example.test/",
       title: "Example",
       text: "Untrusted page text",
+      links: [{ text: "Story", href: "https://example.test/story", selector: "a[data-aibrain-link=story]" }],
     }));
     const emitted: ApprovalItem[] = [];
     const input = request("read", {});
@@ -185,7 +186,7 @@ describe("closed browser dynamic tools", () => {
     });
     expect(durableAtEmission).toBe(true);
 
-    const otherExecute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "" }));
+    const otherExecute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "", links: [] }));
     const other = await handleBrowserDynamicToolCall(
       request("read", {}, {
         threadId: "runtime-thread-b",
@@ -351,7 +352,7 @@ describe("closed browser dynamic tools", () => {
 
   it("does not let browser.read authorize browser mutations", async () => {
     const { approvalStore } = await fixture();
-    const execute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "" }));
+    const execute = vi.fn(async () => ({ schemaVersion: 1, url: "about:blank", title: "", text: "", links: [] }));
     const readOnly = browserPermissions([{
       ruleId: "browser.read",
       action: "consult",

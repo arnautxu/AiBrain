@@ -114,6 +114,11 @@ export type BrowserPageSnapshot = Readonly<{
   url: string;
   title: string;
   text: string;
+  links: readonly Readonly<{
+    text: string;
+    href: string;
+    selector: string;
+  }>[];
 }>;
 
 export type BrowserTabSnapshot = Readonly<{

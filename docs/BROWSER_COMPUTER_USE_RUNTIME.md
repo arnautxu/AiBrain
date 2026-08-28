@@ -172,6 +172,20 @@ Only TCP 80 and 443 are allowed by default for absolute HTTP and CONNECT; a
 different bounded server-side allowlist must be explicit and is never chosen
 by the browser/UI.
 
+`open` waits for a bounded readable document state instead of returning at the
+first navigation acknowledgement. `read` returns bounded page text plus at
+most 40 HTTP(S) links, ranked to place article/news destinations before menus.
+Every returned link includes an exact ephemeral CSS selector owned by that
+thread target. The model is instructed to use those selectors rather than
+guessing page markup; `click` scrolls the approved element into view before
+dispatching input. The selectors are rebuilt by every read, never persisted as
+authority and never relax the explicit mutation approval.
+
+Screenshots are idempotent reads. A generic stale-page CDP failure therefore
+recreates only that thread target and retries once; navigation state restores
+the last safe URL. Mutating calls retain the narrower stale-session predicate
+so an indeterminate click or type is never replayed broadly.
+
 The loopback proxy is not an unauthenticated local capability. It generates a
 new 256-bit password per runtime and returns a Basic challenge. Chrome receives
 that credential only through the target-scoped inherited CDP pipe via
