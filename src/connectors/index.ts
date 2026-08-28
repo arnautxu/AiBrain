@@ -1,4 +1,5 @@
 export * from "@/connectors/authorization";
+export * from "@/connectors/authorization-store";
 export * from "@/connectors/binding-store";
 export * from "@/connectors/canonical";
 export * from "@/connectors/codex-managed-app-action";

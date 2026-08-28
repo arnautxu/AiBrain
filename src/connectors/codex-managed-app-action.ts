@@ -1,6 +1,7 @@
 import { connectorFingerprint } from "@/connectors/canonical";
 import { assertAuthorizationFresh, prepareConnectorAuthorization } from "@/connectors/authorization";
 import { FileConnectorBindingStore } from "@/connectors/binding-store";
+import { FileConnectorAuthorizationStore } from "@/connectors/authorization-store";
 import {
   CODEX_MANAGED_APP_CONNECTOR_ID,
   CodexManagedAppProvider,
@@ -10,18 +11,20 @@ import {
 } from "@/connectors/codex-managed-app-provider";
 import { ConnectorError, type ConnectorAuthorizationSnapshot, type ConnectorPrincipal } from "@/connectors/contracts";
 import type { CodexManagedAppActionConfig } from "@/config/installation-schema";
+import type { ApprovalItem } from "@/lib/chat-contract";
 import type { JsonValue } from "../../contracts/codex/0.149.1/types/serde_json/JsonValue";
 import {
   FileApprovalStore,
   type ApprovalLocator,
-  type ConnectorApprovalReceipt,
 } from "@/runtime/approval-store";
 
 const OPERATION = "execute-allowlisted-action";
 
-export type PreparedCodexManagedAppAction = {
-  receipt: ConnectorApprovalReceipt;
-  authorization: ConnectorAuthorizationSnapshot;
+export type CodexManagedAppActionDescriptor = {
+  operation: typeof OPERATION;
+  locator: Pick<ApprovalLocator, "threadId" | "turnId" | "itemId" | "approvalId">;
+  authorizationFingerprint: string;
+  approval: ApprovalItem;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -57,6 +60,7 @@ export class CodexManagedAppAction {
 
   constructor(
     private readonly bindings: FileConnectorBindingStore,
+    private readonly authorizations: FileConnectorAuthorizationStore,
     private readonly approvals: FileApprovalStore,
     private readonly principal: ConnectorPrincipal,
     private readonly config: CodexManagedAppActionConfig,
@@ -88,7 +92,7 @@ export class CodexManagedAppAction {
     return inspected;
   }
 
-  async prepare(locator: ApprovalLocator): Promise<PreparedCodexManagedAppAction> {
+  async prepare(locator: ApprovalLocator): Promise<CodexManagedAppActionDescriptor> {
     if (locator.installationId !== this.principal.installationId || locator.userId !== this.principal.userId) {
       throw new ConnectorError("CODEX_APP_ACTION_LOCATOR_MISMATCH", "Connector approval locator belongs to another principal.");
     }
@@ -108,6 +112,7 @@ export class CodexManagedAppAction {
       workspacePolicyFingerprint: this.workspacePolicyFingerprint,
       allowSharedCredential: false,
     });
+    await this.authorizations.put(locator, authorization);
     const prepared = await this.approvals.prepareConnectorApproval({
       locator,
       authorizationFingerprint: authorization.authorizationFingerprint,
@@ -115,20 +120,43 @@ export class CodexManagedAppAction {
     if (!prepared.receipt) {
       throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval could not be prepared.");
     }
-    return { receipt: prepared.receipt, authorization };
+    const visible = await this.approvals.createPending({ locator, requestType: "connector" });
+    if (visible.status !== "pending") {
+      throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval is no longer pending.");
+    }
+    return {
+      operation: OPERATION,
+      locator: { threadId: locator.threadId, turnId: locator.turnId, itemId: locator.itemId, approvalId: locator.approvalId },
+      authorizationFingerprint: authorization.authorizationFingerprint,
+      approval: {
+        id: locator.approvalId, threadId: locator.threadId, turnId: locator.turnId, itemId: locator.itemId,
+        kind: "command", title: "Confirmar acción conectada", detail: "Ejecutar la acción aprobada de la aplicación conectada.", status: "pending",
+      },
+    };
   }
 
-  async execute(input: PreparedCodexManagedAppAction) {
-    if (input.receipt.installationId !== this.principal.installationId || input.receipt.userId !== this.principal.userId ||
-        input.authorization.principal.installationId !== this.principal.installationId ||
-        input.authorization.principal.userId !== this.principal.userId ||
-        input.receipt.authorizationFingerprint !== input.authorization.authorizationFingerprint) {
-      throw new ConnectorError("CODEX_APP_ACTION_RECEIPT_MISMATCH", "Connector receipt does not match the authenticated principal.");
+  async execute(input: Pick<CodexManagedAppActionDescriptor, "operation" | "locator" | "authorizationFingerprint">) {
+    if (input.operation !== OPERATION) throw new ConnectorError("CONNECTOR_OPERATION_UNKNOWN", "Connector operation is not registered.");
+    const locator: ApprovalLocator = { installationId: this.principal.installationId, userId: this.principal.userId, ...input.locator };
+    const authorization = await this.authorizations.read(locator, input.authorizationFingerprint);
+    if (authorization.principal.installationId !== this.principal.installationId || authorization.principal.userId !== this.principal.userId) {
+      throw new ConnectorError("CODEX_APP_ACTION_RECEIPT_MISMATCH", "Connector authorization does not match the authenticated principal.");
     }
-    return this.approvals.executeConnectorApproval(input.receipt, {
+    const visible = await this.approvals.read(locator);
+    if (!visible || visible.status !== "resolved" || visible.decision !== "accept") {
+      throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_PENDING", "Connector action requires one explicit approved pending item.");
+    }
+    const current = await this.approvals.readConnectorApproval(locator);
+    if (current?.status !== "executed") {
+      const approved = await this.approvals.approveConnectorApprovalForLocator({ locator, authorizationFingerprint: input.authorizationFingerprint });
+      if (approved.outcome !== "approved" && approved.outcome !== "already-approved") {
+        throw new ConnectorError("CODEX_APP_ACTION_APPROVAL_UNAVAILABLE", "Connector approval is not available for execution.");
+      }
+    }
+    return this.approvals.executeConnectorApprovalForLocator({ locator, authorizationFingerprint: input.authorizationFingerprint,
       revalidate: async () => {
         try {
-          await this.revalidate(input.authorization);
+          await this.revalidate(authorization);
           return true;
         } catch {
           return false;
@@ -137,14 +165,14 @@ export class CodexManagedAppAction {
       execute: async () => {
         const transport = await this.transportForUser(this.principal.userId);
         const actionResponse = await transport.request("mcpServer/tool/call", {
-          threadId: input.receipt.threadId,
+          threadId: locator.threadId,
           server: this.config.server,
           tool: this.config.tool,
           arguments: configuredArguments(this.config.arguments),
         }, "connector-codex-action", 10_000);
         const correlation = correlationFrom(actionResponse, this.config.correlationField);
         const readbackResponse = await transport.request("mcpServer/tool/call", {
-          threadId: input.receipt.threadId,
+          threadId: locator.threadId,
           server: this.config.readback.server,
           tool: this.config.readback.tool,
           arguments: {

@@ -3,6 +3,7 @@ import "server-only";
 import type { AuthSession } from "@/auth/types";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { FileConnectorBindingStore } from "@/connectors/binding-store";
+import { FileConnectorAuthorizationStore } from "@/connectors/authorization-store";
 import { CodexManagedAppAction } from "@/connectors/codex-managed-app-action";
 import { connectorFingerprint } from "@/connectors/canonical";
 import { codexManagedAppRegistration } from "@/connectors/codex-managed-app-provider";
@@ -51,6 +52,7 @@ export async function codexManagedAppCapabilities(
   }
   const registry = new ConnectorRegistry(
     new FileConnectorBindingStore(installation.installationId, installation.paths.dataRoot),
+    new FileConnectorAuthorizationStore(installation.installationId, installation.paths.dataRoot),
     [codexManagedAppRegistration(async (userId) => (await workerAppServerForUser(userId)).client)],
   );
   return registry.capabilities(principal, { allowSharedCredentials: false });
