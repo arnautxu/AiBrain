@@ -813,7 +813,8 @@ export function BrainApp({
         if (!disposed) {
           setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
         }
-      });
+      })
+      .finally(() => window.clearTimeout(timeout));
     return () => {
       disposed = true;
       window.clearTimeout(timeout);
