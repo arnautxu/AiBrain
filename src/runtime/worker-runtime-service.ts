@@ -229,7 +229,14 @@ export async function workerAppServerForUser(
     throw new Error("Worker user is not provisioned or is disabled.");
   }
   if (activityLease) state.maintenance.assertActiveLease(activityLease);
-  let handle = await state.registry.start(userId, activityLease);
+  let handle: WorkerRuntimeHandle;
+  try {
+    handle = await state.registry.start(userId, activityLease);
+  } catch {
+    // A failed gateway connection has already been stopped by the registry.
+    // One clean retry recovers transient process and socket startup races.
+    handle = await state.registry.start(userId, activityLease);
+  }
   let client = state.clients.get(userId);
   if (!client || client.handle.transport !== handle.transport) {
     if (client) await client.close();
