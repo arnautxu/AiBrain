@@ -10,6 +10,7 @@ import {
   expectArray,
   expectInteger,
   expectString,
+  readValidatedJson,
   recoverAtomicJsonFile,
   ResourceLockManager,
   type ValidationContext,
@@ -657,6 +658,47 @@ export class FileWorkbenchStore {
         current.projects.push(newProject("Conversaciones", STANDALONE_PROJECT_SLUG));
       });
       state = await this.read(userId);
+    }
+    return snapshot(state);
+  }
+
+  /**
+   * Reads an already-provisioned workbench without creating state, locks, or
+   * standalone projects. This is reserved for offline maintenance commands.
+   */
+  async readExistingSnapshotForMaintenance(userId: string): Promise<WorkbenchSnapshot | null> {
+    const paths = this.paths(userId);
+    await assertSecureDirectory(this.usersRoot, "El directori d’usuaris");
+    await assertSecureDirectory(paths.userRoot, "L’usuari");
+    try {
+      await lstat(paths.stateRoot);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
+    await assertSecureDirectory(paths.stateRoot, "L’estat de l’usuari");
+    const [canonicalUsersRoot, canonicalUserRoot, canonicalStateRoot] = await Promise.all([
+      realpath(this.usersRoot),
+      realpath(paths.userRoot),
+      realpath(paths.stateRoot),
+    ]);
+    if (
+      canonicalUserRoot === canonicalUsersRoot ||
+      !inside(canonicalUsersRoot, canonicalUserRoot) ||
+      !inside(canonicalUserRoot, canonicalStateRoot)
+    ) {
+      throw new WorkbenchPersistenceError("La ruta de manteniment del workbench resol fora de l’usuari.");
+    }
+    await this.assertStateFileSafe(paths.statePath);
+    let state: WorkbenchState;
+    try {
+      state = await readValidatedJson(paths.statePath, workbenchStateSchema);
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return null;
+      throw error;
+    }
+    if (state.installationId !== this.installationId || state.userId !== userId) {
+      throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
     }
     return snapshot(state);
   }

@@ -11,6 +11,7 @@ import {
   expectOneOf,
   expectString,
   FileJournal,
+  readValidatedJson,
   recoverAtomicJsonFile,
   ResourceLockManager,
 } from "@/storage";
@@ -40,6 +41,17 @@ export type SharedAccessGrant = {
   indexedAt: string;
 };
 
+export type SharedAccessIndexRebuildResult = {
+  schemaVersion: 1;
+  dryRun: boolean;
+  changed: boolean;
+  grantsBefore: number;
+  grantsAfter: number;
+  grantsAdded: number;
+  grantsRemoved: number;
+  ownersRebuilt: number;
+};
+
 type SharedAccessIndexState = {
   schemaVersion: 1;
   installationId: string;
@@ -50,10 +62,10 @@ type SharedAccessIndexState = {
 type SharedAccessAuditEvent = {
   schemaVersion: 1;
   occurredAt: string;
-  action: "sync" | "resolve";
+  action: "sync" | "resolve" | "rebuild";
   outcome: "allowed" | "denied";
   actorUserId: string;
-  resourceType: SharedAccessResourceType;
+  resourceType: SharedAccessResourceType | "index";
   resourceId: string;
   projectId: string | null;
   ownerUserId: string | null;
@@ -116,10 +128,10 @@ const auditSchema = defineVersionedSchema<SharedAccessAuditEvent>({
     return {
       schemaVersion: 1,
       occurredAt: expectIsoDate(record.occurredAt, context.at("occurredAt")),
-      action: expectOneOf(record.action, ["sync", "resolve"], context.at("action")),
+      action: expectOneOf(record.action, ["sync", "resolve", "rebuild"], context.at("action")),
       outcome: expectOneOf(record.outcome, ["allowed", "denied"], context.at("outcome")),
       actorUserId: expectString(record.actorUserId, context.at("actorUserId"), { minLength: 36, maxLength: 36, pattern: UUID }),
-      resourceType: expectOneOf(record.resourceType, ["project", "thread"], context.at("resourceType")),
+      resourceType: expectOneOf(record.resourceType, ["project", "thread", "index"], context.at("resourceType")),
       resourceId: expectString(record.resourceId, context.at("resourceId"), { minLength: 36, maxLength: 36, pattern: UUID }),
       projectId: nullableId(record.projectId, "projectId"),
       ownerUserId: nullableId(record.ownerUserId, "ownerUserId"),
@@ -138,6 +150,20 @@ function nowIso(now: () => number) {
 
 function fingerprint(value: Omit<SharedAccessGrant, "schemaVersion" | "grantFingerprint" | "indexedAt">) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function sortedGrants(grants: readonly SharedAccessGrant[]) {
+  return [...grants].toSorted((left, right) =>
+    left.grantFingerprint.localeCompare(right.grantFingerprint) ||
+    left.indexedAt.localeCompare(right.indexedAt));
+}
+
+function countByFingerprint(grants: readonly SharedAccessGrant[]) {
+  const counts = new Map<string, number>();
+  for (const grant of grants) {
+    counts.set(grant.grantFingerprint, (counts.get(grant.grantFingerprint) ?? 0) + 1);
+  }
+  return counts;
 }
 
 export class FileSharedAccessIndex {
@@ -169,6 +195,19 @@ export class FileSharedAccessIndex {
   private async readLocked() {
     try {
       const state = (await recoverAtomicJsonFile(this.filePath, indexSchema)).value;
+      if (state.installationId !== this.installationId) {
+        throw new Error("Shared access index belongs to a different installation.");
+      }
+      return state;
+    } catch (error) {
+      if (isMissing(error)) return this.emptyState();
+      throw error;
+    }
+  }
+
+  private async readWithoutMutation() {
+    try {
+      const state = await readValidatedJson(this.filePath, indexSchema);
       if (state.installationId !== this.installationId) {
         throw new Error("Shared access index belongs to a different installation.");
       }
@@ -211,6 +250,69 @@ export class FileSharedAccessIndex {
       left.principalUserId.localeCompare(right.principalUserId) ||
       left.resourceType.localeCompare(right.resourceType) ||
       left.resourceId.localeCompare(right.resourceId));
+  }
+
+  async rebuildFromPrivilegedSnapshots(options: {
+    operatorUserId: string;
+    owners: readonly { owner: LocalUser; snapshot: WorkbenchSnapshot }[];
+    users: readonly LocalUser[];
+    dryRun: boolean;
+  }): Promise<SharedAccessIndexRebuildResult> {
+    if (!UUID.test(options.operatorUserId)) throw new Error("Shared access rebuild operator id is invalid.");
+    const generated = options.owners.flatMap(({ owner, snapshot }) =>
+      this.buildOwnerGrants(owner, snapshot, options.users));
+    const project = (current: SharedAccessIndexState) => {
+      const existingByFingerprint = new Map(current.grants.map((grant) => [grant.grantFingerprint, grant]));
+      const grants = sortedGrants(generated.map((grant) => {
+        const existing = existingByFingerprint.get(grant.grantFingerprint);
+        return existing ? { ...grant, indexedAt: existing.indexedAt } : grant;
+      }));
+      const currentGrants = sortedGrants(current.grants);
+      const changed = JSON.stringify(currentGrants.map((grant) => grant.grantFingerprint)) !==
+        JSON.stringify(grants.map((grant) => grant.grantFingerprint));
+      const before = countByFingerprint(current.grants);
+      const after = countByFingerprint(grants);
+      let grantsAdded = 0;
+      let grantsRemoved = 0;
+      for (const [key, count] of after) grantsAdded += Math.max(0, count - (before.get(key) ?? 0));
+      for (const [key, count] of before) grantsRemoved += Math.max(0, count - (after.get(key) ?? 0));
+      const result: SharedAccessIndexRebuildResult = {
+        schemaVersion: 1,
+        dryRun: options.dryRun,
+        changed,
+        grantsBefore: current.grants.length,
+        grantsAfter: grants.length,
+        grantsAdded,
+        grantsRemoved,
+        ownersRebuilt: options.owners.length,
+      };
+      return { grants, result };
+    };
+    if (options.dryRun) return project(await this.readWithoutMutation()).result;
+    return this.locks.withLock(`shared-access-index:${this.installationId}`, async () => {
+      const { grants, result } = project(await this.readLocked());
+      if (result.changed) {
+        await atomicWriteJson(this.filePath, {
+          schemaVersion: 1,
+          installationId: this.installationId,
+          updatedAt: nowIso(this.now),
+          grants,
+        }, indexSchema, { mode: 0o600 });
+      }
+      await this.audit.append({
+        schemaVersion: 1,
+        occurredAt: nowIso(this.now),
+        action: "rebuild",
+        outcome: "allowed",
+        actorUserId: options.operatorUserId,
+        resourceType: "index",
+        resourceId: options.operatorUserId,
+        projectId: null,
+        ownerUserId: null,
+        grantFingerprint: null,
+      });
+      return result;
+    });
   }
 
   async syncOwnerSnapshot(options: { owner: LocalUser; snapshot: WorkbenchSnapshot; users: readonly LocalUser[] }) {

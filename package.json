@@ -37,6 +37,7 @@
     "backup:replicate": "tsx scripts/replicate-backup.ts",
     "backup:orchestrate": "node scripts/orchestrate-backup.mjs",
     "documents:maintain": "tsx scripts/maintain-document-temporaries.ts",
+    "workbench:rebuild-shared-access": "tsx scripts/rebuild-shared-access-index.ts",
     "alerts:run": "tsx scripts/run-operational-alerts.ts",
     "automations:worker": "tsx scripts/run-automations.ts",
     "automations:once": "tsx scripts/run-automations.ts --once",
