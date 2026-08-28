@@ -30,6 +30,20 @@ require_root_owned_file() {
   [[ "$(stat -c '%h' "$file")" == "1" ]] || fail "file has unexpected hard links: ${file}"
 }
 
+require_root_owned_directory() {
+  local directory="$1"
+  [[ -d "$directory" && ! -L "$directory" ]] || fail "missing controlled directory: ${directory}"
+  [[ "$(stat -c '%u' "$directory")" == "0" ]] || fail "directory is not root-owned: ${directory}"
+  (( (8#$(stat -c '%a' "$directory") & 8#077) == 0 )) || fail "directory is accessible by non-root users: ${directory}"
+}
+
+require_release_readback_runtime() {
+  node --experimental-strip-types --input-type=module --eval '
+    const major = Number.parseInt(process.versions.node.split(".")[0], 10);
+    if (!Number.isInteger(major) || major < 22) process.exit(64);
+  ' >/dev/null 2>&1 || fail "host Node runtime cannot execute the release readback collector"
+}
+
 validate_archive() {
   local archive="$1"
   local entry type
@@ -123,6 +137,7 @@ deploy_release() {
   require_root_owned_file "$ACTIVE_CONFIG"
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
+  require_release_readback_runtime
   docker buildx version >/dev/null 2>&1 || fail "Docker Buildx is required before receiving a release archive"
 
   if [[ -f "$STATE_FILE" ]] && jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
@@ -237,13 +252,85 @@ deploy_release() {
   printf 'ARNALL_DEPLOY_OK revision=%s\n' "$revision"
 }
 
+validate_existing_release_readbacks() {
+  local revision="$1" run_id="$2" evidence_root="$3"
+  local captured_at expected_manifest actual_manifest
+  local ci_file="${evidence_root}/release-ci-readback.json"
+  local deploy_file="${evidence_root}/release-deploy-state.json"
+  local runtime_file="${evidence_root}/release-runtime-readback.json"
+  local app_file="${evidence_root}/release-app-oci-inspect.json"
+  local gateway_file="${evidence_root}/release-gateway-oci-inspect.json"
+  local source_file="${evidence_root}/backend-ci-source.json"
+  local manifest_file="${evidence_root}/acceptance-release-readbacks.json"
+
+  require_root_owned_directory "$evidence_root"
+  for artifact in "$ci_file" "$deploy_file" "$runtime_file" "$app_file" "$gateway_file" "$source_file" "$manifest_file"; do
+    require_root_owned_file "$artifact"
+  done
+  jq -e --arg revision "$revision" --arg runId "$run_id" '
+    .schemaVersion == 1 and .workflow == "Backend CI" and .conclusion == "success"
+    and .headSha == $revision and .runId == $runId
+  ' "$source_file" >/dev/null || fail "existing Backend CI source does not match the requested retry"
+  jq -e --arg revision "$revision" '
+    .schemaVersion == 1 and .kind == "aibrain-release-ci-readback" and .source == "ci"
+    and .candidateSha == $revision and .ciSha == $revision
+    and (.capturedAt | type == "string") and (.provenance.kind == "file")
+    and (.provenance.sha256 | test("^[0-9a-f]{64}$"))
+  ' "$ci_file" >/dev/null || fail "existing CI readback does not match the requested retry"
+  captured_at="$(jq -er '.capturedAt' "$ci_file")" || fail "existing collector capture time is invalid"
+  [[ "$captured_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || fail "existing collector capture time is invalid"
+  jq -e --arg revision "$revision" --arg capturedAt "$captured_at" '
+    .schemaVersion == 1 and .kind == "aibrain-release-deploy-state-readback" and .source == "deploy-state"
+    and .ciSha == $revision and .deploySha == $revision and .capturedAt == $capturedAt
+    and (.appOciDigest | test("^sha256:[0-9a-f]{64}$"))
+    and (.gatewayOciDigest | test("^sha256:[0-9a-f]{64}$"))
+  ' "$deploy_file" >/dev/null || fail "existing deploy-state readback does not match the requested retry"
+  jq -e --arg revision "$revision" --arg capturedAt "$captured_at" '
+    .schemaVersion == 1 and .kind == "aibrain-release-runtime-readback" and .source == "runtime"
+    and .deploySha == $revision and .runtimeSha == $revision and .appOciRevision == $revision
+    and .gatewayOciRevision == $revision and .capturedAt == $capturedAt
+  ' "$runtime_file" >/dev/null || fail "existing runtime readback does not match the requested retry"
+  jq -e --arg revision "$revision" --arg capturedAt "$captured_at" --arg digest "$(jq -er '.appOciDigest' "$deploy_file")" '
+    .schemaVersion == 1 and .kind == "aibrain-release-oci-inspect" and .source == "oci-inspect"
+    and .component == "app" and .revision == $revision and .digest == $digest and .capturedAt == $capturedAt
+  ' "$app_file" >/dev/null || fail "existing app OCI readback does not match the requested retry"
+  jq -e --arg revision "$revision" --arg capturedAt "$captured_at" --arg digest "$(jq -er '.gatewayOciDigest' "$deploy_file")" '
+    .schemaVersion == 1 and .kind == "aibrain-release-oci-inspect" and .source == "oci-inspect"
+    and .component == "gateway" and .revision == $revision and .digest == $digest and .capturedAt == $capturedAt
+  ' "$gateway_file" >/dev/null || fail "existing gateway OCI readback does not match the requested retry"
+  expected_manifest="$(jq -cn --arg releaseSha "$revision" --arg runId "$run_id" --arg capturedAt "$captured_at" \
+    --arg ciHash "$(sha256sum "$ci_file" | awk '{print $1}')" \
+    --arg deployHash "$(sha256sum "$deploy_file" | awk '{print $1}')" \
+    --arg runtimeHash "$(sha256sum "$runtime_file" | awk '{print $1}')" \
+    --arg appHash "$(sha256sum "$app_file" | awk '{print $1}')" \
+    --arg gatewayHash "$(sha256sum "$gateway_file" | awk '{print $1}')" \
+    '{schemaVersion:1,releaseSha:$releaseSha,ciRunId:$runId,capturedAt:$capturedAt,evidence:[
+      {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
+      {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
+      {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
+      {kind:"release",route:"release:app-oci-inspect",artifactPath:"release-app-oci-inspect.json",sha256:$appHash},
+      {kind:"release",route:"release:gateway-oci-inspect",artifactPath:"release-gateway-oci-inspect.json",sha256:$gatewayHash}
+    ]}')"
+  actual_manifest="$(jq -cS . "$manifest_file")" || fail "existing acceptance manifest is invalid"
+  [[ "$actual_manifest" == "$(jq -cS . <<<"$expected_manifest")" ]] || fail "existing acceptance evidence does not match the requested retry"
+}
+
 collect_release_readbacks() {
   local revision="$1" run_id="$2"
   local release_dir="${RELEASES_DIR}/${revision}"
   local compose_file="${STATE_FILE}.active.compose.yaml"
   local evidence_parent="${CONFIG_DIR}/acceptance"
   local evidence_root="${evidence_parent}/${revision}"
-  local staging app_container gateway_container captured_at
+  local staging="" app_container gateway_container captured_at
+
+  cleanup_readback_staging() {
+    local status="$?"
+    set +e
+    if [[ -n "$staging" && -d "$staging" && ! -L "$staging" && "$staging" == "${evidence_parent}/.${revision}."* ]]; then
+      rm -rf --one-file-system -- "$staging"
+    fi
+    exit "$status"
+  }
 
   [[ -f "$STATE_FILE" ]] || fail "release state is unavailable"
   require_root_owned_file "$STATE_FILE"
@@ -255,6 +342,13 @@ collect_release_readbacks() {
     || fail "release state does not match the requested candidate"
   [[ "$run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
 
+  install -d -m 0700 -o root -g root "$evidence_parent"
+  if [[ -e "$evidence_root" ]]; then
+    validate_existing_release_readbacks "$revision" "$run_id" "$evidence_root"
+    printf 'ARNALL_READBACKS_ALREADY_COLLECTED revision=%s run_id=%s\n' "$revision" "$run_id"
+    return
+  fi
+
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
   app_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q app)"
@@ -262,10 +356,11 @@ collect_release_readbacks() {
   [[ "$app_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "application container is unavailable"
   [[ "$gateway_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "gateway container is unavailable"
 
-  install -d -m 0700 -o root -g root "$evidence_parent"
-  [[ ! -e "$evidence_root" ]] || fail "acceptance release evidence already exists"
-  staging="$(mktemp -d "${evidence_parent}/.${revision}.XXXXXX")"
   umask 077
+  staging="$(mktemp -d "${evidence_parent}/.${revision}.XXXXXX")"
+  trap cleanup_readback_staging EXIT
+  chmod 0700 "$staging"
+  require_root_owned_directory "$staging"
   jq -n --arg revision "$revision" --arg runId "$run_id" \
     '{schemaVersion:1,workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$runId}' \
     > "${staging}/backend-ci-source.json"
@@ -283,13 +378,13 @@ collect_release_readbacks() {
   done
   captured_at="$(jq -r '.capturedAt' "${staging}/release-ci-readback.json")"
   [[ "$captured_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || fail "collector capture time is invalid"
-  jq -n --arg releaseSha "$revision" --arg capturedAt "$captured_at" \
+  jq -n --arg releaseSha "$revision" --arg runId "$run_id" --arg capturedAt "$captured_at" \
     --arg ciHash "$(sha256sum "${staging}/release-ci-readback.json" | awk '{print $1}')" \
     --arg deployHash "$(sha256sum "${staging}/release-deploy-state.json" | awk '{print $1}')" \
     --arg runtimeHash "$(sha256sum "${staging}/release-runtime-readback.json" | awk '{print $1}')" \
     --arg appHash "$(sha256sum "${staging}/release-app-oci-inspect.json" | awk '{print $1}')" \
     --arg gatewayHash "$(sha256sum "${staging}/release-gateway-oci-inspect.json" | awk '{print $1}')" \
-    '{schemaVersion:1,releaseSha:$releaseSha,capturedAt:$capturedAt,evidence:[
+    '{schemaVersion:1,releaseSha:$releaseSha,ciRunId:$runId,capturedAt:$capturedAt,evidence:[
       {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
       {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
       {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
@@ -299,6 +394,8 @@ collect_release_readbacks() {
   chmod 0600 "${staging}/acceptance-release-readbacks.json"
   require_root_owned_file "${staging}/acceptance-release-readbacks.json"
   mv "$staging" "$evidence_root"
+  staging=""
+  trap - EXIT
 }
 
 main() {
