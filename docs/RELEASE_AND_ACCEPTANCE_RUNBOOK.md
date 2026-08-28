@@ -141,6 +141,30 @@ All current values must equal the candidate. Then capture HTTP 200 JSON from
 component must pass. The public payload currently omits revision, so it cannot
 replace host release-state and OCI-label readback.
 
+Before accepting the packet, create the private `release:identity` evidence
+artifact from the recorded values:
+
+```bash
+npm run acceptance:release-evidence -- \
+  --output /private/evidence/release-identity.json \
+  --candidate-sha "$CANDIDATE_SHA" \
+  --ci-sha "$CI_SHA" \
+  --deploy-sha "$DEPLOY_SHA" \
+  --runtime-sha "$RUNTIME_SHA" \
+  --app-oci-revision "$APP_OCI_REVISION" \
+  --gateway-oci-revision "$GATEWAY_OCI_REVISION" \
+  --app-oci-digest "$APP_OCI_DIGEST" \
+  --gateway-oci-digest "$GATEWAY_OCI_DIGEST"
+```
+
+The command hashes the reviewed backup orchestrator, restore CLI and release
+manager and records the required verification, isolated-restore and
+previous-release rollback posture. It never connects to Arnall and is
+preparation evidence only: it does not replace an executed backup verification,
+isolated restore or rollback rehearsal in Section 8. The acceptance verifier
+rejects a generic `release:identity` JSON or any artifact whose identities, OCI
+digests or backup/rollback posture do not match the manifest contract.
+
 ## 7. Restart and product acceptance
 
 Restart only the AiBrain installation through the reviewed operational path.

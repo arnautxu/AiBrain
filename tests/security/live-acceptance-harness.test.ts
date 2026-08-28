@@ -12,6 +12,7 @@ import {
   type AcceptanceEvidence,
   type AcceptanceManifest,
 } from "../../scripts/verify-live-acceptance";
+import { createPredeployReleaseEvidence } from "../../scripts/create-predeploy-release-evidence";
 
 const roots: string[] = [];
 const releaseSha = "a".repeat(40);
@@ -100,7 +101,18 @@ async function fixture() {
   for (const gateId of REQUIRED_LIVE_GATES) {
     for (const { kind, route } of gateEvidence[gateId]) {
       const artifactPath = `${gateId}-${kind}.json`;
-      const contents = `${JSON.stringify({ gateId, kind, route, target: CANONICAL_LIVE_TARGET, releaseSha })}\n`;
+      const contents = gateId === "release-identity-readiness" && kind === "release"
+        ? `${JSON.stringify(await createPredeployReleaseEvidence({
+          candidateSha: releaseSha,
+          ciSha: releaseSha,
+          deploySha: releaseSha,
+          runtimeSha: releaseSha,
+          appOciRevision: releaseSha,
+          gatewayOciRevision: releaseSha,
+          appOciDigest: `sha256:${"b".repeat(64)}`,
+          gatewayOciDigest: `sha256:${"c".repeat(64)}`,
+        }, process.cwd()))}\n`
+        : `${JSON.stringify({ gateId, kind, route, target: CANONICAL_LIVE_TARGET, releaseSha })}\n`;
       await writeFile(path.join(evidenceRoot, artifactPath), contents, { mode: 0o600 });
       artifacts.set(artifactPath, sha256(contents));
     }
@@ -329,6 +341,34 @@ describe("live acceptance evidence contract", () => {
       "connector_provider_not_live",
       "connector_correlation_mismatch:connector-oauth:credentialReference",
     ]));
+  });
+
+  it("rejects a generic release artifact and incomplete backup or rollback preparation", async () => {
+    const files = await fixture();
+    const artifactPath = "release-identity-readiness-release.json";
+    const generic = `${JSON.stringify({ gateId: "release-identity-readiness", kind: "release", releaseSha })}\n`;
+    await writeFile(path.join(files.evidenceRoot, artifactPath), generic, { mode: 0o600 });
+    files.artifacts.set(artifactPath, sha256(generic));
+    let result = await evaluateAcceptance(manifest(files.artifacts), { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toContain(`release_identity_evidence_invalid:release-identity-readiness:${artifactPath}`);
+
+    const evidence = JSON.parse(JSON.stringify(await createPredeployReleaseEvidence({
+      candidateSha: releaseSha,
+      ciSha: releaseSha,
+      deploySha: releaseSha,
+      runtimeSha: releaseSha,
+      appOciRevision: releaseSha,
+      gatewayOciRevision: releaseSha,
+      appOciDigest: `sha256:${"b".repeat(64)}`,
+      gatewayOciDigest: `sha256:${"c".repeat(64)}`,
+    }, process.cwd()))) as { backup: { verificationRequired: boolean } };
+    evidence.backup.verificationRequired = false;
+    const incomplete = `${JSON.stringify(evidence)}\n`;
+    await writeFile(path.join(files.evidenceRoot, artifactPath), incomplete, { mode: 0o600 });
+    files.artifacts.set(artifactPath, sha256(incomplete));
+    result = await evaluateAcceptance(manifest(files.artifacts), { evidenceRoot: files.evidenceRoot });
+    expect(result.reasons).toContain(`release_identity_evidence_mismatch:release-identity-readiness:${artifactPath}`);
   });
 
   it("rejects absent, modified, symlinked and hard-linked evidence", async () => {
