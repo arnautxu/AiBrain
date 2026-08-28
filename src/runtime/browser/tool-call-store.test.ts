@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { atomicTemporaryPath } from "@/storage";
 import {
   BrowserToolCallStore,
+  browserToolCallRecordSchema,
   type BrowserToolCallIdentity,
 } from "@/runtime/browser/tool-call-store";
 
@@ -37,6 +38,27 @@ afterEach(async () => {
 });
 
 describe("BrowserToolCallStore capacity and recovery", () => {
+  it("reads a pre-evidence record without mutating it or treating it as approved evidence", () => {
+    const parsed = browserToolCallRecordSchema.parse({
+      schemaVersion: 1,
+      ...identity("call-legacy"),
+      status: "completed",
+      response: { success: false, contentItems: [{ type: "inputText", text: "legacy result" }] },
+      approvalRequestedAt: "2026-08-28T00:00:00.000Z",
+      approvalResolvedAt: "2026-08-28T00:00:01.000Z",
+      executingAt: "2026-08-28T00:00:02.000Z",
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-28T00:00:03.000Z",
+    });
+    expect(parsed).toMatchObject({
+      schemaVersion: 2,
+      approvalEvidence: null,
+      approvalResource: null,
+      executionOwnerId: null,
+      status: "completed",
+    });
+  });
+
   it("replays an existing call but applies global record backpressure to a new call", async () => {
     const store = await fixture({ maxRecords: 1 });
     const first = identity("call-first");
@@ -74,6 +96,25 @@ describe("BrowserToolCallStore capacity and recovery", () => {
     await expect(store.markExecuting(call)).resolves.toMatchObject({
       acquired: false,
       record: expect.objectContaining({ status: "executing", response: null }),
+    });
+  });
+
+  it("persists an indeterminate execution as terminal and never reacquires it", async () => {
+    const store = await fixture();
+    const call = identity("call-indeterminate");
+    await store.begin(call);
+    await store.markExecuting(call);
+    const response = {
+      success: false,
+      contentItems: [{ type: "inputText" as const, text: "Outcome is indeterminate and was not replayed." }],
+    };
+    await expect(store.markIndeterminate(call, response)).resolves.toMatchObject({
+      status: "indeterminate",
+      response,
+    });
+    await expect(store.markExecuting(call)).resolves.toMatchObject({
+      acquired: false,
+      record: expect.objectContaining({ status: "indeterminate", response }),
     });
   });
 });

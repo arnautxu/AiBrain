@@ -36,7 +36,10 @@ import {
   BROWSER_DYNAMIC_TOOLS,
   handleBrowserDynamicToolCall,
 } from "@/runtime/browser/dynamic-tools";
-import { executeBrowserAgentCommand } from "@/runtime/browser/server-service";
+import {
+  executeBrowserAgentCommand,
+  prepareBrowserAgentCommand,
+} from "@/runtime/browser/server-service";
 import {
   assertCodexTurnPermissionBinding,
   buildCodexDeveloperInstructions,
@@ -558,6 +561,7 @@ export async function runWorkerCodexTurn(
                 { envelope, key: `approval:${item.status}:${item.id}` },
               );
             },
+            prepare: prepareBrowserAgentCommand,
             execute: executeBrowserAgentCommand,
           }) as JsonValue;
         }

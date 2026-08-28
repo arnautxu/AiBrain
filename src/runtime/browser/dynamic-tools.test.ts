@@ -15,6 +15,12 @@ import {
   handleBrowserDynamicToolCall,
 } from "@/runtime/browser/dynamic-tools";
 import { BrowserToolCallStore } from "@/runtime/browser/tool-call-store";
+import { browserEvidenceHash } from "@/runtime/browser/action-evidence";
+import type {
+  BrowserActionResourceSnapshot,
+  BrowserInformedApprovalEvidence,
+} from "@/runtime/browser/action-evidence";
+import type { BrowserAgentCommand } from "@/runtime/browser/server-service";
 import { assertCodexClientRequest } from "@/runtime/transport/codex-contract-validation";
 
 const INSTALLATION_ID = "browser-tools-test";
@@ -22,6 +28,15 @@ const USER_ID = "11a11111-1111-4111-8111-111111111111";
 const BROWSER_THREAD_A = "11a11111-1111-4111-8111-111111111121";
 const BROWSER_THREAD_B = "11a11111-1111-4111-8111-111111111122";
 const FINGERPRINT = "a".repeat(64);
+
+type ExecutedBrowserCommand = {
+  installationId: string;
+  userId: string;
+  threadId: string;
+  command: BrowserAgentCommand;
+  approvalEvidence?: BrowserInformedApprovalEvidence;
+  expectedResource?: BrowserActionResourceSnapshot;
+};
 
 function permissions(allowed = true): ResolvedPermissions {
   return {
@@ -106,6 +121,20 @@ describe("closed browser dynamic tools", () => {
       approvalStore,
       signal: new AbortController().signal,
       emitApproval: async (item) => { emitted.push(item); },
+      prepare: vi.fn(async ({ threadId, command }) => ({
+        kind: "browser-page" as const,
+        origin: command.action === "open" ? new URL(command.url).origin : "https://example.test",
+        sanitizedUrl: command.action === "open"
+          ? `${new URL(command.url).origin}${new URL(command.url).pathname}`
+          : "https://example.test/current",
+        scopeId: threadId,
+        generation: 3,
+        version: browserEvidenceHash({ threadId, version: 3 }),
+        locatorHash: browserEvidenceHash({ command: command.action, selector: "selector" }),
+        locatorSummary: command.action === "click" || command.action === "type"
+          ? `${command.selector} · button role=button · Submit`
+          : `${command.action} https://example.test/current`,
+      })),
       ...overrides,
       execute,
     };
@@ -211,6 +240,109 @@ describe("closed browser dynamic tools", () => {
     expect(emitted.at(-1)?.status).toBe("accepted");
   });
 
+  it("binds approval, mutation and applied readback to one non-secret evidence fingerprint", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const emitted: ApprovalItem[] = [];
+    const execute = vi.fn(async (input: ExecutedBrowserCommand) => ({
+      schemaVersion: 1,
+      outcome: "applied",
+      actionKind: input.command.action,
+      evidenceFingerprint: input.approvalEvidence?.evidenceFingerprint,
+      resource: input.expectedResource,
+      observedAt: "2026-08-28T00:00:00.000Z",
+    }));
+    const response = await handleBrowserDynamicToolCall(
+      request("type", { selector: "input[name=password]", text: "never-log-this", clear: true }),
+      context(approvalStore, execute, emitted, {
+        callStore,
+        emitApproval: async (item) => {
+          emitted.push(item);
+          if (item.status === "pending") {
+            await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item), "accept");
+          }
+        },
+      }),
+    );
+    expect(response).toMatchObject({ success: true });
+    const execution = execute.mock.calls[0]?.[0];
+    if (!execution?.approvalEvidence) throw new Error("Expected approval evidence.");
+    const evidence = execution.approvalEvidence;
+    expect(execution?.approvalEvidence).toMatchObject({
+      installationId: INSTALLATION_ID,
+      userId: USER_ID,
+      threadId: "runtime-thread-a",
+      turnId: "runtime-turn-a",
+      callId: "call-type",
+      actionKind: "type",
+      permissionFingerprint: FINGERPRINT,
+      request: { secretInput: true },
+      evidenceFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/u),
+    });
+    expect(evidence.request.summary).toContain("input length=14");
+    expect(evidence.request.summary).not.toContain("never-log-this");
+    expect(execution?.expectedResource).toMatchObject({ scopeId: BROWSER_THREAD_A });
+    expect(emitted[0]).toMatchObject({ id: `browser:${evidence.evidenceFingerprint.slice(0, 32)}` });
+    expect(JSON.stringify(emitted)).not.toContain("never-log-this");
+    const audit = await callStore.readAudit();
+    expect(audit.map(({ payload }) => payload.status)).toEqual([
+      "reserved", "approval_requested", "approval_resolved", "executing", "completed",
+    ]);
+    expect(audit.at(-1)?.payload).toMatchObject({
+      evidenceFingerprint: evidence.evidenceFingerprint,
+      success: true,
+    });
+  });
+
+  it("rejects session-wide browser mutation approvals and never executes them", async () => {
+    const { approvalStore } = await fixture();
+    const execute = vi.fn();
+    const emitted: ApprovalItem[] = [];
+    const response = await handleBrowserDynamicToolCall(
+      request("click", { selector: "button[type=submit]" }),
+      context(approvalStore, execute, emitted, {
+        emitApproval: async (item) => {
+          emitted.push(item);
+          if (item.status === "pending") {
+            await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item), "acceptForSession");
+          }
+        },
+      }),
+    );
+    expect(response).toMatchObject({ success: false });
+    expect(response.contentItems[0]).toMatchObject({ text: expect.stringContaining("fresh one-action approval") });
+    expect(execute).not.toHaveBeenCalled();
+    expect(emitted.at(-1)).toMatchObject({ status: "declined" });
+  });
+
+  it("makes a post-dispatch browser failure indeterminate and terminal on replay", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async () => { throw new Error("connection dropped after dispatch"); });
+    const emitted: ApprovalItem[] = [];
+    const input = request("click", { selector: "button[type=submit]" });
+    const ctx = context(approvalStore, execute, emitted, {
+      callStore,
+      emitApproval: async (item) => {
+        emitted.push(item);
+        if (item.status === "pending") {
+          await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item), "accept");
+        }
+      },
+    });
+    const first = await handleBrowserDynamicToolCall(input, ctx);
+    const replay = await handleBrowserDynamicToolCall(input, ctx);
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({ success: false });
+    expect(first.contentItems[0]).toMatchObject({ text: expect.stringContaining("indeterminate") });
+    expect(execute).toHaveBeenCalledOnce();
+    const audit = await callStore.readAudit();
+    expect(audit.map(({ payload }) => payload.status)).toEqual([
+      "reserved", "approval_requested", "approval_resolved", "executing", "indeterminate",
+    ]);
+    expect(audit.at(-1)?.payload.success).toBe(false);
+  });
+
   it("does not duplicate a pending approval or execute twice when the same call is replayed", async () => {
     const { userRoot, approvalStore } = await fixture();
     const callStore = new BrowserToolCallStore({ userRoot });
@@ -307,7 +439,10 @@ describe("closed browser dynamic tools", () => {
 
   it("fails closed instead of replaying a call left executing by a crash", async () => {
     const { userRoot, approvalStore } = await fixture();
-    const callStore = new BrowserToolCallStore({ userRoot });
+    const callStore = new BrowserToolCallStore({
+      userRoot,
+      executionOwnerId: "11111111-1111-4111-8111-111111111111",
+    });
     const input = request("read", {});
     const argumentsHash = await import("node:crypto").then(({ createHash }) => createHash("sha256")
       .update(JSON.stringify({ arguments: {}, browserThreadId: BROWSER_THREAD_A }))
@@ -324,10 +459,14 @@ describe("closed browser dynamic tools", () => {
     };
     await callStore.begin(identity);
     await callStore.markExecuting(identity);
+    const recoveredStore = new BrowserToolCallStore({
+      userRoot,
+      executionOwnerId: "22222222-2222-4222-8222-222222222222",
+    });
     const execute = vi.fn();
     const response = await handleBrowserDynamicToolCall(
       input,
-      context(approvalStore, execute, [], { callStore }),
+      context(approvalStore, execute, [], { callStore: recoveredStore }),
     );
     expect(response).toMatchObject({ success: false });
     expect(response.contentItems[0]).toMatchObject({
@@ -335,6 +474,10 @@ describe("closed browser dynamic tools", () => {
       text: expect.stringContaining("not replayed"),
     });
     expect(execute).not.toHaveBeenCalled();
+    await expect(recoveredStore.begin(identity)).resolves.toMatchObject({
+      status: "indeterminate",
+      response: expect.objectContaining({ success: false }),
+    });
   });
 
   it("records a permission denial and never asks for approval or touches the browser", async () => {
