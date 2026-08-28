@@ -24,6 +24,7 @@ runtime are outside the final trust boundary and can only be prefilters.
 | P0 | A green localhost/demo/CI suite is presented as production acceptance | Canonical live target and live-only manifest contract |
 | P0 | Evidence from another release is substituted after deploy | Full release SHA on manifest, every gate and every evidence item |
 | P0 | One user can read or mutate another user's threads, files, memory, browser or approvals | Two real users with negative cross-user reads and mutations |
+| P0 | A connector health/capability/audit or “connected” state is presented as a real provider action | OAuth credential, live provider, durable approval, exactly-once execution and provider readback must share actor, tenant, operation and release identifiers |
 | P0 | A stale or ambiguous approval executes a different action, repeats after reconnect, or lacks readback | Typed approval plus post-action readback evidence on the same release |
 | P0 | A process restart/reconnect duplicates a turn or action, loses state, or crosses threads | Failure/restart/reconnect gate on the live release |
 | P0 | Evidence paths escape, redirect through symlinks, or are replaced through hard links | Evidence-root containment, regular-file checks and SHA-256 |

@@ -82,10 +82,12 @@ const GATE_REQUIREMENTS: Record<string, {
     ],
   },
   "real-action-approval-readback": {
-    routes: ["POST /api/runtime/approvals"],
+    routes: ["POST /api/runtime/approvals", "connector:operation", "connector:provider-readback"],
     evidence: [
-      { kind: "approval", route: "POST /api/runtime/approvals" },
-      { kind: "readback", route: "action:readback" },
+      { kind: "connector-oauth", route: "connector:oauth" },
+      { kind: "connector-approval", route: "POST /api/runtime/approvals" },
+      { kind: "connector-execution", route: "connector:operation" },
+      { kind: "connector-readback", route: "connector:provider-readback" },
     ],
   },
   "logs-backup-rollback": {
@@ -103,13 +105,33 @@ type Environment = "local" | "ci" | "live";
 type GateStatus = "passed" | "failed" | "blocked" | "skipped";
 
 export type AcceptanceEvidence = {
-  kind: "http" | "ui" | "contract" | "release" | "turn" | "approval" | "readback" | "file" | "library" | "search" | "memory" | "metric" | "restart" | "reconnect" | "isolation" | "log" | "backup" | "restore" | "rollback" | "accessibility" | "visual";
+  kind: "http" | "ui" | "contract" | "release" | "turn" | "approval" | "readback" | "file" | "library" | "search" | "memory" | "metric" | "restart" | "reconnect" | "isolation" | "log" | "backup" | "restore" | "rollback" | "accessibility" | "visual" | "audit" | "connector-oauth" | "connector-approval" | "connector-execution" | "connector-readback";
   artifactPath: string;
   sha256: string;
   capturedAt: string;
   route: string;
   releaseSha: string;
+  connectorCorrelation?: ConnectorCorrelation;
 };
+
+export type ConnectorAction = {
+  connectorId: string;
+  provider: string;
+  tenantId: string;
+  actorId: string;
+  credentialReference: string;
+  authorization: "oauth" | "none";
+  providerLive: boolean;
+  operationId: string;
+  operationType: string;
+  approvalId: string;
+  executionId: string;
+  executionCount: number;
+  providerReadbackId: string;
+};
+
+export type ConnectorCorrelation = Pick<ConnectorAction,
+  "connectorId" | "provider" | "tenantId" | "actorId" | "credentialReference" | "operationId" | "approvalId" | "executionId" | "providerReadbackId">;
 
 export type AcceptanceGate = {
   id: string;
@@ -123,6 +145,7 @@ export type AcceptanceGate = {
   routes: string[];
   latencyMs?: Record<string, number>;
   latencyBudgetMs?: Record<string, number>;
+  connectorAction?: ConnectorAction;
   evidence: AcceptanceEvidence[];
   failures: string[];
 };
@@ -133,6 +156,7 @@ export type AcceptanceManifest = {
   environment: Environment;
   target: string;
   releaseSha: string;
+  tenantId: string;
   releaseIdentity: {
     candidateSha: string;
     ciSha: string;
@@ -213,6 +237,50 @@ function normalizeTarget(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function validateConnectorActionGate(gate: AcceptanceGate | undefined, manifest: AcceptanceManifest, reasons: string[]): void {
+  if (!gate) return;
+  const action = gate.connectorAction;
+  if (!action) {
+    reasons.push("connector_action_missing");
+    return;
+  }
+  if (action.tenantId !== manifest.tenantId) reasons.push("connector_tenant_mismatch");
+  if (!manifest.actors.some(({ id }) => id === action.actorId) || !gate.actorIds.includes(action.actorId)) {
+    reasons.push("connector_actor_mismatch");
+  }
+  if (action.authorization !== "oauth") reasons.push("connector_oauth_missing");
+  if (!action.credentialReference) reasons.push("connector_credential_missing");
+  if (!action.providerLive) reasons.push("connector_provider_not_live");
+  if (action.executionCount !== 1) reasons.push("connector_execution_not_exactly_once");
+  if (/\b(?:health|capabilit(?:y|ies)|status|connected|audit)\b/iu.test(action.operationType)) {
+    reasons.push("connector_operation_not_concrete");
+  }
+  const correlationKeys: Array<keyof ConnectorCorrelation> = [
+    "connectorId", "provider", "tenantId", "actorId", "credentialReference", "operationId", "approvalId", "executionId", "providerReadbackId",
+  ];
+  const requiredKinds: AcceptanceEvidence["kind"][] = [
+    "connector-oauth", "connector-approval", "connector-execution", "connector-readback",
+  ];
+  for (const kind of requiredKinds) {
+    const evidence = gate.evidence.find((candidate) => candidate.kind === kind);
+    if (!evidence) {
+      reasons.push(`connector_evidence_missing:${kind}`);
+      continue;
+    }
+    if (/\b(?:health|capabilit(?:y|ies)|status|connected|audit)\b/iu.test(evidence.route)) {
+      reasons.push(`connector_non_action_evidence:${kind}`);
+    }
+    if (!evidence.connectorCorrelation) {
+      reasons.push(`connector_correlation_missing:${kind}`);
+      continue;
+    }
+    for (const key of correlationKeys) {
+      if (evidence.connectorCorrelation[key] !== action[key]) reasons.push(`connector_correlation_mismatch:${kind}:${key}`);
+    }
+  }
+  if (gate.evidence.some((evidence) => evidence.kind === "audit")) reasons.push("connector_generic_audit_rejected");
 }
 
 async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: string | undefined): Promise<string[]> {
@@ -371,6 +439,11 @@ export async function evaluateAcceptance(
       reasons.push(`required_actors_missing:${gateId}`);
     }
   }
+  validateConnectorActionGate(
+    manifest.gates.find(({ id }) => id === "real-action-approval-readback"),
+    manifest,
+    reasons,
+  );
   const performance = manifest.gates.find(({ id }) => id === "performance-concurrency");
   for (const metric of PERFORMANCE_METRICS) {
     if (typeof performance?.latencyMs?.[metric] !== "number") reasons.push(`performance_metric_missing:${metric}`);
