@@ -1,0 +1,470 @@
+import { createHash } from "node:crypto";
+import { lstat, readFile, realpath } from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+import { pathToFileURL } from "node:url";
+import Ajv2020, { type ErrorObject } from "ajv/dist/2020.js";
+import schema from "../tests/acceptance/live-acceptance.schema.json";
+
+export const CANONICAL_LIVE_TARGET = "https://arnall.graphikai.com";
+
+export const REQUIRED_LIVE_GATES = [
+  "release-identity-readiness",
+  "threat-model-contracts",
+  "functional-desktop-mobile",
+  "accessibility",
+  "visual",
+  "performance-concurrency",
+  "failure-restart-reconnect",
+  "two-user-isolation",
+  "real-turn",
+  "files-search-library-memory",
+  "real-action-approval-readback",
+  "logs-backup-rollback",
+] as const;
+
+export const PERFORMANCE_METRICS = [
+  "navigationP95Ms",
+  "inputP95Ms",
+  "ttftP95Ms",
+  "streamGapP95Ms",
+  "turnTotalP95Ms",
+  "reconnectP95Ms",
+  "toolReadbackP95Ms",
+] as const;
+
+const GATE_REQUIREMENTS: Record<string, {
+  actorCoverage?: "all";
+  routes: string[];
+  evidence: Array<{ kind: AcceptanceEvidence["kind"]; route: string }>;
+}> = {
+  "release-identity-readiness": {
+    routes: ["GET /api/health/live", "GET /api/health/ready"],
+    evidence: [
+      { kind: "release", route: "release:identity" },
+      { kind: "http", route: "GET /api/health/live" },
+      { kind: "http", route: "GET /api/health/ready" },
+    ],
+  },
+  "threat-model-contracts": { routes: ["contract:live-acceptance"], evidence: [{ kind: "contract", route: "contract:live-acceptance" }] },
+  "functional-desktop-mobile": { routes: ["/"], evidence: [{ kind: "ui", route: "/" }] },
+  accessibility: { routes: ["/"], evidence: [{ kind: "accessibility", route: "/" }] },
+  visual: { routes: ["/"], evidence: [{ kind: "visual", route: "/" }] },
+  "performance-concurrency": { routes: ["POST /api/chat"], evidence: [{ kind: "metric", route: "POST /api/chat" }] },
+  "failure-restart-reconnect": {
+    routes: ["POST /api/chat", "POST /api/runtime/turns/control"],
+    evidence: [
+      { kind: "restart", route: "POST /api/runtime/turns/control" },
+      { kind: "reconnect", route: "POST /api/chat" },
+    ],
+  },
+  "two-user-isolation": {
+    actorCoverage: "all",
+    routes: ["GET /api/workbench"],
+    evidence: [{ kind: "isolation", route: "GET /api/workbench" }],
+  },
+  "real-turn": {
+    actorCoverage: "all",
+    routes: ["POST /api/chat", "GET /api/runtime/status"],
+    evidence: [
+      { kind: "turn", route: "POST /api/chat" },
+      { kind: "readback", route: "GET /api/runtime/status" },
+    ],
+  },
+  "files-search-library-memory": {
+    actorCoverage: "all",
+    routes: ["POST /api/threads/{threadId}/documents", "GET /api/library", "GET /api/search", "GET /api/memory"],
+    evidence: [
+      { kind: "file", route: "POST /api/threads/{threadId}/documents" },
+      { kind: "library", route: "GET /api/library" },
+      { kind: "search", route: "GET /api/search" },
+      { kind: "memory", route: "GET /api/memory" },
+    ],
+  },
+  "real-action-approval-readback": {
+    routes: ["POST /api/runtime/approvals"],
+    evidence: [
+      { kind: "approval", route: "POST /api/runtime/approvals" },
+      { kind: "readback", route: "action:readback" },
+    ],
+  },
+  "logs-backup-rollback": {
+    routes: ["operations:logs", "backup:verify", "backup:restore", "release:rollback"],
+    evidence: [
+      { kind: "log", route: "operations:logs" },
+      { kind: "backup", route: "backup:verify" },
+      { kind: "restore", route: "backup:restore" },
+      { kind: "rollback", route: "release:rollback" },
+    ],
+  },
+};
+
+type Environment = "local" | "ci" | "live";
+type GateStatus = "passed" | "failed" | "blocked" | "skipped";
+
+export type AcceptanceEvidence = {
+  kind: "http" | "ui" | "contract" | "release" | "turn" | "approval" | "readback" | "file" | "library" | "search" | "memory" | "metric" | "restart" | "reconnect" | "isolation" | "log" | "backup" | "restore" | "rollback" | "accessibility" | "visual";
+  artifactPath: string;
+  sha256: string;
+  capturedAt: string;
+  route: string;
+  releaseSha: string;
+};
+
+export type AcceptanceGate = {
+  id: string;
+  status: GateStatus;
+  environment: Environment;
+  target: string;
+  releaseSha: string;
+  startedAt: string;
+  completedAt: string;
+  actorIds: string[];
+  routes: string[];
+  latencyMs?: Record<string, number>;
+  latencyBudgetMs?: Record<string, number>;
+  evidence: AcceptanceEvidence[];
+  failures: string[];
+};
+
+export type AcceptanceManifest = {
+  schemaVersion: 1;
+  acceptanceKind: "prefilter" | "live";
+  environment: Environment;
+  target: string;
+  releaseSha: string;
+  releaseIdentity: {
+    candidateSha: string;
+    ciSha: string;
+    deploySha: string;
+    runtimeSha: string;
+    appOciRevision: string;
+    gatewayOciRevision: string;
+  };
+  startedAt: string;
+  completedAt: string;
+  actors: Array<{ id: string; role: "member" | "admin" | "owner" | "operator" }>;
+  gates: AcceptanceGate[];
+  failures: Array<{
+    id: string;
+    severity: "critical" | "high" | "medium" | "low";
+    status: "open" | "resolved";
+    summary: string;
+  }>;
+};
+
+export type AcceptanceEvaluation = {
+  verdict: "accepted" | "rejected" | "prefilter-only";
+  target: string | null;
+  releaseSha: string | null;
+  manifestSha256: string;
+  reasons: string[];
+  manifest: AcceptanceManifest | null;
+};
+
+const validator = new Ajv2020({ allErrors: true, strict: true }).compile(schema);
+const timestampPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u;
+const secretPatterns = [
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/iu,
+  /\b(?:cookie|password|secret|access[_-]?token|refresh[_-]?token)\s*[:=]\s*\S+/iu,
+  /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu,
+  /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/u,
+];
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function digest(value: string | Buffer): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+function schemaErrors(errors: ErrorObject[] | null | undefined): string[] {
+  return (errors ?? []).map((error) => `schema${error.instancePath || "/"}: ${error.message ?? "invalid"}`);
+}
+
+function walkStrings(value: unknown, visit: (text: string) => void): void {
+  if (typeof value === "string") visit(value);
+  else if (Array.isArray(value)) value.forEach((item) => walkStrings(item, visit));
+  else if (value && typeof value === "object") Object.values(value).forEach((item) => walkStrings(item, visit));
+}
+
+function validTimestamp(value: string): boolean {
+  return timestampPattern.test(value) && Number.isFinite(Date.parse(value));
+}
+
+function inWindow(value: string, start: string, end: string): boolean {
+  const time = Date.parse(value);
+  return time >= Date.parse(start) && time <= Date.parse(end);
+}
+
+function normalizeTarget(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.username || url.password || url.search || url.hash) return null;
+    if (url.pathname !== "/" && url.pathname !== "") return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyEvidenceFiles(manifest: AcceptanceManifest, evidenceRoot: string | undefined): Promise<string[]> {
+  if (!evidenceRoot) return ["evidence_root_missing"];
+  const reasons: string[] = [];
+  let root: string;
+  try {
+    root = await realpath(evidenceRoot);
+    const rootStat = await lstat(root);
+    if (!rootStat.isDirectory()) return ["evidence_root_not_directory"];
+  } catch {
+    return ["evidence_root_unreadable"];
+  }
+
+  for (const gate of manifest.gates) {
+    for (const evidence of gate.evidence) {
+      const label = `${gate.id}:${evidence.artifactPath}`;
+      if (path.isAbsolute(evidence.artifactPath) || evidence.artifactPath.split(/[\\/]/u).includes("..")) {
+        reasons.push(`evidence_path_unsafe:${label}`);
+        continue;
+      }
+      const candidate = path.resolve(root, evidence.artifactPath);
+      if (candidate !== root && !candidate.startsWith(`${root}${path.sep}`)) {
+        reasons.push(`evidence_path_escape:${label}`);
+        continue;
+      }
+      try {
+        const stat = await lstat(candidate);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || (stat.mode & 0o077) !== 0) {
+          reasons.push(`evidence_not_private_regular_file:${label}`);
+          continue;
+        }
+        if (await realpath(candidate) !== candidate) {
+          reasons.push(`evidence_path_redirected:${label}`);
+          continue;
+        }
+        const contents = await readFile(candidate);
+        if (digest(contents) !== evidence.sha256) reasons.push(`evidence_digest_mismatch:${label}`);
+      } catch {
+        reasons.push(`evidence_unreadable:${label}`);
+      }
+    }
+  }
+  return reasons;
+}
+
+export async function evaluateAcceptance(
+  input: unknown,
+  options: { evidenceRoot?: string } = {},
+): Promise<AcceptanceEvaluation> {
+  const manifestSha256 = digest(canonicalJson(input));
+  if (!validator(input)) {
+    return {
+      verdict: "rejected",
+      target: null,
+      releaseSha: null,
+      manifestSha256,
+      reasons: schemaErrors(validator.errors),
+      manifest: null,
+    };
+  }
+
+  const manifest = input as AcceptanceManifest;
+  const reasons: string[] = [];
+  const actorIds = new Set(manifest.actors.map(({ id }) => id));
+  const gateIds = new Set<string>();
+  const normalizedTarget = normalizeTarget(manifest.target);
+
+  if (!validTimestamp(manifest.startedAt) || !validTimestamp(manifest.completedAt)
+    || Date.parse(manifest.completedAt) < Date.parse(manifest.startedAt)) {
+    reasons.push("acceptance_window_invalid");
+  }
+  if (actorIds.size !== manifest.actors.length) reasons.push("actor_ids_not_unique");
+
+  walkStrings(manifest, (text) => {
+    if (secretPatterns.some((pattern) => pattern.test(text))) reasons.push("secret_or_email_material_detected");
+  });
+
+  for (const gate of manifest.gates) {
+    if (gateIds.has(gate.id)) reasons.push(`duplicate_gate:${gate.id}`);
+    gateIds.add(gate.id);
+    if (gate.releaseSha !== manifest.releaseSha) reasons.push(`release_sha_mismatch:${gate.id}`);
+    if (normalizeTarget(gate.target) !== normalizedTarget) reasons.push(`target_mismatch:${gate.id}`);
+    if (Date.parse(gate.completedAt) < Date.parse(gate.startedAt)
+      || !inWindow(gate.startedAt, manifest.startedAt, manifest.completedAt)
+      || !inWindow(gate.completedAt, manifest.startedAt, manifest.completedAt)) {
+      reasons.push(`gate_window_invalid:${gate.id}`);
+    }
+    if (gate.actorIds.some((actorId) => !actorIds.has(actorId))) reasons.push(`unknown_actor:${gate.id}`);
+    if (gate.status === "passed" && gate.failures.length > 0) reasons.push(`passed_gate_has_failures:${gate.id}`);
+    for (const evidence of gate.evidence) {
+      if (evidence.releaseSha !== manifest.releaseSha) reasons.push(`evidence_release_mismatch:${gate.id}`);
+      if (!inWindow(evidence.capturedAt, gate.startedAt, gate.completedAt)) {
+        reasons.push(`evidence_window_invalid:${gate.id}:${evidence.artifactPath}`);
+      }
+    }
+  }
+
+  if (manifest.acceptanceKind === "prefilter" || manifest.environment !== "live") {
+    return {
+      verdict: "prefilter-only",
+      target: manifest.target,
+      releaseSha: manifest.releaseSha,
+      manifestSha256,
+      reasons: [...new Set(["local_or_ci_prefilter_is_not_live_acceptance", ...reasons])],
+      manifest,
+    };
+  }
+
+  if (normalizedTarget !== CANONICAL_LIVE_TARGET) reasons.push("canonical_live_target_required");
+  if (manifest.actors.length < 2) reasons.push("two_distinct_live_actors_required");
+  for (const [source, value] of Object.entries(manifest.releaseIdentity)) {
+    if (value !== manifest.releaseSha) reasons.push(`release_identity_mismatch:${source}`);
+  }
+  for (const required of REQUIRED_LIVE_GATES) {
+    const gate = manifest.gates.find(({ id }) => id === required);
+    if (!gate) reasons.push(`required_gate_missing:${required}`);
+    else {
+      if (gate.status !== "passed") reasons.push(`required_gate_not_passed:${required}`);
+      if (gate.environment !== "live") reasons.push(`required_gate_not_live:${required}`);
+      if (normalizeTarget(gate.target) !== CANONICAL_LIVE_TARGET) reasons.push(`required_gate_wrong_target:${required}`);
+    }
+  }
+  for (const gate of manifest.gates) {
+    for (const route of gate.routes) {
+      if (/\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0)\b/iu.test(route)) reasons.push(`local_route_in_live_gate:${gate.id}`);
+      if (/^https?:\/\//iu.test(route)) {
+        try {
+          if (new URL(route).origin !== CANONICAL_LIVE_TARGET) reasons.push(`foreign_route_in_live_gate:${gate.id}`);
+        } catch {
+          reasons.push(`invalid_route_in_live_gate:${gate.id}`);
+        }
+      }
+    }
+    for (const evidence of gate.evidence) {
+      if ((evidence.kind === "http" || evidence.kind === "ui")
+        && !evidence.route.startsWith("/")
+        && !/^[A-Z]+\s+\//u.test(evidence.route)
+        && normalizeTarget(evidence.route) !== CANONICAL_LIVE_TARGET) {
+        reasons.push(`live_web_evidence_wrong_target:${gate.id}`);
+      }
+    }
+  }
+  for (const [gateId, requirement] of Object.entries(GATE_REQUIREMENTS)) {
+    const gate = manifest.gates.find(({ id }) => id === gateId);
+    if (!gate) continue;
+    for (const route of requirement.routes) {
+      if (!gate.routes.includes(route)) reasons.push(`required_route_missing:${gateId}:${route}`);
+    }
+    for (const expected of requirement.evidence) {
+      if (!gate.evidence.some((evidence) => evidence.kind === expected.kind && evidence.route === expected.route)) {
+        reasons.push(`required_evidence_missing:${gateId}:${expected.kind}:${expected.route}`);
+      }
+    }
+    if (requirement.actorCoverage === "all" && manifest.actors.some(({ id }) => !gate.actorIds.includes(id))) {
+      reasons.push(`required_actors_missing:${gateId}`);
+    }
+  }
+  const performance = manifest.gates.find(({ id }) => id === "performance-concurrency");
+  for (const metric of PERFORMANCE_METRICS) {
+    if (typeof performance?.latencyMs?.[metric] !== "number") reasons.push(`performance_metric_missing:${metric}`);
+    if (typeof performance?.latencyBudgetMs?.[metric] !== "number") reasons.push(`performance_budget_missing:${metric}`);
+    if (typeof performance?.latencyMs?.[metric] === "number"
+      && typeof performance?.latencyBudgetMs?.[metric] === "number"
+      && performance.latencyMs[metric] > performance.latencyBudgetMs[metric]) {
+      reasons.push(`performance_budget_exceeded:${metric}`);
+    }
+  }
+  if (manifest.failures.some(({ severity, status }) => status === "open" && (severity === "critical" || severity === "high"))) {
+    reasons.push("open_critical_or_high_failure");
+  }
+  reasons.push(...await verifyEvidenceFiles(manifest, options.evidenceRoot));
+
+  const uniqueReasons = [...new Set(reasons)];
+  return {
+    verdict: uniqueReasons.length === 0 ? "accepted" : "rejected",
+    target: manifest.target,
+    releaseSha: manifest.releaseSha,
+    manifestSha256,
+    reasons: uniqueReasons,
+    manifest,
+  };
+}
+
+function markdownCell(value: unknown): string {
+  return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
+}
+
+export function renderAcceptanceReport(result: AcceptanceEvaluation): string {
+  const manifest = result.manifest;
+  const lines = [
+    "# AiBrain live acceptance report",
+    "",
+    `- Verdict: **${result.verdict.toUpperCase()}**`,
+    `- Target: ${result.target ?? "unavailable"}`,
+    `- Release SHA: ${result.releaseSha ?? "unavailable"}`,
+    `- Manifest SHA-256: ${result.manifestSha256}`,
+  ];
+  if (!manifest) {
+    lines.push("", "## Contract failures", "", ...result.reasons.map((reason) => `- ${reason}`));
+    return `${lines.join("\n")}\n`;
+  }
+  lines.push(
+    `- Window: ${manifest.startedAt} to ${manifest.completedAt}`,
+    `- Actors/roles: ${manifest.actors.map(({ id, role }) => `${id} (${role})`).join(", ")}`,
+    "",
+    "## Gates",
+    "",
+    "| Gate | Status | Environment | Routes | Latencies ms | Evidence |",
+    "|---|---|---|---|---|---|",
+  );
+  for (const gate of manifest.gates) {
+    const latency = gate.latencyMs
+      ? Object.entries(gate.latencyMs).map(([key, value]) => `${key}=${value}`).join(", ")
+      : "n/a";
+    const evidence = gate.evidence.map(({ artifactPath, sha256 }) => `${artifactPath} (${sha256.slice(0, 12)})`).join(", ");
+    lines.push(`| ${markdownCell(gate.id)} | ${gate.status} | ${gate.environment} | ${markdownCell(gate.routes.join(", "))} | ${markdownCell(latency)} | ${markdownCell(evidence)} |`);
+  }
+  lines.push("", "## Acceptance failures", "");
+  if (result.reasons.length === 0 && manifest.failures.length === 0) lines.push("- None.");
+  else {
+    lines.push(...result.reasons.map((reason) => `- Gate: ${reason}`));
+    lines.push(...manifest.gates.flatMap((gate) => gate.failures.map((failure) => `- ${gate.id}: ${failure}`)));
+    lines.push(...manifest.failures.map((failure) => `- ${failure.id} [${failure.severity}/${failure.status}]: ${failure.summary}`));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function main(): Promise<void> {
+  const args = process.argv.slice(2);
+  const value = (name: string) => {
+    const index = args.indexOf(name);
+    return index >= 0 ? args[index + 1] : undefined;
+  };
+  const manifestPath = value("--manifest");
+  const evidenceRoot = value("--evidence-root");
+  const format = value("--format") ?? "markdown";
+  if (!manifestPath || !["markdown", "json"].includes(format)) {
+    process.stderr.write("Usage: npm run acceptance:verify -- --manifest <json> --evidence-root <dir> [--format markdown|json]\n");
+    process.exitCode = 64;
+    return;
+  }
+  const manifestStat = await lstat(manifestPath);
+  if (!manifestStat.isFile() || manifestStat.isSymbolicLink() || manifestStat.nlink !== 1) {
+    throw new Error("Acceptance manifest must be a private regular file, not a link.");
+  }
+  const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as unknown;
+  const result = await evaluateAcceptance(parsed, { evidenceRoot });
+  process.stdout.write(format === "json" ? `${JSON.stringify(result, null, 2)}\n` : renderAcceptanceReport(result));
+  process.exitCode = result.verdict === "accepted" ? 0 : 2;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

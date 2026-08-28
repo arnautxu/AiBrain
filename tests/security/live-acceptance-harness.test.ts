@@ -1,0 +1,263 @@
+import { createHash } from "node:crypto";
+import { link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  CANONICAL_LIVE_TARGET,
+  REQUIRED_LIVE_GATES,
+  evaluateAcceptance,
+  renderAcceptanceReport,
+  type AcceptanceEvidence,
+  type AcceptanceManifest,
+} from "../../scripts/verify-live-acceptance";
+
+const roots: string[] = [];
+const releaseSha = "a".repeat(40);
+const startedAt = "2026-08-28T10:00:00.000Z";
+const completedAt = "2026-08-28T10:10:00.000Z";
+const gateRoutes: Record<string, string[]> = {
+  "release-identity-readiness": ["GET /api/health/live", "GET /api/health/ready"],
+  "threat-model-contracts": ["contract:live-acceptance"],
+  "functional-desktop-mobile": ["/"],
+  accessibility: ["/"],
+  visual: ["/"],
+  "performance-concurrency": ["POST /api/chat"],
+  "failure-restart-reconnect": ["POST /api/chat", "POST /api/runtime/turns/control"],
+  "two-user-isolation": ["GET /api/workbench"],
+  "real-turn": ["POST /api/chat", "GET /api/runtime/status"],
+  "files-search-library-memory": ["POST /api/threads/{threadId}/documents", "GET /api/library", "GET /api/search", "GET /api/memory"],
+  "real-action-approval-readback": ["POST /api/runtime/approvals"],
+  "logs-backup-rollback": ["operations:logs", "backup:verify", "backup:restore", "release:rollback"],
+};
+const gateEvidence: Record<string, Array<Pick<AcceptanceEvidence, "kind" | "route">>> = {
+  "release-identity-readiness": [
+    { kind: "release", route: "release:identity" },
+    { kind: "http", route: "GET /api/health/live" },
+    { kind: "http", route: "GET /api/health/ready" },
+  ],
+  "threat-model-contracts": [{ kind: "contract", route: "contract:live-acceptance" }],
+  "functional-desktop-mobile": [{ kind: "ui", route: "/" }],
+  accessibility: [{ kind: "accessibility", route: "/" }],
+  visual: [{ kind: "visual", route: "/" }],
+  "performance-concurrency": [{ kind: "metric", route: "POST /api/chat" }],
+  "failure-restart-reconnect": [
+    { kind: "restart", route: "POST /api/runtime/turns/control" },
+    { kind: "reconnect", route: "POST /api/chat" },
+  ],
+  "two-user-isolation": [{ kind: "isolation", route: "GET /api/workbench" }],
+  "real-turn": [
+    { kind: "turn", route: "POST /api/chat" },
+    { kind: "readback", route: "GET /api/runtime/status" },
+  ],
+  "files-search-library-memory": [
+    { kind: "file", route: "POST /api/threads/{threadId}/documents" },
+    { kind: "library", route: "GET /api/library" },
+    { kind: "search", route: "GET /api/search" },
+    { kind: "memory", route: "GET /api/memory" },
+  ],
+  "real-action-approval-readback": [
+    { kind: "approval", route: "POST /api/runtime/approvals" },
+    { kind: "readback", route: "action:readback" },
+  ],
+  "logs-backup-rollback": [
+    { kind: "log", route: "operations:logs" },
+    { kind: "backup", route: "backup:verify" },
+    { kind: "restore", route: "backup:restore" },
+    { kind: "rollback", route: "release:rollback" },
+  ],
+};
+
+function sha256(value: string) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function fixture() {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-live-acceptance-"));
+  roots.push(root);
+  const evidenceRoot = path.join(root, "evidence");
+  await mkdir(evidenceRoot, { recursive: true, mode: 0o700 });
+  const artifacts = new Map<string, string>();
+  for (const gateId of REQUIRED_LIVE_GATES) {
+    for (const { kind, route } of gateEvidence[gateId]) {
+      const artifactPath = `${gateId}-${kind}.json`;
+      const contents = `${JSON.stringify({ gateId, kind, route, target: CANONICAL_LIVE_TARGET, releaseSha })}\n`;
+      await writeFile(path.join(evidenceRoot, artifactPath), contents, { mode: 0o600 });
+      artifacts.set(artifactPath, sha256(contents));
+    }
+  }
+  return { evidenceRoot, artifacts };
+}
+
+function manifest(artifacts: Map<string, string>): AcceptanceManifest {
+  return {
+    schemaVersion: 1,
+    acceptanceKind: "live",
+    environment: "live",
+    target: CANONICAL_LIVE_TARGET,
+    releaseSha,
+    releaseIdentity: {
+      candidateSha: releaseSha,
+      ciSha: releaseSha,
+      deploySha: releaseSha,
+      runtimeSha: releaseSha,
+      appOciRevision: releaseSha,
+      gatewayOciRevision: releaseSha,
+    },
+    startedAt,
+    completedAt,
+    actors: [
+      { id: "david", role: "owner" },
+      { id: "arnau", role: "member" },
+    ],
+    gates: REQUIRED_LIVE_GATES.map((id) => ({
+      id,
+      status: "passed",
+      environment: "live",
+      target: CANONICAL_LIVE_TARGET,
+      releaseSha,
+      startedAt: "2026-08-28T10:01:00.000Z",
+      completedAt: "2026-08-28T10:09:00.000Z",
+      actorIds: ["two-user-isolation", "real-turn", "files-search-library-memory"].includes(id)
+        ? ["david", "arnau"] : ["david"],
+      routes: gateRoutes[id],
+      ...(id === "performance-concurrency" ? {
+        latencyMs: {
+          navigationP95Ms: 210,
+          inputP95Ms: 30,
+          ttftP95Ms: 900,
+          streamGapP95Ms: 120,
+          turnTotalP95Ms: 2_400,
+          reconnectP95Ms: 700,
+          toolReadbackP95Ms: 1_200,
+        },
+      } : {}),
+      ...(id === "performance-concurrency" ? {
+        latencyBudgetMs: {
+          navigationP95Ms: 400,
+          inputP95Ms: 100,
+          ttftP95Ms: 1_500,
+          streamGapP95Ms: 250,
+          turnTotalP95Ms: 3_000,
+          reconnectP95Ms: 1_000,
+          toolReadbackP95Ms: 1_500,
+        },
+      } : {}),
+      evidence: gateEvidence[id].map(({ kind, route }) => ({
+        kind,
+        artifactPath: `${id}-${kind}.json`,
+        sha256: artifacts.get(`${id}-${kind}.json`)!,
+        capturedAt: "2026-08-28T10:05:00.000Z",
+        route,
+        releaseSha,
+      })),
+      failures: [],
+    })),
+    failures: [],
+  };
+}
+
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("live acceptance evidence contract", () => {
+  it("accepts only a complete live manifest with matching private evidence", async () => {
+    const files = await fixture();
+    const result = await evaluateAcceptance(manifest(files.artifacts), { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("accepted");
+    expect(result.reasons).toEqual([]);
+    expect(renderAcceptanceReport(result)).toContain("**ACCEPTED**");
+    expect(renderAcceptanceReport(result)).toContain("david (owner), arnau (member)");
+    expect(renderAcceptanceReport(result)).toContain("ttftP95Ms=900");
+  });
+
+  it("classifies localhost and CI evidence as prefilter-only even when every gate passes", async () => {
+    const files = await fixture();
+    const local = manifest(files.artifacts);
+    local.acceptanceKind = "prefilter";
+    local.environment = "ci";
+    local.target = "http://127.0.0.1:3100";
+    for (const gate of local.gates) {
+      gate.environment = "ci";
+      gate.target = local.target;
+    }
+    const result = await evaluateAcceptance(local, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("prefilter-only");
+    expect(result.reasons).toContain("local_or_ci_prefilter_is_not_live_acceptance");
+  });
+
+  it("rejects missing gates, wrong live target, release drift, incomplete metrics and open high failures", async () => {
+    const files = await fixture();
+    const incomplete = manifest(files.artifacts);
+    incomplete.target = "https://preview.graphikai.com";
+    incomplete.gates = incomplete.gates.filter(({ id }) => id !== "real-turn");
+    incomplete.gates[0].releaseSha = "b".repeat(40);
+    incomplete.gates.find(({ id }) => id === "performance-concurrency")!.latencyMs = { ttftP95Ms: 900 };
+    incomplete.failures.push({ id: "isolation-gap", severity: "high", status: "open", summary: "Live isolation is not proved." });
+    const result = await evaluateAcceptance(incomplete, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      "canonical_live_target_required",
+      "required_gate_missing:real-turn",
+      "release_sha_mismatch:release-identity-readiness",
+      "performance_metric_missing:navigationP95Ms",
+      "open_critical_or_high_failure",
+    ]));
+  });
+
+  it("rejects generic gate evidence, incomplete actor coverage, release identity drift and a missed latency budget", async () => {
+    const files = await fixture();
+    const bypass = manifest(files.artifacts);
+    bypass.releaseIdentity.runtimeSha = "b".repeat(40);
+    const turn = bypass.gates.find(({ id }) => id === "real-turn")!;
+    turn.actorIds = ["david"];
+    turn.routes = ["acceptance:real-turn"];
+    turn.evidence = turn.evidence.filter(({ kind }) => kind === "turn");
+    const action = bypass.gates.find(({ id }) => id === "real-action-approval-readback")!;
+    action.evidence = action.evidence.filter(({ kind }) => kind === "readback");
+    const operations = bypass.gates.find(({ id }) => id === "logs-backup-rollback")!;
+    operations.evidence = operations.evidence.filter(({ kind }) => kind !== "restore");
+    bypass.gates.find(({ id }) => id === "performance-concurrency")!.latencyBudgetMs!.ttftP95Ms = 100;
+
+    const result = await evaluateAcceptance(bypass, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toEqual(expect.arrayContaining([
+      "release_identity_mismatch:runtimeSha",
+      "required_actors_missing:real-turn",
+      "required_route_missing:real-turn:POST /api/chat",
+      "required_evidence_missing:real-turn:readback:GET /api/runtime/status",
+      "required_evidence_missing:real-action-approval-readback:approval:POST /api/runtime/approvals",
+      "required_evidence_missing:logs-backup-rollback:restore:backup:restore",
+      "performance_budget_exceeded:ttftP95Ms",
+    ]));
+  });
+
+  it("rejects absent, modified, symlinked and hard-linked evidence", async () => {
+    const files = await fixture();
+    const changed = manifest(files.artifacts);
+    await writeFile(path.join(files.evidenceRoot, "real-turn-turn.json"), "tampered\n", { mode: 0o600 });
+    await rm(path.join(files.evidenceRoot, "visual-visual.json"));
+    await symlink(path.join(files.evidenceRoot, "accessibility-accessibility.json"), path.join(files.evidenceRoot, "visual-visual.json"));
+    await link(path.join(files.evidenceRoot, "threat-model-contracts-contract.json"), path.join(files.evidenceRoot, "duplicate-evidence.json"));
+    const result = await evaluateAcceptance(changed, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons.some((reason) => reason.startsWith("evidence_digest_mismatch:real-turn"))).toBe(true);
+    expect(result.reasons.some((reason) => reason.startsWith("evidence_not_private_regular_file:visual"))).toBe(true);
+    expect(result.reasons.some((reason) => reason.startsWith("evidence_not_private_regular_file:threat-model-contracts"))).toBe(true);
+  });
+
+  it("rejects secret-shaped content and unknown manifest fields", async () => {
+    const files = await fixture();
+    const leaked = manifest(files.artifacts) as AcceptanceManifest & { token?: string };
+    leaked.failures.push({ id: "leak", severity: "low", status: "resolved", summary: "Authorization: Bearer abcdefghijklmnop" });
+    let result = await evaluateAcceptance(leaked, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons).toContain("secret_or_email_material_detected");
+
+    leaked.token = "must-not-be-accepted";
+    result = await evaluateAcceptance(leaked, { evidenceRoot: files.evidenceRoot });
+    expect(result.verdict).toBe("rejected");
+    expect(result.reasons.some((reason) => reason.includes("must NOT have additional properties"))).toBe(true);
+  });
+});
