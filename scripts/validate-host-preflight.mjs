@@ -292,6 +292,8 @@ if (offline) {
 } else {
   const docker = spawnSync("docker", ["version", "--format", "{{.Server.Version}}"], { encoding: "utf8" });
   if (docker.status !== 0 || !docker.stdout.trim()) fail("Docker daemon is unavailable");
+  const buildx = spawnSync("docker", ["buildx", "version"], { encoding: "utf8" });
+  if (buildx.status !== 0) fail("Docker Buildx is unavailable");
   inspectExistingDockerResource("network", required(env, "AIBRAIN_NETWORK_NAME"), installationId);
   inspectExistingDockerResource("network", required(env, "AIBRAIN_EGRESS_NETWORK_NAME"), installationId);
   for (const key of ["AIBRAIN_DATA_VOLUME_NAME", "AIBRAIN_BACKUP_VOLUME_NAME", "AIBRAIN_RESTORE_VOLUME_NAME"]) {

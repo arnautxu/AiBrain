@@ -105,6 +105,7 @@ main() {
   require_root_owned_file "$ACTIVE_CONFIG"
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
+  docker buildx version >/dev/null 2>&1 || fail "Docker Buildx is required before receiving a release archive"
 
   if [[ -f "$STATE_FILE" ]] && jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
