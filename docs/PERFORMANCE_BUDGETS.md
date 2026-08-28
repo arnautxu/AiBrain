@@ -36,10 +36,10 @@ a controlled benchmark.
 | Navigation latency | navigation intent → destination shell painted and interactive | p95 ≤ 500 ms for cached shell; otherwise comparative budget | not started | Browser marks per sidebar/search/project/thread transition; UI owner. |
 | TTI | document navigation start → composer focused and usable | comparative budget | not started | Must be collected in the real Arnall browser, not inferred from server logs. |
 | App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | validated locally | Private `codex.turn_metrics.serverFirstDeltaMs` is measured at the server notification boundary. This is not visible TTFT. `src/runtime/turn-telemetry.test.ts` fixes the clock and verifies the calculation. |
-| Visible TTFT | send intent → first agent text painted | comparative budget | not started | Requires a client send mark and a post-paint mark for the first `delta`. Never substitute first server delta. |
-| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | implemented | Private `codex.turn_metrics` includes server-side delta count plus inter-delta p50/p95/max. Client paint cadence is still pending. |
-| Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | `codex.turn_metrics.totalMs` is server runtime elapsed; the durable usage record retains request total. Client paint/persistence correlation is pending. |
-| Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | `codex.turn_lifecycle` correlates `disconnected`, `reconnected` and `resumed` without payloads. It is event evidence, not yet the end-to-end client catch-up latency. |
+| Visible TTFT | send intent → first agent text painted | comparative budget | implemented | `ClientTurnPerformance` records the first non-empty delta after the dispatcher applies it and schedules an rAF. This is a local paint proxy, not a browser-validated visible-latency result; never substitute the server first delta. |
+| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | implemented | Client readback has bounded inter-paint p50/p95/max after rAF; private `codex.turn_metrics` retains separate server-side cadence. Browser/live comparison remains pending. |
+| Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | The client records terminal `done`/`error`/`stopped` after rAF; `codex.turn_metrics.totalMs` remains server elapsed. Persisted-state correlation is still a live acceptance requirement. |
+| Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | Idempotent replay starts a client reconnect span; the next applied durable snapshot is measured after rAF. `codex.turn_lifecycle` remains separate server lifecycle evidence; live catch-up timing is pending. |
 | Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | not started | Browser owner must also preserve `indeterminate`; runtime must log the phase timestamps without command/body/secrets. |
 
 ## Reproducible local evidence on the authorized base
@@ -115,6 +115,26 @@ Operators read these records only from the existing authenticated operational
 log sink or an approved server-side acceptance artifact. A visible TTFT or
 paint cadence must continue to come from the client benchmark, not these server
 records.
+
+## Client paint telemetry readback
+
+Baseline: candidate `fcb30b15a28f037d70a0eec4141b914e67e7182b` has no
+client-side send-to-rAF timing, client paint cadence, terminal paint or
+reconnect-to-snapshot measurement. Runtime's private telemetry cannot observe
+those client scheduling points.
+
+`src/ui/client-turn-performance.ts` holds at most 24 per-turn readbacks in the
+authenticated client's memory. A readback has only numeric durations/counts and
+a terminal enum: no prompt, response text, tokens, identifiers, filenames,
+error detail or secret. It is surfaced in that user's Review panel and may be
+downloaded only by that user action. This change adds no API route, analytics
+POST, shared storage or server logger.
+
+The event dispatcher calls the measurement only after it has applied a frame,
+then the measurement schedules rAF. The resulting timestamp is a controlled
+local proxy for a paint opportunity, not proof that a real browser painted it;
+real-browser and Arnall validation remain required before claiming visible TTFT
+or user-perceived streaming latency.
 
 ## Historical live observations, not current acceptance
 
