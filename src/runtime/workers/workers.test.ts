@@ -524,7 +524,14 @@ describe("WorkerRuntimeRegistry", () => {
     expect(context.mounts.runtimeReadOnly).toEqual([
       config.paths.companyContextRoot,
       config.paths.sourceReadRoot,
+      path.join(manifest.roots.staging, "threads"),
     ]);
+    const sibling = await new WorkerProvisioner({ config }).provision(syntheticUser(2));
+    expect(context.mounts.runtimeReadOnly).not.toContain(config.paths.dataRoot);
+    expect(context.mounts.runtimeReadOnly).not.toContain(config.paths.usersRoot);
+    expect(context.mounts.runtimeReadOnly).not.toContain(sibling.roots.staging);
+    expect(context.mounts.runtimeReadOnly).not.toContain(path.join(sibling.roots.staging, "threads"));
+    expect(context.mounts.runtimeReadOnly).not.toContain(path.parse(config.paths.dataRoot).root);
     expect(context.mounts.runtimeReadWrite).not.toContain(config.paths.publishWriteRoot);
     expect(context.mounts.runtimeReadWrite).toContain(manifest.roots.stagingTemp);
     expect(context.mounts.runtimeReadWrite).not.toContain(manifest.roots.staging);

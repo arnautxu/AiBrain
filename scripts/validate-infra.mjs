@@ -196,6 +196,8 @@ for (const writable of ["runtime_root", "workspace", "artifacts_root", "transpor
 }
 requireMatch(worker, /--bind "\$staging_root\/tmp" "\$staging_root\/tmp"/u, "worker sandbox is missing its private temporary directory");
 forbidMatch(worker, /--bind "\$staging_root" "\$staging_root"/u, "worker sandbox exposes all staged uploads");
+requireMatch(worker, /--ro-bind "\$uploaded_documents_root" "\$uploaded_documents_root"/u, "worker sandbox does not expose the employee upload directory read-only");
+forbidMatch(worker, /--bind "\$uploaded_documents_root" "\$uploaded_documents_root"/u, "worker sandbox exposes uploaded documents as writable");
 forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-rw as a real writable bind");
 forbidMatch(workerCodexTurn, /runtimeWorkspaceRoots:\s*\[[^\]]*roots\.staging/gu, "Codex turn exposes the employee staging root as a workspace");
 requireMatch(turnAttachments, /No filesystem staging path is exposed/u, "turn document inputs do not declare the server-only staging boundary");

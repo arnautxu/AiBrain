@@ -35,6 +35,7 @@ workspace=$(pwd -P)
 user_root=$(dirname "$workspace")
 runtime_root=$user_root/runtime
 staging_root=$user_root/staging
+uploaded_documents_root=$staging_root/threads
 artifacts_root=$user_root/artifacts
 transport_audit_root=$user_root/audit/transport
 
@@ -53,6 +54,8 @@ for writable_root in "$runtime_root" "$workspace" "$staging_root" "$artifacts_ro
   canonical_root=$(realpath "$writable_root")
   [ "$canonical_root" = "$writable_root" ] || fail "worker roots may not resolve through symlinks"
 done
+[ -d "$uploaded_documents_root" ] && [ ! -L "$uploaded_documents_root" ] || fail "uploaded document root is unsafe"
+[ "$(realpath "$uploaded_documents_root")" = "$uploaded_documents_root" ] || fail "uploaded document root may not resolve through symlinks"
 
 [ -d "$publish_root" ] && [ ! -L "$publish_root" ] || fail "publish root is unavailable"
 [ "$(realpath "$publish_root")" = "$publish_root" ] || fail "publish root may not resolve through symlinks"
@@ -83,9 +86,10 @@ done
 
 # The container root is read-only, then the complete product dataRoot is hidden.
 # Only company context, source-ro, this employee's explicit Markdown context and
-# declared writable roots are re-exposed. Staged uploads remain server-only;
-# the worker receives only server-prepared turn inputs. This prevents credential
-# theft from browser profiles, local sessions, backups or sibling employees.
+# declared writable roots and the employee's upload directory are re-exposed.
+# Uploads are read-only at `staging/threads`; only `staging/tmp` remains
+# writable. This prevents credential theft from browser profiles, local
+# sessions, backups or sibling employees.
 exec /usr/bin/bwrap \
   --die-with-parent \
   --new-session \
@@ -108,6 +112,7 @@ exec /usr/bin/bwrap \
   --remount-ro "$publish_root" \
   --bind "$runtime_root" "$runtime_root" \
   --bind "$workspace" "$workspace" \
+  --ro-bind "$uploaded_documents_root" "$uploaded_documents_root" \
   --bind "$staging_root/tmp" "$staging_root/tmp" \
   --bind "$artifacts_root" "$artifacts_root" \
   --bind "$transport_audit_root" "$transport_audit_root" \
