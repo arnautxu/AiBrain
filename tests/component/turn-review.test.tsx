@@ -51,27 +51,47 @@ const message: ChatMessage = {
 afterEach(cleanup);
 
 describe("turn activity and Review", () => {
-  it("shows safe live activity labels with shimmer while a turn is running", () => {
-    render(<TurnActivity
+  it("keeps live activity compact, updates its shimmer label and opens details on demand", () => {
+    const liveMessage: ChatMessage = {
+      ...message,
+      status: "streaming",
+      plan: [],
+      approvals: [],
+      diff: "",
+      activity: [
+        { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "complete" },
+        { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
+      ],
+    };
+    const { container, rerender } = render(<TurnActivity
+      message={liveMessage}
+      onResolveApproval={vi.fn()}
+    />);
+    const details = container.querySelector("details");
+    const summary = container.querySelector("summary");
+    if (!details || !summary) throw new Error("Live activity details were not rendered");
+
+    expect(details).not.toHaveAttribute("open");
+    expect(within(summary).getByText("Editando archivos")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Respuesta preparada")).not.toBeVisible();
+
+    rerender(<TurnActivity
       message={{
-        ...message,
-        status: "streaming",
-        plan: [],
-        approvals: [],
-        diff: "",
+        ...liveMessage,
         activity: [
-          { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "running" },
-          { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
+          { ...liveMessage.activity[0] },
+          { ...liveMessage.activity[1], status: "complete" },
           { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
         ],
       }}
       onResolveApproval={vi.fn()}
     />);
 
-    expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
+    expect(details).not.toHaveAttribute("open");
+    expect(within(summary).getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
+    fireEvent.click(summary);
+    expect(details).toHaveAttribute("open");
+    expect(screen.getByText("Respuesta preparada")).toBeVisible();
   });
 
   it("presents plan, command output, diff and approval decisions in employee language", () => {
