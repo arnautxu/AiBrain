@@ -331,7 +331,7 @@ export class WorkerRuntimeRegistry {
       runtime = await this.factory.create(context);
       this.assertExclusiveRuntime(entry.userId, runtime);
       entry.runtime = runtime;
-      await runtime.start();
+      await waitForWorkerConnection(runtime.start(), this.workerConnectTimeoutMs);
       await waitForWorkerConnection(runtime.transport.connect(), this.workerConnectTimeoutMs);
       entry.handle = frozenHandle(this.config.installationId, entry.manifest, runtime.transport);
       entry.state = "running";
