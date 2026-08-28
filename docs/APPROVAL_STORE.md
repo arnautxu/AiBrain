@@ -29,7 +29,9 @@ El registro JSON es la fuente de verdad del estado actual; el journal append-onl
 8. El waiter consulta el registro durable. No existe resolver global ni handler compartido por ID.
 
 `requestType` admite `command`, `file`, `permissions` y `browser`. Las acciones
-browser mutantes persisten primero esta approval y después emiten el evento UI.
+browser con un efecto externo sensible persisten primero esta approval y después
+emiten el evento UI. Abrir URLs, leer, hacer scroll, clicar controles de
+navegación y escribir texto ordinario no requieren aprobación humana.
 Su `ApprovalItem` incluye `kind: "browser"` y el fingerprint de permisos del
 turn. Un store separado bajo `browser/tool-calls/` deduplica cada call y conserva
 un journal acotado solo con hashes, tool, estado, fingerprint, resultado booleano

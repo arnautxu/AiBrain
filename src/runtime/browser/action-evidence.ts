@@ -4,6 +4,11 @@ const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
 export type BrowserMutationAction = "open" | "scroll" | "click" | "type";
 
+export type BrowserInteractionCommand = Readonly<{
+  action: BrowserMutationAction;
+  selector?: string;
+}>;
+
 export type BrowserActionResourceSnapshot = Readonly<{
   kind: "browser-page";
   origin: string;
@@ -53,6 +58,28 @@ export type BrowserActionReadback = Readonly<{
   resource: BrowserActionResourceSnapshot;
   observedAt: string;
 }>;
+
+const SENSITIVE_CLICK_PATTERN = /\b(?:send|submit|publish|post|buy|purchase|checkout|pay|order|delete|remove|save|update|change|confirm|subscribe|unsubscribe|follow|connect|like|share|sign\s*in|log\s*in|log\s*out|enviar|envia|publicar|comprar|compra|pagar|paga|pedido|comanda|borrar|esborrar|eliminar|guardar|desar|actualizar|actualitzar|cambiar|canviar|confirmar|suscribir|subscriure|seguir|conectar|connectar|iniciar\s+sesion|cerrar\s+sesion)\b/u;
+const SENSITIVE_TYPE_PATTERN = /\b(?:password|passcode|one\s*time\s*password|otp|secret|token|pin|credit\s*card|card\s*number|cvv|cvc|iban|bank\s*account|contrasena|contrasenya|clave|tarjeta|targeta|cuenta\s+bancaria|compte\s+bancari)\b/u;
+
+function normalizedInteractionText(value: string) {
+  return value.normalize("NFKD").replace(/[\u0300-\u036f]/gu, "").toLowerCase();
+}
+
+/**
+ * Approval is about the external effect, not about operating the browser.
+ * This classification consumes only the server-prepared target snapshot, so
+ * untrusted page instructions cannot opt themselves out of approval.
+ */
+export function browserInteractionRequiresApproval(
+  command: BrowserInteractionCommand,
+  resource: BrowserActionResourceSnapshot,
+) {
+  if (command.action === "open" || command.action === "scroll") return false;
+  const target = normalizedInteractionText(`${command.selector ?? ""} ${resource.locatorSummary}`);
+  if (command.action === "type") return SENSITIVE_TYPE_PATTERN.test(target);
+  return SENSITIVE_CLICK_PATTERN.test(target) || /\btype\s*=\s*["']?submit\b/u.test(target);
+}
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
