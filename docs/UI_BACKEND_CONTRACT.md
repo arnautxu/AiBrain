@@ -1388,8 +1388,10 @@ rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
 `GET /api/usage/me` requiere la cookie local opaca y siempre devuelve únicamente
 las métricas internas del empleado autenticado. `GET /api/usage/company`
-requiere además que su UUID figure en `AIBRAIN_USAGE_ADMIN_USER_IDS` (lista
-separada por comas); la autorización falla de forma cerrada con `403`.
+requiere además que la asignación durable del usuario sea `workspace-owner` o
+`workspace-admin`; `workspace-member` falla de forma cerrada con `403`. La ruta
+resuelve el rol server-side desde `dataRoot/workspace-admin/state.json` y no
+acepta UUIDs o roles enviados por el navegador.
 
 Ambos endpoints responden `Cache-Control: private, no-store`. El objeto
 `internal` usa este contrato:

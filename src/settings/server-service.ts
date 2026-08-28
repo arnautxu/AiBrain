@@ -57,7 +57,7 @@ async function permissionsForSession(session: AuthSession): Promise<PermissionSu
     const resolved = await provider.resolveForUser(
       installation.installationId,
       session.user.id,
-      { turnId: randomUUID(), roleId: null, projectId: null },
+      { turnId: randomUUID(), roleId: workspacePolicy.roleId, projectId: null },
     );
     return ACTIONS.map((action) => {
       const rules = resolved.rules.filter((rule) => rule.action === action).map((rule) => ({

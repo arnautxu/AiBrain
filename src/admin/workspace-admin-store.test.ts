@@ -54,4 +54,39 @@ describe("FileWorkspaceAdminStore", () => {
     await expect(new FileWorkspaceAdminStore("other-qa", root).read([ownerId]))
       .rejects.toThrow("another installation");
   });
+
+  it("uses the operator bootstrap only once and never promotes later members from environment", async () => {
+    const laterId = "00000000-0000-4000-8000-000000000003";
+    const store = new FileWorkspaceAdminStore("example-qa", root);
+    await store.read([ownerId, memberId]);
+
+    process.env.AIBRAIN_ADMIN_USER_IDS = `${ownerId},${laterId}`;
+    const reconciled = await store.read([ownerId, memberId, laterId]);
+    expect(reconciled.assignments).toContainEqual({ userId: laterId, roleId: "workspace-member" });
+  });
+
+  it("fails closed when no provisioned owner is configured for first bootstrap", async () => {
+    delete process.env.AIBRAIN_ADMIN_USER_IDS;
+    await expect(new FileWorkspaceAdminStore("example-qa", root).read([ownerId]))
+      .rejects.toThrow("Workspace owner bootstrap is required");
+  });
+
+  it("does not impose a hardcoded user cap on assignments or group membership", async () => {
+    const memberIds = Array.from(
+      { length: 501 },
+      (_, index) => `00000000-0000-4000-8000-${String(index + 1_000).padStart(12, "0")}`,
+    );
+    const userIds = [ownerId, ...memberIds];
+    const store = new FileWorkspaceAdminStore("example-qa", root);
+    const initial = await store.read(userIds);
+    expect(initial.assignments).toHaveLength(userIds.length);
+
+    const updated = await store.mutate(userIds, ownerId, (current) => {
+      const group = store.newGroup("Tota la plantilla", "Sense límit comercial hardcoded");
+      group.memberIds = memberIds;
+      current.groups.push(group);
+      return { action: "group.created", targetType: "group", targetId: group.id, summary: "Grup creat." };
+    });
+    expect(updated.groups[0]?.memberIds).toHaveLength(memberIds.length);
+  });
 });
