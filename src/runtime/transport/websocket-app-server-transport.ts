@@ -177,6 +177,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   private cursorLoaded = false;
   private deliveryLoaded = false;
   private durableBacklogTargetSequence = 0;
+  private durableBacklogYieldedThrough = 0;
   private reconnectAttempt = 0;
   private pendingReconnectFloorMs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -311,10 +312,12 @@ export class WebSocketAppServerTransport implements AppServerTransport {
 
   async *events() {
     if (this.journal.readUndelivered && this.durableBacklogTargetSequence > 0) {
-      let yieldedThrough = 0;
       const pageSize = Math.min(this.options.maxEventBuffer, 256);
-      while (yieldedThrough < this.durableBacklogTargetSequence) {
-        const pending = await this.journal.readUndelivered(pageSize, yieldedThrough);
+      while (this.durableBacklogYieldedThrough < this.durableBacklogTargetSequence) {
+        const pending = await this.journal.readUndelivered(
+          pageSize,
+          this.durableBacklogYieldedThrough,
+        );
         const page = pending.filter((event) => event.sequence <= this.durableBacklogTargetSequence);
         if (page.length === 0) {
           throw new TransportProtocolError(
@@ -322,7 +325,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
           );
         }
         for (const event of page) {
-          yieldedThrough = event.sequence;
+          this.durableBacklogYieldedThrough = event.sequence;
           yield event;
         }
       }
