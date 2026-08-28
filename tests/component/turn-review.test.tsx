@@ -70,6 +70,8 @@ describe("turn activity and Review", () => {
         onResolveApproval={vi.fn()}
       />);
 
+      const execution = container.querySelector("details");
+      expect(execution).not.toHaveAttribute("open");
       expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
       expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
       expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
@@ -79,6 +81,8 @@ describe("turn activity and Review", () => {
       expect(container.querySelectorAll(".reasoning-stream .t-stream-w.is-in")).toHaveLength(0);
       act(() => vi.advanceTimersByTime(60));
       expect(container.querySelectorAll(".reasoning-stream .t-stream-w.is-in")).toHaveLength(1);
+      fireEvent.click(screen.getByText("Trabajando"));
+      expect(execution).toHaveAttribute("open");
     } finally {
       vi.useRealTimers();
     }

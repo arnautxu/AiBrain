@@ -1,7 +1,9 @@
 "use client";
 
+import { useState } from "react";
 import {
   Brain,
+  CaretRight,
   Check,
   Circle,
   FileCode,
@@ -138,6 +140,7 @@ function ApprovalCard({
 }
 
 export function TurnActivity({ message, compact = false, showDiff = true, onResolveApproval }: TurnActivityProps) {
+  const [executionOpen, setExecutionOpen] = useState(compact);
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 || Boolean(message.diff);
   if (!hasDetails) return null;
   const executionLabel = message.status === "streaming"
@@ -153,16 +156,16 @@ export function TurnActivity({ message, compact = false, showDiff = true, onReso
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {message.plan.length > 0 || message.activity.length > 0 ? (
         <details
-          key={`${compact ? "panel" : "turn"}-${message.status}`}
           className="group/execution"
-          open={compact || message.status === "streaming" ? true : undefined}
+          open={executionOpen}
+          onToggle={(event) => setExecutionOpen(event.currentTarget.open)}
         >
-          <summary className="flex w-fit cursor-pointer list-none items-center gap-2 rounded-lg py-1 text-[16px] font-normal leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">
+          <summary className="codex-thinking-summary flex w-fit cursor-pointer list-none items-center gap-1.5 rounded-md py-1 text-[14px] font-medium leading-5 text-[var(--text-muted)] transition-colors hover:text-[var(--text)] focus-visible:bg-[var(--surface-hover)] focus-visible:outline-none [&::-webkit-details-marker]:hidden">
             {message.status === "streaming" ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} /> : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
-            <span className={message.status === "streaming" ? "activity-shimmer" : undefined}>{executionLabel}</span>
-            <span aria-hidden className="transition group-open/execution:rotate-90">›</span>
+            <span className={message.status === "streaming" ? "activity-shimmer" : undefined} aria-live={message.status === "streaming" ? "polite" : undefined}>{executionLabel}</span>
+            <span aria-hidden className="codex-thinking-chevron grid size-4 place-items-center text-[var(--text-subtle)] transition-transform duration-150 group-open/execution:rotate-90"><CaretRight size={11} weight="bold" /></span>
           </summary>
-          <div className="mt-3 space-y-4 border-l border-[var(--border-subtle)] pl-4">
+          <div className="codex-thinking-content mt-2.5 space-y-4 border-l border-[var(--border-subtle)] pl-4">
             {message.plan.length > 0 ? (
               <section>
           <div className="mb-2.5 flex items-center gap-2 text-[13px] font-semibold text-[var(--text)]">
