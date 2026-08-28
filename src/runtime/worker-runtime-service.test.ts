@@ -41,11 +41,26 @@ class FakeTransport implements AppServerTransport {
   readonly stream = new AsyncEvents();
   sequence = 0;
 
+  constructor(private readonly alreadyInitialized = false) {}
+
   async connect() {}
 
   async send(message: AppServerRequest) {
     this.sent.push(message);
     if (message.kind !== "rpc-request") return;
+    if (message.rpc.method === "initialize" && this.alreadyInitialized) {
+      this.sequence += 1;
+      this.stream.push({
+        eventId: `event-${this.sequence}`,
+        sequence: this.sequence,
+        occurredAt: new Date().toISOString(),
+        message: {
+          kind: "rpc-response",
+          rpc: { id: message.rpc.id, error: { code: -32600, message: "Already initialized" } },
+        },
+      });
+      return;
+    }
     const result = (() => {
       switch (message.rpc.method) {
         case "initialize": return { userAgent: "codex-test" };
@@ -164,6 +179,22 @@ describe("worker App Server client", () => {
         "account/usage/read",
       ].includes(item.rpc.method),
     )).toHaveLength(0);
+    await client.close();
+  });
+
+  it("reuses a persistent App Server that was initialized by an earlier client", async () => {
+    const transport = new FakeTransport(true);
+    const client = new WorkerAppServerClient(handle(transport));
+
+    await expect(client.connectionSummary()).resolves.toMatchObject({
+      connected: true,
+      planType: "team",
+      processWarm: true,
+    });
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-notification" && item.rpc.method === "initialized")).toHaveLength(0);
+    expect(transport.sent.some((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read")).toBe(true);
     await client.close();
   });
 

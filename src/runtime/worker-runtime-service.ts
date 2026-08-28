@@ -52,6 +52,13 @@ function randomRequest(
   } as ClientRequest;
 }
 
+function isAlreadyInitialized(error: unknown) {
+  return error instanceof Error
+    && error.message === "Already initialized"
+    && "code" in error
+    && error.code === -32600;
+}
+
 export class WorkerAppServerClient {
   readonly router: AppServerRpcRouter;
   private initialized: Promise<void> | null = null;
@@ -78,18 +85,26 @@ export class WorkerAppServerClient {
 
   private async initializeOnce() {
     await this.router.start();
-    await this.router.request(randomRequest("initialize", {
-      clientInfo: {
-        name: "aibrain_workbench",
-        title: "AiBrain",
-        version: "0.4.0",
-      },
-      capabilities: {
-        experimentalApi: true,
-        requestAttestation: false,
-      },
-    }, "initialize"), 30_000);
-    await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
+    let initializedHere = true;
+    try {
+      await this.router.request(randomRequest("initialize", {
+        clientInfo: {
+          name: "aibrain_workbench",
+          title: "AiBrain",
+          version: "0.4.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+          requestAttestation: false,
+        },
+      }, "initialize"), 30_000);
+    } catch (error) {
+      if (!isAlreadyInitialized(error)) throw error;
+      initializedHere = false;
+    }
+    if (initializedHere) {
+      await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
+    }
     this.account = parseAccount(await this.router.request(randomRequest(
       "account/read",
       { refreshToken: false },

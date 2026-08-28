@@ -338,6 +338,61 @@ describe("private per-user worker gateway", () => {
     }
   });
 
+  it("ACKs an already completed server response when recovery cannot reproduce its original decision", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) {',
+      '    write({ id: rpc.id, result: {} });',
+      '    write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
+      '    return;',
+      '  }',
+      '  write({ method: "item/agentMessage/delta", params: { threadId: "thread-1", turnId: "turn-1", itemId: "agent-1", delta: "approval processed once" } });',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const worker = gateway();
+    await worker.start();
+    const firstClient = transport(worker);
+    try {
+      await firstClient.connect();
+      await firstClient.send(initializeRequest());
+      const initialized = await nextEvent(firstClient);
+      const approval = await nextEvent(firstClient);
+      if (!initialized.done) await firstClient.acknowledge(initialized.value);
+      if (!approval.done) await firstClient.acknowledge(approval.value);
+      await firstClient.send(approvalResponse());
+      const progress = await nextEvent(firstClient);
+      if (!progress.done) await firstClient.acknowledge(progress.value);
+      await firstClient.close();
+
+      const recoveredClient = transport(worker);
+      try {
+        await recoveredClient.connect();
+        await expect(recoveredClient.send({
+          ...approvalResponse(),
+          rpc: { id: "approval-1", error: { code: -32602, message: "No active route." } },
+        })).resolves.toBeUndefined();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const progressEvents = (await readFile(
+          path.join(context.transportAudit, "gateway-events.jsonl"),
+          "utf8",
+        )).trim().split("\n").map((line) => JSON.parse(line) as {
+          payload: { message: { kind: string; rpc: { method?: string } } };
+        }).filter((entry) => entry.payload.message.kind === "rpc-notification"
+          && entry.payload.message.rpc.method === "item/agentMessage/delta");
+        expect(progressEvents).toHaveLength(1);
+      } finally {
+        await recoveredClient.close();
+      }
+    } finally {
+      await firstClient.close();
+      await worker.stop();
+    }
+  });
+
   it("retries the same server response after a child crash before processing evidence", async () => {
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',

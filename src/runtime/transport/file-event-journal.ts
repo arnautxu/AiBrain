@@ -57,6 +57,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
   private readonly lockManager: ResourceLockManager;
   private readonly deliveryCursorPath: string;
   private readonly maxRetainedDeliveredEvents: number;
+  private readonly verifiedEvents = new Map<number, string>();
 
   constructor(options: FileTransportEventJournalOptions) {
     this.filePath = path.resolve(options.filePath);
@@ -98,6 +99,7 @@ export class FileTransportEventJournal implements TransportEventJournal {
       }
       return true;
     });
+    if (appended !== null) this.rememberVerified(validated);
     return appended !== null;
   }
 
@@ -134,7 +136,9 @@ export class FileTransportEventJournal implements TransportEventJournal {
           throw new TransportProtocolError("Transport delivery cursor does not match the durable event journal.");
         }
       }
-      return this.readEvents(Math.max(cursor?.sequence ?? 0, afterSequence), limit);
+      const events = await this.readEvents(Math.max(cursor?.sequence ?? 0, afterSequence), limit);
+      for (const event of events) this.rememberVerified(event);
+      return events;
     });
   }
 
@@ -149,8 +153,12 @@ export class FileTransportEventJournal implements TransportEventJournal {
           `Transport delivery expected sequence ${expected}, received ${validated.sequence}.`,
         );
       }
-      const persisted = (await this.readEvents(validated.sequence - 1, 1))[0];
-      if (!persisted || persisted.eventId !== validated.eventId || persisted.sequence !== validated.sequence) {
+      const verifiedEventId = this.verifiedEvents.get(validated.sequence);
+      const persisted = verifiedEventId === undefined
+        ? (await this.readEvents(validated.sequence - 1, 1))[0]
+        : validated;
+      if (!persisted || persisted.eventId !== validated.eventId || persisted.sequence !== validated.sequence ||
+          (verifiedEventId !== undefined && verifiedEventId !== validated.eventId)) {
         throw new TransportProtocolError("Cannot acknowledge an event absent from the durable journal.");
       }
       await atomicWriteJson(this.deliveryCursorPath, {
@@ -158,6 +166,10 @@ export class FileTransportEventJournal implements TransportEventJournal {
         eventId: validated.eventId,
         sequence: validated.sequence,
       }, deliveryCursorSchema, { mode: 0o600 });
+      this.verifiedEvents.delete(validated.sequence);
+      const compactionBoundary = validated.sequence % this.maxRetainedDeliveredEvents === 0
+        || validated.sequence === this.maxRetainedDeliveredEvents * 2 + 1;
+      if (!compactionBoundary) return;
       const retainAfter = Math.max(0, validated.sequence - this.maxRetainedDeliveredEvents);
       await this.journal.compact((entries) => {
         if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
@@ -173,6 +185,16 @@ export class FileTransportEventJournal implements TransportEventJournal {
         return retained;
       });
     });
+  }
+
+  private rememberVerified(event: AppServerEvent) {
+    this.verifiedEvents.delete(event.sequence);
+    this.verifiedEvents.set(event.sequence, event.eventId);
+    while (this.verifiedEvents.size > 4_096) {
+      const oldest = this.verifiedEvents.keys().next().value;
+      if (oldest === undefined) break;
+      this.verifiedEvents.delete(oldest);
+    }
   }
 
   async verifyAndRepair() {
