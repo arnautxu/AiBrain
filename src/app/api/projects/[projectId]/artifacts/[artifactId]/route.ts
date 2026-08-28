@@ -6,12 +6,11 @@ import { getProjectRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 import { loadInstallationConfig } from "@/config/installation";
 import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
-import { contentDisposition } from "@/library/http";
 
 export const runtime = "nodejs";
 
 export async function GET(
-  request: Request,
+  _request: Request,
   context: { params: Promise<{ projectId: string; artifactId: string }> },
 ) {
   const session = await getSession();
@@ -19,12 +18,6 @@ export async function GET(
   const { projectId, artifactId } = await context.params;
   if (!isUuid(projectId) || !isUuid(artifactId)) {
     return NextResponse.json({ error: "Artefacte no vàlid." }, { status: 400 });
-  }
-  const searchParams = new URL(request.url).searchParams;
-  if ([...searchParams.keys()].some((key) => key !== "download") ||
-      searchParams.getAll("download").length > 1 ||
-      (searchParams.has("download") && searchParams.get("download") !== "1")) {
-    return NextResponse.json({ error: "Consulta no vàlida." }, { status: 400 });
   }
   try {
     const project = await getProjectRuntimeContext(session, projectId);
@@ -37,16 +30,11 @@ export async function GET(
     );
     const artifactRoot = path.join(projectWorkspace, ".aibrain", "artifacts");
     const contents = await readRegularFileWithin(artifactRoot, `${artifactId}.png`, 20_000_000);
-    const fileName = `imatge-${artifactId.slice(0, 8)}.png`;
     return new Response(contents, {
       headers: {
         "Content-Type": "image/png",
         "Cache-Control": "private, no-store",
-        "Content-Disposition": contentDisposition(
-          fileName,
-          searchParams.get("download") === "1" ? "attachment" : "inline",
-        ),
-        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": `inline; filename="imatge-${artifactId.slice(0, 8)}.png"`,
       },
     });
   } catch {

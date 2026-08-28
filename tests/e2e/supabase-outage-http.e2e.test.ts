@@ -129,7 +129,6 @@ async function startNext() {
     env: {
       ...process.env,
       AIBRAIN_AUTH_MODE: "supabase",
-      AIBRAIN_ADMIN_USER_IDS: USER_ID,
       AIBRAIN_INSTALLATION_CONFIG: configPath,
       AIBRAIN_SESSION_SECRET: "offline-e2e-secret-0123456789abcdef0123456789abcdef",
       NEXT_PUBLIC_SUPABASE_URL: providerUrl,

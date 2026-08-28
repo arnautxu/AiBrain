@@ -156,7 +156,7 @@ for (const viewport of viewports) {
     await screenshot(page, "shell-dark", viewport);
 
     await page.getByRole("button", { name: "Abrir preferencias" }).click();
-    const preferences = page.getByRole("dialog", { name: /Configuración de/ });
+    const preferences = page.getByRole("dialog", { name: /Preferencias de/ });
     await expect(preferences).toBeVisible();
     await preferences.evaluate(async (element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
     await screenshot(page, "preferences-dark", viewport);
@@ -181,7 +181,7 @@ for (const viewport of viewports) {
     await expect(approval).toBeInViewport();
     await screenshot(page, "turn-approval-light", viewport);
 
-    await page.getByRole("button", { name: "Revisar resultados" }).click();
+    await page.getByRole("button", { name: "Revisar cambios" }).click();
     await expect(page.getByRole("heading", { name: "Review del turno" })).toBeVisible();
     await screenshot(page, "review-light", viewport);
     await page.getByRole("button", { name: "Cerrar Review" }).click();

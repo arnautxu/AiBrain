@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { parseInstallationConfig, type InstallationConfig } from "@/config/installation-schema";
 import type { ChatRequest } from "@/lib/chat-contract";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
@@ -61,15 +61,8 @@ function chatRequest(turnId: string): ChatRequest {
 
 describe("server turn permission preflight", () => {
   const temporaryRoots: string[] = [];
-  const originalAdmins = process.env.AIBRAIN_ADMIN_USER_IDS;
-
-  beforeEach(() => {
-    process.env.AIBRAIN_ADMIN_USER_IDS = USER_ID;
-  });
 
   afterEach(async () => {
-    if (originalAdmins === undefined) delete process.env.AIBRAIN_ADMIN_USER_IDS;
-    else process.env.AIBRAIN_ADMIN_USER_IDS = originalAdmins;
     await Promise.all(temporaryRoots.splice(0).map((root) =>
       rm(root, { recursive: true, force: true })));
   });
@@ -165,7 +158,6 @@ describe("server turn permission preflight", () => {
         { scope: "installation", policyVersion: 1 },
         { scope: "user", policyVersion: 3 },
       ],
-      roleId: "workspace-owner",
     });
 
     const second = await resolve(installation, "66f66666-6666-4666-8666-666666666666");

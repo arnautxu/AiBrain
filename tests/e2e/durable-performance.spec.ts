@@ -27,7 +27,7 @@ test("a delayed high-frequency stream stays interactive, ordered and duplicate-f
 
   const preferencesTrigger = page.getByRole("button", { name: "Abrir preferencias" });
   await preferencesTrigger.click();
-  await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: /Preferencias de/ })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(preferencesTrigger).toBeFocused();
 

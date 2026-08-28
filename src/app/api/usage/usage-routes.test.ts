@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
   session: null as null | {
@@ -9,20 +9,22 @@ const mocked = vi.hoisted(() => ({
   },
   personal: vi.fn(),
   company: vi.fn(),
-  isAdmin: vi.fn(),
 }));
 
 vi.mock("@/auth/session", () => ({ getSession: async () => mocked.session }));
-vi.mock("@/admin/server-service", () => ({ isWorkspaceAdmin: mocked.isAdmin }));
 vi.mock("@/usage/server-service", () => ({
   personalUsageForUser: mocked.personal,
   companyUsageForUser: mocked.company,
+  isUsageCompanyAdmin: (userId: string) =>
+    (process.env.AIBRAIN_USAGE_ADMIN_USER_IDS ?? "").split(",").includes(userId),
 }));
 
 import { GET as personalGet } from "@/app/api/usage/me/route";
 import { GET as companyGet } from "@/app/api/usage/company/route";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
+const originalAdmins = process.env.AIBRAIN_USAGE_ADMIN_USER_IDS;
+
 describe("usage routes", () => {
   beforeEach(() => {
     mocked.session = {
@@ -33,10 +35,14 @@ describe("usage routes", () => {
     };
     mocked.personal.mockReset();
     mocked.company.mockReset();
-    mocked.isAdmin.mockReset();
     mocked.personal.mockResolvedValue({ schemaVersion: 1, scope: "personal" });
     mocked.company.mockResolvedValue({ schemaVersion: 1, scope: "company" });
-    mocked.isAdmin.mockResolvedValue(false);
+    delete process.env.AIBRAIN_USAGE_ADMIN_USER_IDS;
+  });
+
+  afterAll(() => {
+    if (originalAdmins === undefined) delete process.env.AIBRAIN_USAGE_ADMIN_USER_IDS;
+    else process.env.AIBRAIN_USAGE_ADMIN_USER_IDS = originalAdmins;
   });
 
   it("requires an authenticated session for personal usage", async () => {
@@ -53,13 +59,12 @@ describe("usage routes", () => {
     expect(mocked.personal).toHaveBeenCalledWith(USER_ID);
   });
 
-  it("fails closed for company usage until the durable workspace role is administrative", async () => {
+  it("fails closed for company usage until the user is configured as admin", async () => {
     expect((await companyGet()).status).toBe(403);
     expect(mocked.company).not.toHaveBeenCalled();
-    mocked.isAdmin.mockResolvedValue(true);
+    process.env.AIBRAIN_USAGE_ADMIN_USER_IDS = `00000000-0000-4000-8000-000000000002,${USER_ID}`;
     const response = await companyGet();
     expect(response.status).toBe(200);
-    expect(mocked.isAdmin).toHaveBeenCalledWith(mocked.session);
     expect(mocked.company).toHaveBeenCalledWith(USER_ID);
   });
 });

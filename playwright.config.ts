@@ -1,11 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 import path from "node:path";
 
-const port = Number(process.env.PLAYWRIGHT_PORT ?? 3100);
+const port = 3100;
 const baseURL = `http://127.0.0.1:${port}`;
 const installationConfig = path.resolve(
   process.cwd(),
-  process.env.PLAYWRIGHT_INSTALLATION_CONFIG ?? "config/installations/playwright.example.json",
+  "config/installations/playwright.example.json",
 );
 
 export default defineConfig({

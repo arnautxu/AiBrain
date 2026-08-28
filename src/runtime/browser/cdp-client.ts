@@ -6,7 +6,6 @@ export const PRIVATE_CDP_METHODS = [
   "Browser.getVersion",
   "Browser.setDownloadBehavior",
   "DOM.focus",
-  "DOM.describeNode",
   "DOM.getBoxModel",
   "DOM.getDocument",
   "DOM.querySelector",

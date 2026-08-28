@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   archiveProjectRequest,
-  branchThreadRequest,
   getThreadRequest,
   listProjectsRequest,
   listThreadsRequest,
@@ -19,10 +18,6 @@ const project: WorkbenchProject = {
   slug: "synthetic-project",
   status: "active",
   pinned: false,
-  instructions: "",
-  sources: [],
-  memory: { enabled: true, notes: "", updatedAt: null },
-  sharing: { visibility: "private", members: [] },
   workspace: {
     id: WORKSPACE_ID,
     label: "Synthetic Project",
@@ -91,24 +86,6 @@ describe("workbench API client lifecycle", () => {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "archived" }),
-    });
-  });
-
-  it("creates a validated branch through the dedicated endpoint", async () => {
-    const branched = {
-      ...thread,
-      id: "44444444-4444-4444-8444-444444444444",
-      lineage: { parentThreadId: THREAD_ID, branchedFromMessageId: THREAD_ID, kind: "edit" as const },
-    };
-    const fetchMock = vi.fn(async () => Response.json({ thread: branched, draftMessage: "Edited" }));
-    vi.stubGlobal("fetch", fetchMock);
-    await expect(branchThreadRequest(THREAD_ID, {
-      kind: "edit", messageId: THREAD_ID, editedContent: "Edited",
-    })).resolves.toEqual({ thread: branched, draftMessage: "Edited" });
-    expect(fetchMock).toHaveBeenCalledWith(`/api/threads/${THREAD_ID}/branch`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "edit", messageId: THREAD_ID, editedContent: "Edited" }),
     });
   });
 });

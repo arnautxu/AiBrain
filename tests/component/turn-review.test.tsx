@@ -51,47 +51,27 @@ const message: ChatMessage = {
 afterEach(cleanup);
 
 describe("turn activity and Review", () => {
-  it("keeps live activity compact, updates its shimmer label and opens details on demand", () => {
-    const liveMessage: ChatMessage = {
-      ...message,
-      status: "streaming",
-      plan: [],
-      approvals: [],
-      diff: "",
-      activity: [
-        { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "complete" },
-        { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
-      ],
-    };
-    const { container, rerender } = render(<TurnActivity
-      message={liveMessage}
-      onResolveApproval={vi.fn()}
-    />);
-    const details = container.querySelector("details");
-    const summary = container.querySelector("summary");
-    if (!details || !summary) throw new Error("Live activity details were not rendered");
-
-    expect(details).not.toHaveAttribute("open");
-    expect(within(summary).getByText("Editando archivos")).toHaveClass("activity-shimmer");
-    expect(screen.getByText("Respuesta preparada")).not.toBeVisible();
-
-    rerender(<TurnActivity
+  it("shows safe live activity labels with shimmer while a turn is running", () => {
+    render(<TurnActivity
       message={{
-        ...liveMessage,
+        ...message,
+        status: "streaming",
+        plan: [],
+        approvals: [],
+        diff: "",
         activity: [
-          { ...liveMessage.activity[0] },
-          { ...liveMessage.activity[1], status: "complete" },
+          { ...message.activity[0], id: "reasoning-1", kind: "reasoning", status: "running" },
+          { ...message.activity[0], id: "file-1", kind: "file", status: "running" },
           { ...message.activity[0], id: "command-1", kind: "command", status: "running" },
         ],
       }}
       onResolveApproval={vi.fn()}
     />);
 
-    expect(details).not.toHaveAttribute("open");
-    expect(within(summary).getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
-    fireEvent.click(summary);
-    expect(details).toHaveAttribute("open");
-    expect(screen.getByText("Respuesta preparada")).toBeVisible();
+    expect(screen.getByText("Trabajando")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Pensando")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Editando archivos")).toHaveClass("activity-shimmer");
+    expect(screen.getByText("Ejecutando comando")).toHaveClass("activity-shimmer");
   });
 
   it("presents plan, command output, diff and approval decisions in employee language", () => {
@@ -105,26 +85,6 @@ describe("turn activity and Review", () => {
     const approval = screen.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
     fireEvent.click(within(approval).getByRole("button", { name: "Permitir" }));
     expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
-  });
-
-  it("keeps connector outcomes auditable and removes session-wide approval", () => {
-    const connectorApproval = { ...message.approvals[0], id: "connector-approval", title: "Confirmar acción conectada" };
-    render(<TurnActivity
-      message={{
-        ...message,
-        approvals: [connectorApproval],
-        toolResults: [{
-          id: "managed-app:connector-approval", kind: "app", title: "Acción conectada", status: "failed",
-          summary: "indeterminate", output: null, sourceIds: [], createdAt: "2026-08-28T12:00:00.000Z",
-        }],
-      }}
-      onResolveApproval={vi.fn()}
-      managedAppApprovalKeys={[JSON.stringify(["thread-1", "turn-1", "item-1", "connector-approval"])]}
-    />);
-
-    expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Acción conectada"));
-    expect(screen.getByText("indeterminate")).toBeVisible();
   });
 
   it("renders an inspectable file diff and activity tabs", () => {

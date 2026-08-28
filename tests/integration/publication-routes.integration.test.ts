@@ -82,18 +82,12 @@ describe("server-side publication routes", () => {
   let root: string;
   let previousConfig: string | undefined;
   let previousSecret: string | undefined;
-  let previousAdmins: string | undefined;
-  let previousMinimumFreeBytes: string | undefined;
-  let previousMinimumFreeRatio: string | undefined;
   let threadId: string;
   let targetPath: string;
 
   beforeAll(async () => {
     previousConfig = process.env.AIBRAIN_INSTALLATION_CONFIG;
     previousSecret = process.env.AIBRAIN_PUBLICATION_SECRET;
-    previousAdmins = process.env.AIBRAIN_ADMIN_USER_IDS;
-    previousMinimumFreeBytes = process.env.AIBRAIN_MINIMUM_FREE_BYTES;
-    previousMinimumFreeRatio = process.env.AIBRAIN_MINIMUM_FREE_RATIO;
     root = await mkdtemp(path.join(tmpdir(), "aibrain-publication-routes-"));
     const dataRoot = path.join(root, "data");
     const publishWriteRoot = path.join(root, "publish-rw");
@@ -127,9 +121,6 @@ describe("server-side publication routes", () => {
     }, null, 2)}\n`, "utf8");
     process.env.AIBRAIN_INSTALLATION_CONFIG = configPath;
     process.env.AIBRAIN_PUBLICATION_SECRET = "publication-route-secret-with-more-than-thirty-two-bytes";
-    process.env.AIBRAIN_ADMIN_USER_IDS = USER_A;
-    process.env.AIBRAIN_MINIMUM_FREE_BYTES = "0";
-    process.env.AIBRAIN_MINIMUM_FREE_RATIO = "0";
 
     const [
       { loadInstallationConfig },
@@ -186,12 +177,6 @@ describe("server-side publication routes", () => {
     else process.env.AIBRAIN_INSTALLATION_CONFIG = previousConfig;
     if (previousSecret === undefined) delete process.env.AIBRAIN_PUBLICATION_SECRET;
     else process.env.AIBRAIN_PUBLICATION_SECRET = previousSecret;
-    if (previousAdmins === undefined) delete process.env.AIBRAIN_ADMIN_USER_IDS;
-    else process.env.AIBRAIN_ADMIN_USER_IDS = previousAdmins;
-    if (previousMinimumFreeBytes === undefined) delete process.env.AIBRAIN_MINIMUM_FREE_BYTES;
-    else process.env.AIBRAIN_MINIMUM_FREE_BYTES = previousMinimumFreeBytes;
-    if (previousMinimumFreeRatio === undefined) delete process.env.AIBRAIN_MINIMUM_FREE_RATIO;
-    else process.env.AIBRAIN_MINIMUM_FREE_RATIO = previousMinimumFreeRatio;
     await rm(root, { recursive: true, force: true });
   });
 

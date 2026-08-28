@@ -4,23 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   Copy,
-  DownloadSimple,
   FileCode,
   GitDiff,
   ListChecks,
   ShieldCheck,
-  Globe,
   X,
 } from "@phosphor-icons/react";
 import type { ApprovalDecision, ApprovalItem, ChatMessage } from "@/lib/chat-contract";
 import { TurnActivity } from "@/components/turn-activity";
 import { useModalFocus } from "@/ui/use-modal-focus";
-import { TurnSourceList } from "@/components/turn-sources";
-import type { ClientTurnPerformanceReadback } from "@/ui/client-turn-performance";
 
 type DetailsPanelProps = {
   message: ChatMessage | null;
-  performance?: ClientTurnPerformanceReadback | null;
   open: boolean;
   onClose: () => void;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
@@ -79,9 +74,9 @@ function DiffCode({ content }: { content: string }) {
   );
 }
 
-export function DetailsPanel({ message, performance = null, open, onClose, onResolveApproval }: DetailsPanelProps) {
+export function DetailsPanel({ message, open, onClose, onResolveApproval }: DetailsPanelProps) {
   const files = useMemo(() => parseDiff(message?.diff ?? ""), [message?.diff]);
-  const [tab, setTab] = useState<"changes" | "activity" | "sources" | "performance">("changes");
+  const [tab, setTab] = useState<"changes" | "activity">("changes");
   const [activeFile, setActiveFile] = useState(0);
   const [copied, setCopied] = useState(false);
   const [mobileOverlay, setMobileOverlay] = useState(false);
@@ -115,19 +110,6 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
     window.setTimeout(() => setCopied(false), 1600);
   };
 
-  const downloadPerformance = () => {
-    if (!performance) return;
-    const blob = new Blob([JSON.stringify(performance, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "metricas-cliente-turno.json";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const milliseconds = (value: number | null) => value === null ? "—" : `${value} ms`;
-
   return (
     <aside
       ref={panelRef}
@@ -153,10 +135,6 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
         <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
           Actividad {message?.activity.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.activity.length}</span> : null}
         </button>
-        <button type="button" aria-pressed={tab === "sources"} className={`review-tab ${tab === "sources" ? "review-tab-active" : ""}`} onClick={() => setTab("sources")}>
-          Fuentes {message?.sources?.length ? <span className="tabular-nums text-[8px] text-[var(--text)]">{message.sources.length}</span> : null}
-        </button>
-        {performance ? <button type="button" aria-pressed={tab === "performance"} className={`review-tab ${tab === "performance" ? "review-tab-active" : ""}`} onClick={() => setTab("performance")}>Rendimiento</button> : null}
       </div>
 
       {!message ? (
@@ -166,24 +144,6 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
             <p className="mt-3 text-[11px] font-semibold text-[var(--text)]">Selecciona una respuesta</p>
             <p className="mt-1.5 text-[9px] leading-4 text-[var(--text)]">Review muestra los cambios, la actividad y las aprobaciones del turno.</p>
           </div>
-        </div>
-      ) : tab === "performance" && performance ? (
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 text-[11px] text-[var(--text)]">
-          <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">Métricas de pintura del cliente</p><p className="mt-1 text-[9px] leading-4 text-[var(--text-muted)]">Sin texto, prompts, tokens, IDs ni errores.</p></div><button type="button" aria-label="Descargar métricas del cliente" title="Descargar métricas del cliente" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={downloadPerformance}><DownloadSimple size={15} /></button></div>
-          <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[10px]">
-            <dt className="text-[var(--text-muted)]">Intento → primer delta pintado</dt><dd className="font-medium tabular-nums">{milliseconds(performance.sendIntentToFirstDeltaPaintMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Cadencia p50 / p95 / máxima</dt><dd className="font-medium tabular-nums">{milliseconds(performance.interPaintP50Ms)} / {milliseconds(performance.interPaintP95Ms)} / {milliseconds(performance.interPaintMaxMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Estado terminal pintado</dt><dd className="font-medium tabular-nums">{performance.terminal ? `${performance.terminal} · ${milliseconds(performance.sendIntentToTerminalPaintMs)}` : "—"}</dd>
-            <dt className="text-[var(--text-muted)]">Reconexión → snapshot/catch-up p95</dt><dd className="font-medium tabular-nums">{milliseconds(performance.reconnectToSnapshotVisibleP95Ms)} / {milliseconds(performance.reconnectToCaughtUpP95Ms)}</dd>
-            <dt className="text-[var(--text-muted)]">Stream abierto / último evento / idle</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.responseOpenedAtMs)} / {milliseconds(performance.transport.lastEventAtMs)} / {milliseconds(performance.transport.idleObservedAtMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Cierre HTTP / recuperación / snapshot</dt><dd className="font-medium tabular-nums">{performance.transport.closeReason ?? "—"} / {performance.transport.recoveryAttempts} / {milliseconds(performance.transport.snapshotObservedAtMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Banner de recuperación</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.bannerShownAtMs)}</dd>
-          </dl>
-        </div>
-      ) : tab === "sources" ? (
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-3 flex items-center gap-2 px-1 text-[11px] font-semibold text-[var(--text)]"><Globe size={14} />Fuentes entregadas por el runtime</div>
-          <TurnSourceList sources={message.sources ?? []} />
         </div>
       ) : tab === "changes" ? (
         files.length ? (

@@ -18,24 +18,6 @@ export type InstallationPaths = {
   backupsRoot: string;
 };
 
-export type CodexManagedAppActionConfig = {
-  appId: string;
-  server: string;
-  tool: string;
-  arguments: Record<string, unknown>;
-  correlationField: string;
-  readback: {
-    server: string;
-    tool: string;
-    arguments: Record<string, unknown>;
-    correlationArgument: string;
-  };
-};
-
-export type InstallationConnectors = {
-  codexManagedAppAction: CodexManagedAppActionConfig;
-};
-
 export type InstallationConfig = {
   schemaVersion: typeof INSTALLATION_CONFIG_SCHEMA_VERSION;
   installationId: string;
@@ -44,7 +26,6 @@ export type InstallationConfig = {
   publicUrl: string;
   branding: InstallationBranding;
   paths: InstallationPaths;
-  connectors?: InstallationConnectors;
 };
 
 export type InstallationConfigIssue = {
@@ -70,7 +51,6 @@ const ROOT_KEYS = [
   "publicUrl",
   "branding",
   "paths",
-  "connectors",
 ] as const;
 
 const BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"] as const;
@@ -83,11 +63,6 @@ const PATH_KEYS = [
   "publishWriteRoot",
   "backupsRoot",
 ] as const;
-
-const CONNECTOR_KEYS = ["codexManagedAppAction"] as const;
-const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
-const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
-const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
@@ -316,97 +291,9 @@ function parsePaths(value: unknown, issues: InstallationConfigIssue[]): Installa
   return parsed;
 }
 
-function parseStaticArguments(value: unknown, issuePath: string, issues: InstallationConfigIssue[]) {
-  if (!isRecord(value)) {
-    issues.push({ path: issuePath, message: "debe ser un objeto JSON estático" });
-    return {};
-  }
-  let encoded = "";
-  try {
-    encoded = JSON.stringify(value);
-  } catch {
-    issues.push({ path: issuePath, message: "debe ser JSON serializable" });
-    return {};
-  }
-  if (encoded.length > 16_384) {
-    issues.push({ path: issuePath, message: "supera el máximo de 16384 bytes" });
-  }
-  const inspect = (candidate: unknown, currentPath: string): void => {
-    if (Array.isArray(candidate)) {
-      candidate.forEach((item, index) => inspect(item, `${currentPath}[${index}]`));
-      return;
-    }
-    if (!isRecord(candidate)) return;
-    for (const [key, nested] of Object.entries(candidate)) {
-      const normalized = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (/authorization|cookie|password|secret|accesstoken|refreshtoken|apikey/.test(normalized)) {
-        issues.push({ path: `${currentPath}.${key}`, message: "no se permiten claves de credenciales en argumentos estáticos" });
-      }
-      inspect(nested, `${currentPath}.${key}`);
-    }
-  };
-  inspect(value, issuePath);
-  return structuredClone(value);
-}
-
-function parseMcpIdentifier(value: unknown, issuePath: string, issues: InstallationConfigIssue[]) {
-  if (typeof value !== "string" || !MCP_IDENTIFIER.test(value)) {
-    issues.push({ path: issuePath, message: "debe ser un identificador MCP seguro" });
-    return "";
-  }
-  return value;
-}
-
-function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): InstallationConnectors | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    issues.push({ path: "$.connectors", message: "debe ser un objeto" });
-    return undefined;
-  }
-  addUnknownKeyIssues(value, CONNECTOR_KEYS, "$.connectors", issues);
-  const action = value.codexManagedAppAction;
-  if (!isRecord(action)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction", message: "debe ser un objeto" });
-    return undefined;
-  }
-  addUnknownKeyIssues(action, CODEX_MANAGED_APP_ACTION_KEYS, "$.connectors.codexManagedAppAction", issues);
-  const readbackValue = action.readback;
-  if (!isRecord(readbackValue)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction.readback", message: "debe ser un objeto" });
-    return undefined;
-  }
-  addUnknownKeyIssues(readbackValue, CODEX_MANAGED_APP_READBACK_KEYS, "$.connectors.codexManagedAppAction.readback", issues);
-  const readback = {
-    server: parseMcpIdentifier(readbackValue.server, "$.connectors.codexManagedAppAction.readback.server", issues),
-    tool: parseMcpIdentifier(readbackValue.tool, "$.connectors.codexManagedAppAction.readback.tool", issues),
-    arguments: parseStaticArguments(readbackValue.arguments, "$.connectors.codexManagedAppAction.readback.arguments", issues),
-    correlationArgument: parseMcpIdentifier(readbackValue.correlationArgument, "$.connectors.codexManagedAppAction.readback.correlationArgument", issues),
-  };
-  if (Object.prototype.hasOwnProperty.call(readback.arguments, readback.correlationArgument)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction.readback.arguments", message: "no puede fijar el argumento de correlación" });
-  }
-  return {
-    codexManagedAppAction: {
-      appId: parseMcpIdentifier(action.appId, "$.connectors.codexManagedAppAction.appId", issues),
-      server: parseMcpIdentifier(action.server, "$.connectors.codexManagedAppAction.server", issues),
-      tool: parseMcpIdentifier(action.tool, "$.connectors.codexManagedAppAction.tool", issues),
-      arguments: parseStaticArguments(action.arguments, "$.connectors.codexManagedAppAction.arguments", issues),
-      correlationField: parseMcpIdentifier(action.correlationField, "$.connectors.codexManagedAppAction.correlationField", issues),
-      readback,
-    },
-  };
-}
-
 function freezeInstallationConfig(config: InstallationConfig): Readonly<InstallationConfig> {
   Object.freeze(config.branding);
   Object.freeze(config.paths);
-  if (config.connectors) {
-    Object.freeze(config.connectors.codexManagedAppAction.arguments);
-    Object.freeze(config.connectors.codexManagedAppAction.readback.arguments);
-    Object.freeze(config.connectors.codexManagedAppAction.readback);
-    Object.freeze(config.connectors.codexManagedAppAction);
-    Object.freeze(config.connectors);
-  }
   return Object.freeze(config);
 }
 
@@ -432,7 +319,6 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
   const publicUrl = validatePublicUrl(rawPublicUrl, "$.publicUrl", issues);
   const branding = parseBranding(value.branding, issues);
   const paths = parsePaths(value.paths, issues);
-  const connectors = parseConnectors(value.connectors, issues);
 
   if (issues.length > 0) {
     throw new InstallationConfigValidationError(issues);
@@ -445,6 +331,5 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
     publicUrl,
     branding,
     paths,
-    ...(connectors ? { connectors } : {}),
   });
 }

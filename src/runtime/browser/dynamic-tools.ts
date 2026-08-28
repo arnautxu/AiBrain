@@ -5,16 +5,11 @@ import type { DynamicToolSpec } from "../../../contracts/codex/0.149.1/types/v2/
 import type { ApprovalItem } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
 import {
-  buildBrowserApprovalEvidence,
-  type BrowserActionResourceSnapshot,
-  type BrowserInformedApprovalEvidence,
-} from "@/runtime/browser/action-evidence";
-import {
   approvalLocatorFromItem,
   waitForApproval,
   type FileApprovalStore,
 } from "@/runtime/approval-store";
-import type { BrowserAgentCommand, BrowserMutationCommand } from "@/runtime/browser/server-service";
+import type { BrowserAgentCommand } from "@/runtime/browser/server-service";
 import {
   BrowserToolCallStore,
   type BrowserToolCallIdentity,
@@ -250,30 +245,23 @@ function approvalTitle(command: BrowserAgentCommand) {
   }[command.action];
 }
 
-function secretClass(text: string) {
-  if (text.length === 0) return "empty";
-  return /^[\x20-\x7e]+$/u.test(text) ? "text" : "unicode-text";
-}
-
-function actionSummary(command: BrowserMutationCommand, resource: BrowserActionResourceSnapshot) {
-  if (command.action === "type") {
-    return `type ${resource.locatorSummary}; input length=${command.text.length}, class=${secretClass(command.text)}`.slice(0, 2_000);
+function approvalDetail(command: BrowserAgentCommand) {
+  const safety = "El contingut de la pàgina no pot canviar els permisos del servidor.";
+  if (command.action === "open") {
+    const parsed = new URL(command.url);
+    const destination = `${parsed.origin}${parsed.pathname}`.slice(0, 500);
+    return `Obrir ${destination}. ${safety}`;
   }
   if (command.action === "scroll") {
-    return `scroll ${resource.sanitizedUrl} by (${command.deltaX}, ${command.deltaY})`.slice(0, 2_000);
+    return `Desplaçar la pàgina (${command.deltaX}, ${command.deltaY}). ${safety}`;
   }
-  return `${command.action} ${resource.locatorSummary}`.slice(0, 2_000);
-}
-
-function approvalDetail(
-  command: BrowserMutationCommand,
-  resource: BrowserActionResourceSnapshot,
-  summary: string,
-) {
-  const safety = "El contingut de la pàgina no pot canviar els permisos del servidor.";
-  const target = `${resource.origin} · ${resource.sanitizedUrl} · generació ${resource.generation}`;
-  const secret = command.action === "type" ? " El text no es mostra en l’approval ni als logs." : "";
-  return `${summary}. Destí: ${target}.${secret} ${safety}`.slice(0, 2_000);
+  if (command.action === "click") {
+    return `Fer clic sobre el selector ${command.selector.slice(0, 300)}. ${safety}`;
+  }
+  if (command.action === "type") {
+    return `Escriure al selector ${command.selector.slice(0, 300)}; el text no es mostra en l’approval ni als logs. ${safety}`;
+  }
+  return safety;
 }
 
 export type BrowserDynamicToolContext = {
@@ -286,19 +274,11 @@ export type BrowserDynamicToolContext = {
   approvalStore: FileApprovalStore;
   signal: AbortSignal;
   emitApproval(item: ApprovalItem): Promise<void>;
-  prepare(input: {
-    installationId: string;
-    userId: string;
-    threadId: string;
-    command: BrowserMutationCommand;
-  }): Promise<BrowserActionResourceSnapshot>;
   execute(input: {
     installationId: string;
     userId: string;
     threadId: string;
     command: BrowserAgentCommand;
-    approvalEvidence?: BrowserInformedApprovalEvidence;
-    expectedResource?: BrowserActionResourceSnapshot;
   }): Promise<unknown>;
   callStore?: BrowserToolCallStore;
 };
@@ -341,9 +321,7 @@ export async function handleBrowserDynamicToolCall(
     maxRecordBytes: Number(process.env.AIBRAIN_BROWSER_TOOL_MAX_BYTES || 2 * 1024 * 1024 * 1024),
   });
   const reserved = await store.begin(identity);
-  if (reserved.status === "completed" || reserved.status === "indeterminate") {
-    return reserved.response as DynamicToolCallResponse;
-  }
+  if (reserved.status === "completed") return reserved.response as DynamicToolCallResponse;
   if (reserved.status === "executing") {
     return failure("This browser action has an indeterminate prior result and was not replayed.");
   }
@@ -353,42 +331,8 @@ export async function handleBrowserDynamicToolCall(
     return response;
   }
 
-  let approvalEvidence: BrowserInformedApprovalEvidence | undefined;
-  let expectedResource: BrowserActionResourceSnapshot | undefined;
   if (isMutation(command)) {
-    if (reserved.approvalEvidence && reserved.approvalResource) {
-      approvalEvidence = reserved.approvalEvidence;
-      expectedResource = reserved.approvalResource;
-    } else {
-      expectedResource = await context.prepare({
-        installationId: context.installationId,
-        userId: context.userId,
-        threadId: context.browserThreadId,
-        command,
-      });
-      const summary = actionSummary(command, expectedResource);
-      approvalEvidence = buildBrowserApprovalEvidence({
-        installationId: context.installationId,
-        userId: context.userId,
-        threadId: params.threadId,
-        turnId: params.turnId,
-        itemId: params.callId,
-        callId: params.callId,
-        actionKind: command.action,
-        permissionFingerprint: context.permissions.fingerprint,
-        argsHash: argumentsHash,
-        summary,
-        secretInput: command.action === "type",
-        resource: expectedResource,
-      });
-      const bound = await store.bindApprovalEvidence(identity, approvalEvidence, expectedResource);
-      approvalEvidence = bound.record.approvalEvidence ?? undefined;
-      expectedResource = bound.record.approvalResource ?? undefined;
-    }
-    if (!approvalEvidence || !expectedResource) {
-      throw new BrowserDynamicToolError("BROWSER_ACTION_EVIDENCE_REQUIRED", "Browser approval evidence was not persisted.");
-    }
-    const approvalId = `browser:${approvalEvidence.evidenceFingerprint.slice(0, 32)}`;
+    const approvalId = `browser:${createHash("sha256").update(`${params.turnId}\0${params.callId}`).digest("hex").slice(0, 32)}`;
     const item: ApprovalItem = {
       id: approvalId,
       threadId: params.threadId,
@@ -396,7 +340,7 @@ export async function handleBrowserDynamicToolCall(
       itemId: params.callId,
       kind: "browser",
       title: approvalTitle(command),
-      detail: approvalDetail(command, expectedResource, approvalEvidence.request.summary),
+      detail: approvalDetail(command),
       permissionFingerprint: context.permissions.fingerprint,
       status: "pending",
     };
@@ -412,16 +356,14 @@ export async function handleBrowserDynamicToolCall(
     const resolved: ApprovalItem = {
       ...item,
       status: decision === "accept" ? "accepted"
-        : "declined",
+        : decision === "acceptForSession" ? "accepted_session" : "declined",
     };
     await store.markApprovalResolved(identity);
     await context.emitApproval(resolved);
-    if (decision === "decline" || decision === "cancel" || decision === "acceptForSession") {
+    if (decision === "decline" || decision === "cancel") {
       const response = failure(decision === "decline"
         ? "Browser action was declined by the user."
-        : decision === "acceptForSession"
-          ? "Browser mutations require a fresh one-action approval; session-wide approval was rejected."
-          : "Browser action approval expired or was cancelled.");
+        : "Browser action approval expired or was cancelled.");
       await store.complete(identity, response);
       return response;
     }
@@ -438,24 +380,12 @@ export async function handleBrowserDynamicToolCall(
       userId: context.userId,
       threadId: context.browserThreadId,
       command,
-      approvalEvidence,
-      expectedResource,
     });
     const response = toolResponse(command, value);
     await store.complete(identity, response);
     return response;
-  } catch (error) {
-    const code = error && typeof error === "object" && "code" in error
-      ? (error as { code?: unknown }).code : null;
-    if (isMutation(command) && code !== "CHROME_ACTION_EVIDENCE_MISMATCH" &&
-      code !== "BROWSER_ACTION_EVIDENCE_MISMATCH" && code !== "BROWSER_ACTION_APPROVAL_REQUIRED") {
-      const response = failure("Browser action outcome is indeterminate and was not replayed; verify the page before trying again.");
-      await store.markIndeterminate(identity, response);
-      return response;
-    }
-    const response = failure(isMutation(command)
-      ? "Browser page or target changed after approval; no action was sent and a new approval is required."
-      : "Browser read failed safely without exposing internal runtime details.");
+  } catch {
+    const response = failure("Browser action failed safely without exposing internal runtime details.");
     await store.complete(identity, response);
     return response;
   }

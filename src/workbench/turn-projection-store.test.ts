@@ -104,28 +104,6 @@ describe("turn projection store", () => {
       "turn:done",
       { type: "done" },
     );
-    await projections.applyTransportEvent(
-      thread.id,
-      assistantId,
-      envelope(1),
-      "source:official",
-      { type: "source", item: {
-        id: "source-official", kind: "web", title: "Fuente oficial",
-        url: "https://example.com/oficial", domain: "example.com", snippet: "Dato verificable",
-        publishedAt: null,
-      } },
-    );
-    await projections.applyTransportEvent(
-      thread.id,
-      assistantId,
-      envelope(1),
-      "tool-result:search",
-      { type: "toolResult", item: {
-        id: "search-1", kind: "web", title: "Búsqueda oficial", status: "complete",
-        summary: "1 fuente", output: null, sourceIds: ["source-official"],
-        createdAt: "2026-08-27T00:00:01.000Z",
-      } },
-    );
     await projections.setRuntimeThreadToken(thread.id, assistantId, "signed-runtime-token");
     await projections.setRuntimeTurnId(thread.id, assistantId, "runtime-turn-1");
 
@@ -135,8 +113,6 @@ describe("turn projection store", () => {
       id: assistantId,
       content: "Hello",
       status: "complete",
-      sources: [{ id: "source-official", url: "https://example.com/oficial" }],
-      toolResults: [{ id: "search-1", sourceIds: ["source-official"] }],
     });
     expect((await restarted.getThreadRuntimeContext(userId, thread.id)).runtimeThreadToken)
       .toBe("signed-runtime-token");

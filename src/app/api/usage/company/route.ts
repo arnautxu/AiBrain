@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { isWorkspaceAdmin } from "@/admin/server-service";
 import { getSession } from "@/auth/session";
-import { companyUsageForUser } from "@/usage/server-service";
+import {
+  companyUsageForUser,
+  isUsageCompanyAdmin,
+} from "@/usage/server-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,7 +18,7 @@ export async function GET() {
       { status: 401, headers: NO_STORE_HEADERS },
     );
   }
-  if (!await isWorkspaceAdmin(session)) {
+  if (!isUsageCompanyAdmin(session.user.id)) {
     return NextResponse.json(
       { error: "No tens permisos per consultar l’ús de l’empresa.", code: "USAGE_ADMIN_REQUIRED" },
       { status: 403, headers: NO_STORE_HEADERS },

@@ -40,12 +40,10 @@ Ejemplo de error:
 | `GET`, `POST` | `/api/projects/{projectId}/threads` | Lista y creación de threads del proyecto |
 | `GET` | `/api/threads` | Lista/búsqueda global de threads |
 | `GET`, `PATCH` | `/api/threads/{threadId}` | Lectura, renombrado, pin y archivo/restauración |
-| `GET`, `PATCH` | `/api/task-center` | Historial derivado de turns, lectura y preferencias de avisos |
 | `POST` | `/api/chat` | Turn persistente y stream NDJSON |
 | `POST` | `/api/runtime/turns/control` | Steering o stop idempotente |
 | `POST` | `/api/runtime/approvals` | Resolución durable de aprobación |
 | `GET` | `/api/runtime/status?projectId={uuid}` | Estado, modelos, skills y capacidades del worker |
-| `GET`, `PATCH` | `/api/settings` | Cuenta, apps reales, permisos, privacidad, red y preferencias persistentes |
 | `POST` | `/api/threads/{threadId}/messages/{messageId}/result` | Estado de revisión/reversión del resultado |
 | `GET` | `/api/projects/{projectId}/artifacts/{artifactId}` | Artefacto de imagen generado |
 | `POST` | `/api/threads/{threadId}/documents` | Upload seguro, staging y preview |
@@ -230,7 +228,7 @@ type PublicInstallationBranding = {
 
 La rama UI debe conservar ese límite o acordar una ruta nueva antes de intentar `fetch('/api/installation')`; esa ruta no existe.
 
-No existe todavía un control plane remoto de onboarding o invitaciones. La identidad local provisionada y `PERMISSIONS.md` siguen siendo las únicas fuentes server-side de autorización efectiva. Los miembros guardados en un proyecto son metadatos locales explícitos: no crean cuentas, no envían correo y no amplían permisos del runtime. El workbench recibe también `logoPath`, por lo que login y aplicación muestran la marca de la instalación sin una rama por empresa.
+No existen roles de producto, onboarding, invitaciones ni control plane HTTP. La identidad local provisionada y `PERMISSIONS.md` son las únicas fuentes server-side de perfil y permiso. El workbench recibe también `logoPath`, por lo que login y aplicación muestran la marca de la instalación sin una rama por empresa.
 
 ## 5. Proyectos y threads
 
@@ -245,40 +243,12 @@ type WorkbenchWorkspace = {
   isPrimary: boolean;
 };
 
-type ProjectSource = {
-  id: string;
-  kind: "file" | "link" | "note";
-  name: string;
-  url: string | null;
-  mimeType: string | null;
-  size: number | null;
-  excerpt: string | null; // texto persistido, máximo 32.000
-  status: "ready" | "pending-index";
-  createdAt: string;
-};
-
-type ProjectMember = {
-  id: string;
-  email: string;
-  name: string | null;
-  role: "owner" | "editor" | "viewer";
-  status: "active" | "invited-local";
-  addedAt: string;
-};
-
 type WorkbenchProject = {
   id: string;
   name: string;       // 1–80 caracteres no vacíos
   slug: string;
   status: "active" | "archived";
   pinned: boolean;
-  instructions: string; // máximo 16.000; se inyecta como instrucción persistente
-  sources: ProjectSource[]; // máximo 100
-  memory: { enabled: boolean; notes: string; updatedAt: string | null };
-  sharing: {
-    visibility: "private" | "shared";
-    members: ProjectMember[]; // acceso declarado local, no invitación remota
-  };
   workspace: WorkbenchWorkspace;
   createdAt: string;
   updatedAt: string;
@@ -360,16 +330,13 @@ Threads listados usan `WorkbenchThreadSummary` y la clave `threads`.
 
 `GET /api/projects/{projectId}` → `{ "project": WorkbenchProject }`.
 
-`PATCH /api/projects/{projectId}` acepta uno o varios de `name`, `pinned`, `status`, `instructions`, `sources`, `memory` y `sharing`:
+`PATCH /api/projects/{projectId}` acepta uno o varios de:
 
 ```json
 {
   "name": "Renamed Operations",
   "pinned": true,
-  "status": "active",
-  "instructions": "Responde en español y cita las fuentes del proyecto.",
-  "memory": { "enabled": true, "notes": "El cliente prefiere entregas los viernes.", "updatedAt": "2026-08-28T09:00:00.000Z" },
-  "sharing": { "visibility": "private", "members": [] }
+  "status": "archived"
 }
 ```
 
@@ -403,38 +370,11 @@ type WorkbenchSnapshot = {
 
 Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia es `filesystem`. Supabase no es un valor válido de persistencia: participa únicamente durante los flujos de identidad anteriores a la emisión de la sesión local.
 
-### 5.5 Centro de tareas
-
-`GET /api/task-center` reconstruye el historial desde los mensajes durables del usuario y devuelve estados `running`, `needs_attention`, `completed` o `failed`, junto con `readTaskIds`, preferencias de avisos y `continuity: "worker_required"`. La última señal impide que la UI prometa ejecución cloud si el servidor o el worker no están activos.
-
-`PATCH /api/task-center` marca ids como leídos o guarda las preferencias `inApp` y `desktop`. El backend persiste ese estado dentro de la raíz del usuario autenticado; no acepta tenant ni user en el body. Los avisos Web requieren además permiso explícito en el navegador y nunca se solicitan al cargar la página. Véase [`TASK_CENTER.md`](TASK_CENTER.md).
-
 ## 6. Mensajes, turns y streaming
 
 ### 6.1 Modelo persistido
 
 ```ts
-type TurnSource = {
-  id: string;
-  kind: "web" | "file" | "app";
-  title: string;
-  url: string | null;         // solo HTTP(S) entregado por el runtime
-  domain: string | null;
-  snippet: string | null;
-  publishedAt: string | null; // ISO-8601 cuando existe en metadatos
-};
-
-type ToolResult = {
-  id: string;
-  kind: "command" | "file" | "web" | "app" | "browser";
-  title: string;
-  status: "running" | "complete" | "failed" | "stopped";
-  summary: string | null;
-  output: string | null;      // salida real acotada; nunca texto inferido del asistente
-  sourceIds: string[];
-  createdAt: string;
-};
-
 type ChatMessage = {
   id: string;
   role: "user" | "assistant";
@@ -447,12 +387,8 @@ type ChatMessage = {
   diff: string;
   attachments: ChatAttachment[];
   artifacts: GeneratedArtifact[];
-  sources?: TurnSource[];     // opcional solo para leer mensajes V1 previos
-  toolResults?: ToolResult[]; // opcional solo para leer mensajes V1 previos
 };
 ```
-
-Las fuentes se proyectan únicamente desde URLs o archivos presentes en los metadatos del runtime, la búsqueda web, una app/MCP o los adjuntos del turno. Un resultado sin URL no se transforma en cita. Los tool results conservan salida y estado por separado de `activity`, de modo que siguen siendo revisables tras refresh.
 
 ### 6.2 Iniciar o reanudar un turn
 
@@ -528,8 +464,6 @@ type ChatStreamEvent =
   | { type: "approval"; item: ApprovalItem }
   | { type: "diff"; value: string }
   | { type: "artifact"; item: GeneratedArtifact }
-  | { type: "source"; item: TurnSource }
-  | { type: "toolResult"; item: ToolResult }
   | { type: "done" }
   | { type: "stopped" }
   | { type: "error"; message: string };
@@ -543,7 +477,6 @@ Reglas del reducer actual:
 - `plan` reemplaza `message.plan` con `steps`; `explanation` no se persiste en `ChatMessage`;
 - `diff` reemplaza el diff completo;
 - `artifact` añade el elemento;
-- `source` y `toolResult` hacen upsert por `item.id`; cada `toolResult.sourceIds` solo referencia fuentes observadas en el mismo turn;
 - `done`, `stopped`, `error` cambian el estado terminal.
 
 ### 6.4 Idempotencia, refresh y recuperación
@@ -697,17 +630,7 @@ La UI debe habilitar selección/invocación según `models`, `skills` y `capabil
 
 ### 7.3 Superficies no publicadas
 
-AiBrain no envía invitaciones ni publica un control plane remoto. El panel de proyecto persiste miembros locales; cuando el correo coincide con una persona provisionada y habilitada de la misma instalación, el backend activa la visibilidad compartida según `viewer` o `editor`. Un correo sin identidad local sigue como `invited-local`, no obtiene acceso y la UI debe explicar que no se ha enviado nada. La autorización efectiva siempre se resuelve en servidor.
-
-Las automatizaciones programadas son locales y explícitas: `/api/automations` administra tareas privadas del empleado y el runner documentado en `docs/AUTOMATIONS.md` ejecuta sus prompts únicamente mientras ese proceso está vivo. La API y la UI muestran la señal real del worker; no prometen ejecución cloud, no envían mensajes externos por sí solas y conservan las aprobaciones normales del runtime.
-
-### Centro de administración del workspace
-
-`GET /api/admin` exige una sesión local del mismo tenant y un rol persistido con `canManageWorkspace=true`. Devuelve personas, estado observado de workers, uso interno, roles, grupos, políticas y los últimos eventos de auditoría. Nunca inicia un worker para calcular su estado.
-
-`PATCH /api/admin` exige además mismo origen. Admite comandos estrictos para cambiar rol/estado de una persona, crear/actualizar/eliminar grupos y provisionar un perfil local. Las políticas de rol y grupo cubren apps (`web-search`, `image-generation`, `skills`, `managed-browser`) y capacidades (`consult`, `respond`, `execute`, `publish`); un bloqueo de cualquier grupo prevalece. Los cambios se persisten por instalación y se registran con actor, destino, acción y fecha.
-
-`provision-local-member` reutiliza `UserProvisioner`: crea perfil, worker y workspace locales para un UUID que ya debe existir en el proveedor de identidad. La respuesta declara `emailSent:false` e `identityCreated:false`. AiBrain no finge una invitación, un alta de IdP ni un correo enviado.
+V1 no publica rutas ni paneles de onboarding, invitaciones, roles, control plane o automatizaciones programadas. No deben añadirse clientes, estados vacíos ni fallbacks que simulen esas capacidades.
 
 ## 8. Approvals
 
@@ -1388,10 +1311,8 @@ rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
 `GET /api/usage/me` requiere la cookie local opaca y siempre devuelve únicamente
 las métricas internas del empleado autenticado. `GET /api/usage/company`
-requiere además que la asignación durable del usuario sea `workspace-owner` o
-`workspace-admin`; `workspace-member` falla de forma cerrada con `403`. La ruta
-resuelve el rol server-side desde `dataRoot/workspace-admin/state.json` y no
-acepta UUIDs o roles enviados por el navegador.
+requiere además que su UUID figure en `AIBRAIN_USAGE_ADMIN_USER_IDS` (lista
+separada por comas); la autorización falla de forma cerrada con `403`.
 
 Ambos endpoints responden `Cache-Control: private, no-store`. El objeto
 `internal` usa este contrato:
@@ -1577,28 +1498,3 @@ ni tocan sesiones de empleados.
 - Documentos/publicación: [`src/documents`](../src/documents), [`src/app/api/threads/[threadId]/documents`](../src/app/api/threads/%5BthreadId%5D/documents), [`src/app/api/threads/[threadId]/publications`](../src/app/api/threads/%5BthreadId%5D/publications).
 - Browser/Computer Use: [`src/runtime/browser`](../src/runtime/browser), [`src/app/api/runtime/browser`](../src/app/api/runtime/browser), [`tests/integration/browser-routes.integration.test.ts`](../tests/integration/browser-routes.integration.test.ts).
 - Pruebas de rutas: [`tests/integration`](../tests/integration).
-
-## 18. Settings, apps and capability policy
-
-`GET /api/settings` returns a private, no-store `schemaVersion: 1` snapshot for
-the authenticated employee. The snapshot separates account/company identity,
-the real capability catalogue, in-app notification preferences, effective
-permission rules, privacy/isolation facts and browser/network policy.
-
-Apps use `connected | available | blocked | not_configured`. A connected label
-requires live runtime evidence. No route creates OAuth, secret or provider
-records. Missing external adapters are configuration work, not a clickable
-fake connection.
-
-`PATCH /api/settings` accepts one strict mutation:
-
-- `{ target: "user-app", appId, enabled }`
-- `{ target: "installation-app", appId, enabled }` (admin only)
-- `{ target: "notifications", values }`
-
-Controllable app IDs are `web-search`, `image-generation`, `skills` and
-`managed-browser`. Both policy files are private (`0600`), atomically replaced
-under a cross-process resource lock, and scoped to the current installation or
-employee. `/api/chat` enforces web/image/skill gates and the browser service
-enforces the managed-browser gate for human and agent operations. A stop action
-remains available so disabling a running browser cannot strand the process.

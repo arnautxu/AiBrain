@@ -6,7 +6,6 @@ import path from "node:path";
 import type { AuthSession } from "@/auth/types";
 import type { ChatMessage } from "@/lib/chat-contract";
 import {
-  branchHistory,
   publicProject,
   publicThread,
   uniqueSlug,
@@ -16,7 +15,6 @@ import {
 } from "@/workbench/internal";
 import {
   isUuid,
-  isBranchThreadInput,
   isWorkbenchProject,
   isWorkbenchThread,
   STANDALONE_PROJECT_SLUG,
@@ -26,8 +24,6 @@ import {
   type WorkbenchProject,
   type WorkbenchSnapshot,
   type WorkbenchThread,
-  type BranchThreadInput,
-  type BranchThreadResult,
 } from "@/workbench/types";
 import {
   WorkbenchConflictError,
@@ -76,10 +72,6 @@ function seededProject(name: string, slug: string, workspaceKey: string): Stored
     slug,
     status: "active",
     pinned: workspaceKey === "workspace",
-    instructions: "",
-    sources: [],
-    memory: { enabled: true, notes: "", updatedAt: null },
-    sharing: { visibility: "private", members: [] },
     workspace: {
       id: randomUUID(),
       label: workspaceKey === "workspace" ? "Workspace principal" : name,
@@ -156,24 +148,7 @@ async function readState(session: AuthSession) {
             Object.assign(message, { artifacts: [] });
             upgraded = true;
           }
-          if (message && typeof message === "object" && !("sources" in message)) {
-            Object.assign(message, { sources: [] });
-            upgraded = true;
-          }
-          if (message && typeof message === "object" && !("toolResults" in message)) {
-            Object.assign(message, { toolResults: [] });
-            upgraded = true;
-          }
         }
-      }
-    }
-    if (decoded && typeof decoded === "object" && "projects" in decoded && Array.isArray(decoded.projects)) {
-      for (const project of decoded.projects) {
-        if (!project || typeof project !== "object") continue;
-        if (!("instructions" in project)) { Object.assign(project, { instructions: "" }); upgraded = true; }
-        if (!("sources" in project)) { Object.assign(project, { sources: [] }); upgraded = true; }
-        if (!("memory" in project)) { Object.assign(project, { memory: { enabled: true, notes: "", updatedAt: null } }); upgraded = true; }
-        if (!("sharing" in project)) { Object.assign(project, { sharing: { visibility: "private", members: [] } }); upgraded = true; }
       }
     }
     if (!isDemoState(decoded)) {
@@ -237,13 +212,6 @@ export async function loadDemoWorkbench(
   return snapshot(await readState(session), persistence);
 }
 
-export async function getDemoThread(session: AuthSession, threadId: string): Promise<WorkbenchThread> {
-  assertWorkbenchId(threadId);
-  const thread = (await readState(session)).threads.find((candidate) => candidate.id === threadId);
-  if (!thread) throw new WorkbenchNotFoundError("Fil no trobat.");
-  return publicThread(thread);
-}
-
 export async function createDemoProject(session: AuthSession, name: string): Promise<WorkbenchProject> {
   return mutateState(session, (state) => {
     const slug = uniqueSlug(name, new Set(state.projects.map((project) => project.slug)));
@@ -265,10 +233,6 @@ export async function updateDemoProject(
     if (patch.name !== undefined) project.name = patch.name.trim();
     if (patch.pinned !== undefined) project.pinned = patch.pinned;
     if (patch.status !== undefined) project.status = patch.status;
-    if (patch.instructions !== undefined) project.instructions = patch.instructions;
-    if (patch.sources !== undefined) project.sources = patch.sources;
-    if (patch.memory !== undefined) project.memory = patch.memory;
-    if (patch.sharing !== undefined) project.sharing = patch.sharing;
     project.updatedAt = new Date().toISOString();
     return publicProject(project);
   });
@@ -327,13 +291,7 @@ function runtimeContext(state: DemoState, projectId: string): ThreadRuntimeConte
     projectId: project.id,
     projectName: project.name,
     workspaceKey: project.workspaceKey,
-    projectInstructions: project.instructions,
-    projectMemory: project.memory.enabled ? project.memory.notes : "",
-    projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
-      kind, name, url, excerpt, status,
-    })),
     runtimeThreadToken: null,
-    branchHistory: null,
   };
 }
 
@@ -350,57 +308,7 @@ export async function getDemoThreadRuntimeContext(
   if (!thread || thread.status !== "active") {
     throw new WorkbenchNotFoundError("Fil actiu no trobat.");
   }
-  return {
-    ...runtimeContext(state, thread.projectId),
-    runtimeThreadToken: thread.runtimeThreadToken,
-    branchHistory: branchHistory(thread),
-  };
-}
-
-export async function branchDemoThread(
-  session: AuthSession,
-  threadId: string,
-  input: BranchThreadInput,
-): Promise<BranchThreadResult> {
-  if (!isBranchThreadInput(input)) throw new WorkbenchPersistenceError("La branca no és vàlida.");
-  return mutateState(session, (state) => {
-    const parent = state.threads.find((candidate) => candidate.id === threadId);
-    if (!parent || parent.status !== "active") throw new WorkbenchNotFoundError("Fil actiu no trobat.");
-    const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
-    const target = parent.messages[targetIndex];
-    if (!target) throw new WorkbenchNotFoundError("Missatge no trobat.");
-    let prefixEnd = targetIndex;
-    let draftMessage: string | null = null;
-    if (input.kind === "edit") {
-      if (target.role !== "user" || !input.editedContent?.trim()) {
-        throw new WorkbenchConflictError("Només es poden editar missatges de l’usuari.");
-      }
-      prefixEnd = targetIndex - 1;
-      draftMessage = input.editedContent.trim();
-    } else if (input.kind === "retry") {
-      if (target.role !== "assistant") throw new WorkbenchConflictError("Resposta no vàlida.");
-      const userIndex = parent.messages.findLastIndex(
-        (message, index) => index < targetIndex && message.role === "user",
-      );
-      if (userIndex < 0) throw new WorkbenchConflictError("La resposta no té cap petició per regenerar.");
-      prefixEnd = userIndex - 1;
-      draftMessage = parent.messages[userIndex].content;
-    } else if (target.role !== "assistant") {
-      throw new WorkbenchConflictError("La branca ha de començar des d’una resposta.");
-    }
-    const now = new Date().toISOString();
-    const suffix = input.kind === "edit" ? "editada" : input.kind === "retry" ? "regenerada" : "rama";
-    const thread: StoredThread = {
-      id: randomUUID(), projectId: parent.projectId,
-      title: `${parent.title.replace(/ · (?:editada|regenerada|rama)$/u, "")} · ${suffix}`.slice(0, 120),
-      status: "active", pinned: false, createdAt: now, updatedAt: now,
-      messages: structuredClone(parent.messages.slice(0, prefixEnd + 1)),
-      runtimeThreadToken: null,
-      lineage: { parentThreadId: parent.id, branchedFromMessageId: target.id, kind: input.kind },
-    };
-    state.threads.push(thread);
-    return { thread: publicThread(thread), draftMessage };
-  });
+  return { ...runtimeContext(state, thread.projectId), runtimeThreadToken: thread.runtimeThreadToken };
 }
 
 export async function beginDemoThreadTurn(

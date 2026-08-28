@@ -130,12 +130,11 @@ La jerarquía del usuario debe existir, ser real (sin symlinks) y tener permisos
 
 1. carga la `InstallationConfig` del servidor y verifica que coincide con la instalación autenticada;
 2. usa el UUID del mensaje assistant como identificador lógico del turn;
-3. resuelve server-side el rol durable del workspace y lo pasa como `roleId`; el navegador no puede elegirlo;
-4. cruza las reglas Markdown con la política efectiva deny-wins de rol y grupos antes de habilitar consulta, ejecución o publicación;
-5. persiste el evento de auditoría con fingerprint y `policyVersion` de cada fuente;
-6. solo entonces persiste/inicia el turn y llama al App Server;
-7. enlaza instalación, usuario, rol, proyecto y turn de la resolución con el request antes de enviar nada;
-8. añade `developerInstructions` efectivas, incluido el fingerprint, a `thread/start` o `thread/resume`.
+3. resuelve las políticas con `roleId: null` —V1 no usa roles como autorización—;
+4. persiste el evento de auditoría con fingerprint y `policyVersion` de cada fuente;
+5. solo entonces persiste/inicia el turn y llama al App Server;
+6. enlaza instalación, usuario, proyecto y turn de la resolución con el request antes de enviar nada;
+7. añade `developerInstructions` efectivas, incluido el fingerprint, a `thread/start` o `thread/resume`.
 
 Un fallo de policy o auditoría devuelve un estado degradado recuperable y no crea un fallback de producción. El modo demo identificado no ejecuta Codex y no simula una resolución de permisos real.
 
