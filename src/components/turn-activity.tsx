@@ -260,7 +260,7 @@ export function TurnActivity({
       {message.diff && showDiff ? (
         <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
           <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
-          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Disponibles en Review</p></div>
+          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Incluidos en este turno</p></div>
         </section>
       ) : null}
     </div>

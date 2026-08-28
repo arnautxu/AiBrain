@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
 
-test("a response exposes real citations, reviewable tool output and a Sources panel", async ({ page }) => {
+test("a response exposes real citations and reviewable tool output inline", async ({ page }) => {
   const source = {
     id: "source-official-1", kind: "web", title: "Informe oficial",
     url: "https://example.com/informe", domain: "example.com", snippet: "Cifra publicada por la fuente.",
@@ -34,8 +34,6 @@ test("a response exposes real citations, reviewable tool output and a Sources pa
   await page.getByText("CRM · Leer cuenta").click();
   await expect(page.getByLabel("Salida de CRM · Leer cuenta")).toContainText("Ejemplo SA");
 
-  await page.getByRole("button", { name: "Revisar resultados" }).click();
-  await page.getByRole("button", { name: /^Fuentes 1$/ }).click();
-  await expect(page.getByText("Fuentes entregadas por el runtime")).toBeVisible();
-  await expect(page.getByText("Cifra publicada por la fuente.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Copiar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
 });

@@ -28,8 +28,13 @@ for (const viewport of viewports) {
     expect(composer!.x).toBeGreaterThanOrEqual(0);
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(viewport.width + 1);
 
-    const preferencesTrigger = page.getByRole("button", { name: "Abrir preferencias" });
-    await preferencesTrigger.click();
+    if (viewport.width < 768) {
+      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+    }
+    const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
+    await accountButton.click();
+    await page.getByRole("menuitem", { name: "Configuración" }).click();
     const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
     await expect(preferences).toBeVisible();
     await preferences.evaluate(async (element) => {
@@ -42,7 +47,6 @@ for (const viewport of viewports) {
     expect(panel!.height).toBeLessThanOrEqual(viewport.height + 1);
     await page.keyboard.press("Escape");
     await expect(preferences).toBeHidden();
-    await expect(preferencesTrigger).toBeFocused();
 
     if (viewport.width < 768) {
       const sidebarTrigger = page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" });

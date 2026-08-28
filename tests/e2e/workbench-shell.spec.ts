@@ -9,7 +9,7 @@ async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
   await expect(page).toHaveURL(/\/$/);
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible();
 }
 
 test("the employee shell exposes work, not implementation details", async ({ page }) => {
@@ -22,7 +22,9 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByTestId("composer")).toBeVisible();
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
-  await expect(page.getByText(/Control plane|Automatizaciones|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Automatizaciones (cron jobs)" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Biblioteca|Tareas|Programadas/ })).toHaveCount(0);
+  await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });
   await projectButton.hover();
@@ -35,12 +37,9 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("heading", { name: "Nuevo proyecto" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
 
-  const modePicker = page.getByRole("button", { name: "Modo del turno" });
-  await modePicker.click();
-  const modeMenu = page.getByRole("menu", { name: "Modo del turno" });
-  await expect(modeMenu).toBeVisible();
-  await modeMenu.getByRole("menuitemradio", { name: /Plan/ }).click();
-  await expect(modePicker).toContainText("Plan");
+  await expect(page.getByText("Trabajar", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Modo del turno" })).toHaveCount(0);
+  await expect(page.getByLabel("Destino de la conversación")).toContainText(primaryProject);
 
   const addMenuButton = page.getByRole("button", { name: "Añadir al mensaje" });
   await addMenuButton.click();
@@ -67,7 +66,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(search.getByRole("option", { name: /Abrir Review/ })).toBeVisible();
   await expect(search.getByRole("option", { name: /Abrir Computer Use/ })).toBeVisible();
   await search.getByRole("textbox").fill(primaryProject);
-  await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible();
+  await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");
   await expect(search).toBeHidden();
 

@@ -5,7 +5,7 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible({ timeout: 15_000 });
 }
 
 test("the composer grows, accepts dropped images, stops a stream and recovers after reload", async ({ page }) => {

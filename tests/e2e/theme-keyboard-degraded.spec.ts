@@ -48,7 +48,7 @@ test("keyboard dialogs trap focus, close with Escape and restore their opener", 
   await expect(searchTrigger).toBeFocused();
 });
 
-test("mobile Review behaves as a focus-trapped dialog and restores its opener", async ({ page }) => {
+test("mobile completed responses expose only the copy action", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const events = [
     { type: "diff", value: "diff --git a/estado.txt b/estado.txt\n--- a/estado.txt\n+++ b/estado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
@@ -65,16 +65,10 @@ test("mobile Review behaves as a focus-trapped dialog and restores its opener", 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("heading", { name: "Resultado sintético" })).toBeVisible();
 
-  const opener = page.getByRole("button", { name: "Revisar resultados" });
-  await opener.click();
-  const review = page.getByRole("dialog", { name: "Review del turno" });
-  await expect(review).toBeVisible();
-  await expect(review.getByRole("button", { name: "Cerrar Review" })).toBeFocused();
-  await page.keyboard.press("Shift+Tab");
-  await expect(review.locator("pre")).toBeFocused();
-  await page.keyboard.press("Escape");
-  await expect(review).toBeHidden();
-  await expect(opener).toBeFocused();
+  const copy = page.getByRole("button", { name: "Copiar" });
+  await expect(copy).toBeVisible();
+  await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Aprobar resultado|Descargar resultado|Leer en voz alta|Regenerar respuesta|Crear rama/ })).toHaveCount(0);
 });
 
 test("runtime failures and offline state fail closed and recover explicitly", async ({ page, context }) => {
