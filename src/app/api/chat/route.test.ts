@@ -154,12 +154,13 @@ describe("chat turn transport lifecycle", () => {
 
   it("keeps the server-owned turn alive when the NDJSON client disconnects", async () => {
     const turnGate = deferred();
-    const workerStarted = deferred();
-    let workerSignal: AbortSignal | null = null;
+    let captureWorkerSignal!: (signal: AbortSignal) => void;
+    const workerSignal = new Promise<AbortSignal>((resolve) => {
+      captureWorkerSignal = resolve;
+    });
     mocked.runWorkerCodexTurn.mockImplementation(async (...args: unknown[]) => {
-      workerSignal = args[9] as AbortSignal;
+      captureWorkerSignal(args[9] as AbortSignal);
       const emit = args[10] as (event: Record<string, unknown>) => Promise<void>;
-      workerStarted.resolve();
       await turnGate.promise;
       await emit({ type: "runtimeTurn", turnId: "runtime-turn-1" });
       await emit({ type: "delta", value: "still running" });
@@ -169,13 +170,13 @@ describe("chat turn transport lifecycle", () => {
     const client = new AbortController();
     const response = await POST(chatRequest(client.signal));
     expect(response.status).toBe(200);
-    await workerStarted.promise;
+    const signal = await workerSignal;
 
     client.abort();
-    expect(workerSignal?.aborted).toBe(false);
+    expect(signal.aborted).toBe(false);
     turnGate.resolve();
 
     await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
-    expect(workerSignal?.aborted).toBe(false);
+    expect(signal.aborted).toBe(false);
   });
 });
