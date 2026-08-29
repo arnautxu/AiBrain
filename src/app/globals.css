@@ -3,8 +3,8 @@
 @import "../styles/typography.css";
 
 :root {
-  --stream-gap: 16ms;
   --stream-fade: 180ms;
+  --stream-settle: 700ms;
   --stream-blur: 1.5px;
   --stream-ease: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
@@ -1032,21 +1032,42 @@ button:disabled {
 }
 
 .t-stream-w {
-  opacity: 0;
-  filter: blur(var(--stream-blur));
-  transform: translate3d(0, 3px, 0);
-  transform-origin: center bottom;
-  will-change: opacity, filter, transform;
-  transition:
-    opacity var(--stream-fade) var(--stream-ease),
-    filter var(--stream-fade) var(--stream-ease),
-    transform var(--stream-fade) var(--stream-ease);
+  color: inherit;
+  transition: color var(--stream-settle) var(--stream-ease);
 }
 
-.t-stream-w.is-in {
-  opacity: 1;
-  filter: blur(0);
-  transform: translate3d(0, 0, 0);
+.t-stream-w.is-fresh {
+  display: inline-block;
+  color: var(--installation-accent);
+  animation: stream-word-enter var(--stream-fade) var(--stream-ease) both;
+}
+
+.t-stream-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin: 0 0 -0.12em 0.2em;
+  border-radius: 999px;
+  background: var(--installation-accent);
+  animation: stream-caret-pulse 1s ease-in-out infinite;
+}
+
+@keyframes stream-word-enter {
+  from {
+    opacity: 0.35;
+    filter: blur(var(--stream-blur));
+    transform: translate3d(0, 2px, 0);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes stream-caret-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .message-enter {
@@ -1158,10 +1179,15 @@ button:disabled {
   }
 
   .t-stream-w {
-    opacity: 1 !important;
+    color: inherit !important;
     filter: none !important;
     transform: none !important;
+    animation: none !important;
     transition: none !important;
+  }
+
+  .t-stream-caret {
+    display: none;
   }
 
   *,
