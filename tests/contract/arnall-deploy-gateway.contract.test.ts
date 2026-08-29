@@ -9,13 +9,18 @@ import { describe, expect, it } from "vitest";
 const gatewayPath = path.join(process.cwd(), "infra", "hetzner", "app", "deploy-arnall-main.sh");
 
 describe("Arnall deployment gateway contract", () => {
-  it("checks build headroom before preparing a release", async () => {
+  it("reclaims only unreferenced dangling images before checking build headroom", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
+    const reclaim = gateway.indexOf("reclaim_unreferenced_dangling_images");
     const diskCheck = gateway.indexOf('free_bytes="$(df --output=avail -B1 /');
     const prepareRelease = gateway.indexOf('install -d -m 0700 -o root -g root "$release_dir"');
 
+    expect(reclaim).toBeGreaterThan(-1);
     expect(diskCheck).toBeGreaterThan(-1);
+    expect(diskCheck).toBeGreaterThan(reclaim);
     expect(prepareRelease).toBeGreaterThan(diskCheck);
+    expect(gateway).toContain('docker image ls --filter dangling=true --quiet --no-trunc');
+    expect(gateway).toContain('docker ps --all --quiet --filter "ancestor=${image_id}"');
   });
 
   it("removes only incomplete non-current releases after a failed attempt", async () => {
