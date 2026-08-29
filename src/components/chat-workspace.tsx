@@ -28,7 +28,7 @@ import {
 import { GuidedActions } from "@/components/guided-actions";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { ThinkingOrb } from "thinking-orbs";
-import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage } from "@/lib/chat-contract";
+import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
@@ -95,6 +95,7 @@ type ChatWorkspaceProps = {
   managedAppActionEnabled: boolean;
   managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
+  onPreviewDocument: (artifact: DocumentArtifact) => void;
   showAdvancedControls: boolean;
 };
 
@@ -214,6 +215,7 @@ function AssistantMessage({
   onDecidePublication,
   managedAppAction,
   managedAppApprovalKeys,
+  onPreviewDocument,
 }: {
   message: ChatMessage;
   projectId: string | undefined;
@@ -228,6 +230,7 @@ function AssistantMessage({
     onPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   } | null;
   managedAppApprovalKeys: readonly string[];
+  onPreviewDocument: (artifact: DocumentArtifact) => void;
 }) {
   const hasExecution = message.activity.length > 0 || message.plan.length > 0;
 
@@ -260,9 +263,9 @@ function AssistantMessage({
       {message.status === "stopped" ? <p className="mt-3 text-[12px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
 
       {message.artifacts.length ? (
-        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div className={`mt-4 grid gap-3 ${message.artifacts.every((artifact) => artifact.type === "image") ? "sm:grid-cols-2" : "grid-cols-1"}`}>
           {message.artifacts.map((artifact) => (
-            <TurnArtifactCard key={artifact.id} artifact={artifact} />
+            <TurnArtifactCard key={artifact.id} artifact={artifact} onPreviewDocument={onPreviewDocument} />
           ))}
         </div>
       ) : null}
@@ -355,6 +358,7 @@ export function ChatWorkspace({
   managedAppActionEnabled,
   managedAppApprovalKeys,
   onManagedAppPrepared,
+  onPreviewDocument,
   showAdvancedControls,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -557,6 +561,7 @@ export function ChatWorkspace({
                       onFreezePublication={onFreezePublication}
                       onDecidePublication={onDecidePublication}
                       managedAppApprovalKeys={managedAppApprovalKeys}
+                      onPreviewDocument={onPreviewDocument}
                       managedAppAction={managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
                         enabled: true,
                         threadId: thread.id,

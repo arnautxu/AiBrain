@@ -114,6 +114,7 @@ function renderWorkspace(
     managedAppActionEnabled={false}
     managedAppApprovalKeys={[]}
     onManagedAppPrepared={vi.fn()}
+    onPreviewDocument={vi.fn()}
     showAdvancedControls={false}
     {...overrides}
   />);

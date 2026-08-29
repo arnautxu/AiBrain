@@ -2,8 +2,9 @@
 
 import NextImage from "next/image";
 import {
-  ArrowSquareOut,
   Browser,
+  DownloadSimple,
+  Eye,
   FileDoc,
   FilePdf,
   FilePpt,
@@ -47,7 +48,10 @@ function DocumentIcon({ kind }: { kind: DocumentArtifact["kind"] }) {
   return <FileText size={18} />;
 }
 
-function DocumentCard({ artifact }: { artifact: DocumentArtifact }) {
+function DocumentCard({ artifact, onPreview }: {
+  artifact: DocumentArtifact;
+  onPreview?: (artifact: DocumentArtifact) => void;
+}) {
   return (
     <article className="max-w-[420px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-raised)]">
       <header className="flex items-center gap-2.5 px-3 py-2.5">
@@ -56,12 +60,15 @@ function DocumentCard({ artifact }: { artifact: DocumentArtifact }) {
           <h3 className="truncate text-[11px] font-semibold text-[var(--text)]">{artifact.name}</h3>
           <p className="mt-0.5 text-[9px] text-[var(--text-muted)]">{artifact.kind.toUpperCase()} · {Math.ceil(artifact.size / 1024)} KB{artifact.pages ? ` · ${artifact.pages} ${artifact.pages === 1 ? "página" : "páginas"}` : ""}</p>
         </div>
-        {artifact.status === "ready" ? <a href={artifact.url} download={artifact.name} className="grid size-7 shrink-0 place-items-center rounded-md text-[var(--text-muted)] hover:bg-[var(--surface-muted)] hover:text-[var(--text)]" aria-label={`Descargar ${artifact.name}`} title="Descargar"><ArrowSquareOut size={13} /></a> : null}
+        {artifact.status === "ready" && artifact.kind === "pdf" && artifact.previewUrl && onPreview ? <button type="button" className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={`Previsualizar ${artifact.name}`} title="Vista previa" onClick={() => onPreview(artifact)}><Eye size={15} /></button> : null}
+        {artifact.status === "ready" ? <a href={artifact.url} download={artifact.name} className="grid size-8 shrink-0 place-items-center rounded-lg text-[var(--text-muted)] transition hover:bg-[var(--surface-muted)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={`Descargar ${artifact.name}`} title="Descargar"><DownloadSimple size={15} /></a> : null}
       </header>
       {artifact.status === "processing" ? (
         <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--text-muted)]" role="status"><SpinnerGap size={12} className="motion-safe:animate-spin" />Preparando una vista previa segura…</div>
       ) : artifact.status === "error" ? (
         <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--danger)]" role="alert"><WarningCircle size={13} />{artifact.error ?? "No se ha podido generar la vista previa."}</div>
+      ) : artifact.kind === "pdf" && artifact.previewUrl && onPreview ? (
+        <button type="button" className="flex min-h-10 w-full items-center justify-between border-t border-[var(--border-subtle)] px-3 text-left text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:bg-[var(--surface-selected)]" onClick={() => onPreview(artifact)}><span>Revisar antes de descargar</span><span aria-hidden>›</span></button>
       ) : artifact.previewUrl ? (
         <details className="border-t border-[var(--border-subtle)]">
           <summary className="cursor-pointer list-none px-3 py-2 text-[9px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">Vista previa ›</summary>
@@ -77,8 +84,11 @@ function DocumentCard({ artifact }: { artifact: DocumentArtifact }) {
   );
 }
 
-export function TurnArtifactCard({ artifact }: { artifact: GeneratedArtifact }) {
-  if (artifact.type === "document") return <DocumentCard artifact={artifact} />;
+export function TurnArtifactCard({ artifact, onPreviewDocument }: {
+  artifact: GeneratedArtifact;
+  onPreviewDocument?: (artifact: DocumentArtifact) => void;
+}) {
+  if (artifact.type === "document") return <DocumentCard artifact={artifact} onPreview={onPreviewDocument} />;
   if (artifact.type === "browser") {
     return (
       <article className="max-w-[420px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-raised)]">

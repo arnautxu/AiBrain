@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import type { BrowserArtifact, DocumentArtifact } from "@/lib/chat-contract";
 
@@ -26,9 +26,12 @@ const documentArtifact: DocumentArtifact = {
 
 describe("TurnArtifactCard", () => {
   it("shows a safe Office/PDF preview and an honest publication state", () => {
-    render(<TurnArtifactCard artifact={documentArtifact} />);
+    const onPreview = vi.fn();
+    render(<TurnArtifactCard artifact={documentArtifact} onPreviewDocument={onPreview} />);
     expect(screen.getByRole("heading", { name: "informe.pdf" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Vista previa de informe.pdf" })).toBeInTheDocument();
+    screen.getByRole("button", { name: "Previsualizar informe.pdf" }).click();
+    expect(onPreview).toHaveBeenCalledWith(documentArtifact);
+    expect(screen.getByRole("button", { name: "Revisar antes de descargar" })).toBeInTheDocument();
     expect(screen.getByText("Pendiente de confirmación segura")).toBeInTheDocument();
     expect(screen.getByText("Informes/informe.pdf")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Descargar informe.pdf" })).toHaveAttribute("href", documentArtifact.url);
