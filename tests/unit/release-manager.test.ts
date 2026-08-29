@@ -358,6 +358,27 @@ describe("immutable release manager", () => {
     expect(log).toContain('"{{.State.Status}} {{.State.Health.Status}}"');
   }, 20_000);
 
+  it("can deliberately take the automation worker out of a release and restore it later", async () => {
+    const files = await fixture();
+    await execFileAsync(process.execPath, commandArgs(files, "promote"), {
+      env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "false" },
+    });
+
+    const afterDisable = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    const disabledUp = afterDisable.filter((args) => args.includes("up"));
+    expect(disabledUp).toHaveLength(1);
+    expect(disabledUp[0]).not.toContain("automation-worker");
+    expect(afterDisable.filter((args) => args.includes("stop") && args.at(-1) === "automation-worker")).toHaveLength(2);
+    expect(afterDisable.some((args) => args.includes("ps") && args.at(-1) === "automation-worker")).toBe(true);
+
+    await execFileAsync(process.execPath, commandArgs(files, "rollback"), {
+      env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "true" },
+    });
+    const afterRestore = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    const restoredUp = afterRestore.filter((args) => args.includes("up")).at(-1);
+    expect(restoredUp).toContain("automation-worker");
+  }, 20_000);
+
   it("allows a running service to recover from a transient unhealthy state", async () => {
     const files = await fixture();
     const promoted = await execFileAsync(process.execPath, commandArgs(files, "promote"), {

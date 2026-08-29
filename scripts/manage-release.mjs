@@ -39,6 +39,8 @@ const TRANSACTION_PHASES = new Set([
   "recovering-previous",
   "recovery-state-committed",
 ]);
+const BOOLEAN_FALSE_SET = new Set(["0", "false", "no", "off"]);
+const BOOLEAN_TRUE_SET = new Set(["1", "true", "yes", "on"]);
 
 class ReleaseError extends Error {
   constructor(code, message, options = {}) {
@@ -55,6 +57,15 @@ function usage() {
     "  node scripts/manage-release.mjs rollback --installation-id <slug> --env-file <absolute> --state-file <absolute>",
     "Optional: --docker-bin <absolute> --health-timeout-ms <positive integer> --docker-command-timeout-ms <positive integer>",
   ].join("\n");
+}
+
+function parseBooleanEnv(value, fallback = true) {
+  if (value === undefined || value === null) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized.length === 0) return fallback;
+  if (BOOLEAN_FALSE_SET.has(normalized)) return false;
+  if (BOOLEAN_TRUE_SET.has(normalized)) return true;
+  return fallback;
 }
 
 function parseArguments(argv) {
@@ -140,6 +151,7 @@ function parseArguments(argv) {
     installationConfig: values.has("--installation-config")
       ? safeExistingFile(values.get("--installation-config"), "target installation config")
       : null,
+    automationWorkerEnabled: parseBooleanEnv(process.env.AIBRAIN_AUTOMATION_WORKER_ENABLED, true),
     stateFile: safeStateFile(values.get("--state-file")),
     dockerBin: safeExecutable(values.get("--docker-bin") ?? "/usr/bin/docker"),
     healthTimeoutMs: Number(timeoutValue),
@@ -591,6 +603,26 @@ function remainingDockerTimeout(options, deadline) {
   return Math.max(1, Math.min(options.dockerCommandTimeoutMs, remaining));
 }
 
+function managedServiceSet(includeAutomationWorker) {
+  return includeAutomationWorker
+    ? ["egress-gateway", "automation-worker", "app", "ingress-gateway", "alert-dispatcher"]
+    : ["egress-gateway", "app", "ingress-gateway", "alert-dispatcher"];
+}
+
+function stopAutomationWorkerIfRunning(options, release, deadline) {
+  const containerId = runDocker(
+    options,
+    composeArgs(options, release, "ps", "-q", "automation-worker"),
+    remainingDockerTimeout(options, deadline),
+  );
+  if (containerId.length === 0) return;
+  runDocker(
+    options,
+    composeArgs(options, release, "stop", "automation-worker"),
+    remainingDockerTimeout(options, deadline),
+  );
+}
+
 function waitUntilHealthy(options, release, service, deadline) {
   const containerId = runDocker(
     options,
@@ -649,23 +681,24 @@ function verifyRunningService(options, release, service, expectedImage, expected
 function deploy(options, release, deadline = performance.now() + options.healthTimeoutMs) {
   assertSelectedReleaseInputs(options, release);
   runDocker(options, composeArgs(options, release, "config", "--quiet"), remainingDockerTimeout(options, deadline));
+  if (!options.automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
   runDocker(
     options,
     composeArgs(
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      "egress-gateway", "automation-worker", "app", "ingress-gateway", "alert-dispatcher",
+      ...managedServiceSet(options.automationWorkerEnabled),
     ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  waitUntilHealthy(options, release, "automation-worker", deadline);
+  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
-  verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
+  if (options.automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
@@ -673,13 +706,14 @@ function deploy(options, release, deadline = performance.now() + options.healthT
 
 function verifyCurrentDeployment(options, release, deadline = performance.now() + options.healthTimeoutMs) {
   assertSelectedReleaseInputs(options, release);
+  if (!options.automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  waitUntilHealthy(options, release, "automation-worker", deadline);
+  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
-  verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
+  if (options.automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
