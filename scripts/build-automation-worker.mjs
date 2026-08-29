@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { spawnSync } from "node:child_process";
 import { chmod, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +24,14 @@ await build({
   conditions: ["react-server", "node", "import"],
   alias: { "@": path.join(repositoryRoot, "src") },
   legalComments: "none",
-  banner: { js: "// Generated at image-build time. Do not edit." },
+  // Some server dependencies (notably ws) still contain CommonJS dynamic
+  // requires. Give the ESM bundle a Node-native require without weakening the
+  // browser/server module boundary.
+  banner: {
+    js: `// Generated at image-build time. Do not edit.
+import { createRequire as __aibrainCreateRequire } from "node:module";
+const require = __aibrainCreateRequire(import.meta.url);`,
+  },
 });
 
 // `server-only` is a conditional marker. Resolving it under react-server while
@@ -31,5 +39,12 @@ await build({
 const bundle = await readFile(output, "utf8");
 if (bundle.includes("This module cannot be imported from a Client Component")) {
   throw new Error("automation worker retained the server-only client sentinel");
+}
+const smoke = spawnSync(process.execPath, [output, "--bundle-smoke-test"], {
+  encoding: "utf8",
+  timeout: 15_000,
+});
+if (smoke.status !== 1 || !smoke.stderr.includes("Argumento desconocido: --bundle-smoke-test")) {
+  throw new Error(`automation worker bundle failed its Node runtime smoke test: ${smoke.stderr.trim()}`);
 }
 await chmod(output, 0o555);
