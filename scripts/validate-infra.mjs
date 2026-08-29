@@ -98,7 +98,7 @@ requireMatch(dockerfile, /scripts\/maintain-document-temporaries\.ts/u, "Dockerf
 requireMatch(dockerfile, /src\/documents\/maintenance\.ts/u, "Dockerfile is missing document maintenance logic");
 requireMatch(dockerfile, /infra\/hetzner\/app\/document-maintenance\.sh/u, "Dockerfile is missing the document maintenance launcher");
 requireMatch(documentMaintenance, /maintain-document-temporaries\.ts "\$@"/u, "document maintenance launcher does not preserve explicit arguments");
-for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "qpdf", "chromium", "restic"]) {
+for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress", "poppler-utils", "python3", "python3-venv", "qpdf", "chromium", "restic"]) {
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
