@@ -369,7 +369,8 @@ describe("immutable release manager", () => {
     expect(disabledUp).toHaveLength(1);
     expect(disabledUp[0]).not.toContain("automation-worker");
     expect(afterDisable.filter((args) => args.includes("stop") && args.at(-1) === "automation-worker")).toHaveLength(2);
-    expect(afterDisable.some((args) => args.includes("ps") && args.at(-1) === "automation-worker")).toBe(true);
+    expect(afterDisable.some((args) => args.includes("ps") && args.includes("--status")
+      && args.includes("running") && args.at(-1) === "automation-worker")).toBe(true);
 
     await execFileAsync(process.execPath, commandArgs(files, "rollback"), {
       env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "true" },
