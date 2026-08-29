@@ -19,6 +19,8 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).toContain('local compose_file="${OPS_ROOT}/compose.yaml"');
     expect(gateway).toContain('require_root_owned_file "${OPS_ROOT}/browser/seccomp_profile.json"');
     expect(gateway).toContain('readonly AUTOMATION_WORKER_ENABLED="true"');
+    expect(gateway).toContain("automation_worker_is_healthy");
+    expect(gateway).toContain('worker_state" == "true|healthy"');
     expect(gateway).toContain('cleanup_previous_aibrain_images');
     expect(gateway).not.toContain("docker buildx prune");
     expect(gateway).not.toContain("docker build ");
