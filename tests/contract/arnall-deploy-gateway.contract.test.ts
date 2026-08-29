@@ -9,36 +9,33 @@ import { describe, expect, it } from "vitest";
 const gatewayPath = path.join(process.cwd(), "infra", "hetzner", "app", "deploy-arnall-main.sh");
 
 describe("Arnall deployment gateway contract", () => {
-  it("reclaims only unreferenced dangling images and unused build cache before checking build headroom", async () => {
+  it("pulls only approved immutable GHCR images and never builds or archives source on the host", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    const reclaim = gateway.indexOf("reclaim_unreferenced_dangling_images");
-    const buildCache = gateway.indexOf("reclaim_unused_build_cache");
-    const diskCheck = gateway.indexOf('free_bytes="$(df --output=avail -B1 /');
-    const prepareRelease = gateway.indexOf('install -d -m 0700 -o root -g root "$release_dir"');
-
-    expect(reclaim).toBeGreaterThan(-1);
-    expect(buildCache).toBeGreaterThan(reclaim);
-    expect(diskCheck).toBeGreaterThan(-1);
-    expect(diskCheck).toBeGreaterThan(buildCache);
-    expect(prepareRelease).toBeGreaterThan(diskCheck);
-    expect(gateway).toContain('docker image ls --filter dangling=true --quiet --no-trunc');
-    expect(gateway).toContain('docker ps --all --quiet --filter "ancestor=${image_id}"');
-    expect(gateway).toContain("docker buildx prune --all --force");
+    expect(gateway).toContain('readonly GHCR_APP_REPOSITORY="ghcr.io/arnautxu/aibrain"');
+    expect(gateway).toContain('readonly GHCR_EGRESS_REPOSITORY="ghcr.io/arnautxu/aibrain-egress"');
+    expect(gateway).toContain('docker --config "$ghcr_docker_config" pull "$app_image"');
+    expect(gateway).toContain('docker --config "$ghcr_docker_config" pull "$egress_image"');
+    expect(gateway).toContain('node "${OPS_ROOT}/manage-release.mjs"');
+    expect(gateway).toContain('cleanup_previous_aibrain_images');
+    expect(gateway).not.toContain("docker buildx prune");
+    expect(gateway).not.toContain("docker build ");
+    expect(gateway).not.toContain("docker push ");
+    expect(gateway).not.toContain("git archive");
   });
 
-  it("removes only incomplete non-current releases after a failed attempt", async () => {
+  it("keeps GHCR credentials in a temporary Docker config and rejects other image repositories", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
 
-    expect(gateway).toContain("trap cleanup_incomplete_release EXIT");
-    expect(gateway).toContain("status != 0 && release_prepared == 1");
-    expect(gateway).toContain(".current.revision == $revision");
-    expect(gateway).toContain('rm -rf --one-file-system -- "$release_dir"');
-    expect(gateway).toContain("trap - EXIT");
+    expect(gateway).toContain('ghcr_docker_config="$(mktemp -d "${RELEASE_ROOT}/.ghcr-docker.XXXXXX")"');
+    expect(gateway).toContain("trap cleanup_ghcr_credentials EXIT");
+    expect(gateway).toContain('rm -rf --one-file-system -- "$ghcr_docker_config"');
+    expect(gateway).toContain("application image is not the approved GHCR repository and digest");
+    expect(gateway).toContain("egress image is not the approved GHCR repository and digest");
   });
 
   it("adds post-deploy readbacks after health validation, with separate fail-closed sources", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    const deployment = gateway.indexOf('node "${release_dir}/scripts/manage-release.mjs"');
+    const deployment = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
     const health = gateway.indexOf("/api/health/ready");
     const collection = gateway.indexOf("collect_release_readbacks()");
 
@@ -54,6 +51,7 @@ describe("Arnall deployment gateway contract", () => {
       "backend-ci-source.json",
       "acceptance-release-readbacks.json",
       "collect-release-readbacks.mjs",
+      'require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"',
       "docker compose --env-file \"$ACTIVE_ENV\" -f \"$compose_file\" ps -q app",
       "docker compose --env-file \"$ACTIVE_ENV\" -f \"$compose_file\" ps -q ingress-gateway",
     ]) expect(gateway).toContain(required);
@@ -62,14 +60,12 @@ describe("Arnall deployment gateway contract", () => {
 
   it("preflights the collector runtime before any build or promotion", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    const deploy = gateway.indexOf("deploy_release()");
+    const deploy = gateway.indexOf("deploy_ghcr_release()");
     const runtimeCheck = gateway.indexOf("  require_release_readback_runtime", deploy);
-    const buildx = gateway.indexOf("docker buildx version");
-    const promotion = gateway.indexOf('node "${release_dir}/scripts/manage-release.mjs"');
+    const promotion = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
 
     expect(gateway).toContain("node --input-type=module --eval");
     expect(runtimeCheck).toBeGreaterThan(-1);
-    expect(runtimeCheck).toBeLessThan(buildx);
     expect(runtimeCheck).toBeLessThan(promotion);
   });
 

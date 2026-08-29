@@ -41,13 +41,23 @@ describe("backend CI contract", () => {
     expect(workflow).not.toMatch(/persist-credentials:\s*true/u);
   });
 
-  it("collects readbacks only after the successful restricted deploy using trusted workflow context", async () => {
+  it("publishes only after the protected gates and deploys the immutable GHCR digests", async () => {
+    const publish = await readFile(path.join(process.cwd(), ".github", "workflows", "publish-ghcr.yml"), "utf8");
     const workflow = await readFile(path.join(process.cwd(), ".github", "workflows", "deploy-arnall.yml"), "utf8");
-    const deploy = workflow.indexOf('root@"$DEPLOY_HOST" "deploy $TESTED_SHA"');
+    const deploy = workflow.indexOf('root@"$DEPLOY_HOST" "deploy-ghcr $TESTED_SHA $APP_IMAGE $EGRESS_IMAGE $GHCR_USERNAME"');
     const collection = workflow.indexOf("Collect post-deploy release identity readbacks");
 
+    expect(publish).toContain("Backend CI");
+    expect(publish).toContain("packages: write");
+    expect(publish).toContain("docker/build-push-action@");
+    expect(publish).toContain("AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}");
+    expect(publish).toContain("aibrain-ghcr-release-${{ github.event.workflow_run.head_sha }}");
     expect(deploy).toBeGreaterThan(-1);
     expect(collection).toBeGreaterThan(deploy);
+    expect(workflow).toContain("Publish GHCR images");
+    expect(workflow).toContain("packages: read");
+    expect(workflow).toContain("GHCR_PULL_TOKEN: ${{ github.token }}");
+    expect(workflow).toContain("actions/download-artifact@");
     expect(workflow).toContain("CI_RUN_ID: ${{ github.event.workflow_run.id }}");
     expect(workflow).toContain('root@"$DEPLOY_HOST" "collect-readbacks $TESTED_SHA $CI_RUN_ID" > /dev/null');
     expect(workflow).toContain('root@"$DEPLOY_HOST" "bootstrap-admin $BOOTSTRAP_ADMIN_USER_ID"');

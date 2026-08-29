@@ -7,6 +7,23 @@ llevar la misma label OCI `org.opencontainers.image.revision` y los contenedores
 que terminan healthy deben declarar exactamente esos digests y esa revisión.
 Un healthcheck verde con una imagen antigua no se acepta.
 
+## Publicación GHCR y promoción Arnall
+
+`Backend CI` conserva todos los gates. Solo un `workflow_run` exitoso de un
+push a `main` publica `ghcr.io/arnautxu/aibrain:<SHA>` y
+`ghcr.io/arnautxu/aibrain-egress:<SHA>`. El workflow guarda los dos digests en
+un artefacto de siete días y `Deploy Arnall` descarga ese manifiesto, rechaza
+una revisión que ya no sea la punta de `main`, y transmite el `GITHUB_TOKEN`
+temporal por stdin al gateway restringido.
+
+El gateway usa una configuración Docker temporal para el login, hace pull de
+ambos digests exactos, elimina esa configuración antes de promover y ejecuta el
+release manager. Nunca recibe un archivo fuente, no construye ni publica en
+Hetzner y no persiste credenciales GHCR. Tras health/readiness y los readbacks,
+solo elimina referencias de imágenes AiBrain previas que no tengan ningún
+contenedor asociado. La imagen anterior queda recuperable desde GHCR por su
+digest guardado en el estado de release.
+
 ## Precondiciones
 
 1. Completar maintenance/drain, backup compuesto, verificación, réplica, tests,

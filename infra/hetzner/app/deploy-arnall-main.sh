@@ -5,18 +5,14 @@ set -euo pipefail
 readonly INSTALLATION_ID="company-qa"
 readonly COMPOSE_PROJECT="aibrain-company-qa"
 readonly RELEASE_ROOT="/opt/aibrain-company-qa"
-readonly RELEASES_DIR="${RELEASE_ROOT}/releases"
+readonly OPS_ROOT="${RELEASE_ROOT}/ghcr-ops"
 readonly CONFIG_DIR="/etc/aibrain/company-qa"
 readonly ACTIVE_ENV="${CONFIG_DIR}/compose.env"
 readonly AUTOMATION_WORKER_ENABLED="false"
 readonly ACTIVE_CONFIG="${CONFIG_DIR}/installation.json"
 readonly STATE_FILE="${CONFIG_DIR}/release-state.json"
-readonly REGISTRY="127.0.0.1:5000"
-readonly APP_REPOSITORY="${REGISTRY}/aibrain-company-qa"
-readonly EGRESS_REPOSITORY="${REGISTRY}/aibrain-company-qa-egress"
-readonly CONTEXT_ROOT="/var/lib/docker/volumes/aibrain-company-qa-data/_data/company-context"
-readonly MAX_ARCHIVE_BYTES=$((64 * 1024 * 1024))
-readonly MIN_FREE_BYTES=$((12 * 1024 * 1024 * 1024))
+readonly GHCR_APP_REPOSITORY="ghcr.io/arnautxu/aibrain"
+readonly GHCR_EGRESS_REPOSITORY="ghcr.io/arnautxu/aibrain-egress"
 readback_staging=""
 readback_evidence_parent=""
 readback_revision=""
@@ -58,19 +54,6 @@ cleanup_readback_staging() {
   exit "$status"
 }
 
-validate_archive() {
-  local archive="$1"
-  local entry type
-  [[ "$(stat -c '%s' "$archive")" -le "$MAX_ARCHIVE_BYTES" ]] || fail "source archive exceeds 64 MiB"
-  while IFS= read -r entry; do
-    [[ -n "$entry" ]] || continue
-    [[ "$entry" != /* && ! "$entry" =~ (^|/)\.\.(/|$) ]] || fail "source archive contains an unsafe path"
-  done < <(tar -tf "$archive")
-  while IFS= read -r type; do
-    [[ "$type" == "-" || "$type" == "d" ]] || fail "source archive contains links or special files"
-  done < <(tar -tvf "$archive" | cut -c1)
-}
-
 replace_release_values() {
   local source="$1" target="$2" image="$3" egress_image="$4" revision="$5"
   awk -v image="$image" -v egress_image="$egress_image" -v revision="$revision" '
@@ -83,7 +66,7 @@ replace_release_values() {
   chown root:root "$target"
 }
 
-set_temporary_automation_worker_flag() {
+set_automation_worker_flag() {
   local target_env="$1"
   if grep -q '^AIBRAIN_AUTOMATION_WORKER_ENABLED=' "$target_env"; then
     sed -i "s/^AIBRAIN_AUTOMATION_WORKER_ENABLED=.*/AIBRAIN_AUTOMATION_WORKER_ENABLED=${AUTOMATION_WORKER_ENABLED}/" "$target_env"
@@ -92,153 +75,83 @@ set_temporary_automation_worker_flag() {
   fi
 }
 
-new_dangling_images() {
-  local before="$1" after="$2"
-  docker image ls --filter dangling=true --quiet --no-trunc | sort -u > "$after"
-  comm -13 "$before" "$after"
+cleanup_ghcr_credentials() {
+  local status="$?"
+  if [[ -n "${ghcr_docker_config:-}" && -d "$ghcr_docker_config" && ! -L "$ghcr_docker_config" ]]; then
+    rm -rf --one-file-system -- "$ghcr_docker_config"
+  fi
+  exit "$status"
 }
 
-remove_new_dangling_images() {
-  local before="$1" after="$2" image_id
-  while IFS= read -r image_id; do
-    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
-    [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || continue
-    docker image rm "$image_id" >/dev/null 2>&1 || true
-  done < <(new_dangling_images "$before" "$after")
+pull_ghcr_images() {
+  local app_image="$1" egress_image="$2" ghcr_user="$3" ghcr_token=""
+  [[ "$app_image" =~ ^${GHCR_APP_REPOSITORY}@sha256:[0-9a-f]{64}$ ]] || fail "application image is not the approved GHCR repository and digest"
+  [[ "$egress_image" =~ ^${GHCR_EGRESS_REPOSITORY}@sha256:[0-9a-f]{64}$ ]] || fail "egress image is not the approved GHCR repository and digest"
+  [[ "$ghcr_user" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail "GHCR username is invalid"
+  IFS= read -r ghcr_token || [[ -n "$ghcr_token" ]] || fail "GHCR pull token was not supplied"
+  [[ -n "$ghcr_token" ]] || fail "GHCR pull token was empty"
+  umask 077
+  ghcr_docker_config="$(mktemp -d "${RELEASE_ROOT}/.ghcr-docker.XXXXXX")"
+  trap cleanup_ghcr_credentials EXIT
+  printf '%s' "$ghcr_token" | docker --config "$ghcr_docker_config" login ghcr.io --username "$ghcr_user" --password-stdin >/dev/null
+  unset ghcr_token
+  docker --config "$ghcr_docker_config" pull "$app_image" >/dev/null
+  docker --config "$ghcr_docker_config" pull "$egress_image" >/dev/null
 }
 
-reclaim_unreferenced_dangling_images() {
-  local image_id
-  while IFS= read -r image_id; do
-    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
-    [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || continue
-    docker image rm "$image_id" >/dev/null 2>&1 || true
-  done < <(docker image ls --filter dangling=true --quiet --no-trunc | sort -u)
+remove_unused_aibrain_image() {
+  local image="$1" image_id label reference
+  [[ "$image" =~ ^(127\.0\.0\.1:5000/aibrain-company-qa|127\.0\.0\.1:5000/aibrain-company-qa-egress|${GHCR_APP_REPOSITORY}|${GHCR_EGRESS_REPOSITORY})@sha256:[0-9a-f]{64}$ ]] || return 0
+  image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
+  [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 0
+  [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || return 0
+  label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image_id")"
+  [[ "$label" == "AiBrain Company Brain" || "$label" == "AiBrain Egress Gateway" ]] || fail "refusing to remove a non-AiBrain image"
+  while IFS= read -r reference; do
+    [[ -n "$reference" && "$reference" != "<none>:<none>" ]] || continue
+    [[ "$reference" == 127.0.0.1:5000/aibrain-company-qa:* || "$reference" == 127.0.0.1:5000/aibrain-company-qa-egress:* || "$reference" == ${GHCR_APP_REPOSITORY}:* || "$reference" == ${GHCR_EGRESS_REPOSITORY}:* ]] \
+      || fail "refusing to remove an image shared with another repository"
+    docker image rm "$reference" >/dev/null
+  done < <(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$image_id")
 }
 
-reclaim_unused_build_cache() {
-  docker buildx prune --all --force >/dev/null
+cleanup_previous_aibrain_images() {
+  local image
+  [[ -f "$STATE_FILE" ]] || return 0
+  while IFS= read -r image; do
+    remove_unused_aibrain_image "$image"
+  done < <(jq -r '.previous.image?, .previous.egressImage? // empty' "$STATE_FILE")
 }
 
-sync_company_context() {
-  local source="$1" file temporary
-  install -d -m 0700 -o root -g root "$CONTEXT_ROOT"
-  chown 10001:10001 "$CONTEXT_ROOT"
-  while IFS= read -r -d '' file; do
-    temporary="${CONTEXT_ROOT}/.$(basename "$file").pending-$$"
-    install -m 0400 -o root -g root "$file" "$temporary"
-    chown 10001:10001 "$temporary"
-    mv -f "$temporary" "${CONTEXT_ROOT}/$(basename "$file")"
-  done < <(find "$source" -maxdepth 1 -type f -name '*.md' -print0)
-}
-
-deploy_release() {
-  local revision="$1"
+deploy_ghcr_release() {
+  local revision="$1" app_image="$2" egress_image="$3" ghcr_user="$4"
   local short_revision="${revision:0:7}"
-  local release_dir="${RELEASES_DIR}/${revision}"
-  local incoming_dir="${RELEASE_ROOT}/incoming"
-  local archive="${incoming_dir}/${revision}.$$.tar"
   local target_env="${CONFIG_DIR}/compose.env.target-${short_revision}"
-  local target_config="${CONFIG_DIR}/installation.target-${short_revision}.json"
-  local compose_file current_compose current_revision current_short
-  local app_tag egress_tag app_image egress_image free_bytes
-  local dangling_before="" dangling_after="" manager_args
-  local release_prepared=0
-
-  cleanup_incomplete_release() {
-    local status="$?"
-
-    set +e
-    if (( status != 0 )) && [[ -n "${dangling_before:-}" && -f "${dangling_before:-}" ]]; then
-      remove_new_dangling_images "${dangling_before:-}" "${dangling_after:-}"
-    fi
-    rm -f "${archive:-}" "${target_env:-}" "${target_config:-}"
-    [[ -z "${dangling_before:-}" ]] || rm -f "${dangling_before:-}"
-    [[ -z "${dangling_after:-}" ]] || rm -f "${dangling_after:-}"
-
-    if (( status != 0 && release_prepared == 1 )); then
-      if [[ ! -f "$STATE_FILE" ]] || ! jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
-        rm -rf --one-file-system -- "$release_dir"
-      fi
-    fi
-    exit "$status"
-  }
+  local compose_file="${STATE_FILE}.active.compose.yaml"
+  local manager_args
 
   umask 077
-  install -d -m 0700 -o root -g root "$RELEASE_ROOT" "$RELEASES_DIR" "$incoming_dir" "$CONFIG_DIR"
+  install -d -m 0700 -o root -g root "$RELEASE_ROOT" "$CONFIG_DIR"
   exec 9>"${RELEASE_ROOT}/deploy.lock"
   flock --exclusive --nonblock 9 || fail "another Arnall deployment is running"
-
   require_root_owned_file "$ACTIVE_ENV"
   require_root_owned_file "$ACTIVE_CONFIG"
+  require_root_owned_file "$STATE_FILE"
+  require_root_owned_file "$compose_file"
+  require_root_owned_file "${OPS_ROOT}/manage-release.mjs"
+  require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
   require_release_readback_runtime
-  docker buildx version >/dev/null 2>&1 || fail "Docker Buildx is required before receiving a release archive"
 
-  if [[ -f "$STATE_FILE" ]] && jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
+  if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
-    exit 0
+    return
   fi
 
-  if [[ -e "$release_dir" ]]; then
-    [[ -d "$release_dir" && ! -L "$release_dir" ]] || fail "non-current release path is not a directory"
-    rm -rf --one-file-system -- "$release_dir"
-  fi
-
-  reclaim_unreferenced_dangling_images
-  reclaim_unused_build_cache
-  free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
-  [[ "$free_bytes" =~ ^[0-9]+$ && "$free_bytes" -ge "$MIN_FREE_BYTES" ]] || fail "insufficient free disk for a bounded image build"
-
-  trap cleanup_incomplete_release EXIT
-
-  dd if=/dev/stdin of="$archive" bs=1M count=65 iflag=fullblock status=none
-  validate_archive "$archive"
-  release_prepared=1
-  install -d -m 0700 -o root -g root "$release_dir"
-  tar --extract --file="$archive" --directory="$release_dir" --no-same-owner
-  rm -f "$archive"
-  chown -R root:root "$release_dir"
-  find "$release_dir" -type d -exec chmod go-w {} +
-  find "$release_dir" -type f -exec chmod go-w {} +
-
-  compose_file="${release_dir}/infra/hetzner/compose.yaml"
-  [[ -f "${release_dir}/Dockerfile" ]] || fail "release archive has no Dockerfile"
-  [[ -f "${release_dir}/scripts/manage-release.mjs" ]] || fail "release archive has no release manager"
-  [[ -f "$compose_file" ]] || fail "release archive has no Compose contract"
-  [[ -f "${release_dir}/infra/hetzner/browser/seccomp_profile.json" ]] || fail "release archive has no seccomp profile"
-  [[ -f "${release_dir}/config/installations/arnall.qa.example.json" ]] || fail "release archive has no Arnall installation config"
-  [[ -d "${release_dir}/config/company-context/arnall" ]] || fail "release archive has no Arnall company context"
-  chmod 0644 "$compose_file" "${release_dir}/infra/hetzner/browser/seccomp_profile.json"
-
-  install -d -m 0755 -o root -g root "${RELEASE_ROOT}/node_modules"
-  if [[ ! -f "${RELEASE_ROOT}/node_modules/js-yaml/package.json" ]]; then
-    npm install --prefix "$RELEASE_ROOT" --no-save --ignore-scripts --omit=dev js-yaml@4.3.2
-  fi
-
-  dangling_before="$(mktemp "${RELEASE_ROOT}/dangling-before.XXXXXX")"
-  dangling_after="$(mktemp "${RELEASE_ROOT}/dangling-after.XXXXXX")"
-  docker image ls --filter dangling=true --quiet --no-trunc | sort -u > "$dangling_before"
-
-  app_tag="${APP_REPOSITORY}:${revision}"
-  egress_tag="${EGRESS_REPOSITORY}:${revision}"
-  DOCKER_BUILDKIT=1 docker build --pull --target runtime --build-arg "AIBRAIN_REVISION=${revision}" --tag "$app_tag" "$release_dir"
-  DOCKER_BUILDKIT=1 docker build --pull --target egress-gateway --build-arg "AIBRAIN_REVISION=${revision}" --tag "$egress_tag" "$release_dir"
-  docker push "$app_tag"
-  docker push "$egress_tag"
-  app_image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$app_tag")"
-  egress_image="$(docker image inspect --format '{{index .RepoDigests 0}}' "$egress_tag")"
-  [[ "$app_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "application image digest is unavailable"
-  [[ "$egress_image" =~ @sha256:[0-9a-f]{64}$ ]] || fail "egress image digest is unavailable"
-  # Keep compatibility cleanup for hosts upgrading from the legacy builder.
-  # BuildKit avoids materializing one full dangling image per Dockerfile step.
-  remove_new_dangling_images "$dangling_before" "$dangling_after"
-
+  pull_ghcr_images "$app_image" "$egress_image" "$ghcr_user"
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"
-  set_temporary_automation_worker_flag "$target_env"
-  install -m 0400 -o root -g root "${release_dir}/config/installations/arnall.qa.example.json" "$target_config"
-
+  set_automation_worker_flag "$target_env"
   manager_args=(
     promote
     --image "$app_image"
@@ -248,47 +161,24 @@ deploy_release() {
     --env-file "$ACTIVE_ENV"
     --target-env-file "$target_env"
     --compose-file "$compose_file"
-    --installation-config "$target_config"
+    --installation-config "$ACTIVE_CONFIG"
     --state-file "$STATE_FILE"
     --health-timeout-ms 240000
     --docker-command-timeout-ms 240000
   )
 
-  if [[ ! -f "$STATE_FILE" ]]; then
-    current_revision="$(sed -n 's/^AIBRAIN_REVISION=//p' "$ACTIVE_ENV")"
-    [[ "$current_revision" =~ ^[0-9a-f]{7,40}$ ]] || fail "active revision is invalid"
-    current_short="${current_revision:0:7}"
-    current_compose="${RELEASES_DIR}/${current_short}/infra/hetzner/compose.yaml"
-    [[ -f "$current_compose" ]] || fail "bootstrap Compose input is missing"
-    chown root:root "$current_compose" "$(dirname "$current_compose")/browser/seccomp_profile.json"
-    chmod 0644 "$current_compose" "$(dirname "$current_compose")/browser/seccomp_profile.json"
-    docker compose --env-file "$ACTIVE_ENV" -f "$current_compose" up -d --no-deps alert-dispatcher
-    manager_args+=(--current-compose-file "$current_compose")
-  else
-    docker compose --env-file "$ACTIVE_ENV" -f "${STATE_FILE}.active.compose.yaml" up -d --no-deps alert-dispatcher
-  fi
-
+  docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" up -d --no-deps alert-dispatcher
   AIBRAIN_AUTOMATION_WORKER_ENABLED="$AUTOMATION_WORKER_ENABLED" \
-    node "${release_dir}/scripts/manage-release.mjs" "${manager_args[@]}"
-  sync_company_context "${release_dir}/config/company-context/arnall"
-
+    node "${OPS_ROOT}/manage-release.mjs" "${manager_args[@]}"
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
-
-  remove_new_dangling_images "$dangling_before" "$dangling_after"
-  rm -f "$dangling_before" "$dangling_after"
-
-  bash -n "${release_dir}/infra/hetzner/app/deploy-arnall-main.sh"
-  install -m 0700 -o root -g root \
-    "${release_dir}/infra/hetzner/app/deploy-arnall-main.sh" \
-    /usr/local/sbin/aibrain-deploy-gateway
+  cleanup_previous_aibrain_images
 
   jq -n --arg revision "$revision" --arg image "$app_image" --arg egressImage "$egress_image" \
     '{schemaVersion:1,installationId:"company-qa",revision:$revision,image:$image,egressImage:$egressImage,deployedAt:(now|todateiso8601)}' \
     > "${CONFIG_DIR}/last-deployment.json.pending"
   chmod 0600 "${CONFIG_DIR}/last-deployment.json.pending"
   mv -f "${CONFIG_DIR}/last-deployment.json.pending" "${CONFIG_DIR}/last-deployment.json"
-  trap - EXIT
   printf 'ARNALL_DEPLOY_OK revision=%s\n' "$revision"
 }
 
@@ -357,7 +247,6 @@ validate_existing_release_readbacks() {
 
 collect_release_readbacks() {
   local revision="$1" run_id="$2"
-  local release_dir="${RELEASES_DIR}/${revision}"
   local compose_file="${STATE_FILE}.active.compose.yaml"
   local evidence_parent="${CONFIG_DIR}/acceptance"
   local evidence_root="${evidence_parent}/${revision}"
@@ -369,8 +258,7 @@ collect_release_readbacks() {
   require_root_owned_file "$STATE_FILE"
   require_root_owned_file "$ACTIVE_ENV"
   require_root_owned_file "$compose_file"
-  [[ -d "$release_dir" && ! -L "$release_dir" ]] || fail "candidate release directory is unavailable"
-  [[ -f "${release_dir}/scripts/collect-release-readbacks.mjs" ]] || fail "candidate release has no readback collector"
+  require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   jq -e --arg revision "$revision" '.schemaVersion == 3 and .current.revision == $revision' "$STATE_FILE" >/dev/null \
     || fail "release state does not match the requested candidate"
   [[ "$run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
@@ -398,7 +286,7 @@ collect_release_readbacks() {
     '{schemaVersion:1,workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$runId}' \
     > "${readback_staging}/backend-ci-source.json"
   chmod 0600 "${readback_staging}/backend-ci-source.json"
-  node "${release_dir}/scripts/collect-release-readbacks.mjs" \
+  node "${OPS_ROOT}/collect-release-readbacks.mjs" \
     --output-root "$readback_staging" \
     --candidate-sha "$revision" \
     --ci-source "${readback_staging}/backend-ci-source.json" \
@@ -481,8 +369,8 @@ bootstrap_workspace_admin() {
 
 main() {
   [[ "$(id -u)" == "0" ]] || fail "deployment gateway must run as root"
-  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
-    deploy_release "${BASH_REMATCH[1]}"
+  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^deploy-ghcr\ ([0-9a-f]{40})\ (ghcr\.io/arnautxu/aibrain@sha256:[0-9a-f]{64})\ (ghcr\.io/arnautxu/aibrain-egress@sha256:[0-9a-f]{64})\ ([A-Za-z0-9][A-Za-z0-9-]{0,38})$ ]]; then
+    deploy_ghcr_release "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
     return
   fi
   if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^collect-readbacks\ ([0-9a-f]{40})\ ([0-9]{6,20})$ ]]; then
