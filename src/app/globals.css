@@ -3,10 +3,6 @@
 @import "../styles/typography.css";
 
 :root {
-  --stream-fade: 180ms;
-  --stream-settle: 700ms;
-  --stream-blur: 1.5px;
-  --stream-ease: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
   --installation-accent: #315ee7;
   --canvas: #ffffff;
@@ -1041,17 +1037,6 @@ button:disabled {
   animation: activity-text-shimmer 1.8s linear infinite;
 }
 
-.t-stream-w {
-  color: inherit;
-  transition: color var(--stream-settle) var(--stream-ease);
-}
-
-.t-stream-w.is-fresh {
-  display: inline-block;
-  color: var(--installation-accent);
-  animation: stream-word-enter var(--stream-fade) var(--stream-ease) both;
-}
-
 .t-stream-caret {
   display: inline-block;
   width: 2px;
@@ -1060,19 +1045,6 @@ button:disabled {
   border-radius: 999px;
   background: var(--installation-accent);
   animation: stream-caret-pulse 1s ease-in-out infinite;
-}
-
-@keyframes stream-word-enter {
-  from {
-    opacity: 0.35;
-    filter: blur(var(--stream-blur));
-    transform: translate3d(0, 2px, 0);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-    transform: translate3d(0, 0, 0);
-  }
 }
 
 @keyframes stream-caret-pulse {
@@ -1186,14 +1158,6 @@ button:disabled {
   .activity-shimmer {
     color: var(--text);
     background: none;
-  }
-
-  .t-stream-w {
-    color: inherit !important;
-    filter: none !important;
-    transform: none !important;
-    animation: none !important;
-    transition: none !important;
   }
 
   .t-stream-caret {

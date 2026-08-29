@@ -1,28 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useState } from "react";
 import { Check, Copy } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-
-const STREAM_SETTLE_MS = 700;
-
-function useStreamDecoration(streaming: boolean) {
-  const [decorated, setDecorated] = useState(streaming);
-
-  useEffect(() => {
-    if (streaming && !decorated) {
-      const frame = window.requestAnimationFrame(() => setDecorated(true));
-      return () => window.cancelAnimationFrame(frame);
-    }
-    if (streaming || !decorated) return;
-
-    const timer = window.setTimeout(() => setDecorated(false), STREAM_SETTLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [decorated, streaming]);
-
-  return streaming || decorated;
-}
 
 type MarkdownAstNode = {
   type: string;
@@ -34,50 +15,28 @@ type MarkdownAstNode = {
 
 type MarkdownAstRoot = MarkdownAstNode & { children: MarkdownAstNode[] };
 
-function createStreamWordsPlugin(streaming: boolean) {
+function createStreamCaretPlugin() {
   return () => (tree: MarkdownAstRoot) => {
-    const countWords = (children: MarkdownAstNode[], literal = false): number => children.reduce((total, node) => {
-      const isLiteral = literal || node.tagName === "code" || node.tagName === "pre";
-      if (node.type === "text" && !isLiteral && typeof node.value === "string") {
-        return total + (node.value.match(/\S+/g)?.length ?? 0);
-      }
-      return total + (node.children ? countWords(node.children, isLiteral) : 0);
-    }, 0);
-
-    const wordCount = countWords(tree.children);
-    let wordIndex = 0;
-
-    const transformChildren = (children: MarkdownAstNode[], literal = false): MarkdownAstNode[] => children.flatMap<MarkdownAstNode>((node): MarkdownAstNode | MarkdownAstNode[] => {
-      const isLiteral = literal || node.tagName === "code" || node.tagName === "pre";
-
-      if (node.type === "text" && !isLiteral && typeof node.value === "string") {
-        return node.value.split(/(\s+)/).filter(Boolean).flatMap<MarkdownAstNode>((part) => {
-          if (/^\s+$/.test(part)) return { type: "text", value: part };
-
-          const fresh = streaming && wordCount - wordIndex <= 2;
-          const last = streaming && wordIndex === wordCount - 1;
-          const word: MarkdownAstNode = {
-            type: "element",
-            tagName: "span",
-            properties: { className: ["t-stream-w", fresh ? "is-fresh" : "is-settled"] },
-            children: [{ type: "text", value: part }],
-          };
-          wordIndex += 1;
-          if (!last) return word;
-          return [word, {
+    const appendCaret = (children: MarkdownAstNode[], literal = false): boolean => {
+      for (let index = children.length - 1; index >= 0; index -= 1) {
+        const node = children[index];
+        if (!node) continue;
+        const isLiteral = literal || node.tagName === "code" || node.tagName === "pre";
+        if (!isLiteral && node.children && appendCaret(node.children, false)) return true;
+        if (!isLiteral && node.type === "text" && typeof node.value === "string" && /\S/u.test(node.value)) {
+          children.splice(index, 1, node, {
             type: "element",
             tagName: "span",
             properties: { ariaHidden: "true", className: ["t-stream-caret"] },
             children: [],
-          }];
-        });
+          });
+          return true;
+        }
       }
+      return false;
+    };
 
-      if (node.children) node.children = transformChildren(node.children, isLiteral);
-      return node;
-    });
-
-    tree.children = transformChildren(tree.children);
+    appendCaret(tree.children);
   };
 }
 
@@ -99,14 +58,12 @@ function CodeBlock({ language, value }: { language: string | null; value: string
   );
 }
 
-export function MarkdownMessage({ children, streaming = false }: { children: string; streaming?: boolean }) {
-  const decorated = useStreamDecoration(streaming);
-
+export const MarkdownMessage = memo(function MarkdownMessage({ children, streaming = false }: { children: string; streaming?: boolean }) {
   return (
     <div className={`markdown-body${streaming ? " t-stream" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={decorated ? [createStreamWordsPlugin(streaming)] : []}
+        rehypePlugins={streaming ? [createStreamCaretPlugin()] : []}
         components={{
           a: ({ children: label, ...props }) => <a {...props} target="_blank" rel="noreferrer">{label}</a>,
           pre: ({ children: content }) => <>{content}</>,
@@ -125,4 +82,4 @@ export function MarkdownMessage({ children, streaming = false }: { children: str
       </ReactMarkdown>
     </div>
   );
-}
+});

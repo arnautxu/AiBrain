@@ -10,7 +10,7 @@ export type ResolvedComposerExperience = {
 
 /** Product intent is stable even when provider model names change. */
 export const COMPOSER_EXPERIENCES: Record<ComposerExperience, ResolvedComposerExperience> = {
-  fast: { experience: "fast", model: "gpt-5.6-terra", effort: "medium" },
+  fast: { experience: "fast", model: "gpt-5.6-terra", effort: "low" },
   smart: { experience: "smart", model: "gpt-5.6-sol", effort: "low" },
   expert: { experience: "expert", model: "gpt-5.6-sol", effort: "high" },
 };

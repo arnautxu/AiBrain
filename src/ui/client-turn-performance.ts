@@ -117,7 +117,6 @@ export class ClientTurnPerformance {
 
   transportMeasured(measurement: ChatStreamRecoveryMeasurement) {
     this.transport = measurement;
-    this.publish();
   }
 
   readback(): ClientTurnPerformanceReadback {
@@ -150,12 +149,13 @@ export class ClientTurnPerformance {
 
   private deltaPainted() {
     const paintedAt = this.scheduler.now();
+    const firstPaint = this.firstDeltaPaintedAt === null;
     this.firstDeltaPaintedAt ??= paintedAt;
     if (this.previousPaintedAt !== null) {
       appendBounded(this.interPaintGaps, Math.max(0, Math.round(paintedAt - this.previousPaintedAt)), MAX_PAINT_GAPS);
     }
     this.previousPaintedAt = paintedAt;
-    this.publish();
+    if (firstPaint) this.publish();
   }
 
   private snapshotPainted() {

@@ -190,6 +190,26 @@ describe("chat workspace simplificado", () => {
     expect(onStop).toHaveBeenCalledOnce();
   });
 
+  it("keeps a live response pinned without restarting smooth scrolling for every delta", () => {
+    const scrollIntoView = vi.mocked(Element.prototype.scrollIntoView);
+    scrollIntoView.mockClear();
+    const message = assistantMessage();
+    const thread: WorkbenchThread = {
+      id: "thread-streaming",
+      projectId: project.id,
+      title: "Respuesta en curso",
+      status: "active",
+      pinned: false,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-28T00:00:01.000Z",
+      messages: [{ ...message, status: "streaming", content: "Texto parcial" }],
+    };
+
+    renderWorkspace(thread, project, { sending: true });
+
+    expect(scrollIntoView).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
   it("prevents duplicate stop requests while App Server confirms cancellation", () => {
     const onStop = vi.fn();
     renderWorkspace(null, project, { sending: true, stopping: true, onStop });
