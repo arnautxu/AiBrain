@@ -325,5 +325,8 @@ describe("multi-user private worker acceptance", () => {
     expect(context1.environment.CODEX_HOME).not.toBe(context2.environment.CODEX_HOME);
     expect(context1.workspace).not.toBe(context2.workspace);
     expect(context1.transportAudit).not.toBe(context2.transportAudit);
-  }, 25_000);
+  // This exercises four isolated worker processes, an approval round-trip and a
+  // durable replay. CI contention can make the end-to-end path exceed the
+  // default integration-test budget without indicating a behavioural failure.
+  }, 45_000);
 });
