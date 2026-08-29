@@ -29,6 +29,7 @@ test("a response exposes real citations and reviewable tool output inline", asyn
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Consulta la cuenta con fuentes.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
 
+  await page.getByText("Fuentes", { exact: true }).click();
   await expect(page.getByRole("link", { name: "Abrir fuente 1: Informe oficial" })).toHaveAttribute("href", source.url);
   await expect(page.getByText("CRM · Leer cuenta")).toBeVisible();
   await page.getByText("CRM · Leer cuenta").click();

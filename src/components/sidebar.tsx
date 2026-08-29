@@ -350,7 +350,7 @@ export function Sidebar({
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </SidebarMenuButton>
-                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                   </SidebarMenuItem>
                 );
@@ -389,7 +389,7 @@ export function Sidebar({
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </SidebarMenuButton>
-                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                     <div aria-label={`Chats de ${project.name}`} className="ml-5 border-l border-[var(--border-subtle)] pl-1">
                       <div className="flex items-center justify-between px-2 py-1">
@@ -408,7 +408,7 @@ export function Sidebar({
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
-                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
+                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
                               {threadMenuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                             </div>
                           );
