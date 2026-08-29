@@ -65,6 +65,7 @@ export const runtime = "nodejs";
 const encoder = new TextEncoder();
 const PROJECTION_BATCH_DELAY_MS = 24;
 const PROJECTION_BATCH_MAX_EVENTS = 64;
+const CHAT_STREAM_KEEPALIVE_MS = 15_000;
 
 type ChatSetupPhase =
   | "feature_policy"
@@ -109,6 +110,15 @@ async function measureChatSetup<T>(
 
 function line(event: ChatStreamEvent) {
   return encoder.encode(`${JSON.stringify(event)}\n`);
+}
+
+function chatStreamHeaders(additional: Record<string, string> = {}) {
+  return {
+    "Content-Type": "application/x-ndjson; charset=utf-8",
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+    ...additional,
+  };
 }
 
 class TurnProjectionBatchWriter {
@@ -199,11 +209,9 @@ function message(
 }
 
 function replayHeaders() {
-  return {
-    "Content-Type": "application/x-ndjson; charset=utf-8",
-    "Cache-Control": "no-cache, no-transform",
+  return chatStreamHeaders({
     "X-AiBrain-Idempotent-Replay": "true",
-  };
+  });
 }
 
 function replayMessageResponse(messageToReplay: ChatMessage) {
@@ -222,6 +230,7 @@ function followProjectedTurn(
   assistantMessageId: string,
   initial: ChatMessage,
   signal: AbortSignal,
+  isTurnActive: () => boolean,
   onDisconnect: () => void,
 ) {
   let clientDetached = false;
@@ -235,19 +244,25 @@ function followProjectedTurn(
       signal.addEventListener("abort", detach, { once: true });
       if (signal.aborted) detach();
       let lastUpdatedAt = "";
+      let lastSentAt = Date.now();
       let current = initial;
       try {
         controller.enqueue(line({ type: "snapshot", message: current }));
-        const deadline = Date.now() + 10 * 60_000;
-        while (!signal.aborted && current.status === "streaming" && Date.now() < deadline) {
+        while (!signal.aborted && current.status === "streaming") {
           await delay(100, signal);
           const projection = await store.read(threadId, assistantMessageId);
           if (!projection) break;
           current = projection.message;
-          if (projection.updatedAt !== lastUpdatedAt) {
+          const now = Date.now();
+          if (projection.updatedAt !== lastUpdatedAt || now - lastSentAt >= CHAT_STREAM_KEEPALIVE_MS) {
             lastUpdatedAt = projection.updatedAt;
+            lastSentAt = now;
             controller.enqueue(line({ type: "snapshot", message: current }));
           }
+          // Read and deliver the latest durable projection before allowing a
+          // vanished worker to end this attachment. A live turn has no fixed
+          // wall-clock limit; the browser can remain attached for hours.
+          if (current.status === "streaming" && !isTurnActive()) break;
         }
         if (!clientDetached) controller.close();
       } finally {
@@ -588,6 +603,11 @@ export async function POST(request: Request) {
         body.assistantMessageId,
         assistantMessage,
         request.signal,
+        () => workerTurnIsActive(
+          session.user.id,
+          runtimeThreadId,
+          body.assistantMessageId,
+        ),
         () => {
           if (reconnectDetached) return;
           reconnectDetached = true;
@@ -628,6 +648,12 @@ export async function POST(request: Request) {
             body.assistantMessageId,
           )
         : null;
+      const keepalive = setInterval(() => {
+        if (!clientDetached) {
+          controller.enqueue(line({ type: "snapshot", message: assistantMessage }));
+        }
+      }, CHAT_STREAM_KEEPALIVE_MS);
+      keepalive.unref?.();
       const emit = async (event: ChatStreamEvent, projection?: WorkerTurnProjection) => {
         if (persistent && turnProjectionStore && projectionWriter) {
           if (projection) {
@@ -730,6 +756,7 @@ export async function POST(request: Request) {
           message: error instanceof Error ? error.message : "El runtime no està disponible.",
         });
       } finally {
+        clearInterval(keepalive);
         try {
           await projectionWriter?.flush();
         } catch (error) {
@@ -799,9 +826,6 @@ export async function POST(request: Request) {
     },
   });
   return new Response(stream, {
-    headers: {
-      "Content-Type": "application/x-ndjson; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-    },
+    headers: chatStreamHeaders(),
   });
 }

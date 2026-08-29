@@ -171,6 +171,7 @@ describe("chat turn transport lifecycle", () => {
     const client = new AbortController();
     const response = await POST(chatRequest(client.signal));
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-accel-buffering")).toBe("no");
     const signal = await workerSignal;
 
     client.abort();
@@ -179,5 +180,35 @@ describe("chat turn transport lifecycle", () => {
 
     await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
     expect(signal.aborted).toBe(false);
+  });
+
+  it("keeps a quiet long-running response alive with a durable snapshot", async () => {
+    vi.useFakeTimers();
+    try {
+      const turnGate = deferred();
+      mocked.runWorkerCodexTurn.mockImplementation(async () => {
+        await turnGate.promise;
+      });
+
+      const response = await POST(chatRequest(new AbortController().signal));
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      const nextChunk = reader!.read();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      const chunk = await nextChunk;
+      expect(chunk.done).toBe(false);
+      const event = JSON.parse(new TextDecoder().decode(chunk.value));
+      expect(event).toMatchObject({
+        type: "snapshot",
+        message: { status: "streaming" },
+      });
+
+      await reader!.cancel();
+      turnGate.resolve();
+      await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
