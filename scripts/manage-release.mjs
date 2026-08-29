@@ -629,15 +629,19 @@ function stopAutomationWorkerIfRunning(options, release, deadline) {
 }
 
 function waitUntilHealthy(options, release, service, deadline) {
-  const containerId = runDocker(
-    options,
-    composeArgs(options, release, "ps", "-q", service),
-    remainingDockerTimeout(options, deadline),
-  );
-  if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
-    throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
-  }
+  let containerId = "";
   while (performance.now() <= deadline) {
+    containerId = runDocker(
+      options,
+      composeArgs(options, release, "ps", "-q", service),
+      remainingDockerTimeout(options, deadline),
+      [1],
+    );
+    if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
+      const waitMs = Math.min(500, Math.max(0, deadline - performance.now()));
+      if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+      continue;
+    }
     const state = runDocker(
       options,
       ["inspect", "--format", "{{.State.Status}} {{.State.Health.Status}}", containerId],
@@ -652,6 +656,9 @@ function waitUntilHealthy(options, release, service, deadline) {
     // only a terminal container state fails immediately.
     const waitMs = Math.min(500, Math.max(0, deadline - performance.now()));
     if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
+  }
+  if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
+    throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
   }
   throw new ReleaseError("RELEASE_HEALTH_FAILED", `${service} did not become healthy before the release deadline.`);
 }

@@ -212,6 +212,12 @@ if (args[0] === "image" && args[1] === "inspect") {
   }
   if (args.includes("ps")) {
     if (process.env.FAKE_NO_RUNNING_AUTOMATION_WORKER === "1" && args.at(-1) === "automation-worker") process.exit(1);
+    if (args.at(-1) === "automation-worker" && process.env.FAKE_DELAY_AUTOMATION_CONTAINER_CALLS) {
+      let calls = 0;
+      try { calls = Number(readFileSync(process.env.FAKE_AUTOMATION_PS_COUNTER, "utf8")); } catch {}
+      writeFileSync(process.env.FAKE_AUTOMATION_PS_COUNTER, String(calls + 1));
+      if (calls < Number(process.env.FAKE_DELAY_AUTOMATION_CONTAINER_CALLS)) process.exit(1);
+    }
     process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "automation-worker" ? "b".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
   }
 } else if (args[0] === "inspect") {
@@ -280,6 +286,7 @@ function environment(files: Awaited<ReturnType<typeof fixture>>, failImage = "")
     FAKE_COMPOSE_ENV: files.envFile,
     FAKE_RUNTIME_FILE: files.runtimeFile,
     FAKE_HEALTH_COUNTER_FILE: path.join(files.root, "health-counter"),
+    FAKE_AUTOMATION_PS_COUNTER: path.join(files.root, "automation-ps-counter"),
     FAKE_FAIL_IMAGE: failImage,
     FAKE_IMAGE_REVISIONS: JSON.stringify({
       [digestA]: revisionA,
@@ -395,6 +402,14 @@ describe("immutable release manager", () => {
 
     const commands = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
     expect(commands.filter((args) => args.includes("stop") && args.at(-1) === "automation-worker")).toHaveLength(0);
+  });
+
+  it("waits for Compose to create the automation worker after its dependency becomes ready", async () => {
+    const files = await fixture();
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), {
+      env: { ...environment(files), FAKE_DELAY_AUTOMATION_CONTAINER_CALLS: "2" },
+    })).resolves.toMatchObject({ stdout: expect.stringContaining(digestB) });
+    expect(Number(await readFile(path.join(files.root, "automation-ps-counter"), "utf8"))).toBeGreaterThan(2);
   });
 
   it("allows a running service to recover from a transient unhealthy state", async () => {
