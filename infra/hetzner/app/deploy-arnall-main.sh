@@ -107,6 +107,15 @@ remove_new_dangling_images() {
   done < <(new_dangling_images "$before" "$after")
 }
 
+reclaim_unreferenced_dangling_images() {
+  local image_id
+  while IFS= read -r image_id; do
+    [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || continue
+    [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || continue
+    docker image rm "$image_id" >/dev/null 2>&1 || true
+  done < <(docker image ls --filter dangling=true --quiet --no-trunc | sort -u)
+}
+
 sync_company_context() {
   local source="$1" file temporary
   install -d -m 0700 -o root -g root "$CONTEXT_ROOT"
@@ -173,6 +182,7 @@ deploy_release() {
     rm -rf --one-file-system -- "$release_dir"
   fi
 
+  reclaim_unreferenced_dangling_images
   free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
   [[ "$free_bytes" =~ ^[0-9]+$ && "$free_bytes" -ge "$MIN_FREE_BYTES" ]] || fail "insufficient free disk for a bounded image build"
 
