@@ -364,7 +364,8 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.seccomp.json`, "utf8")).toContain('"read"');
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","automation-worker","app","ingress-gateway","alert-dispatcher"');
+    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","ingress-gateway","alert-dispatcher"');
+    expect(log).toContain('"up","-d","--force-recreate","--no-deps","automation-worker"');
     expect(log).toContain('"{{.State.Status}} {{.State.Health.Status}}"');
   }, 20_000);
 

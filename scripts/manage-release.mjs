@@ -700,12 +700,19 @@ function deploy(options, release, deadline = performance.now() + options.healthT
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      ...managedServiceSet(options.automationWorkerEnabled),
+      ...managedServiceSet(false),
     ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
+  if (options.automationWorkerEnabled) {
+    runDocker(
+      options,
+      composeArgs(options, release, "up", "-d", "--force-recreate", "--no-deps", "automation-worker"),
+      remainingDockerTimeout(options, deadline),
+    );
+    waitUntilHealthy(options, release, "automation-worker", deadline);
+  }
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
