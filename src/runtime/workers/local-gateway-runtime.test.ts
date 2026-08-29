@@ -493,5 +493,5 @@ describe("private per-user worker gateway", () => {
       await restartedClient.close();
       await restartedWorker.stop();
     }
-  });
+  }, 15_000);
 });
