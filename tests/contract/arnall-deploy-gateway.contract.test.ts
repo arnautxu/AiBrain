@@ -16,6 +16,8 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).toContain('docker --config "$ghcr_docker_config" pull "$app_image"');
     expect(gateway).toContain('docker --config "$ghcr_docker_config" pull "$egress_image"');
     expect(gateway).toContain('node "${OPS_ROOT}/manage-release.mjs"');
+    expect(gateway).toContain('local compose_file="${OPS_ROOT}/compose.yaml"');
+    expect(gateway).toContain('require_root_owned_file "${OPS_ROOT}/browser/seccomp_profile.json"');
     expect(gateway).toContain('cleanup_previous_aibrain_images');
     expect(gateway).not.toContain("docker buildx prune");
     expect(gateway).not.toContain("docker build ");
