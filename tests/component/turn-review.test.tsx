@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailsPanel } from "@/components/details-panel";
 import { TurnActivity } from "@/components/turn-activity";
@@ -165,7 +165,9 @@ describe("turn activity and Review", () => {
     />);
 
     fireEvent.click(screen.getByRole("button", { name: /src\/example\.ts/ }));
-    expect(await screen.findByText("export const ready = true;")).toBeVisible();
+    await waitFor(() => {
+      expect(screen.getByText("export const ready = true;")).toBeVisible();
+    });
     expect(fetchPreview).toHaveBeenCalledWith(
       "/api/projects/00000000-0000-4000-8000-000000000001/files?path=src%2Fexample.ts",
       { headers: { Accept: "application/json" } },
