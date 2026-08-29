@@ -475,6 +475,12 @@ export async function runWorkerCodexTurn(
     throw new Error("La skill seleccionada ja no està disponible.");
   }
 
+  const developerInstructions = [
+    buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
+    readableFilesDeveloperInstructions(),
+    projectDeveloperInstructions(projectGuidance),
+    preparedMemory.developerInstructions,
+  ].filter(Boolean).join("\n\n");
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
@@ -483,13 +489,10 @@ export async function runWorkerCodexTurn(
     approvalsReviewer: SERVER_APPROVALS_REVIEWER,
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
-    developerInstructions: [
-      buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
-      readableFilesDeveloperInstructions(),
-      projectDeveloperInstructions(projectGuidance),
-      preparedMemory.developerInstructions,
-    ].filter(Boolean).join("\n\n"),
+    developerInstructions,
   };
+  const reuseLoadedThread = runtimeThreadId !== null &&
+    runtime.client.canReuseLoadedThread(runtimeThreadId, chatRequest.options.webSearch);
   let recovered: RecoveredTurn | null = null;
   const projectRecoveredTurn = async (
     recoveredTurnState: RecoveredTurn,
@@ -560,70 +563,74 @@ export async function runWorkerCodexTurn(
     if (!recovered) return;
     await projectRecoveredTurn(recovered, envelope);
   };
-  await setRuntimePhase(
-    "runtime-thread",
-    runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
-    runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
-  );
   let threadResult: JsonValue;
-  try {
-    threadResult = await telemetry.measure("thread", () => runtimeThreadId
-      ? runtime.client.request("thread/resume", {
+  if (reuseLoadedThread && runtimeThreadId) {
+    threadResult = { thread: { id: runtimeThreadId, turns: [] } };
+  } else {
+    await setRuntimePhase(
+      "runtime-thread",
+      runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
+      runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
+    );
+    try {
+      threadResult = await telemetry.measure("thread", () => runtimeThreadId
+        ? runtime.client.request("thread/resume", {
+            threadId: runtimeThreadId,
+            ...commonThreadParams,
+          }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
+        : runtime.client.request("thread/start", {
+            ...commonThreadParams,
+            dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
+            ephemeral: false,
+            serviceName: "aibrain_workbench",
+          }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
+    } catch (error) {
+      if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
+        throw error;
+      }
+      await setRuntimePhase(
+        "runtime-thread-recovery",
+        "Comprovant la conversa",
+        "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
+      );
+      const recoveredResult = await runtime.client.request(
+        "thread/read",
+        { threadId: runtimeThreadId, includeTurns: true },
+        `thread-resume-recover:${chatRequest.assistantMessageId}`,
+        15_000,
+        persistThreadIdentity,
+      );
+      if (extractThreadId(recoveredResult) !== runtimeThreadId) {
+        throw new Error("App Server ha retornat una conversa diferent durant la recuperació.");
+      }
+      const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+      if (durableTurn && durableTurn.status !== "inProgress") {
+        threadResult = recoveredResult;
+        await completeRuntimePhase("runtime-thread-recovery", {
+          label: "Conversa recuperada",
+          detail: "S’ha trobat el resultat durable sense repetir la petició",
+        });
+      } else {
+        // `thread/resume` does not submit a model turn.  Once the durable read
+        // has proved the thread identity, one identical resume is safe to
+        // reattach the stream; there is deliberately no retry loop.
+        await setRuntimePhase(
+          "runtime-thread-retry",
+          "Reprenent la conversa",
+          "L’estat durable s’ha verificat; reconnectant una sola vegada",
+        );
+        threadResult = await telemetry.measure("thread", () => runtime.client.request("thread/resume", {
           threadId: runtimeThreadId,
           ...commonThreadParams,
-        }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
-      : runtime.client.request("thread/start", {
-          ...commonThreadParams,
-          dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
-          ephemeral: false,
-          serviceName: "aibrain_workbench",
-        }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
-  } catch (error) {
-    if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
-      throw error;
-    }
-    await setRuntimePhase(
-      "runtime-thread-recovery",
-      "Comprovant la conversa",
-      "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
-    );
-    const recoveredResult = await runtime.client.request(
-      "thread/read",
-      { threadId: runtimeThreadId, includeTurns: true },
-      `thread-resume-recover:${chatRequest.assistantMessageId}`,
-      15_000,
-      persistThreadIdentity,
-    );
-    if (extractThreadId(recoveredResult) !== runtimeThreadId) {
-      throw new Error("App Server ha retornat una conversa diferent durant la recuperació.");
-    }
-    const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
-    if (durableTurn && durableTurn.status !== "inProgress") {
-      threadResult = recoveredResult;
-      await completeRuntimePhase("runtime-thread-recovery", {
-        label: "Conversa recuperada",
-        detail: "S’ha trobat el resultat durable sense repetir la petició",
-      });
-    } else {
-      // `thread/resume` does not submit a model turn.  Once the durable read
-      // has proved the thread identity, one identical resume is safe to
-      // reattach the stream; there is deliberately no retry loop.
-      await setRuntimePhase(
-        "runtime-thread-retry",
-        "Reprenent la conversa",
-        "L’estat durable s’ha verificat; reconnectant una sola vegada",
-      );
-      threadResult = await telemetry.measure("thread", () => runtime.client.request("thread/resume", {
-        threadId: runtimeThreadId,
-        ...commonThreadParams,
-      }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+        }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+      }
     }
   }
   runtime.client.prewarmConnection?.(projectWorkspace);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
   telemetry.bindRuntimeThread(threadId);
-  if (runtimeThreadId) telemetry.resumed();
+  if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
   recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
   if (recoveredState && recoveredState.status !== "inProgress") {
@@ -1113,6 +1120,11 @@ export async function runWorkerCodexTurn(
         turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", {
       threadId,
       clientUserMessageId: chatRequest.userMessageId,
+      ...(reuseLoadedThread ? {
+        additionalContext: {
+          "aibrain.turn": { value: developerInstructions, kind: "application" },
+        },
+      } : {}),
       input: [
         { type: "text", text: projectGuidance?.branchHistory
           ? [

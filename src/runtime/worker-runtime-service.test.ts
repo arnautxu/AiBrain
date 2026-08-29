@@ -94,6 +94,8 @@ class FakeTransport implements AppServerTransport {
         case "modelProvider/capabilities/read": return { webSearch: true, imageGeneration: false };
         case "account/rateLimits/read": return { rateLimits: { primary: { usedPercent: 12 } } };
         case "account/usage/read": return { summary: { lifetimeTokens: 42 } };
+        case "thread/start":
+        case "thread/resume": return { thread: { id: "runtime-thread-1", turns: [] } };
         default: return {};
       }
     })() as JsonValue;
@@ -249,6 +251,24 @@ describe("worker App Server client", () => {
         "account/usage/read",
       ].includes(item.rpc.method),
     )).toHaveLength(4);
+    await client.close();
+  });
+
+  it("reuses only threads loaded by this App Server client with matching web configuration", async () => {
+    const client = new WorkerAppServerClient(handle(new FakeTransport()));
+
+    expect(client.canReuseLoadedThread("runtime-thread-1", false)).toBe(false);
+    await client.request("thread/start", {
+      config: { web_search: "disabled" },
+    }, "thread-start:test");
+    expect(client.canReuseLoadedThread("runtime-thread-1", false)).toBe(true);
+    expect(client.canReuseLoadedThread("runtime-thread-1", true)).toBe(false);
+
+    await client.request("thread/resume", {
+      threadId: "runtime-thread-1",
+      config: { web_search: "live" },
+    }, "thread-resume:test");
+    expect(client.canReuseLoadedThread("runtime-thread-1", true)).toBe(true);
     await client.close();
   });
 
