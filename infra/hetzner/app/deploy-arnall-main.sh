@@ -8,6 +8,7 @@ readonly RELEASE_ROOT="/opt/aibrain-company-qa"
 readonly RELEASES_DIR="${RELEASE_ROOT}/releases"
 readonly CONFIG_DIR="/etc/aibrain/company-qa"
 readonly ACTIVE_ENV="${CONFIG_DIR}/compose.env"
+readonly AUTOMATION_WORKER_ENABLED="false"
 readonly ACTIVE_CONFIG="${CONFIG_DIR}/installation.json"
 readonly STATE_FILE="${CONFIG_DIR}/release-state.json"
 readonly REGISTRY="127.0.0.1:5000"
@@ -80,6 +81,15 @@ replace_release_values() {
   ' "$source" > "$target"
   chmod 0600 "$target"
   chown root:root "$target"
+}
+
+set_temporary_automation_worker_flag() {
+  local target_env="$1"
+  if grep -q '^AIBRAIN_AUTOMATION_WORKER_ENABLED=' "$target_env"; then
+    sed -i "s/^AIBRAIN_AUTOMATION_WORKER_ENABLED=.*/AIBRAIN_AUTOMATION_WORKER_ENABLED=${AUTOMATION_WORKER_ENABLED}/" "$target_env"
+  else
+    printf '\nAIBRAIN_AUTOMATION_WORKER_ENABLED=%s\n' "$AUTOMATION_WORKER_ENABLED" >> "$target_env"
+  fi
 }
 
 new_dangling_images() {
@@ -211,6 +221,7 @@ deploy_release() {
   remove_new_dangling_images "$dangling_before" "$dangling_after"
 
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"
+  set_temporary_automation_worker_flag "$target_env"
   install -m 0400 -o root -g root "${release_dir}/config/installations/arnall.qa.example.json" "$target_config"
 
   manager_args=(
@@ -242,7 +253,8 @@ deploy_release() {
     docker compose --env-file "$ACTIVE_ENV" -f "${STATE_FILE}.active.compose.yaml" up -d --no-deps alert-dispatcher
   fi
 
-  node "${release_dir}/scripts/manage-release.mjs" "${manager_args[@]}"
+  AIBRAIN_AUTOMATION_WORKER_ENABLED="$AUTOMATION_WORKER_ENABLED" \
+    node "${release_dir}/scripts/manage-release.mjs" "${manager_args[@]}"
   sync_company_context "${release_dir}/config/company-context/arnall"
 
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null

@@ -46,10 +46,14 @@ export async function readAutomationWorkerStatus(dataRoot: string, now = Date.no
  * still report it honestly, but the installation is not operationally ready
  * for automations until its supervised worker has recovered.
  */
-export function automationWorkerReadinessProbe(dataRoot: string, now: () => number = Date.now): ReadinessComponentProbe {
+export function automationWorkerReadinessProbe(
+  dataRoot: string,
+  now: () => number = Date.now,
+  required = true,
+): ReadinessComponentProbe {
   return {
     name: "automations-worker",
-    required: true,
+    required,
     async check(): Promise<ReadinessComponentResult> {
       const status = await readAutomationWorkerStatus(dataRoot, now());
       return status?.online

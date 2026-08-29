@@ -21,6 +21,14 @@ function configuredRatio(name: string, fallback: number) {
   return Number.isFinite(value) && value >= 0 && value <= 1 ? value : fallback;
 }
 
+function automationWorkerEnabled() {
+  const raw = process.env.AIBRAIN_AUTOMATION_WORKER_ENABLED?.trim().toLowerCase();
+  if (!raw) return true;
+  if (raw === "0" || raw === "false" || raw === "no" || raw === "off") return false;
+  if (raw === "1" || raw === "true" || raw === "yes" || raw === "on") return true;
+  return true;
+}
+
 export async function GET() {
   try {
     const config = await loadInstallationConfig();
@@ -29,7 +37,7 @@ export async function GET() {
       minimumFreeRatio: configuredRatio("AIBRAIN_MINIMUM_FREE_RATIO", 0.20),
       componentProbes: [
         ...runtimeReadinessProbes(),
-        automationWorkerReadinessProbe(config.paths.dataRoot),
+        automationWorkerReadinessProbe(config.paths.dataRoot, Date.now, automationWorkerEnabled()),
       ],
     });
     return NextResponse.json(report, {
