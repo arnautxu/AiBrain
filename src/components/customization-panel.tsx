@@ -31,6 +31,7 @@ export function CustomizationPanel({ productName, open, runtimeStatus, onSetting
   const [loading, setLoading] = useState(true);
   const [savingKey, setSavingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -49,7 +50,7 @@ export function CustomizationPanel({ productName, open, runtimeStatus, onSetting
     }).catch(() => { if (!cancelled) setError("No se ha podido cargar la configuración."); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [onSettingsSnapshot, open]);
+  }, [loadAttempt, onSettingsSnapshot, open]);
 
   const save = async (patch: SettingsPatch, key: string) => {
     setSavingKey(key); setError(null);
@@ -67,6 +68,11 @@ export function CustomizationPanel({ productName, open, runtimeStatus, onSetting
 
   const usage = companyUsage ?? personalUsage;
   const usedPercent = planPercent(usage);
+  const retryLoad = () => {
+    setLoading(true);
+    setError(null);
+    setLoadAttempt((current) => current + 1);
+  };
   const tabs: Array<{ id: Tab; label: string; icon: ReactNode }> = [
     { id: "appearance", label: "Apariencia", icon: <PaintBrush size={17} /> },
     { id: "notifications", label: "Avisos", icon: <Bell size={17} /> },
@@ -78,7 +84,7 @@ export function CustomizationPanel({ productName, open, runtimeStatus, onSetting
     <section ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Configuración de ${productName}`} className="workspace-panel panel-enter relative flex h-full w-full max-w-[840px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(680px,calc(100dvh-3rem))] md:rounded-[22px]">
       <header className="workspace-panel-header flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><div><h2 className="workspace-panel-title">Configuración</h2><p className="workspace-panel-subtitle mt-0.5 hidden sm:block">Tu apariencia, avisos y uso.</p></div><button type="button" aria-label="Cerrar" className="grid size-10 place-items-center rounded-full text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
       <div className="flex min-h-0 flex-1 flex-col md:flex-row"><nav aria-label="Secciones de configuración" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">{tabs.map((item) => <button key={item.id} type="button" aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}</nav>
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <p role="alert" className="mb-5 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">Cargando configuración…</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "usage" ? <Usage usage={usage} companyUsage={companyUsage} usedPercent={usedPercent} runtimeStatus={runtimeStatus} /> : null}</div>
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <div className="mb-5 flex items-center justify-between gap-3 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><p role="alert">{error}</p>{!settings ? <button type="button" className="shrink-0 rounded-lg border border-current px-3 py-2 font-semibold hover:bg-[var(--surface-hover)]" onClick={retryLoad}>Reintentar</button> : null}</div> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">Cargando configuración…</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "usage" ? <Usage usage={usage} companyUsage={companyUsage} usedPercent={usedPercent} runtimeStatus={runtimeStatus} /> : null}</div>
       </div>
       <footer className="flex shrink-0 items-center justify-between border-t border-[var(--border-subtle)] px-5 py-3.5"><span className="text-[11px] text-[var(--text-subtle)]">Las políticas de empresa se gestionan por separado.</span>{settings?.company.isAdmin ? <a href="/admin" className="rounded-lg border border-[var(--border)] px-3 py-2 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Administración</a> : <button type="button" className="rounded-lg bg-[var(--brain-accent)] px-4 py-2 text-[12px] font-semibold text-[var(--brain-contrast)]" onClick={onClose}>Cerrar</button>}</footer>
     </section>

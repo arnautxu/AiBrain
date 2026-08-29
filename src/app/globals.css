@@ -631,6 +631,16 @@ button:disabled {
     gap: 0.25rem;
   }
 
+  .composer-destination {
+    min-width: 0;
+    flex-shrink: 1;
+    overflow: hidden;
+  }
+
+  .composer-destination .composer-picker-button {
+    max-width: 4.75rem;
+  }
+
   .composer-picker-button {
     padding-inline: 0.25rem;
   }

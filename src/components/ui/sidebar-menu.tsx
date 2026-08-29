@@ -547,7 +547,15 @@ const SidebarMenu = forwardRef<HTMLUListElement, SidebarMenuProps>(
           {...containerProps}
           {...props}
         >
-          {overlays}
+          {overlays ? (
+            <li
+              aria-hidden="true"
+              role="presentation"
+              className="pointer-events-none absolute inset-0 list-none"
+            >
+              {overlays}
+            </li>
+          ) : null}
           {children}
         </ul>
       </MenuScopeContext.Provider>
