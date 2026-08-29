@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, link, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, link, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -363,6 +363,7 @@ describe("immutable release manager", () => {
 
   it("can deliberately take the automation worker out of a release and restore it later", async () => {
     const files = await fixture();
+    await appendFile(files.targetEnvFile, "AIBRAIN_AUTOMATION_WORKER_ENABLED=false\n");
     await execFileAsync(process.execPath, commandArgs(files, "promote"), {
       env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "false" },
     });
@@ -375,6 +376,8 @@ describe("immutable release manager", () => {
     expect(afterDisable.some((args) => args.includes("ps") && args.includes("--status")
       && args.includes("running") && args.at(-1) === "automation-worker")).toBe(true);
 
+    // The rollback target predates the flag and therefore uses the requested
+    // default, while the current disabled release must be verified as disabled.
     await execFileAsync(process.execPath, commandArgs(files, "rollback"), {
       env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "true" },
     });

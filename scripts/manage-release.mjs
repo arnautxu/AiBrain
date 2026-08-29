@@ -613,6 +613,14 @@ function managedServiceSet(includeAutomationWorker) {
     : ["egress-gateway", "app", "ingress-gateway", "alert-dispatcher"];
 }
 
+function releaseAutomationWorkerEnabled(options, release) {
+  const environment = parseEnv(releaseContents(release).environment);
+  return parseBooleanEnv(
+    environment.get("AIBRAIN_AUTOMATION_WORKER_ENABLED"),
+    options.automationWorkerEnabled,
+  );
+}
+
 function stopAutomationWorkerIfRunning(options, release, deadline) {
   const containerId = runDocker(
     options,
@@ -684,41 +692,43 @@ function verifyRunningService(options, release, service, expectedImage, expected
 }
 
 function deploy(options, release, deadline = performance.now() + options.healthTimeoutMs) {
+  const automationWorkerEnabled = releaseAutomationWorkerEnabled(options, release);
   assertSelectedReleaseInputs(options, release);
   runDocker(options, composeArgs(options, release, "config", "--quiet"), remainingDockerTimeout(options, deadline));
-  if (!options.automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
+  if (!automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
   runDocker(
     options,
     composeArgs(
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      ...managedServiceSet(options.automationWorkerEnabled),
+      ...managedServiceSet(automationWorkerEnabled),
     ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
+  if (automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
-  if (options.automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
+  if (automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
 }
 
 function verifyCurrentDeployment(options, release, deadline = performance.now() + options.healthTimeoutMs) {
+  const automationWorkerEnabled = releaseAutomationWorkerEnabled(options, release);
   assertSelectedReleaseInputs(options, release);
-  if (!options.automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
+  if (!automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
+  if (automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
-  if (options.automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
+  if (automationWorkerEnabled) verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
