@@ -139,7 +139,7 @@ deploy_release() {
     if (( status != 0 )) && [[ -n "${dangling_before:-}" && -f "${dangling_before:-}" ]]; then
       remove_new_dangling_images "${dangling_before:-}" "${dangling_after:-}"
     fi
-    rm -f "$archive" "$target_env" "$target_config"
+    rm -f "${archive:-}" "${target_env:-}" "${target_config:-}"
     [[ -z "${dangling_before:-}" ]] || rm -f "${dangling_before:-}"
     [[ -z "${dangling_after:-}" ]] || rm -f "${dangling_after:-}"
 

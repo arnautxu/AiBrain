@@ -612,7 +612,7 @@ function managedServiceSet(includeAutomationWorker) {
 function stopAutomationWorkerIfRunning(options, release, deadline) {
   const containerId = runDocker(
     options,
-    composeArgs(options, release, "ps", "-q", "automation-worker"),
+    composeArgs(options, release, "ps", "-q", "--status", "running", "automation-worker"),
     remainingDockerTimeout(options, deadline),
   );
   if (containerId.length === 0) return;
