@@ -127,7 +127,7 @@ deploy_ghcr_release() {
   local revision="$1" app_image="$2" egress_image="$3" ghcr_user="$4"
   local short_revision="${revision:0:7}"
   local target_env="${CONFIG_DIR}/compose.env.target-${short_revision}"
-  local compose_file="${STATE_FILE}.active.compose.yaml"
+  local compose_file="${OPS_ROOT}/compose.yaml"
   local manager_args
 
   umask 077
@@ -138,6 +138,8 @@ deploy_ghcr_release() {
   require_root_owned_file "$ACTIVE_CONFIG"
   require_root_owned_file "$STATE_FILE"
   require_root_owned_file "$compose_file"
+  require_root_owned_directory "${OPS_ROOT}/browser"
+  require_root_owned_file "${OPS_ROOT}/browser/seccomp_profile.json"
   require_root_owned_file "${OPS_ROOT}/manage-release.mjs"
   require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
