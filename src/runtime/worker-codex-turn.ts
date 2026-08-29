@@ -1152,7 +1152,10 @@ export async function runWorkerCodexTurn(
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
-      summary: "detailed",
+      summary: chatRequest.options.effort === "high" || chatRequest.options.effort === "xhigh" ||
+        chatRequest.options.effort === "max" || chatRequest.options.effort === "ultra"
+        ? "detailed"
+        : "concise",
       }, `turn-start:${chatRequest.assistantMessageId}`, 60_000, async (result) => {
         const resolvedTurnId = extractTurnId(result);
         if (!resolvedTurnId) throw new Error("Codex no ha iniciat el torn.");

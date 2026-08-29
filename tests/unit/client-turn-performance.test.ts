@@ -106,6 +106,6 @@ describe("client turn performance", () => {
     expect(artifact).not.toContain("contenido sensible");
     expect(artifact).not.toContain("jamás debe entrar");
     expect(artifact).not.toContain("00000000-0000-4000-8000-000000000001");
-    expect(readbacks).toHaveBeenCalled();
+    expect(readbacks).toHaveBeenCalledTimes(4);
   });
 });

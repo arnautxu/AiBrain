@@ -89,6 +89,29 @@ test("the mobile composer keeps every control below its growing text area", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("a mobile response paints received text directly without animated auto-scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.addInitScript(() => {
+    const original = Element.prototype.scrollIntoView;
+    const behaviors: string[] = [];
+    Object.defineProperty(window, "__aibrainScrollBehaviors", { value: behaviors });
+    Element.prototype.scrollIntoView = function scrollIntoView(options?: boolean | ScrollIntoViewOptions) {
+      if (typeof options === "object" && options.behavior) behaviors.push(options.behavior);
+      return original.call(this, options);
+    };
+  });
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Responde con tres ideas sintéticas para comprobar el streaming móvil.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+
+  const streamingMessage = page.locator(".markdown-body.t-stream");
+  await expect(streamingMessage).toBeVisible({ timeout: 10_000 });
+  await expect(streamingMessage.locator(".t-stream-w")).toHaveCount(0);
+  await expect(streamingMessage.locator(".t-stream-caret")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
+  expect(await page.evaluate(() => (window as typeof window & { __aibrainScrollBehaviors: string[] }).__aibrainScrollBehaviors)).not.toContain("smooth");
+});
+
 test("automatic permission review remains server-side and invisible on desktop and mobile", async ({ page }) => {
   await page.route("**/api/runtime/status**", (route) => route.fulfill({
     status: 200,

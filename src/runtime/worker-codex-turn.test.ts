@@ -414,7 +414,7 @@ describe("worker Codex turn", () => {
         "/source-knowledge",
         path.join(staging, "threads"),
       ],
-      summary: "detailed",
+      summary: "concise",
     });
     expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
       .toEqual(expect.arrayContaining([
@@ -949,6 +949,7 @@ describe("worker Codex turn", () => {
     expect(calls.map(({ method }) => method)).toEqual(["turn/start"]);
     expect(calls[0]?.params).toMatchObject({
       threadId: "runtime-thread-1",
+      summary: "concise",
       additionalContext: {
         "aibrain.turn": {
           kind: "application",

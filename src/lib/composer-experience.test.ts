@@ -3,7 +3,7 @@ import { COMPOSER_EXPERIENCES, isComposerExperience, resolveComposerExperience }
 
 describe("composer experiences", () => {
   it("maps the three employee-facing choices to the approved provider settings", () => {
-    expect(COMPOSER_EXPERIENCES.fast).toMatchObject({ model: "gpt-5.6-terra", effort: "medium" });
+    expect(COMPOSER_EXPERIENCES.fast).toMatchObject({ model: "gpt-5.6-terra", effort: "low" });
     expect(resolveComposerExperience("smart")).toMatchObject({ model: "gpt-5.6-sol", effort: "low" });
     expect(resolveComposerExperience("expert")).toMatchObject({ model: "gpt-5.6-sol", effort: "high" });
   });

@@ -374,9 +374,10 @@ export function ChatWorkspace({
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!shouldStickToBottomRef.current && !sending) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [sending, thread?.messages]);
 
   useEffect(() => {
