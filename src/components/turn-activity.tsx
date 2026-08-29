@@ -309,7 +309,7 @@ export function TurnActivity({
               : message.status === "stopped" || message.status === "error"
                 ? <X size={14} />
                 : <Check size={14} />}
-            labelClassName={message.status === "streaming" ? "thinking-steps-shimmer" : undefined}
+            labelClassName={message.status === "streaming" ? "thinking-steps-shimmer" : "text-[var(--text-secondary)]"}
             className={message.status === "complete" ? "codex-thinking-summary-complete max-w-full" : "max-w-full"}
           >
             {executionLabel}

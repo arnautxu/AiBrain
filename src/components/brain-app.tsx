@@ -1725,6 +1725,16 @@ export function BrainApp({
     setMobileSidebarOpen((current) => !current);
   }, []);
 
+  useEffect(() => {
+    const desktopQuery = window.matchMedia("(min-width: 768px)");
+    const closeMobileSidebar = (event: MediaQueryListEvent) => {
+      if (event.matches) setMobileSidebarOpen(false);
+    };
+    if (desktopQuery.matches) setMobileSidebarOpen(false);
+    desktopQuery.addEventListener("change", closeMobileSidebar);
+    return () => desktopQuery.removeEventListener("change", closeMobileSidebar);
+  }, []);
+
   const toggleTaskCenter = useCallback(() => {
     setTaskCenterOpen((current) => !current);
   }, []);
@@ -1807,17 +1817,17 @@ export function BrainApp({
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
         onOpenDesktop={() => setDesktopSidebarOpen(true)}
-        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
-        onOpenLibrary={() => setLibraryOpen(true)}
-        onOpenTaskCenter={() => setTaskCenterOpen(true)}
-        onOpenAutomations={() => setAutomationsOpen(true)}
+        onOpenCommandPalette={() => { setMobileSidebarOpen(false); setCommandPaletteOpen(true); }}
+        onOpenLibrary={() => { setMobileSidebarOpen(false); setLibraryOpen(true); }}
+        onOpenTaskCenter={() => { setMobileSidebarOpen(false); setTaskCenterOpen(true); }}
+        onOpenAutomations={() => { setMobileSidebarOpen(false); setAutomationsOpen(true); }}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
         onNewThread={startNewThread}
-        onNewProject={() => setTextDialog({ kind: "create-project" })}
+        onNewProject={() => { setMobileSidebarOpen(false); setTextDialog({ kind: "create-project" }); }}
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
-        onOpenCustomization={() => setCustomizationOpen(true)}
+        onOpenCustomization={() => { setMobileSidebarOpen(false); setCustomizationOpen(true); }}
       />
 
       <ChatWorkspace

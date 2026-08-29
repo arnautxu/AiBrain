@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -9,7 +9,7 @@ import type { SettingsSnapshot } from "@/settings/contracts";
 function settings(isAdmin: boolean): SettingsSnapshot { return { schemaVersion: 1, account: { userId: "user", displayName: "Arnau", email: "arnau@example.com", provider: "local", expiresAt: "2026-08-29T00:00:00.000Z" }, company: { installationId: "example", name: "Example", isAdmin }, apps: [], notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false }, permissions: [], privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" }, browser: { profileScope: "private_per_employee", networkPolicy: "public_http_https_only", privateNetworkAllowed: false, mutationsRequireApproval: true, downloadsArePrivate: true } }; }
 function usage(scope: "personal" | "company") { return { schemaVersion: 1, scope, generatedAt: "2026-08-29T00:00:00.000Z", userId: "user", installationId: "example", notices: [], sharedSubscription: null, internal: { turns: 2, completedTurns: 1, errorTurns: 1, stoppedTurns: 0, activeDays: 1, totalDurationMs: 95_000, averageDurationMs: 47_500, p95DurationMs: 90_000, averageFirstTextMs: null, p95FirstTextMs: null, turnsWithTokenData: 0, tokens: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 } }, ...(scope === "company" ? { members: [] } : {}) }; }
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
@@ -45,5 +45,28 @@ describe("CustomizationPanel", () => {
     await waitFor(() => expect(screen.getByRole("link", { name: "Administración" })).toHaveAttribute("href", "/admin"));
     expect(screen.queryByRole("button", { name: "Equipo" })).not.toBeInTheDocument();
     expect(screen.queryByText("Alta local")).not.toBeInTheDocument();
+  });
+
+  it("retries loading settings after a recoverable error", async () => {
+    let settingsRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") {
+        settingsRequests += 1;
+        return settingsRequests === 1
+          ? new Response("{}", { status: 503 })
+          : new Response(JSON.stringify(settings(false)), { status: 200 });
+      }
+      if (url === "/api/usage/me") return new Response(JSON.stringify(usage("personal")), { status: 200 });
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Reintentar" }));
+
+    await waitFor(() => expect(settingsRequests).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Avisos" })).toBeInTheDocument();
   });
 });

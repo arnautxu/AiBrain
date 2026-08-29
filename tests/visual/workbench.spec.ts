@@ -11,8 +11,9 @@ async function login(page: Page) {
   });
   expect(loginResponse.ok()).toBe(true);
   await page.goto("/");
+  await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
-  await expect(page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
   await expect(page.getByText("Conectando con el servicio…")).toHaveCount(0, { timeout: 10_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
 }

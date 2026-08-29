@@ -109,6 +109,8 @@ function ComposerPicker({
   options,
   open,
   placement,
+  align = "start",
+  anchor = "self",
   className,
   disabled = false,
   onOpenChange,
@@ -120,13 +122,15 @@ function ComposerPicker({
   options: ComposerPickerOption[];
   open: boolean;
   placement: "above" | "below";
+  align?: "start" | "end";
+  anchor?: "self" | "controls";
   className?: string;
   disabled?: boolean;
   onOpenChange: (open: boolean) => void;
   onSelect: (value: string) => void;
 }) {
   return (
-    <div className={`composer-picker relative shrink-0 ${className ?? ""}`}>
+    <div className={`composer-picker shrink-0 ${anchor === "controls" ? "static" : "relative"} ${className ?? ""}`}>
       <button
         type="button"
         aria-label={ariaLabel}
@@ -143,7 +147,7 @@ function ComposerPicker({
         <div
           role="menu"
           aria-label={ariaLabel}
-          className={`menu-enter absolute z-40 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)] ${placement === "above" ? "bottom-full mb-2" : "top-full mt-2"}`}
+          className={`menu-enter absolute z-40 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)] ${placement === "above" ? "bottom-full mb-2" : "top-full mt-2"} ${align === "end" ? "right-0" : "left-0"}`}
         >
           {options.map((option) => {
             const selected = option.value === value;
@@ -629,7 +633,7 @@ export function ChatWorkspace({
                 }
               }}
             />
-            <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
+            <div className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 {!hasMessages ? (
@@ -660,6 +664,8 @@ export function ChatWorkspace({
                   ]}
                   open={composerPickerOpen === "experience"}
                   placement={hasMessages ? "above" : "below"}
+                  align="end"
+                  anchor="controls"
                   className="composer-experience"
                   disabled={sending}
                   onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "experience" : null); }}

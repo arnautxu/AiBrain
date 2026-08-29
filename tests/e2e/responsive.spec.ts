@@ -29,11 +29,11 @@ for (const viewport of viewports) {
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
     }
     await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
-    await expect(page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ })).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     const composer = await page.getByTestId("composer").boundingBox();
-    const emptyHeading = await page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ }).boundingBox();
+    const emptyHeading = await page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ }).boundingBox();
     expect(composer).not.toBeNull();
     expect(emptyHeading).not.toBeNull();
     expect(composer!.x).toBeGreaterThanOrEqual(0);
@@ -49,11 +49,27 @@ for (const viewport of viewports) {
     await page.getByRole("button", { name: "Prefiero escribir directamente" }).click();
     await expect(page.getByTestId("composer")).toBeVisible();
 
+    await page.getByRole("button", { name: "Experiencia" }).click();
+    const experienceMenu = await page.getByRole("menu", { name: "Experiencia" }).boundingBox();
+    expect(experienceMenu).not.toBeNull();
+    expect(experienceMenu!.x).toBeGreaterThanOrEqual(0);
+    expect(experienceMenu!.x + experienceMenu!.width).toBeLessThanOrEqual(viewport.width + 1);
+    await page.keyboard.press("Escape");
+
     if (viewport.width < 768) {
       const header = await page.getByTestId("mobile-app-header").boundingBox();
       expect(header).not.toBeNull();
       expect(header!.x).toBeGreaterThanOrEqual(0);
       expect(header!.x + header!.width).toBeLessThanOrEqual(viewport.width + 1);
+
+      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Buscar" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
+      await expect(page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" })).toBeVisible();
+      await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
+      await page.keyboard.press("Escape");
 
       await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
@@ -102,3 +118,37 @@ for (const viewport of viewports) {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
   });
 }
+
+test("mobile navigation closes when the viewport becomes desktop", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+
+  await page.setViewportSize({ width: 768, height: 844 });
+  await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
+});
+
+test("settings can recover after its initial request fails", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  let settingsRequests = 0;
+  await page.route("**/api/settings", async (route) => {
+    settingsRequests += 1;
+    if (settingsRequests === 1) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
+      return;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("menuitem", { name: "Configuración" }).click();
+  await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
+  await expect(page.getByRole("button", { name: "Reintentar" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Reintentar" }).click();
+  await expect(page.getByRole("button", { name: "Reintentar" })).toBeHidden();
+  await expect.poll(() => settingsRequests).toBe(2);
+});
