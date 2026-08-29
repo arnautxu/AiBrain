@@ -159,9 +159,11 @@ requireMatch(compose, /com\.graphikai\.aibrain\.installation:[^\n]*AIBRAIN_INSTA
 requireMatch(compose, /- "127\.0\.0\.1:\$\{AIBRAIN_HTTP_PORT:\?/u, "HTTP binding is not fixed to loopback");
 forbidMatch(compose, /AIBRAIN_BIND_ADDRESS/u, "Compose permits the loopback binding to be overridden");
 requireMatch(compose, /test: \[CMD, node, \/usr\/local\/share\/aibrain\/healthcheck\.mjs\]/u, "Compose does not use the storage-aware healthcheck");
-requireMatch(dockerfile, /run-automations\.ts[\s\S]*COPY --from=builder --chown=root:root \/app\/src \.\/src/u, "Docker image does not contain the immutable automation worker source");
+requireMatch(dockerfile, /npm run build:automation-worker[\s\S]*COPY --from=builder --chown=root:root \/app\/dist\/automation-worker\.mjs/u, "Docker image does not contain the compiled immutable automation worker");
+forbidMatch(dockerfile, /COPY --from=builder --chown=root:root \/app\/scripts\/run-automations\.ts/u, "Docker image copies TypeScript automation worker source into runtime");
 requireMatch(dockerfile, /automation-worker-healthcheck\.mjs/u, "Docker image does not contain the automation worker healthcheck");
-requireMatch(compose, /automation-worker:[\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-entrypoint\][\s\S]*?run-automations\.ts[\s\S]*?restart: unless-stopped/u, "Compose lacks the supervised automation worker");
+requireMatch(compose, /automation-worker:[\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-entrypoint\][\s\S]*?automation-worker\.mjs[\s\S]*?restart: unless-stopped/u, "Compose lacks the supervised compiled automation worker");
+forbidMatch(compose.match(/  automation-worker:[\s\S]*?(?=\n  ingress-gateway:)/u)?.[0] ?? "", /\btsx\b|run-automations\.ts/u, "Automation worker invokes a mutable TypeScript runtime");
 requireMatch(compose, /automation-worker:[\s\S]*?target: \/var\/lib\/aibrain\/data[\s\S]*?healthcheck:[\s\S]*?automation-worker-healthcheck\.mjs/u, "Automation worker lacks the shared durable volume or a fresh-heartbeat healthcheck");
 forbidMatch(compose, /^\s*build\s*:/mu, "runtime Compose permits an implicit mutable image build");
 requireMatch(composeBuild, /AIBRAIN_REVISION: "\$\{AIBRAIN_REVISION:\?/u, "build override does not require an exact source revision");

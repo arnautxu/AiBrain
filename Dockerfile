@@ -32,7 +32,7 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN npm run build && npm run build:automation-worker
 
 FROM ${NODE_IMAGE} AS runtime
 
@@ -125,13 +125,10 @@ WORKDIR /app
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
-COPY --from=builder --chown=root:root /app/tsconfig.json ./tsconfig.json
-COPY --from=builder --chown=root:root /app/scripts/run-automations.ts ./scripts/run-automations.ts
-# The dedicated automation worker is intentionally launched outside Next's
-# standalone server. Keep its reviewed TypeScript dependency graph in the
-# immutable image so it can share the installation volume without mounting the
-# mutable source checkout into production.
-COPY --from=builder --chown=root:root /app/src ./src
+COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automation-worker.mjs
+# The scheduler is an explicit server-conditioned ESM bundle. Unlike the app,
+# it does not depend on Next's standalone file tracer, tsx, source mounts, or a
+# hand-copied `server-only` marker/dependency graph at runtime.
 COPY --from=builder --chown=root:root /app/scripts/backup.ts ./scripts/backup.ts
 COPY --from=builder --chown=root:root /app/scripts/replicate-backup.ts ./scripts/replicate-backup.ts
 COPY --from=builder --chown=root:root /app/scripts/run-operational-alerts.ts ./scripts/run-operational-alerts.ts
