@@ -17,6 +17,7 @@ import {
   Plus,
   MagicWand,
   PencilSimple,
+  ShieldCheck,
   SidebarSimple,
   SpinnerGap,
   Stop,
@@ -51,6 +52,7 @@ type ChatWorkspaceProps = {
   prompt: string;
   composerModel: string | null;
   composerEffort: RuntimeReasoningEffort | null;
+  autoApprove: boolean;
   webSearch: boolean;
   imageGeneration: boolean;
   selectedSkill: string | null;
@@ -68,6 +70,7 @@ type ChatWorkspaceProps = {
   onPromptChange: (value: string) => void;
   onComposerModelChange: (value: string | null) => void;
   onComposerEffortChange: (value: RuntimeReasoningEffort | null) => void;
+  onAutoApproveChange: (value: boolean) => void;
   onWebSearchChange: (value: boolean) => void;
   onImageGenerationChange: (value: boolean) => void;
   onSelectedSkillChange: (value: string | null) => void;
@@ -314,6 +317,7 @@ export function ChatWorkspace({
   prompt,
   composerModel,
   composerEffort,
+  autoApprove,
   webSearch,
   imageGeneration,
   selectedSkill,
@@ -331,6 +335,7 @@ export function ChatWorkspace({
   onPromptChange,
   onComposerModelChange,
   onComposerEffortChange,
+  onAutoApproveChange,
   onWebSearchChange,
   onImageGenerationChange,
   onSelectedSkillChange,
@@ -639,6 +644,22 @@ export function ChatWorkspace({
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 <span className="composer-mode-chip rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)]">Trabajar</span>
+                {runtimeStatus.mode === "codex" ? (
+                  <button
+                    type="button"
+                    aria-label="Aprobar permisos automáticamente"
+                    aria-pressed={autoApprove}
+                    title={autoApprove
+                      ? "Codex revisa automáticamente las solicitudes de permiso"
+                      : "Revisar y aprobar automáticamente las solicitudes de permiso"}
+                    className={`composer-auto-approve composer-tool ${autoApprove ? "composer-tool-active" : ""}`}
+                    disabled={sending || !project}
+                    onClick={() => onAutoApproveChange(!autoApprove)}
+                  >
+                    <ShieldCheck size={15} weight={autoApprove ? "fill" : "regular"} />
+                    <span className="composer-auto-approve-label">{autoApprove ? "Permisos auto" : "Permisos"}</span>
+                  </button>
+                ) : null}
                 <span className="composer-destination max-w-44 truncate text-[12px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
                 {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
                   <ComposerPicker

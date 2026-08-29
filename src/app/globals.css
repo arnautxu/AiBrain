@@ -831,6 +831,18 @@ button:disabled {
   color: var(--accent);
 }
 
+.composer-auto-approve {
+  flex-shrink: 0;
+  padding-inline: 0.55rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 1023px) {
+  .composer-auto-approve-label {
+    display: none;
+  }
+}
+
 .browser-action {
   display: inline-flex;
   min-height: 2.5rem;

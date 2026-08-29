@@ -493,6 +493,7 @@ export function BrainApp({
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
   const [composerModel, setComposerModel] = useState<string | null>(null);
   const [composerEffort, setComposerEffort] = useState<RuntimeReasoningEffort | null>("low");
+  const [autoApprove, setAutoApprove] = useState(false);
   // Keep the hosted Codex web tool available by default, matching Codex's
   // normal agent behavior. The employee can still opt out per page session.
   const [webSearch, setWebSearch] = useState(() => manifest.composer.webSearch);
@@ -1318,6 +1319,7 @@ export function BrainApp({
           mode: "agent",
           model: composerModel,
           effort: composerEffort,
+          autoApprove,
           webSearch,
           imageGeneration,
           skill: selectedSkill,
@@ -1365,7 +1367,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerEffort, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, autoApprove, composerEffort, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1810,6 +1812,7 @@ export function BrainApp({
         prompt={prompt}
         composerModel={composerModel}
         composerEffort={composerEffort}
+        autoApprove={autoApprove}
         webSearch={webSearch}
         imageGeneration={imageGeneration}
         selectedSkill={selectedSkill}
@@ -1829,6 +1832,7 @@ export function BrainApp({
         onPromptChange={setPrompt}
         onComposerModelChange={setComposerModel}
         onComposerEffortChange={setComposerEffort}
+        onAutoApproveChange={setAutoApprove}
         onWebSearchChange={setWebSearch}
         onImageGenerationChange={setImageGeneration}
         onSelectedSkillChange={setSelectedSkill}

@@ -74,6 +74,53 @@ test("the mobile composer keeps every control below its growing text area", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
+test("automatic permission review stays inside the existing composer on desktop and mobile", async ({ page }) => {
+  await page.route("**/api/runtime/status**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      tenantId: "example-lab-dev",
+      projectId: "018f5f68-4a6e-7abc-8def-0123456789ab",
+      projectName: "Trabajo interno",
+      mode: "codex",
+      codex: "connected",
+      isolated: true,
+      ready: true,
+      authMode: "chatgpt",
+      planType: "team",
+      processWarm: true,
+      rateLimit: null,
+      usage: null,
+      workspaceName: "workspace",
+      model: "gpt-5.6",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      models: [],
+      skills: [],
+      capabilities: { webSearch: true, imageInput: true, imageGeneration: false },
+    }),
+  }));
+  await login(page);
+
+  const composer = page.getByTestId("composer");
+  const control = page.getByRole("button", { name: "Aprobar permisos automáticamente" });
+  await expect(control).toBeVisible();
+  await expect(control).toHaveAttribute("aria-pressed", "false");
+  await control.click();
+  await expect(control).toHaveAttribute("aria-pressed", "true");
+  await expect(control).toHaveClass(/composer-tool-active/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  const composerBox = await composer.boundingBox();
+  const controlBox = await control.boundingBox();
+  expect(composerBox).not.toBeNull();
+  expect(controlBox).not.toBeNull();
+  expect(controlBox!.x).toBeGreaterThanOrEqual(composerBox!.x);
+  expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
+  await expect(control.locator(".composer-auto-approve-label")).toBeHidden();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
 test("the existing chat route streams a complete turn and persists it in preview storage", async ({ page }) => {
   await login(page);
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
