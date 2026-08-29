@@ -655,15 +655,17 @@ function deploy(options, release, deadline = performance.now() + options.healthT
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      "egress-gateway", "app", "ingress-gateway", "alert-dispatcher",
+      "egress-gateway", "automation-worker", "app", "ingress-gateway", "alert-dispatcher",
     ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
+  waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
+  verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);
@@ -672,10 +674,12 @@ function deploy(options, release, deadline = performance.now() + options.healthT
 function verifyCurrentDeployment(options, release, deadline = performance.now() + options.healthTimeoutMs) {
   assertSelectedReleaseInputs(options, release);
   waitUntilHealthy(options, release, "egress-gateway", deadline);
+  waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
   verifyRunningService(options, release, "egress-gateway", release.egressImage, release.revision, deadline);
+  verifyRunningService(options, release, "automation-worker", release.image, release.revision, deadline);
   verifyRunningService(options, release, "app", release.image, release.revision, deadline);
   verifyRunningService(options, release, "ingress-gateway", release.egressImage, release.revision, deadline);
   verifyRunningService(options, release, "alert-dispatcher", release.image, release.revision, deadline);

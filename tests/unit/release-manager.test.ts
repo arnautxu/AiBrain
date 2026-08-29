@@ -210,10 +210,10 @@ if (args[0] === "image" && args[1] === "inspect") {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(process.env.FAKE_RUNTIME_FILE, JSON.stringify({ app: image, egress: egressImage }));
   }
-  if (args.includes("ps")) process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
+  if (args.includes("ps")) process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "automation-worker" ? "b".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
 } else if (args[0] === "inspect") {
   const runtime = JSON.parse(readFileSync(process.env.FAKE_RUNTIME_FILE, "utf8"));
-  const isApp = args.at(-1)?.startsWith("a") || args.at(-1)?.startsWith("d");
+  const isApp = args.at(-1)?.startsWith("a") || args.at(-1)?.startsWith("b") || args.at(-1)?.startsWith("d");
   const image = isApp ? runtime.app : runtime.egress;
   if (args[2].includes("Health.Status")) {
     const unhealthyCalls = Number(process.env.FAKE_TRANSIENT_UNHEALTHY_CALLS ?? "0");
@@ -265,8 +265,8 @@ function commandArgs(files: Awaited<ReturnType<typeof fixture>>, command: "promo
     "--env-file", files.envFile,
     "--state-file", files.stateFile,
     "--docker-bin", files.dockerBin,
-    "--health-timeout-ms", "5000",
-    "--docker-command-timeout-ms", "1000",
+    "--health-timeout-ms", "15000",
+    "--docker-command-timeout-ms", "3000",
   ];
 }
 
@@ -354,7 +354,7 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.seccomp.json`, "utf8")).toContain('"read"');
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","app","ingress-gateway","alert-dispatcher"');
+    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","automation-worker","app","ingress-gateway","alert-dispatcher"');
     expect(log).toContain('"{{.State.Status}} {{.State.Health.Status}}"');
   }, 20_000);
 

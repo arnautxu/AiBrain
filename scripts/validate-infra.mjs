@@ -248,6 +248,7 @@ requireMatch(releaseManager, /target-healthy[\s\S]*state-committed/u, "release m
 requireMatch(releaseManager, /RELEASE_DOCKER_TIMEOUT/u, "release manager does not bound Docker subprocesses");
 requireMatch(releaseManager, /\{\{\.Config\.Image\}\}/u, "release manager does not verify running container image identity");
 requireMatch(releaseManager, /"alert-dispatcher"/u, "release manager does not promote and verify the alert dispatcher");
+requireMatch(releaseManager, /"up", "-d", "--force-recreate", "--no-deps",[\s\S]*?"automation-worker"/u, "release manager does not promote the automation worker");
 requireMatch(releaseManager, /installationConfigSha256[\s\S]*composeSha256[\s\S]*environmentSha256/u, "release manager does not version config, Compose and environment hashes");
 requireMatch(releaseManager, /active\.compose\.yaml/u, "release manager does not materialize the exact versioned Compose input");
 requireMatch(releaseManager, /--force-recreate/u, "release manager does not recreate services for config-only releases");

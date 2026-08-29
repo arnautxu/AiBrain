@@ -126,12 +126,12 @@ deploy_release() {
     local status="$?"
 
     set +e
-    if (( status != 0 )) && [[ -n "$dangling_before" && -f "$dangling_before" ]]; then
-      remove_new_dangling_images "$dangling_before" "$dangling_after"
+    if (( status != 0 )) && [[ -n "${dangling_before:-}" && -f "${dangling_before:-}" ]]; then
+      remove_new_dangling_images "${dangling_before:-}" "${dangling_after:-}"
     fi
     rm -f "$archive" "$target_env" "$target_config"
-    [[ -z "$dangling_before" ]] || rm -f "$dangling_before"
-    [[ -z "$dangling_after" ]] || rm -f "$dangling_after"
+    [[ -z "${dangling_before:-}" ]] || rm -f "${dangling_before:-}"
+    [[ -z "${dangling_after:-}" ]] || rm -f "${dangling_after:-}"
 
     if (( status != 0 && release_prepared == 1 )); then
       if [[ ! -f "$STATE_FILE" ]] || ! jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
