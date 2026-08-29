@@ -76,3 +76,54 @@ test("a generated PDF can be reviewed beside the chat before it is downloaded", 
   await page.getByRole("button", { name: "Cerrar vista previa" }).click();
   await expect(page.getByRole("complementary", { name: "Vista previa de precios-carne.pdf" })).toHaveCount(0);
 });
+
+test("a mobile PDF preview recovers from a private-route failure without leaving the panel loading", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const previewUrl = `/api/projects/${projectId}/files?path=informes%2Fmovil.pdf&raw=1`;
+  let requests = 0;
+  let servePdf = false;
+  await page.route("**/api/chat", async (route) => {
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: `${JSON.stringify({ type: "artifact", item: {
+        id: "00000000-0000-4000-8000-000000000098",
+        type: "document",
+        name: "movil.pdf",
+        url: `${previewUrl}&download=1`,
+        kind: "pdf",
+        mimeType: "application/pdf",
+        size: 4821,
+        status: "ready",
+        pages: 1,
+        previewUrl,
+        publicationStatus: null,
+        publicationError: null,
+        targetLabel: null,
+        error: null,
+      } })}\n${JSON.stringify({ type: "done" })}\n`,
+    });
+  });
+  await page.route("**/api/projects/*/files?*", async (route) => {
+    requests += 1;
+    if (!servePdf) {
+      await route.fulfill({ status: 503, contentType: "application/json", body: '{"error":"temporal"}' });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: validPdf() });
+  });
+
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Genera el informe móvil.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
+
+  const panel = page.getByRole("complementary", { name: "Vista previa de movil.pdf" });
+  await expect(panel).toBeVisible();
+  await expect(panel.getByRole("alert")).toContainText("No se ha podido mostrar el PDF");
+  await expect(panel.getByRole("status", { name: "Cargando vista previa del PDF" })).toHaveCount(0);
+  servePdf = true;
+  await panel.getByRole("button", { name: "Reintentar" }).click();
+  await expect(page.getByTitle("Documento movil.pdf")).toHaveAttribute("src", /^blob:/);
+  expect(requests).toBeGreaterThanOrEqual(2);
+});

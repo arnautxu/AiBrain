@@ -60,6 +60,11 @@ RestartSec=5
 - Señal del worker: `<dataRoot>/automations/worker-status.json`.
 - El identificador de ejecución deriva de tarea + instante programado.
 - La concesión expira si el proceso muere y se renueva mientras el turno sigue activo.
-- Los mensajes del turno usan ids deterministas. Tras una recuperación, el store y el workbench rechazan duplicados ya terminales.
+- La conversación y los mensajes del turno usan ids deterministas. Tras una recuperación, el store y el workbench reutilizan el mismo resultado visible y rechazan duplicados ya terminales.
+- Pausar o eliminar una tarea con una ejecución en curso no borra su fence de
+  inmediato: el worker recibe la cancelación desde el estado durable, aborta
+  cooperativamente el turno y registra el resultado. La tarea deja de ser
+  visible al instante, no se reintenta ni vuelve a programarse, y el historial
+  conservado mantiene el error y el vínculo a la conversación si ya existía.
 
 Los fallos se guardan y se muestran en la tarea. En horarios recurrentes se calcula la siguiente ocurrencia; una tarea de una sola vez termina aunque su ejecución falle, para evitar reintentos infinitos no solicitados.

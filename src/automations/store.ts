@@ -65,10 +65,14 @@ function parseTask(value: unknown): AutomationTask {
     !(value.lastRunStatus === null || value.lastRunStatus === "succeeded" || value.lastRunStatus === "failed") ||
     !(value.lastRunError === null || typeof value.lastRunError === "string") ||
     !(value.retryAt === undefined || value.retryAt === null || isIsoDate(value.retryAt)) ||
+    !(value.deletedAt === undefined || value.deletedAt === null || isIsoDate(value.deletedAt)) ||
+    !(value.cancellationRequestedAt === undefined || value.cancellationRequestedAt === null || isIsoDate(value.cancellationRequestedAt)) ||
     !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt)) invalid("task");
   return {
     ...value,
     retryAt: value.retryAt ?? null,
+    deletedAt: value.deletedAt ?? null,
+    cancellationRequestedAt: value.cancellationRequestedAt ?? null,
     lease: parseLease(value.lease),
   } as AutomationTask;
 }
@@ -186,7 +190,9 @@ export class FileAutomationStore {
     await this.prepare();
     const snapshot = await this.readUnlocked();
     snapshot.tasks.forEach((task) => this.assertOwnership(task));
-    return snapshot.tasks.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    return snapshot.tasks
+      .filter((task) => task.deletedAt === null)
+      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   async create(input: AutomationTaskInput) {
@@ -205,6 +211,8 @@ export class FileAutomationStore {
       lastRunStatus: null,
       lastRunError: null,
       retryAt: null,
+      deletedAt: null,
+      cancellationRequestedAt: null,
       lease: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
@@ -220,13 +228,26 @@ export class FileAutomationStore {
       if (index < 0) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
       const current = snapshot.tasks[index];
       this.assertOwnership(current);
+      if (current.deletedAt !== null) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
       const state = patch.state ?? current.state;
+      // A claim is a snapshot of these runtime inputs. Keep its lease while
+      // cancelling it so the owning worker can record the terminal history,
+      // but fence it before it can produce a turn for obsolete instructions.
+      const invalidatesActiveClaim = state === "paused" ||
+        "prompt" in patch || "projectId" in patch || "schedule" in patch || "timeZone" in patch;
+      const cancellationRequested = invalidatesActiveClaim && current.lease !== null;
       const next: AutomationTask = {
         ...current,
         ...patch,
         state,
-        lease: state === "paused" ? null : current.lease,
+        // Retain the lease while a turn is being cancelled. The claimant can
+        // then write its terminal history, whereas clearing it would allow a
+        // stale process to race a replacement lease.
+        lease: current.lease,
         retryAt: state === "paused" || patch.schedule || patch.timeZone ? null : current.retryAt,
+        cancellationRequestedAt: cancellationRequested
+          ? new Date(this.now()).toISOString()
+          : state === "active" ? null : current.cancellationRequestedAt,
         updatedAt: new Date(this.now()).toISOString(),
       };
       if (state === "active" && (patch.schedule || patch.timeZone || current.state !== "active")) {
@@ -242,8 +263,17 @@ export class FileAutomationStore {
     return this.mutate((snapshot) => {
       const index = snapshot.tasks.findIndex((task) => task.id === taskId);
       if (index < 0) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
-      this.assertOwnership(snapshot.tasks[index]);
-      snapshot.tasks.splice(index, 1);
+      const task = snapshot.tasks[index];
+      this.assertOwnership(task);
+      if (task.deletedAt !== null) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+      const now = new Date(this.now()).toISOString();
+      // Keep a leased record until the owner observes cancellation. This is a
+      // durable cancellation fence, not a best-effort process-local signal.
+      task.state = "paused";
+      task.retryAt = null;
+      task.deletedAt = now;
+      task.cancellationRequestedAt = task.lease ? now : null;
+      task.updatedAt = now;
       return true;
     });
   }
@@ -255,7 +285,7 @@ export class FileAutomationStore {
       const claims: ClaimedAutomation[] = [];
       for (const task of snapshot.tasks.toSorted((a, b) => (a.nextRunAt ?? "").localeCompare(b.nextRunAt ?? ""))) {
         const dueAt = task.retryAt ?? task.nextRunAt;
-        if (claims.length >= limit || task.state !== "active" || !task.nextRunAt || !dueAt ||
+        if (claims.length >= limit || task.deletedAt !== null || task.state !== "active" || !task.nextRunAt || !dueAt ||
           new Date(dueAt).getTime() > now ||
           (task.lease && new Date(task.lease.expiresAt).getTime() > now)) continue;
         const scheduledFor = task.nextRunAt;
@@ -288,10 +318,20 @@ export class FileAutomationStore {
       task.lastRunError = outcome.status === "failed" ? (outcome.error ?? "Error de ejecución") : null;
       // Bound restart catch-up to one occurrence. A long outage must not turn
       // into a burst of every missed daily/weekly job.
-      task.nextRunAt = nextAfterOccurrence(task.schedule, task.timeZone,
-        new Date(Math.max(this.now(), new Date(claim.scheduledFor).getTime())).toISOString());
-      task.state = task.nextRunAt ? "active" : "completed";
+      if (task.deletedAt !== null) {
+        task.nextRunAt = null;
+        task.state = "completed";
+      } else if (task.state === "paused") {
+        // A user pause during a running occurrence applies before the next
+        // recurrence. Preserve its terminal outcome but do not reschedule it.
+        task.nextRunAt = null;
+      } else {
+        task.nextRunAt = nextAfterOccurrence(task.schedule, task.timeZone,
+          new Date(Math.max(this.now(), new Date(claim.scheduledFor).getTime())).toISOString());
+        task.state = task.nextRunAt ? "active" : "completed";
+      }
       task.retryAt = null;
+      task.cancellationRequestedAt = null;
       task.lease = null;
       task.updatedAt = task.lastRunAt;
       return { ...task };
@@ -304,6 +344,9 @@ export class FileAutomationStore {
       if (!task?.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId ||
         task.lease.fenceToken !== claim.task.lease?.fenceToken) {
         throw new AutomationStoreError("AUTOMATION_LEASE_LOST", "La concesión de ejecución ya no pertenece a este worker.");
+      }
+      if (task.deletedAt !== null || task.state !== "active" || task.cancellationRequestedAt !== null) {
+        throw new AutomationStoreError("AUTOMATION_CANCELLED", "La automatización fue cancelada por su propietario.");
       }
       task.lease.expiresAt = new Date(this.now() + this.leaseMs).toISOString();
       task.updatedAt = new Date(this.now()).toISOString();
@@ -330,7 +373,8 @@ export class FileAutomationStore {
       task.lastRunAt = new Date(this.now()).toISOString();
       task.lastRunStatus = "failed";
       task.lastRunError = outcome.error;
-      task.retryAt = outcome.retryAt;
+      task.retryAt = task.deletedAt === null && task.state === "active" ? outcome.retryAt : null;
+      task.cancellationRequestedAt = null;
       task.lease = null;
       task.updatedAt = task.lastRunAt;
       return { ...task };

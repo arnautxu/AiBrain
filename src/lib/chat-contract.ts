@@ -129,6 +129,8 @@ export type TurnOptions = {
   webSearch: boolean;
   imageGeneration: boolean;
   skill: string | null;
+  /** Catalog resource IDs selected through the @ connector autocomplete. */
+  connectorMentions?: string[];
   attachments: ChatInputAttachment[];
   documentUploadIds?: string[];
 };
@@ -340,6 +342,7 @@ export function isChatInputAttachment(value: unknown): value is ChatInputAttachm
 export function isTurnOptions(value: unknown): value is TurnOptions {
   if (!isRecord(value)) return false;
   const documentUploadIds = value.documentUploadIds;
+  const connectorMentions = value.connectorMentions;
   const validDocumentUploadIds = documentUploadIds === undefined || (
     Array.isArray(documentUploadIds) && documentUploadIds.length <= 10 &&
     documentUploadIds.every((uploadId) => typeof uploadId === "string" &&
@@ -356,6 +359,11 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
     typeof value.webSearch === "boolean" &&
     typeof value.imageGeneration === "boolean" &&
     (value.skill === null || (typeof value.skill === "string" && value.skill.length <= 100)) &&
+    (connectorMentions === undefined || (
+      Array.isArray(connectorMentions) && connectorMentions.length <= 20 &&
+      connectorMentions.every((id) => typeof id === "string" && /^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$/.test(id)) &&
+      new Set(connectorMentions).size === connectorMentions.length
+    )) &&
     Array.isArray(value.attachments) &&
     value.attachments.length <= 3 &&
     value.attachments.every(isChatInputAttachment) &&

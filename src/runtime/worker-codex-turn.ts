@@ -28,6 +28,8 @@ import {
 } from "@/runtime/codex-app-server";
 import type { RuntimeConfig } from "@/runtime/config";
 import { catalogRuntimeEnforcer } from "@/catalog/access-service";
+import { resolveConnectorMentionsForTurn } from "@/connectors/mentions";
+import { connectorMentionDeveloperInstructions } from "@/connectors/mentions-contract";
 import {
   approvalLocatorFromItem,
   waitForApproval,
@@ -70,6 +72,7 @@ import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
+import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
   parseTurnTokenUsage,
@@ -99,11 +102,15 @@ type EmitEvent = (
   projection?: WorkerTurnProjection,
 ) => Promise<void>;
 
-function readableFilesDeveloperInstructions() {
+function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDocumentRoot[]) {
+  const scopedRoots = documentRoots.length > 0
+    ? documentRoots.map((root) => `- ${root.scope}: ${root.path} (${root.readOnly ? "solo lectura" : "lectura y escritura"})`).join("\n")
+    : "- No hay raíces documentales corporativas autorizadas para este turno.";
   return [
     "## Alcance de archivos autorizado",
     "Puedes listar y leer sin aprobación el workspace privado del empleado, los archivos del proyecto y sus artefactos, el contexto y conocimiento corporativo de solo lectura, la fuente documental corporativa de solo lectura y los documentos subidos por este empleado.",
-    "Las escrituras, borrados y cambios siguen sujetos a la política del turno y solo pueden afectar al workspace del proyecto actual.",
+    "Las raíces documentales de empresa ya autorizadas para este turno son:\n" + scopedRoots,
+    "Las escrituras en estas raíces autorizadas no requieren una aprobación repetida; los borrados, publicaciones y cualquier efecto externo sí siguen sujetos a la política del turno. Nunca salgas de estas raíces.",
     "Este runtime remoto no tiene acceso al disco físico del Mac u otro ordenador personal del usuario. Para consultar esos archivos hace falta un desktop bridge autorizado o que estén sincronizados o montados en una raíz de lectura aprobada; nunca afirmes que puedes verlos si no lo están.",
   ].join("\n");
 }
@@ -300,6 +307,7 @@ export async function runWorkerCodexTurn(
   projectGuidance: Pick<AgentThreadRuntimeContext,
     "projectId" | "projectName" | "projectInstructions" | "projectMemory" | "projectSources" | "visibleProjects" | "branchHistory"
   > | null = null,
+  requestStartedAt?: number,
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
@@ -310,7 +318,7 @@ export async function runWorkerCodexTurn(
     threadId: chatRequest.threadId,
     localTurnId: chatRequest.assistantMessageId,
     clientRequestId: chatRequest.userMessageId,
-  }, { logger: operationalLogger });
+  }, { logger: operationalLogger, startedAt: requestStartedAt });
   try {
   if (runtimeConfig.mode !== "codex") {
     throw new RuntimeNotReadyError("El runtime real de Codex no està activat.");
@@ -325,6 +333,7 @@ export async function runWorkerCodexTurn(
   const activities = new Map<string, ActivityItem>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
     activities.set(item.id, item);
+    telemetry.activity();
     if (chatRequest.preferences.showActivity) await emit({ type: "activity", item }, projection);
   };
   let activeRuntimePhaseId: string | null = null;
@@ -403,6 +412,16 @@ export async function runWorkerCodexTurn(
     runtime.handle.roots.workspace,
     path.posix.join("projects", chatRequest.projectId),
   );
+  // The production installation schema always has dataRoot. Keeping this
+  // guard lets older in-process test doubles remain deliberately minimal;
+  // it is not a production fallback and grants no document root.
+  const enterpriseDocumentRoots = typeof runtime.config.paths.dataRoot === "string"
+    ? await new EnterpriseDocumentNetwork(runtime.config).rootsForTurn({
+        userId: authenticatedUserId,
+        projectId: chatRequest.projectId,
+        permissions,
+      })
+    : [];
   const uploadedDocuments = await resolveWorkerOwnedPath(runtime.handle.roots.staging, "threads");
   const runtimeWorkspaceRoots = uniqueAbsoluteRoots([
     projectWorkspace,
@@ -411,6 +430,7 @@ export async function runWorkerCodexTurn(
     runtime.config.paths.companyContextRoot,
     runtime.config.paths.sourceReadRoot,
     uploadedDocuments,
+    ...enterpriseDocumentRoots.map((root) => root.path),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   // A new conversation used to wait for the optional model/skills/usage
@@ -428,9 +448,11 @@ export async function runWorkerCodexTurn(
 
   let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
   let selectedModelOption: Awaited<ReturnType<typeof runtime.client.connection>>["models"][number] | null = null;
-  const needsModelCatalog = Boolean(
-    selectedModel || chatRequest.options.effort || chatRequest.options.attachments.length > 0,
-  );
+  // `turn/start` is the authoritative validator for a selected model and
+  // effort. Do not block every normal turn on the optional models/skills/
+  // usage catalog: it fans out into five RPCs and was competing with the
+  // first model request. Images alone need local modality validation.
+  const needsModelCatalog = chatRequest.options.attachments.length > 0;
   if (needsModelCatalog) {
     const catalog = await telemetry.measure("catalog", () => runtime.client.connection(projectWorkspace));
     selectedModelOption = selectedModel
@@ -463,7 +485,8 @@ export async function runWorkerCodexTurn(
   // server boundary before a selected skill is placed in turn/start input.
   // Keep the generic runtime transport unchanged; catalog filtering belongs at
   // its own inventory/action boundaries and must not weaken approvals or DENY.
-  const catalog = chatRequest.options.skill
+  const hasConnectorMentions = (chatRequest.options.connectorMentions?.length ?? 0) > 0;
+  const catalog = chatRequest.options.skill || hasConnectorMentions
     ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
     : null;
   const selectedSkill = chatRequest.options.skill
@@ -474,12 +497,44 @@ export async function runWorkerCodexTurn(
   if (chatRequest.options.skill && !selectedSkill) {
     throw new Error("La skill seleccionada ja no està disponible.");
   }
+  const selectedConnectorMentions = hasConnectorMentions
+    ? await resolveConnectorMentionsForTurn(
+      installationId,
+      authenticatedUserId,
+      chatRequest.options.connectorMentions ?? [],
+    )
+    : [];
+  // App Server's per-thread app configuration is the enforceable toolset
+  // boundary for managed apps. The catalog revalidation above supplies these
+  // IDs; the browser never supplies an app ID or a tool name directly.
+  const selectedAppIds = [...new Set(selectedConnectorMentions.flatMap(({ resource }) => resource.appId ? [resource.appId] : []))];
+  const connectorAppConfig = selectedAppIds.length > 0 ? {
+    apps: {
+      _default: {
+        enabled: false,
+        approvals_reviewer: null,
+        destructive_enabled: false,
+        open_world_enabled: false,
+        default_tools_approval_mode: "writes",
+      },
+      ...Object.fromEntries(selectedAppIds.map((appId) => [appId, {
+        enabled: true,
+        approvals_reviewer: SERVER_APPROVALS_REVIEWER,
+        destructive_enabled: false,
+        open_world_enabled: false,
+        default_tools_approval_mode: "writes",
+        default_tools_enabled: true,
+        tools: null,
+      }])),
+    },
+  } : {};
 
   const developerInstructions = [
     buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
-    readableFilesDeveloperInstructions(),
+    readableFilesDeveloperInstructions(enterpriseDocumentRoots),
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
+    connectorMentionDeveloperInstructions(selectedConnectorMentions),
   ].filter(Boolean).join("\n\n");
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
@@ -488,7 +543,7 @@ export async function runWorkerCodexTurn(
     approvalPolicy: runtimeConfig.approvalPolicy,
     approvalsReviewer: SERVER_APPROVALS_REVIEWER,
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
-    config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
+    config: { web_search: chatRequest.options.webSearch ? "live" : "disabled", ...connectorAppConfig },
     developerInstructions,
   };
   const reuseLoadedThread = runtimeThreadId !== null &&
@@ -573,7 +628,7 @@ export async function runWorkerCodexTurn(
       runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
     );
     try {
-      threadResult = await telemetry.measure("thread", () => runtimeThreadId
+      threadResult = await telemetry.measure(runtimeThreadId ? "thread_resume" : "thread_start", () => runtimeThreadId
         ? runtime.client.request("thread/resume", {
             threadId: runtimeThreadId,
             ...commonThreadParams,
@@ -619,14 +674,13 @@ export async function runWorkerCodexTurn(
           "Reprenent la conversa",
           "L’estat durable s’ha verificat; reconnectant una sola vegada",
         );
-        threadResult = await telemetry.measure("thread", () => runtime.client.request("thread/resume", {
+        threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
           threadId: runtimeThreadId,
           ...commonThreadParams,
         }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
       }
     }
   }
-  runtime.client.prewarmConnection?.(projectWorkspace);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
   telemetry.bindRuntimeThread(threadId);
@@ -743,6 +797,7 @@ export async function runWorkerCodexTurn(
           return;
         }
         if (method === "item/reasoning/summaryPartAdded") {
+          telemetry.summary();
           await setRuntimePhase(
             "runtime-reasoning",
             "Preparant el resum del raonament",
@@ -794,6 +849,7 @@ export async function runWorkerCodexTurn(
                 ? [part.text.trim()]
                 : []).filter(Boolean).join("\n\n").slice(0, 12_000);
             if (summary) {
+              telemetry.summary();
               if (activeRuntimePhaseId) {
                 await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("raw-reasoning-summary"));
               }
@@ -871,6 +927,7 @@ export async function runWorkerCodexTurn(
           await projectItemEvidence(params, method === "item/completed", envelope, emit);
           const activity = itemActivity(params, method === "item/completed");
           if (activity) {
+            if (activity.kind === "command" || activity.kind === "tool" || activity.kind === "web") telemetry.tool();
             await upsertActivity(activity, {
               envelope,
               key: `activity:${method === "item/completed" ? "completed" : "started"}:${activity.id}`,
@@ -918,6 +975,7 @@ export async function runWorkerCodexTurn(
           const itemId = notificationItemId(params);
           const delta = notificationDelta(params);
           if (!itemId || !delta) return;
+          telemetry.summary();
           if (activeRuntimePhaseId) {
             await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("reasoning-summary-text"));
           }
@@ -1149,9 +1207,15 @@ export async function runWorkerCodexTurn(
       runtimeWorkspaceRoots,
       approvalPolicy: runtimeConfig.approvalPolicy,
       approvalsReviewer: SERVER_APPROVALS_REVIEWER,
-      sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
+      sandboxPolicy: sandboxPolicy(
+        { ...runtimeConfig, workspace: projectWorkspace },
+        chatRequest,
+        enterpriseDocumentRoots.filter((root) => !root.readOnly).map((root) => root.path),
+      ),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
+      // Keep simple turns concise while preserving the richer public activity
+      // stream explicitly requested by deeper reasoning experiences.
       summary: chatRequest.options.effort === "high" || chatRequest.options.effort === "xhigh" ||
         chatRequest.options.effort === "max" || chatRequest.options.effort === "ultra"
         ? "detailed"
@@ -1261,6 +1325,9 @@ export async function runWorkerCodexTurn(
     signal.removeEventListener("abort", forwardExternalAbort);
     unregisterCancellation();
     registration.dispose();
+    // Warm optional picker metadata only after the live turn is no longer
+    // latency-sensitive. The cache is then ready for a later turn.
+    runtime.client.prewarmConnection?.(projectWorkspace);
   }
   } catch (error) {
     telemetry.finish("error");

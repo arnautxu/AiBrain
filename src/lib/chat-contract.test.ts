@@ -44,6 +44,13 @@ describe("chat attachment contract", () => {
     expect(isTurnOptions({ ...base, documentUploadIds: [uploadId, uploadId] })).toBe(false);
     expect(isTurnOptions({ ...base, documentUploadIds: ["../escape"] })).toBe(false);
   });
+
+  it("accepts only unique catalog connector mentions", () => {
+    const base = { mode: "agent", model: null, effort: null, webSearch: false, imageGeneration: false, skill: null, attachments: [] };
+    expect(isTurnOptions({ ...base, connectorMentions: ["gmail", "calendar-company"] })).toBe(true);
+    expect(isTurnOptions({ ...base, connectorMentions: ["gmail", "gmail"] })).toBe(false);
+    expect(isTurnOptions({ ...base, connectorMentions: ["../another-user"] })).toBe(false);
+  });
 });
 
 describe("turn evidence contract", () => {

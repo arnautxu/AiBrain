@@ -8,7 +8,7 @@ readonly RELEASE_ROOT="/opt/aibrain-company-qa"
 readonly OPS_ROOT="${RELEASE_ROOT}/ghcr-ops"
 readonly CONFIG_DIR="/etc/aibrain/company-qa"
 readonly ACTIVE_ENV="${CONFIG_DIR}/compose.env"
-readonly AUTOMATION_WORKER_ENABLED="false"
+readonly AUTOMATION_WORKER_ENABLED="true"
 readonly ACTIVE_CONFIG="${CONFIG_DIR}/installation.json"
 readonly STATE_FILE="${CONFIG_DIR}/release-state.json"
 readonly GHCR_APP_REPOSITORY="ghcr.io/arnautxu/aibrain"
@@ -99,27 +99,96 @@ pull_ghcr_images() {
   docker --config "$ghcr_docker_config" pull "$egress_image" >/dev/null
 }
 
+is_aibrain_image_reference() {
+  local reference="$1"
+  [[ "$reference" == 127.0.0.1:5000/aibrain-company-qa:* || "$reference" == 127.0.0.1:5000/aibrain-company-qa-egress:* \
+    || "$reference" == ${GHCR_APP_REPOSITORY}:* || "$reference" == ${GHCR_EGRESS_REPOSITORY}:* \
+    || "$reference" == ${GHCR_APP_REPOSITORY}@sha256:* || "$reference" == ${GHCR_EGRESS_REPOSITORY}@sha256:* ]]
+}
+
+is_current_aibrain_image() {
+  local image="$1"
+  jq -e --arg image "$image" '.current.image == $image or .current.egressImage == $image' "$STATE_FILE" >/dev/null
+}
+
+current_aibrain_image_id_matches() {
+  local image_id="$1" current_image current_image_id
+  while IFS= read -r current_image; do
+    [[ -n "$current_image" ]] || continue
+    current_image_id="$(docker image inspect --format '{{.Id}}' "$current_image" 2>/dev/null || true)"
+    [[ "$current_image_id" == "$image_id" ]] && return 0
+  done < <(jq -r '.current.image, .current.egressImage' "$STATE_FILE")
+  return 1
+}
+
+report_cleanup_blocked() {
+  local image="$1" reason="$2" detail="$3"
+  printf 'ARNALL_RELEASE_CLEANUP_BLOCKED image=%s reason=%s detail=%s\n' "$image" "$reason" "$detail" >&2
+}
+
+remove_obsolete_aibrain_containers() {
+  local image="$1" image_id="$2" container details running container_image project
+  local -a obsolete_containers=()
+  while IFS= read -r container; do
+    [[ "$container" =~ ^[0-9a-f]{12,64}$ ]] || continue
+    details="$(docker container inspect --format '{{.State.Running}}|{{.Image}}|{{index .Config.Labels "com.docker.compose.project"}}' "$container" 2>/dev/null || true)"
+    IFS='|' read -r running container_image project <<< "$details"
+    if [[ "$running" == "true" || "$container_image" != "$image_id" || "$project" != "$COMPOSE_PROJECT" ]]; then
+      report_cleanup_blocked "$image" "container-reference" "container=${container},running=${running:-unknown},image=${container_image:-unknown},project=${project:-unknown}"
+      return 1
+    fi
+    obsolete_containers+=("$container")
+  done < <(docker ps --all --quiet --filter "ancestor=${image_id}")
+  for container in "${obsolete_containers[@]}"; do
+    docker container rm "$container" >/dev/null
+    printf 'ARNALL_RELEASE_CLEANUP_REMOVED_CONTAINER image=%s container=%s\n' "$image" "$container"
+  done
+  return 0
+}
+
 remove_unused_aibrain_image() {
   local image="$1" image_id label reference
+  local -a image_references=()
   [[ "$image" =~ ^(127\.0\.0\.1:5000/aibrain-company-qa|127\.0\.0\.1:5000/aibrain-company-qa-egress|${GHCR_APP_REPOSITORY}|${GHCR_EGRESS_REPOSITORY})@sha256:[0-9a-f]{64}$ ]] || return 0
+  is_current_aibrain_image "$image" && return 0
   image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
   [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 0
-  [[ -z "$(docker ps --all --quiet --filter "ancestor=${image_id}")" ]] || return 0
   label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image_id")"
   [[ "$label" == "AiBrain Company Brain" || "$label" == "AiBrain Egress Gateway" ]] || fail "refusing to remove a non-AiBrain image"
   while IFS= read -r reference; do
     [[ -n "$reference" && "$reference" != "<none>:<none>" ]] || continue
-    [[ "$reference" == 127.0.0.1:5000/aibrain-company-qa:* || "$reference" == 127.0.0.1:5000/aibrain-company-qa-egress:* || "$reference" == ${GHCR_APP_REPOSITORY}:* || "$reference" == ${GHCR_EGRESS_REPOSITORY}:* ]] \
-      || fail "refusing to remove an image shared with another repository"
-    docker image rm "$reference" >/dev/null
-  done < <(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}' "$image_id")
+    is_aibrain_image_reference "$reference" || {
+      report_cleanup_blocked "$image" "shared-image-reference" "reference=${reference}"
+      return 1
+    }
+    image_references+=("$reference")
+  done < <(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}' "$image_id")
+  if current_aibrain_image_id_matches "$image_id"; then
+    report_cleanup_blocked "$image" "current-image-id" "image_id=${image_id}"
+    return 1
+  fi
+  remove_obsolete_aibrain_containers "$image" "$image_id" || return 1
+  if ((${#image_references[@]})); then
+    for reference in "${image_references[@]}"; do
+      docker image rm "$reference" >/dev/null || {
+        report_cleanup_blocked "$image" "image-remove-failed" "reference=${reference}"
+        return 1
+      }
+    done
+  else
+    docker image rm "$image_id" >/dev/null || {
+      report_cleanup_blocked "$image" "image-remove-failed" "image_id=${image_id}"
+      return 1
+    }
+  fi
+  printf 'ARNALL_RELEASE_CLEANUP_REMOVED_IMAGE image=%s image_id=%s\n' "$image" "$image_id"
 }
 
 cleanup_previous_aibrain_images() {
   local image
   [[ -f "$STATE_FILE" ]] || return 0
   while IFS= read -r image; do
-    remove_unused_aibrain_image "$image"
+    remove_unused_aibrain_image "$image" || return 1
   done < <(jq -r '.previous.image?, .previous.egressImage? // empty' "$STATE_FILE")
 }
 
@@ -147,6 +216,7 @@ deploy_ghcr_release() {
   require_release_readback_runtime
 
   if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
+    cleanup_previous_aibrain_images
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
     return
   fi

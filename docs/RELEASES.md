@@ -19,10 +19,25 @@ temporal por stdin al gateway restringido.
 El gateway usa una configuración Docker temporal para el login, hace pull de
 ambos digests exactos, elimina esa configuración antes de promover y ejecuta el
 release manager. Nunca recibe un archivo fuente, no construye ni publica en
-Hetzner y no persiste credenciales GHCR. Tras health/readiness y los readbacks,
-solo elimina referencias de imágenes AiBrain previas que no tengan ningún
-contenedor asociado. La imagen anterior queda recuperable desde GHCR por su
-digest guardado en el estado de release.
+Hetzner y no persiste credenciales GHCR. Tras health/readiness, elimina los
+contenedores **detenidos** de la misma instalación que aún referencien los dos
+digests previos y después elimina esas referencias de imagen. Un contenedor en
+ejecución, una etiqueta de otro repositorio o una imagen no etiquetada como
+AiBrain bloquean la limpieza y se registran con su referencia exacta: el
+comando no declara la release aceptada hasta resolverlo, y nunca elimina un
+workload ajeno. La imagen anterior queda recuperable desde GHCR por el digest
+guardado en el estado de release.
+
+Después de una aceptación satisfactoria el invariante local es exactamente un
+digest activo para `ghcr.io/arnautxu/aibrain` y uno para
+`ghcr.io/arnautxu/aibrain-egress`: los de `current` en `release-state.json`.
+No se conserva rollback local. El rollback automático antes de la aceptación
+sigue usando la release previa que conserva el estado durable y GHCR. El host
+no ejecuta builds desde esta ruta; por seguridad la gateway no usa
+`docker builder prune` ni un prune general, porque Docker no permite atribuir
+de forma fiable una entrada de caché histórica a una instalación. Cualquier
+caché antigua sin esa atribución queda fuera de esta operación, sin tocar otros
+workloads.
 
 ## Precondiciones
 

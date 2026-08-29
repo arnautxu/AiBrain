@@ -42,4 +42,11 @@ describe("DocumentPreviewPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cerrar vista previa" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("does not leave an unavailable PDF in an endless loading state", () => {
+    render(<DocumentPreviewPanel artifact={{ ...artifact, previewUrl: null }} onClose={vi.fn()} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido mostrar el PDF");
+    expect(screen.queryByRole("status", { name: "Cargando vista previa del PDF" })).not.toBeInTheDocument();
+  });
 });

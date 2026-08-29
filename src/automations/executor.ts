@@ -55,10 +55,21 @@ export type ScheduledExecutionInput = {
 
 /** Executes the prompt as a real persistent AiBrain turn. It never sends an external message by itself. */
 export async function executeScheduledTurn(input: ScheduledExecutionInput) {
+  // The worker constructs its session from the installation's provisioned
+  // employee record; retain this boundary immediately before a durable task
+  // can enter the runtime as defence in depth against tenant/user mix-ups.
+  if (input.task.installationId !== input.installation.installationId || input.task.userId !== input.session.user.id) {
+    throw new Error("La automatización no pertenece a este empleado o instalación.");
+  }
   const signal = input.signal ?? new AbortController().signal;
   const thread = input.existingThreadId
     ? null
-    : await createThread(input.session, input.task.projectId, `Programada · ${input.task.name}`);
+    : await createThread(input.session, input.task.projectId, `Programada · ${input.task.name}`, {
+      // Persist this boundary before a runtime thread is available. If the
+      // worker dies between creating the workbench thread and recording its
+      // run journal entry, recovery reuses this exact visible conversation.
+      id: stableUuid(`${input.runKey}:workbench-thread`),
+    });
   const threadId = input.existingThreadId ?? thread?.id;
   if (!threadId) throw new Error("No se ha podido preparar la conversación programada.");
   await input.onThreadPrepared?.(threadId);

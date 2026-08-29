@@ -858,19 +858,31 @@ export class FileWorkbenchStore {
     userId: string,
     projectId: string,
     title: string,
+    requestedId?: string,
   ): Promise<WorkbenchThread> {
     assertFilesystemWorkbenchId(projectId);
     if (!isThreadTitle(title)) throw new WorkbenchPersistenceError("El títol del fil no és vàlid.");
+    if (requestedId !== undefined) assertFilesystemWorkbenchId(requestedId);
     return this.mutate(userId, (state) => {
       const project = state.projects.find((candidate) => candidate.id === projectId);
       if (!project || project.status !== "active") {
         throw new WorkbenchNotFoundError("Projecte actiu no trobat.");
       }
+      const normalizedTitle = title.trim();
+      if (requestedId) {
+        const existing = state.threads.find((candidate) => candidate.id === requestedId);
+        if (existing) {
+          if (existing.projectId !== projectId || existing.title !== normalizedTitle) {
+            throw new WorkbenchConflictError("L’identificador determinista del fil ja pertany a una altra conversa.");
+          }
+          return publicThread(existing);
+        }
+      }
       const now = new Date().toISOString();
       const thread: StoredThread = {
-        id: randomUUID(),
+        id: requestedId ?? randomUUID(),
         projectId,
-        title: title.trim(),
+        title: normalizedTitle,
         status: "active",
         pinned: false,
         createdAt: now,

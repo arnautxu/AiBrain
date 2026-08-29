@@ -132,6 +132,17 @@ describe("FileWorkbenchStore", () => {
     )).rejects.toBeInstanceOf(WorkbenchConflictError);
   });
 
+  it("reuses a deterministic thread id after a worker recovery boundary", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Recovery project");
+    const threadId = "00000000-0000-4000-8000-000000000099";
+    const first = await store.createThread(USER_A, project.id, "Programada · Informe", threadId);
+    const recovered = await store.createThread(USER_A, project.id, "Programada · Informe", threadId);
+
+    expect(recovered).toEqual(first);
+    expect((await store.load(USER_A)).threads.filter((thread) => thread.id === threadId)).toHaveLength(1);
+  });
+
   it("persists approval fingerprints produced by projected runtime events", async () => {
     const { usersRoot, store } = await fixture();
     const project = await store.createProject(USER_A, "Approval project");

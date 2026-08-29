@@ -91,6 +91,7 @@ import {
   type WorkbenchThread,
 } from "@/workbench/types";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
+import { isConnectorMention, type ConnectorMention } from "@/connectors/mentions-contract";
 import { isSettingsSnapshot, type SettingsSnapshot } from "@/settings/contracts";
 import {
   getThreadActivity,
@@ -502,6 +503,8 @@ export function BrainApp({
   const [webSearch, setWebSearch] = useState(() => manifest.composer.webSearch);
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
+  const [connectorMentions, setConnectorMentions] = useState<ConnectorMention[]>([]);
+  const [selectedConnectorMentionIds, setSelectedConnectorMentionIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<ChatInputAttachment[]>([]);
   const [documents, setDocuments] = useState<StagedComposerDocument[]>([]);
   const [publications, setPublications] = useState<DocumentPublicationDraft[]>([]);
@@ -596,6 +599,23 @@ export function BrainApp({
     });
     return () => { active = false; };
   }, [hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
+    const controller = new AbortController();
+    void fetch("/api/connectors/mentions", { signal: controller.signal, cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((value: unknown) => {
+        const mentions = value && typeof value === "object" && "mentions" in value ? (value as { mentions?: unknown }).mentions : null;
+        if (Array.isArray(mentions) && mentions.every(isConnectorMention)) setConnectorMentions(mentions);
+      })
+      .catch(() => undefined);
+    return () => controller.abort();
+  }, [hydrated, initialWorkbench.persistence]);
+
+  useEffect(() => {
+    setSelectedConnectorMentionIds((current) => current.filter((id) => connectorMentions.some((mention) => mention.id === id && mention.canRead)));
+  }, [connectorMentions]);
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
@@ -1308,6 +1328,7 @@ export function BrainApp({
         setPendingRuntimeContext(null);
         setAttachments([]);
         setDocuments([]);
+        setSelectedConnectorMentionIds([]);
       }
 
       controller = new AbortController();
@@ -1338,6 +1359,7 @@ export function BrainApp({
           webSearch,
           imageGeneration,
           skill: selectedSkill,
+          ...(selectedConnectorMentionIds.length ? { connectorMentions: selectedConnectorMentionIds } : {}),
           attachments,
           ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
         },
@@ -1382,7 +1404,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedConnectorMentionIds, selectedSkill, sending, webSearch]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1844,6 +1866,8 @@ export function BrainApp({
         composerExperience={composerExperience}
         webSearch={webSearch}
         imageGeneration={imageGeneration}
+        connectorMentions={connectorMentions}
+        selectedConnectorMentionIds={selectedConnectorMentionIds}
         attachments={attachments}
         documents={documents}
         publications={publications}
@@ -1862,6 +1886,7 @@ export function BrainApp({
         onDestinationChange={startNewThread}
         onWebSearchChange={setWebSearch}
         onImageGenerationChange={setImageGeneration}
+        onConnectorMentionIdsChange={setSelectedConnectorMentionIds}
         onAttachmentsChange={setAttachments}
         onDocumentsChange={setDocuments}
         onAddDocuments={addDocuments}
@@ -1960,6 +1985,7 @@ export function BrainApp({
       <AutomationsPanel
         open={automationsOpen}
         projects={projects}
+        fullPage
         onClose={() => setAutomationsOpen(false)}
       />
 

@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import type { AutomationRun } from "@/automations/contracts";
-import type { FileAutomationStore, ClaimedAutomation } from "@/automations/store";
+import { AutomationStoreError, type FileAutomationStore, type ClaimedAutomation } from "@/automations/store";
 
 export type AutomationExecution = (
   claim: ClaimedAutomation,
@@ -19,6 +19,8 @@ export async function runAutomationSweep(options: {
   maxAttempts?: number;
   retryBaseMs?: number;
   timeoutMs?: number;
+  /** Bounds cancellation latency while keeping the durable lease fresh. */
+  leaseRenewalMs?: number;
 }) {
   const now = options.now ?? Date.now;
   const ownerId = options.ownerId ?? `${hostname()}-${process.pid}`.replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 128);
@@ -27,6 +29,7 @@ export async function runAutomationSweep(options: {
   const maxAttempts = options.maxAttempts ?? 3;
   const retryBaseMs = options.retryBaseMs ?? 30_000;
   const timeoutMs = options.timeoutMs ?? 15 * 60_000;
+  const leaseRenewalMs = Math.max(1_000, options.leaseRenewalMs ?? 15_000);
   const executeClaim = async (claim: ClaimedAutomation) => {
     const previous = await options.store.latestRun(claim.runKey);
     if (previous?.status === "succeeded" || previous?.status === "failed") {
@@ -59,19 +62,25 @@ export async function runAutomationSweep(options: {
     });
     const controller = new AbortController();
     let leaseLost = false;
+    let cancellationRequested = false;
     let renewal = Promise.resolve();
     const renew = () => {
       renewal = renewal.then(async () => {
         try {
           await options.store.renewLease(claim);
-        } catch {
+        } catch (error) {
+          if (error instanceof AutomationStoreError && error.code === "AUTOMATION_CANCELLED") {
+            cancellationRequested = true;
+            controller.abort(error);
+            return;
+          }
           leaseLost = true;
           controller.abort(new Error("La concesión de automatización se ha perdido."));
         }
       });
       return renewal;
     };
-    const renewTimer = setInterval(() => { void renew(); }, 60_000);
+    const renewTimer = setInterval(() => { void renew(); }, leaseRenewalMs);
     renewTimer.unref?.();
     const timeoutTimer = setTimeout(() => controller.abort(new Error("La automatización excedió el tiempo máximo de ejecución.")), timeoutMs);
     timeoutTimer.unref?.();
@@ -135,6 +144,11 @@ export async function runAutomationSweep(options: {
       if (leaseLost) {
         // A fenced successor owns the outcome. Do not advance or retry from a
         // stale worker; its deterministic turn ids keep the remote side safe.
+        results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });
+      } else if (cancellationRequested) {
+        // The same valid lease owns this terminal record. A cancellation must
+        // never be retried or revive a paused/deleted recurrence.
+        await options.store.settle(claim, { status: "failed", error: detail });
         results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });
       } else if (attempt < maxAttempts) {
         const delay = retryBaseMs * (2 ** (attempt - 1));

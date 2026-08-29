@@ -706,13 +706,17 @@ export function effectiveSandbox(config: RuntimeConfig, chatRequest: ChatRequest
   return chatRequest.options.mode === "agent" ? config.sandbox : "read-only";
 }
 
-export function sandboxPolicy(config: RuntimeConfig, chatRequest: ChatRequest) {
+export function sandboxPolicy(
+  config: RuntimeConfig,
+  chatRequest: ChatRequest,
+  additionalWritableRoots: readonly string[] = [],
+) {
   if (effectiveSandbox(config, chatRequest) === "read-only") {
     return { type: "readOnly" as const, networkAccess: false };
   }
   return {
     type: "workspaceWrite" as const,
-    writableRoots: [config.workspace],
+    writableRoots: [config.workspace, ...additionalWritableRoots],
     networkAccess: false,
     excludeTmpdirEnvVar: false,
     excludeSlashTmp: false,

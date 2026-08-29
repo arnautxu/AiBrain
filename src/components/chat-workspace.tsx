@@ -4,8 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import {
   ArrowDown,
   ArrowUp,
+  At,
   CaretDown,
-  ChatCircleDots,
   Check,
   Copy,
   FolderOpen,
@@ -42,6 +42,7 @@ import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
+import type { ConnectorMention } from "@/connectors/mentions-contract";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -57,6 +58,8 @@ type ChatWorkspaceProps = {
   composerExperience: ComposerExperience;
   webSearch: boolean;
   imageGeneration: boolean;
+  connectorMentions: ConnectorMention[];
+  selectedConnectorMentionIds: string[];
   attachments: ChatInputAttachment[];
   documents: StagedComposerDocument[];
   publications: DocumentPublicationDraft[];
@@ -73,6 +76,7 @@ type ChatWorkspaceProps = {
   onDestinationChange: (projectId: string) => void;
   onWebSearchChange: (value: boolean) => void;
   onImageGenerationChange: (value: boolean) => void;
+  onConnectorMentionIdsChange: (value: string[]) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
   onDocumentsChange: (value: StagedComposerDocument[]) => void;
   onAddDocuments: (files: File[]) => Promise<void>;
@@ -326,6 +330,8 @@ export function ChatWorkspace({
   composerExperience,
   webSearch,
   imageGeneration,
+  connectorMentions,
+  selectedConnectorMentionIds,
   attachments,
   documents,
   publications,
@@ -342,6 +348,7 @@ export function ChatWorkspace({
   onDestinationChange,
   onWebSearchChange,
   onImageGenerationChange,
+  onConnectorMentionIdsChange,
   onAttachmentsChange,
   onDocumentsChange,
   onAddDocuments,
@@ -371,6 +378,7 @@ export function ChatWorkspace({
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
+  const [mentionOpen, setMentionOpen] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -409,7 +417,7 @@ export function ChatWorkspace({
   }, [resizeComposer]);
 
   const hasMessages = Boolean(thread?.messages.length);
-  const composerEngaged = Boolean(prompt.trim() || attachments.length || documents.length);
+  const composerEngaged = Boolean(prompt.trim() || attachments.length || documents.length || selectedConnectorMentionIds.length);
   const guideVisible = guidedActionsOpen;
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canAttachDocuments = runtimeStatus.mode === "codex";
@@ -424,22 +432,40 @@ export function ChatWorkspace({
     })), [projects]);
   const suggestions = useMemo(() => landingSuggestions(project, companyName), [companyName, project]);
   const noProject = !project || standaloneConversation;
+  const firstName = userName.trim().split(/\s+/)[0] || "ahí";
   const landingHeadline = noProject
-    ? `¿En qué te puedo ayudar, ${userName}?`
+    ? `¿En qué te puedo ayudar, ${firstName}?`
     : `¿Cómo puedo ayudarte en ${project.name}?`;
   const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
+  const mentionMatch = prompt.match(/(?:^|\s)@([^\s@]*)$/u);
+  const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase("es") ?? null;
+  const mentionOptions = useMemo(() => mentionQuery === null ? [] : connectorMentions
+    .filter((mention) => mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery))
+    .slice(0, 8), [connectorMentions, mentionQuery]);
+  const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
+
+  const selectConnectorMention = (mention: ConnectorMention) => {
+    if (!mention.canRead || !mentionMatch) return;
+    const atIndex = prompt.lastIndexOf(`@${mentionMatch[1]}`);
+    onPromptChange(`${prompt.slice(0, atIndex)}@${mention.label} ${prompt.slice(atIndex + mentionMatch[0].trimStart().length)}`);
+    if (!selectedConnectorMentionIds.includes(mention.id)) onConnectorMentionIdsChange([...selectedConnectorMentionIds, mention.id]);
+    setMentionOpen(false);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
 
   useEffect(() => {
-    if (!composerMenuOpen && !composerPickerOpen) return;
+    if (!composerMenuOpen && !composerPickerOpen && !mentionOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
       if (composerShellRef.current?.contains(event.target as Node)) return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
+      setMentionOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
+      setMentionOpen(false);
       composerRef.current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutside);
@@ -448,7 +474,7 @@ export function ChatWorkspace({
       document.removeEventListener("pointerdown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [composerMenuOpen, composerPickerOpen]);
+  }, [composerMenuOpen, composerPickerOpen, mentionOpen]);
 
   const addImages = async (files: FileList | File[] | null) => {
     if (!files || !canAttachImages) return;
@@ -520,7 +546,7 @@ export function ChatWorkspace({
             <SidebarSimple size={17} />
           </button>
           <div data-testid="project-breadcrumb" className="flex min-w-0 items-center gap-1.5 px-1 py-1 text-left">
-            {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : <ChatCircleDots size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" />}
+            {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : null}
             {!standaloneConversation ? <span className="hidden max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name}</span> : null}
             {thread ? <span className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</span> : <span className="truncate text-[13px] font-semibold text-[var(--text)] sm:hidden">Nueva conversación</span>}
           </div>
@@ -563,14 +589,13 @@ export function ChatWorkspace({
             </div>
             <div ref={bottomRef} className="h-8" />
           </div>
-        ) : <section className={`chat-empty-state mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 text-center md:px-8 ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía">
-          <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1>
-        </section>}
+        ) : <section className={`chat-empty-state mx-auto min-h-full w-full ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía" />}
       </div>
 
       {!guideVisible ? <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
+          {!hasMessages ? <h1 className="mb-4 text-center text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
@@ -609,6 +634,9 @@ export function ChatWorkspace({
                 ))}
               </div>
             ) : null}
+            {selectedMentions.length ? <div className="flex flex-wrap gap-1.5 px-2 pt-1" aria-label="Conectores seleccionados">
+              {selectedMentions.map((mention) => <span key={mention.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><At size={11} />{mention.label}<button type="button" aria-label={`Quitar ${mention.label}`} className="rounded-full hover:bg-[var(--surface-raised)]" onClick={() => onConnectorMentionIdsChange(selectedConnectorMentionIds.filter((id) => id !== mention.id))}><X size={10} /></button></span>)}
+            </div> : null}
             <div
               ref={composerMeasurementRef}
               aria-hidden="true"
@@ -623,8 +651,13 @@ export function ChatWorkspace({
               placeholder={`Escribe a ${placeholderName}…`}
               rows={1}
               value={prompt}
-              onChange={(event) => onPromptChange(event.target.value)}
+              onChange={(event) => { onPromptChange(event.target.value); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
               onKeyDown={(event) => {
+                if (mentionOpen && mentionOptions.length && (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter")) {
+                  event.preventDefault();
+                  if (event.key === "Enter") selectConnectorMention(mentionOptions.find((option) => option.canRead) ?? mentionOptions[0]);
+                  return;
+                }
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   if (!sending && !documentUploading && prompt.trim() && runtimeReady) {
@@ -634,6 +667,9 @@ export function ChatWorkspace({
                 }
               }}
             />
+            {mentionOpen && mentionQuery !== null ? <div role="listbox" aria-label="Conectores disponibles" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
+              {mentionOptions.length ? mentionOptions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectConnectorMention(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "requiere inicio de sesión" : "no disponible"}</span></button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
+            </div> : null}
             <div className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>

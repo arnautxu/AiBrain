@@ -215,15 +215,17 @@ export async function createThread(
   session: AuthSession,
   projectId: string,
   title: string,
+  options: { id?: string } = {},
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(projectId);
     const access = await resolveProjectAccess(session, projectId);
     if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
-    const thread = await access.store.createThread(access.ownerUserId, projectId, title);
+    const thread = await access.store.createThread(access.ownerUserId, projectId, title, options.id);
     await syncSharedThreadAccess(session, access.ownerUserId, projectId, thread.id);
     return thread;
   }
+  if (options.id) throw new WorkbenchPersistenceError("Los ids deterministas requieren el workbench local persistente.");
   assertWorkbenchId(projectId);
   return createDemoThread(session, projectId, title);
 }

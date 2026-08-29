@@ -178,6 +178,7 @@ describe("worker Codex turn", () => {
         };
       },
     };
+    let modelCatalogCalls = 0;
     const client = {
       router,
       async connectionSummary() {
@@ -195,6 +196,7 @@ describe("worker Codex turn", () => {
         };
       },
       async connection() {
+        modelCatalogCalls += 1;
         return {
           connected: true,
           authMode: "chatgpt",
@@ -346,6 +348,8 @@ describe("worker Codex turn", () => {
     // Legacy client input cannot weaken the server-owned reviewer selection.
     request.options.autoApprove = false;
     request.options.webSearch = true;
+    request.options.model = "gpt-5.6-terra";
+    request.options.effort = "low";
     request.options.documentUploadIds = [documentUploadId];
     const turnPermissions = permissions([{
       ruleId: "documents.read",
@@ -414,8 +418,13 @@ describe("worker Codex turn", () => {
         "/source-knowledge",
         path.join(staging, "threads"),
       ],
+      model: "gpt-5.6-terra",
+      effort: "low",
       summary: "concise",
     });
+    // A normal selected model/effort is validated by turn/start itself. The
+    // optional five-RPC picker catalog must not delay this live web turn.
+    expect(modelCatalogCalls).toBe(0);
     expect((turnStart?.params as { input: Array<{ type: string; path?: string; text?: string }> }).input)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ type: "text", text: expect.stringContaining("server-attached documents") }),

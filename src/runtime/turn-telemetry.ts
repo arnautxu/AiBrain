@@ -17,7 +17,8 @@ export type TurnTelemetryPhase =
   | "worker"
   | "catalog"
   | "skills"
-  | "thread"
+  | "thread_start"
+  | "thread_resume"
   | "turn_start";
 
 export type TurnTelemetrySnapshot = Readonly<{
@@ -29,6 +30,11 @@ export type TurnTelemetrySnapshot = Readonly<{
   serverInterDeltaP50Ms: number | null;
   serverInterDeltaP95Ms: number | null;
   serverInterDeltaMaxMs: number | null;
+  firstActivityMs: number | null;
+  firstSummaryMs: number | null;
+  firstToolMs: number | null;
+  firstActivityWithinBudget: boolean | null;
+  firstTextWithinBudget: boolean | null;
   totalMs: number;
   resumeCount: number;
   reconnectCount: number;
@@ -36,9 +42,22 @@ export type TurnTelemetrySnapshot = Readonly<{
   cancelRequested: boolean;
 }>;
 
+/**
+ * Product budgets, not timeouts. They are evaluated in telemetry and never
+ * terminate or retry a valid turn. Cold workers have a separate allowance.
+ */
+export const TURN_PERFORMANCE_BUDGET_MS = Object.freeze({
+  warmFirstActivity: 1_500,
+  coldFirstActivity: 8_000,
+  warmFirstText: 6_000,
+  coldFirstText: 18_000,
+});
+
 type TurnTelemetryOptions = Readonly<{
   logger: Pick<OperationalLogger, "info">;
   now?: () => number;
+  /** Share the HTTP request clock with the worker when it is available. */
+  startedAt?: number;
 }>;
 
 function elapsedMs(startedAt: number, now: () => number) {
@@ -62,6 +81,9 @@ export class TurnTelemetry {
   private runtimeThreadId: string | null = null;
   private runtimeTurnId: string | null = null;
   private firstDeltaAt: number | null = null;
+  private firstActivityAt: number | null = null;
+  private firstSummaryAt: number | null = null;
+  private firstToolAt: number | null = null;
   private previousDeltaAt: number | null = null;
   private readonly interDeltaMs: number[] = [];
   private resumeCount = 0;
@@ -77,7 +99,7 @@ export class TurnTelemetry {
     private readonly options: TurnTelemetryOptions,
   ) {
     this.now = options.now ?? performance.now.bind(performance);
-    this.startedAt = this.now();
+    this.startedAt = options.startedAt ?? this.now();
   }
 
   bindRuntimeThread(runtimeThreadId: string) {
@@ -122,6 +144,19 @@ export class TurnTelemetry {
     this.previousDeltaAt = observedAt;
   }
 
+  /** Marks an observed, user-safe App Server event without retaining its text. */
+  activity() {
+    this.firstActivityAt ??= this.now();
+  }
+
+  summary() {
+    this.firstSummaryAt ??= this.now();
+  }
+
+  tool() {
+    this.firstToolAt ??= this.now();
+  }
+
   async measure<T>(phase: TurnTelemetryPhase, operation: () => Promise<T>): Promise<T> {
     const phaseStartedAt = this.now();
     let outcome: "completed" | "error" = "completed";
@@ -134,7 +169,7 @@ export class TurnTelemetry {
       const phaseMs = elapsedMs(phaseStartedAt, this.now);
       this.phaseElapsedMs.set(phase, (this.phaseElapsedMs.get(phase) ?? 0) + phaseMs);
       this.options.logger.info("codex.turn_phase", {
-        metricSchemaVersion: 1,
+        metricSchemaVersion: 2,
         ...this.attributes(),
         phase,
         outcome,
@@ -149,7 +184,7 @@ export class TurnTelemetry {
       this.terminal = terminal;
       const snapshot = this.snapshot();
       this.options.logger.info("codex.turn_metrics", {
-        metricSchemaVersion: 1,
+        metricSchemaVersion: 2,
         ...this.attributes(),
         terminal,
         ...snapshot,
@@ -161,7 +196,7 @@ export class TurnTelemetry {
 
   private lifecycle(lifecycle: TurnTelemetryLifecycle) {
     this.options.logger.info("codex.turn_lifecycle", {
-      metricSchemaVersion: 1,
+      metricSchemaVersion: 2,
       ...this.attributes(),
       lifecycle,
       requestElapsedMs: elapsedMs(this.startedAt, this.now),
@@ -180,6 +215,17 @@ export class TurnTelemetry {
       serverInterDeltaP50Ms: percentile(this.interDeltaMs, 0.5),
       serverInterDeltaP95Ms: percentile(this.interDeltaMs, 0.95),
       serverInterDeltaMaxMs: this.interDeltaMs.length === 0 ? null : Math.max(...this.interDeltaMs),
+      firstActivityMs: this.firstActivityAt === null ? null : Math.max(0, Math.round(this.firstActivityAt - this.startedAt)),
+      firstSummaryMs: this.firstSummaryAt === null ? null : Math.max(0, Math.round(this.firstSummaryAt - this.startedAt)),
+      firstToolMs: this.firstToolAt === null ? null : Math.max(0, Math.round(this.firstToolAt - this.startedAt)),
+      firstActivityWithinBudget: this.firstActivityAt === null ? null :
+        elapsedMs(this.startedAt, () => this.firstActivityAt!) <= (this.workerWarm
+          ? TURN_PERFORMANCE_BUDGET_MS.warmFirstActivity
+          : TURN_PERFORMANCE_BUDGET_MS.coldFirstActivity),
+      firstTextWithinBudget: this.firstDeltaAt === null ? null :
+        elapsedMs(this.startedAt, () => this.firstDeltaAt!) <= (this.workerWarm
+          ? TURN_PERFORMANCE_BUDGET_MS.warmFirstText
+          : TURN_PERFORMANCE_BUDGET_MS.coldFirstText),
       totalMs: elapsedMs(this.startedAt, this.now),
       resumeCount: this.resumeCount,
       reconnectCount: this.reconnectCount,

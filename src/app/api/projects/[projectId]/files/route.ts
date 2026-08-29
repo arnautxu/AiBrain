@@ -124,6 +124,10 @@ export async function GET(
           "Cross-Origin-Resource-Policy": "same-origin",
           "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",
+          // The authenticated client fetches this response into a blob before
+          // previewing it. Keeping the original response non-frameable avoids
+          // turning a private document URL into an embeddable resource.
+          "X-Frame-Options": "DENY",
         },
       });
     }

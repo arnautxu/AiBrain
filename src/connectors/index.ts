@@ -5,4 +5,5 @@ export * from "@/connectors/canonical";
 export * from "@/connectors/codex-managed-app-action";
 export * from "@/connectors/codex-managed-app-provider";
 export * from "@/connectors/contracts";
+export * from "@/connectors/mentions-contract";
 export * from "@/connectors/registry";
