@@ -5,39 +5,23 @@ import { Check, Copy } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const STREAM_GAP_FALLBACK_MS = 16;
-const MIN_STREAM_BURST_WORDS = 4;
+const STREAM_SETTLE_MS = 700;
 
-function getStreamGapMs() {
-  const value = window.getComputedStyle(document.documentElement).getPropertyValue("--stream-gap").trim();
-  if (value.endsWith("ms")) return Number.parseFloat(value) || STREAM_GAP_FALLBACK_MS;
-  if (value.endsWith("s")) return (Number.parseFloat(value) || STREAM_GAP_FALLBACK_MS / 1000) * 1000;
-  return STREAM_GAP_FALLBACK_MS;
-}
-
-function countWords(content: string) {
-  return content.match(/\S+/g)?.length ?? 0;
-}
-
-function useVisibleStreamWords(content: string, streaming: boolean) {
-  const wordCount = countWords(content);
-  const [visibleWordCount, setVisibleWordCount] = useState(() => streaming ? 0 : wordCount);
+function useStreamDecoration(streaming: boolean) {
+  const [decorated, setDecorated] = useState(streaming);
 
   useEffect(() => {
-    if (!streaming || visibleWordCount >= wordCount) return;
+    if (streaming && !decorated) {
+      const frame = window.requestAnimationFrame(() => setDecorated(true));
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (streaming || !decorated) return;
 
-    const timer = window.setTimeout(() => {
-      setVisibleWordCount((current) => {
-        const remaining = wordCount - current;
-        if (remaining <= 0) return current;
-        return Math.min(wordCount, current + Math.max(MIN_STREAM_BURST_WORDS, Math.ceil(remaining / 2)));
-      });
-    }, getStreamGapMs());
-
+    const timer = window.setTimeout(() => setDecorated(false), STREAM_SETTLE_MS);
     return () => window.clearTimeout(timer);
-  }, [streaming, visibleWordCount, wordCount]);
+  }, [decorated, streaming]);
 
-  return visibleWordCount;
+  return streaming || decorated;
 }
 
 type MarkdownAstNode = {
@@ -50,25 +34,42 @@ type MarkdownAstNode = {
 
 type MarkdownAstRoot = MarkdownAstNode & { children: MarkdownAstNode[] };
 
-function createStreamWordsPlugin(visibleWordCount: number) {
+function createStreamWordsPlugin(streaming: boolean) {
   return () => (tree: MarkdownAstRoot) => {
+    const countWords = (children: MarkdownAstNode[], literal = false): number => children.reduce((total, node) => {
+      const isLiteral = literal || node.tagName === "code" || node.tagName === "pre";
+      if (node.type === "text" && !isLiteral && typeof node.value === "string") {
+        return total + (node.value.match(/\S+/g)?.length ?? 0);
+      }
+      return total + (node.children ? countWords(node.children, isLiteral) : 0);
+    }, 0);
+
+    const wordCount = countWords(tree.children);
     let wordIndex = 0;
 
     const transformChildren = (children: MarkdownAstNode[], literal = false): MarkdownAstNode[] => children.flatMap<MarkdownAstNode>((node): MarkdownAstNode | MarkdownAstNode[] => {
       const isLiteral = literal || node.tagName === "code" || node.tagName === "pre";
 
       if (node.type === "text" && !isLiteral && typeof node.value === "string") {
-        return node.value.split(/(\s+)/).filter(Boolean).map((part) => {
+        return node.value.split(/(\s+)/).filter(Boolean).flatMap<MarkdownAstNode>((part) => {
           if (/^\s+$/.test(part)) return { type: "text", value: part };
 
-          const className = wordIndex < visibleWordCount ? ["t-stream-w", "is-in"] : ["t-stream-w"];
-          wordIndex += 1;
-          return {
+          const fresh = streaming && wordCount - wordIndex <= 2;
+          const last = streaming && wordIndex === wordCount - 1;
+          const word: MarkdownAstNode = {
             type: "element",
             tagName: "span",
-            properties: { className },
+            properties: { className: ["t-stream-w", fresh ? "is-fresh" : "is-settled"] },
             children: [{ type: "text", value: part }],
           };
+          wordIndex += 1;
+          if (!last) return word;
+          return [word, {
+            type: "element",
+            tagName: "span",
+            properties: { ariaHidden: "true", className: ["t-stream-caret"] },
+            children: [],
+          }];
         });
       }
 
@@ -99,13 +100,13 @@ function CodeBlock({ language, value }: { language: string | null; value: string
 }
 
 export function MarkdownMessage({ children, streaming = false }: { children: string; streaming?: boolean }) {
-  const visibleWordCount = useVisibleStreamWords(children, streaming);
+  const decorated = useStreamDecoration(streaming);
 
   return (
     <div className={`markdown-body${streaming ? " t-stream" : ""}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={streaming ? [createStreamWordsPlugin(visibleWordCount)] : []}
+        rehypePlugins={decorated ? [createStreamWordsPlugin(streaming)] : []}
         components={{
           a: ({ children: label, ...props }) => <a {...props} target="_blank" rel="noreferrer">{label}</a>,
           pre: ({ children: content }) => <>{content}</>,
