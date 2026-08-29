@@ -210,7 +210,10 @@ if (args[0] === "image" && args[1] === "inspect") {
     const { writeFileSync } = await import("node:fs");
     writeFileSync(process.env.FAKE_RUNTIME_FILE, JSON.stringify({ app: image, egress: egressImage }));
   }
-  if (args.includes("ps")) process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "automation-worker" ? "b".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
+  if (args.includes("ps")) {
+    if (process.env.FAKE_NO_RUNNING_AUTOMATION_WORKER === "1" && args.at(-1) === "automation-worker") process.exit(1);
+    process.stdout.write(args.at(-1) === "app" ? "a".repeat(64) : args.at(-1) === "automation-worker" ? "b".repeat(64) : args.at(-1) === "alert-dispatcher" ? "d".repeat(64) : "c".repeat(64));
+  }
 } else if (args[0] === "inspect") {
   const runtime = JSON.parse(readFileSync(process.env.FAKE_RUNTIME_FILE, "utf8"));
   const isApp = args.at(-1)?.startsWith("a") || args.at(-1)?.startsWith("b") || args.at(-1)?.startsWith("d");
@@ -379,6 +382,20 @@ describe("immutable release manager", () => {
     const restoredUp = afterRestore.filter((args) => args.includes("up")).at(-1);
     expect(restoredUp).toContain("automation-worker");
   }, 20_000);
+
+  it("accepts Compose's no-running-worker status while automation is disabled", async () => {
+    const files = await fixture();
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), {
+      env: {
+        ...environment(files),
+        AIBRAIN_AUTOMATION_WORKER_ENABLED: "false",
+        FAKE_NO_RUNNING_AUTOMATION_WORKER: "1",
+      },
+    })).resolves.toMatchObject({ stdout: expect.stringContaining(digestB) });
+
+    const commands = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(commands.filter((args) => args.includes("stop") && args.at(-1) === "automation-worker")).toHaveLength(0);
+  });
 
   it("allows a running service to recover from a transient unhealthy state", async () => {
     const files = await fixture();

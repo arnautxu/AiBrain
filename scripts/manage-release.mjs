@@ -528,7 +528,7 @@ function unlinkDurably(file) {
   fsyncDirectory(path.dirname(file));
 }
 
-function runDocker(options, args, timeoutMs = options.dockerCommandTimeoutMs) {
+function runDocker(options, args, timeoutMs = options.dockerCommandTimeoutMs, allowedExitCodes = []) {
   try {
     const boundedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
     return execFileSync(options.dockerBin, args, {
@@ -539,6 +539,10 @@ function runDocker(options, args, timeoutMs = options.dockerCommandTimeoutMs) {
       killSignal: "SIGKILL",
     }).trim();
   } catch (error) {
+    if (error && typeof error === "object" && "status" in error
+      && allowedExitCodes.includes(error.status)) {
+      return typeof error.stdout === "string" ? error.stdout.trim() : "";
+    }
     if (error && typeof error === "object" && "code" in error && error.code === "ETIMEDOUT") {
       throw new ReleaseError("RELEASE_DOCKER_TIMEOUT", "Docker release command exceeded its bounded timeout.", { cause: error });
     }
@@ -614,6 +618,7 @@ function stopAutomationWorkerIfRunning(options, release, deadline) {
     options,
     composeArgs(options, release, "ps", "-q", "--status", "running", "automation-worker"),
     remainingDockerTimeout(options, deadline),
+    [1],
   );
   if (containerId.length === 0) return;
   runDocker(
