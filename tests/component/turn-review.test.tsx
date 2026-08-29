@@ -62,6 +62,8 @@ describe("turn activity and Review", () => {
       approvals: [],
       diff: "",
       activity: [
+        { ...message.activity[0], id: "runtime-context", kind: "system", label: "Context preparat", detail: "Memòria, permisos i documents", status: "complete" },
+        { ...message.activity[0], id: "runtime-performance", kind: "system", label: "Rendiment del torn", detail: "Primer text 30508 ms · Total 45918 ms · Worker calent", status: "complete" },
         { ...message.activity[0], id: "reasoning-1", kind: "reasoning", label: "Raonament completat", detail: "Identificando el alcance exacto", status: "complete" },
         { ...message.activity[0], id: "file-1", kind: "file", label: "Preparant canvis", detail: "src/components/turn-activity.tsx", status: "running" },
       ],
@@ -77,6 +79,8 @@ describe("turn activity and Review", () => {
     expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
     fireEvent.click(trigger);
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
+    expect(screen.queryByText("Contexto preparado")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Primer text 30508 ms/)).not.toBeInTheDocument();
 
     rerender(<TurnActivity
       message={{
@@ -84,6 +88,8 @@ describe("turn activity and Review", () => {
         activity: [
           { ...liveMessage.activity[0] },
           { ...liveMessage.activity[1], status: "complete" },
+          { ...liveMessage.activity[2] },
+          { ...liveMessage.activity[3], status: "complete" },
           { ...message.activity[0], id: "command-1", kind: "command", label: "Executant una ordre", detail: "npm run typecheck", status: "running" },
         ],
       }}
@@ -102,6 +108,8 @@ describe("turn activity and Review", () => {
         activity: [
           { ...liveMessage.activity[0] },
           { ...liveMessage.activity[1], status: "complete" },
+          { ...liveMessage.activity[2] },
+          { ...liveMessage.activity[3], status: "complete" },
           { ...message.activity[0], id: "command-1", kind: "command", label: "Ordre executada", detail: "npm run typecheck", status: "complete" },
         ],
       }}
@@ -116,6 +124,26 @@ describe("turn activity and Review", () => {
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
+  });
+
+  it("keeps runtime failures visible while hiding successful lifecycle telemetry", () => {
+    render(<TurnActivity
+      message={{
+        ...message,
+        plan: [],
+        approvals: [],
+        diff: "",
+        activity: [
+          { id: "runtime-context", kind: "system", label: "Context preparat", status: "complete" },
+          { id: "runtime-turn-recovery", kind: "system", label: "No s’ha pogut recuperar el torn", detail: "App Server no ha retornat el torn", status: "failed" },
+        ],
+      }}
+      onResolveApproval={vi.fn()}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+    expect(screen.getByText(/No se ha podido completar: No se ha podido recuperar la tarea/)).toBeInTheDocument();
+    expect(screen.queryByText("Contexto preparado")).not.toBeInTheDocument();
   });
 
   it("presents plan, command output, diff and approval decisions in employee language", () => {
