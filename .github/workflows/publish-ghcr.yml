@@ -1,0 +1,94 @@
+name: Publish GHCR images
+
+on:
+  workflow_run:
+    workflows:
+      - Backend CI
+    branches:
+      - main
+    types:
+      - completed
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-ghcr-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish immutable product and egress images
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+      APP_REPOSITORY: ghcr.io/arnautxu/aibrain
+      EGRESS_REPOSITORY: ghcr.io/arnautxu/aibrain-egress
+    steps:
+      - name: Checkout the tested immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up the isolated Buildx builder
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.0.0
+      - name: Authenticate the runner to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.0.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and publish the product by immutable digest
+        id: app
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.0.0
+        with:
+          context: .
+          target: runtime
+          push: true
+          build-args: AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}
+          tags: ${{ env.APP_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+      - name: Build and publish the egress gateway by immutable digest
+        id: egress
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.0.0
+        with:
+          context: .
+          target: egress-gateway
+          push: true
+          build-args: AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}
+          tags: ${{ env.EGRESS_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+      - name: Record the reviewed immutable release identity
+        env:
+          APP_DIGEST: ${{ steps.app.outputs.digest }}
+          EGRESS_DIGEST: ${{ steps.egress.outputs.digest }}
+        run: |
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$APP_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EGRESS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          jq -n \
+            --arg revision "$RELEASE_SHA" \
+            --arg image "${APP_REPOSITORY}@${APP_DIGEST}" \
+            --arg egressImage "${EGRESS_REPOSITORY}@${EGRESS_DIGEST}" \
+            '{schemaVersion:1,revision:$revision,image:$image,egressImage:$egressImage}' \
+            > release.json
+          chmod 0600 release.json
+      - name: Publish the digest manifest for the restricted deploy workflow
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: aibrain-ghcr-release-${{ github.event.workflow_run.head_sha }}
+          path: release.json
+          if-no-files-found: error
+          retention-days: 7
