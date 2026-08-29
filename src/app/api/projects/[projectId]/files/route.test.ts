@@ -29,8 +29,8 @@ vi.mock("@/security/safe-file", () => ({
 
 import { GET } from "@/app/api/projects/[projectId]/files/route";
 
-function request(filePath: string, raw = false) {
-  return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}`);
+function request(filePath: string, raw = false, download = false) {
+  return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}${download ? "&download=1" : ""}`);
 }
 
 describe("workspace file preview route", () => {
@@ -84,6 +84,18 @@ describe("workspace file preview route", () => {
     expect(image.status).toBe(200);
     expect(image.headers.get("Content-Type")).toBe("image/png");
     expect(image.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(image.headers.get("Content-Disposition")).toContain("inline");
+
+    mocks.readRegularFileWithin.mockResolvedValueOnce(Buffer.from("%PDF-1.7\nfixture"));
+    const pdfDownload = await GET(request("informes/informe.pdf", true, true), { params: Promise.resolve({ projectId }) });
+    expect(pdfDownload.status).toBe(200);
+    expect(pdfDownload.headers.get("Content-Disposition")).toContain("attachment");
+    expect(pdfDownload.headers.get("Content-Type")).toBe("application/pdf");
+    expect(mocks.readRegularFileWithin).toHaveBeenLastCalledWith(
+      "/private/workspaces/projects/00000000-0000-4000-8000-000000000011",
+      "informes/informe.pdf",
+      50 * 1024 * 1024,
+    );
 
     mocks.session.current = null;
     const unauthenticated = await GET(request("src/example.ts"), { params: Promise.resolve({ projectId }) });

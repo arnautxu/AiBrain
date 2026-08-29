@@ -8,6 +8,7 @@ import { BrowserPanel } from "@/components/browser-panel";
 import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
+import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { LibraryPanel } from "@/components/library-panel";
@@ -33,6 +34,7 @@ import {
   type ApprovalItem,
   type ChatMessage,
   type ChatInputAttachment,
+  type DocumentArtifact,
   type ToolResult,
 } from "@/lib/chat-contract";
 import {
@@ -512,6 +514,7 @@ export function BrainApp({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
+  const [previewDocument, setPreviewDocument] = useState<DocumentArtifact | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
@@ -679,6 +682,13 @@ export function BrainApp({
       activeThread?.messages.findLast((message) => message.role === "assistant") ?? null,
     [activeThread, selectedMessageId],
   );
+
+  useEffect(() => {
+    if (!previewDocument) return;
+    const remainsInConversation = activeThread?.messages.some((message) =>
+      message.artifacts.some((artifact) => artifact.id === previewDocument.id)) ?? false;
+    if (!remainsInConversation) setPreviewDocument(null);
+  }, [activeThread, previewDocument]);
   const taskCenterItems = useMemo(() => {
     const local = deriveTaskCenterItems({ projects, threads }, taskCenterPayload.readTaskIds);
     const merged = initialWorkbench.persistence === "browser-preview"
@@ -1744,6 +1754,7 @@ export function BrainApp({
       else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
+      else if (previewDocument) setPreviewDocument(null);
       else if (activeSideWindow) setActiveSideWindow(null);
       else if (mobileSidebarOpen) setMobileSidebarOpen(false);
     };
@@ -1761,6 +1772,7 @@ export function BrainApp({
     taskCenterOpen,
     automationsOpen,
     mobileSidebarOpen,
+    previewDocument,
     startNewThread,
     textDialog,
   ]);
@@ -1854,8 +1866,16 @@ export function BrainApp({
           .filter((descriptor) => descriptor.locator.threadId === activeThreadId)
           .map((descriptor) => managedAppActionKey(descriptor.locator))}
         onManagedAppPrepared={prepareManagedAppAction}
+        onPreviewDocument={(artifact) => {
+          setActiveSideWindow(null);
+          setPreviewDocument(artifact);
+        }}
         showAdvancedControls
       />
+
+      {previewDocument ? (
+        <DocumentPreviewPanel key={previewDocument.id} artifact={previewDocument} onClose={() => setPreviewDocument(null)} />
+      ) : null}
 
       {inspectorEnabled && preferences.showInspector && activeSideWindow === "inspector" ? (
         <DetailsPanel
@@ -1949,8 +1969,8 @@ export function BrainApp({
         onNewProject={() => setTextDialog({ kind: "create-project" })}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
-        onOpenInspector={() => setActiveSideWindow("inspector")}
-        onOpenBrowser={() => setActiveSideWindow("browser")}
+        onOpenInspector={() => { setPreviewDocument(null); setActiveSideWindow("inspector"); }}
+        onOpenBrowser={() => { setPreviewDocument(null); setActiveSideWindow("browser"); }}
         onOpenCustomization={() => setCustomizationOpen(true)}
         onOpenMemory={() => setMemoryOpen(true)}
         onOpenLibrary={() => setLibraryOpen(true)}

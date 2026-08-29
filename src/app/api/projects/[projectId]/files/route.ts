@@ -11,7 +11,8 @@ import { isUuid } from "@/workbench/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MAXIMUM_FILE_BYTES = 8_000_000;
+const MAXIMUM_TEXT_FILE_BYTES = 8_000_000;
+const MAXIMUM_BINARY_FILE_BYTES = 50 * 1024 * 1024;
 const MAXIMUM_TEXT_BYTES = 500_000;
 
 const imageMimeTypes: Record<string, string> = {
@@ -73,11 +74,15 @@ export async function GET(
   const url = new URL(request.url);
   const filePath = url.searchParams.get("path");
   const raw = url.searchParams.get("raw") === "1";
+  const download = url.searchParams.get("download") === "1";
   if (
-    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw") ||
+    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download") ||
     url.searchParams.getAll("path").length !== 1 ||
     url.searchParams.getAll("raw").length > 1 ||
+    url.searchParams.getAll("download").length > 1 ||
     (url.searchParams.has("raw") && url.searchParams.get("raw") !== "1") ||
+    (url.searchParams.has("download") && url.searchParams.get("download") !== "1") ||
+    (download && !raw) ||
     !filePath || filePath.length > 2_048 || filePath.includes("\0")
   ) {
     return NextResponse.json({ error: "Ruta no válida." }, { status: 400 });
@@ -95,8 +100,12 @@ export async function GET(
     const workspaceRelativePath = path.isAbsolute(filePath)
       ? path.relative(projectWorkspace, filePath)
       : filePath;
-    const contents = await readRegularFileWithin(projectWorkspace, workspaceRelativePath, MAXIMUM_FILE_BYTES);
     const preview = previewType(filePath);
+    const contents = await readRegularFileWithin(
+      projectWorkspace,
+      workspaceRelativePath,
+      preview.kind === "text" ? MAXIMUM_TEXT_FILE_BYTES : MAXIMUM_BINARY_FILE_BYTES,
+    );
 
     if (raw) {
       if (preview.kind === "text") {
@@ -105,8 +114,9 @@ export async function GET(
       return new Response(contents, {
         headers: {
           "Cache-Control": "private, no-store",
-          "Content-Disposition": contentDisposition(path.basename(filePath), "inline"),
+          "Content-Disposition": contentDisposition(path.basename(filePath), download ? "attachment" : "inline"),
           "Content-Type": preview.mimeType,
+          ...(download ? {} : { "Content-Security-Policy": "sandbox" }),
           "X-Content-Type-Options": "nosniff",
         },
       });

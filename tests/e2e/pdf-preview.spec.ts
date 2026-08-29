@@ -1,0 +1,62 @@
+import { expect, test, type Page } from "@playwright/test";
+
+const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
+const projectId = "00000000-0000-4000-8000-000000000011";
+
+async function login(page: Page) {
+  await page.goto("/login");
+  await page.getByRole("button", { name: new RegExp(accountName) }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+}
+
+test("a generated PDF can be reviewed beside the chat before it is downloaded", async ({ page }) => {
+  const previewUrl = `/api/projects/${projectId}/files?path=informes%2Fprecios-carne.pdf&raw=1`;
+  const downloadUrl = `${previewUrl}&download=1`;
+  await page.route("**/api/chat", async (route) => {
+    const events = [
+      { type: "delta", value: "Informe creado y verificado: PDF A4 de 4 páginas." },
+      { type: "artifact", item: {
+        id: "00000000-0000-4000-8000-000000000099",
+        type: "document",
+        name: "precios-carne.pdf",
+        url: downloadUrl,
+        kind: "pdf",
+        mimeType: "application/pdf",
+        size: 4821,
+        status: "ready",
+        pages: 4,
+        previewUrl,
+        publicationStatus: null,
+        publicationError: null,
+        targetLabel: null,
+        error: null,
+      } },
+      { type: "done" },
+    ];
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+    });
+  });
+  await page.route("**/api/projects/*/files?*", async (route) => {
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.7\n%%EOF" });
+  });
+
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Genera el informe en PDF.");
+  const chat = page.locator("main.workbench-main");
+  const initialWidth = (await chat.boundingBox())?.width ?? 0;
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+
+  await expect(page.getByRole("heading", { name: "precios-carne.pdf" })).toBeVisible();
+  await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
+  const panel = page.getByRole("complementary", { name: "Vista previa de precios-carne.pdf" });
+  await expect(panel).toBeVisible();
+  await expect(page.getByTitle("Documento precios-carne.pdf")).toHaveAttribute("src", previewUrl);
+  await expect(panel.getByRole("link", { name: "Descargar precios-carne.pdf" })).toHaveAttribute("href", downloadUrl);
+  expect((await chat.boundingBox())?.width ?? initialWidth).toBeLessThan(initialWidth);
+
+  await page.getByRole("button", { name: "Cerrar vista previa" }).click();
+  await expect(page.getByRole("complementary", { name: "Vista previa de precios-carne.pdf" })).toHaveCount(0);
+});

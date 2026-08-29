@@ -68,6 +68,7 @@ import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
+import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
   parseTurnTokenUsage,
@@ -226,6 +227,28 @@ async function persistGeneratedImage(
       prompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : null,
     },
   }, { envelope, key: `artifact:${String(item.id ?? artifactId)}` });
+}
+
+async function projectGeneratedDocuments(
+  item: unknown,
+  projectWorkspace: string,
+  projectId: string,
+  turnId: string,
+  envelope: AppServerEvent,
+  emit: EmitEvent,
+) {
+  const artifacts = await generatedDocumentArtifactsFromRuntimeItem(
+    item,
+    projectWorkspace,
+    projectId,
+    turnId,
+  );
+  for (const artifact of artifacts) {
+    await emit(
+      { type: "artifact", item: artifact },
+      { envelope, key: `artifact:document:${artifact.id}` },
+    );
+  }
 }
 
 async function projectItemEvidence(
@@ -464,6 +487,14 @@ export async function runWorkerCodexTurn(
           emit,
         );
       }
+      await projectGeneratedDocuments(
+        item,
+        projectWorkspace,
+        chatRequest.projectId,
+        chatRequest.assistantMessageId,
+        envelope,
+        emit,
+      );
       await projectItemEvidence({ item }, true, envelope, emit);
       const activity = itemActivity({ item }, true);
       if (activity) {
@@ -543,14 +574,54 @@ export async function runWorkerCodexTurn(
   const turnSignal = turnController.signal;
   type FinishedTurn = { status: string | null; error: string | null };
   let terminalTurnStatus: FinishedTurn | null = null;
+  let finalAnswerRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveFinishedTurn!: (status: FinishedTurn) => void;
   const turnFinished = new Promise<FinishedTurn>((resolve) => {
     resolveFinishedTurn = resolve;
   });
   const finishTurn = (status: FinishedTurn) => {
     if (terminalTurnStatus) return;
+    if (finalAnswerRecoveryTimer) {
+      clearTimeout(finalAnswerRecoveryTimer);
+      finalAnswerRecoveryTimer = null;
+    }
     terminalTurnStatus = status;
     resolveFinishedTurn(status);
+  };
+  const reconcileCompletedFinalAnswer = (sourceEnvelope: AppServerEvent) => {
+    if (finalAnswerRecoveryTimer || terminalTurnStatus) return;
+    finalAnswerRecoveryTimer = setTimeout(() => {
+      finalAnswerRecoveryTimer = null;
+      void (async () => {
+        if (terminalTurnStatus) return;
+        let recoveryEnvelope: AppServerEvent | null = null;
+        const result = await runtime.client.request(
+          "thread/read",
+          { threadId, includeTurns: true },
+          `turn-final-answer-reconcile:${chatRequest.assistantMessageId}`,
+          15_000,
+          (_result, envelope) => { recoveryEnvelope = envelope; },
+        );
+        const recovered = recoveredTurn(result, chatRequest.userMessageId);
+        if (!recovered) return;
+        const observedFinalAnswer = recovered.items.some((item) =>
+          item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string");
+        if (!observedFinalAnswer) return;
+        const envelope = recoveryEnvelope ?? sourceEnvelope;
+        if (recovered.status === "completed") {
+          await projectRecoveredTurn(recovered, envelope, "final-answer-recovery");
+        } else {
+          await emit(
+            { type: "done" },
+            { envelope, key: `final-answer-recovery:done:${recovered.id}` },
+          );
+        }
+        finishTurn({ status: "completed", error: null });
+      })().catch(() => {
+        // The authoritative turn/completed event remains the fallback.
+      });
+    }, 12_000);
+    finalAnswerRecoveryTimer.unref?.();
   };
   let stoppedEmitted = false;
 
@@ -708,6 +779,16 @@ export async function runWorkerCodexTurn(
               envelope,
               emit,
             );
+            if (isRecord(params) && isRecord(params.item)) {
+              await projectGeneratedDocuments(
+                params.item,
+                projectWorkspace,
+                chatRequest.projectId,
+                chatRequest.assistantMessageId,
+                envelope,
+                emit,
+              );
+            }
           }
           await projectItemEvidence(params, method === "item/completed", envelope, emit);
           const activity = itemActivity(params, method === "item/completed");
@@ -716,6 +797,10 @@ export async function runWorkerCodexTurn(
               envelope,
               key: `activity:${method === "item/completed" ? "completed" : "started"}:${activity.id}`,
             });
+          }
+          if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
+              params.item.type === "agentMessage" && params.item.phase === "final_answer") {
+            reconcileCompletedFinalAnswer(envelope);
           }
           return;
         }
@@ -1085,6 +1170,7 @@ export async function runWorkerCodexTurn(
       status: "complete",
     });
   } finally {
+    if (finalAnswerRecoveryTimer) clearTimeout(finalAnswerRecoveryTimer);
     turnSignal.removeEventListener("abort", interrupt);
     signal.removeEventListener("abort", forwardExternalAbort);
     unregisterCancellation();
