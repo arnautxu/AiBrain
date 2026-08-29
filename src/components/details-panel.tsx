@@ -13,7 +13,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import type { ApprovalDecision, ApprovalItem, ChatMessage } from "@/lib/chat-contract";
-import { TurnActivity } from "@/components/turn-activity";
+import { isRelevantProcessActivity, TurnActivity } from "@/components/turn-activity";
 import { useModalFocus } from "@/ui/use-modal-focus";
 import { TurnSourceList } from "@/components/turn-sources";
 import type { ClientTurnPerformanceReadback } from "@/ui/client-turn-performance";
@@ -87,6 +87,8 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
   const [mobileOverlay, setMobileOverlay] = useState(false);
   const panelRef = useModalFocus<HTMLElement>(open && mobileOverlay, onClose);
   const pending = message?.approvals.filter((approval) => approval.status === "pending").length ?? 0;
+  const relevantActivityCount = message?.activity.filter((item) =>
+    item.status !== "pending" && isRelevantProcessActivity(item)).length ?? 0;
   const additions = files.reduce((total, file) => total + file.additions, 0);
   const deletions = files.reduce((total, file) => total + file.deletions, 0);
 
@@ -151,7 +153,7 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
           Cambios {files.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{files.length}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
-          Actividad {message?.activity.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.activity.length}</span> : null}
+          Actividad {relevantActivityCount ? <span className="tabular-nums text-[11px] text-[var(--text)]">{relevantActivityCount}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "sources"} className={`review-tab ${tab === "sources" ? "review-tab-active" : ""}`} onClick={() => setTab("sources")}>
           Fuentes {message?.sources?.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.sources.length}</span> : null}

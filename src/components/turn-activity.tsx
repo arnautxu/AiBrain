@@ -93,6 +93,24 @@ const GENERIC_RUNTIME_LABELS = new Set([
   "Coordinació completada",
 ]);
 
+const LIFECYCLE_ACTIVITY_IDS = new Set([
+  "runtime-context",
+  "runtime-connect",
+  "runtime-thread",
+  "runtime-thread-recovery",
+  "runtime-thread-retry",
+  "runtime-turn-start",
+  "runtime-turn-recovery",
+  "runtime-awaiting-model",
+  "runtime-model-active",
+  "runtime-reasoning",
+  "runtime-model-verification",
+  "runtime-model-reroute",
+  "runtime-safety-buffering",
+  "runtime-response-processing",
+  "runtime-performance",
+]);
+
 function translatedRuntimeLabel(label: string) {
   return label
     .replace(/^Utilitzant /u, "Usando ")
@@ -156,12 +174,24 @@ function activityPresentation(item: ActivityItem) {
   return { title, detail: secondaryDetail };
 }
 
-function currentActivityLabel(message: ChatMessage) {
-  for (let index = message.activity.length - 1; index >= 0; index -= 1) {
-    const item = message.activity[index];
+/** Runtime lifecycle events remain persisted for diagnostics, but they are not
+ * useful steps in the employee-facing work process. Failures stay visible. */
+export function isRelevantProcessActivity(item: ActivityItem) {
+  if (item.status === "failed" || item.status === "stopped") return true;
+  return !LIFECYCLE_ACTIVITY_IDS.has(item.id);
+}
+
+export function hasRelevantWorkProcess(message: Pick<ChatMessage, "activity" | "plan">) {
+  return message.plan.some((step) => step.status !== "pending") ||
+    message.activity.some((item) => item.status !== "pending" && isRelevantProcessActivity(item));
+}
+
+function currentActivityLabel(relevantActivity: ActivityItem[]) {
+  for (let index = relevantActivity.length - 1; index >= 0; index -= 1) {
+    const item = relevantActivity[index];
     if (item.status === "running" || item.status === "waiting") return activityPresentation(item).title;
   }
-  const latestItem = message.activity.at(-1);
+  const latestItem = relevantActivity.at(-1);
   return latestItem ? activityPresentation(latestItem).title : "Pensando";
 }
 
@@ -240,25 +270,27 @@ export function TurnActivity({
     ? manualDisclosure.open
     : false;
 
-  const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
+  const visiblePlan = message.plan.filter((step) => step.status !== "pending");
+  const visibleActivity = message.activity.filter((item) =>
+    item.status !== "pending" && isRelevantProcessActivity(item));
+  const hasWorkProcess = visiblePlan.length > 0 || visibleActivity.length > 0;
+  const hasDetails = hasWorkProcess || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
   const executionLabel = message.status === "streaming"
-    ? currentActivityLabel(message)
+    ? currentActivityLabel(visibleActivity)
     : message.status === "stopped"
       ? "Pensamiento interrumpido"
       : message.status === "error"
         ? "Trabajo interrumpido"
         : "Trabajo completado";
 
-  const activeActivity = [...message.activity].reverse().find((item) => item.status === "running" || item.status === "waiting");
-  const visiblePlan = message.plan.filter((step) => step.status !== "pending");
-  const visibleActivity = message.activity.filter((item) => item.status !== "pending");
+  const activeActivity = [...visibleActivity].reverse().find((item) => item.status === "running" || item.status === "waiting");
   const visibleStepCount = visiblePlan.length + visibleActivity.length;
 
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
-      {message.plan.length > 0 || message.activity.length > 0 ? (
+      {hasWorkProcess ? (
         <ThinkingSteps
           data-testid="turn-thinking-steps"
           size="compact"

@@ -32,7 +32,7 @@ import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
 import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
-import { TurnActivity } from "@/components/turn-activity";
+import { hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
@@ -228,7 +228,7 @@ function AssistantMessage({
   managedAppApprovalKeys: readonly string[];
   onPreviewDocument: (artifact: DocumentArtifact) => void;
 }) {
-  const hasExecution = message.activity.length > 0 || message.plan.length > 0;
+  const hasExecution = hasRelevantWorkProcess(message);
 
   return (
     <article className="message-enter group">
