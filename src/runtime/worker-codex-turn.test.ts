@@ -328,6 +328,7 @@ describe("worker Codex turn", () => {
     const events: Array<Record<string, unknown>> = [];
     const request = chatRequest();
     request.message = "Quin és l'horari d'avui de la botiga Arnall de Palamós? Cerca'l a la web oficial.";
+    request.options.autoApprove = true;
     request.options.webSearch = true;
     request.options.documentUploadIds = [documentUploadId];
     const turnPermissions = permissions([{
@@ -412,9 +413,13 @@ describe("worker Codex turn", () => {
       type: "workspaceWrite",
       writableRoots: [path.join(workspace, "projects", projectId)],
     });
+    expect(turnStart?.params).toMatchObject({ approvalsReviewer: "auto_review" });
     const threadStart = calls.find((call) => call.method === "thread/start");
     expect(threadStart?.params).not.toHaveProperty("projectId");
-    expect(threadStart?.params).toMatchObject({ config: { web_search: "live" } });
+    expect(threadStart?.params).toMatchObject({
+      approvalsReviewer: "auto_review",
+      config: { web_search: "live" },
+    });
     expect((threadStart?.params as { dynamicTools?: unknown[] })?.dynamicTools).toEqual([
       expect.objectContaining({
         type: "namespace",

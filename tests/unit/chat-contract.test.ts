@@ -60,6 +60,21 @@ describe("chat contract", () => {
     })).toBe(false);
   });
 
+  it("accepts only a boolean automatic approval preference", () => {
+    const options = {
+      mode: "agent",
+      model: null,
+      effort: null,
+      webSearch: false,
+      imageGeneration: false,
+      skill: null,
+      attachments: [],
+    } as const;
+
+    expect(isTurnOptions({ ...options, autoApprove: true })).toBe(true);
+    expect(isTurnOptions({ ...options, autoApprove: "true" })).toBe(false);
+  });
+
   it("accepts bounded document and browser view models without widening upload input", () => {
     expect(isGeneratedArtifact({
       id: "018f5f68-4a6e-7abc-8def-0123456789ae",

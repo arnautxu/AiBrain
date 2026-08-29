@@ -125,6 +125,7 @@ export type TurnOptions = {
   mode: ComposerMode;
   model: string | null;
   effort: RuntimeReasoningEffort | null;
+  autoApprove?: boolean;
   webSearch: boolean;
   imageGeneration: boolean;
   skill: string | null;
@@ -351,6 +352,7 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
     (value.effort === null || value.effort === "none" || value.effort === "minimal" ||
       value.effort === "low" || value.effort === "medium" || value.effort === "high" ||
       value.effort === "xhigh" || value.effort === "max" || value.effort === "ultra") &&
+    (value.autoApprove === undefined || typeof value.autoApprove === "boolean") &&
     typeof value.webSearch === "boolean" &&
     typeof value.imageGeneration === "boolean" &&
     (value.skill === null || (typeof value.skill === "string" && value.skill.length <= 100)) &&

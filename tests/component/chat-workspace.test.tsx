@@ -76,6 +76,7 @@ function renderWorkspace(
     prompt=""
     composerModel={null}
     composerEffort={null}
+    autoApprove={false}
     webSearch
     imageGeneration={false}
     selectedSkill={null}
@@ -93,6 +94,7 @@ function renderWorkspace(
     onPromptChange={vi.fn()}
     onComposerModelChange={vi.fn()}
     onComposerEffortChange={vi.fn()}
+    onAutoApproveChange={vi.fn()}
     onWebSearchChange={vi.fn()}
     onImageGenerationChange={vi.fn()}
     onSelectedSkillChange={vi.fn()}
@@ -169,6 +171,21 @@ describe("chat workspace simplificado", () => {
 
     fireEvent.keyDown(prompt, { key: "Enter" });
     expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("integrates automatic permission review into the existing composer controls", () => {
+    const onAutoApproveChange = vi.fn();
+    renderWorkspace(null, project, {
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
+      onAutoApproveChange,
+    });
+
+    const control = screen.getByRole("button", { name: "Aprobar permisos automáticamente" });
+    expect(control).toHaveAttribute("aria-pressed", "false");
+    expect(control.closest(".composer-controls")).toBeInTheDocument();
+
+    fireEvent.click(control);
+    expect(onAutoApproveChange).toHaveBeenCalledWith(true);
   });
 
   it("keeps one action control and exposes stop while the agent is working", () => {

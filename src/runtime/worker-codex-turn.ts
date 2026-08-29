@@ -430,7 +430,7 @@ export async function runWorkerCodexTurn(
     cwd: projectWorkspace,
     runtimeWorkspaceRoots,
     approvalPolicy: runtimeConfig.approvalPolicy,
-    approvalsReviewer: "user",
+    approvalsReviewer: chatRequest.options.autoApprove === true ? "auto_review" : "user",
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
     developerInstructions: [
@@ -980,7 +980,7 @@ export async function runWorkerCodexTurn(
       cwd: projectWorkspace,
       runtimeWorkspaceRoots,
       approvalPolicy: runtimeConfig.approvalPolicy,
-      approvalsReviewer: "user",
+      approvalsReviewer: chatRequest.options.autoApprove === true ? "auto_review" : "user",
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
