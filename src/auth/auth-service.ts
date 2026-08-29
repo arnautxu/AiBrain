@@ -99,6 +99,7 @@ export class LocalAuthService {
     const credentials: IdentityCredentials = identity;
     try {
       const user = await this.authorizedLocalUser(identity.userId, identity.email);
+      await this.users.saveAvatarUrl(user.userId, identity.avatarUrl ?? null);
       if (await this.users.hasInitialPasswordMarker(user.userId)) {
         const challenge = await this.challenges.create({
           installationId: this.installationId,

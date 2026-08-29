@@ -73,7 +73,6 @@ export type SettingsSnapshot = {
 };
 
 export type SettingsPatch =
-  | { target: "user-app"; appId: ControllableAppId; enabled: boolean }
   | { target: "installation-app"; appId: ControllableAppId; enabled: boolean }
   | { target: "notifications"; values: Partial<NotificationSettings> };
 
@@ -87,7 +86,7 @@ export function isControllableAppId(value: unknown): value is ControllableAppId 
 
 export function isSettingsPatch(value: unknown): value is SettingsPatch {
   if (!isRecord(value) || typeof value.target !== "string") return false;
-  if (value.target === "user-app" || value.target === "installation-app") {
+  if (value.target === "installation-app") {
     return Object.keys(value).length === 3 &&
       isControllableAppId(value.appId) && typeof value.enabled === "boolean";
   }

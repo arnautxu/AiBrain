@@ -16,6 +16,7 @@ import {
   readSupabasePublicConfig,
   type SupabasePublicConfig,
 } from "@/lib/supabase/config";
+import { validatedAvatarUrl } from "@/auth/avatar-url";
 
 function isolatedClient(config: SupabasePublicConfig) {
   return createClient(config.url, config.publishableKey, {
@@ -29,7 +30,7 @@ function isolatedClient(config: SupabasePublicConfig) {
 
 function normalizeIdentity(
   data: {
-    user: { id?: string; email?: string } | null;
+    user: { id?: string; email?: string; user_metadata?: Record<string, unknown> | null } | null;
     session: { access_token?: string; refresh_token?: string } | null;
   },
   errorCode: "invalid_credentials" | "invalid_recovery",
@@ -41,7 +42,9 @@ function normalizeIdentity(
   if (!userId || !email || !accessToken || !refreshToken) {
     throw new IdentityProviderError(errorCode, "Identity provider did not return a complete session.");
   }
-  return { userId, email, accessToken, refreshToken };
+  const metadata = data.user?.user_metadata;
+  const avatarUrl = validatedAvatarUrl(metadata?.avatar_url ?? metadata?.picture ?? metadata?.avatar);
+  return { userId, email, accessToken, refreshToken, avatarUrl };
 }
 
 function providerFailure(

@@ -55,8 +55,10 @@ export async function GET(
         "Content-Length": String(contents.byteLength),
         "Content-Disposition": contentDisposition(resolved.document.fileName, inline ? "inline" : "attachment"),
         "Cache-Control": "private, no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
-        ...(inline ? { "Content-Security-Policy": "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'" } : {}),
+        ...(inline ? { "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'unsafe-inline'" } : {}),
       },
     });
   } catch (error) {

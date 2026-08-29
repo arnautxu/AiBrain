@@ -87,6 +87,7 @@ export function aggregateTurnUsage(records: readonly TurnUsageRecord[]): UsageAg
     errorTurns: records.filter((record) => record.status === "error").length,
     stoppedTurns: records.filter((record) => record.status === "stopped").length,
     activeDays: new Set(records.map((record) => record.startedAt.slice(0, 10))).size,
+    totalDurationMs: durations.reduce((total, duration) => total + duration, 0),
     averageDurationMs: average(durations),
     p95DurationMs: percentile(durations, 0.95),
     averageFirstTextMs: average(firstText),

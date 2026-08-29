@@ -127,6 +127,7 @@ describe("FileUsageStore", () => {
       turns: 2,
       completedTurns: 1,
       errorTurns: 1,
+      totalDurationMs: 15_000,
       averageDurationMs: 7_500,
       p95DurationMs: 10_000,
       averageFirstTextMs: 900,

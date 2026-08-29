@@ -3,10 +3,26 @@ import { expect, test, type Page } from "@playwright/test";
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
 const projectId = "00000000-0000-4000-8000-000000000011";
 
+function validPdf() {
+  const header = "%PDF-1.4\n";
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
+  ];
+  const offsets: number[] = [];
+  let offset = header.length;
+  for (const object of objects) {
+    offsets.push(offset);
+    offset += object.length;
+  }
+  return `${header}${objects.join("")}xref\n0 4\n0000000000 65535 f \n${offsets.map((value) => `${String(value).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${offset}\n%%EOF\n`;
+}
+
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible();
 }
 
 test("a generated PDF can be reviewed beside the chat before it is downloaded", async ({ page }) => {
@@ -40,7 +56,7 @@ test("a generated PDF can be reviewed beside the chat before it is downloaded", 
     });
   });
   await page.route("**/api/projects/*/files?*", async (route) => {
-    await route.fulfill({ status: 200, contentType: "application/pdf", body: "%PDF-1.7\n%%EOF" });
+    await route.fulfill({ status: 200, contentType: "application/pdf", body: validPdf() });
   });
 
   await login(page);
@@ -53,7 +69,7 @@ test("a generated PDF can be reviewed beside the chat before it is downloaded", 
   await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
   const panel = page.getByRole("complementary", { name: "Vista previa de precios-carne.pdf" });
   await expect(panel).toBeVisible();
-  await expect(page.getByTitle("Documento precios-carne.pdf")).toHaveAttribute("src", previewUrl);
+  await expect(page.getByTitle("Documento precios-carne.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(panel.getByRole("link", { name: "Descargar precios-carne.pdf" })).toHaveAttribute("href", downloadUrl);
   expect((await chat.boundingBox())?.width ?? initialWidth).toBeLessThan(initialWidth);
 

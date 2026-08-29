@@ -6,12 +6,13 @@ import { FileConnectorBindingStore } from "@/connectors/binding-store";
 import { FileConnectorAuthorizationStore } from "@/connectors/authorization-store";
 import { CodexManagedAppAction } from "@/connectors/codex-managed-app-action";
 import { connectorFingerprint } from "@/connectors/canonical";
-import { codexManagedAppRegistration } from "@/connectors/codex-managed-app-provider";
+import { CODEX_MANAGED_APP_CONNECTOR_ID, codexManagedAppRegistration } from "@/connectors/codex-managed-app-provider";
 import { ConnectorError, type ConnectorCapabilitySnapshot } from "@/connectors/contracts";
 import { ConnectorRegistry } from "@/connectors/registry";
 import { loadInstallationConfig } from "@/config/installation";
-import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
 import { FileApprovalStore } from "@/runtime/approval-store";
+import { catalogTransportForUser } from "@/catalog/server-service";
+import { catalogRuntimeEnforcer } from "@/catalog/access-service";
 
 async function connectorContext(session: AuthSession) {
   const installation = await loadInstallationConfig();
@@ -52,8 +53,10 @@ export async function codexManagedAppCapabilities(
   }
   const registry = new ConnectorRegistry(
     new FileConnectorBindingStore(installation.installationId, installation.paths.dataRoot),
-    [codexManagedAppRegistration(async (userId) => (await workerAppServerForUser(userId)).client)],
+    [codexManagedAppRegistration(async (userId) => catalogTransportForUser(installation.installationId, userId))],
   );
+  const catalog = await catalogRuntimeEnforcer(installation.installationId, session.user.id);
+  if (!catalog.allowsConnector(CODEX_MANAGED_APP_CONNECTOR_ID)) return [];
   return registry.capabilities(principal, { allowSharedCredentials: false });
 }
 
@@ -67,7 +70,10 @@ export async function codexManagedAppActionForSession(session: AuthSession) {
   if (!workspacePolicy.policy.capabilities.execute) {
     throw new ConnectorError("CODEX_APP_ACTION_PERMISSION_DENIED", "Workspace policy does not permit connector execution.");
   }
-  const transportForUser = async (userId: string) => (await workerAppServerForUser(userId)).client;
+  if (!(await catalogRuntimeEnforcer(installation.installationId, session.user.id)).allowsConnector(CODEX_MANAGED_APP_CONNECTOR_ID)) {
+    throw new ConnectorError("CODEX_APP_ACTION_CATALOG_DENIED", "This connector is not assigned to the authenticated user.");
+  }
+  const transportForUser = async (userId: string) => catalogTransportForUser(installation.installationId, userId);
   return new CodexManagedAppAction(
     new FileConnectorBindingStore(installation.installationId, installation.paths.dataRoot),
     new FileConnectorAuthorizationStore(installation.installationId, installation.paths.dataRoot),

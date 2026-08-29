@@ -27,6 +27,7 @@ import {
   type LegacyServerRequest,
 } from "@/runtime/codex-app-server";
 import type { RuntimeConfig } from "@/runtime/config";
+import { catalogRuntimeEnforcer } from "@/catalog/access-service";
 import {
   approvalLocatorFromItem,
   waitForApproval,
@@ -87,6 +88,11 @@ export type WorkerCodexTurnEvent = CodexTurnEvent | {
   type: "runtimeUsage";
   tokenUsage: TokenUsageBreakdown;
 };
+
+// This is a server-owned review mode.  `autoApprove` remains accepted in the
+// wire contract while older browsers update, but it must never choose a less
+// restrictive App Server reviewer or approval/sandbox policy.
+const SERVER_APPROVALS_REVIEWER = "auto_review";
 
 type EmitEvent = (
   event: WorkerCodexTurnEvent,
@@ -290,7 +296,7 @@ export async function runWorkerCodexTurn(
   signal: AbortSignal,
   emit: EmitEvent,
   admittedMaintenanceActivity?: MaintenanceActivityLease,
-  assistantName = "AiBrain",
+  assistantName = "Asistente",
   projectGuidance: Pick<AgentThreadRuntimeContext,
     "projectId" | "projectName" | "projectInstructions" | "projectMemory" | "projectSources" | "visibleProjects" | "branchHistory"
   > | null = null,
@@ -379,6 +385,7 @@ export async function runWorkerCodexTurn(
     "worker",
     () => workerAppServerForUser(authenticatedUserId, maintenanceActivity),
   );
+  telemetry.workerReadiness(runtime.workerWasWarm ?? false);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
   }
@@ -406,9 +413,12 @@ export async function runWorkerCodexTurn(
     uploadedDocuments,
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
+  // A new conversation used to wait for the optional model/skills/usage
+  // catalog before it even opened its App Server thread.  The status route
+  // prewarms that catalog, but a direct first turn must not depend on it.
   const account = await telemetry.measure(
     "catalog",
-    () => runtime.client.connection(projectWorkspace),
+    () => runtime.client.connectionSummary(),
   );
   if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
   await completeRuntimePhase("runtime-connect", {
@@ -417,14 +427,20 @@ export async function runWorkerCodexTurn(
   });
 
   let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
-  let selectedModelOption = selectedModel
-    ? account.models.find((model) => model.id === selectedModel) ?? null
-    : account.models.find((model) => model.isDefault) ?? account.models[0] ?? null;
-  if (chatRequest.options.model) {
-    selectedModelOption = account.models.find((model) => model.id === chatRequest.options.model) ?? null;
-    if (!selectedModelOption) throw new Error("El model seleccionat ja no està disponible.");
+  let selectedModelOption: Awaited<ReturnType<typeof runtime.client.connection>>["models"][number] | null = null;
+  const needsModelCatalog = Boolean(
+    selectedModel || chatRequest.options.effort || chatRequest.options.attachments.length > 0,
+  );
+  if (needsModelCatalog) {
+    const catalog = await telemetry.measure("catalog", () => runtime.client.connection(projectWorkspace));
+    selectedModelOption = selectedModel
+      ? catalog.models.find((model) => model.id === selectedModel) ?? null
+      : catalog.models.find((model) => model.isDefault) ?? catalog.models[0] ?? null;
+    if (chatRequest.options.model && !selectedModelOption) {
+      throw new Error("El model seleccionat ja no està disponible.");
+    }
+    selectedModel = selectedModel ?? selectedModelOption?.id ?? null;
   }
-  selectedModel = selectedModel ?? selectedModelOption?.id ?? null;
   if (selectedModelOption && chatRequest.options.attachments.length > 0 &&
       !selectedModelOption.inputModalities.includes("image")) {
     throw new Error("El model seleccionat no admet imatges.");
@@ -434,14 +450,25 @@ export async function runWorkerCodexTurn(
       !selectedModelOption.supportedReasoningEfforts.includes(chatRequest.options.effort)) {
     throw new Error("El nivell de raonament seleccionat no és compatible amb aquest model.");
   }
-  if (chatRequest.options.webSearch && !account.webSearch) {
-    throw new Error("La cerca web no està disponible en aquest runtime.");
+  if (chatRequest.options.webSearch || chatRequest.options.imageGeneration) {
+    const capabilities = await telemetry.measure("catalog", () => runtime.client.capabilities());
+    if (chatRequest.options.webSearch && !capabilities.webSearch) {
+      throw new Error("La cerca web no està disponible en aquest runtime.");
+    }
+    if (chatRequest.options.imageGeneration && !capabilities.imageGeneration) {
+      throw new Error("La generació d’imatges no està disponible en aquest runtime.");
+    }
   }
-  if (chatRequest.options.imageGeneration && !account.imageGeneration) {
-    throw new Error("La generació d’imatges no està disponible en aquest runtime.");
-  }
+  // Integration point with the Runtime workstream: this is the last trusted
+  // server boundary before a selected skill is placed in turn/start input.
+  // Keep the generic runtime transport unchanged; catalog filtering belongs at
+  // its own inventory/action boundaries and must not weaken approvals or DENY.
+  const catalog = chatRequest.options.skill
+    ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
+    : null;
   const selectedSkill = chatRequest.options.skill
     ? (await telemetry.measure("skills", () => runtime.client.resolvedSkills(projectWorkspace)))
+      .filter((skill) => catalog?.allowsSkill(skill.id))
       .find((skill) => skill.id === chatRequest.options.skill) ?? null
     : null;
   if (chatRequest.options.skill && !selectedSkill) {
@@ -453,7 +480,7 @@ export async function runWorkerCodexTurn(
     cwd: projectWorkspace,
     runtimeWorkspaceRoots,
     approvalPolicy: runtimeConfig.approvalPolicy,
-    approvalsReviewer: chatRequest.options.autoApprove === true ? "auto_review" : "user",
+    approvalsReviewer: SERVER_APPROVALS_REVIEWER,
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
     config: { web_search: chatRequest.options.webSearch ? "live" : "disabled" },
     developerInstructions: [
@@ -538,17 +565,61 @@ export async function runWorkerCodexTurn(
     runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
     runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
   );
-  const threadResult = await telemetry.measure("thread", () => runtimeThreadId
-    ? runtime.client.request("thread/resume", {
+  let threadResult: JsonValue;
+  try {
+    threadResult = await telemetry.measure("thread", () => runtimeThreadId
+      ? runtime.client.request("thread/resume", {
+          threadId: runtimeThreadId,
+          ...commonThreadParams,
+        }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
+      : runtime.client.request("thread/start", {
+          ...commonThreadParams,
+          dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
+          ephemeral: false,
+          serviceName: "aibrain_workbench",
+        }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
+  } catch (error) {
+    if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
+      throw error;
+    }
+    await setRuntimePhase(
+      "runtime-thread-recovery",
+      "Comprovant la conversa",
+      "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
+    );
+    const recoveredResult = await runtime.client.request(
+      "thread/read",
+      { threadId: runtimeThreadId, includeTurns: true },
+      `thread-resume-recover:${chatRequest.assistantMessageId}`,
+      15_000,
+      persistThreadIdentity,
+    );
+    if (extractThreadId(recoveredResult) !== runtimeThreadId) {
+      throw new Error("App Server ha retornat una conversa diferent durant la recuperació.");
+    }
+    const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+    if (durableTurn && durableTurn.status !== "inProgress") {
+      threadResult = recoveredResult;
+      await completeRuntimePhase("runtime-thread-recovery", {
+        label: "Conversa recuperada",
+        detail: "S’ha trobat el resultat durable sense repetir la petició",
+      });
+    } else {
+      // `thread/resume` does not submit a model turn.  Once the durable read
+      // has proved the thread identity, one identical resume is safe to
+      // reattach the stream; there is deliberately no retry loop.
+      await setRuntimePhase(
+        "runtime-thread-retry",
+        "Reprenent la conversa",
+        "L’estat durable s’ha verificat; reconnectant una sola vegada",
+      );
+      threadResult = await telemetry.measure("thread", () => runtime.client.request("thread/resume", {
         threadId: runtimeThreadId,
         ...commonThreadParams,
-      }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
-    : runtime.client.request("thread/start", {
-        ...commonThreadParams,
-        dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
-        ephemeral: false,
-        serviceName: "aibrain_workbench",
-      }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
+      }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+    }
+  }
+  runtime.client.prewarmConnection?.(projectWorkspace);
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
   telemetry.bindRuntimeThread(threadId);
@@ -928,7 +999,7 @@ export async function runWorkerCodexTurn(
         const approval = approvalFromRequest(legacyServerRequest(request));
         if (!approval || approval.item.threadId !== threadId ||
             (runtimeTurnId && approval.item.turnId !== runtimeTurnId)) {
-          throw new Error(`AiBrain encara no admet ${request.method}.`);
+          throw new Error(`La aplicación todavía no admite ${request.method}.`);
         }
         const permissionBoundItem = {
           ...approval.item,
@@ -1065,7 +1136,7 @@ export async function runWorkerCodexTurn(
       cwd: projectWorkspace,
       runtimeWorkspaceRoots,
       approvalPolicy: runtimeConfig.approvalPolicy,
-      approvalsReviewer: chatRequest.options.autoApprove === true ? "auto_review" : "user",
+      approvalsReviewer: SERVER_APPROVALS_REVIEWER,
       sandboxPolicy: sandboxPolicy({ ...runtimeConfig, workspace: projectWorkspace }, chatRequest),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
@@ -1166,7 +1237,7 @@ export async function runWorkerCodexTurn(
       id: "runtime-performance",
       kind: "system",
       label: "Rendiment del torn",
-      detail: `${metrics.serverFirstDeltaMs === null ? "Sense text incremental" : `Primer text ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker calent`,
+      detail: `${metrics.serverFirstDeltaMs === null ? "Sense text incremental" : `Primer text ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker ${metrics.workerWarm ? "calent" : "fred"}`,
       status: "complete",
     });
   } finally {

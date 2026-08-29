@@ -3,6 +3,7 @@
   "operations": {
     "DELETE /api/automations/{taskId}": "JsonObject",
     "GET /api/admin": "JsonObject",
+    "GET /api/admin/catalog": "JsonObject",
     "GET /api/artifacts": "JsonObject",
     "GET /api/artifacts/{artifactId}": "JsonObject",
     "GET /api/artifacts/{artifactId}/download": "binary:artifact-export",
@@ -39,6 +40,7 @@
     "GET /api/usage/me": "PersonalUsageResponse",
     "GET /api/workbench": "WorkbenchResponse",
     "PATCH /api/admin": "JsonObject",
+    "PATCH /api/admin/catalog": "JsonObject",
     "PATCH /api/automations/{taskId}": "JsonObject",
     "PATCH /api/projects/{projectId}": "JsonObject",
     "PATCH /api/settings": "JsonObject",

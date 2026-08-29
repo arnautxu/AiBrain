@@ -63,7 +63,7 @@ function statePath(tenantId: string) {
 }
 
 function seedNames(tenantId: string, tenantName: string) {
-  if (tenantId === "studio") return ["AiBrain", "Laboratori"] as const;
+  if (tenantId === "studio") return ["Espacio principal", "Laboratori"] as const;
   if (tenantId === "operations") return ["Operacions", "Processos"] as const;
   return [tenantName, "Laboratori"] as const;
 }

@@ -53,7 +53,7 @@ test("conversations run independently, cancel independently and notify on backgr
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
 
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ })).toBeVisible();
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Segunda tarea cancelable");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect.poll(() => chatRequests).toBe(2);
@@ -62,7 +62,7 @@ test("conversations run independently, cancel independently and notify on backgr
   second.release();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
 
-  const runningProject = page.getByRole("button", { name: /AiBrain.*1 conversación trabajando/ });
+  const runningProject = page.getByRole("button", { name: /Espacio principal.*1 conversación trabajando/ });
   await expect(runningProject).toBeVisible();
   await runningProject.click();
 
@@ -71,10 +71,10 @@ test("conversations run independently, cancel independently and notify on backgr
   await page.getByRole("button", { name: /^Segunda tarea cancelable(?: Hoy)?$/ }).click();
 
   first.release();
-  const completedProject = page.getByRole("button", { name: /AiBrain.*1 actualización sin leer/ });
+  const completedProject = page.getByRole("button", { name: /Espacio principal.*1 actualización sin leer/ });
   await expect(completedProject).toBeVisible();
 
   await completedProject.click();
   await expect(page.getByText("Primera tarea completada.")).toBeVisible();
-  await expect(page.getByRole("button", { name: /AiBrain.*actualización sin leer/ })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Espacio principal.*actualización sin leer/ })).toHaveCount(0);
 });

@@ -67,9 +67,12 @@ import {
 import {
   initialRuntimeStatus,
   isRuntimeStatus,
-  type RuntimeReasoningEffort,
   type RuntimeStatus,
 } from "@/lib/runtime-status";
+import {
+  resolveComposerExperience,
+  type ComposerExperience,
+} from "@/lib/composer-experience";
 import {
   branchThreadRequest,
   createProjectRequest,
@@ -493,9 +496,7 @@ export function BrainApp({
   const [preferences, setPreferences] = useState<BrainPreferences>(() => preferencesFromManifest(manifest));
   const [prompt, setPrompt] = useState("");
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
-  const [composerModel, setComposerModel] = useState<string | null>(null);
-  const [composerEffort, setComposerEffort] = useState<RuntimeReasoningEffort | null>("low");
-  const [autoApprove, setAutoApprove] = useState(false);
+  const [composerExperience, setComposerExperience] = useState<ComposerExperience>("smart");
   // Keep the hosted Codex web tool available by default, matching Codex's
   // normal agent behavior. The employee can still opt out per page session.
   const [webSearch, setWebSearch] = useState(() => manifest.composer.webSearch);
@@ -665,6 +666,10 @@ export function BrainApp({
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads],
   );
+  const resolvedComposerExperience = useMemo(
+    () => resolveComposerExperience(composerExperience),
+    [composerExperience],
+  );
   const threadActivityById = useMemo(() => Object.fromEntries(threads.map((thread) => [
     thread.id,
     getThreadActivity(
@@ -730,8 +735,8 @@ export function BrainApp({
     }
     if (payload.preferences.desktop && typeof Notification !== "undefined" && Notification.permission === "granted") {
       const notification = new Notification(
-        newest.status === "needs_attention" ? "AiBrain necesita tu atención" :
-          newest.status === "completed" ? "AiBrain ha terminado una tarea" : "Una tarea de AiBrain ha fallado",
+        newest.status === "needs_attention" ? `${branding.productName} necesita tu atención` :
+          newest.status === "completed" ? `${branding.productName} ha terminado una tarea` : `Una tarea de ${branding.productName} ha fallado`,
         { body: newest.threadTitle, tag: newest.id },
       );
       notification.onclick = () => {
@@ -740,7 +745,7 @@ export function BrainApp({
         notification.close();
       };
     }
-  }, []);
+  }, [branding.productName]);
 
   const refreshTaskCenter = useCallback(async (notify = true) => {
     const response = await fetch("/api/task-center", { cache: "no-store" });
@@ -1327,9 +1332,9 @@ export function BrainApp({
         },
         options: {
           mode: "agent",
-          model: composerModel,
-          effort: composerEffort,
-          autoApprove,
+          experience: composerExperience,
+          model: resolvedComposerExperience.model,
+          effort: resolvedComposerExperience.effort,
           webSearch,
           imageGeneration,
           skill: selectedSkill,
@@ -1377,7 +1382,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, autoApprove, composerEffort, composerModel, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedSkill, sending, webSearch]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1820,14 +1825,15 @@ export function BrainApp({
         preferences={preferences}
         project={activeProject}
         thread={activeThread}
+        projects={projects}
+        userName={session.user.name}
+        companyName={branding.companyName}
+        assistantName={branding.productName}
         hydrated={hydrated}
         prompt={prompt}
-        composerModel={composerModel}
-        composerEffort={composerEffort}
-        autoApprove={autoApprove}
+        composerExperience={composerExperience}
         webSearch={webSearch}
         imageGeneration={imageGeneration}
-        selectedSkill={selectedSkill}
         attachments={attachments}
         documents={documents}
         publications={publications}
@@ -1842,12 +1848,10 @@ export function BrainApp({
           : null}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={setPrompt}
-        onComposerModelChange={setComposerModel}
-        onComposerEffortChange={setComposerEffort}
-        onAutoApproveChange={setAutoApprove}
+        onComposerExperienceChange={setComposerExperience}
+        onDestinationChange={startNewThread}
         onWebSearchChange={setWebSearch}
         onImageGenerationChange={setImageGeneration}
-        onSelectedSkillChange={setSelectedSkill}
         onAttachmentsChange={setAttachments}
         onDocumentsChange={setDocuments}
         onAddDocuments={addDocuments}
@@ -1858,7 +1862,6 @@ export function BrainApp({
         onStop={() => void stopActiveTurn()}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
-        onOpenProject={() => setProjectOpen(true)}
         onResolveApproval={resolveApproval}
         onEditMessage={(message, content) => void branchConversation(message, { kind: "edit", messageId: message.id, editedContent: content }, true)}
         managedAppActionEnabled={managedAppAvailable}
@@ -1870,7 +1873,6 @@ export function BrainApp({
           setActiveSideWindow(null);
           setPreviewDocument(artifact);
         }}
-        showAdvancedControls
       />
 
       {previewDocument ? (
@@ -1900,13 +1902,8 @@ export function BrainApp({
       <CustomizationPanel
         productName={branding.productName}
         open={customizationOpen}
-        preferences={preferences}
         runtimeStatus={effectiveRuntimeStatus}
-        selectedSkill={selectedSkill}
-        onSelectedSkillChange={setSelectedSkill}
         onSettingsSnapshot={setSettingsSnapshot}
-        onChange={changePreference}
-        onReset={() => setPreferences(defaultPreferences)}
         onClose={() => setCustomizationOpen(false)}
       />
 
@@ -1958,37 +1955,12 @@ export function BrainApp({
 
       <CommandPalette
         open={commandPaletteOpen}
-        busy={actionBusy}
         projects={projects}
         threads={threads}
         activeProjectId={activeProjectId}
-        inspectorEnabled={inspectorEnabled}
-        browserEnabled={browserEnabled}
         onClose={() => setCommandPaletteOpen(false)}
-        onNewThread={startNewThread}
-        onNewProject={() => setTextDialog({ kind: "create-project" })}
         onSelectProject={selectProject}
         onSelectThread={selectThread}
-        onOpenInspector={() => { setPreviewDocument(null); setActiveSideWindow("inspector"); }}
-        onOpenBrowser={() => { setPreviewDocument(null); setActiveSideWindow("browser"); }}
-        onOpenCustomization={() => setCustomizationOpen(true)}
-        onOpenMemory={() => setMemoryOpen(true)}
-        onOpenLibrary={() => setLibraryOpen(true)}
-        onOpenSearchResult={(result) => {
-          if (result.type === "memory") {
-            setMemoryOpen(true);
-            return;
-          }
-          if (result.threadId) {
-            selectThread(result.threadId);
-            if (result.messageId) {
-              setSelectedMessageId(result.messageId);
-              window.setTimeout(() => document.getElementById(`message-${result.messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-            }
-            return;
-          }
-          if (result.projectId) selectProject(result.projectId);
-        }}
       />
 
       {textDialogCopy ? (

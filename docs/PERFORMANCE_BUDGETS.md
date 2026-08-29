@@ -141,6 +141,39 @@ log sink or an approved server-side acceptance artifact. A visible TTFT or
 paint cadence must continue to come from the client benchmark, not these server
 records.
 
+## Capacity gate for three to four employees
+
+The Compose defaults are a verified configuration limit, not a measurement of
+the Hetzner host: `app` is capped at **2 CPU / 4 GiB**
+(`infra/hetzner/compose.yaml`). It is therefore insufficient evidence for a
+three-to-four-employee claim, particularly when workers, browser tasks or
+document conversion overlap.
+
+`npm run test:soak -- --concurrency 4 --cycles 20 --restart-every 5` is the
+safe local equivalent: it runs four isolated worker transports, durable replay
+and restart/recovery without a customer prompt, provider action or deployment.
+The JSON report captures request latency plus process CPU (`userMicros`,
+`systemMicros`), process filesystem I/O counters (`fsRead`, `fsWrite`), memory,
+journal growth and leaked resources. It does **not** simulate model inference,
+real browsers or live Hetzner contention, so it cannot be called production
+capacity proof by itself.
+
+| Tier | Host / app limit | Operating envelope | Required evidence before using it |
+| --- | --- | --- | --- |
+| Current configured default | app: 2 CPU / 4 GiB | Single-user canary or one active worker; not a 3–4 employee commitment | Read back the real host and container limits; no resizing is implied here. |
+| Minimum provisional | host: 4 vCPU / 8 GiB; app: 3 CPU / 6 GiB | 3 employees, text-first turns, one browser/conversion burst at a time | Four-worker soak plus a matched live turn sample with p95 CPU below 70% and memory below 75% of the app cap. |
+| Recommended | host: 8 vCPU / 16 GiB SSD; app: 6 CPU / 12 GiB | 3–4 employees with overlapping text turns and controlled browser/document work | Same evidence for a sustained window, no queue/backpressure growth and at least 30% CPU/RAM headroom. |
+
+The host readback is strictly diagnostic and must be captured before any
+resize: resolve the installation-specific Compose environment, then collect
+`docker compose ... config`, `docker stats --no-stream` for `app`, `free -h`,
+`df -h`, `iostat -xz 1 3` (when available), and the last 200 `app` log lines.
+The operational log slice must include `chat.request_phase`,
+`codex.turn_phase`, `codex.turn_lifecycle`, and `codex.turn_metrics`; correlate
+only opaque IDs and numeric timings. Record the immutable revision, limits,
+sample period and raw counters with the report. Never treat a healthy endpoint,
+an empty log, or this local fixture as host-capacity acceptance.
+
 ## Client paint telemetry readback
 
 Baseline: candidate `fcb30b15a28f037d70a0eec4141b914e67e7182b` has no

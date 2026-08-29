@@ -21,6 +21,9 @@ export type TurnTelemetryPhase =
   | "turn_start";
 
 export type TurnTelemetrySnapshot = Readonly<{
+  workerWarm: boolean | null;
+  workerStartupMs: number | null;
+  catalogMs: number | null;
   serverFirstDeltaMs: number | null;
   serverDeltaCount: number;
   serverInterDeltaP50Ms: number | null;
@@ -66,6 +69,8 @@ export class TurnTelemetry {
   private disconnectCount = 0;
   private cancelRequested = false;
   private terminal: TurnTelemetryTerminal | null = null;
+  private workerWarm: boolean | null = null;
+  private readonly phaseElapsedMs = new Map<TurnTelemetryPhase, number>();
 
   constructor(
     private readonly correlation: TurnTelemetryCorrelation,
@@ -81,6 +86,10 @@ export class TurnTelemetry {
 
   bindRuntimeTurn(runtimeTurnId: string) {
     this.runtimeTurnId = runtimeTurnId;
+  }
+
+  workerReadiness(warm: boolean) {
+    this.workerWarm = warm;
   }
 
   resumed() {
@@ -122,12 +131,14 @@ export class TurnTelemetry {
       outcome = "error";
       throw error;
     } finally {
+      const phaseMs = elapsedMs(phaseStartedAt, this.now);
+      this.phaseElapsedMs.set(phase, (this.phaseElapsedMs.get(phase) ?? 0) + phaseMs);
       this.options.logger.info("codex.turn_phase", {
         metricSchemaVersion: 1,
         ...this.attributes(),
         phase,
         outcome,
-        phaseMs: elapsedMs(phaseStartedAt, this.now),
+        phaseMs,
         requestElapsedMs: elapsedMs(this.startedAt, this.now),
       });
     }
@@ -159,6 +170,9 @@ export class TurnTelemetry {
 
   private snapshot(): TurnTelemetrySnapshot {
     return {
+      workerWarm: this.workerWarm,
+      workerStartupMs: this.phaseElapsedMs.get("worker") ?? null,
+      catalogMs: this.phaseElapsedMs.get("catalog") ?? null,
       serverFirstDeltaMs: this.firstDeltaAt === null
         ? null
         : Math.max(0, Math.round(this.firstDeltaAt - this.startedAt)),

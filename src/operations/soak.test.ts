@@ -36,6 +36,8 @@ describe("worker replay soak harness", () => {
     });
     expect(report.latency).toMatchObject({ count: 8, sampled: 8 });
     expect(report.latency.p95Ms).toBeGreaterThan(0);
+    expect(report.samples.peak.cpu.userMicros).toBeGreaterThan(0);
+    expect(report.samples.peak.io.fsWrite).toBeGreaterThanOrEqual(0);
     expect(report.samples.steadyStart.resources.childProcesses).toBeGreaterThanOrEqual(
       report.samples.beforeStart.resources.childProcesses + 2,
     );

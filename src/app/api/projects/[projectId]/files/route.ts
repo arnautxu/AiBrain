@@ -14,6 +14,7 @@ export const dynamic = "force-dynamic";
 const MAXIMUM_TEXT_FILE_BYTES = 8_000_000;
 const MAXIMUM_BINARY_FILE_BYTES = 50 * 1024 * 1024;
 const MAXIMUM_TEXT_BYTES = 500_000;
+const PDF_SIGNATURE = Buffer.from("%PDF-");
 
 const imageMimeTypes: Record<string, string> = {
   ".avif": "image/avif",
@@ -111,12 +112,17 @@ export async function GET(
       if (preview.kind === "text") {
         return NextResponse.json({ error: "Este archivo se muestra como texto." }, { status: 400 });
       }
+      if (preview.kind === "pdf" && !contents.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE)) {
+        return NextResponse.json({ error: "El archivo no es un PDF válido." }, { status: 415 });
+      }
       return new Response(contents, {
         headers: {
           "Cache-Control": "private, no-store",
           "Content-Disposition": contentDisposition(path.basename(filePath), download ? "attachment" : "inline"),
           "Content-Type": preview.mimeType,
-          ...(download ? {} : { "Content-Security-Policy": "sandbox" }),
+          ...(download ? {} : { "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'none'" }),
+          "Cross-Origin-Resource-Policy": "same-origin",
+          "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",
         },
       });

@@ -124,7 +124,7 @@ export function TaskCenterPanel({
         {settingsOpen ? (
           <div className="border-b border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-3 sm:px-4">
             <h3 className="px-3 text-[11px] font-semibold text-[var(--text)]">Notificaciones</h3>
-            <PreferenceRow icon={<Bell size={17} />} label="Avisos dentro de AiBrain" detail="Muestra un aviso cuando otra conversación termina o necesita atención." checked={preferences.inApp} disabled={busy} onChange={(inApp) => onPreferencesChange({ ...preferences, inApp })} />
+            <PreferenceRow icon={<Bell size={17} />} label="Avisos dentro de la aplicación" detail="Muestra un aviso cuando otra conversación termina o necesita atención." checked={preferences.inApp} disabled={busy} onChange={(inApp) => onPreferencesChange({ ...preferences, inApp })} />
             <PreferenceRow icon={<BellRinging size={17} />} label="Avisos del navegador" detail={notificationPermission === "denied" ? "El navegador los ha bloqueado. Puedes reactivarlos desde sus ajustes." : notificationPermission === "unsupported" ? "Este navegador no admite avisos del sistema." : "Solo se activan después de que aceptes el permiso del navegador."} checked={preferences.desktop && notificationPermission === "granted"} disabled={busy || notificationPermission === "denied" || notificationPermission === "unsupported"} onChange={(enabled) => {
               if (enabled && notificationPermission !== "granted") onRequestDesktopNotifications();
               else onPreferencesChange({ ...preferences, desktop: enabled });

@@ -72,14 +72,15 @@ function renderWorkspace(
     preferences={preferences}
     project={activeProject}
     thread={thread}
+    projects={[project]}
+    userName="Ada"
+    companyName="Arnall"
+    assistantName="Arnall AI"
     hydrated
     prompt=""
-    composerModel={null}
-    composerEffort={null}
-    autoApprove={false}
+    composerExperience="smart"
     webSearch
     imageGeneration={false}
-    selectedSkill={null}
     attachments={[]}
     documents={[]}
     publications={[]}
@@ -92,12 +93,10 @@ function renderWorkspace(
     streamRecovery={null}
     onRetryRuntime={vi.fn()}
     onPromptChange={vi.fn()}
-    onComposerModelChange={vi.fn()}
-    onComposerEffortChange={vi.fn()}
-    onAutoApproveChange={vi.fn()}
+    onComposerExperienceChange={vi.fn()}
+    onDestinationChange={vi.fn()}
     onWebSearchChange={vi.fn()}
     onImageGenerationChange={vi.fn()}
-    onSelectedSkillChange={vi.fn()}
     onAttachmentsChange={vi.fn()}
     onDocumentsChange={vi.fn()}
     onAddDocuments={vi.fn(async () => undefined)}
@@ -108,14 +107,12 @@ function renderWorkspace(
     onStop={vi.fn()}
     sidebarOpen
     onToggleSidebar={vi.fn()}
-    onOpenProject={vi.fn()}
     onResolveApproval={vi.fn(async () => undefined)}
     onEditMessage={vi.fn()}
     managedAppActionEnabled={false}
     managedAppApprovalKeys={[]}
     onManagedAppPrepared={vi.fn()}
     onPreviewDocument={vi.fn()}
-    showAdvancedControls={false}
     {...overrides}
   />);
 }
@@ -127,13 +124,14 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
-  it("keeps the landing focused on its exact project destination without suggestions or disclaimer", () => {
+  it("keeps the landing focused on its editable destination and honest suggestions", () => {
     renderWorkspace();
 
     expect(screen.getAllByText("Operaciones Arnall").length).toBeGreaterThan(0);
-    expect(screen.getByRole("heading", { name: "¿En qué trabajamos?" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "¿Cómo puedo ayudarte en Operaciones Arnall?" })).toBeInTheDocument();
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");
-    expect(screen.getByText("Trabajar")).toBeInTheDocument();
+    expect(screen.queryByText("Trabajar")).not.toBeInTheDocument();
+    expect(screen.getByText("Prioridades")).toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
     expect(screen.queryByRole("button", { name: /Abrir contexto/ })).not.toBeInTheDocument();
     for (const removed of ["Analizar información", "Crear un documento", "Resumir contenido", "Comprueba los datos importantes antes de usarlos.", "Planificar", "Preguntar", "↵ enviar"]) {
@@ -174,19 +172,13 @@ describe("chat workspace simplificado", () => {
     expect(onSend).toHaveBeenCalledOnce();
   });
 
-  it("integrates automatic permission review into the existing composer controls", () => {
-    const onAutoApproveChange = vi.fn();
-    renderWorkspace(null, project, {
-      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
-      onAutoApproveChange,
-    });
-
-    const control = screen.getByRole("button", { name: "Aprobar permisos automáticamente" });
-    expect(control).toHaveAttribute("aria-pressed", "false");
-    expect(control.closest(".composer-controls")).toBeInTheDocument();
-
-    fireEvent.click(control);
-    expect(onAutoApproveChange).toHaveBeenCalledWith(true);
+  it("offers only the three named work experiences and no permission control", () => {
+    renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Experiencia" }));
+    expect(screen.getByRole("menuitemradio", { name: /Rápido/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Smart/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Experto/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Aprobar permisos automáticamente" })).not.toBeInTheDocument();
   });
 
   it("keeps one action control and exposes stop while the agent is working", () => {
@@ -209,7 +201,7 @@ describe("chat workspace simplificado", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
-  it("shows the BoardUI drop surface and forwards dropped files to the existing attachment flow", () => {
+  it("shows a file drop message and forwards dropped files to the existing attachment flow", () => {
     const onAddDocuments = vi.fn(async () => undefined);
     renderWorkspace(null, project, {
       runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
@@ -219,8 +211,8 @@ describe("chat workspace simplificado", () => {
     const composer = screen.getByTestId("composer");
     const file = new File(["contenido"], "informe.pdf", { type: "application/pdf" });
     fireEvent.dragEnter(composer, { dataTransfer: { files: [file] } });
-    expect(screen.getByRole("button", { name: "Adjuntar un archivo" })).toBeInTheDocument();
-    fireEvent.drop(screen.getByRole("button", { name: "Adjuntar un archivo" }), { dataTransfer: { files: [file] } });
+    expect(screen.getByText("Suelta los archivos para adjuntarlos")).toBeInTheDocument();
+    fireEvent.drop(composer, { dataTransfer: { files: [file] } });
 
     expect(onAddDocuments).toHaveBeenCalledWith([file]);
   });

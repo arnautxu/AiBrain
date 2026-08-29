@@ -56,8 +56,8 @@ const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
   "Canvis revertits i verificats": "Cambios deshechos y verificados",
   "Preparant el context": "Preparando el contexto",
   "Context preparat": "Contexto preparado",
-  "Connectant amb Codex": "Conectando con AiBrain",
-  "Codex connectat": "AiBrain está listo",
+  "Connectant amb Codex": "Conectando con el asistente",
+  "Codex connectat": "El asistente está listo",
   "Obrint la conversa": "Abriendo la conversación",
   "Conversa oberta": "Conversación abierta",
   "Recuperant la conversa": "Recuperando la conversación",
@@ -68,9 +68,9 @@ const SYSTEM_ACTIVITY_LABELS: Record<string, string> = {
   "Recuperant el torn": "Recuperando la tarea",
   "No s’ha pogut recuperar el torn": "No se ha podido recuperar la tarea",
   "Esperant activitat del model": "Esperando actividad del modelo",
-  "Codex està treballant": "AiBrain está trabajando",
+  "Codex està treballant": "El asistente está trabajando",
   "Preparant el resum del raonament": "Preparando el resumen del razonamiento",
-  "Codex està raonant": "AiBrain está preparando la respuesta",
+  "Codex està raonant": "El asistente está preparando la respuesta",
   "Verificant el model": "Verificando el modelo",
   "Canviant de model": "Cambiando de modelo",
   "Verificant la resposta": "Verificando la respuesta",
@@ -183,7 +183,7 @@ function ApprovalCard({
   }[approval.status];
   const title = approval.title;
   const explanation = approval.kind === "file"
-    ? "AiBrain ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
+    ? "El asistente ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
     : approval.kind === "browser"
       ? "La siguiente acción del navegador necesita tu permiso antes de continuar."
       : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";

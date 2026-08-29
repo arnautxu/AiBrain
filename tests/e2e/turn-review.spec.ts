@@ -5,7 +5,7 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 async function login(page: Page) {
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible();
 }
 
 test("plan, command, diff and approval decisions consume the typed turn contract inline", async ({ page }) => {

@@ -11,7 +11,7 @@ test("the authenticated employee shell has no critical or serious axe violations
   }));
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible();
 
   const assertNoBlockingViolations = async () => {
     const results = await new AxeBuilder({ page }).analyze();

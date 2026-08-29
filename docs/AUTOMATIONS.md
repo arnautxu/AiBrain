@@ -1,4 +1,4 @@
-# Automatizaciones programadas
+# Automatizaciones
 
 AiBrain puede ejecutar un prompt una vez, cada día o ciertos días de la semana. Cada tarea pertenece a un único usuario y proyecto, conserva su próxima y última ejecución y crea una conversación normal para que el resultado quede visible en el workbench.
 
@@ -28,7 +28,16 @@ Otro intervalo:
 npm run automations:worker -- --interval-ms 60000
 ```
 
-En producción debe ejecutarse como servicio independiente con el mismo usuario, imagen, `AIBRAIN_INSTALLATION_CONFIG`, volumen de datos y credenciales Codex que la aplicación. Configure reinicio automático y parada con `SIGTERM`; nunca ejecute dos workers como sustituto de alta disponibilidad. El lock con lease evita que dos procesos reclamen la misma ocurrencia, pero ambos necesitan acceso al mismo volumen.
+En producción, `infra/hetzner/compose.yaml` arranca `automation-worker` como servicio independiente, supervisado con `restart: unless-stopped` y un healthcheck que requiere un heartbeat fresco del proceso vivo. Comparte la misma imagen, usuario, configuración, volumen de datos y credenciales Codex que la aplicación. No arranque un segundo worker manualmente como sustituto de alta disponibilidad: el lock con lease evita reclamaciones duplicadas, pero ambos procesos compartirían el mismo volumen.
+
+Tras un despliegue autorizado, la comprobación de aceptación es:
+
+```bash
+docker compose -f /opt/aibrain/active.compose.yaml ps app automation-worker
+docker compose -f /opt/aibrain/active.compose.yaml exec app node -e 'fetch("http://127.0.0.1:3000/api/health/ready").then(async r => { const b = await r.json(); if (!r.ok || !b.components?.some(c => c.name === "automations-worker" && c.status === "ready")) process.exit(1) })'
+```
+
+Ambos servicios deben aparecer `healthy`; si el worker se reinicia, la aplicación expone readiness degradado hasta que vuelva a escribir una señal fresca.
 
 Ejemplo conceptual para systemd (ajuste rutas y usuario):
 

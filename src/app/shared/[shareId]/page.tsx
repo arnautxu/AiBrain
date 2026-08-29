@@ -15,9 +15,11 @@ export default async function SharedConversationPage({
   const session = await getSession();
   if (!session) redirect("/login");
   const { shareId } = await params;
+  let productName = "la aplicación";
   let share;
   try {
     const installation = await loadInstallationConfig();
+    productName = installation.branding.productName;
     share = await new ConversationShareStore(installation.paths.dataRoot).read(session, shareId);
   } catch {
     notFound();
@@ -28,7 +30,7 @@ export default async function SharedConversationPage({
         <header className="mb-8 border-b border-[var(--border)] pb-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="rounded-full bg-[var(--surface-muted)] px-3 py-1 text-[11px] font-medium text-[var(--text-muted)]">Copia interna · solo equipo autenticado</span>
-            <Link href="/" className="rounded-full px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">Volver a AiBrain</Link>
+            <Link href="/" className="rounded-full px-3 py-2 text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]">Volver a {productName}</Link>
           </div>
           <p className="mt-6 text-[12px] font-medium text-[var(--text-muted)]">{share.projectName}</p>
           <h1 className="mt-1 text-[28px] font-semibold tracking-[-.03em]">{share.title}</h1>

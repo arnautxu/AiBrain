@@ -136,7 +136,7 @@ export function ProjectPanel({ project, open, onClose, onSave }: ProjectPanelPro
       status: "invited-local", addedAt: new Date().toISOString(),
     }]);
     setVisibility("shared"); setMemberEmail("");
-    setNotice("Acceso registrado localmente. AiBrain todavía no envía invitaciones por correo.");
+    setNotice("Acceso registrado localmente. La aplicación todavía no envía invitaciones por correo.");
   };
 
   return (

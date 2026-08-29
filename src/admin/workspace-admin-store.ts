@@ -138,7 +138,7 @@ function roles(): WorkspaceRole[] {
   return [
     { id: "workspace-owner", name: "Propietario", description: "Control total del workspace y de sus administradores.", canManageWorkspace: true, policy: full },
     { id: "workspace-admin", name: "Administrador", description: "Gestiona personas, grupos y políticas del workspace.", canManageWorkspace: true, policy: defaultWorkspacePolicy() },
-    { id: "workspace-member", name: "Miembro", description: "Usa AiBrain con las políticas asignadas por la empresa.", canManageWorkspace: false, policy: defaultWorkspacePolicy() },
+    { id: "workspace-member", name: "Miembro", description: "Usa la aplicación con las políticas asignadas por la empresa.", canManageWorkspace: false, policy: defaultWorkspacePolicy() },
   ];
 }
 

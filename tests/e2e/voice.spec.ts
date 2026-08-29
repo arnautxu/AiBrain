@@ -30,7 +30,7 @@ test.beforeEach(async ({ page }) => {
   });
   await page.goto("/login");
   await page.getByRole("button", { name: /Alex|Taylor/ }).click();
-  await expect(page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId("composer")).toBeVisible({ timeout: 30_000 });
 });
 
 test("voice dictation requires consent and leaves text editable without sending", async ({ page }) => {

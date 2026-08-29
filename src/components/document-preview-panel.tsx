@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ArrowClockwise, DownloadSimple, FilePdf, WarningCircle, X } from "@phosphor-icons/react";
 import type { DocumentArtifact } from "@/lib/chat-contract";
+import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
 
 export function DocumentPreviewPanel({ artifact, onClose }: {
   artifact: DocumentArtifact;
@@ -11,6 +12,8 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const [reload, setReload] = useState(0);
+  const handleLoad = useCallback(() => setLoaded(true), []);
+  const handleError = useCallback(() => setFailed(true), []);
 
   const retry = () => {
     setLoaded(false);
@@ -44,7 +47,14 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
             <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el PDF</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">Puedes volver a intentarlo o descargar el archivo directamente.</p><button type="button" className="mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
           </div>
         ) : artifact.previewUrl ? (
-          <iframe key={`${artifact.id}:${reload}`} title={`Documento ${artifact.name}`} src={artifact.previewUrl} className={`h-full w-full rounded-xl border border-[var(--border)] bg-white shadow-[var(--shadow-sm)] transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`} onLoad={() => setLoaded(true)} onError={() => setFailed(true)} />
+          <AuthenticatedPdfPreview
+            key={`${artifact.id}:${reload}`}
+            previewUrl={artifact.previewUrl}
+            title={`Documento ${artifact.name}`}
+            className={`h-full w-full rounded-xl border border-[var(--border)] bg-white shadow-[var(--shadow-sm)] transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
+            onLoad={handleLoad}
+            onError={handleError}
+          />
         ) : null}
       </div>
     </aside>

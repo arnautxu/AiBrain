@@ -106,6 +106,7 @@ function demoSession(payload: DemoSessionPayload): AuthSession | null {
       id: account.id,
       name: account.name,
       email: account.email,
+      avatarUrl: null,
     },
     tenant: { id: tenant.id, name: tenant.name },
     expiresAt: new Date(payload.expiresAt).toISOString(),
@@ -127,6 +128,7 @@ async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
       id: user.userId,
       name: user.displayName,
       email: user.email,
+      avatarUrl: await users.readAvatarUrl(user.userId),
     },
     tenant: {
       id: installation.installationId,

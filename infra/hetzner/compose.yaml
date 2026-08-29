@@ -99,6 +99,102 @@ services:
         mode: non-blocking
         max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
 
+  automation-worker:
+    image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
+    entrypoint: [/usr/bin/tini, --, /usr/local/bin/aibrain-entrypoint]
+    command: [tsx, scripts/run-automations.ts, --interval-ms, "${AIBRAIN_AUTOMATIONS_INTERVAL_MS:-30000}"]
+    env_file:
+      - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
+      - "${AIBRAIN_EGRESS_ENV_FILE:?set AIBRAIN_EGRESS_ENV_FILE}"
+    environment:
+      AIBRAIN_INSTALLATION_CONFIG: /etc/aibrain/installation.json
+      AIBRAIN_CHROME_BIN: /usr/local/bin/aibrain-chrome
+      AIBRAIN_SOFFICE_BIN: /usr/local/bin/aibrain-soffice
+      AIBRAIN_PDFINFO_BIN: /usr/local/bin/aibrain-pdfinfo
+      AIBRAIN_PDFTOPPM_BIN: /usr/local/bin/aibrain-pdftoppm
+      AIBRAIN_PDFTOTEXT_BIN: /usr/local/bin/aibrain-pdftotext
+      AIBRAIN_QPDF_BIN: /usr/local/bin/aibrain-qpdf
+      AIBRAIN_CODEX_EXPECTED_VERSION: "0.149.1"
+      CHAT_RUNTIME: codex
+      CODEX_BIN: /usr/local/bin/aibrain-codex-worker
+      CODEX_APPROVAL_POLICY: on-request
+      CODEX_SANDBOX: workspace-write
+      NODE_ENV: production
+      TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+      AIBRAIN_EGRESS_PROXY_URL: http://egress-gateway:8080
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.component: automation-worker
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID:?set AIBRAIN_INSTALLATION_ID}"
+    user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+      - apparmor=aibrain-container
+      - systempaths=unconfined
+      - seccomp=./browser/seccomp_profile.json
+    restart: unless-stopped
+    depends_on:
+      egress-gateway:
+        condition: service_healthy
+    stop_grace_period: 45s
+    pids_limit: ${AIBRAIN_AUTOMATIONS_PIDS_LIMIT:-256}
+    cpus: ${AIBRAIN_AUTOMATIONS_CPU_LIMIT:-1.0}
+    mem_limit: "${AIBRAIN_AUTOMATIONS_MEMORY_LIMIT:-2g}"
+    mem_reservation: "${AIBRAIN_AUTOMATIONS_MEMORY_RESERVATION:-512m}"
+    shm_size: "${AIBRAIN_AUTOMATIONS_SHM_SIZE:-512m}"
+    ulimits:
+      nofile:
+        soft: ${AIBRAIN_AUTOMATIONS_NOFILE_SOFT:-4096}
+        hard: ${AIBRAIN_AUTOMATIONS_NOFILE_HARD:-8192}
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=${AIBRAIN_AUTOMATIONS_TMP_SIZE:-256m},mode=1777
+      - /run:rw,nosuid,nodev,noexec,size=16m,mode=0755
+    volumes:
+      - type: bind
+        source: "${AIBRAIN_INSTALLATION_CONFIG_HOST:?set AIBRAIN_INSTALLATION_CONFIG_HOST}"
+        target: /etc/aibrain/installation.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: volume
+        source: aibrain-data
+        target: /var/lib/aibrain/data
+      - type: volume
+        source: aibrain-backups
+        target: /var/lib/aibrain/data/backups
+      - type: volume
+        source: aibrain-restores
+        target: /var/lib/aibrain-restores
+      - type: bind
+        source: "${AIBRAIN_SOURCE_HOST_PATH:?set AIBRAIN_SOURCE_HOST_PATH}"
+        target: /srv/aibrain/source-ro
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: "${AIBRAIN_PUBLISH_HOST_PATH:?set AIBRAIN_PUBLISH_HOST_PATH}"
+        target: /srv/aibrain/publish-rw
+        bind:
+          create_host_path: false
+    networks:
+      - aibrain-internal
+    healthcheck:
+      test: [CMD, node, /usr/local/share/aibrain/automation-worker-healthcheck.mjs]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "${AIBRAIN_LOG_MAX_SIZE:-10m}"
+        max-file: "${AIBRAIN_LOG_MAX_FILES:-5}"
+        mode: non-blocking
+        max-buffer-size: "${AIBRAIN_LOG_BUFFER_SIZE:-4m}"
+
   ingress-gateway:
     image: "${AIBRAIN_EGRESS_IMAGE:?set AIBRAIN_EGRESS_IMAGE to an immutable image digest}"
     entrypoint: [node, /usr/local/share/aibrain/ingress-gateway.mts]

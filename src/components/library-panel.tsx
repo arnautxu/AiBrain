@@ -26,6 +26,7 @@ import { isAdvancedArtifactSummary, type AdvancedArtifactKind } from "@/artifact
 import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
 import { SafeVisualizationPreview } from "@/components/safe-visualization-preview";
+import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
 
 type LibraryFilter = "all" | LibraryItemType;
 
@@ -205,6 +206,7 @@ export function LibraryPanel({
 
   if (!open) return null;
   const previewIsImage = selected?.previewUrl && selected.mimeType?.startsWith("image/");
+  const previewIsPdf = selected?.mimeType === "application/pdf";
 
   return (
     <div className="workspace-overlay fixed inset-0 z-[75] flex sm:p-5">
@@ -258,7 +260,7 @@ export function LibraryPanel({
                 <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{selected.name}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{label(selected.type)} · {formatSize(selected.size) ?? "Tamaño no disponible"}</p></div>
               </div>
               <div className="mt-5 grid min-h-64 flex-1 place-items-center overflow-hidden rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && selected.previewUrl ? <NextImage unoptimized width={960} height={720} src={selected.previewUrl} alt={`Vista previa de ${selected.name}`} className="max-h-[460px] w-full object-contain" /> : selected.previewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${selected.name}`} src={selected.previewUrl} className="h-[460px] w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
+                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && selected.previewUrl ? <NextImage unoptimized width={960} height={720} src={selected.previewUrl} alt={`Vista previa de ${selected.name}`} className="max-h-[460px] w-full object-contain" /> : previewIsPdf && selected.previewUrl ? <AuthenticatedPdfPreview previewUrl={selected.previewUrl} title={`Vista previa de ${selected.name}`} className="h-[460px] w-full bg-white" /> : selected.previewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${selected.name}`} src={selected.previewUrl} className="h-[460px] w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 {selected.downloadUrl ? <a href={selected.downloadUrl} download={selected.name} className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />Descargar</a> : null}

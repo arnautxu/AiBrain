@@ -1,66 +1,49 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CustomizationPanel } from "@/components/customization-panel";
-import { defaultPreferences } from "@/config/brain";
+import { ThemeProvider } from "@/components/theme-provider";
 import { initialRuntimeStatus } from "@/lib/runtime-status";
 import type { SettingsSnapshot } from "@/settings/contracts";
 
-const settings: SettingsSnapshot = {
-  schemaVersion: 1,
-  account: { userId: "user", displayName: "Ada", email: "ada@example.com", provider: "local", expiresAt: "2026-08-29T00:00:00.000Z" },
-  company: { installationId: "example", name: "Example", isAdmin: true },
-  apps: [{
-    id: "web-search", label: "Búsqueda web", description: "Consulta fuentes públicas.", kind: "capability",
-    status: "available", statusDetail: "Disponible para usar.", scopes: ["Internet público"], permissionActions: ["consult"],
-    approvalRequired: false, installationEnabled: true, userEnabled: true, effectiveEnabled: true,
-    canUserChange: true, canAdminChange: true, configurationHint: null,
-  }],
-  notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
-  permissions: [{ action: "consult", effect: "allow", rules: [] }],
-  privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" },
-  browser: { profileScope: "private_per_employee", networkPolicy: "public_http_https_only", privateNetworkAllowed: false, mutationsRequireApproval: true, downloadsArePrivate: true },
-};
+function settings(isAdmin: boolean): SettingsSnapshot { return { schemaVersion: 1, account: { userId: "user", displayName: "Arnau", email: "arnau@example.com", provider: "local", expiresAt: "2026-08-29T00:00:00.000Z" }, company: { installationId: "example", name: "Example", isAdmin }, apps: [], notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false }, permissions: [], privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" }, browser: { profileScope: "private_per_employee", networkPolicy: "public_http_https_only", privateNetworkAllowed: false, mutationsRequireApproval: true, downloadsArePrivate: true } }; }
+function usage(scope: "personal" | "company") { return { schemaVersion: 1, scope, generatedAt: "2026-08-29T00:00:00.000Z", userId: "user", installationId: "example", notices: [], sharedSubscription: null, internal: { turns: 2, completedTurns: 1, errorTurns: 1, stoppedTurns: 0, activeDays: 1, totalDurationMs: 95_000, averageDurationMs: 47_500, p95DurationMs: 90_000, averageFirstTextMs: null, p95FirstTextMs: null, turnsWithTokenData: 0, tokens: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 } }, ...(scope === "company" ? { members: [] } : {}) }; }
 
 afterEach(() => vi.unstubAllGlobals());
+beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
-  it("shows a truthful app catalogue and persists an employee gate", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+  it("keeps employee settings to theme, notifications and personal usage", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === "/api/settings") {
-        const response = init?.method === "PATCH"
-          ? { ...settings, apps: [{ ...settings.apps[0]!, userEnabled: false, effectiveEnabled: false }] }
-          : settings;
-        return new Response(JSON.stringify(response), { status: 200, headers: { "Content-Type": "application/json" } });
-      }
-      return new Response(JSON.stringify({}), { status: 503, headers: { "Content-Type": "application/json" } });
+      if (url === "/api/settings") return new Response(JSON.stringify(settings(false)), { status: 200 });
+      if (url === "/api/usage/me") return new Response(JSON.stringify(usage("personal")), { status: 200 });
+      return new Response(JSON.stringify({ error: "forbidden" }), { status: 403 });
     });
     vi.stubGlobal("fetch", fetchMock);
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByRole("button", { name: "Apariencia" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Avisos" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Uso" })).toBeInTheDocument();
+    for (const hidden of ["Herramientas", "Permisos", "Datos y privacidad", "Navegador y red", "Equipo", "Alta local", "Grupos y políticas", "Registro de auditoría"]) expect(screen.queryByText(hidden)).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/usage/company", expect.anything());
+    fireEvent.click(screen.getByRole("button", { name: "Uso" }));
+    expect(await screen.findByText("Minutos trabajados")).toBeInTheDocument();
+    expect(screen.getByText("2 min")).toBeInTheDocument();
+  });
 
-    render(<CustomizationPanel
-      productName="Example Brain"
-      open
-      preferences={defaultPreferences}
-      runtimeStatus={{
-        ...initialRuntimeStatus,
-        codex: "connected",
-        ready: true,
-        capabilities: { ...initialRuntimeStatus.capabilities, webSearch: true },
-      }}
-      selectedSkill={null}
-      onSelectedSkillChange={vi.fn()}
-      onChange={vi.fn()}
-      onReset={vi.fn()}
-      onClose={vi.fn()}
-    />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Herramientas" }));
-    expect(await screen.findByText("Búsqueda web")).toBeInTheDocument();
-    expect(screen.getByText("Internet público")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Activar Búsqueda web" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/settings", expect.objectContaining({ method: "PATCH" })));
-    const patchCall = fetchMock.mock.calls.find(([, init]) => init?.method === "PATCH");
-    expect(JSON.parse(String(patchCall?.[1]?.body))).toEqual({ target: "user-app", appId: "web-search", enabled: false });
+  it("offers an administrator the separate administration surface without employee tabs", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/settings") return new Response(JSON.stringify(settings(true)), { status: 200 });
+      if (url === "/api/usage/me") return new Response(JSON.stringify(usage("personal")), { status: 200 });
+      if (url === "/api/usage/company") return new Response(JSON.stringify(usage("company")), { status: 200 });
+      return new Response("{}", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    await waitFor(() => expect(screen.getByRole("link", { name: "Administración" })).toHaveAttribute("href", "/admin"));
+    expect(screen.queryByRole("button", { name: "Equipo" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Alta local")).not.toBeInTheDocument();
   });
 });

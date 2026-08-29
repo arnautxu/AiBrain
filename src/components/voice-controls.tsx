@@ -218,7 +218,7 @@ export function VoiceDictationControl({
       {consentOpen ? (
         <div role="dialog" aria-label="Permiso para dictar" className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
           <p className="text-[12px] font-semibold text-[var(--text)]">Usar el micrófono para dictar</p>
-          <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">El navegador procesa tu voz con su propio servicio y añadirá el texto al mensaje. AiBrain no recibe audio ni lo guarda, y nunca enviará el mensaje automáticamente.</p>
+          <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">El navegador procesa tu voz con su propio servicio y añadirá el texto al mensaje. La aplicación no recibe audio ni lo guarda, y nunca enviará el mensaje automáticamente.</p>
           <div className="mt-3 flex justify-end gap-2">
             <button type="button" className="min-h-10 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => setConsentOpen(false)}>Ahora no</button>
             <button type="button" className="min-h-10 rounded-full bg-[var(--brain-accent)] px-4 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={confirmConsent}>Activar dictado</button>

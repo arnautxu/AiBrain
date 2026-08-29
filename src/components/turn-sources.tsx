@@ -56,7 +56,7 @@ export function TurnSourceList({ sources }: { sources: readonly TurnSource[] }) 
         <div className="max-w-60">
           <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Globe size={18} /></span>
           <p className="mt-3 text-[12px] font-semibold text-[var(--text)]">Sin fuentes verificables</p>
-          <p className="mt-1.5 text-[11px] leading-5 text-[var(--text-muted)]">Este turno no ha entregado URLs ni archivos como metadatos. AiBrain no crea citas a partir del texto de la respuesta.</p>
+          <p className="mt-1.5 text-[11px] leading-5 text-[var(--text-muted)]">Este turno no ha entregado URLs ni archivos como metadatos. La aplicación no crea citas a partir del texto de la respuesta.</p>
         </div>
       </div>
     );

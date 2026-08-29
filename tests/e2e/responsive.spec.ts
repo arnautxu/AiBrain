@@ -23,10 +23,17 @@ for (const viewport of viewports) {
   test(`shell and dialogs stay inside ${viewport.width}x${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await login(page);
+    await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
+    if (viewport.width < 768) {
+      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+    }
+    await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
+    await expect(page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ })).toBeVisible();
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
     const composer = await page.getByTestId("composer").boundingBox();
-    const emptyHeading = await page.getByRole("heading", { level: 1, name: "¿En qué trabajamos?" }).boundingBox();
+    const emptyHeading = await page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ }).boundingBox();
     expect(composer).not.toBeNull();
     expect(emptyHeading).not.toBeNull();
     expect(composer!.x).toBeGreaterThanOrEqual(0);

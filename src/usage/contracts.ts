@@ -96,6 +96,8 @@ export type UsageAggregate = {
   errorTurns: number;
   stoppedTurns: number;
   activeDays: number;
+  /** Sum of terminal turn durations persisted in the usage journal. */
+  totalDurationMs: number;
   averageDurationMs: number | null;
   p95DurationMs: number | null;
   averageFirstTextMs: number | null;

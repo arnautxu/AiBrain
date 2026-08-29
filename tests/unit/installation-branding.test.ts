@@ -57,7 +57,7 @@ describe("UI installation fixtures", () => {
   it("uses the development installation as a safe fallback", () => {
     expect(resolveUiInstallationBranding("unknown")).toMatchObject({
       installationId: "example-lab-dev",
-      productName: "Example Brain",
+      productName: "Example AI",
       accentColor: "#315ee7",
     });
   });
@@ -68,7 +68,7 @@ describe("UI installation fixtures", () => {
       companyName: "Northwind Advisory QA",
       companySlug: "northwind-advisory",
       publicUrl: "https://brain.northwind-advisory.test",
-      productName: "Northwind Brain",
+      productName: "Northwind AI",
       logoPath: "/branding/northwind-qa/logo.svg",
       faviconPath: "/branding/northwind-qa/favicon.svg",
       accentColor: "#0f766e",

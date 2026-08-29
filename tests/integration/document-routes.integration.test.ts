@@ -47,14 +47,20 @@ describe("authenticated document routes", () => {
   let previousConfig: string | undefined;
   let previousMinimumFreeBytes: string | undefined;
   let previousMinimumFreeRatio: string | undefined;
+  let previousMaximumActiveUploads: string | undefined;
+  let previousWorstCaseActiveBytes: string | undefined;
   let threadId: string;
 
   beforeAll(async () => {
     previousConfig = process.env.AIBRAIN_INSTALLATION_CONFIG;
     previousMinimumFreeBytes = process.env.AIBRAIN_MINIMUM_FREE_BYTES;
     previousMinimumFreeRatio = process.env.AIBRAIN_MINIMUM_FREE_RATIO;
+    previousMaximumActiveUploads = process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS;
+    previousWorstCaseActiveBytes = process.env.AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES;
     process.env.AIBRAIN_MINIMUM_FREE_BYTES = "0";
     process.env.AIBRAIN_MINIMUM_FREE_RATIO = "0";
+    process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS = "1";
+    process.env.AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES = "134217728";
     root = await mkdtemp(path.join(tmpdir(), "aibrain-document-routes-"));
     dataRoot = path.join(root, "data");
     const configPath = path.join(root, "installation.json");
@@ -104,6 +110,10 @@ describe("authenticated document routes", () => {
     else process.env.AIBRAIN_MINIMUM_FREE_BYTES = previousMinimumFreeBytes;
     if (previousMinimumFreeRatio === undefined) delete process.env.AIBRAIN_MINIMUM_FREE_RATIO;
     else process.env.AIBRAIN_MINIMUM_FREE_RATIO = previousMinimumFreeRatio;
+    if (previousMaximumActiveUploads === undefined) delete process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS;
+    else process.env.AIBRAIN_DOCUMENT_MAX_ACTIVE_UPLOADS = previousMaximumActiveUploads;
+    if (previousWorstCaseActiveBytes === undefined) delete process.env.AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES;
+    else process.env.AIBRAIN_DOCUMENT_WORST_CASE_ACTIVE_BYTES = previousWorstCaseActiveBytes;
     await rm(root, { recursive: true, force: true });
   });
 
@@ -139,6 +149,10 @@ describe("authenticated document routes", () => {
     };
     const preview = await previewRoute.GET(new Request("http://localhost/preview"), previewContext);
     expect(preview.status).toBe(200);
+    expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(preview.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(preview.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    expect(preview.headers.get("Referrer-Policy")).toBe("no-referrer");
     expect(preview.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(await preview.text()).toBe("Private document\n");
 

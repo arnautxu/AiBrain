@@ -2,8 +2,9 @@
 
 import NextImage from "next/image";
 import { ArrowClockwise, CaretRight, Check, Copy, Eye, FileCode, Trash, WarningCircle } from "@phosphor-icons/react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { ActivityFileChange } from "@/lib/chat-contract";
+import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
 
 type WorkspaceFile = {
   path: string;
@@ -60,6 +61,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
   const [preview, setPreview] = useState<WorkspaceFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const handlePdfError = useCallback(() => setError("No se ha podido cargar el PDF privado."), []);
 
   const loadPreview = async () => {
     setLoading(true);
@@ -147,7 +149,12 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
                   <NextImage unoptimized width={1280} height={960} src={preview.previewUrl} alt={`Vista previa de ${preview.name}`} className="mx-auto max-h-[420px] w-auto rounded-md border border-[var(--border)] bg-white object-contain shadow-[var(--shadow-sm)]" />
                 </div>
               ) : preview.kind === "pdf" && preview.previewUrl ? (
-                <iframe title={`Vista previa de ${preview.name}`} src={preview.previewUrl} className="h-[420px] w-full bg-white" />
+                <AuthenticatedPdfPreview
+                  previewUrl={preview.previewUrl}
+                  title={`Vista previa de ${preview.name}`}
+                  className="h-[420px] w-full bg-white"
+                  onError={handlePdfError}
+                />
               ) : null}
             </>
           ) : null}

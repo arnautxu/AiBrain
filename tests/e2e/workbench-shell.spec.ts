@@ -2,8 +2,8 @@ import { expect, test, type Page } from "@playwright/test";
 
 const northwind = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa";
 const accountName = northwind ? "Taylor" : "Alex";
-const productName = northwind ? "Northwind Brain" : "Example Brain";
-const primaryProject = "AiBrain";
+const productName = northwind ? "Northwind AI" : "Example AI";
+const primaryProject = northwind ? "Operacions" : "Espacio principal";
 
 async function login(page: Page) {
   await page.goto("/login");
@@ -22,7 +22,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByTestId("composer")).toBeVisible();
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Tareas programadas" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Automatizaciones" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
@@ -37,7 +37,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("heading", { name: "Nuevo proyecto" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
 
-  await expect(page.getByText("Trabajar", { exact: true })).toBeVisible();
+  await expect(page.getByText("Trabajar", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Modo del turno" })).toHaveCount(0);
   await expect(page.getByLabel("Destino de la conversación")).toContainText(primaryProject);
   await expect(page.getByTestId("project-breadcrumb")).toContainText(primaryProject);
@@ -66,8 +66,6 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await page.keyboard.press("Meta+K");
   const search = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeVisible();
-  await expect(search.getByRole("option", { name: /Abrir cambios y resultados/ })).toBeVisible();
-  await expect(search.getByRole("option", { name: /Abrir navegador/ })).toBeVisible();
   await search.getByRole("textbox").fill(primaryProject);
   await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");

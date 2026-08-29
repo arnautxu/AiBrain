@@ -126,6 +126,12 @@ COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/tsconfig.json ./tsconfig.json
+COPY --from=builder --chown=root:root /app/scripts/run-automations.ts ./scripts/run-automations.ts
+# The dedicated automation worker is intentionally launched outside Next's
+# standalone server. Keep its reviewed TypeScript dependency graph in the
+# immutable image so it can share the installation volume without mounting the
+# mutable source checkout into production.
+COPY --from=builder --chown=root:root /app/src ./src
 COPY --from=builder --chown=root:root /app/scripts/backup.ts ./scripts/backup.ts
 COPY --from=builder --chown=root:root /app/scripts/replicate-backup.ts ./scripts/replicate-backup.ts
 COPY --from=builder --chown=root:root /app/scripts/run-operational-alerts.ts ./scripts/run-operational-alerts.ts
@@ -159,6 +165,7 @@ COPY --chown=root:root infra/hetzner/app/alerts.sh /usr/local/bin/aibrain-alerts
 COPY --chown=root:root infra/hetzner/app/alert-controller.sh /usr/local/bin/aibrain-alert-controller
 COPY --chown=root:root infra/hetzner/app/document-maintenance.sh /usr/local/bin/aibrain-document-maintenance
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
+COPY --chown=root:root infra/hetzner/app/automation-worker-healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs
 COPY --chown=root:root infra/hetzner/app/configure-egress.mjs /usr/local/share/aibrain/configure-egress.mjs
 RUN chmod 0755 \
   /usr/local/bin/aibrain-entrypoint \
@@ -174,7 +181,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-alerts \
   /usr/local/bin/aibrain-alert-controller \
   /usr/local/bin/aibrain-document-maintenance \
-  && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs \
+  && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
   && chmod -R a-w /app /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
 

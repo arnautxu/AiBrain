@@ -39,7 +39,7 @@ test("keyboard dialogs trap focus, close with Escape and restore their opener", 
   const searchTrigger = page.getByRole("button", { name: "Buscar" });
   await searchTrigger.click();
   const palette = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
-  const search = page.getByRole("textbox", { name: "Buscar proyectos, conversaciones y acciones" });
+  const search = page.getByRole("textbox", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeFocused();
   await page.keyboard.press("Shift+Tab");
   await expect(palette.getByRole("option").last()).toBeFocused();
