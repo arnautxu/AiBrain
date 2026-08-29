@@ -71,6 +71,7 @@ requireMatch(arnallDeployGateway, /validate_archive[\s\S]{0,1500}source archive 
 requireMatch(arnallDeployGateway, /tar --extract.*--no-same-owner/u, "Arnall deploy gateway does not retain reviewed modes while refusing archive ownership");
 requireMatch(arnallDeployGateway, /dd if=\/dev\/stdin.*iflag=fullblock/u, "Arnall deploy gateway can truncate a streamed archive on short pipe reads");
 requireMatch(arnallDeployGateway, /reclaim_unreferenced_dangling_images[\s\S]{0,2000}free_bytes="\$\(df --output=avail/u, "Arnall deploy gateway does not reclaim unreferenced dangling images before the bounded build headroom check");
+requireMatch(arnallDeployGateway, /reclaim_unused_build_cache\(\)[\s\S]{0,100}docker buildx prune --all --force[\s\S]{0,10000}free_bytes="\$\(df --output=avail/u, "Arnall deploy gateway does not reclaim unused BuildKit cache before the bounded build headroom check");
 requireMatch(arnallDeployGateway, /docker push "\$egress_tag"[\s\S]{0,1200}remove_new_dangling_images "\$dangling_before"/u, "Arnall deploy gateway does not reclaim its new intermediates before health-gated promotion");
 requireMatch(arnallDeployGateway, /bash -n "\$\{release_dir\}\/infra\/hetzner\/app\/deploy-arnall-main\.sh"[\s\S]{0,240}\/usr\/local\/sbin\/aibrain-deploy-gateway/u, "Arnall deploy gateway does not install the validated versioned gateway after promotion");
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");

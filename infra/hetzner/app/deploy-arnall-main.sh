@@ -116,6 +116,10 @@ reclaim_unreferenced_dangling_images() {
   done < <(docker image ls --filter dangling=true --quiet --no-trunc | sort -u)
 }
 
+reclaim_unused_build_cache() {
+  docker buildx prune --all --force >/dev/null
+}
+
 sync_company_context() {
   local source="$1" file temporary
   install -d -m 0700 -o root -g root "$CONTEXT_ROOT"
@@ -183,6 +187,7 @@ deploy_release() {
   fi
 
   reclaim_unreferenced_dangling_images
+  reclaim_unused_build_cache
   free_bytes="$(df --output=avail -B1 / | tail -n 1 | tr -d ' ')"
   [[ "$free_bytes" =~ ^[0-9]+$ && "$free_bytes" -ge "$MIN_FREE_BYTES" ]] || fail "insufficient free disk for a bounded image build"
 
