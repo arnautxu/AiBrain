@@ -629,19 +629,15 @@ function stopAutomationWorkerIfRunning(options, release, deadline) {
 }
 
 function waitUntilHealthy(options, release, service, deadline) {
-  let containerId = "";
+  const containerId = runDocker(
+    options,
+    composeArgs(options, release, "ps", "-q", service),
+    remainingDockerTimeout(options, deadline),
+  );
+  if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
+    throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
+  }
   while (performance.now() <= deadline) {
-    containerId = runDocker(
-      options,
-      composeArgs(options, release, "ps", "-q", service),
-      remainingDockerTimeout(options, deadline),
-      [1],
-    );
-    if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
-      const waitMs = Math.min(500, Math.max(0, deadline - performance.now()));
-      if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
-      continue;
-    }
     const state = runDocker(
       options,
       ["inspect", "--format", "{{.State.Status}} {{.State.Health.Status}}", containerId],
@@ -656,9 +652,6 @@ function waitUntilHealthy(options, release, service, deadline) {
     // only a terminal container state fails immediately.
     const waitMs = Math.min(500, Math.max(0, deadline - performance.now()));
     if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs);
-  }
-  if (!/^[a-f0-9]{12,64}$/u.test(containerId)) {
-    throw new ReleaseError("RELEASE_CONTAINER_INVALID", `Compose did not return the ${service} container ID.`);
   }
   throw new ReleaseError("RELEASE_HEALTH_FAILED", `${service} did not become healthy before the release deadline.`);
 }
@@ -700,19 +693,12 @@ function deploy(options, release, deadline = performance.now() + options.healthT
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      ...managedServiceSet(false),
+      ...managedServiceSet(options.automationWorkerEnabled),
     ),
     remainingDockerTimeout(options, deadline),
   );
   waitUntilHealthy(options, release, "egress-gateway", deadline);
-  if (options.automationWorkerEnabled) {
-    runDocker(
-      options,
-      composeArgs(options, release, "up", "-d", "--force-recreate", "--no-deps", "automation-worker"),
-      remainingDockerTimeout(options, deadline),
-    );
-    waitUntilHealthy(options, release, "automation-worker", deadline);
-  }
+  if (options.automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
   waitUntilHealthy(options, release, "alert-dispatcher", deadline);
