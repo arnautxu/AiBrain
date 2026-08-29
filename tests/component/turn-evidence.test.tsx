@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ToolResultList } from "@/components/tool-result-list";
 import { TurnSourceChips, TurnSourceList } from "@/components/turn-sources";
@@ -16,8 +16,12 @@ afterEach(cleanup);
 describe("turn evidence UI", () => {
   it("renders an accessible inline citation and detailed source", () => {
     render(<><TurnSourceChips sources={[source]} /><TurnSourceList sources={[source]} /></>);
-    expect(screen.getByRole("region", { name: "Fuentes de la respuesta" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Abrir fuente 1: Informe oficial" })).toHaveAttribute("href", source.url);
+    const region = screen.getByRole("region", { name: "Fuentes de la respuesta" });
+    const disclosure = region.querySelector("details");
+    expect(disclosure).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("Fuentes"));
+    expect(disclosure).toHaveAttribute("open");
+    expect(screen.getAllByRole("link", { name: "Abrir fuente 1: Informe oficial" })[0]).toHaveAttribute("href", source.url);
     expect(screen.getByText("Cifra publicada")).toBeInTheDocument();
   });
 

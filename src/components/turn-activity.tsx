@@ -238,7 +238,7 @@ export function TurnActivity({
   } | null>(null);
   const executionOpen = manualDisclosure?.status === message.status
     ? manualDisclosure.open
-    : compact || streaming;
+    : false;
 
   const hasDetails = message.plan.length > 0 || message.activity.length > 0 || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);

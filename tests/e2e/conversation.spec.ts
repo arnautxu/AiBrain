@@ -32,13 +32,29 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 
+  await composer.evaluate((element) => {
+    const transfer = new DataTransfer();
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
+    transfer.items.add(new File([bytes], "arrastrada.png", { type: "image/png" }));
+    element.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
+  });
+  const dropSurface = page.getByRole("button", { name: "Adjuntar un archivo" });
+  await expect(dropSurface).toBeVisible();
+  await dropSurface.evaluate((element) => {
+    const transfer = new DataTransfer();
+    const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
+    transfer.items.add(new File([bytes], "arrastrada.png", { type: "image/png" }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  });
+  await expect(page.getByText("arrastrada.png")).toBeVisible();
+
   await page.getByLabel("Seleccionar archivos para adjuntar").setInputFiles({
     name: "informe.png",
     mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=", "base64"),
   });
   await expect(page.getByText("informe.png")).toBeVisible();
-  await expect(page.getByText(/Lista ·/)).toBeVisible();
+  await expect(page.getByText(/Lista ·/)).toHaveCount(2);
 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   const userMessage = page.locator("article.flex.justify-end").filter({ hasText: "Primera línea" });
@@ -127,9 +143,10 @@ test("the existing chat route streams a complete turn and persists it in preview
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
   const liveActivity = page.getByTestId("turn-thinking-steps").last();
-  const liveActivityTrigger = liveActivity.getByRole("button", { name: "Ocultar el proceso de trabajo" });
-  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "true");
+  const liveActivityTrigger = liveActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(liveActivityTrigger.locator(".thinking-steps-shimmer")).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
+  await liveActivityTrigger.click();
   await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });

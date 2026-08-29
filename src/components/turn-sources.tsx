@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarBlank, File, Globe, LinkSimple } from "@phosphor-icons/react";
+import { BookOpenText, CalendarBlank, CaretDown, File, Globe, LinkSimple } from "@phosphor-icons/react";
 import type { TurnSource } from "@/lib/chat-contract";
 
 function sourceLabel(source: TurnSource) {
@@ -17,24 +17,34 @@ export function TurnSourceChips({ sources }: { sources: readonly TurnSource[] })
   if (sources.length === 0) return null;
   return (
     <section aria-label="Fuentes de la respuesta" className="mt-4">
-      <h3 className="mb-2 text-[12px] font-semibold text-[var(--text-secondary)]">Fuentes</h3>
-      <div className="flex flex-wrap gap-2">
-        {sources.map((source, index) => {
-          const content = (
-            <>
-              <span className="grid size-5 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-secondary)]">{sourceIcon(source, 12)}</span>
-              <span className="max-w-48 truncate">{source.title}</span>
-              <span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{index + 1}</span>
-            </>
-          );
-          const className = "inline-flex min-h-9 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-2.5 py-1.5 text-[11px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)]";
-          return source.url ? (
-            <a key={source.id} href={source.url} target="_blank" rel="noreferrer" className={className} aria-label={`Abrir fuente ${index + 1}: ${source.title}`}>{content}</a>
-          ) : (
-            <span key={source.id} className={className} aria-label={`Fuente ${index + 1}: ${source.title}`}>{content}</span>
-          );
-        })}
-      </div>
+      <details className="group/sources">
+        <summary className="-ml-1 flex min-h-8 w-fit cursor-pointer list-none items-center gap-2 rounded-lg px-1 text-[12px] font-medium text-[var(--text-muted)] outline-none transition-colors hover:text-[var(--text)] focus-visible:ring-2 focus-visible:ring-[var(--focus)]">
+          <BookOpenText size={15} />
+          <span>Fuentes</span>
+          <span className="rounded-full bg-[var(--surface-muted)] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">{sources.length}</span>
+          <CaretDown size={13} className="transition-transform duration-150 group-open/sources:rotate-180" />
+        </summary>
+        <ol className="mt-1 grid gap-0.5" aria-label="Lista de fuentes de la respuesta">
+          {sources.map((source, index) => {
+            const content = (
+              <>
+                <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-secondary)]">{sourceIcon(source, 13)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] font-medium text-[var(--text)]">{source.title}</span>
+                  <span className="block truncate text-[10px] text-[var(--text-subtle)]">{sourceLabel(source)}</span>
+                </span>
+                <span className="grid size-5 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)] text-[10px] font-semibold tabular-nums text-[var(--text-muted)]">{index + 1}</span>
+              </>
+            );
+            const className = "group/source flex min-h-10 items-center gap-2 rounded-lg px-1.5 py-1 outline-none transition-colors hover:bg-[var(--surface-hover)] focus-visible:ring-2 focus-visible:ring-[var(--focus)]";
+            return <li key={source.id}>{source.url ? (
+              <a href={source.url} target="_blank" rel="noreferrer" className={className} aria-label={`Abrir fuente ${index + 1}: ${source.title}`}>{content}</a>
+            ) : (
+              <div className={className} aria-label={`Fuente ${index + 1}: ${source.title}`}>{content}</div>
+            )}</li>;
+          })}
+        </ol>
+      </details>
     </section>
   );
 }

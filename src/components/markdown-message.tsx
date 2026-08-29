@@ -5,7 +5,8 @@ import { Check, Copy } from "@phosphor-icons/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-const STREAM_GAP_FALLBACK_MS = 60;
+const STREAM_GAP_FALLBACK_MS = 16;
+const MIN_STREAM_BURST_WORDS = 4;
 
 function getStreamGapMs() {
   const value = window.getComputedStyle(document.documentElement).getPropertyValue("--stream-gap").trim();
@@ -23,14 +24,18 @@ function useVisibleStreamWords(content: string, streaming: boolean) {
   const [visibleWordCount, setVisibleWordCount] = useState(() => streaming ? 0 : wordCount);
 
   useEffect(() => {
-    if (!streaming) return;
+    if (!streaming || visibleWordCount >= wordCount) return;
 
-    const timer = window.setInterval(() => {
-      setVisibleWordCount((current) => current < wordCount ? current + 1 : current);
+    const timer = window.setTimeout(() => {
+      setVisibleWordCount((current) => {
+        const remaining = wordCount - current;
+        if (remaining <= 0) return current;
+        return Math.min(wordCount, current + Math.max(MIN_STREAM_BURST_WORDS, Math.ceil(remaining / 2)));
+      });
     }, getStreamGapMs());
 
-    return () => window.clearInterval(timer);
-  }, [streaming, wordCount]);
+    return () => window.clearTimeout(timer);
+  }, [streaming, visibleWordCount, wordCount]);
 
   return visibleWordCount;
 }

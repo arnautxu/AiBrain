@@ -141,10 +141,10 @@ describe("Sidebar", () => {
     const productChats = screen.getByLabelText("Chats de Producto");
     const standaloneChats = screen.getByRole("region", { name: "Chats" });
 
-    expect(within(operationsChats).getByText("Plan semanal")).toBeInTheDocument();
+    expect(within(operationsChats).getByRole("button", { name: "Plan semanal" })).toBeInTheDocument();
     expect(within(operationsChats).queryByText("Roadmap")).not.toBeInTheDocument();
-    expect(within(productChats).getByText("Roadmap")).toBeInTheDocument();
-    expect(within(standaloneChats).getByText("Recordatorio personal")).toBeInTheDocument();
+    expect(within(productChats).getByRole("button", { name: "Roadmap" })).toBeInTheDocument();
+    expect(within(standaloneChats).getByRole("button", { name: "Recordatorio personal" })).toBeInTheDocument();
     expect(within(standaloneChats).queryByText("Plan semanal")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación en Operaciones" }));

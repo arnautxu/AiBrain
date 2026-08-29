@@ -36,6 +36,7 @@ import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
+import { FileUpload } from "@/components/base/file-upload/file-upload";
 import { VoiceDictationControl } from "@/components/voice-controls";
 import { StreamRecoveryBanner } from "@/components/stream-recovery-banner";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
@@ -586,7 +587,15 @@ export function ChatWorkspace({
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending && !documentUploading) void addFiles(event.dataTransfer.files); }}
           >
-            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta los archivos para adjuntarlos</div> : null}
+            {dragActive ? (
+              <div className="absolute inset-1 z-20 overflow-hidden rounded-[20px] bg-[var(--surface-raised)]/98">
+                <FileUpload
+                  allowedExtensions={["pdf", "doc", "docx", "txt", "md", "csv", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "gif"]}
+                  maxBytes={25 * 1024 * 1024}
+                  className="h-full min-h-[112px] rounded-[20px]"
+                />
+              </div>
+            ) : null}
             {composerMenuOpen ? (
               <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
