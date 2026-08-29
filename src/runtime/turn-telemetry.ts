@@ -12,6 +12,13 @@ export type TurnTelemetryCorrelation = Readonly<{
 
 export type TurnTelemetryTerminal = "completed" | "error" | "stopped";
 export type TurnTelemetryLifecycle = "resumed" | "reconnected" | "disconnected" | "cancel_requested";
+export type TurnTelemetryPhase =
+  | "memory"
+  | "worker"
+  | "catalog"
+  | "skills"
+  | "thread"
+  | "turn_start";
 
 export type TurnTelemetrySnapshot = Readonly<{
   serverFirstDeltaMs: number | null;
@@ -104,6 +111,26 @@ export class TurnTelemetry {
       this.interDeltaMs.push(Math.max(0, Math.round(observedAt - this.previousDeltaAt)));
     }
     this.previousDeltaAt = observedAt;
+  }
+
+  async measure<T>(phase: TurnTelemetryPhase, operation: () => Promise<T>): Promise<T> {
+    const phaseStartedAt = this.now();
+    let outcome: "completed" | "error" = "completed";
+    try {
+      return await operation();
+    } catch (error) {
+      outcome = "error";
+      throw error;
+    } finally {
+      this.options.logger.info("codex.turn_phase", {
+        metricSchemaVersion: 1,
+        ...this.attributes(),
+        phase,
+        outcome,
+        phaseMs: elapsedMs(phaseStartedAt, this.now),
+        requestElapsedMs: elapsedMs(this.startedAt, this.now),
+      });
+    }
   }
 
   finish(terminal: TurnTelemetryTerminal): TurnTelemetrySnapshot {

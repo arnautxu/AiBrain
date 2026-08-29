@@ -114,10 +114,23 @@ describe("shared project visibility", () => {
     const snapshot = await loadSharedWorkbench(memberSession);
     expect(snapshot.projects.some((item) => item.id === project.id)).toBe(true);
     expect(snapshot.threads.some((item) => item.projectId === project.id)).toBe(true);
+
+    const index = new FileSharedAccessIndex({
+      dataRoot: installation.paths.dataRoot,
+      installationId: installation.installationId,
+    });
+    await loadSharedWorkbench(ownerSession);
+    const syncCountBefore = (await index.readAudit())
+      .filter((entry) => entry.payload.action === "sync").length;
+    await loadSharedWorkbench(ownerSession);
+    const syncCountAfter = (await index.readAudit())
+      .filter((entry) => entry.payload.action === "sync").length;
+    expect(syncCountAfter).toBe(syncCountBefore);
+
     await expect(resolveProjectAccess({ ...memberSession, user: { ...memberSession.user, email: "other@example.com" } }, project.id))
       .rejects.toThrow("Projecte no trobat");
 
-    const audit = await new FileSharedAccessIndex({ dataRoot: installation.paths.dataRoot, installationId: installation.installationId }).readAudit();
+    const audit = await index.readAudit();
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "denied" && entry.payload.actorUserId === outsiderId)).toBe(true);
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
   });

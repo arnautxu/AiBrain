@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocked = vi.hoisted(() => ({
   connectionSummary: vi.fn(),
   capabilities: vi.fn(),
+  prewarmConnection: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -27,6 +28,7 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
     client: {
       connectionSummary: mocked.connectionSummary,
       capabilities: mocked.capabilities,
+      prewarmConnection: mocked.prewarmConnection,
     },
   })),
 }));
@@ -69,5 +71,8 @@ describe("runtime status capability exposure", () => {
       capabilities: { webSearch: true },
     });
     expect(mocked.capabilities).toHaveBeenCalledOnce();
+    expect(mocked.prewarmConnection).toHaveBeenCalledWith(
+      "/tmp/aibrain-runtime-status-route/projects/default",
+    );
   });
 });

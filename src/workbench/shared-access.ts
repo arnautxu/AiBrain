@@ -54,6 +54,31 @@ async function ownAccessContext(session: AuthSession) {
   return { ...context, store, own, index };
 }
 
+type OwnAccessContext = Awaited<ReturnType<typeof ownAccessContext>>;
+
+async function loadSharedWorkbenchFromContext(
+  context: OwnAccessContext,
+): Promise<WorkbenchSnapshot> {
+  const { principal, store, own, index } = context;
+  const grants = await index.listProjectsForPrincipal(principal);
+  const projects = [...own.projects];
+  const threads = [...own.threads];
+  const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
+  const sharedSnapshots = await Promise.all([...byOwner].map(async ([ownerUserId, ownerGrants]) => {
+    const snapshot = await store.load(ownerUserId);
+    const sharedIds = new Set(ownerGrants.map((grant) => grant.projectId));
+    return {
+      projects: snapshot.projects.filter((project) => sharedIds.has(project.id)),
+      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId)),
+    };
+  }));
+  for (const snapshot of sharedSnapshots) {
+    projects.push(...snapshot.projects);
+    threads.push(...snapshot.threads);
+  }
+  return { persistence: "filesystem", projects, threads };
+}
+
 export async function syncOwnSharedAccess(session: AuthSession) {
   await ownAccessContext(session);
 }
@@ -100,12 +125,21 @@ export async function resolveProjectAccess(session: AuthSession, projectId: stri
 }
 
 export async function resolveThreadAccess(session: AuthSession, threadId: string) {
-  const { principal, store, own, index } = await ownAccessContext(session);
+  const context = await ownAccessContext(session);
+  const { principal, store, own, index } = context;
   const ownThread = own.threads.find((item) => item.id === threadId);
   if (ownThread) {
     const ownProject = own.projects.find((item) => item.id === ownThread.projectId);
     if (ownProject) {
-      return { store, ownerUserId: principal.userId, role: "owner" as const, project: ownProject, thread: ownThread, provenance: null };
+      return {
+        store,
+        ownerUserId: principal.userId,
+        role: "owner" as const,
+        project: ownProject,
+        thread: ownThread,
+        provenance: null,
+        context,
+      };
     }
   }
 
@@ -126,22 +160,18 @@ export async function resolveThreadAccess(session: AuthSession, threadId: string
       projectUpdatedAt: grant.projectUpdatedAt,
       indexedAt: grant.indexedAt,
     } satisfies SharedAccessProvenance,
+    context,
   };
 }
 
+export function loadSharedWorkbenchForResolvedThread(
+  access: Awaited<ReturnType<typeof resolveThreadAccess>>,
+) {
+  return loadSharedWorkbenchFromContext(access.context);
+}
+
 export async function loadSharedWorkbench(session: AuthSession): Promise<WorkbenchSnapshot> {
-  const { principal, store, own, index } = await ownAccessContext(session);
-  const grants = await index.listProjectsForPrincipal(principal);
-  const projects = [...own.projects];
-  const threads = [...own.threads];
-  const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
-  for (const [ownerUserId, ownerGrants] of byOwner) {
-    const snapshot = await store.load(ownerUserId);
-    const sharedIds = new Set(ownerGrants.map((grant) => grant.projectId));
-    projects.push(...snapshot.projects.filter((project) => sharedIds.has(project.id)));
-    threads.push(...snapshot.threads.filter((thread) => sharedIds.has(thread.projectId)));
-  }
-  return { persistence: "filesystem", projects, threads };
+  return loadSharedWorkbenchFromContext(await ownAccessContext(session));
 }
 
 export async function normalizeProjectMembers(session: AuthSession, project: WorkbenchProject) {

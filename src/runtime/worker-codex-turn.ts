@@ -342,17 +342,20 @@ export async function runWorkerCodexTurn(
   };
 
   await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
-  const preparedMemory = await prepareTurnMemory(memory, {
+  const preparedMemory = await telemetry.measure("memory", () => prepareTurnMemory(memory, {
     installationId,
     userId: authenticatedUserId,
     projectId: chatRequest.projectId,
     turnId: chatRequest.assistantMessageId,
     permissionFingerprint: permissions.fingerprint,
-  });
+  }));
   await completeRuntimePhase("runtime-context", { label: "Context preparat" });
   await setRuntimePhase("runtime-connect", "Connectant amb Codex", "Worker privat i sessió d’App Server");
 
-  const runtime = await workerAppServerForUser(authenticatedUserId, maintenanceActivity);
+  const runtime = await telemetry.measure(
+    "worker",
+    () => workerAppServerForUser(authenticatedUserId, maintenanceActivity),
+  );
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
   }
@@ -380,7 +383,10 @@ export async function runWorkerCodexTurn(
     uploadedDocuments,
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
-  const account = await runtime.client.connection(projectWorkspace);
+  const account = await telemetry.measure(
+    "catalog",
+    () => runtime.client.connection(projectWorkspace),
+  );
   if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
   await completeRuntimePhase("runtime-connect", {
     label: "Codex connectat",
@@ -412,7 +418,7 @@ export async function runWorkerCodexTurn(
     throw new Error("La generació d’imatges no està disponible en aquest runtime.");
   }
   const selectedSkill = chatRequest.options.skill
-    ? (await runtime.client.resolvedSkills(projectWorkspace))
+    ? (await telemetry.measure("skills", () => runtime.client.resolvedSkills(projectWorkspace)))
       .find((skill) => skill.id === chatRequest.options.skill) ?? null
     : null;
   if (chatRequest.options.skill && !selectedSkill) {
@@ -501,17 +507,17 @@ export async function runWorkerCodexTurn(
     runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
     runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
   );
-  const threadResult = runtimeThreadId
-    ? await runtime.client.request("thread/resume", {
+  const threadResult = await telemetry.measure("thread", () => runtimeThreadId
+    ? runtime.client.request("thread/resume", {
         threadId: runtimeThreadId,
         ...commonThreadParams,
       }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
-    : await runtime.client.request("thread/start", {
+    : runtime.client.request("thread/start", {
         ...commonThreadParams,
         dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
         ephemeral: false,
         serviceName: "aibrain_workbench",
-      }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity);
+      }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
   telemetry.bindRuntimeThread(threadId);
@@ -948,7 +954,7 @@ export async function runWorkerCodexTurn(
       );
       let turnResult: JsonValue;
       try {
-        turnResult = await runtime.client.request("turn/start", {
+        turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", {
       threadId,
       clientUserMessageId: chatRequest.userMessageId,
       input: [
@@ -1000,7 +1006,7 @@ export async function runWorkerCodexTurn(
         if (turnSignal.aborted && !remoteInterruptConfirmed) {
           await confirmRemoteInterrupt();
         }
-      }, maintenanceActivity);
+      }, maintenanceActivity));
       } catch (error) {
         if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "turn/start") throw error;
         await setRuntimePhase(

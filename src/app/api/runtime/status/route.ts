@@ -85,6 +85,7 @@ export async function GET(request: Request) {
           worker.client.connectionSummary(),
           worker.client.capabilities(),
         ]);
+        worker.client.prewarmConnection(workspace);
         return { connection: { ...connection, ...capabilities }, workspace };
       })());
       workerWorkspace = runtimeConnection.workspace;

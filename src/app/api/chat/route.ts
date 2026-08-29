@@ -27,10 +27,9 @@ import { FileApprovalStore } from "@/runtime/approval-store";
 import { readThreadToken } from "@/runtime/thread-token";
 import { workbenchErrorResponse } from "@/workbench/http";
 import {
-  beginThreadTurn,
   finishThreadTurn,
-  getThreadRuntimeContext,
   isBrowserPreviewWorkbench,
+  prepareThreadTurn,
 } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
@@ -66,6 +65,47 @@ export const runtime = "nodejs";
 const encoder = new TextEncoder();
 const PROJECTION_BATCH_DELAY_MS = 24;
 const PROJECTION_BATCH_MAX_EVENTS = 64;
+
+type ChatSetupPhase =
+  | "feature_policy"
+  | "thread_context"
+  | "maintenance"
+  | "permissions"
+  | "documents"
+  | "turn_persistence"
+  | "projection";
+
+async function measureChatSetup<T>(
+  correlation: Readonly<{
+    installationId: string;
+    userId: string;
+    projectId: string;
+    threadId: string;
+    localTurnId: string;
+  }>,
+  phase: ChatSetupPhase,
+  requestStartedAt: number,
+  operation: () => Promise<T>,
+) {
+  const phaseStartedAt = performance.now();
+  let outcome: "completed" | "error" = "completed";
+  try {
+    return await operation();
+  } catch (error) {
+    outcome = "error";
+    throw error;
+  } finally {
+    const completedAt = performance.now();
+    operationalLogger.info("chat.request_phase", {
+      metricSchemaVersion: 1,
+      ...correlation,
+      phase,
+      outcome,
+      phaseMs: Math.max(0, Math.round(completedAt - phaseStartedAt)),
+      requestElapsedMs: Math.max(0, Math.round(completedAt - requestStartedAt)),
+    });
+  }
+}
 
 function line(event: ChatStreamEvent) {
   return encoder.encode(`${JSON.stringify(event)}\n`);
@@ -220,6 +260,7 @@ function followProjectedTurn(
 }
 
 export async function POST(request: Request) {
+  const requestStartedAt = performance.now();
   if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
@@ -233,11 +274,23 @@ export async function POST(request: Request) {
     !isUuid(body.userMessageId) || !isUuid(body.assistantMessageId)) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
+  const setupCorrelation = {
+    installationId: session.tenant.id,
+    userId: session.user.id,
+    projectId: body.projectId,
+    threadId: body.threadId,
+    localTurnId: body.assistantMessageId,
+  };
 
   const requestsControlledFeature = body.options.webSearch || body.options.imageGeneration || Boolean(body.options.skill);
   if (requestsControlledFeature) {
     try {
-      const featurePolicy = await featurePolicyForUser(session);
+      const featurePolicy = await measureChatSetup(
+        setupCorrelation,
+        "feature_policy",
+        requestStartedAt,
+        () => featurePolicyForUser(session),
+      );
       const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
         ? "búsqueda web"
         : body.options.imageGeneration && !featurePolicy["image-generation"]
@@ -259,6 +312,7 @@ export async function POST(request: Request) {
 
   const browserPreview = isBrowserPreviewWorkbench();
   let persistent = !browserPreview;
+  let preparedPersistentTurn: Awaited<ReturnType<typeof prepareThreadTurn>> | null = null;
   let context: {
     projectId: string;
     projectName: string;
@@ -285,7 +339,13 @@ export async function POST(request: Request) {
     };
   } else {
     try {
-      context = await getThreadRuntimeContext(session, body.threadId);
+      preparedPersistentTurn = await measureChatSetup(
+        setupCorrelation,
+        "thread_context",
+        requestStartedAt,
+        () => prepareThreadTurn(session, body.threadId),
+      );
+      context = preparedPersistentTurn.context;
     } catch (error) {
       return workbenchErrorResponse(error, "No s’ha pogut resoldre el fil persistent.");
     }
@@ -308,7 +368,12 @@ export async function POST(request: Request) {
   let maintenanceActivity: MaintenanceActivityLease | null = null;
   if (config.mode === "codex") {
     try {
-      maintenanceActivity = await acquireWorkerTurnActivity();
+      maintenanceActivity = await measureChatSetup(
+        setupCorrelation,
+        "maintenance",
+        requestStartedAt,
+        () => acquireWorkerTurnActivity(),
+      );
     } catch (error) {
       if (error instanceof MaintenanceModeError) {
         return NextResponse.json(
@@ -341,14 +406,23 @@ export async function POST(request: Request) {
   let assistantName = "AiBrain";
   if (config.mode === "codex") {
     try {
-      const installation = await loadInstallationConfig();
+      const { installation, permissions } = await measureChatSetup(
+        setupCorrelation,
+        "permissions",
+        requestStartedAt,
+        async () => {
+          const resolvedInstallation = await loadInstallationConfig();
+          const resolvedPermissions = await resolveServerTurnPermissions(resolvedInstallation, {
+            installationId: session.tenant.id,
+            userId: session.user.id,
+            projectId: context.projectId,
+            turnId: body.assistantMessageId,
+          });
+          return { installation: resolvedInstallation, permissions: resolvedPermissions };
+        },
+      );
       assistantName = installation.branding.productName;
-      turnPermissions = await resolveServerTurnPermissions(installation, {
-        installationId: session.tenant.id,
-        userId: session.user.id,
-        projectId: context.projectId,
-        turnId: body.assistantMessageId,
-      });
+      turnPermissions = permissions;
       approvalStore = new FileApprovalStore({
         installationId: installation.installationId,
         userId: session.user.id,
@@ -369,20 +443,27 @@ export async function POST(request: Request) {
       };
       const documentUploadIds = body.options.documentUploadIds ?? [];
       if (documentUploadIds.length > 0) {
-        const documentServices = await documentServicesForUser(installation, session.user.id);
-        turnDocuments = await resolveTurnDocumentAttachments({
-          staging: documentServices.staging,
-          threadId: body.threadId,
-          uploadIds: documentUploadIds,
-          permissions: turnPermissions,
-          signal: request.signal,
-          inputResolver: new ServerTurnDocumentInputResolver({
-            stagingRoot: documentServices.manifest.roots.staging,
-            previews: documentServices.previews,
-            pdftotext: documentServices.toolchain.pdftotext,
-            conversionGate: documentServices.conversionGate,
-          }),
-        });
+        turnDocuments = await measureChatSetup(
+          setupCorrelation,
+          "documents",
+          requestStartedAt,
+          async () => {
+            const documentServices = await documentServicesForUser(installation, session.user.id);
+            return resolveTurnDocumentAttachments({
+              staging: documentServices.staging,
+              threadId: body.threadId,
+              uploadIds: documentUploadIds,
+              permissions: turnPermissions!,
+              signal: request.signal,
+              inputResolver: new ServerTurnDocumentInputResolver({
+                stagingRoot: documentServices.manifest.roots.staging,
+                previews: documentServices.previews,
+                pdftotext: documentServices.toolchain.pdftotext,
+                conversionGate: documentServices.conversionGate,
+              }),
+            });
+          },
+        );
       }
     } catch (error) {
       maintenanceActivity?.release();
@@ -445,7 +526,13 @@ export async function POST(request: Request) {
   let turnOutcome: "created" | "existing" = "created";
   if (persistent) {
     try {
-      const begun = await beginThreadTurn(session, body.threadId, userMessage, assistantMessage);
+      if (!preparedPersistentTurn) throw new Error("El torn persistent no està preparat.");
+      const begun = await measureChatSetup(
+        setupCorrelation,
+        "turn_persistence",
+        requestStartedAt,
+        () => preparedPersistentTurn!.begin(userMessage, assistantMessage),
+      );
       turnOutcome = begun.outcome;
       assistantMessage = begun.assistantMessage;
     } catch (error) {
@@ -455,7 +542,12 @@ export async function POST(request: Request) {
   }
   if (persistent && config.mode === "codex" && turnProjectionStore) {
     try {
-      assistantMessage = (await turnProjectionStore.initialize(body.threadId, assistantMessage)).message;
+      assistantMessage = (await measureChatSetup(
+        setupCorrelation,
+        "projection",
+        requestStartedAt,
+        () => turnProjectionStore!.initialize(body.threadId, assistantMessage),
+      )).message;
     } catch (error) {
       maintenanceActivity?.release();
       assistantMessage = {

@@ -23,7 +23,8 @@ import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gatewa
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 
-const CATALOG_TTL_MS = 60_000;
+const CATALOG_FRESH_TTL_MS = 5 * 60_000;
+const CATALOG_STALE_TTL_MS = 30 * 60_000;
 const PENDING_TURN_CANCELLATION_TTL_MS = 5 * 60_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -65,7 +66,10 @@ export class WorkerAppServerClient {
   private initialized: Promise<void> | null = null;
   private account: CodexConnection | null = null;
   private cachedConnection: CodexConnection | null = null;
+  private cachedConnectionCwd: string | null = null;
   private cachedAt = 0;
+  private catalogRefresh: Promise<CodexConnection> | null = null;
+  private catalogRefreshCwd: string | null = null;
 
   constructor(
     readonly handle: WorkerRuntimeHandle,
@@ -136,9 +140,44 @@ export class WorkerAppServerClient {
   async connection(cwd: string, forceRefresh = false): Promise<CodexConnection> {
     await this.initialize();
     if (!this.account) throw new Error("Codex did not return account state.");
-    if (!forceRefresh && this.cachedConnection && Date.now() - this.cachedAt < CATALOG_TTL_MS) {
-      return this.cachedConnection;
+    const cachedForCwd = this.cachedConnection && this.cachedConnectionCwd === cwd
+      ? this.cachedConnection
+      : null;
+    const cacheAge = Date.now() - this.cachedAt;
+    if (!forceRefresh && cachedForCwd && cacheAge < CATALOG_FRESH_TTL_MS) {
+      return cachedForCwd;
     }
+    if (!forceRefresh && cachedForCwd && cacheAge < CATALOG_STALE_TTL_MS) {
+      void this.refreshConnection(cwd).catch(() => undefined);
+      return cachedForCwd;
+    }
+    return this.refreshConnection(cwd);
+  }
+
+  /**
+   * Starts loading the optional catalog without delaying the caller. Runtime
+   * status uses this after the worker account has been verified so the first
+   * real turn normally finds a warm model and skill catalog.
+   */
+  prewarmConnection(cwd: string) {
+    void this.connection(cwd).catch(() => undefined);
+  }
+
+  private refreshConnection(cwd: string): Promise<CodexConnection> {
+    if (this.catalogRefresh) {
+      if (this.catalogRefreshCwd === cwd) return this.catalogRefresh;
+      return this.catalogRefresh.then(() => this.refreshConnection(cwd));
+    }
+    this.catalogRefreshCwd = cwd;
+    this.catalogRefresh = this.loadConnection(cwd).finally(() => {
+      this.catalogRefresh = null;
+      this.catalogRefreshCwd = null;
+    });
+    return this.catalogRefresh;
+  }
+
+  private async loadConnection(cwd: string): Promise<CodexConnection> {
+    if (!this.account) throw new Error("Codex did not return account state.");
     const [modelsResult, skillsResult, capabilitiesResult, rateLimitResult, usageResult] = await Promise.all([
       this.router.request(randomRequest("model/list", { limit: 30, includeHidden: false }, "models"), 10_000).catch(() => null),
       this.router.request(randomRequest("skills/list", { cwds: [cwd], forceReload: false }, "skills"), 10_000).catch(() => null),
@@ -156,6 +195,7 @@ export class WorkerAppServerClient {
       rateLimit: parseRateLimit(rateLimitResult),
       usage: parseUsage(usageResult),
     };
+    this.cachedConnectionCwd = cwd;
     this.cachedAt = Date.now();
     return this.cachedConnection;
   }
