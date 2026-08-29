@@ -437,7 +437,7 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.compose.yaml`, "utf8")).toContain("x-release: A");
     await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const log = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(log.filter((args) => args.includes("up"))).toHaveLength(2);
+    expect(log.filter((args) => args.includes("up"))).toHaveLength(3);
   });
 
   it("restores both images when the egress gateway promotion fails", async () => {
