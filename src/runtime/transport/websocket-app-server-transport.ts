@@ -143,6 +143,12 @@ function eventData(event: unknown) {
   return (event as { data: unknown }).data;
 }
 
+function closeCode(event: unknown) {
+  if (!event || typeof event !== "object" || !("code" in event)) return null;
+  const code = (event as { code: unknown }).code;
+  return typeof code === "number" && Number.isInteger(code) ? code : null;
+}
+
 function safeErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : "WebSocket transport failed.";
   return message
@@ -179,6 +185,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   private durableBacklogTargetSequence = 0;
   private durableBacklogYieldedThrough = 0;
   private reconnectAttempt = 0;
+  private runtimeFailureReconnects = 0;
   private pendingReconnectFloorMs = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private readyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -434,9 +441,31 @@ export class WebSocketAppServerTransport implements AppServerTransport {
       .catch((error: unknown) => this.protocolFailure(error));
   };
 
-  private readonly onClose = () => {
+  private readonly onClose = (event: unknown) => {
     this.detachSocket();
-    if (!this.closeRequested) this.scheduleReconnect();
+    if (this.closeRequested) return;
+    if (closeCode(event) === 1011) {
+      if (this.runtimeFailureReconnects === 0) {
+        this.runtimeFailureReconnects += 1;
+        this.scheduleReconnect();
+        return;
+      }
+      const error = new TransportClosedError(
+        "Worker runtime failed; a fresh worker transport is required.",
+      );
+      this.recordError(error);
+      this.clearTimers();
+      this.closeRequested = true;
+      this.state = "closed";
+      void this.messageChain.finally(() => {
+        this.connectWaiter?.reject(error);
+        this.connectWaiter = null;
+        this.failPending(error);
+        this.eventQueue.close(error);
+      });
+      return;
+    }
+    this.scheduleReconnect();
   };
 
   private readonly onError = () => {

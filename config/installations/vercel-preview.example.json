@@ -5,7 +5,7 @@
   "companySlug": "example-laboratory",
   "publicUrl": "https://aibrain-workbench-preview.vercel.app",
   "branding": {
-    "productName": "Example Brain",
+    "productName": "Example AI",
     "logoPath": "/branding/example-lab/logo.svg",
     "faviconPath": "/branding/example-lab/favicon.svg",
     "accentColor": "#315ee7"

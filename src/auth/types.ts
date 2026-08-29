@@ -7,6 +7,7 @@ export type AuthSession = {
     id: string;
     name: string;
     email: string;
+    avatarUrl?: string | null;
   };
   tenant: {
     id: string;

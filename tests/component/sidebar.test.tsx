@@ -110,17 +110,17 @@ function renderSidebar() {
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("limits primary navigation to new chat, search and scheduled tasks", () => {
+  it("limits primary navigation to new chat, search and automations", () => {
     const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
     fireEvent.click(within(navigation).getByRole("button", { name: /Buscar/ }));
-    fireEvent.click(within(navigation).getByRole("button", { name: "Tareas programadas" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Automatizaciones" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();
     expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
-    expect(within(navigation).queryByText("Tareas")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("Tareas programadas")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("⌘K")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abrir preferencias" })).not.toBeInTheDocument();
   });

@@ -476,7 +476,7 @@ button:disabled {
 }
 
 .chat-empty-state {
-  padding-top: clamp(5rem, 18vh, 10rem);
+  padding-top: clamp(1.5rem, calc(40vh - 18rem), 4.5rem);
   transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -488,6 +488,22 @@ button:disabled {
 
 .chat-empty-composer-dock {
   bottom: calc(100% - clamp(20.75rem, 50vh, 27rem));
+}
+
+@media (max-width: 768px) {
+  .chat-empty-composer-dock {
+    bottom: max(1rem, calc(100% - 34rem));
+  }
+}
+
+@media (max-height: 600px) {
+  .chat-empty-composer-dock {
+    bottom: 1rem;
+  }
+
+  .landing-suggestions {
+    display: none;
+  }
 }
 
 .guided-trace {
@@ -606,6 +622,17 @@ button:disabled {
 
   .composer-shadow [role="menu"] > button {
     min-height: 44px;
+  }
+}
+
+@media (max-width: 359px) {
+  .composer-controls,
+  .composer-controls-end {
+    gap: 0.25rem;
+  }
+
+  .composer-picker-button {
+    padding-inline: 0.25rem;
   }
 }
 

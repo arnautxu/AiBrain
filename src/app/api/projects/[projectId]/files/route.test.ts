@@ -102,6 +102,23 @@ describe("workspace file preview route", () => {
     expect(unauthenticated.status).toBe(401);
   });
 
+  it("serves a valid PDF only through private, non-sniffable response headers", async () => {
+    mocks.readRegularFileWithin.mockResolvedValueOnce(Buffer.from("%PDF-1.7\\n%%EOF\\n"));
+
+    const response = await GET(request("informes/informe.pdf", true), { params: Promise.resolve({ projectId }) });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(response.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    expect(response.headers.get("Referrer-Policy")).toBe("no-referrer");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+
+    mocks.readRegularFileWithin.mockResolvedValueOnce(Buffer.from("not a pdf"));
+    const malformed = await GET(request("informes/informe.pdf", true), { params: Promise.resolve({ projectId }) });
+    expect(malformed.status).toBe(415);
+  });
+
   it("rejects malformed queries before reading the workspace", async () => {
     const response = await GET(
       new Request(`https://brain.example/api/projects/${projectId}/files?path=src%2Fa.ts&path=src%2Fb.ts`),

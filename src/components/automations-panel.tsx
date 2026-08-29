@@ -168,7 +168,7 @@ export function AutomationsPanel({ open, projects, onClose }: {
     <aside ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="automations-title" className="workspace-panel panel-enter relative flex h-full w-full max-w-[580px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]">
       <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-5">
         <CalendarBlank size={19} />
-        <div className="min-w-0 flex-1"><h2 id="automations-title" className="workspace-panel-title text-[var(--text)]">Tareas programadas</h2><p className="workspace-panel-subtitle mt-0.5">Se ejecutan mientras el servicio de AiBrain esté activo.</p></div>
+        <div className="min-w-0 flex-1"><h2 id="automations-title" className="workspace-panel-title text-[var(--text)]">Tareas programadas</h2><p className="workspace-panel-subtitle mt-0.5">Se ejecutan mientras el servicio de la aplicación esté activo.</p></div>
         <button type="button" disabled={!availableProjects.length} onClick={() => openForm(null)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button>
         <button type="button" aria-label="Cerrar automatizaciones" onClick={onClose} className="grid size-9 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><X size={17} /></button>
       </header>

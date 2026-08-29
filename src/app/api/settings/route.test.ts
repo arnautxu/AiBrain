@@ -50,17 +50,28 @@ describe("settings route", () => {
     expect(updateSettings).not.toHaveBeenCalled();
   });
 
-  it("delegates a strict authenticated employee preference", async () => {
-    const result = { schemaVersion: 1, apps: [] };
-    updateSettings.mockResolvedValue(result);
+  it("does not expose employee app administration through the settings API", async () => {
     const response = await PATCH(new Request("http://localhost/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ target: "user-app", appId: "web-search", enabled: false }),
     }));
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(400);
+    expect(updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("keeps direct installation changes behind the server-side administrator check", async () => {
+    const denied = Object.assign(new Error("denied"), { code: "SETTINGS_ADMIN_REQUIRED" });
+    updateSettings.mockRejectedValue(denied);
+    const response = await PATCH(new Request("http://localhost/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: "installation-app", appId: "web-search", enabled: false }),
+    }));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "SETTINGS_ADMIN_REQUIRED" });
     expect(updateSettings).toHaveBeenCalledWith(session, {
-      target: "user-app", appId: "web-search", enabled: false,
+      target: "installation-app", appId: "web-search", enabled: false,
     });
   });
 });

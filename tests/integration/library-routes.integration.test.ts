@@ -93,6 +93,9 @@ describe("private library downloads", () => {
     const inline = await route.GET(new Request("http://localhost/api/library/upload?inline=1"), context);
     expect(inline.headers.get("Content-Disposition")).toContain("inline");
     expect(inline.headers.get("Content-Security-Policy")).toContain("sandbox");
+    expect(inline.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(inline.headers.get("Cross-Origin-Resource-Policy")).toBe("same-origin");
+    expect(inline.headers.get("Referrer-Policy")).toBe("no-referrer");
 
     auth.session = session(userB);
     expect((await route.GET(new Request("http://localhost/api/library/upload"), context)).status).toBe(404);

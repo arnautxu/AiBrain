@@ -39,7 +39,13 @@
           "properties": {
             "id": { "type": "string", "minLength": 1 },
             "name": { "type": "string", "minLength": 1 },
-            "email": { "type": "string", "minLength": 3 }
+            "email": { "type": "string", "minLength": 3 },
+            "avatarUrl": {
+              "oneOf": [
+                { "type": "string", "pattern": "^https://" },
+                { "type": "null" }
+              ]
+            }
           }
         },
         "tenant": {
@@ -584,13 +590,14 @@
     "UsageAggregate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["turns", "completedTurns", "errorTurns", "stoppedTurns", "activeDays", "averageDurationMs", "p95DurationMs", "averageFirstTextMs", "p95FirstTextMs", "turnsWithTokenData", "tokens"],
+      "required": ["turns", "completedTurns", "errorTurns", "stoppedTurns", "activeDays", "totalDurationMs", "averageDurationMs", "p95DurationMs", "averageFirstTextMs", "p95FirstTextMs", "turnsWithTokenData", "tokens"],
       "properties": {
         "turns": { "type": "integer", "minimum": 0 },
         "completedTurns": { "type": "integer", "minimum": 0 },
         "errorTurns": { "type": "integer", "minimum": 0 },
         "stoppedTurns": { "type": "integer", "minimum": 0 },
         "activeDays": { "type": "integer", "minimum": 0 },
+        "totalDurationMs": { "type": "integer", "minimum": 0 },
         "averageDurationMs": { "type": ["integer", "null"], "minimum": 0 },
         "p95DurationMs": { "type": ["integer", "null"], "minimum": 0 },
         "averageFirstTextMs": { "type": ["integer", "null"], "minimum": 0 },

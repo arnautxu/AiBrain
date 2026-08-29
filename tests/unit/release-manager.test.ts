@@ -41,6 +41,11 @@ function installationConfigInput(brand: string) {
       publishWriteRoot: "/srv/aibrain/publish-rw",
       backupsRoot: "/var/lib/aibrain/data/backups",
     },
+    catalog: {
+      graphikAIManagedSkills: [
+        { id: "graphikai-company-context", label: "GraphikAI company context" },
+      ],
+    },
   }, null, 2)}\n`;
 }
 
@@ -55,6 +60,13 @@ services:
     security_opt:
       - seccomp=./browser/seccomp_profile.json
     mem_limit: "\${AIBRAIN_MEMORY_LIMIT}"
+    networks: [aibrain-internal]
+  automation-worker:
+    image: "\${AIBRAIN_IMAGE}"
+    labels:
+      com.graphikai.aibrain.installation: "\${AIBRAIN_INSTALLATION_ID}"
+    security_opt:
+      - seccomp=./browser/seccomp_profile.json
     networks: [aibrain-internal]
   ingress-gateway:
     image: "\${AIBRAIN_EGRESS_IMAGE}"

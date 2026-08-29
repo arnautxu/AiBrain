@@ -56,6 +56,7 @@ describe("turn telemetry", () => {
     });
 
     telemetry.bindRuntimeThread("runtime-thread-1");
+    telemetry.workerReadiness(false);
     telemetry.resumed();
     now = 1_005;
     telemetry.delta();
@@ -73,6 +74,9 @@ describe("turn telemetry", () => {
     const metrics = telemetry.finish("error");
 
     expect(metrics).toEqual({
+      workerWarm: false,
+      workerStartupMs: null,
+      catalogMs: null,
       serverFirstDeltaMs: 5,
       serverDeltaCount: 3,
       serverInterDeltaP50Ms: 20,

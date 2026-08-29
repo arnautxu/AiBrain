@@ -74,7 +74,7 @@ describe("versioned AiBrain UI/backend contract", () => {
   it("keeps representative TypeScript contracts compatible with JSON Schema", () => {
     const session = {
       provider: "local",
-      user: { id: "employee-1", name: "Employee", email: "employee@example.test" },
+      user: { id: "employee-1", name: "Employee", email: "employee@example.test", avatarUrl: null },
       tenant: { id: "installation-1", name: "Example Company" },
       expiresAt: "2026-08-28T10:00:00.000Z",
     } satisfies AuthSession;

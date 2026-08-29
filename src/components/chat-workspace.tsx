@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -17,12 +17,10 @@ import {
   Plus,
   MagicWand,
   PencilSimple,
-  ShieldCheck,
   SidebarSimple,
   SpinnerGap,
   Stop,
   WarningCircle,
-  Wrench,
   X,
 } from "@phosphor-icons/react";
 import { GuidedActions } from "@/components/guided-actions";
@@ -30,13 +28,14 @@ import { MarkdownMessage } from "@/components/markdown-message";
 import { ThinkingOrb } from "thinking-orbs";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
-import type { RuntimeReasoningEffort, RuntimeStatus } from "@/lib/runtime-status";
+import type { RuntimeStatus } from "@/lib/runtime-status";
+import type { ComposerExperience } from "@/lib/composer-experience";
+import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
-import { FileUpload } from "@/components/base/file-upload/file-upload";
 import { VoiceDictationControl } from "@/components/voice-controls";
 import { StreamRecoveryBanner } from "@/components/stream-recovery-banner";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
@@ -49,14 +48,15 @@ type ChatWorkspaceProps = {
   preferences: BrainPreferences;
   project: WorkbenchProject | null;
   thread: WorkbenchThread | null;
+  projects: WorkbenchProject[];
+  userName: string;
+  companyName: string;
+  assistantName: string;
   hydrated: boolean;
   prompt: string;
-  composerModel: string | null;
-  composerEffort: RuntimeReasoningEffort | null;
-  autoApprove: boolean;
+  composerExperience: ComposerExperience;
   webSearch: boolean;
   imageGeneration: boolean;
-  selectedSkill: string | null;
   attachments: ChatInputAttachment[];
   documents: StagedComposerDocument[];
   publications: DocumentPublicationDraft[];
@@ -69,12 +69,10 @@ type ChatWorkspaceProps = {
   streamRecovery: { attempt: number } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
-  onComposerModelChange: (value: string | null) => void;
-  onComposerEffortChange: (value: RuntimeReasoningEffort | null) => void;
-  onAutoApproveChange: (value: boolean) => void;
+  onComposerExperienceChange: (value: ComposerExperience) => void;
+  onDestinationChange: (projectId: string) => void;
   onWebSearchChange: (value: boolean) => void;
   onImageGenerationChange: (value: boolean) => void;
-  onSelectedSkillChange: (value: string | null) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
   onDocumentsChange: (value: StagedComposerDocument[]) => void;
   onAddDocuments: (files: File[]) => Promise<void>;
@@ -85,7 +83,6 @@ type ChatWorkspaceProps = {
   onStop: () => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
-  onOpenProject: () => void;
   onResolveApproval: (
     messageId: string,
     approval: ApprovalItem,
@@ -96,7 +93,6 @@ type ChatWorkspaceProps = {
   managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   onPreviewDocument: (artifact: DocumentArtifact) => void;
-  showAdvancedControls: boolean;
 };
 
 type ComposerPickerOption = {
@@ -317,14 +313,15 @@ export function ChatWorkspace({
   preferences,
   project,
   thread,
+  projects,
+  userName,
+  companyName,
+  assistantName,
   hydrated,
   prompt,
-  composerModel,
-  composerEffort,
-  autoApprove,
+  composerExperience,
   webSearch,
   imageGeneration,
-  selectedSkill,
   attachments,
   documents,
   publications,
@@ -337,12 +334,10 @@ export function ChatWorkspace({
   streamRecovery,
   onRetryRuntime,
   onPromptChange,
-  onComposerModelChange,
-  onComposerEffortChange,
-  onAutoApproveChange,
+  onComposerExperienceChange,
+  onDestinationChange,
   onWebSearchChange,
   onImageGenerationChange,
-  onSelectedSkillChange,
   onAttachmentsChange,
   onDocumentsChange,
   onAddDocuments,
@@ -359,7 +354,6 @@ export function ChatWorkspace({
   managedAppApprovalKeys,
   onManagedAppPrepared,
   onPreviewDocument,
-  showAdvancedControls,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -370,7 +364,7 @@ export function ChatWorkspace({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [guidedActionsOpen, setGuidedActionsOpen] = useState(false);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
-  const [composerPickerOpen, setComposerPickerOpen] = useState<"model" | "effort" | "skill" | null>(null);
+  const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
@@ -383,14 +377,17 @@ export function ChatWorkspace({
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
+    const frame = requestAnimationFrame(() => setShowJumpToBottom(false));
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     bottomRef.current?.scrollIntoView({ block: "end" });
+    return () => cancelAnimationFrame(frame);
   }, [thread?.id]);
 
   const resizeComposer = useCallback(() => {
     const textarea = composerRef.current;
     const measurement = composerMeasurementRef.current;
     if (!textarea || !measurement) return;
-    const minHeight = thread?.messages.length ? 44 : 56;
+    const minHeight = thread?.messages.length ? 26 : 56;
     textarea.style.height = `${Math.min(Math.max(measurement.scrollHeight, minHeight), 192)}px`;
   }, [thread?.messages.length]);
 
@@ -414,31 +411,18 @@ export function ChatWorkspace({
   const canUseWeb = appPolicy.webSearch && manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = appPolicy.imageGeneration && manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
-  const selectedModelOption = runtimeStatus.models.find((model) => model.id === composerModel) ??
-    runtimeStatus.models.find((model) => model.isDefault) ?? runtimeStatus.models[0] ?? null;
-  const effortOptions = selectedModelOption?.supportedReasoningEfforts.length
-    ? selectedModelOption.supportedReasoningEfforts
-    : (["low", "medium", "high"] satisfies RuntimeReasoningEffort[]);
-  const effortLabels: Record<RuntimeReasoningEffort, string> = {
-    none: "Sin razonamiento",
-    minimal: "Mínimo",
-    low: "Rápido",
-    medium: "Equilibrado",
-    high: "Profundo",
-    xhigh: "Muy profundo",
-    max: "Máximo",
-    ultra: "Ultra",
-  };
-
-  useEffect(() => {
-    if (!composerEffort || !selectedModelOption?.supportedReasoningEfforts.length) return;
-    if (selectedModelOption.supportedReasoningEfforts.includes(composerEffort)) return;
-    onComposerEffortChange(
-      selectedModelOption.defaultReasoningEffort ??
-        selectedModelOption.supportedReasoningEfforts[0] ??
-        null,
-    );
-  }, [composerEffort, onComposerEffortChange, selectedModelOption]);
+  const destinationOptions = useMemo(() => projects
+    .filter((candidate) => candidate.status === "active")
+    .map((candidate) => ({
+      value: candidate.id,
+      label: isStandaloneProject(candidate) ? "Sin proyecto" : candidate.name,
+    })), [projects]);
+  const suggestions = useMemo(() => landingSuggestions(project, companyName), [companyName, project]);
+  const noProject = !project || standaloneConversation;
+  const landingHeadline = noProject
+    ? `¿En qué te puedo ayudar, ${userName}?`
+    : `¿Cómo puedo ayudarte en ${project.name}?`;
+  const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
 
   useEffect(() => {
     if (!composerMenuOpen && !composerPickerOpen) return;
@@ -532,7 +516,7 @@ export function ChatWorkspace({
           </button>
           <div data-testid="project-breadcrumb" className="flex min-w-0 items-center gap-1.5 px-1 py-1 text-left">
             {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : <ChatCircleDots size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" />}
-            <span className="hidden max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
+            {!standaloneConversation ? <span className="hidden max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name}</span> : null}
             {thread ? <span className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</span> : <span className="truncate text-[13px] font-semibold text-[var(--text)] sm:hidden">Nueva conversación</span>}
           </div>
         </div>
@@ -575,7 +559,7 @@ export function ChatWorkspace({
             <div ref={bottomRef} className="h-8" />
           </div>
         ) : <section className={`chat-empty-state mx-auto flex min-h-full w-full max-w-[768px] flex-col items-center justify-start px-5 pb-14 text-center md:px-8 ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía">
-          <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">¿En qué trabajamos?</h1>
+          <h1 className="text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1>
         </section>}
       </div>
 
@@ -592,15 +576,7 @@ export function ChatWorkspace({
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
             onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending && !documentUploading) void addFiles(event.dataTransfer.files); }}
           >
-            {dragActive ? (
-              <div className="absolute inset-1 z-20 overflow-hidden rounded-[20px] bg-[var(--surface-raised)]/98">
-                <FileUpload
-                  allowedExtensions={["pdf", "doc", "docx", "txt", "md", "csv", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png", "webp", "gif"]}
-                  maxBytes={25 * 1024 * 1024}
-                  className="h-full min-h-[112px] rounded-[20px]"
-                />
-              </div>
-            ) : null}
+            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--brain-accent)]">Suelta los archivos para adjuntarlos</div> : null}
             {composerMenuOpen ? (
               <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
@@ -638,11 +614,10 @@ export function ChatWorkspace({
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
-              className="composer-textarea max-h-52 min-h-14 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]"
-              placeholder={project ? `Escribe a ${preferences.assistantName}…` : "Crea un proyecto para empezar…"}
+              className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] ${hasMessages ? "min-h-[26px]" : "min-h-14"}`}
+              placeholder={`Escribe a ${placeholderName}…`}
               rows={1}
               value={prompt}
-              disabled={!project}
               onChange={(event) => onPromptChange(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -657,72 +632,39 @@ export function ChatWorkspace({
             <div className="composer-controls flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                <span className="composer-mode-chip rounded-full bg-[var(--surface-muted)] px-2.5 py-1 text-[12px] font-medium text-[var(--text-secondary)]">Trabajar</span>
-                {runtimeStatus.mode === "codex" ? (
-                  <button
-                    type="button"
-                    aria-label="Aprobar permisos automáticamente"
-                    aria-pressed={autoApprove}
-                    title={autoApprove
-                      ? "Codex revisa automáticamente las solicitudes de permiso"
-                      : "Revisar y aprobar automáticamente las solicitudes de permiso"}
-                    className={`composer-auto-approve composer-tool ${autoApprove ? "composer-tool-active" : ""}`}
-                    disabled={sending || !project}
-                    onClick={() => onAutoApproveChange(!autoApprove)}
-                  >
-                    <ShieldCheck size={15} weight={autoApprove ? "fill" : "regular"} />
-                    <span className="composer-auto-approve-label">{autoApprove ? "Permisos auto" : "Permisos"}</span>
-                  </button>
-                ) : null}
-                <span className="composer-destination max-w-44 truncate text-[12px] text-[var(--text-subtle)]" aria-label="Destino de la conversación">{standaloneConversation ? "Sin proyecto" : project?.name ?? "Sin proyecto"}</span>
-                {showAdvancedControls && manifest.composer.skills && runtimeStatus.skills.length ? (
+                {!hasMessages ? (
                   <ComposerPicker
-                    ariaLabel="Herramienta"
-                    value={selectedSkill ?? ""}
-                    valueLabel={runtimeStatus.skills.find((skill) => skill.id === selectedSkill)?.label ?? "Sin herramienta"}
-                    options={[{ value: "", label: "Sin herramienta" }, ...runtimeStatus.skills.map((skill) => ({ value: skill.id, label: skill.label, icon: <Wrench size={12} /> }))]}
-                    open={composerPickerOpen === "skill"}
+                    ariaLabel="Destino de la conversación"
+                    value={project?.id ?? ""}
+                    valueLabel={noProject ? "Sin proyecto" : project?.name ?? "Sin proyecto"}
+                    options={destinationOptions}
+                    open={composerPickerOpen === "destination"}
                     placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
+                    className="composer-destination"
                     disabled={sending}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "skill" : null); }}
-                    onSelect={(value) => onSelectedSkillChange(value || null)}
+                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "destination" : null); }}
+                    onSelect={onDestinationChange}
                   />
                 ) : null}
                 {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
-                {showAdvancedControls && manifest.composer.modelSelection ? (
-                  <ComposerPicker
-                    ariaLabel="Forma de trabajo"
-                    value={composerModel ?? ""}
-                    valueLabel={selectedModelOption?.label ?? runtimeStatus.model ?? "Automático recomendado"}
-                    options={[
-                      { value: "", label: runtimeStatus.model ?? "Automático recomendado", detail: "Recomendado" },
-                      ...runtimeStatus.models.map((model) => ({ value: model.id, label: model.label, detail: model.isDefault ? "Predeterminado" : undefined })),
-                    ]}
-                    open={composerPickerOpen === "model"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
-                    disabled={sending || runtimeStatus.models.length === 0}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "model" : null); }}
-                    onSelect={(value) => onComposerModelChange(value || null)}
-                  />
-                ) : null}
-                {showAdvancedControls && manifest.composer.modelSelection && runtimeStatus.mode === "codex" ? (
-                  <ComposerPicker
-                    ariaLabel="Profundidad del trabajo"
-                    value={composerEffort ?? ""}
-                    valueLabel={composerEffort ? effortLabels[composerEffort] : "Automático"}
-                    options={[{ value: "", label: "Automático" }, ...effortOptions.map((effort) => ({ value: effort, label: effortLabels[effort] }))]}
-                    open={composerPickerOpen === "effort"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="hidden sm:block"
-                    disabled={sending}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "effort" : null); }}
-                    onSelect={(value) => onComposerEffortChange((value || null) as RuntimeReasoningEffort | null)}
-                  />
-                ) : null}
+                <ComposerPicker
+                  ariaLabel="Experiencia"
+                  value={composerExperience}
+                  valueLabel={composerExperience === "fast" ? "Rápido" : composerExperience === "expert" ? "Experto" : "Smart"}
+                  options={[
+                    { value: "fast", label: "Rápido", detail: "Para avanzar con agilidad" },
+                    { value: "smart", label: "Smart", detail: "Equilibrio para el día a día" },
+                    { value: "expert", label: "Experto", detail: "Para trabajo más exigente" },
+                  ]}
+                  open={composerPickerOpen === "experience"}
+                  placement={hasMessages ? "above" : "below"}
+                  className="composer-experience"
+                  disabled={sending}
+                  onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "experience" : null); }}
+                  onSelect={(value) => onComposerExperienceChange(value as ComposerExperience)}
+                />
                 <VoiceDictationControl
                   value={prompt}
                   disabled={!project || sending || documentUploading}
@@ -751,6 +693,14 @@ export function ChatWorkspace({
               </div>
             </div>
           </div>
+          {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
+            {suggestions.map((suggestion) => (
+              <button key={suggestion.id} type="button" className="block w-full rounded-xl px-4 py-2 text-left text-[14px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => onSend(suggestion.prompt)}>
+                <span className="font-medium text-[var(--text)]">{suggestion.label}</span>
+                <span className="ml-2 text-[var(--text-muted)]">{suggestion.prompt}</span>
+              </button>
+            ))}
+          </div> : null}
         </div>
       </div> : null}
     </main>

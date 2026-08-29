@@ -1,6 +1,8 @@
 import { lstat, unlink } from "node:fs/promises";
 import path from "node:path";
+import { validatedAvatarUrl } from "@/auth/avatar-url";
 import { readRegularFileWithin, UnsafeFilePathError } from "@/security/safe-file";
+import { atomicWriteJson } from "@/storage/atomic-file";
 import {
   defineVersionedSchema,
   expectBoolean,
@@ -21,6 +23,16 @@ const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f
 const WORKER_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const USER_FILE_MAX_BYTES = 32 * 1024;
+
+type IdentityProfile = { schemaVersion: 1; avatarUrl: string };
+const identityProfileSchema = defineVersionedSchema<IdentityProfile>({
+  name: "IdentityProfile", schemaVersion: 1, keys: ["avatarUrl"],
+  parse(record, context) {
+    const avatarUrl = validatedAvatarUrl(record.avatarUrl);
+    if (!avatarUrl) context.at("avatarUrl").fail("expected a safe HTTPS avatar URL");
+    return { schemaVersion: 1, avatarUrl: avatarUrl as string };
+  },
+});
 
 export const localUserSchema = defineVersionedSchema<LocalUser>({
   name: "LocalUser",
@@ -93,6 +105,24 @@ export class FileLocalUserStore {
       if (isMissing(error)) return null;
       throw error;
     }
+  }
+
+  async readAvatarUrl(userId: string): Promise<string | null> {
+    const relativePath = this.relativeUserPath(userId, "identity-profile.json");
+    try {
+      const contents = await readRegularFileWithin(this.usersRoot, relativePath, 4 * 1024);
+      return parseJson(identityProfileSchema, contents.toString("utf8"), relativePath).avatarUrl;
+    } catch (error) { if (isMissing(error)) return null; throw error; }
+  }
+
+  async saveAvatarUrl(userId: string, avatarUrl: string | null) {
+    const safeUrl = validatedAvatarUrl(avatarUrl);
+    if (!safeUrl || !await this.read(userId)) return false;
+    const root = path.join(this.usersRoot, userId);
+    const metadata = await lstat(root);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new UnsafeFilePathError("Identity profile directory must be a real directory.");
+    await atomicWriteJson(path.join(root, "identity-profile.json"), { schemaVersion: 1, avatarUrl: safeUrl }, identityProfileSchema, { mode: 0o600 });
+    return true;
   }
 
   async hasInitialPasswordMarker(userId: string) {

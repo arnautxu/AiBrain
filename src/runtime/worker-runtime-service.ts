@@ -95,7 +95,7 @@ export class WorkerAppServerClient {
       await this.router.request(randomRequest("initialize", {
         clientInfo: {
           name: "aibrain_workbench",
-          title: "AiBrain",
+          title: "Asistente",
           version: "0.4.0",
         },
         capabilities: {
@@ -329,6 +329,9 @@ export async function workerAppServerForUser(
     throw new Error("Worker user is not provisioned or is disabled.");
   }
   if (activityLease) state.maintenance.assertActiveLease(activityLease);
+  // This is sampled before `start()`: it distinguishes an already-running
+  // employee process from a cold start without exposing a worker identifier.
+  const workerWasWarm = state.registry.get(userId) !== null;
   let handle: WorkerRuntimeHandle;
   try {
     handle = await state.registry.start(userId, activityLease);
@@ -359,7 +362,7 @@ export async function workerAppServerForUser(
       throw retryError;
     }
   }
-  return { config: state.config, registry: state.registry, handle, client };
+  return { config: state.config, registry: state.registry, handle, client, workerWasWarm };
 }
 
 export async function acquireWorkerTurnActivity() {

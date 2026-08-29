@@ -38,9 +38,8 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
     transfer.items.add(new File([bytes], "arrastrada.png", { type: "image/png" }));
     element.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer: transfer }));
   });
-  const dropSurface = page.getByRole("button", { name: "Adjuntar un archivo" });
-  await expect(dropSurface).toBeVisible();
-  await dropSurface.evaluate((element) => {
+  await expect(page.getByText("Suelta los archivos para adjuntarlos", { exact: true })).toBeVisible();
+  await composer.evaluate((element) => {
     const transfer = new DataTransfer();
     const bytes = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
     transfer.items.add(new File([bytes], "arrastrada.png", { type: "image/png" }));
@@ -90,7 +89,7 @@ test("the mobile composer keeps every control below its growing text area", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 
-test("automatic permission review stays inside the existing composer on desktop and mobile", async ({ page }) => {
+test("automatic permission review remains server-side and invisible on desktop and mobile", async ({ page }) => {
   await page.route("**/api/runtime/status**", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -119,21 +118,14 @@ test("automatic permission review stays inside the existing composer on desktop 
   await login(page);
 
   const composer = page.getByTestId("composer");
-  const control = page.getByRole("button", { name: "Aprobar permisos automáticamente" });
-  await expect(control).toBeVisible();
-  await expect(control).toHaveAttribute("aria-pressed", "false");
-  await control.click();
-  await expect(control).toHaveAttribute("aria-pressed", "true");
-  await expect(control).toHaveClass(/composer-tool-active/);
+  await expect(page.getByRole("button", { name: /permisos/i })).toHaveCount(0);
+  await expect(page.getByText(/permisos auto/i)).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });
   const composerBox = await composer.boundingBox();
-  const controlBox = await control.boundingBox();
   expect(composerBox).not.toBeNull();
-  expect(controlBox).not.toBeNull();
-  expect(controlBox!.x).toBeGreaterThanOrEqual(composerBox!.x);
-  expect(controlBox!.x + controlBox!.width).toBeLessThanOrEqual(composerBox!.x + composerBox!.width);
-  await expect(control.locator(".composer-auto-approve-label")).toBeHidden();
+  await expect(page.getByRole("button", { name: /permisos/i })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Experiencia" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 });
 

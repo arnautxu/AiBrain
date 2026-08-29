@@ -5,7 +5,7 @@
   "companySlug": "northwind-advisory",
   "publicUrl": "https://brain.northwind-advisory.test",
   "branding": {
-    "productName": "Northwind Brain",
+    "productName": "Northwind AI",
     "logoPath": "/branding/northwind-qa/logo.svg",
     "faviconPath": "/branding/northwind-qa/favicon.svg",
     "accentColor": "#0f766e"

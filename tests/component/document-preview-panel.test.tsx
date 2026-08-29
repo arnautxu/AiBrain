@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import type { DocumentArtifact } from "@/lib/chat-contract";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 const artifact: DocumentArtifact = {
   id: "018f5f68-4a6e-7abc-8def-0123456789ae",
@@ -25,12 +28,16 @@ const artifact: DocumentArtifact = {
 };
 
 describe("DocumentPreviewPanel", () => {
-  it("previews the private PDF and keeps download and close actions available", () => {
+  it("previews the private PDF blob and keeps download and close actions available", async () => {
     const onClose = vi.fn();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.7\\n%%EOF", {
+      headers: { "Content-Length": "14", "Content-Type": "application/pdf" },
+    })));
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:https://brain.example/document"), revokeObjectURL: vi.fn() });
     render(<DocumentPreviewPanel artifact={artifact} onClose={onClose} />);
 
     expect(screen.getByRole("complementary", { name: "Vista previa de informe-precios.pdf" })).toBeInTheDocument();
-    expect(screen.getByTitle("Documento informe-precios.pdf")).toHaveAttribute("src", artifact.previewUrl);
+    expect(await screen.findByTitle("Documento informe-precios.pdf")).toHaveAttribute("src", "blob:https://brain.example/document");
     expect(screen.getByRole("link", { name: "Descargar informe-precios.pdf" })).toHaveAttribute("href", artifact.url);
     fireEvent.click(screen.getByRole("button", { name: "Cerrar vista previa" }));
     expect(onClose).toHaveBeenCalledOnce();

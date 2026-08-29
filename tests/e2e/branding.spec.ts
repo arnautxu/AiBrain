@@ -3,13 +3,13 @@ import { expect, test } from "@playwright/test";
 const northwind = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa";
 const expected = northwind ? {
   installationId: "northwind-qa",
-  productName: "Northwind Brain",
+  productName: "Northwind AI",
   companyName: "Northwind Advisory QA",
   accountName: "Taylor",
   favicon: "northwind-qa/favicon.svg",
 } : {
   installationId: "example-lab-playwright",
-  productName: "Example Brain",
+  productName: "Example AI",
   companyName: "Example Laboratory",
   accountName: "Alex",
   favicon: "example-lab/favicon.svg",

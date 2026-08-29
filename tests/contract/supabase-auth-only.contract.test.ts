@@ -28,7 +28,10 @@ describe("Supabase Auth-only architecture", () => {
       if (contents.includes("@supabase/")) {
         imports.push(relative);
       }
-      expect(contents, relative).not.toMatch(/\.(?:from|rpc)\(\s*["']/);
+      // Keep generic Supabase query-builder calls forbidden without mistaking
+      // the built-in Node Buffer.from(...) constructor for a database query.
+      const withoutNodeBufferConstructors = contents.replace(/\bBuffer\.from\s*\(/gu, "Buffer(");
+      expect(withoutNodeBufferConstructors, relative).not.toMatch(/\.(?:from|rpc)\(\s*["']/);
       expect(contents, relative).not.toMatch(/\/(?:rest|graphql|storage|realtime)\/v1\b/iu);
       expect(contents, relative).not.toMatch(/\.supabase\.(?:from|rpc|storage|realtime|functions)\b/iu);
     }

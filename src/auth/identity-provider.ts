@@ -6,6 +6,7 @@ export type IdentityCredentials = {
 export type VerifiedIdentity = IdentityCredentials & {
   userId: string;
   email: string;
+  avatarUrl?: string | null;
 };
 
 export type RecoveryProof =

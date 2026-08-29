@@ -418,7 +418,7 @@ export async function POST(request: Request) {
   let turnProjectionStore: FileTurnProjectionStore | null = null;
   let turnMemory: WorkerTurnMemoryDependencies | null = null;
   let turnDocuments: readonly ResolvedTurnDocument[] = [];
-  let assistantName = "AiBrain";
+  let assistantName = "AI";
   if (config.mode === "codex") {
     try {
       const { installation, permissions } = await measureChatSetup(

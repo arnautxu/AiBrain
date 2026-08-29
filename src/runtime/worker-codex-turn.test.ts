@@ -180,6 +180,20 @@ describe("worker Codex turn", () => {
     };
     const client = {
       router,
+      async connectionSummary() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
       async connection() {
         return {
           connected: true,
@@ -194,6 +208,7 @@ describe("worker Codex turn", () => {
           usage: null,
         };
       },
+      async capabilities() { return { webSearch: true, imageGeneration: false }; },
       async resolvedSkills() { return []; },
       async request(
         method: string,
@@ -328,7 +343,8 @@ describe("worker Codex turn", () => {
     const events: Array<Record<string, unknown>> = [];
     const request = chatRequest();
     request.message = "Quin és l'horari d'avui de la botiga Arnall de Palamós? Cerca'l a la web oficial.";
-    request.options.autoApprove = true;
+    // Legacy client input cannot weaken the server-owned reviewer selection.
+    request.options.autoApprove = false;
     request.options.webSearch = true;
     request.options.documentUploadIds = [documentUploadId];
     const turnPermissions = permissions([{
@@ -515,7 +531,7 @@ describe("worker Codex turn", () => {
           };
         },
       },
-      async connection() {
+      async connectionSummary() {
         return {
           connected: true,
           authMode: "chatgpt",
@@ -622,7 +638,7 @@ describe("worker Codex turn", () => {
           };
         },
       },
-      async connection() {
+      async connectionSummary() {
         return {
           connected: true,
           authMode: "chatgpt",
@@ -732,7 +748,7 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "done" });
   });
 
-  it("recovers a completed clientUserMessageId from thread history without starting it twice", async () => {
+  it("recovers a completed turn after thread/resume times out without retrying a model action", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-recovery-"));
     const workspace = path.join(userRoot, "workspace");
     const staging = path.join(userRoot, "staging");
@@ -745,7 +761,7 @@ describe("worker Codex turn", () => {
       router: {
         registerTurn() { throw new Error("A completed recovery must not register a live turn."); },
       },
-      async connection() {
+      async connectionSummary() {
         return {
           connected: true,
           authMode: "chatgpt",
@@ -768,7 +784,10 @@ describe("worker Codex turn", () => {
         beforeResolve?: (value: never, event: never) => Promise<void> | void,
       ) {
         calls.push(method);
-        if (method !== "thread/resume") throw new Error(`Unexpected request ${method}`);
+        if (method === "thread/resume") {
+          throw new AppServerRequestTimeoutError("thread/resume", purpose, 60_000);
+        }
+        if (method !== "thread/read") throw new Error(`Unexpected request ${method}`);
         const result = {
           thread: {
             id: "runtime-thread-1",
@@ -784,7 +803,7 @@ describe("worker Codex turn", () => {
           },
         };
         await beforeResolve?.(result as never, {
-          eventId: "response-resume",
+          eventId: "response-thread-read",
           sequence: 1,
           occurredAt: new Date().toISOString(),
           message: { kind: "rpc-response", rpc: { id: purpose, result } },
@@ -821,7 +840,7 @@ describe("worker Codex turn", () => {
       async (event) => { events.push(event); },
     );
 
-    expect(calls).toEqual(["thread/resume"]);
+    expect(calls).toEqual(["thread/resume", "thread/read"]);
     expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
     expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
     expect(events).toContainEqual({ type: "done" });
@@ -852,7 +871,7 @@ describe("worker Codex turn", () => {
           };
         },
       },
-      async connection() {
+      async connectionSummary() {
         return {
           connected: true,
           authMode: "chatgpt",

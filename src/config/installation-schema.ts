@@ -36,6 +36,11 @@ export type InstallationConnectors = {
   codexManagedAppAction: CodexManagedAppActionConfig;
 };
 
+/** Immutable GraphikAI baseline; workspace admins may not modify it through the catalog API. */
+export type InstallationCatalog = {
+  graphikAIManagedSkills: Array<{ id: string; label: string }>;
+};
+
 export type InstallationConfig = {
   schemaVersion: typeof INSTALLATION_CONFIG_SCHEMA_VERSION;
   installationId: string;
@@ -45,6 +50,7 @@ export type InstallationConfig = {
   branding: InstallationBranding;
   paths: InstallationPaths;
   connectors?: InstallationConnectors;
+  catalog?: InstallationCatalog;
 };
 
 export type InstallationConfigIssue = {
@@ -71,6 +77,7 @@ const ROOT_KEYS = [
   "branding",
   "paths",
   "connectors",
+  "catalog",
 ] as const;
 
 const BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"] as const;
@@ -397,6 +404,27 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
   };
 }
 
+function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) { issues.push({ path: "$.catalog", message: "debe ser un objeto" }); return undefined; }
+  addUnknownKeyIssues(value, ["graphikAIManagedSkills"], "$.catalog", issues);
+  if (!Array.isArray(value.graphikAIManagedSkills) || value.graphikAIManagedSkills.length > 80) {
+    issues.push({ path: "$.catalog.graphikAIManagedSkills", message: "debe ser una lista de hasta 80 skills" });
+    return undefined;
+  }
+  const skills = value.graphikAIManagedSkills.map((candidate, index) => {
+    const current = `$.catalog.graphikAIManagedSkills[${index}]`;
+    if (!isRecord(candidate)) { issues.push({ path: current, message: "debe ser un objeto" }); return { id: "", label: "" }; }
+    addUnknownKeyIssues(candidate, ["id", "label"], current, issues);
+    return {
+      id: parseMcpIdentifier(candidate.id, `${current}.id`, issues),
+      label: readRequiredString(candidate, "label", current, issues, 120),
+    };
+  });
+  if (new Set(skills.map(({ id }) => id)).size !== skills.length) issues.push({ path: "$.catalog.graphikAIManagedSkills", message: "los ids deben ser únicos" });
+  return { graphikAIManagedSkills: skills };
+}
+
 function freezeInstallationConfig(config: InstallationConfig): Readonly<InstallationConfig> {
   Object.freeze(config.branding);
   Object.freeze(config.paths);
@@ -406,6 +434,11 @@ function freezeInstallationConfig(config: InstallationConfig): Readonly<Installa
     Object.freeze(config.connectors.codexManagedAppAction.readback);
     Object.freeze(config.connectors.codexManagedAppAction);
     Object.freeze(config.connectors);
+  }
+  if (config.catalog) {
+    for (const skill of config.catalog.graphikAIManagedSkills) Object.freeze(skill);
+    Object.freeze(config.catalog.graphikAIManagedSkills);
+    Object.freeze(config.catalog);
   }
   return Object.freeze(config);
 }
@@ -433,6 +466,7 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
   const branding = parseBranding(value.branding, issues);
   const paths = parsePaths(value.paths, issues);
   const connectors = parseConnectors(value.connectors, issues);
+  const catalog = parseCatalog(value.catalog, issues);
 
   if (issues.length > 0) {
     throw new InstallationConfigValidationError(issues);
@@ -446,5 +480,6 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
     branding,
     paths,
     ...(connectors ? { connectors } : {}),
+    ...(catalog ? { catalog } : {}),
   });
 }

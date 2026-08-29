@@ -268,6 +268,7 @@ function assertTargetEnvironment(current, target, options) {
 const INSTALLATION_ROOT_KEYS = [
   "schemaVersion", "installationId", "companyName", "companySlug", "publicUrl", "branding", "paths",
 ];
+const INSTALLATION_OPTIONAL_ROOT_KEYS = ["catalog"];
 const INSTALLATION_BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"];
 const INSTALLATION_PATHS = Object.freeze({
   dataRoot: "/var/lib/aibrain/data",
@@ -281,6 +282,30 @@ const INSTALLATION_PATHS = Object.freeze({
 function exactObjectKeys(value, keys) {
   return value && typeof value === "object" && !Array.isArray(value)
     && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+function installationRootKeysAreValid(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value);
+  return INSTALLATION_ROOT_KEYS.every((key) => actual.includes(key))
+    && actual.every((key) => INSTALLATION_ROOT_KEYS.includes(key) || INSTALLATION_OPTIONAL_ROOT_KEYS.includes(key));
+}
+
+function validInstallationCatalog(value) {
+  if (value === undefined) return true;
+  if (!exactObjectKeys(value, ["graphikAIManagedSkills"])
+    || !Array.isArray(value.graphikAIManagedSkills)
+    || value.graphikAIManagedSkills.length > 80) return false;
+  const ids = new Set();
+  for (const skill of value.graphikAIManagedSkills) {
+    if (!exactObjectKeys(skill, ["id", "label"])
+      || typeof skill.id !== "string"
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(skill.id)
+      || !validConfigString(skill.label, 120)
+      || ids.has(skill.id)) return false;
+    ids.add(skill.id);
+  }
+  return true;
 }
 
 function validConfigString(value, maximumLength) {
@@ -302,7 +327,7 @@ function validateVersionedInstallationConfig(contents, installationId) {
   }
   const branding = value?.branding;
   const paths = value?.paths;
-  if (!exactObjectKeys(value, INSTALLATION_ROOT_KEYS)
+  if (!installationRootKeysAreValid(value)
     || value.schemaVersion !== 1 || value.installationId !== installationId
     || !exactObjectKeys(branding, INSTALLATION_BRANDING_KEYS)
     || !exactObjectKeys(paths, Object.keys(INSTALLATION_PATHS))
@@ -315,6 +340,7 @@ function validateVersionedInstallationConfig(contents, installationId) {
     || !validPublicAssetPath(branding?.logoPath)
     || !validPublicAssetPath(branding?.faviconPath)
     || !/^#[0-9a-fA-F]{6}$/u.test(branding.accentColor)
+    || !validInstallationCatalog(value.catalog)
     || Object.entries(INSTALLATION_PATHS).some(([key, expected]) => paths[key] !== expected)) {
     throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig does not match the installation schema and fixed container paths.");
   }
@@ -350,11 +376,12 @@ function validateComposeSafety(contents, installationId) {
   const networks = value?.networks;
   const volumes = value?.volumes;
   const allowedServices = new Set([
-    "app", "ingress-gateway", "egress-gateway", "alert-dispatcher", "backup-replicator",
+    "app", "automation-worker", "ingress-gateway", "egress-gateway", "alert-dispatcher", "backup-replicator",
   ]);
-  const requiredServices = ["app", "ingress-gateway", "egress-gateway", "alert-dispatcher"];
+  const requiredServices = ["app", "automation-worker", "ingress-gateway", "egress-gateway", "alert-dispatcher"];
   const expectedNetworks = {
     app: ["aibrain-internal"],
+    "automation-worker": ["aibrain-internal"],
     "ingress-gateway": ["aibrain-ingress", "aibrain-internal"],
     "egress-gateway": ["aibrain-egress", "aibrain-internal"],
     "alert-dispatcher": ["aibrain-egress", "aibrain-internal"],
@@ -362,11 +389,14 @@ function validateComposeSafety(contents, installationId) {
   };
   const expectedImages = {
     app: "AIBRAIN_IMAGE",
+    "automation-worker": "AIBRAIN_IMAGE",
     "ingress-gateway": "AIBRAIN_EGRESS_IMAGE",
     "egress-gateway": "AIBRAIN_EGRESS_IMAGE",
     "alert-dispatcher": "AIBRAIN_IMAGE",
     "backup-replicator": "AIBRAIN_IMAGE",
   };
+  const seccompServices = new Set(["app", "automation-worker"]);
+  const reviewedSeccomp = "seccomp=./browser/seccomp_profile.json";
   const expectedResourceNames = {
     "aibrain-internal": "AIBRAIN_NETWORK_NAME",
     "aibrain-egress": "AIBRAIN_EGRESS_NETWORK_NAME",
@@ -413,6 +443,13 @@ function validateComposeSafety(contents, installationId) {
       || interpolationKey(service.image) !== expectedImages[name]
       || !exactStringSet(service.networks, expectedNetworks[name])) {
       throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} violates runtime isolation.`);
+    }
+    const securityOptions = Array.isArray(service.security_opt) ? service.security_opt : [];
+    const seccompOptions = securityOptions.filter((option) =>
+      typeof option === "string" && option.startsWith("seccomp="));
+    if ((seccompServices.has(name) && (seccompOptions.length !== 1 || seccompOptions[0] !== reviewedSeccomp))
+      || (!seccompServices.has(name) && seccompOptions.length !== 0)) {
+      throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", `Compose service ${name} has an unreviewed seccomp boundary.`);
     }
     if (service.volumes !== undefined) {
       if (!Array.isArray(service.volumes) || service.volumes.some((mount) => {
@@ -726,11 +763,11 @@ function releaseRecord({
     throw new ReleaseError("RELEASE_SECCOMP_INVALID", "Release seccomp profile does not fail closed.");
   }
   const sourceToken = "seccomp=./browser/seccomp_profile.json";
-  if (composeContents.split(sourceToken).length !== 2) {
-    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose must reference exactly one reviewed seccomp profile.");
+  if (composeContents.split(sourceToken).length !== 3) {
+    throw new ReleaseError("RELEASE_COMPOSE_UNSAFE", "Compose must reference the reviewed seccomp profile for both isolated runtimes.");
   }
   const seccompActivePath = `${stateFile}.active.seccomp.json`;
-  const composeEffective = composeContents.replace(sourceToken, `seccomp=${seccompActivePath}`);
+  const composeEffective = composeContents.replaceAll(sourceToken, `seccomp=${seccompActivePath}`);
   return {
     image,
     egressImage,
@@ -790,8 +827,8 @@ function validReleaseRecord(value) {
     && composeEffective !== null
     && decodeInput(value.seccomp, value.seccompSha256) !== null
     && decodeInput(value.installationConfig, value.installationConfigSha256) !== null
-    && compose.split("seccomp=./browser/seccomp_profile.json").length === 2
-    && compose.replace(
+    && compose.includes("seccomp=./browser/seccomp_profile.json")
+    && compose.replaceAll(
       "seccomp=./browser/seccomp_profile.json",
       `seccomp=${value.seccompActivePath}`,
     ) === composeEffective

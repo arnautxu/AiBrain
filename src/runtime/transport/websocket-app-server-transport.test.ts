@@ -252,6 +252,34 @@ describe("WebSocketAppServerTransport contract", () => {
     await transport.close();
   });
 
+  it("allows one durable replay reconnect, then fails pending submissions when the worker remains terminated", async () => {
+    const factory = new FakeSocketFactory();
+    const transport = createTransport(factory);
+    const connecting = transport.connect();
+    await settle();
+    const socket = factory.sockets[0];
+    socket.open();
+    ready(socket);
+    await connecting;
+
+    const sending = transport.send(request);
+    socket.close(1011, "Worker runtime failure");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const replaySocket = factory.sockets[1];
+    replaySocket.open();
+    ready(replaySocket, "failed-runtime-replay");
+    replaySocket.close(1011, "Worker runtime still failed");
+
+    await expect(sending).rejects.toMatchObject({ code: "TRANSPORT_CLOSED" });
+    await expect(transport.health()).resolves.toMatchObject({
+      healthy: false,
+      state: "closed",
+      pendingRequests: 0,
+      lastError: expect.stringContaining("fresh worker transport"),
+    });
+    expect(factory.sockets).toHaveLength(2);
+  });
+
   it("streams a durable backlog larger than the live event buffer", async () => {
     const factory = new FakeSocketFactory();
     const backlog = Array.from({ length: 5 }, (_, index): AppServerEvent => ({

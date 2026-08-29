@@ -78,8 +78,8 @@ export const baseBrainManifest: BrainManifest = {
   id: "aibrain-studio",
   version: 3,
   identity: {
-    productName: "Example Brain",
-    assistantName: "Brain",
+    productName: "Example AI",
+    assistantName: "Asistente",
     role: "Asistente de trabajo",
     language: "es",
     tone: "balanced",
@@ -122,8 +122,8 @@ export const operationsBrainManifest: BrainManifest = {
   id: "aibrain-operations",
   version: 3,
   identity: {
-    productName: "Northwind Brain",
-    assistantName: "Brain",
+    productName: "Northwind AI",
+    assistantName: "Asistente",
     role: "Asistente de operaciones",
     language: "es",
     tone: "direct",

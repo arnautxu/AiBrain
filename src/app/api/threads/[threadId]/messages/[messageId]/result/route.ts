@@ -29,7 +29,7 @@ export async function POST(
     : action === "pending"
       ? { id: "result-review", kind: "system" as const, label: "Resultat pendent de revisió", detail: `Actualitzat per ${session.user.name} · ${now}`, status: "waiting" as const }
       : action === "undo_waiting"
-        ? { id: "result-undo", kind: "system" as const, label: "Revertint els canvis", detail: "AiBrain conservarà el resultat original i verificarà la reversió.", status: "waiting" as const }
+        ? { id: "result-undo", kind: "system" as const, label: "Revertint els canvis", detail: "L'aplicació conservarà el resultat original i verificarà la reversió.", status: "waiting" as const }
         : { id: "result-undo", kind: "system" as const, label: "Canvis revertits i verificats", detail: `Reversió completada · ${now}`, status: "complete" as const };
   try {
     const message = await updateMessageActivity(session, threadId, messageId, item);

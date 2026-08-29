@@ -15,8 +15,8 @@ describe("UI primitives", () => {
   it("renders installation-owned brand text and asset", () => {
     const branding = resolveUiInstallationBranding("northwind-qa");
     render(<BrandMark branding={branding} />);
-    const brand = screen.getByRole("img", { name: "Northwind Brain, Northwind Advisory QA" });
-    expect(brand).toHaveTextContent("Northwind Brain");
+    const brand = screen.getByRole("img", { name: "Northwind AI, Northwind Advisory QA" });
+    expect(brand).toHaveTextContent("Northwind AI");
     expect(brand.querySelector("img")).toHaveAttribute("src", expect.stringContaining("northwind-qa"));
   });
 });

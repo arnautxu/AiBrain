@@ -89,6 +89,14 @@ export type JournalCounts = Readonly<{
 export type SoakResourceSample = Readonly<{
   sampledAt: string;
   elapsedMs: number;
+  cpu: Readonly<{
+    userMicros: number;
+    systemMicros: number;
+  }>;
+  io: Readonly<{
+    fsRead: number;
+    fsWrite: number;
+  }>;
   memory: Readonly<{
     rssBytes: number;
     heapUsedBytes: number;
@@ -398,9 +406,18 @@ function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoExcepti
 
 async function sampleResources(runRoot: string, startedAt: number, now: () => number): Promise<SoakResourceSample> {
   const memory = process.memoryUsage();
+  const usage = process.resourceUsage();
   return Object.freeze({
     sampledAt: new Date(now()).toISOString(),
     elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    cpu: Object.freeze({
+      userMicros: usage.userCPUTime,
+      systemMicros: usage.systemCPUTime,
+    }),
+    io: Object.freeze({
+      fsRead: usage.fsRead,
+      fsWrite: usage.fsWrite,
+    }),
     memory: Object.freeze({
       rssBytes: memory.rss,
       heapUsedBytes: memory.heapUsed,
@@ -426,6 +443,14 @@ function peakSample(samples: readonly SoakResourceSample[]) {
   return Object.freeze({
     sampledAt: last.sampledAt,
     elapsedMs: maximum((sample) => sample.elapsedMs),
+    cpu: Object.freeze({
+      userMicros: maximum((sample) => sample.cpu.userMicros),
+      systemMicros: maximum((sample) => sample.cpu.systemMicros),
+    }),
+    io: Object.freeze({
+      fsRead: maximum((sample) => sample.io.fsRead),
+      fsWrite: maximum((sample) => sample.io.fsWrite),
+    }),
     memory: Object.freeze({
       rssBytes: maximum((sample) => sample.memory.rssBytes),
       heapUsedBytes: maximum((sample) => sample.memory.heapUsedBytes),

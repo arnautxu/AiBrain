@@ -45,7 +45,7 @@ export function assertCodexTurnPermissionBinding(
 export function buildCodexDeveloperInstructions(
   chatRequest: ChatRequest,
   permissions: ResolvedPermissions,
-  assistantName = "AiBrain",
+  assistantName = "Asistente",
 ) {
   const toneInstruction = {
     direct: "Sigues breu i prioritza la conclusió.",

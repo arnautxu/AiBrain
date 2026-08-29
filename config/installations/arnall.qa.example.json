@@ -17,5 +17,10 @@
     "sourceReadRoot": "/srv/aibrain/source-ro",
     "publishWriteRoot": "/srv/aibrain/publish-rw",
     "backupsRoot": "/var/lib/aibrain/data/backups"
+  },
+  "catalog": {
+    "graphikAIManagedSkills": [
+      { "id": "graphikai-company-context", "label": "Contexto de empresa GraphikAI" }
+    ]
   }
 }

@@ -329,11 +329,6 @@ export async function updateSettings(session: AuthSession, patch: SettingsPatch)
       ...current,
       apps: { ...current.apps, [patch.appId]: patch.enabled },
     }));
-  } else if (patch.target === "user-app") {
-    await store.updateUser(session.user.id, (current) => ({
-      ...current,
-      apps: { ...current.apps, [patch.appId]: patch.enabled },
-    }));
   } else {
     await store.updateUser(session.user.id, (current) => ({
       ...current,
