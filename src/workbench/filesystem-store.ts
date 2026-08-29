@@ -59,6 +59,8 @@ const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const WORKSPACE_KEY_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const MAX_STATE_BYTES = 64 * 1024 * 1024;
+const MAX_CACHED_STATE_BYTES = 16 * 1024 * 1024;
+const MAX_STATE_CACHE_BYTES = 128 * 1024 * 1024;
 
 const PROJECT_KEYS = [
   "id",
@@ -112,6 +114,56 @@ type WorkbenchState = {
   projects: StoredProject[];
   threads: StoredThread[];
 };
+
+type CachedWorkbenchState = {
+  ino: number;
+  mtimeMs: number;
+  size: number;
+  state: WorkbenchState;
+};
+
+const workbenchCacheGlobal = globalThis as typeof globalThis & {
+  __aibrainWorkbenchStateCache?: Map<string, CachedWorkbenchState>;
+};
+
+function workbenchStateCache() {
+  return workbenchCacheGlobal.__aibrainWorkbenchStateCache ??= new Map();
+}
+
+function cachedState(
+  statePath: string,
+  metadata: Readonly<{ ino: number; mtimeMs: number; size: number }>,
+) {
+  const cache = workbenchStateCache();
+  const cached = cache.get(statePath);
+  if (!cached || cached.ino !== metadata.ino || cached.mtimeMs !== metadata.mtimeMs ||
+      cached.size !== metadata.size) {
+    if (cached) cache.delete(statePath);
+    return null;
+  }
+  cache.delete(statePath);
+  cache.set(statePath, cached);
+  return structuredClone(cached.state);
+}
+
+function cacheState(
+  statePath: string,
+  metadata: Readonly<{ ino: number; mtimeMs: number; size: number }>,
+  state: WorkbenchState,
+) {
+  const cache = workbenchStateCache();
+  cache.delete(statePath);
+  if (metadata.size <= MAX_CACHED_STATE_BYTES) {
+    cache.set(statePath, { ...metadata, state: structuredClone(state) });
+  }
+  let cachedBytes = [...cache.values()].reduce((total, entry) => total + entry.size, 0);
+  while (cachedBytes > MAX_STATE_CACHE_BYTES) {
+    const oldest = cache.entries().next().value as [string, CachedWorkbenchState] | undefined;
+    if (!oldest) break;
+    cache.delete(oldest[0]);
+    cachedBytes -= oldest[1].size;
+  }
+}
 
 type PageCursor = {
   schemaVersion: 1;
@@ -580,20 +632,26 @@ export class FileWorkbenchStore {
       if (metadata.size > MAX_STATE_BYTES) {
         throw new WorkbenchPersistenceError("L’estat del workbench supera el límit operatiu segur.");
       }
+      return metadata;
     } catch (error) {
       if (!isNodeError(error, "ENOENT")) throw error;
+      return null;
     }
   }
 
   private async readUnlocked(userId: string, statePath: string) {
-    await this.assertStateFileSafe(statePath);
-    let state: WorkbenchState;
-    try {
-      state = (await recoverAtomicJsonFile(statePath, workbenchStateSchema)).value;
-    } catch (error) {
-      if (!isNodeError(error, "ENOENT")) throw error;
-      state = newState(this.installationId, userId);
-      await this.writeUnlocked(statePath, state);
+    const metadata = await this.assertStateFileSafe(statePath);
+    let state: WorkbenchState | null = metadata ? cachedState(statePath, metadata) : null;
+    if (!state) {
+      try {
+        state = (await recoverAtomicJsonFile(statePath, workbenchStateSchema)).value;
+        const recoveredMetadata = await this.assertStateFileSafe(statePath);
+        if (recoveredMetadata) cacheState(statePath, recoveredMetadata, state);
+      } catch (error) {
+        if (!isNodeError(error, "ENOENT")) throw error;
+        state = newState(this.installationId, userId);
+        await this.writeUnlocked(statePath, state);
+      }
     }
     if (state.installationId !== this.installationId || state.userId !== userId) {
       throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
@@ -623,6 +681,8 @@ export class FileWorkbenchStore {
       throw new WorkbenchPersistenceError("L’estat del workbench supera el límit operatiu segur.");
     }
     await atomicWriteJson(statePath, validated, workbenchStateSchema);
+    const metadata = await this.assertStateFileSafe(statePath);
+    if (metadata) cacheState(statePath, metadata, validated);
   }
 
   private async read(userId: string) {

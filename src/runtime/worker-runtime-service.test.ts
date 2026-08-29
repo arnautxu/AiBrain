@@ -44,14 +44,26 @@ class FakeTransport implements AppServerTransport {
   readonly sent: AppServerRequest[] = [];
   readonly stream = new AsyncEvents();
   sequence = 0;
+  private readonly blockedMethods = new Map<string, Promise<void>>();
 
   constructor(private readonly alreadyInitialized = false) {}
+
+  block(method: string) {
+    let release!: () => void;
+    this.blockedMethods.set(method, new Promise<void>((resolve) => { release = resolve; }));
+    return () => {
+      this.blockedMethods.delete(method);
+      release();
+    };
+  }
 
   async connect() {}
 
   async send(message: AppServerRequest) {
     this.sent.push(message);
     if (message.kind !== "rpc-request") return;
+    const blocker = this.blockedMethods.get(message.rpc.method);
+    if (blocker) await blocker;
     if (message.rpc.method === "initialize" && this.alreadyInitialized) {
       this.sequence += 1;
       this.stream.push({
@@ -213,6 +225,56 @@ describe("worker App Server client", () => {
       ].includes(item.rpc.method),
     )).toHaveLength(0);
     await client.close();
+  });
+
+  it("prewarms the catalog so the first turn can reuse it without more RPCs", async () => {
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+    const workspace = "/private/workspace/projects/example";
+
+    await client.connectionSummary();
+    client.prewarmConnection(workspace);
+    await vi.waitFor(() => {
+      expect(transport.sent.filter((item) =>
+        item.kind === "rpc-request" && item.rpc.method === "model/list",
+      )).toHaveLength(1);
+    });
+    await client.connection(workspace);
+
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && [
+        "model/list",
+        "skills/list",
+        "account/rateLimits/read",
+        "account/usage/read",
+      ].includes(item.rpc.method),
+    )).toHaveLength(4);
+    await client.close();
+  });
+
+  it("serves a stale catalog immediately while refreshing it in the background", async () => {
+    let now = 1_000;
+    const dateNow = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+    const workspace = "/private/workspace/projects/example";
+
+    try {
+      const initial = await client.connection(workspace);
+      now += 6 * 60_000;
+      const releaseModelRefresh = transport.block("model/list");
+
+      await expect(client.connection(workspace)).resolves.toBe(initial);
+      expect(transport.sent.filter((item) =>
+        item.kind === "rpc-request" && item.rpc.method === "model/list",
+      )).toHaveLength(2);
+
+      releaseModelRefresh();
+      await client.connection(workspace, true);
+    } finally {
+      dateNow.mockRestore();
+      await client.close();
+    }
   });
 
   it("reads the live web-search capability without loading the full catalog", async () => {

@@ -37,6 +37,7 @@ import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 import type { AgentThreadRuntimeContext, ThreadRuntimeContext } from "@/workbench/internal";
 import {
   loadSharedWorkbench,
+  loadSharedWorkbenchForResolvedThread,
   normalizeProjectMembers,
   resolveProjectAccess,
   resolveThreadAccess,
@@ -290,6 +291,37 @@ export async function getThreadRuntimeContext(
       isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
     ),
   );
+}
+
+/**
+ * Resolves filesystem authorization once for the pre-stream portion of a chat
+ * turn. The returned closure can persist the idempotent turn without scanning
+ * users and rebuilding the same access context a second time.
+ */
+export async function prepareThreadTurn(session: AuthSession, threadId: string) {
+  if (mode(session) !== "filesystem") {
+    throw new WorkbenchPersistenceError("La preparació persistent requereix un workbench local.");
+  }
+  assertFilesystemWorkbenchId(threadId);
+  const access = await resolveThreadAccess(session, threadId);
+  if (access.role === "viewer") {
+    throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+  }
+  const [runtimeContext, visibleSnapshot] = await Promise.all([
+    access.store.getThreadRuntimeContext(access.ownerUserId, threadId),
+    loadSharedWorkbenchForResolvedThread(access),
+  ]);
+  return {
+    context: withVisibleProjects(runtimeContext, visibleSnapshot),
+    begin(userMessage: ChatMessage, assistantMessage: ChatMessage) {
+      return access.store.beginThreadTurn(
+        access.ownerUserId,
+        threadId,
+        userMessage,
+        assistantMessage,
+      );
+    },
+  };
 }
 
 export async function beginThreadTurn(

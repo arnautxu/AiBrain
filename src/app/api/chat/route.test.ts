@@ -58,6 +58,7 @@ vi.mock("@/workbench/store", () => ({
   finishThreadTurn: vi.fn(),
   getThreadRuntimeContext: vi.fn(),
   isBrowserPreviewWorkbench: vi.fn(() => true),
+  prepareThreadTurn: vi.fn(),
 }));
 
 vi.mock("@/workbench/http", () => ({

@@ -2,6 +2,43 @@ import { describe, expect, it } from "vitest";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 
 describe("turn telemetry", () => {
+  it("records payload-free phase timing for successful and failed setup work", async () => {
+    let now = 2_000;
+    const records: Array<{ event: string; attributes: Record<string, unknown> }> = [];
+    const telemetry = new TurnTelemetry({
+      installationId: "qa-company",
+      userId: "00000000-0000-4000-8000-000000000001",
+      projectId: "project-1",
+      threadId: "thread-1",
+      localTurnId: "turn-local-1",
+      clientRequestId: "request-1",
+    }, {
+      now: () => now,
+      logger: { info: (event, attributes = {}) => records.push({ event, attributes: { ...attributes } }) },
+    });
+
+    await telemetry.measure("memory", async () => {
+      now = 2_014;
+      return "ready";
+    });
+    await expect(telemetry.measure("catalog", async () => {
+      now = 2_035;
+      throw new Error("sensitive catalog error");
+    })).rejects.toThrow("sensitive catalog error");
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        event: "codex.turn_phase",
+        attributes: expect.objectContaining({ phase: "memory", outcome: "completed", phaseMs: 14 }),
+      }),
+      expect.objectContaining({
+        event: "codex.turn_phase",
+        attributes: expect.objectContaining({ phase: "catalog", outcome: "error", phaseMs: 21 }),
+      }),
+    ]);
+    expect(JSON.stringify(records)).not.toMatch(/sensitive catalog error|prompt|content|token|secret/iu);
+  });
+
   it("records first server delta, cadence, reconnect and terminal error with a controlled clock", () => {
     let now = 1_000;
     const records: Array<{ event: string; attributes: Record<string, unknown> }> = [];

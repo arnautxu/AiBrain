@@ -35,6 +35,7 @@ a controlled benchmark.
 | Input latency | key/paste event → next painted composer value | p95 ≤ 100 ms; no task > 200 ms | not started | Browser `performance.mark` and `requestAnimationFrame`; UI owner. |
 | Navigation latency | navigation intent → destination shell painted and interactive | p95 ≤ 500 ms for cached shell; otherwise comparative budget | not started | Browser marks per sidebar/search/project/thread transition; UI owner. |
 | TTI | document navigation start → composer focused and usable | comparative budget | not started | Must be collected in the real Arnall browser, not inferred from server logs. |
+| Turn setup | valid chat request → NDJSON response created | p95 ≤ reference + allowance; no repeated access-index or catalog refresh on the hot path | validated locally | `chat.request_phase` separates feature policy, thread context, maintenance, permissions, documents, turn persistence and projection. A project-scoped workbench cache and one resolved authorization context remove repeated parsing and access scans. |
 | App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | validated locally | Private `codex.turn_metrics.serverFirstDeltaMs` is measured at the server notification boundary. This is not visible TTFT. `src/runtime/turn-telemetry.test.ts` fixes the clock and verifies the calculation. |
 | Visible TTFT | send intent → first agent text painted | comparative budget | implemented | `ClientTurnPerformance` records the first non-empty delta after the dispatcher applies it and schedules an rAF. This is a local paint proxy, not a browser-validated visible-latency result; never substitute the server first delta. |
 | Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | implemented | Client readback has bounded inter-paint p50/p95/max after rAF; private `codex.turn_metrics` retains separate server-side cadence. Browser/live comparison remains pending. |
@@ -123,8 +124,11 @@ that differs from the generated contract version.
 
 ## Private runtime telemetry readback
 
-The existing server-only operational logger emits two bounded JSON records per
-correlation, never a public route or client payload. `codex.turn_lifecycle`
+The existing server-only operational logger emits bounded JSON records per
+correlation, never a public route or client payload. `chat.request_phase`
+measures the status-sensitive work that must complete before the NDJSON stream
+is returned. `codex.turn_phase` then separates memory, worker startup, catalog,
+skills, thread resume/start and `turn/start`. `codex.turn_lifecycle`
 records `resumed`, `reconnected`, `disconnected` and `cancel_requested` with
 opaque installation/user/project/thread/turn/request IDs and request elapsed
 time. `codex.turn_metrics` records terminal `completed`, `error` or `stopped`,
@@ -166,3 +170,19 @@ variance; they do not prove the current branch, current production revision or
 ChatGPT Work parity. Repeat the matched benchmark after release and attach the
 immutable revision, model, prompt, timestamps, raw NDJSON event timing and final
 persisted turn/usage readback.
+
+## Warm-path implementation
+
+Opening a project verifies the private worker account and starts a non-blocking,
+project-scoped catalog preload. Catalog data is fresh for five minutes; for the
+next 25 minutes a turn uses the last verified value immediately while a single
+deduplicated refresh runs in the background. A cold or older-than-30-minute
+catalog still fails closed by awaiting a verified refresh.
+
+Filesystem workbench state is cached only after strict schema validation and is
+invalidated by inode, mtime or size changes. Cached entries are cloned before
+use, limited to 16 MiB each and 128 MiB process-wide. The durable file lock,
+atomic write, tenant/user binding and projection overlay remain authoritative.
+Unchanged shared-access fingerprints no longer rewrite the access index or add
+a redundant audit entry; actual membership, role or project changes still
+invalidate the fingerprint and update the index synchronously.

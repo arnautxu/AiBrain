@@ -319,6 +319,15 @@ export class FileSharedAccessIndex {
     const grants = this.buildOwnerGrants(options.owner, options.snapshot, options.users);
     return this.locks.withLock(`shared-access-index:${this.installationId}`, async () => {
       const current = await this.readLocked();
+      const currentFingerprints = current.grants
+        .filter((grant) => grant.ownerUserId === options.owner.userId)
+        .map((grant) => grant.grantFingerprint)
+        .toSorted();
+      const nextFingerprints = grants.map((grant) => grant.grantFingerprint).toSorted();
+      if (currentFingerprints.length === nextFingerprints.length &&
+          currentFingerprints.every((fingerprint, index) => fingerprint === nextFingerprints[index])) {
+        return current;
+      }
       const state: SharedAccessIndexState = {
         schemaVersion: 1,
         installationId: this.installationId,
