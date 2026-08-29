@@ -93,6 +93,8 @@ RUN printf '%s\n' \
     libreoffice-impress \
     libreoffice-writer \
     poppler-utils \
+    python3 \
+    python3-venv \
     qpdf \
     restic \
     tini \

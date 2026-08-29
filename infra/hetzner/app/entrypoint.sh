@@ -126,6 +126,7 @@ for executable in \
   /usr/bin/pdfinfo \
   /usr/bin/pdftoppm \
   /usr/bin/pdftotext \
+  /usr/bin/python3 \
   /usr/bin/qpdf \
   /usr/bin/restic; do
   [ -x "$executable" ] || fail "required executable is unavailable: $executable"
