@@ -29,10 +29,9 @@ async function enabledUsers(usersRoot: string) {
   return users.filter((user) => user?.enabled === true);
 }
 
-async function sweep(workerId: string, installation: Readonly<InstallationConfig>) {
-  const output = [];
-  for (const user of await enabledUsers(installation.paths.usersRoot)) {
-    if (!user) continue;
+async function sweep(workerId: string, installation: Readonly<InstallationConfig>, concurrency: number, timeoutMs: number) {
+  const outputs = await Promise.all((await enabledUsers(installation.paths.usersRoot)).map(async (user) => {
+    if (!user) return [];
     const session: AuthSession = {
       provider: "local",
       user: { id: user.userId, name: user.displayName, email: user.email },
@@ -44,30 +43,35 @@ async function sweep(workerId: string, installation: Readonly<InstallationConfig
       userId: user.userId,
       usersRoot: installation.paths.usersRoot,
     });
-    output.push(...await runAutomationSweep({
+    return runAutomationSweep({
       store,
       ownerId: workerId,
-      execute: (claim, existingThreadId, onThreadPrepared) => executeScheduledTurn({
+      concurrency,
+      timeoutMs,
+      execute: (claim, existingThreadId, onThreadPrepared, signal) => executeScheduledTurn({
         installation,
         session,
         task: claim.task,
         runKey: claim.runKey,
         existingThreadId,
         onThreadPrepared,
+        signal,
       }),
-    }));
-  }
-  return { installation, output };
+    });
+  }));
+  return { installation, output: outputs.flat() };
 }
 
 async function main() {
   const once = process.argv.includes("--once");
-  const allowed = new Set(["--once", "--interval-ms"]);
+  const allowed = new Set(["--once", "--interval-ms", "--concurrency", "--timeout-ms"]);
   for (let index = 2; index < process.argv.length; index += 1) {
     if (!allowed.has(process.argv[index])) throw new Error(`Argumento desconocido: ${process.argv[index]}`);
     if (process.argv[index] === "--interval-ms") index += 1;
   }
   const intervalMs = positiveInteger("--interval-ms", 30_000);
+  const concurrency = positiveInteger("--concurrency", 2);
+  const timeoutMs = positiveInteger("--timeout-ms", 15 * 60_000);
   const workerId = `automation-${randomUUID()}`;
   const installation = await loadInstallationConfig();
   const heartbeat = () => writeAutomationWorkerStatus(installation.paths.dataRoot, {
@@ -80,7 +84,7 @@ async function main() {
   const heartbeatTimer = setInterval(() => void heartbeat().catch(() => undefined), Math.min(intervalMs, 10_000));
   heartbeatTimer.unref?.();
   do {
-    const { output } = await sweep(workerId, installation);
+    const { output } = await sweep(workerId, installation, concurrency, timeoutMs);
     await heartbeat();
     process.stdout.write(`${JSON.stringify({ operation: "automations", workerId, processed: output.length, results: output })}\n`);
     if (once) break;

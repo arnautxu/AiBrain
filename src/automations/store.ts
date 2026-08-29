@@ -39,11 +39,17 @@ function invalid(source: string): never {
 
 function parseLease(value: unknown) {
   if (value === null) return null;
-  if (!isRecord(value) || Object.keys(value).length !== 4 ||
+  if (!isRecord(value) || ![4, 5].includes(Object.keys(value).length) ||
     typeof value.runKey !== "string" || value.runKey.length > 200 ||
     typeof value.ownerId !== "string" || value.ownerId.length > 128 ||
     !isIsoDate(value.scheduledFor) || !isIsoDate(value.expiresAt)) invalid("lease");
-  return value as AutomationTask["lease"];
+  if ("fenceToken" in value && (typeof value.fenceToken !== "string" || value.fenceToken.length < 16 || value.fenceToken.length > 128)) invalid("lease");
+  // A legacy lease cannot be settled by the fenced runner. The next locked
+  // claim replaces it after expiry, without rejecting an in-flight upgrade.
+  return {
+    ...value,
+    fenceToken: typeof value.fenceToken === "string" ? value.fenceToken : "legacy-unfenced",
+  } as AutomationTask["lease"];
 }
 
 function parseTask(value: unknown): AutomationTask {
@@ -58,9 +64,11 @@ function parseTask(value: unknown): AutomationTask {
     !(value.lastRunAt === null || isIsoDate(value.lastRunAt)) ||
     !(value.lastRunStatus === null || value.lastRunStatus === "succeeded" || value.lastRunStatus === "failed") ||
     !(value.lastRunError === null || typeof value.lastRunError === "string") ||
+    !(value.retryAt === undefined || value.retryAt === null || isIsoDate(value.retryAt)) ||
     !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt)) invalid("task");
   return {
     ...value,
+    retryAt: value.retryAt ?? null,
     lease: parseLease(value.lease),
   } as AutomationTask;
 }
@@ -196,6 +204,7 @@ export class FileAutomationStore {
       lastRunAt: null,
       lastRunStatus: null,
       lastRunError: null,
+      retryAt: null,
       lease: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
@@ -217,6 +226,7 @@ export class FileAutomationStore {
         ...patch,
         state,
         lease: state === "paused" ? null : current.lease,
+        retryAt: state === "paused" || patch.schedule || patch.timeZone ? null : current.retryAt,
         updatedAt: new Date(this.now()).toISOString(),
       };
       if (state === "active" && (patch.schedule || patch.timeZone || current.state !== "active")) {
@@ -244,14 +254,16 @@ export class FileAutomationStore {
       const now = this.now();
       const claims: ClaimedAutomation[] = [];
       for (const task of snapshot.tasks.toSorted((a, b) => (a.nextRunAt ?? "").localeCompare(b.nextRunAt ?? ""))) {
-        if (claims.length >= limit || task.state !== "active" || !task.nextRunAt ||
-          new Date(task.nextRunAt).getTime() > now ||
+        const dueAt = task.retryAt ?? task.nextRunAt;
+        if (claims.length >= limit || task.state !== "active" || !task.nextRunAt || !dueAt ||
+          new Date(dueAt).getTime() > now ||
           (task.lease && new Date(task.lease.expiresAt).getTime() > now)) continue;
         const scheduledFor = task.nextRunAt;
         const runKey = `${task.id}:${scheduledFor}`;
         task.lease = {
           runKey,
           ownerId,
+          fenceToken: randomUUID(),
           scheduledFor,
           expiresAt: new Date(now + this.leaseMs).toISOString(),
         };
@@ -267,14 +279,19 @@ export class FileAutomationStore {
       const task = snapshot.tasks.find((candidate) => candidate.id === claim.task.id);
       if (!task) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
       this.assertOwnership(task);
-      if (!task.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId) {
+      if (!task.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId ||
+        task.lease.fenceToken !== claim.task.lease?.fenceToken) {
         throw new AutomationStoreError("AUTOMATION_LEASE_LOST", "La concesión de ejecución ya no pertenece a este worker.");
       }
       task.lastRunAt = new Date(this.now()).toISOString();
       task.lastRunStatus = outcome.status;
       task.lastRunError = outcome.status === "failed" ? (outcome.error ?? "Error de ejecución") : null;
-      task.nextRunAt = nextAfterOccurrence(task.schedule, task.timeZone, claim.scheduledFor);
+      // Bound restart catch-up to one occurrence. A long outage must not turn
+      // into a burst of every missed daily/weekly job.
+      task.nextRunAt = nextAfterOccurrence(task.schedule, task.timeZone,
+        new Date(Math.max(this.now(), new Date(claim.scheduledFor).getTime())).toISOString());
       task.state = task.nextRunAt ? "active" : "completed";
+      task.retryAt = null;
       task.lease = null;
       task.updatedAt = task.lastRunAt;
       return { ...task };
@@ -284,7 +301,8 @@ export class FileAutomationStore {
   async renewLease(claim: ClaimedAutomation) {
     return this.mutate((snapshot) => {
       const task = snapshot.tasks.find((candidate) => candidate.id === claim.task.id);
-      if (!task?.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId) {
+      if (!task?.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId ||
+        task.lease.fenceToken !== claim.task.lease?.fenceToken) {
         throw new AutomationStoreError("AUTOMATION_LEASE_LOST", "La concesión de ejecución ya no pertenece a este worker.");
       }
       task.lease.expiresAt = new Date(this.now() + this.leaseMs).toISOString();
@@ -297,6 +315,26 @@ export class FileAutomationStore {
     this.assertRunOwnership(run);
     await this.prepare();
     return this.runs.append(run);
+  }
+
+  async retry(claim: ClaimedAutomation, outcome: { error: string; retryAt: string }) {
+    if (!isIsoDate(outcome.retryAt)) throw new AutomationStoreError("AUTOMATION_RETRY_INVALID", "La reprogramación no es válida.");
+    return this.mutate((snapshot) => {
+      const task = snapshot.tasks.find((candidate) => candidate.id === claim.task.id);
+      if (!task) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+      this.assertOwnership(task);
+      if (!task.lease || task.lease.runKey !== claim.runKey || task.lease.ownerId !== claim.ownerId ||
+        task.lease.fenceToken !== claim.task.lease?.fenceToken) {
+        throw new AutomationStoreError("AUTOMATION_LEASE_LOST", "La concesión de ejecución ya no pertenece a este worker.");
+      }
+      task.lastRunAt = new Date(this.now()).toISOString();
+      task.lastRunStatus = "failed";
+      task.lastRunError = outcome.error;
+      task.retryAt = outcome.retryAt;
+      task.lease = null;
+      task.updatedAt = task.lastRunAt;
+      return { ...task };
+    });
   }
 
   private assertRunOwnership(run: AutomationRun) {

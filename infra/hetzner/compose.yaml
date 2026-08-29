@@ -103,7 +103,7 @@ services:
   automation-worker:
     image: "${AIBRAIN_IMAGE:?set AIBRAIN_IMAGE to an immutable image digest}"
     entrypoint: [/usr/bin/tini, --, /usr/local/bin/aibrain-entrypoint]
-    command: [tsx, scripts/run-automations.ts, --interval-ms, "${AIBRAIN_AUTOMATIONS_INTERVAL_MS:-30000}"]
+    command: [node, /app/automation-worker.mjs, --interval-ms, "${AIBRAIN_AUTOMATIONS_INTERVAL_MS:-30000}"]
     env_file:
       - "${AIBRAIN_RUNTIME_ENV_FILE:?set AIBRAIN_RUNTIME_ENV_FILE}"
       - "${AIBRAIN_EGRESS_ENV_FILE:?set AIBRAIN_EGRESS_ENV_FILE}"

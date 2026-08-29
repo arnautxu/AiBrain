@@ -16,6 +16,8 @@ export type AutomationSchedule =
 export type AutomationLease = {
   runKey: string;
   ownerId: string;
+  /** Changes for every claim, so an expired process cannot settle a newer claim. */
+  fenceToken: string;
   scheduledFor: string;
   expiresAt: string;
 };
@@ -36,6 +38,8 @@ export type AutomationTask = {
   lastRunAt: string | null;
   lastRunStatus: Exclude<AutomationRunStatus, "running"> | null;
   lastRunError: string | null;
+  /** Retry retains the same occurrence and its deterministic idempotency key. */
+  retryAt: string | null;
   lease: AutomationLease | null;
   createdAt: string;
   updatedAt: string;

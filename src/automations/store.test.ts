@@ -66,6 +66,7 @@ describe("FileAutomationStore", () => {
       store,
       ownerId: "worker-one",
       now: () => clock,
+      maxAttempts: 1,
       execute: async () => { throw new Error("Runtime no disponible"); },
     });
     expect(results).toMatchObject([{ status: "failed", error: "Runtime no disponible" }]);
@@ -106,5 +107,72 @@ describe("FileAutomationStore", () => {
     });
     expect(executions).toBe(0);
     expect((await store.list())[0].state).toBe("completed");
+  });
+
+  it("persists exponential retries with the same idempotency key", async () => {
+    const usersRoot = await root();
+    let clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock });
+    await store.create(input("2026-08-28T09:00:00.000Z"));
+    const first = await runAutomationSweep({
+      store,
+      ownerId: "worker-one",
+      now: () => clock,
+      retryBaseMs: 1_000,
+      execute: async () => { throw new Error("transient"); },
+    });
+    expect(first).toMatchObject([{ status: "failed", error: "transient" }]);
+    const [pending] = await store.list();
+    expect(pending.retryAt).toBe("2026-08-28T09:00:01.000Z");
+    const firstRunKey = (await store.listRuns())[0].runKey;
+    clock += 1_000;
+    await runAutomationSweep({
+      store,
+      ownerId: "worker-two",
+      now: () => clock,
+      retryBaseMs: 1_000,
+      execute: async () => ({ threadId: projectId }),
+    });
+    const runs = await store.listRuns();
+    expect(runs.at(-1)).toMatchObject({ runKey: firstRunKey, status: "succeeded", attempt: 2 });
+    expect((await store.list())[0].state).toBe("completed");
+  });
+
+  it("fences a stale worker after a recovered lease", async () => {
+    const usersRoot = await root();
+    let clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock, leaseMs: 1_000 });
+    await store.create(input("2026-08-28T09:00:00.000Z"));
+    const [first] = await store.claimDue("worker-one");
+    clock += 1_001;
+    const [second] = await store.claimDue("worker-two");
+    await expect(store.renewLease(first)).rejects.toMatchObject({ code: "AUTOMATION_LEASE_LOST" });
+    await store.settle(second, { status: "succeeded" });
+    expect((await store.list())[0].state).toBe("completed");
+  });
+
+  it("runs independent claims concurrently but never duplicates their run key", async () => {
+    const usersRoot = await root();
+    const clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock });
+    await store.create(input("2026-08-28T09:00:00.000Z"));
+    await store.create({ ...input("2026-08-28T09:00:00.000Z"), name: "Segundo" });
+    let running = 0;
+    let maximum = 0;
+    await runAutomationSweep({
+      store,
+      ownerId: "worker-one",
+      concurrency: 2,
+      now: () => clock,
+      execute: async () => {
+        running += 1;
+        maximum = Math.max(maximum, running);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        running -= 1;
+        return { threadId: projectId };
+      },
+    });
+    expect(maximum).toBe(2);
+    expect(new Set((await store.listRuns()).filter((run) => run.status === "succeeded").map((run) => run.runKey)).size).toBe(2);
   });
 });
