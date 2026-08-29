@@ -9,6 +9,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Each suite starts a real copied Next application. Keep the files
+    // serial so their short-lived dev servers and generated `.next` trees
+    // cannot race on constrained CI or release hosts.
+    fileParallelism: false,
     maxWorkers: 1,
     include: ["tests/e2e/**/*.test.ts"],
     testTimeout: 120_000,

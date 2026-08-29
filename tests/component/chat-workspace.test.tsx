@@ -2,7 +2,9 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
+import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+vi.mock("thinking-orbs", () => ({ ThinkingOrb: () => null }));
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { baseBrainManifest, type BrainPreferences } from "@/config/brain";
 import type { ChatMessage } from "@/lib/chat-contract";
@@ -67,7 +69,10 @@ function renderWorkspace(
   activeProject: WorkbenchProject | null = project,
   overrides: Partial<ComponentProps<typeof ChatWorkspace>> = {},
 ) {
-  return render(<ChatWorkspace
+  const { prompt: initialPrompt = "", onPromptChange = vi.fn(), ...remainingOverrides } = overrides;
+  function ControlledWorkspace() {
+    const [prompt, setPrompt] = useState(initialPrompt);
+    return <ChatWorkspace
     manifest={baseBrainManifest}
     preferences={preferences}
     project={activeProject}
@@ -77,10 +82,12 @@ function renderWorkspace(
     companyName="Arnall"
     assistantName="Arnall AI"
     hydrated
-    prompt=""
+    prompt={prompt}
     composerExperience="smart"
     webSearch
     imageGeneration={false}
+    connectorMentions={[]}
+    selectedConnectorMentionIds={[]}
     attachments={[]}
     documents={[]}
     publications={[]}
@@ -92,11 +99,15 @@ function renderWorkspace(
     networkOnline
     streamRecovery={null}
     onRetryRuntime={vi.fn()}
-    onPromptChange={vi.fn()}
+    onPromptChange={(value) => {
+      setPrompt(value);
+      onPromptChange(value);
+    }}
     onComposerExperienceChange={vi.fn()}
     onDestinationChange={vi.fn()}
     onWebSearchChange={vi.fn()}
     onImageGenerationChange={vi.fn()}
+    onConnectorMentionIdsChange={vi.fn()}
     onAttachmentsChange={vi.fn()}
     onDocumentsChange={vi.fn()}
     onAddDocuments={vi.fn(async () => undefined)}
@@ -113,8 +124,10 @@ function renderWorkspace(
     managedAppApprovalKeys={[]}
     onManagedAppPrepared={vi.fn()}
     onPreviewDocument={vi.fn()}
-    {...overrides}
-  />);
+    {...remainingOverrides}
+  />;
+  }
+  return render(<ControlledWorkspace />);
 }
 
 afterEach(cleanup);
@@ -124,6 +137,26 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
+  it("shows only the authorized connector autocomplete and binds a selected @ source", () => {
+    const onPromptChange = vi.fn();
+    const onConnectorMentionIdsChange = vi.fn();
+    renderWorkspace(null, project, {
+      connectorMentions: [
+        { id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true },
+        { id: "executive-crm", label: "CRM Ejecutivo", kind: "connector", status: "requires_login", statusCode: "CONNECTOR_LOGIN_REQUIRED", canRead: false, requiresApprovalForWrites: false },
+      ],
+      onPromptChange,
+      onConnectorMentionIdsChange,
+    });
+    const composer = screen.getByLabelText("Mensaje");
+    fireEvent.change(composer, { target: { value: "Busca @gm" } });
+    expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Gmail");
+    expect(screen.queryByText("CRM Ejecutivo")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: /Gmail/ }));
+    expect(onConnectorMentionIdsChange).toHaveBeenCalledWith(["gmail"]);
+    expect(onPromptChange).toHaveBeenLastCalledWith("Busca @Gmail ");
+  });
+
   it("keeps the landing focused on its editable destination and honest suggestions", () => {
     renderWorkspace();
 
@@ -138,6 +171,13 @@ describe("chat workspace simplificado", () => {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
     expect(screen.queryByLabelText("Abrir preferencias")).not.toBeInTheDocument();
+  });
+
+  it("uses only the employee's first name on a standalone landing", () => {
+    renderWorkspace(null, null, { userName: "David Liria" });
+
+    expect(screen.getByRole("heading", { name: "¿En qué te puedo ayudar, David?" })).toBeInTheDocument();
+    expect(screen.queryByText("David Liria", { exact: true })).not.toBeInTheDocument();
   });
 
   it("replaces the composer with a focused guided flow and reveals secondary actions on request", () => {

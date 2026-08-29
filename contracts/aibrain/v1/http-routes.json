@@ -13,6 +13,7 @@
     "GET /api/automations": "JsonObject",
     "GET /api/automations/{taskId}/runs": "JsonObject",
     "GET /api/connectors": "ConnectorCapabilitiesResponse",
+    "GET /api/connectors/mentions": "ConnectorMentionsResponse",
     "GET /api/health/live": "JsonObject",
     "GET /api/health/ready": "JsonObject",
     "GET /api/library": "JsonObject",

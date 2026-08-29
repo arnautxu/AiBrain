@@ -10,6 +10,9 @@ export type ResolvedComposerExperience = {
 
 /** Product intent is stable even when provider model names change. */
 export const COMPOSER_EXPERIENCES: Record<ComposerExperience, ResolvedComposerExperience> = {
+  // Fast is intentionally conservative: users asking for a quick answer
+  // should not pay for deeper reasoning unless they explicitly opt into a
+  // different experience.
   fast: { experience: "fast", model: "gpt-5.6-terra", effort: "low" },
   smart: { experience: "smart", model: "gpt-5.6-sol", effort: "low" },
   expert: { experience: "expert", model: "gpt-5.6-sol", effort: "high" },

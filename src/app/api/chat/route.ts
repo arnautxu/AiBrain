@@ -98,12 +98,15 @@ async function measureChatSetup<T>(
   } finally {
     const completedAt = performance.now();
     operationalLogger.info("chat.request_phase", {
-      metricSchemaVersion: 1,
+      metricSchemaVersion: 2,
       ...correlation,
       phase,
       outcome,
       phaseMs: Math.max(0, Math.round(completedAt - phaseStartedAt)),
       requestElapsedMs: Math.max(0, Math.round(completedAt - requestStartedAt)),
+      // Wall-clock markers make cross-service traces joinable; no request or
+      // model payload is ever attached to this record.
+      observedAt: new Date().toISOString(),
     });
   }
 }
@@ -276,6 +279,7 @@ function followProjectedTurn(
 
 export async function POST(request: Request) {
   const requestStartedAt = performance.now();
+  const requestReceivedAt = new Date().toISOString();
   if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
@@ -296,6 +300,13 @@ export async function POST(request: Request) {
     threadId: body.threadId,
     localTurnId: body.assistantMessageId,
   };
+  operationalLogger.info("chat.request_received", {
+    metricSchemaVersion: 2,
+    ...setupCorrelation,
+    receivedAt: requestReceivedAt,
+    authenticatedAt: new Date().toISOString(),
+    authenticationMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
+  });
 
   const requestsControlledFeature = body.options.webSearch || body.options.imageGeneration || Boolean(body.options.skill);
   if (requestsControlledFeature) {
@@ -625,7 +636,7 @@ export async function POST(request: Request) {
     localTurnId: body.assistantMessageId,
     clientRequestId: body.userMessageId,
     streamRequestId: randomUUID(),
-  }, { logger: operationalLogger });
+  }, { logger: operationalLogger, startedAt: requestStartedAt });
   let clientDetached = false;
   const detachClient = () => {
     if (clientDetached) return;
@@ -731,6 +742,7 @@ export async function POST(request: Request) {
             maintenanceActivity ?? undefined,
             assistantName,
             context,
+            requestStartedAt,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

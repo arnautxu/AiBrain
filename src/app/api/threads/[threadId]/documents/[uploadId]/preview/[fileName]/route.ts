@@ -52,6 +52,7 @@ export async function GET(_request: Request, context: RouteContext) {
         "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
         "Cross-Origin-Resource-Policy": "same-origin",
         "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
       },
     });
   } catch (error) {

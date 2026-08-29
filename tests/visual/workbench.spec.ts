@@ -4,13 +4,8 @@ const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "ope
 
 async function login(page: Page) {
   await page.goto("/login");
-  const origin = new URL(page.url()).origin;
-  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
-    data: { userId: demoUserId },
-    headers: { Origin: origin },
-  });
-  expect(loginResponse.ok()).toBe(true);
-  await page.goto("/");
+  await page.getByRole("button", { name: demoUserId === "operations-user" ? /Taylor/ : /Alex Example/ }).click();
+  await page.waitForURL(/\/$/);
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
@@ -186,12 +181,14 @@ test("task center surface dark", async ({ page }) => {
   await expect(page).toHaveScreenshot("task-center-surface-dark.png", { fullPage: true });
 });
 
-test("scheduled work surface light", async ({ page }) => {
+test("automations occupy the main surface", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
-  await page.getByRole("button", { name: "Programadas", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Tareas programadas" })).toBeVisible();
-  await expect(page.getByText("Cargando tareas…")).toBeHidden();
+  await page.getByRole("button", { name: "Automatizaciones", exact: true }).click();
+  const automations = page.getByRole("dialog", { name: "Automatizaciones" });
+  await expect(automations).toBeVisible();
+  await expect(page.getByText("Cargando automatizaciones…")).toBeHidden();
+  await expect(automations).toHaveCSS("width", `${page.viewportSize()?.width ?? 1440}px`);
   await expect(page).toHaveScreenshot("scheduled-work-surface-light.png", { fullPage: true });
 });
 

@@ -40,6 +40,11 @@ export type AutomationTask = {
   lastRunError: string | null;
   /** Retry retains the same occurrence and its deterministic idempotency key. */
   retryAt: string | null;
+  /** A soft-deleted task stays available to the worker only long enough to
+   * fence and record an in-flight turn. It is never returned to its owner. */
+  deletedAt: string | null;
+  /** A pause/delete requested during a lease aborts the turn cooperatively. */
+  cancellationRequestedAt: string | null;
   lease: AutomationLease | null;
   createdAt: string;
   updatedAt: string;

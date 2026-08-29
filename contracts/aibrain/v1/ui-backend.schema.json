@@ -173,6 +173,25 @@
         "connectors": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/ConnectorCapability" } }
       }
     },
+    "ConnectorMention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "kind", "status", "statusCode", "canRead", "requiresApprovalForWrites"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "kind": { "enum": ["app", "connector", "mcp"] },
+        "status": { "enum": ["connected", "requires_login", "unavailable"] },
+        "statusCode": { "type": ["string", "null"], "maxLength": 160 },
+        "canRead": { "type": "boolean" },
+        "requiresApprovalForWrites": { "type": "boolean" }
+      }
+    },
+    "ConnectorMentionsResponse": {
+      "type": "array",
+      "maxItems": 100,
+      "items": { "$ref": "#/$defs/ConnectorMention" }
+    },
     "ConnectorActionLocator": {
       "type": "object",
       "additionalProperties": false,

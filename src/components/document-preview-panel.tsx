@@ -10,12 +10,13 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
   onClose: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState(!artifact.previewUrl);
   const [reload, setReload] = useState(0);
   const handleLoad = useCallback(() => setLoaded(true), []);
   const handleError = useCallback(() => setFailed(true), []);
 
   const retry = () => {
+    if (!artifact.previewUrl) return;
     setLoaded(false);
     setFailed(false);
     setReload((current) => current + 1);

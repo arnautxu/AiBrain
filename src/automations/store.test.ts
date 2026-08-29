@@ -175,4 +175,63 @@ describe("FileAutomationStore", () => {
     expect(maximum).toBe(2);
     expect(new Set((await store.listRuns()).filter((run) => run.status === "succeeded").map((run) => run.runKey)).size).toBe(2);
   });
+
+  it("cancels an in-flight deletion without retrying and retains its durable history", async () => {
+    const usersRoot = await root();
+    const clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock });
+    const task = await store.create(input("2026-08-28T09:00:00.000Z"));
+    let started!: () => void;
+    const executing = new Promise<void>((resolve) => { started = resolve; });
+    const sweep = runAutomationSweep({
+      store,
+      ownerId: "worker-one",
+      now: () => clock,
+      leaseRenewalMs: 1,
+      execute: async (_claim, _threadId, _prepared, signal) => {
+        started();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+        return { threadId: projectId };
+      },
+    });
+    await executing;
+    await store.delete(task.id);
+    await sweep;
+
+    expect(await store.list()).toEqual([]);
+    const history = await store.listRuns(task.id);
+    expect(history.at(-1)).toMatchObject({ status: "failed", attempt: 1, error: "La automatización fue cancelada por su propietario." });
+    expect(history.filter((run) => run.status === "running")).toHaveLength(1);
+  });
+
+  it("fences an in-flight claim when its runtime inputs change", async () => {
+    const usersRoot = await root();
+    const clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock });
+    const task = await store.create(input("2026-08-28T09:00:00.000Z"));
+    const [claim] = await store.claimDue("worker-one");
+    await store.update(task.id, { prompt: "Genera el informe únicamente con cifras aprobadas." });
+    await expect(store.renewLease(claim)).rejects.toMatchObject({ code: "AUTOMATION_CANCELLED" });
+    expect((await store.list())[0]).toMatchObject({ state: "active", cancellationRequestedAt: expect.any(String) });
+  });
+
+  it("persists the prepared result thread in the durable run history", async () => {
+    const usersRoot = await root();
+    const clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock });
+    await store.create(input("2026-08-28T09:00:00.000Z"));
+    await runAutomationSweep({
+      store,
+      ownerId: "offline-worker",
+      now: () => clock,
+      execute: async (_claim, _threadId, prepared) => {
+        await prepared(projectId);
+        return { threadId: projectId };
+      },
+    });
+
+    expect((await store.listRuns()).at(-1)).toMatchObject({ status: "succeeded", threadId: projectId });
+  });
 });
