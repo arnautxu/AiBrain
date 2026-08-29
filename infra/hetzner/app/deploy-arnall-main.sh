@@ -75,6 +75,17 @@ set_automation_worker_flag() {
   fi
 }
 
+automation_worker_is_healthy() {
+  local compose_file="${STATE_FILE}.active.compose.yaml"
+  local worker_container worker_state
+  [[ -f "$compose_file" && ! -L "$compose_file" ]] || return 1
+  grep -qx "AIBRAIN_AUTOMATION_WORKER_ENABLED=${AUTOMATION_WORKER_ENABLED}" "$ACTIVE_ENV" || return 1
+  worker_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q automation-worker)"
+  [[ "$worker_container" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+  worker_state="$(docker container inspect --format '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$worker_container" 2>/dev/null || true)"
+  [[ "$worker_state" == "true|healthy" ]]
+}
+
 cleanup_ghcr_credentials() {
   local status="$?"
   if [[ -n "${ghcr_docker_config:-}" && -d "$ghcr_docker_config" && ! -L "$ghcr_docker_config" ]]; then
@@ -215,7 +226,8 @@ deploy_ghcr_release() {
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
   require_release_readback_runtime
 
-  if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null; then
+  if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null \
+      && automation_worker_is_healthy; then
     cleanup_previous_aibrain_images
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
     return
