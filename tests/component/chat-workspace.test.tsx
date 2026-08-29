@@ -208,6 +208,22 @@ describe("chat workspace simplificado", () => {
     expect(onStop).not.toHaveBeenCalled();
   });
 
+  it("shows the BoardUI drop surface and forwards dropped files to the existing attachment flow", () => {
+    const onAddDocuments = vi.fn(async () => undefined);
+    renderWorkspace(null, project, {
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
+      onAddDocuments,
+    });
+
+    const composer = screen.getByTestId("composer");
+    const file = new File(["contenido"], "informe.pdf", { type: "application/pdf" });
+    fireEvent.dragEnter(composer, { dataTransfer: { files: [file] } });
+    expect(screen.getByRole("button", { name: "Adjuntar un archivo" })).toBeInTheDocument();
+    fireEvent.drop(screen.getByRole("button", { name: "Adjuntar un archivo" }), { dataTransfer: { files: [file] } });
+
+    expect(onAddDocuments).toHaveBeenCalledWith([file]);
+  });
+
   it("keeps only copy below a response while retaining sensitive approval cards", () => {
     const thread: WorkbenchThread = {
       id: "thread-1",

@@ -25,8 +25,21 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
+import {
+  CalendarDays,
+  Folder as FluidFolder,
+  FolderOpen as FluidFolderOpen,
+  MessageCircle as FluidChat,
+  PenLine,
+  Search,
+} from "lucide-react";
 import type { AuthSession } from "@/auth/types";
 import { BrandMark, ThemeToggle } from "@/components/ui/primitives";
+import {
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "@/components/ui/sidebar";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
 import {
   STANDALONE_PROJECT_SLUG,
@@ -298,18 +311,24 @@ export function Sidebar({
           <button aria-label="Cerrar menú" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>
         </div>
 
-        <nav aria-label="Navegación principal" className="space-y-1 px-2 pb-3">
-          <button disabled={!standaloneProject || busy} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-[13px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-hover)] disabled:opacity-40" onClick={() => onNewThread()}>
-            <NotePencil size={17} /> Nueva conversación
-          </button>
-          <button className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}>
-            <MagnifyingGlass size={17} />
-            <span className="min-w-0 flex-1 text-[13px]">Buscar</span>
-          </button>
-          <button aria-label="Tareas programadas" title="Gestionar tareas programadas" className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-left text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}>
-            <CalendarBlank size={17} />
-            <span className="min-w-0 flex-1 text-[13px]">Tareas programadas</span>
-          </button>
+        <nav aria-label="Navegación principal" className="px-2 pb-3">
+          <SidebarMenu className="gap-0.5">
+            <SidebarMenuItem>
+              <SidebarMenuButton icon={PenLine} size="lg" disabled={!standaloneProject || busy} render={<button onClick={() => onNewThread()} />}>
+                Nueva conversación
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton icon={Search} size="lg" render={<button onClick={onOpenCommandPalette} />}>
+                Buscar
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton icon={CalendarDays} size="lg" aria-label="Tareas programadas" title="Gestionar tareas programadas" render={<button onClick={onOpenAutomations} />}>
+                Tareas programadas
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
         </nav>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
@@ -318,26 +337,25 @@ export function Sidebar({
               <h2 id="standalone-conversations-label" className="text-[12px] font-semibold text-[var(--text-subtle)]">Chats</h2>
               <button disabled={!standaloneProject || busy} aria-label="Nueva conversación independiente" className="rounded-md p-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-40" onClick={() => onNewThread()}><Plus size={14} /></button>
             </div>
-            <div className="space-y-0.5">
+            <SidebarMenu size="compact" className="gap-0.5">
               {activeStandaloneThreads.length === 0 ? (
-                <p className="px-3 py-2 text-[12px] leading-5 text-[var(--text-subtle)]">Tus chats sin proyecto aparecerán aquí.</p>
+                <li className="px-3 py-2 text-[12px] leading-5 text-[var(--text-subtle)]">Tus chats sin proyecto aparecerán aquí.</li>
               ) : activeStandaloneThreads.map((thread) => {
                 const active = thread.id === activeThreadId;
                 const menuOpen = threadMenuId === thread.id;
                 return (
-                  <div key={thread.id} className="relative group/thread">
-                    <button aria-current={active ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-11 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
-                      <ChatCircleDots size={15} weight={active ? "fill" : "regular"} />
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{thread.title}</span>
+                  <SidebarMenuItem key={thread.id} className="group/thread">
+                    <SidebarMenuButton icon={FluidChat} isActive={active} className="sidebar-touch-row" render={<button onClick={() => selectThread(thread.id)} />}>
+                      {thread.title}
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
-                    </button>
+                    </SidebarMenuButton>
                     <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
-                  </div>
+                  </SidebarMenuItem>
                 );
               })}
-            </div>
+            </SidebarMenu>
             {archivedStandaloneThreads.length ? (
               <div className="mt-1">
                 <button className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedStandaloneThreadsOpen((open) => !open)}>{archivedStandaloneThreadsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Archivadas · {archivedStandaloneThreads.length}</button>
@@ -351,9 +369,9 @@ export function Sidebar({
               <h2 id="projects-label" className="text-[12px] font-semibold text-[var(--text-subtle)]">Proyectos</h2>
               <button aria-label="Crear proyecto" className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onNewProject}><Plus size={14} /></button>
             </div>
-            <div className="space-y-0.5">
+            <SidebarMenu className="gap-0.5">
               {activeProjects.length === 0 ? (
-                <button className="w-full rounded-lg border border-dashed border-[var(--border)] px-3 py-3 text-left text-[12px] leading-5 text-[var(--text-subtle)]" onClick={onNewProject}>Crea tu primer proyecto</button>
+                <SidebarMenuItem><button className="w-full rounded-lg border border-dashed border-[var(--border)] px-3 py-3 text-left text-[12px] leading-5 text-[var(--text-subtle)]" onClick={onNewProject}>Crea tu primer proyecto</button></SidebarMenuItem>
               ) : activeProjects.map((project) => {
                 const active = project.id === activeProjectId;
                 const menuOpen = projectMenuId === project.id;
@@ -365,13 +383,12 @@ export function Sidebar({
                   .map((thread) => threadActivityById[thread.id])
                   .filter((activity): activity is ThreadActivity => Boolean(activity));
                 return (
-                  <div key={project.id} className="relative group">
-                    <button aria-current={active ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center gap-2.5 rounded-lg px-3 py-2 pr-11 text-left transition ${active ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectProject(project.id)}>
-                      {active ? <FolderOpen size={16} weight="fill" /> : <Folder size={16} />}
-                      <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{project.name}</span>
+                  <SidebarMenuItem key={project.id} className="group">
+                    <SidebarMenuButton icon={active ? FluidFolderOpen : FluidFolder} isActive={active} className="sidebar-touch-row" render={<button onClick={() => selectProject(project.id)} />}>
+                      {project.name}
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
-                    </button>
+                    </SidebarMenuButton>
                     <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                     <div aria-label={`Chats de ${project.name}`} className="ml-5 border-l border-[var(--border-subtle)] pl-1">
@@ -404,10 +421,10 @@ export function Sidebar({
                         </div>
                       ) : null}
                     </div>
-                  </div>
+                  </SidebarMenuItem>
                 );
               })}
-            </div>
+            </SidebarMenu>
           </section>
 
           {archivedProjects.length ? (

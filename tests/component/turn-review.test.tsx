@@ -70,11 +70,12 @@ describe("turn activity and Review", () => {
       message={liveMessage}
       onResolveApproval={vi.fn()}
     />);
-    let trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
+    let trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
 
-    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveTextContent("Preparando cambios en src/components/turn-activity.tsx");
     expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
+    fireEvent.click(trigger);
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
 
     rerender(<TurnActivity
@@ -111,7 +112,7 @@ describe("turn activity and Review", () => {
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveTextContent("Trabajo completado");
     expect(trigger.querySelector(".thinking-steps-shimmer")).not.toBeInTheDocument();
-    expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
+    expect(screen.getByText("Identificando el alcance exacto")).not.toBeVisible();
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
@@ -164,6 +165,7 @@ describe("turn activity and Review", () => {
       onResolveApproval={vi.fn()}
     />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
     fireEvent.click(screen.getByRole("button", { name: /src\/example\.ts/ }));
     await waitFor(() => {
       expect(screen.getByText("export const ready = true;")).toBeVisible();

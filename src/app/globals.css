@@ -1,9 +1,11 @@
 @import "tailwindcss";
+@import "../styles/theme.css";
+@import "../styles/typography.css";
 
 :root {
-  --stream-gap: 34ms;
-  --stream-fade: 440ms;
-  --stream-blur: 3px;
+  --stream-gap: 16ms;
+  --stream-fade: 180ms;
+  --stream-blur: 1.5px;
   --stream-ease: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light;
   --installation-accent: #315ee7;
@@ -1173,6 +1175,19 @@ button:disabled {
   --color-muted: var(--muted);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  @keyframes spinner-move {
+  to {
+    stroke-dashoffset: -100;
+    }
+  }
+  @keyframes spinner-dash {
+  0%, 100% {
+    stroke-dasharray: 15 85;
+    }
+  50% {
+    stroke-dasharray: 40 60;
+    }
+  }
 }
 
 @keyframes thinking-steps-shimmer {

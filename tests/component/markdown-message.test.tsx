@@ -29,7 +29,7 @@ describe("MarkdownMessage", () => {
     expect(screen.getByText("const ready = true;")).toBeInTheDocument();
   });
 
-  it("reveals streamed prose word by word without animating code", () => {
+  it("reveals streamed prose in fast adaptive bursts without animating code", () => {
     vi.useFakeTimers();
     try {
       const { container } = render(
@@ -39,8 +39,8 @@ describe("MarkdownMessage", () => {
       expect(container.querySelector(".t-stream")).toBeInTheDocument();
       expect(container.querySelectorAll(".t-stream-w")).toHaveLength(2);
       expect(container.querySelectorAll(".t-stream-w.is-in")).toHaveLength(0);
-      act(() => vi.advanceTimersByTime(60));
-      expect(container.querySelectorAll(".t-stream-w.is-in")).toHaveLength(1);
+      act(() => vi.advanceTimersByTime(16));
+      expect(container.querySelectorAll(".t-stream-w.is-in")).toHaveLength(2);
       expect(container.querySelector("code")?.className).not.toContain("t-stream-w");
     } finally {
       vi.useRealTimers();
