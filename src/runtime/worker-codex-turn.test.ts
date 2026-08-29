@@ -758,6 +758,7 @@ describe("worker Codex turn", () => {
     });
     const calls: string[] = [];
     const client = {
+      canReuseLoadedThread() { return false; },
       router: {
         registerTurn() { throw new Error("A completed recovery must not register a live turn."); },
       },
@@ -843,6 +844,122 @@ describe("worker Codex turn", () => {
     expect(calls).toEqual(["thread/resume", "thread/read"]);
     expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
     expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
+    expect(events).toContainEqual({ type: "done" });
+  });
+
+  it("starts a turn directly when the thread is already loaded in the warm App Server", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-warm-thread-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    let handlers: { onNotification(value: unknown): Promise<void> | void } | null = null;
+    const calls: Array<{ method: string; params: unknown }> = [];
+    const client = {
+      canReuseLoadedThread(runtimeThreadId: string, webSearchEnabled: boolean) {
+        return runtimeThreadId === "runtime-thread-1" && webSearchEnabled === false;
+      },
+      router: {
+        registerTurn(_runtimeThreadId: string, _localTurnId: string, value: typeof handlers) {
+          handlers = value;
+          return {
+            threadId: "runtime-thread-1",
+            localTurnId: assistantMessageId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connectionSummary() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: false,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push({ method, params });
+        if (method !== "turn/start") throw new Error(`Unexpected request ${method}`);
+        const result = { turn: { id: "runtime-turn-warm" } };
+        await beforeResolve?.(result as never, {
+          eventId: "response-turn-warm",
+          sequence: 1,
+          occurredAt: new Date().toISOString(),
+          message: { kind: "rpc-response", rpc: { id: purpose, result } },
+        } as never);
+        queueMicrotask(() => {
+          void handlers?.onNotification({
+            method: "turn/completed",
+            params: {
+              threadId: "runtime-thread-1",
+              turn: { id: "runtime-turn-warm", status: "completed", items: [], error: null },
+            },
+          });
+        });
+        return result;
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+      workerWasWarm: true,
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      "runtime-thread-1",
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls.map(({ method }) => method)).toEqual(["turn/start"]);
+    expect(calls[0]?.params).toMatchObject({
+      threadId: "runtime-thread-1",
+      additionalContext: {
+        "aibrain.turn": {
+          kind: "application",
+          value: expect.stringContaining(`Policy fingerprint: ${fingerprint}`),
+        },
+      },
+    });
+    expect(events).not.toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ id: "runtime-thread" }),
+    }));
     expect(events).toContainEqual({ type: "done" });
   });
 

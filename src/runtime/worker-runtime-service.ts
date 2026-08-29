@@ -64,6 +64,7 @@ function isAlreadyInitialized(error: unknown) {
 export class WorkerAppServerClient {
   readonly router: AppServerRpcRouter;
   private initialized: Promise<void> | null = null;
+  private readonly loadedThreads = new Map<string, boolean>();
   private account: CodexConnection | null = null;
   private cachedConnection: CodexConnection | null = null;
   private cachedConnectionCwd: string | null = null;
@@ -130,11 +131,26 @@ export class WorkerAppServerClient {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(purpose)) {
       throw new Error("Stable App Server request id is invalid.");
     }
-    return this.router.request(
+    const result = await this.router.request(
       { method, id: purpose, params } as ClientRequest,
       timeoutMs,
       beforeResolve,
     );
+    if ((method === "thread/start" || method === "thread/resume") &&
+        isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string" &&
+        isRecord(params) && isRecord(params.config)) {
+      this.loadedThreads.set(result.thread.id, params.config.web_search === "live");
+    }
+    return result;
+  }
+
+  /**
+   * A loaded thread can accept `turn/start` directly. The cache belongs to
+   * this client/transport, so replacing or restarting App Server naturally
+   * makes every persisted thread require one fresh `thread/resume`.
+   */
+  canReuseLoadedThread(threadId: string, webSearchEnabled: boolean) {
+    return this.loadedThreads.get(threadId) === webSearchEnabled;
   }
 
   async connection(cwd: string, forceRefresh = false): Promise<CodexConnection> {
