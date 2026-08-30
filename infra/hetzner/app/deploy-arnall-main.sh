@@ -150,7 +150,7 @@ remove_obsolete_aibrain_containers() {
     fi
     obsolete_containers+=("$container")
   done < <(docker ps --all --quiet --filter "ancestor=${image_id}")
-  for container in "${obsolete_containers[@]}"; do
+  for container in ${obsolete_containers[@]+"${obsolete_containers[@]}"}; do
     docker container rm "$container" >/dev/null
     printf 'ARNALL_RELEASE_CLEANUP_REMOVED_CONTAINER image=%s container=%s\n' "$image" "$container"
   done
@@ -181,6 +181,10 @@ remove_unused_aibrain_image() {
   remove_obsolete_aibrain_containers "$image" "$image_id" || return 1
   if ((${#image_references[@]})); then
     for reference in "${image_references[@]}"; do
+      # Docker can expose several RepoDigests for one image ID. Removing the
+      # first reference may atomically remove the remaining aliases as well,
+      # so a later missing alias is already the desired end state.
+      docker image inspect "$reference" >/dev/null 2>&1 || continue
       docker image rm "$reference" >/dev/null || {
         report_cleanup_blocked "$image" "image-remove-failed" "reference=${reference}"
         return 1
