@@ -134,6 +134,61 @@ jobs:
             --target runtime \
             --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
             --tag "aibrain-ci:${GITHUB_SHA}" .
+      - name: Exercise packaged Codex App Server through its production sandbox
+        run: |
+          mkdir -p "${RUNNER_TEMP}/aibrain-ci-data/company-context" \
+            "${RUNNER_TEMP}/aibrain-ci-source" \
+            "${RUNNER_TEMP}/aibrain-ci-publish"
+          chmod 0555 "${RUNNER_TEMP}/aibrain-ci-source"
+          sudo chown -R 10001:10001 \
+            "${RUNNER_TEMP}/aibrain-ci-data" \
+            "${RUNNER_TEMP}/aibrain-ci-publish"
+          cat > "${RUNNER_TEMP}/aibrain-ci-installation.json" <<'JSON'
+          {
+            "schemaVersion": 1,
+            "installationId": "container-ci",
+            "companyName": "Container CI",
+            "companySlug": "container-ci",
+            "publicUrl": "http://localhost",
+            "branding": {
+              "productName": "AiBrain",
+              "logoPath": "/brand.svg",
+              "faviconPath": "/favicon.ico",
+              "accentColor": "#000000"
+            },
+            "paths": {
+              "dataRoot": "/var/lib/aibrain/data",
+              "companyContextRoot": "/var/lib/aibrain/data/company-context",
+              "usersRoot": "/var/lib/aibrain/data/users",
+              "sourceReadRoot": "/srv/aibrain/source-ro",
+              "publishWriteRoot": "/srv/aibrain/publish-rw",
+              "backupsRoot": "/var/lib/aibrain/data/backups"
+            }
+          }
+          JSON
+          docker run --rm \
+            --user 10001:10001 \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --security-opt systempaths=unconfined \
+            --security-opt seccomp=infra/hetzner/browser/seccomp_profile.json \
+            --pids-limit 768 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777 \
+            --tmpfs /run:rw,nosuid,nodev,noexec,size=16m,mode=0755 \
+            --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-installation.json,dst=/etc/aibrain/installation.json,readonly" \
+            --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-data,dst=/var/lib/aibrain/data" \
+            --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-source,dst=/srv/aibrain/source-ro,readonly" \
+            --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-publish,dst=/srv/aibrain/publish-rw" \
+            --env NODE_ENV=production \
+            --env CODEX_BIN=/usr/local/bin/aibrain-codex-worker \
+            --env AIBRAIN_CODEX_EXPECTED_VERSION=0.149.1 \
+            --env AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json \
+            --env AIBRAIN_EGRESS_PROXY_URL=http://127.0.0.1:9 \
+            --env AIBRAIN_EGRESS_WORKER_TOKEN=container_ci_worker_token_000000000000000000 \
+            --entrypoint node \
+            "aibrain-ci:${GITHUB_SHA}" \
+            /usr/local/share/aibrain/container-app-server-acceptance.mjs
       - name: Build egress gateway image from scratch
         run: |
           docker build --pull --no-cache \

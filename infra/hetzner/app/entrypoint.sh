@@ -214,4 +214,12 @@ rm -rf "$browser_test_root" "$browser_sibling_root"
 rm -f "$browser_publish_marker"
 trap - EXIT INT TERM
 
+# A version check proves only that a binary exists. Exercise the packaged
+# worker launcher, private gateway, durable journals and real Codex App Server
+# protocol across a clean process restart before this container can become
+# globally ready. The inherited marker belongs to this exact startup only.
+node /usr/local/share/aibrain/container-app-server-acceptance.mjs \
+  || fail "Codex App Server protocol acceptance failed"
+export AIBRAIN_CODEX_APP_SERVER_ACCEPTED=1
+
 exec "$@"

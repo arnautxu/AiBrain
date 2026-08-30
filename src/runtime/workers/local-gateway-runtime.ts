@@ -190,6 +190,11 @@ function appServerScopeDigest(scope: AppServerScope) {
   return sha256(JSON.stringify([scope.threadId, scope.turnId]));
 }
 
+function serverResponseClientRequestId(event: AppServerEvent) {
+  const scope = appServerScope(event.message);
+  return `server-response:${event.eventId}:${scope ? appServerScopeDigest(scope) : "unscoped"}`;
+}
+
 function encodedResponseScopeDigest(clientRequestId: string) {
   if (!clientRequestId.startsWith("server-response:")) return undefined;
   const suffix = clientRequestId.slice(clientRequestId.lastIndexOf(":") + 1);
@@ -323,6 +328,7 @@ export class PrivateWorkerGateway {
   private eventRecordChain = Promise.resolve();
   private readonly inFlightRequests = new Set<string>();
   private readonly pendingResponseConfirmations = new Map<string, string>();
+  private readonly currentServerResponses = new Map<string, string | number>();
 
   constructor(options: PrivateWorkerGatewayOptions) {
     this.context = options.context;
@@ -594,6 +600,24 @@ export class PrivateWorkerGateway {
       this.sendAccepted(socket, request.clientRequestId);
       return;
     }
+    if (
+      request.kind === "rpc-response"
+      && encodedResponseScopeDigest(request.clientRequestId) !== undefined
+      && !this.currentServerResponses.has(request.clientRequestId)
+    ) {
+      // This response belongs to a server request emitted by an earlier Codex
+      // process. A recovered router may no longer own that turn and therefore
+      // cannot reproduce the original decision. Re-injecting the replacement
+      // response into a fresh App Server cannot complete the old request; it
+      // instead blocks the durable delivery cursor and every later RPC. Keep
+      // the accepted receipt uncertain, do not replay an effect, and let the
+      // historical server-request event drain from the client journal. If the
+      // response had not reached the previous child, retain its first receipt
+      // as uncertain rather than losing it or treating it as completed.
+      if (!prior) await this.requests.accept(request.clientRequestId, canonicalHash);
+      this.sendAccepted(socket, request.clientRequestId);
+      return;
+    }
     const accepted = await this.requests.accept(request.clientRequestId, canonicalHash);
     if (accepted.existing && accepted.record.status === "accepted") {
       if (request.kind === "rpc-response") {
@@ -707,6 +731,7 @@ export class PrivateWorkerGateway {
       id: clientRequestId,
       result: { processedAfterEventId: null },
     });
+    this.currentServerResponses.delete(clientRequestId);
     this.sendAccepted(socket, clientRequestId);
   }
 
@@ -744,6 +769,12 @@ export class PrivateWorkerGateway {
       message: parseAppServerOutput(value),
     };
     await this.events.append(event);
+    if (event.message.kind === "rpc-request") {
+      this.currentServerResponses.set(
+        serverResponseClientRequestId(event),
+        event.message.rpc.id,
+      );
+    }
     const socket = this.activeSocket;
     if (socket) {
       this.send(socket, {
@@ -764,6 +795,7 @@ export class PrivateWorkerGateway {
         result: { processedAfterEventId: evidenceEventId },
       });
       this.pendingResponseConfirmations.delete(clientRequestId);
+      this.currentServerResponses.delete(clientRequestId);
       const socket = this.activeSocket;
       if (socket) this.sendAccepted(socket, clientRequestId);
     }

@@ -68,6 +68,9 @@ export function runtimeReadinessProbes(
       name: "codex-toolchain",
       required: true,
       async check(signal: AbortSignal) {
+        if (environment.AIBRAIN_CODEX_APP_SERVER_ACCEPTED !== "1") {
+          return unavailable("CODEX_APP_SERVER_ACCEPTANCE_REQUIRED");
+        }
         if (!await allExecutable([codexReal, workerSandbox, "/usr/bin/bwrap"], dependencies)) {
           return unavailable("CODEX_EXECUTABLE_UNAVAILABLE");
         }

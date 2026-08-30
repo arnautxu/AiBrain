@@ -32,7 +32,7 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build && npm run build:automation-worker
+RUN npm run build && npm run build:automation-worker && npm run build:container-app-server-acceptance
 
 FROM ${NODE_IMAGE} AS runtime
 
@@ -129,6 +129,7 @@ COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/config/internal-agent-context /usr/local/share/aibrain/internal-agent-context
 COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automation-worker.mjs
+COPY --from=builder --chown=root:root /app/dist/container-app-server-acceptance.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs
 # The scheduler is an explicit server-conditioned ESM bundle. Unlike the app,
 # it does not depend on Next's standalone file tracer, tsx, source mounts, or a
 # hand-copied `server-only` marker/dependency graph at runtime.
@@ -182,7 +183,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-alert-controller \
   /usr/local/bin/aibrain-document-maintenance \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs \
-  && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
+  && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs \
   && chmod -R a-w /app /usr/local/share/aibrain/internal-agent-context /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
 
 ARG AIBRAIN_REVISION=development
