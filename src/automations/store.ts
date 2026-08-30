@@ -9,6 +9,7 @@ import type {
   AutomationTaskPatch,
 } from "@/automations/contracts";
 import {
+  isAutomationAudience,
   isAutomationSchedule,
   isIsoDate,
   isRecord,
@@ -55,6 +56,7 @@ function parseLease(value: unknown) {
 function parseTask(value: unknown): AutomationTask {
   if (!isRecord(value) || value.schemaVersion !== 1 || !UUID_PATTERN.test(String(value.id)) ||
     typeof value.installationId !== "string" || typeof value.userId !== "string" ||
+    !(value.audience === undefined || isAutomationAudience(value.audience)) ||
     typeof value.name !== "string" || !value.name || value.name.length > 100 ||
     typeof value.prompt !== "string" || !value.prompt || value.prompt.length > 20_000 ||
     !UUID_PATTERN.test(String(value.projectId)) || typeof value.projectName !== "string" ||
@@ -70,6 +72,13 @@ function parseTask(value: unknown): AutomationTask {
     !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt)) invalid("task");
   return {
     ...value,
+    // Backward-compatible migration: existing tasks initially deliver only
+    // to their owner. Any locked read/write persists this explicit selector.
+    audience: value.audience ?? {
+      membershipPolicy: "current",
+      userIds: [value.userId],
+      groupIds: [],
+    },
     retryAt: value.retryAt ?? null,
     deletedAt: value.deletedAt ?? null,
     cancellationRequestedAt: value.cancellationRequestedAt ?? null,
@@ -160,11 +169,14 @@ export class FileAutomationStore {
     await ensurePrivateDirectory(path.join(this.root, "locks"));
   }
 
-  private async readUnlocked(): Promise<AutomationSnapshot> {
+  private async readUnlocked(): Promise<{ snapshot: AutomationSnapshot; migrated: boolean }> {
     try {
-      return snapshotSchema.parse(JSON.parse(await readFile(this.tasksPath, "utf8")), this.tasksPath);
+      const raw: unknown = JSON.parse(await readFile(this.tasksPath, "utf8"));
+      const migrated = isRecord(raw) && Array.isArray(raw.tasks) &&
+        raw.tasks.some((task) => isRecord(task) && !("audience" in task));
+      return { snapshot: snapshotSchema.parse(raw, this.tasksPath), migrated };
     } catch (error) {
-      if (isNodeError(error, "ENOENT")) return { schemaVersion: 1, tasks: [] };
+      if (isNodeError(error, "ENOENT")) return { snapshot: { schemaVersion: 1, tasks: [] }, migrated: false };
       throw error;
     }
   }
@@ -178,7 +190,7 @@ export class FileAutomationStore {
   private async mutate<T>(operation: (snapshot: AutomationSnapshot) => T | Promise<T>) {
     await this.prepare();
     return this.locks.withLock("automation-tasks", async () => {
-      const snapshot = await this.readUnlocked();
+      const { snapshot } = await this.readUnlocked();
       snapshot.tasks.forEach((task) => this.assertOwnership(task));
       const result = await operation(snapshot);
       await atomicWriteJson(this.tasksPath, snapshot, snapshotSchema);
@@ -186,13 +198,37 @@ export class FileAutomationStore {
     });
   }
 
-  async list() {
+  private async read<T>(operation: (snapshot: AutomationSnapshot) => T) {
     await this.prepare();
-    const snapshot = await this.readUnlocked();
-    snapshot.tasks.forEach((task) => this.assertOwnership(task));
-    return snapshot.tasks
-      .filter((task) => task.deletedAt === null)
-      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+    const current = await this.readUnlocked();
+    current.snapshot.tasks.forEach((task) => this.assertOwnership(task));
+    if (!current.migrated) return operation(current.snapshot);
+    // Only legacy normalization needs a write lock. Ordinary reads retain the
+    // original lock-free atomic-snapshot path used by polling UI and workers.
+    return this.locks.withLock("automation-tasks", async () => {
+      const { snapshot, migrated } = await this.readUnlocked();
+      snapshot.tasks.forEach((task) => this.assertOwnership(task));
+      if (migrated) await atomicWriteJson(this.tasksPath, snapshot, snapshotSchema);
+      return operation(snapshot);
+    });
+  }
+
+  async list(options: { includeDeleted?: boolean } = {}) {
+    return this.read((snapshot) => snapshot.tasks
+      .filter((task) => options.includeDeleted || task.deletedAt === null)
+      .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+  }
+
+  async get(taskId: string, options: { includeDeleted?: boolean } = {}) {
+    if (!UUID_PATTERN.test(taskId)) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+    return this.read((snapshot) => {
+      const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
+      if (!task || (!options.includeDeleted && task.deletedAt !== null)) {
+        throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+      }
+      this.assertOwnership(task);
+      return { ...task };
+    });
   }
 
   async create(input: AutomationTaskInput) {
@@ -205,6 +241,11 @@ export class FileAutomationStore {
       installationId: this.options.installationId,
       userId: this.options.userId,
       ...input,
+      audience: input.audience ?? {
+        membershipPolicy: "current",
+        userIds: [this.options.userId],
+        groupIds: [],
+      },
       state: "active",
       nextRunAt,
       lastRunAt: null,

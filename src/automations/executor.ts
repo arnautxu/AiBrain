@@ -16,6 +16,7 @@ import {
   getThreadRuntimeContext,
 } from "@/workbench/store";
 import type { AutomationTask } from "@/automations/contracts";
+import { FileAutomationAudienceStore } from "@/automations/audience-store";
 
 function stableUuid(value: string) {
   const bytes = createHash("sha256").update(value).digest("hex").slice(0, 32).split("");
@@ -73,6 +74,19 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   const threadId = input.existingThreadId ?? thread?.id;
   if (!threadId) throw new Error("No se ha podido preparar la conversación programada.");
   await input.onThreadPrepared?.(threadId);
+  // One durable delivery manifest per occurrence. Recipient membership is
+  // intentionally not copied here: every read resolves the task's current
+  // user/group selectors so later removals revoke access immediately.
+  await new FileAutomationAudienceStore({
+    installationId: input.installation.installationId,
+    dataRoot: input.installation.paths.dataRoot,
+  }).record({
+    runKey: input.runKey,
+    taskId: input.task.id,
+    ownerUserId: input.task.userId,
+    projectId: input.task.projectId,
+    threadId,
+  });
   const context = await getThreadRuntimeContext(input.session, threadId);
   if (context.projectId !== input.task.projectId) throw new Error("El proyecto de la automatización ha cambiado.");
   const runtimeConfig = readRuntimeConfig(input.installation.installationId, context.workspaceKey);

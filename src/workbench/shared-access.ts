@@ -12,6 +12,8 @@ import {
   type SharedAccessRole as IndexedSharedAccessRole,
 } from "@/workbench/shared-access-index";
 import type { WorkbenchProject, WorkbenchSnapshot, WorkbenchThread } from "@/workbench/types";
+import { listAutomationThreadAccess, resolveAutomationThreadAccess } from "@/automations/thread-access";
+import { FileAutomationAudienceStore } from "@/automations/audience-store";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export type SharedAccessRole = "owner" | IndexedSharedAccessRole;
@@ -45,13 +47,20 @@ function accessIndex(installation: Awaited<ReturnType<typeof loadInstallationCon
   });
 }
 
+function automationAudienceStore(installation: Awaited<ReturnType<typeof loadInstallationConfig>>) {
+  return new FileAutomationAudienceStore({
+    dataRoot: installation.paths.dataRoot,
+    installationId: installation.installationId,
+  });
+}
+
 async function ownAccessContext(session: AuthSession) {
   const context = await users(session);
   const store = FileWorkbenchStore.fromInstallation(context.installation);
   const own = await store.load(context.principal.userId);
   const index = accessIndex(context.installation);
   await index.syncOwnerSnapshot({ owner: context.principal, snapshot: own, users: context.users });
-  return { ...context, store, own, index };
+  return { ...context, session, store, own, index };
 }
 
 type OwnAccessContext = Awaited<ReturnType<typeof ownAccessContext>>;
@@ -60,21 +69,43 @@ async function loadSharedWorkbenchFromContext(
   context: OwnAccessContext,
 ): Promise<WorkbenchSnapshot> {
   const { principal, store, own, index } = context;
+  const deliveries = await automationAudienceStore(context.installation).list();
+  const deliveredThreadIds = new Set(deliveries.map(({ threadId }) => threadId));
+  const automationAccess = deliveries.length ? await listAutomationThreadAccess(context.session) : [];
+  const authorizedAutomationThreadIds = new Set(automationAccess.map(({ delivery }) => delivery.threadId));
+  const visibleAutomationThread = (threadId: string) =>
+    !deliveredThreadIds.has(threadId) || authorizedAutomationThreadIds.has(threadId);
   const grants = await index.listProjectsForPrincipal(principal);
   const projects = [...own.projects];
-  const threads = [...own.threads];
+  const threads = own.threads.filter(({ id }) => visibleAutomationThread(id));
   const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
   const sharedSnapshots = await Promise.all([...byOwner].map(async ([ownerUserId, ownerGrants]) => {
     const snapshot = await store.load(ownerUserId);
     const sharedIds = new Set(ownerGrants.map((grant) => grant.projectId));
     return {
       projects: snapshot.projects.filter((project) => sharedIds.has(project.id)),
-      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId)),
+      threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId) && visibleAutomationThread(thread.id)),
     };
   }));
   for (const snapshot of sharedSnapshots) {
     projects.push(...snapshot.projects);
     threads.push(...snapshot.threads);
+  }
+  // Automation audiences grant only their result threads, never the owner's
+  // whole project. The task center can therefore notify recipients without
+  // widening ordinary project visibility.
+  const automationByOwner = Map.groupBy(automationAccess, ({ delivery }) => delivery.ownerUserId);
+  const automationThreads = await Promise.all([...automationByOwner].map(async ([ownerUserId, grants]) => {
+    const snapshot = await store.load(ownerUserId);
+    const allowed = new Set(grants.map(({ delivery }) => delivery.threadId));
+    return snapshot.threads.filter(({ id }) => allowed.has(id));
+  }));
+  const knownThreadIds = new Set(threads.map(({ id }) => id));
+  for (const thread of automationThreads.flat()) {
+    if (!knownThreadIds.has(thread.id)) {
+      knownThreadIds.add(thread.id);
+      threads.push(thread);
+    }
   }
   return { persistence: "filesystem", projects, threads };
 }
@@ -127,6 +158,27 @@ export async function resolveProjectAccess(session: AuthSession, projectId: stri
 export async function resolveThreadAccess(session: AuthSession, threadId: string) {
   const context = await ownAccessContext(session);
   const { principal, store, own, index } = context;
+  const delivery = await automationAudienceStore(context.installation).findByThread(threadId);
+  if (delivery) {
+    const automation = await resolveAutomationThreadAccess(session, threadId);
+    if (!automation) throw new WorkbenchNotFoundError("Fil no trobat.");
+    const thread = await store.getThread(delivery.ownerUserId, threadId);
+    const project = await store.getProject(delivery.ownerUserId, delivery.projectId);
+    return {
+      store,
+      ownerUserId: delivery.ownerUserId,
+      role: delivery.ownerUserId === principal.userId ? "owner" as const : "viewer" as const,
+      project,
+      thread,
+      provenance: {
+        source: "automation-audience" as const,
+        taskId: delivery.taskId,
+        runKey: delivery.runKey,
+        membershipPolicy: "current" as const,
+      },
+      context,
+    };
+  }
   const ownThread = own.threads.find((item) => item.id === threadId);
   if (ownThread) {
     const ownProject = own.projects.find((item) => item.id === ownThread.projectId);
