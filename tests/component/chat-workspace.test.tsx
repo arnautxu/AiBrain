@@ -250,6 +250,31 @@ describe("chat workspace simplificado", () => {
     expect(scrollIntoView).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
   });
 
+  it("shows the latest honest lifecycle status instead of a generic thinking placeholder", () => {
+    const message = assistantMessage();
+    const thread: WorkbenchThread = {
+      id: "thread-feedback",
+      projectId: project.id,
+      title: "Respuesta en curso",
+      status: "active",
+      pinned: false,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-28T00:00:01.000Z",
+      messages: [{
+        ...message,
+        content: "",
+        status: "streaming",
+        approvals: [],
+        activity: [{ id: "runtime-context", kind: "system", label: "Preparant el context", status: "running" }],
+      }],
+    };
+
+    renderWorkspace(thread, project, { sending: true });
+
+    expect(screen.getByRole("status")).toHaveTextContent("Preparando el contexto");
+    expect(screen.queryByText("Pensando…")).not.toBeInTheDocument();
+  });
+
   it("prevents duplicate stop requests while App Server confirms cancellation", () => {
     const onStop = vi.fn();
     renderWorkspace(null, project, { sending: true, stopping: true, onStop });

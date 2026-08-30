@@ -36,14 +36,50 @@ a controlled benchmark.
 | Navigation latency | navigation intent → destination shell painted and interactive | p95 ≤ 500 ms for cached shell; otherwise comparative budget | not started | Browser marks per sidebar/search/project/thread transition; UI owner. |
 | TTI | document navigation start → composer focused and usable | comparative budget | not started | Must be collected in the real Arnall browser, not inferred from server logs. |
 | Turn setup | valid chat request → NDJSON response created | p95 ≤ reference + allowance; no repeated access-index or catalog refresh on the hot path | validated locally | `chat.request_phase` separates feature policy, thread context, maintenance, permissions, documents, turn persistence and projection. A project-scoped workbench cache and one resolved authorization context remove repeated parsing and access scans. |
+| Initial honest feedback | send intent → first painted factual activity | **< 1,000 ms**; no invented response content | validated locally | The optimistic assistant state paints `Enviando solicitud`; a real Chromium test holds `/api/chat` open and measures click → visible activity with `performance.now()`. |
+| Accepted activity | successful chat response acceptance → `Solicitud aceptada` paint | **< 1,000 ms** | validated locally | Client telemetry schema 2 records both the accepted timestamp and its next paint opportunity. The accepted callback fires once across reattachment. |
 | App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | validated locally | Private `codex.turn_metrics.serverFirstDeltaMs` is measured at the server notification boundary. This is not visible TTFT. `src/runtime/turn-telemetry.test.ts` fixes the clock and verifies the calculation. |
-| Visible TTFT | send intent → first agent text painted | comparative budget | implemented | `ClientTurnPerformance` records the first non-empty delta after the dispatcher applies it and schedules an rAF. This is a local paint proxy, not a browser-validated visible-latency result; never substitute the server first delta. |
-| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | implemented | Client readback has bounded inter-paint p50/p95/max after rAF; private `codex.turn_metrics` retains separate server-side cadence. Browser/live comparison remains pending. |
+| Visible TTFT | send intent → first agent text painted | comparative budget | validated locally | The first non-empty delta is applied synchronously and measured at the next rAF, avoiding the previous extra-frame delay. This is a paint proxy, not model latency; never substitute the server first delta. |
+| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | validated locally | Later deltas coalesce once per frame with a 32 ms fallback for throttled frames. A 10,000-delta fixture preserves order in two UI applications; reconnect projection replaces the partial message instead of appending it twice. |
 | Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | The client records terminal `done`/`error`/`stopped` after rAF; `codex.turn_metrics.totalMs` remains server elapsed. Persisted-state correlation is still a live acceptance requirement. |
 | Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | Idempotent replay starts a client reconnect span; the next applied durable snapshot is measured after rAF. `codex.turn_lifecycle` remains separate server lifecycle evidence; live catch-up timing is pending. |
 | Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | not started | Browser owner must also preserve `indeterminate`; runtime must log the phase timestamps without command/body/secrets. |
 
 ## Reproducible local evidence on the authorized base
+
+### 2026-08-30 client pipeline benchmark
+
+Run `npm run benchmark:chat` from a clean installation. The fixture uses a
+controlled 16 ms browser scheduler plus a real CPU timer for the 10,000-delta
+dispatch loop. It deliberately excludes network, server queue and model time;
+those remain separate server/client telemetry fields and must not be inferred
+from these numbers.
+
+| Measurement | `origin/main` `cb5f0e70` before | This change after |
+| --- | ---: | ---: |
+| First factual feedback field | missing | 16 ms paint proxy |
+| Real Chromium submit → factual activity paint | not measured | 20.30 ms in the final post-sync focal run; budget < 1,000 ms |
+| Accepted response → factual activity | missing | 16 ms paint proxy; budget pass |
+| First delta applied before a frame | no | yes |
+| First delta arrival → paint proxy | 32 ms | 16 ms |
+| Maximum wait when rAF is unavailable | unbounded | 32 ms |
+| 10,000 subsequent deltas | one accumulated frame event | one accumulated frame event |
+| Duplicate/reordered content after reconnect snapshot | regression asserted only by event types | final projection equals snapshot exactly |
+
+The companion Chromium gate is:
+
+```text
+PLAYWRIGHT_PORT=3117 \
+PLAYWRIGHT_INSTALLATION_CONFIG=config/installations/playwright-isolated.example.json \
+npx playwright test tests/e2e/conversation.spec.ts \
+  --project=chromium-desktop \
+  --grep 'submit paints honest activity' \
+  --workers=1
+```
+
+It holds the synthetic response open, measures the real click-to-visible-status
+interval with `performance.now()`, asserts it is below 1,000 ms and attaches the
+numeric JSON result. It does not claim anything about provider/model latency.
 
 Historical lifecycle baseline: `d381ccf836516f91464f20225403996e7e8158d1`.
 
@@ -181,18 +217,19 @@ client-side send-to-rAF timing, client paint cadence, terminal paint or
 reconnect-to-snapshot measurement. Runtime's private telemetry cannot observe
 those client scheduling points.
 
-`src/ui/client-turn-performance.ts` holds at most 24 per-turn readbacks in the
+`src/ui/client-turn-performance.ts` holds at most 24 schema-2 per-turn readbacks in the
 authenticated client's memory. A readback has only numeric durations/counts and
 a terminal enum: no prompt, response text, tokens, identifiers, filenames,
-error detail or secret. It is surfaced in that user's Review panel and may be
-downloaded only by that user action. This change adds no API route, analytics
-POST, shared storage or server logger.
+error detail or secret. It is not exposed as a per-message control; the focal
+browser test attaches its numeric benchmark JSON only to that local test run.
+This change adds no API route, analytics POST, shared storage or server logger.
 
-The event dispatcher calls the measurement only after it has applied a frame,
-then the measurement schedules rAF. The resulting timestamp is a controlled
-local proxy for a paint opportunity, not proof that a real browser painted it;
-real-browser and Arnall validation remain required before claiming visible TTFT
-or user-perceived streaming latency.
+The first delta is applied immediately; subsequent deltas are coalesced per
+frame with a 32 ms fallback. The measurement then schedules rAF. The resulting
+timestamp is a controlled local proxy for a paint opportunity. The Chromium
+initial-feedback test is real-browser evidence for the local shell only;
+authenticated Arnall validation remains required before claiming live provider
+or user-perceived model latency.
 
 ## Historical live observations, not current acceptance
 

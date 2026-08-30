@@ -13,8 +13,10 @@
   --surface-selected: #e7e7e7;
   --sidebar: #f9f9f9;
   --header: #fcfcfc;
-  --user-message: #e8f3fe;
-  --user-message-text: #0c274a;
+  --user-message: #f1f1f1;
+  --user-message-text: #171717;
+  --send-button: #1f1f1f;
+  --send-button-text: #ffffff;
   --page: var(--canvas);
   --overlay: rgba(20, 20, 18, 0.38);
   --text: #0d0d0d;
@@ -66,6 +68,8 @@
   --header: #000000;
   --user-message: #2f2f2f;
   --user-message-text: #f2f2f2;
+  --send-button: #f3f3f3;
+  --send-button-text: #171717;
   --overlay: rgba(0, 0, 0, 0.64);
   --text: #f1f0ec;
   --text-secondary: #b2afa8;
@@ -101,6 +105,8 @@
     --header: #000000;
     --user-message: #2f2f2f;
     --user-message-text: #f2f2f2;
+    --send-button: #f3f3f3;
+    --send-button-text: #171717;
     --text: #f1f0ec;
     --text-secondary: #b2afa8;
     --text-muted: #b2afa8;
@@ -510,18 +516,22 @@ button:disabled {
 }
 
 .chat-empty-composer-dock {
-  bottom: calc(100% - clamp(18rem, 44vh, 24rem));
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
 }
 
 @media (max-width: 768px) {
   .chat-empty-composer-dock {
-    bottom: max(1rem, calc(100% - 34rem));
+    top: 48%;
   }
 }
 
 @media (max-height: 600px) {
   .chat-empty-composer-dock {
+    top: auto;
     bottom: 1rem;
+    transform: none;
   }
 
   .landing-suggestions {

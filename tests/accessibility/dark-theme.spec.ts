@@ -5,7 +5,7 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
 
-test("dark shell, guided actions, turn capabilities and Review have no blocking axe violations", async ({ page }) => {
+test("dark shell, guided actions and turn capabilities have no blocking axe violations", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   const events = [
     { type: "plan", explanation: null, steps: [{ step: "Revisar el proyecto", status: "completed" }] },
@@ -46,8 +46,5 @@ test("dark shell, guided actions, turn capabilities and Review have no blocking 
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" })).toBeVisible();
   await assertNoBlockingViolations();
-  await page.keyboard.press("Meta+K");
-  await page.getByRole("option", { name: /Abrir cambios y resultados/ }).click();
-  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
-  await assertNoBlockingViolations();
+  await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
 });

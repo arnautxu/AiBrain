@@ -109,6 +109,7 @@ const LIFECYCLE_ACTIVITY_IDS = new Set([
   "runtime-safety-buffering",
   "runtime-response-processing",
   "runtime-performance",
+  "client-request-status",
 ]);
 
 function translatedRuntimeLabel(label: string) {
@@ -186,13 +187,18 @@ export function hasRelevantWorkProcess(message: Pick<ChatMessage, "activity" | "
     message.activity.some((item) => item.status !== "pending" && isRelevantProcessActivity(item));
 }
 
-function currentActivityLabel(relevantActivity: ActivityItem[]) {
+export function currentActivityLabel(relevantActivity: ActivityItem[]) {
   for (let index = relevantActivity.length - 1; index >= 0; index -= 1) {
     const item = relevantActivity[index];
     if (item.status === "running" || item.status === "waiting") return activityPresentation(item).title;
   }
   const latestItem = relevantActivity.at(-1);
   return latestItem ? activityPresentation(latestItem).title : "Pensando";
+}
+
+/** One safe, factual status for the collapsed live response surface. */
+export function currentTurnStatusLabel(message: Pick<ChatMessage, "activity">) {
+  return message.activity.length ? currentActivityLabel(message.activity) : null;
 }
 
 function ApprovalCard({

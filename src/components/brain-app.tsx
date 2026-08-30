@@ -1218,6 +1218,18 @@ export function BrainApp({
         startedAt,
         onEvent: dispatcher.dispatch,
         onMeasurement: (measurement) => performance.transportMeasured(measurement),
+        onAccepted: () => {
+          dispatcher.dispatch({
+            type: "activity",
+            item: {
+              id: "client-request-status",
+              kind: "system",
+              label: "Solicitud aceptada",
+              status: "complete",
+            },
+          });
+          performance.feedbackApplied("accepted");
+        },
         onRecoveryState: (state: ChatStreamRecoveryState) => {
           if (state.state === "recovering") {
             performance.reconnectStarted();
@@ -1299,6 +1311,12 @@ export function BrainApp({
         "streaming",
         new Date(startedAt.getTime() + 1).toISOString(),
       );
+      assistantMessage.activity = [{
+        id: "client-request-status",
+        kind: "system",
+        label: "Enviando solicitud",
+        status: "running",
+      }];
       const threadId = thread.id;
       const assistantId = assistantMessage.id;
       clientTurnPerformance = new ClientTurnPerformance(
@@ -1337,6 +1355,7 @@ export function BrainApp({
             messages: [...candidate.messages, userMessage, assistantMessage as ChatMessage],
           }
         : candidate));
+      clientTurnPerformance.feedbackApplied("local");
       if (ownsVisibleComposer) {
         setSelectedMessageId(assistantId);
         setPrompt("");

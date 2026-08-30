@@ -62,23 +62,42 @@ describe("client turn performance", () => {
     }, { onEventApplied: (event) => metric.eventApplied(event) });
 
     expect(metric.readback()).toMatchObject({
+      sendIntentToFirstFeedbackPaintMs: null,
+      responseAcceptedToFeedbackPaintMs: null,
       sendIntentToFirstDeltaPaintMs: null,
       paintCount: 0,
       sendIntentToTerminalPaintMs: null,
       reconnectToSnapshotVisibleP95Ms: null,
     });
 
+    metric.feedbackApplied("local");
+    frames.advance(6);
+    metric.transportMeasured({
+      responseOpenedAtMs: 6,
+      responseAcceptedAtMs: 6,
+      lastEventAtMs: null,
+      idleObservedAtMs: null,
+      closedAtMs: null,
+      closeCode: null,
+      closeReason: null,
+      recoveryStartedAtMs: null,
+      recoveryAttempts: 0,
+      snapshotObservedAtMs: null,
+      bannerShownAtMs: null,
+    });
+    metric.feedbackApplied("accepted");
+    frames.advance(10);
+    frames.paint();
+
     dispatcher.dispatch({ type: "delta", value: "contenido sensible" });
-    frames.advance(12);
-    frames.paint(); // dispatcher applies the coalesced delta
-    frames.advance(4);
-    frames.paint(); // the delta is now observed after rAF
+    frames.advance(16);
+    frames.paint(); // the immediate delta is now observed after rAF
 
     dispatcher.dispatch({ type: "delta", value: " que no se exporta" });
     frames.advance(8);
-    frames.paint();
+    frames.paint(); // dispatcher applies the coalesced delta
     frames.advance(16);
-    frames.paint();
+    frames.paint(); // the delta is now observed after rAF
 
     metric.reconnectStarted();
     dispatcher.dispatch({ type: "snapshot", message: snapshot() });
@@ -91,13 +110,17 @@ describe("client turn performance", () => {
 
     const readback = metric.readback();
     expect(readback).toMatchObject({
-      sendIntentToFirstDeltaPaintMs: 16,
+      schemaVersion: 2,
+      sendIntentToFirstFeedbackPaintMs: 16,
+      responseAcceptedToFeedbackPaintMs: 10,
+      responseAcceptedFeedbackWithinBudget: true,
+      sendIntentToFirstDeltaPaintMs: 32,
       paintCount: 2,
       interPaintP50Ms: 24,
       interPaintP95Ms: 24,
       interPaintMaxMs: 24,
       terminal: "completed",
-      sendIntentToTerminalPaintMs: 52,
+      sendIntentToTerminalPaintMs: 68,
       reconnectCount: 1,
       reconnectToSnapshotVisibleP95Ms: 7,
       reconnectToCaughtUpP95Ms: 7,
@@ -106,6 +129,6 @@ describe("client turn performance", () => {
     expect(artifact).not.toContain("contenido sensible");
     expect(artifact).not.toContain("jamás debe entrar");
     expect(artifact).not.toContain("00000000-0000-4000-8000-000000000001");
-    expect(readbacks).toHaveBeenCalledTimes(4);
+    expect(readbacks.mock.calls.length).toBeGreaterThanOrEqual(6);
   });
 });

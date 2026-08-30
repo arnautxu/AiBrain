@@ -4,8 +4,13 @@ const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "ope
 
 async function login(page: Page) {
   await page.goto("/login");
-  await page.getByRole("button", { name: demoUserId === "operations-user" ? /Taylor/ : /Alex Example/ }).click();
-  await page.waitForURL(/\/$/);
+  const origin = new URL(page.url()).origin;
+  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
+    data: { userId: demoUserId },
+    headers: { Origin: origin },
+  });
+  expect(loginResponse.ok()).toBe(true);
+  await page.goto("/");
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
@@ -92,6 +97,20 @@ async function installCompletedTurnRoute(page: Page) {
   }));
 }
 
+async function installPendingTurnRoute(page: Page) {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/chat", async (route) => {
+    await gate;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: `${JSON.stringify({ type: "done" })}\n`,
+    });
+  });
+  return release;
+}
+
 test("employee shell light", async ({ page }) => {
   await login(page);
   await expect(page).toHaveScreenshot("employee-shell-light.png", { fullPage: true });
@@ -101,6 +120,29 @@ test("employee shell dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   await expect(page).toHaveScreenshot("employee-shell-dark.png", { fullPage: true });
+});
+
+test("immediate activity light", async ({ page }) => {
+  await login(page);
+  const release = await installPendingTurnRoute(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara una respuesta breve.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByText(/^Enviando solicitud/u)).toBeVisible({ timeout: 1_000 });
+  await expect(page).toHaveScreenshot("immediate-activity-light.png", { fullPage: true });
+  release();
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
+});
+
+test("immediate activity dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await login(page);
+  const release = await installPendingTurnRoute(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara una respuesta breve.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByText(/^Enviando solicitud/u)).toBeVisible({ timeout: 1_000 });
+  await expect(page).toHaveScreenshot("immediate-activity-dark.png", { fullPage: true });
+  release();
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
 });
 
 test("employee shell collapsed rail light", async ({ page }, testInfo) => {

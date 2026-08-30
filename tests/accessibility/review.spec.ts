@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
 
-test("turn approval and Review have no critical or serious axe violations", async ({ page }) => {
+test("turn activity and approval have no critical or serious axe violations", async ({ page }) => {
   const events = [
     { type: "plan", explanation: null, steps: [{ step: "Revisar el proyecto", status: "completed" }] },
     { type: "activity", item: { id: "command-a11y", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
@@ -30,8 +30,5 @@ test("turn approval and Review have no critical or serious axe violations", asyn
     )).toEqual([]);
   };
   await assertNoBlockingViolations();
-  await page.keyboard.press("Meta+K");
-  await page.getByRole("option", { name: /Abrir cambios y resultados/ }).click();
-  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
-  await assertNoBlockingViolations();
+  await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
 });

@@ -3,6 +3,8 @@ import type { ChatStreamEvent } from "@/lib/chat-contract";
 type FrameScheduler = {
   request: (callback: () => void) => number;
   cancel: (handle: number) => void;
+  setTimeout?: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  clearTimeout?: (handle: ReturnType<typeof setTimeout>) => void;
 };
 
 type FrameDispatcherOptions = {
@@ -12,7 +14,12 @@ type FrameDispatcherOptions = {
 const browserScheduler: FrameScheduler = {
   request: (callback) => window.requestAnimationFrame(callback),
   cancel: (handle) => window.cancelAnimationFrame(handle),
+  setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs) as unknown as ReturnType<typeof setTimeout>,
+  clearTimeout: (handle) => window.clearTimeout(handle as unknown as number),
 };
+
+/** A backgrounded or congested tab must not hold visible text indefinitely. */
+export const CHAT_DELTA_MAX_BATCH_WAIT_MS = 32;
 
 export function createChatEventFrameDispatcher(
   onEvent: (event: ChatStreamEvent) => void,
@@ -21,10 +28,19 @@ export function createChatEventFrameDispatcher(
 ) {
   let pendingDelta = "";
   let frame: number | null = null;
+  let fallback: ReturnType<typeof setTimeout> | null = null;
+  let firstDeltaApplied = false;
   let closed = false;
 
-  const flush = () => {
+  const cancelScheduledFlush = () => {
+    if (frame !== null) scheduler.cancel(frame);
     frame = null;
+    if (fallback !== null) scheduler.clearTimeout?.(fallback);
+    fallback = null;
+  };
+
+  const flush = () => {
+    cancelScheduledFlush();
     if (!pendingDelta || closed) return;
     const value = pendingDelta;
     pendingDelta = "";
@@ -33,22 +49,35 @@ export function createChatEventFrameDispatcher(
     options.onEventApplied?.(event);
   };
 
+  const scheduleFlush = () => {
+    if (frame !== null) return;
+    frame = scheduler.request(flush);
+    fallback = scheduler.setTimeout?.(flush, CHAT_DELTA_MAX_BATCH_WAIT_MS) ?? null;
+  };
+
   return {
     dispatch(event: ChatStreamEvent) {
       if (closed) return;
       if (event.type === "delta") {
+        // Apply the first non-empty delta synchronously. React still commits it
+        // on its normal paint boundary, while the user avoids paying an extra
+        // animation frame before the response can become visible.
+        if (!firstDeltaApplied && !pendingDelta && frame === null && event.value) {
+          firstDeltaApplied = true;
+          onEvent(event);
+          options.onEventApplied?.(event);
+          return;
+        }
         pendingDelta += event.value;
-        frame ??= scheduler.request(flush);
+        scheduleFlush();
         return;
       }
-      if (frame !== null) scheduler.cancel(frame);
       flush();
       onEvent(event);
       options.onEventApplied?.(event);
     },
     close() {
       if (closed) return;
-      if (frame !== null) scheduler.cancel(frame);
       flush();
       closed = true;
     },

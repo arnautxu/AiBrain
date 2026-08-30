@@ -32,7 +32,7 @@ import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
 import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
-import { hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
+import { currentTurnStatusLabel, hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
@@ -237,6 +237,7 @@ function AssistantMessage({
   onPreviewDocument: (artifact: DocumentArtifact) => void;
 }) {
   const hasExecution = hasRelevantWorkProcess(message);
+  const liveStatus = currentTurnStatusLabel(message) ?? "Enviando solicitud";
 
   return (
     <article className="message-enter group">
@@ -247,7 +248,7 @@ function AssistantMessage({
       {message.status === "streaming" && !message.content && !hasExecution ? (
         <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" role="status">
           <ThinkingOrb state="working" size={20} aria-hidden="true" />
-          <span className="activity-shimmer">Pensando…</span>
+          <span className="activity-shimmer">{liveStatus}…</span>
         </div>
       ) : message.content ? (
         <div className="mt-4 max-w-[76ch] text-[16px] leading-7 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
@@ -305,7 +306,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
             <textarea id={`edit-${message.id}`} autoFocus value={value} maxLength={32_000} rows={Math.min(8, Math.max(2, value.split("\n").length))} className="w-full min-w-64 resize-y bg-transparent outline-none" onChange={(event) => setValue(event.target.value)} />
             <div className="mt-2 flex justify-end gap-2 text-[12px]">
               <button type="button" className="rounded-full px-3 py-1.5 hover:bg-black/5" onClick={() => { setValue(message.content); setEditing(false); }}>Cancelar</button>
-              <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--brain-accent)] px-3 py-1.5 font-semibold text-[var(--brain-contrast)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
+              <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--send-button)] px-3 py-1.5 font-semibold text-[var(--send-button-text)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
             </div>
           </div>
         ) : <div>{message.content}</div>}
@@ -596,11 +597,11 @@ export function ChatWorkspace({
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
           {!hasMessages ? <h1 className="mb-4 text-center text-balance text-[26px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
-          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
+          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
-            className={`composer-shadow relative flex flex-col rounded-[28px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[128px] justify-end"} ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[26px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[112px] justify-end"} ${dragActive ? "border-[var(--brain-accent)] ring-2 ring-[var(--brain-accent-soft)]" : "border-transparent"}`}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
@@ -718,7 +719,7 @@ export function ChatWorkspace({
                 <button
                   aria-label={sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
                   aria-busy={stopping || undefined}
-                  className={`composer-submit grid size-11 place-items-center rounded-xl transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full ${sending ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--brain-accent)] text-[var(--brain-contrast)]"}`}
+                  className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full"
                   disabled={sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
                   onClick={() => {
                     if (sending) {
