@@ -16,7 +16,7 @@ describe("UI primitives", () => {
     const branding = resolveUiInstallationBranding("northwind-qa");
     render(<BrandMark branding={branding} />);
     const brand = screen.getByRole("img", { name: "Northwind AI, Northwind Advisory QA" });
-    expect(brand).toHaveTextContent("Northwind AI");
-    expect(brand.querySelector("img")).toHaveAttribute("src", expect.stringContaining("northwind-qa"));
+    expect(brand).not.toHaveTextContent("Northwind AI");
+    expect(brand.querySelector("img")).toHaveAttribute("src", expect.stringContaining("northwind-qa/logo.svg"));
   });
 });

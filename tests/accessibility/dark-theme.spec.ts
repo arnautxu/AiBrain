@@ -5,7 +5,7 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
 
-test("dark shell, guided actions and turn capabilities have no blocking axe violations", async ({ page }) => {
+test("dark shell, composer tools and turn capabilities have no blocking axe violations", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
   const events = [
     { type: "plan", explanation: null, steps: [{ step: "Revisar el proyecto", status: "completed" }] },
@@ -37,10 +37,10 @@ test("dark shell, guided actions and turn capabilities have no blocking axe viol
   await page.keyboard.press("Escape");
 
   await page.getByRole("button", { name: "Añadir al mensaje" }).click();
-  await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
-  await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
+  await expect(page.getByRole("menu", { name: "Añadir al mensaje" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
   await assertNoBlockingViolations();
-  await page.getByRole("button", { name: "Volver a la conversación" }).click();
+  await page.keyboard.press("Escape");
 
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Ejecuta una comprobación sintética.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();

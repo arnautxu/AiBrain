@@ -12,7 +12,7 @@
   --surface-hover: #ececec;
   --surface-selected: #e7e7e7;
   --sidebar: #f9f9f9;
-  --header: #fcfcfc;
+  --header: var(--surface);
   --user-message: #f1f1f1;
   --user-message-text: #171717;
   --send-button: #1f1f1f;
@@ -26,10 +26,10 @@
   --border: rgba(0, 0, 0, 0.10);
   --border-subtle: rgba(0, 0, 0, 0.05);
   --border-strong: rgba(0, 0, 0, 0.14);
-  --accent: var(--installation-accent);
-  --accent-soft: color-mix(in srgb, var(--installation-accent) 10%, var(--surface));
+  --accent: var(--text);
+  --accent-soft: var(--surface-muted);
   --accent-contrast: #ffffff;
-  --focus: color-mix(in srgb, var(--installation-accent) 72%, #ffffff);
+  --focus: color-mix(in srgb, var(--text) 68%, var(--surface));
   --positive: #3f7450;
   --positive-soft: #edf6ef;
   --warning: #846224;
@@ -58,14 +58,14 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #000000;
-  --surface: #000000;
-  --surface-raised: #202020;
-  --surface-muted: #2a2a2a;
+  --canvas: #151515;
+  --surface: #151515;
+  --surface-raised: #222222;
+  --surface-muted: #292929;
   --surface-hover: #303030;
-  --surface-selected: #353535;
-  --sidebar: #000000;
-  --header: #000000;
+  --surface-selected: #363636;
+  --sidebar: #151515;
+  --header: var(--surface);
   --user-message: #2f2f2f;
   --user-message-text: #f2f2f2;
   --send-button: #f3f3f3;
@@ -78,8 +78,8 @@
   --border: #343431;
   --border-subtle: #2b2b29;
   --border-strong: #4a4945;
-  --accent-soft: color-mix(in srgb, var(--installation-accent) 26%, var(--surface));
-  --focus: color-mix(in srgb, var(--installation-accent) 64%, #ffffff);
+  --accent-soft: var(--surface-muted);
+  --focus: color-mix(in srgb, var(--text) 68%, var(--surface));
   --positive: #7ab089;
   --positive-soft: #203127;
   --warning: #d5ad65;
@@ -95,14 +95,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --canvas: #000000;
-    --surface: #000000;
-    --surface-raised: #202020;
-    --surface-muted: #2a2a2a;
+    --canvas: #151515;
+    --surface: #151515;
+    --surface-raised: #222222;
+    --surface-muted: #292929;
     --surface-hover: #303030;
     --surface-selected: #353535;
-    --sidebar: #000000;
-    --header: #000000;
+    --sidebar: #151515;
+    --header: var(--surface);
     --user-message: #2f2f2f;
     --user-message-text: #f2f2f2;
     --send-button: #f3f3f3;
@@ -131,7 +131,7 @@ body {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -179,14 +179,22 @@ button:disabled {
 
 .ui-brand-image {
   display: block;
-  width: 1.5rem;
-  height: 1.5rem;
-  object-fit: cover;
+  width: auto;
+  max-width: 7.5rem;
+  height: 2rem;
+  object-fit: contain;
+  object-position: left center;
 }
 
 .ui-brand-compact {
   width: 2rem;
   gap: 0;
+}
+
+.ui-brand-compact .ui-brand-image {
+  width: 1.5rem;
+  height: 1.5rem;
+  object-fit: cover;
 }
 
 .ui-brand-name {
@@ -369,11 +377,11 @@ button:disabled {
 }
 
 .composer-measurement {
-  min-height: 44px;
-  padding: 10px;
+  min-height: 32px;
+  padding: 4px 8px;
   color: transparent;
-  font-size: 16px;
-  line-height: 26px;
+  font-size: 14px;
+  line-height: 24px;
 }
 
 .composer-add-icon {
@@ -516,14 +524,14 @@ button:disabled {
 }
 
 .chat-empty-composer-dock {
-  top: 50%;
+  top: 56%;
   bottom: auto;
   transform: translateY(-50%);
 }
 
 @media (max-width: 768px) {
   .chat-empty-composer-dock {
-    top: 48%;
+    top: 52%;
   }
 }
 
@@ -633,8 +641,8 @@ button:disabled {
 
 @media (max-width: 479px) {
   .composer-compact {
-    min-height: 92px;
-    gap: 0.125rem;
+    min-height: 52px;
+    gap: 0.25rem;
   }
 
   .composer-compact .composer-mode-chip,
@@ -643,10 +651,10 @@ button:disabled {
   }
 
   .composer-compact .composer-textarea {
-    min-height: 44px;
-    padding: 9px 4px 7px;
+    min-height: 40px;
+    padding: 8px;
     font-size: 16px;
-    line-height: 26px;
+    line-height: 24px;
   }
 
   .composer-shadow {
@@ -680,14 +688,20 @@ button:disabled {
 }
 
 .composer-compact {
-  display: flex;
-  min-height: 92px;
-  align-items: stretch;
-  padding: 8px;
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: minmax(5rem, 1fr) auto;
+  align-items: end;
+  gap: 0.25rem;
+  padding: 6px;
 }
 
 .composer-compact .composer-controls {
   display: flex;
+  width: auto;
+  align-self: end;
+  gap: 0.125rem;
+  padding: 0;
 }
 
 .composer-compact .composer-controls-start {
@@ -695,13 +709,32 @@ button:disabled {
 }
 
 .composer-compact .composer-textarea {
+  grid-column: 1;
+  grid-row: 1;
   width: 100%;
   min-width: 0;
-  min-height: 44px;
-  flex: 0 0 auto;
-  padding-top: 9px;
-  padding-bottom: 7px;
-  line-height: 26px;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.composer-compact .composer-controls {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+@media (max-width: 479px) {
+  .composer-compact {
+    min-height: 52px;
+  }
+
+  .composer-compact .composer-textarea {
+    min-height: 40px;
+    padding: 8px;
+    font-size: 16px;
+    line-height: 24px;
+  }
 }
 
 .composer-textarea:focus,
@@ -899,8 +932,8 @@ button:disabled {
 }
 
 .composer-tool-active {
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--surface-muted);
+  color: var(--text);
 }
 
 .composer-auto-approve {
@@ -1080,7 +1113,7 @@ button:disabled {
   height: 1em;
   margin: 0 0 -0.12em 0.2em;
   border-radius: 999px;
-  background: var(--installation-accent);
+  background: var(--text-muted);
   animation: stream-caret-pulse 1s ease-in-out infinite;
 }
 

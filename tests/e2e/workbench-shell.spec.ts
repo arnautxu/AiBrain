@@ -6,9 +6,10 @@ const productName = northwind ? "Northwind AI" : "Example AI";
 const primaryProject = northwind ? "Operacions" : "Espacio principal";
 
 async function login(page: Page) {
+  await page.goto("/api/auth/session");
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/$/, { timeout: 15_000 });
   await expect(page.getByTestId("composer")).toBeVisible();
 }
 
@@ -23,7 +24,8 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Automatizaciones" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Biblioteca" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
+  await expect(page.getByText("Centro de tareas", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });
@@ -49,6 +51,8 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
   await expect(addMenu).toBeVisible();
   await expect(addMenu.getByRole("menuitemcheckbox", { name: /Buscar en la web/ })).toHaveCount(0);
+  await expect(addMenu.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
+  await expect(addMenu.getByText(/Buscar en la web|Crear imagen|Acciones guiadas/i)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(addMenu).toBeHidden();
 

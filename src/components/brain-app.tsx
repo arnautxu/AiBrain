@@ -11,9 +11,7 @@ import { DetailsPanel } from "@/components/details-panel";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
-import { LibraryPanel } from "@/components/library-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
-import { useTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
@@ -110,8 +108,8 @@ import {
   deriveTaskCenterItems,
   isTaskCenterPayload,
   type TaskCenterItem,
-  type TaskCenterPayload,
   type TaskNotificationPreferences,
+  type TaskCenterPayload,
 } from "@/task-center/contracts";
 
 type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
@@ -121,6 +119,7 @@ type BrainStyle = CSSProperties & {
   "--brain-accent-strong": string;
   "--brain-accent-on-soft": string;
   "--brain-accent-soft": string;
+  "--notification-accent": string;
   "--brain-contrast": string;
   "--brain-radius": string;
 };
@@ -527,7 +526,6 @@ export function BrainApp({
   const [customizationInitialTab, setCustomizationInitialTab] = useState<"appearance" | "connectors" | "memory">("appearance");
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [taskCenterPayload, setTaskCenterPayload] = useState<TaskCenterPayload>({
     tasks: [],
@@ -562,7 +560,6 @@ export function BrainApp({
     threadId: null,
   });
   const taskStatusRef = useRef(new Map<string, TaskCenterItem["status"]>());
-  const taskPreferencesRef = useRef<TaskNotificationPreferences>(DEFAULT_TASK_NOTIFICATION_PREFERENCES);
   const taskCenterInitializedRef = useRef(false);
 
   useEffect(() => {
@@ -587,7 +584,6 @@ export function BrainApp({
     if (initialWorkbench.persistence === "browser-preview") {
       const taskCenter = loadTaskCenterCache(taskCenterKey);
       setTaskCenterPayload(taskCenter);
-      taskPreferencesRef.current = taskCenter.preferences;
     }
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
@@ -759,7 +755,6 @@ export function BrainApp({
     }) : [];
     taskStatusRef.current = new Map(payload.tasks.map((task) => [task.id, task.status]));
     taskCenterInitializedRef.current = true;
-    taskPreferencesRef.current = payload.preferences;
     setTaskCenterPayload(payload);
 
     const newest = fresh[0];
@@ -779,7 +774,10 @@ export function BrainApp({
       );
       notification.onclick = () => {
         window.focus();
-        setTaskCenterOpen(true);
+        activeSelectionRef.current = { projectId: newest.projectId, threadId: newest.threadId };
+        setActiveProjectId(newest.projectId);
+        setActiveThreadId(newest.threadId);
+        setSelectedMessageId(null);
         notification.close();
       };
     }
@@ -825,7 +823,6 @@ export function BrainApp({
   }, [hydrated, initialWorkbench.persistence, refreshTaskCenter, taskSummary.running]);
 
   useEffect(() => {
-    taskPreferencesRef.current = taskCenterPayload.preferences;
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
     localStorage.setItem(taskCenterKey, JSON.stringify({ ...taskCenterPayload, tasks: taskCenterItems }));
   }, [hydrated, initialWorkbench.persistence, taskCenterItems, taskCenterKey, taskCenterPayload]);
@@ -937,11 +934,12 @@ export function BrainApp({
 
   const style = useMemo<BrainStyle>(() => {
     return {
-      "--brain-accent": branding.accentColor,
-      "--brain-accent-strong": `color-mix(in srgb, ${branding.accentColor} 72%, #000000)`,
-      "--brain-accent-on-soft": `color-mix(in srgb, ${branding.accentColor} 45%, var(--text))`,
-      "--brain-accent-soft": `color-mix(in srgb, ${branding.accentColor} 12%, transparent)`,
-      "--brain-contrast": "#ffffff",
+      "--brain-accent": "var(--text)",
+      "--brain-accent-strong": "#3b3b3b",
+      "--brain-accent-on-soft": "var(--text-secondary)",
+      "--brain-accent-soft": "var(--surface-muted)",
+      "--notification-accent": branding.accentColor,
+      "--brain-contrast": "var(--surface)",
       "--brain-radius": cornerTokens[preferences.corners],
     };
   }, [branding.accentColor, preferences.corners]);
@@ -994,20 +992,15 @@ export function BrainApp({
     setTaskCenterBusy(true);
     try {
       if (initialWorkbench.persistence === "browser-preview") {
-        setTaskCenterPayload((current) => {
-          if (body.action === "preferences") {
-            taskPreferencesRef.current = body.preferences;
-            return { ...current, preferences: body.preferences };
-          }
-          const readTaskIds = [...new Set([...current.readTaskIds, ...body.taskIds])];
-          return {
-            ...current,
-            readTaskIds,
-            tasks: current.tasks.map((task) => body.taskIds.includes(task.id)
-              ? { ...task, unread: false }
-              : task),
-          };
-        });
+        setTaskCenterPayload((current) => body.action === "preferences"
+          ? { ...current, preferences: body.preferences }
+          : {
+              ...current,
+              readTaskIds: [...new Set([...current.readTaskIds, ...body.taskIds])],
+              tasks: current.tasks.map((task) => body.taskIds.includes(task.id)
+                ? { ...task, unread: false }
+                : task),
+            });
         return;
       }
       const response = await fetch("/api/task-center", {
@@ -1016,9 +1009,7 @@ export function BrainApp({
         body: JSON.stringify(body),
       });
       const value: unknown = await response.json().catch(() => null);
-      if (!response.ok || !isTaskCenterPayload(value)) {
-        throw new Error("No se ha podido guardar el centro de tareas.");
-      }
+      if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido guardar el centro de tareas.");
       applyTaskCenterPayload(value, false);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.");
@@ -1046,29 +1037,18 @@ export function BrainApp({
     if (permission === "granted") {
       void updateTaskCenter({
         action: "preferences",
-        preferences: { ...taskPreferencesRef.current, desktop: true },
+        preferences: { ...taskCenterPayload.preferences, desktop: true },
       });
     } else {
       setNotice("Los avisos del navegador no se han activado.");
     }
-  }, [updateTaskCenter]);
+  }, [taskCenterPayload.preferences, updateTaskCenter]);
 
-  const openTaskConversation = useCallback(async (task: TaskCenterItem) => {
+  const openTaskConversation = useCallback((task: TaskCenterItem) => {
     if (task.unread) markTaskRead(task.id);
     setTaskCenterOpen(false);
     selectThread(task.threadId);
-    if (initialWorkbench.persistence === "browser-preview") return;
-    try {
-      const response = await fetch("/api/workbench", { cache: "no-store" });
-      const value: unknown = await response.json().catch(() => null);
-      if (!response.ok || !value || typeof value !== "object" || !("workbench" in value) ||
-        !isWorkbenchSnapshot(value.workbench)) return;
-      setProjects(value.workbench.projects);
-      setThreads(value.workbench.threads);
-    } catch {
-      // The already loaded conversation remains usable if this refresh fails.
-    }
-  }, [initialWorkbench.persistence, markTaskRead, selectThread]);
+  }, [markTaskRead, selectThread]);
 
   const startNewThread = useCallback((projectId?: string) => {
     if (documentUploading) return;
@@ -1835,12 +1815,6 @@ export function BrainApp({
     return () => desktopQuery.removeEventListener("change", closeMobileSidebar);
   }, []);
 
-  const toggleTaskCenter = useCallback(() => {
-    setTaskCenterOpen((current) => !current);
-  }, []);
-
-  useTaskCenterShortcut(toggleTaskCenter);
-
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
@@ -1864,7 +1838,6 @@ export function BrainApp({
       if (commandPaletteOpen) setCommandPaletteOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (memoryOpen) setMemoryOpen(false);
-      else if (libraryOpen) setLibraryOpen(false);
       else if (taskCenterOpen) setTaskCenterOpen(false);
       else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
@@ -1883,7 +1856,6 @@ export function BrainApp({
     confirmDialog,
     customizationOpen,
     memoryOpen,
-    libraryOpen,
     taskCenterOpen,
     automationsOpen,
     mobileSidebarOpen,
@@ -1913,13 +1885,10 @@ export function BrainApp({
         desktopOpen={desktopSidebarOpen}
         busy={actionBusy}
         threadActivityById={threadActivityById}
-        taskSummary={taskSummary}
         onCloseMobile={() => setMobileSidebarOpen(false)}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
         onOpenDesktop={() => setDesktopSidebarOpen(true)}
         onOpenCommandPalette={() => { setMobileSidebarOpen(false); setCommandPaletteOpen(true); }}
-        onOpenLibrary={() => { setMobileSidebarOpen(false); setLibraryOpen(true); }}
-        onOpenTaskCenter={() => { setMobileSidebarOpen(false); setTaskCenterOpen(true); }}
         onOpenAutomations={() => { setMobileSidebarOpen(false); setAutomationsOpen(true); }}
         onSelectProject={(projectId) => { setAutomationsOpen(false); selectProject(projectId); }}
         onSelectThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
@@ -1949,7 +1918,6 @@ export function BrainApp({
         hydrated={hydrated}
         prompt={prompt}
         composerExperience={composerExperience}
-        imageGeneration={imageGeneration}
         connectorMentions={connectorMentions}
         selectedConnectorMentionIds={selectedConnectorMentionIds}
         attachments={attachments}
@@ -1959,7 +1927,6 @@ export function BrainApp({
         sending={sending}
         stopping={activeThread ? stoppingThreadIds.has(activeThread.id) : false}
         runtimeStatus={effectiveRuntimeStatus}
-        appPolicy={appPolicy}
         networkOnline={networkOnline}
         streamRecovery={streamRecoveryNotice?.threadId === activeThreadId
           ? { attempt: streamRecoveryNotice.attempt }
@@ -1968,7 +1935,6 @@ export function BrainApp({
         onPromptChange={setPrompt}
         onComposerExperienceChange={setComposerExperience}
         onDestinationChange={startNewThread}
-        onImageGenerationChange={setImageGeneration}
         onConnectorMentionIdsChange={setSelectedConnectorMentionIds}
         onAttachmentsChange={setAttachments}
         onDocumentsChange={setDocuments}
@@ -2028,6 +1994,11 @@ export function BrainApp({
         open={customizationOpen}
         initialTab={customizationInitialTab}
         runtimeStatus={effectiveRuntimeStatus}
+        projects={projects}
+        threads={threads}
+        archiveBusy={actionBusy}
+        onRestoreProject={(project) => handleProjectAction(project, "restore")}
+        onRestoreThread={(thread) => handleThreadAction(thread, "restore")}
         onSettingsSnapshot={setSettingsSnapshot}
         onOpenMemory={() => { setCustomizationOpen(false); setMemoryOpen(true); }}
         onClose={() => setCustomizationOpen(false)}
@@ -2045,19 +2016,6 @@ export function BrainApp({
         open={projectOpen}
         onClose={() => setProjectOpen(false)}
         onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
-      />
-
-      <LibraryPanel
-        open={libraryOpen}
-        projects={projects}
-        threads={threads}
-        onClose={() => setLibraryOpen(false)}
-        onOpenConversation={(threadId, messageId) => {
-          setLibraryOpen(false);
-          selectThread(threadId);
-          setSelectedMessageId(messageId);
-          window.setTimeout(() => document.getElementById(`message-${messageId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
-        }}
       />
 
       <TaskCenterPanel
@@ -2102,10 +2060,10 @@ export function BrainApp({
         open={Boolean(confirmDialog)}
         title={confirmDialog?.kind === "undo-result" ? "¿Quieres deshacer estos cambios?" : confirmDialog?.kind === "archive-project" ? "¿Archivar proyecto?" : "¿Archivar conversación?"}
         description={confirmDialog?.kind === "archive-project"
-          ? "El proyecto y sus conversaciones dejarán de aparecer en la vista activa. Podrás restaurarlos desde Archivados."
+          ? "El proyecto y sus conversaciones dejarán de aparecer en la vista activa. Podrás restaurarlos desde Configuración > Archivados."
           : confirmDialog?.kind === "undo-result"
             ? "Se revertirán solo los cambios de este resultado, se comprobará el estado final y se conservará el original en el historial."
-            : "La conversación dejará de aparecer en la lista activa. Podrás restaurarla más adelante."}
+            : "La conversación dejará de aparecer en la lista activa. Podrás restaurarla desde Configuración > Archivados."}
         confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, deshacer" : "Archivar"}
         busy={actionBusy}
         onClose={() => !actionBusy && setConfirmDialog(null)}
@@ -2113,7 +2071,7 @@ export function BrainApp({
       />
 
       {notice ? (
-        <div role="status" aria-live="polite" className="fixed left-1/2 top-4 z-[90] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
+        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[90] max-w-[min(24rem,calc(100%-2rem))] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
           {notice}
         </div>
       ) : null}

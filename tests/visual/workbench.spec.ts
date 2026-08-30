@@ -10,6 +10,8 @@ async function login(page: Page) {
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Automatizaciones", exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByRole("button", { name: "Biblioteca", exact: true })).toHaveCount(0);
   await expect(page.getByText("Conectando con el servicio…")).toHaveCount(0, { timeout: 10_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
 }
@@ -169,15 +171,6 @@ test("preferences dark", async ({ page }) => {
   await expect(page).toHaveScreenshot("preferences-dark.png", { fullPage: true });
 });
 
-test("guided actions dark", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "dark" });
-  await login(page);
-  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
-  await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
-  await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
-  await expect(page).toHaveScreenshot("guided-actions-dark.png", { fullPage: true });
-});
-
 test("composer tools menu light", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: "Añadir al mensaje" }).click();
@@ -205,24 +198,6 @@ test("command palette light", async ({ page }) => {
   await page.keyboard.press("Meta+K");
   await expect(page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" })).toBeVisible();
   await expect(page).toHaveScreenshot("command-palette-light.png", { fullPage: true });
-});
-
-test("library surface light", async ({ page }) => {
-  await login(page);
-  await openMobileDrawerIfNeeded(page);
-  await page.getByRole("button", { name: "Biblioteca", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Biblioteca" })).toBeVisible();
-  await expect(page.getByText("Cargando biblioteca…")).toBeHidden();
-  await expect(page).toHaveScreenshot("library-surface-light.png", { fullPage: true });
-});
-
-test("task center surface dark", async ({ page }) => {
-  await page.emulateMedia({ colorScheme: "dark" });
-  await login(page);
-  await openMobileDrawerIfNeeded(page);
-  await page.getByRole("button", { name: /Centro de tareas/ }).click();
-  await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeVisible();
-  await expect(page).toHaveScreenshot("task-center-surface-dark.png", { fullPage: true });
 });
 
 test("automations occupy the main surface", async ({ page }) => {

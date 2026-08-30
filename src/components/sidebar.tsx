@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
-  Bell,
   CalendarBlank,
   CaretDown,
   CaretRight,
   ChatCircleDots,
   CheckCircle,
   DotsThree,
-  Folder,
   FolderOpen,
   GearSix,
   MagnifyingGlass,
@@ -21,7 +19,6 @@ import {
   SidebarSimple,
   SignOut,
   SpinnerGap,
-  UserCircle,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -30,7 +27,6 @@ import {
   CalendarDays,
   Folder as FluidFolder,
   FolderOpen as FluidFolderOpen,
-  LibraryBig,
   PenLine,
 } from "lucide-react";
 import type { AuthSession } from "@/auth/types";
@@ -64,13 +60,10 @@ type SidebarProps = {
   desktopOpen: boolean;
   busy: boolean;
   threadActivityById: Record<string, ThreadActivity>;
-  taskSummary: { unread: number; running: number; needsAttention: number };
   onCloseMobile: () => void;
   onCloseDesktop: () => void;
   onOpenDesktop: () => void;
   onOpenCommandPalette: () => void;
-  onOpenLibrary: () => void;
-  onOpenTaskCenter: () => void;
   onOpenAutomations: () => void;
   onSelectProject: (id: string) => void;
   onSelectThread: (id: string) => void;
@@ -94,12 +87,12 @@ function ThreadActivitySignal({ activity }: { activity: ThreadActivity | undefin
   const label = threadStateCopy[activity.state];
   return (
     <span className="flex shrink-0 items-center gap-1" title={label}>
-      {activity.unreadCount > 0 ? <span aria-label={`${activity.unreadCount} actualizaciones sin leer`} className="size-2 rounded-full bg-[var(--brain-accent)]" /> : null}
+      {activity.unreadCount > 0 ? <span aria-label="Hay actualizaciones sin leer" className="size-2 rounded-full bg-[var(--notification-accent)]" /> : null}
       <span aria-label={label} className={`grid size-4 place-items-center rounded-full ${
         activity.state === "needs_attention" || activity.state === "failed"
           ? "text-[var(--danger)]"
           : activity.state === "completed"
-            ? "text-[var(--brain-accent-on-soft)]"
+            ? "text-[var(--text-secondary)]"
             : "text-[var(--text-subtle)]"
       }`}>
         {activity.state === "running" ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : null}
@@ -124,7 +117,7 @@ function ProjectActivitySignal({ activities }: { activities: ThreadActivity[] })
     <span aria-label={label} title={label} className="flex shrink-0 items-center gap-1 text-[var(--text-subtle)]">
       {attention ? <WarningCircle size={12} weight="fill" className="text-[var(--danger)]" /> : null}
       {!attention && running ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : null}
-      {unread ? <span className="size-2 rounded-full bg-[var(--brain-accent)]" aria-label={`${unread} actualizaciones sin leer`} /> : null}
+      {unread ? <span className="size-2 rounded-full bg-[var(--notification-accent)]" aria-label="Hay actualizaciones sin leer" /> : null}
     </span>
   );
 }
@@ -192,13 +185,10 @@ export function Sidebar({
   desktopOpen,
   busy,
   threadActivityById,
-  taskSummary,
   onCloseMobile,
   onCloseDesktop,
   onOpenDesktop,
   onOpenCommandPalette,
-  onOpenTaskCenter,
-  onOpenLibrary,
   onOpenAutomations,
   onSelectProject,
   onSelectThread,
@@ -211,9 +201,6 @@ export function Sidebar({
   const router = useRouter();
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
-  const [archivedProjectsOpen, setArchivedProjectsOpen] = useState(false);
-  const [archivedStandaloneThreadsOpen, setArchivedStandaloneThreadsOpen] = useState(false);
-  const [archivedProjectThreadsOpen, setArchivedProjectThreadsOpen] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [chatsOpen, setChatsOpen] = useState(true);
@@ -228,11 +215,6 @@ export function Sidebar({
       project.status === "active" && project.slug !== STANDALONE_PROJECT_SLUG).sort(byPriority),
     [projects],
   );
-  const archivedProjects = useMemo(
-    () => projects.filter((project) =>
-      project.status === "archived" && project.slug !== STANDALONE_PROJECT_SLUG).sort(byPriority),
-    [projects],
-  );
   const standaloneProject = projects.find((project) =>
     project.slug === STANDALONE_PROJECT_SLUG && project.status === "active") ?? null;
   const standaloneThreads = useMemo(
@@ -242,7 +224,6 @@ export function Sidebar({
     [standaloneProject, threads],
   );
   const activeStandaloneThreads = standaloneThreads.filter((thread) => thread.status === "active");
-  const archivedStandaloneThreads = standaloneThreads.filter((thread) => thread.status === "archived");
   const closeMenus = () => {
     setProjectMenuId(null);
     setThreadMenuId(null);
@@ -291,15 +272,13 @@ export function Sidebar({
         aria-label={mobileOpen ? "Navegación" : undefined}
         data-testid="workbench-sidebar"
         data-desktop-state={desktopOpen ? "expanded" : "collapsed"}
-        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden border-r border-[var(--border-subtle)] bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
         <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <button ref={railOpenButtonRef} aria-label="Mostrar barra lateral" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { onOpenDesktop(); requestAnimationFrame(() => desktopCloseButtonRef.current?.focus()); }}><SidebarSimple size={19} /></button>
           <div className="mt-2 flex flex-col items-center gap-1">
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={() => onNewThread()}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
-            <button aria-label={`Centro de tareas${taskSummary.unread ? `, ${taskSummary.unread} sin leer` : ""}`} title="Centro de tareas" className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}><Bell size={18} />{taskSummary.unread ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 min-w-3 rounded-full bg-[var(--brain-accent)] px-1 text-center text-[8px] font-bold leading-3 text-white">{Math.min(taskSummary.unread, 99)}</span> : null}</button>
-            <button aria-label="Biblioteca" title="Biblioteca" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenLibrary}><FolderOpen size={18} /></button>
             <button aria-label="Automatizaciones" title="Automatizaciones" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}><CalendarBlank size={18} /></button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-1">
@@ -307,8 +286,8 @@ export function Sidebar({
           </div>
         </div>
         <div aria-hidden={!(desktopOpen || mobileOpen)} inert={!(desktopOpen || mobileOpen) ? true : undefined} className={`flex h-full w-[min(280px,88vw)] shrink-0 flex-col transition-opacity duration-150 md:w-[260px] ${desktopOpen ? "md:opacity-100" : "md:pointer-events-none md:opacity-0"}`}>
-        <div className="flex h-[72px] shrink-0 items-center justify-between px-4">
-          <button type="button" aria-label={`${branding.productName}. Nueva conversación sin proyecto`} className="rounded-lg p-1 text-left hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => { onNewThread(); onCloseMobile(); }}><BrandMark branding={branding} /></button>
+        <div className="flex h-16 shrink-0 items-center justify-between px-3">
+          <button type="button" aria-label={`${branding.productName}. Nueva conversación sin proyecto`} className="grid h-10 min-w-0 place-items-center justify-start text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => { onNewThread(); onCloseMobile(); }}><BrandMark branding={branding} /></button>
           <div className="flex items-center gap-0.5">
             <button aria-label="Buscar" title="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
             <button ref={desktopCloseButtonRef} aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:grid" onClick={() => { onCloseDesktop(); requestAnimationFrame(() => railOpenButtonRef.current?.focus()); }}><SidebarSimple size={18} /></button>
@@ -324,17 +303,6 @@ export function Sidebar({
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton icon={Bell} aria-label={`Centro de tareas${taskSummary.unread ? `, ${taskSummary.unread} sin leer` : ""}`} title="Centro de tareas" render={<button onClick={onOpenTaskCenter} />}>
-                Centro de tareas
-                {taskSummary.unread ? <span aria-hidden="true" className="ml-auto min-w-5 rounded-full bg-[var(--brain-accent)] px-1.5 text-center text-[10px] font-bold leading-5 text-white">{Math.min(taskSummary.unread, 99)}</span> : null}
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton icon={LibraryBig} aria-label="Biblioteca" title="Abrir biblioteca" render={<button onClick={onOpenLibrary} />}>
-                Biblioteca
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
               <SidebarMenuButton icon={CalendarDays} aria-label="Automatizaciones" title="Gestionar automatizaciones" render={<button onClick={onOpenAutomations} />}>
                 Automatizaciones
               </SidebarMenuButton>
@@ -342,11 +310,11 @@ export function Sidebar({
           </SidebarMenu>
         </nav>
 
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           <section aria-labelledby="standalone-conversations-label" className="group/chats">
-            <div className="flex items-center justify-between px-3 pb-1 pt-3">
-              <button id="standalone-conversations-label" type="button" aria-expanded={chatsOpen} aria-controls="standalone-conversations" className="sidebar-section-label rounded-md px-1 py-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setChatsOpen((open) => !open)}>Chats</button>
-              <button disabled={!standaloneProject || busy} aria-label="Nueva conversación independiente" className="rounded-md p-1 text-[var(--text-subtle)] opacity-0 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] group-hover/chats:opacity-100 group-focus-within/chats:opacity-100 disabled:opacity-40" onClick={() => onNewThread()}><Plus size={14} /></button>
+            <div className="flex items-center justify-between pb-1 pt-3">
+              <button id="standalone-conversations-label" type="button" aria-expanded={chatsOpen} aria-controls="standalone-conversations" className="sidebar-section-label flex items-center gap-1 py-1 text-[var(--text-subtle)]" onClick={() => setChatsOpen((open) => !open)}>Chats{chatsOpen ? <CaretDown size={11} className="opacity-0 transition-opacity group-hover/chats:opacity-100 group-focus-within/chats:opacity-100" /> : <CaretRight size={11} className="opacity-0 transition-opacity group-hover/chats:opacity-100 group-focus-within/chats:opacity-100" />}</button>
+              <button disabled={!standaloneProject || busy} aria-label="Nueva conversación independiente" className="grid size-7 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/chats:opacity-100 group-focus-within/chats:opacity-100 disabled:opacity-40" onClick={() => onNewThread()}><Plus size={14} /></button>
             </div>
             {chatsOpen ? <SidebarMenu id="standalone-conversations" size="compact" className="gap-0.5">
               {activeStandaloneThreads.length === 0 ? (
@@ -361,24 +329,18 @@ export function Sidebar({
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </SidebarMenuButton>
-                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                   </SidebarMenuItem>
                 );
               })}
             </SidebarMenu> : null}
-            {chatsOpen && archivedStandaloneThreads.length ? (
-              <div className="mt-1">
-                <button className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedStandaloneThreadsOpen((open) => !open)}>{archivedStandaloneThreadsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Archivadas · {archivedStandaloneThreads.length}</button>
-                {archivedStandaloneThreadsOpen ? archivedStandaloneThreads.map((thread) => <div key={thread.id} className="relative group/thread flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{thread.title}</span><button aria-label={`Acciones de ${thread.title}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover/thread:opacity-100 focus:opacity-100" onClick={() => setThreadMenuId(threadMenuId === thread.id ? null : thread.id)}><DotsThree size={14} /></button>{threadMenuId === thread.id ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}</div>) : null}
-              </div>
-            ) : null}
           </section>
 
-          <section aria-labelledby="projects-label" className="group/projects mt-3 border-t border-[var(--border-subtle)] pt-2">
-            <div className="flex items-center justify-between px-3 pb-1 pt-2">
-              <button id="projects-label" type="button" aria-expanded={projectsOpen} aria-controls="projects-list" className="sidebar-section-label rounded-md px-1 py-1 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setProjectsOpen((open) => !open)}>Proyectos</button>
-              <button aria-label="Crear proyecto" className="touch-target grid place-items-center rounded-md text-[var(--text-subtle)] opacity-0 transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] group-hover/projects:opacity-100 group-focus-within/projects:opacity-100" onClick={onNewProject}><Plus size={14} /></button>
+          <section aria-labelledby="projects-label" className="group/projects mt-3 pt-2">
+            <div className="flex items-center justify-between pb-1 pt-2">
+              <button id="projects-label" type="button" aria-expanded={projectsOpen} aria-controls="projects-list" className="sidebar-section-label flex items-center gap-1 py-1 text-[var(--text-subtle)]" onClick={() => setProjectsOpen((open) => !open)}>Proyectos{projectsOpen ? <CaretDown size={11} className="opacity-0 transition-opacity group-hover/projects:opacity-100 group-focus-within/projects:opacity-100" /> : <CaretRight size={11} className="opacity-0 transition-opacity group-hover/projects:opacity-100 group-focus-within/projects:opacity-100" />}</button>
+              <button aria-label="Crear proyecto" className="touch-target grid size-7 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/projects:opacity-100 group-focus-within/projects:opacity-100" onClick={onNewProject}><Plus size={14} /></button>
             </div>
             {projectsOpen ? <SidebarMenu id="projects-list" className="gap-0.5">
               {activeProjects.length === 0 ? (
@@ -388,8 +350,6 @@ export function Sidebar({
                 const menuOpen = projectMenuId === project.id;
                 const projectThreadsOpen = !collapsedProjectIds.includes(project.id);
                 const activeProjectThreads = threads.filter((thread) => thread.projectId === project.id && thread.status === "active").sort(byPriority);
-                const archivedProjectThreads = threads.filter((thread) => thread.projectId === project.id && thread.status === "archived").sort(byPriority);
-                const archivedThreadsOpen = archivedProjectThreadsOpen === project.id;
                 const projectActivities = threads
                   .filter((thread) => thread.projectId === project.id && thread.status === "active")
                   .map((thread) => threadActivityById[thread.id])
@@ -401,11 +361,11 @@ export function Sidebar({
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </SidebarMenuButton>
-                    <button aria-label={projectThreadsOpen ? `Contraer ${project.name}` : `Expandir ${project.name}`} aria-expanded={projectThreadsOpen} className="absolute right-11 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 transition hover:bg-[var(--surface-selected)] group-hover/project:opacity-100 focus:opacity-100" onClick={() => setCollapsedProjectIds((current) => projectThreadsOpen ? [...current, project.id] : current.filter((id) => id !== project.id))}>{projectThreadsOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}</button>
-                    <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="absolute right-[2.75rem] top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 transition hover:bg-[var(--surface-selected)] hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={14} /></button>
-                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/project:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
+                    <button aria-label={projectThreadsOpen ? `Contraer ${project.name}` : `Expandir ${project.name}`} aria-expanded={projectThreadsOpen} className="absolute right-11 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100" onClick={() => setCollapsedProjectIds((current) => projectThreadsOpen ? [...current, project.id] : current.filter((id) => id !== project.id))}>{projectThreadsOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}</button>
+                    <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="absolute right-[2.75rem] top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={14} /></button>
+                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
-                    {projectThreadsOpen ? <div aria-label={`Chats de ${project.name}`} className="ml-5 border-l border-[var(--border-subtle)] pl-1">
+                    {projectThreadsOpen ? <div aria-label={`Chats de ${project.name}`} className="ml-5 pl-1">
                       <div className="space-y-0.5">
                         {activeProjectThreads.length === 0 ? <p className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">Aún no hay conversaciones.</p> : activeProjectThreads.map((thread) => {
                           const threadActive = thread.id === activeThreadId;
@@ -417,31 +377,18 @@ export function Sidebar({
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
-                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center rounded-md text-[var(--text-subtle)] opacity-0 hover:bg-[var(--surface-selected)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
+                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
                               {threadMenuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                             </div>
                           );
                         })}
                       </div>
-                      {archivedProjectThreads.length ? (
-                        <div className="mt-1">
-                          <button className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedProjectThreadsOpen(archivedThreadsOpen ? null : project.id)}>{archivedThreadsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Archivadas · {archivedProjectThreads.length}</button>
-                          {archivedThreadsOpen ? archivedProjectThreads.map((thread) => <div key={thread.id} className="relative group/thread flex items-center gap-2 rounded-lg px-2 py-1.5 pr-8 text-[var(--text-subtle)]"><Archive size={12} /><span className="truncate text-[11px]">{thread.title}</span><button aria-label={`Acciones de ${thread.title}`} className="absolute right-0 rounded-md p-1.5 opacity-0 group-hover/thread:opacity-100 focus:opacity-100" onClick={() => setThreadMenuId(threadMenuId === thread.id ? null : thread.id)}><DotsThree size={13} /></button>{threadMenuId === thread.id ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}</div>) : null}
-                        </div>
-                      ) : null}
                     </div> : null}
                   </SidebarMenuItem>
                 );
               })}
             </SidebarMenu> : null}
           </section>
-
-          {archivedProjects.length ? (
-            <section className="mt-4">
-              <button className="flex w-full items-center gap-1.5 rounded-lg px-3 py-2 text-[11px] font-medium text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={() => setArchivedProjectsOpen((open) => !open)}>{archivedProjectsOpen ? <CaretDown size={12} /> : <CaretRight size={12} />} Proyectos archivados · {archivedProjects.length}</button>
-              {archivedProjectsOpen ? archivedProjects.map((project) => <div key={project.id} className="relative group flex items-center gap-2 rounded-lg px-3 py-2 pr-9 text-[var(--text-subtle)]"><Archive size={13} /><span className="truncate text-[11px]">{project.name}</span><button aria-label={`Acciones de ${project.name}`} className="absolute right-1 rounded-md p-2 opacity-0 group-hover:opacity-100 focus:opacity-100" onClick={() => setProjectMenuId(projectMenuId === project.id ? null : project.id)}><DotsThree size={14} /></button>{projectMenuId === project.id ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}</div>) : null}
-            </section>
-          ) : null}
         </div>
 
         <div ref={profileMenuRef} className="relative shrink-0 p-2">
@@ -454,7 +401,7 @@ export function Sidebar({
               <div className="my-1 border-t border-[var(--border-subtle)]" />
               <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { setProfileMenuOpen(false); onOpenCustomization(); }}><GearSix size={16} />Configuración</button>
               <button role="menuitem" aria-expanded={helpOpen} aria-controls="account-help" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => setHelpOpen((open) => !open)}><Question size={16} />Ayuda</button>
-              {helpOpen ? <div id="account-help" role="note" className="mx-1 mb-1 rounded-[14px] bg-[var(--surface-muted)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-secondary)]"><p className="font-semibold text-[var(--text)]">Cómo empezar</p><p className="mt-1">Escribe lo que necesitas o abre “Acciones guiadas” desde el botón +. Podrás revisar los cambios antes de utilizarlos.</p></div> : null}
+              {helpOpen ? <div id="account-help" role="note" className="mx-1 mb-1 rounded-[14px] bg-[var(--surface-muted)] px-3 py-2.5 text-[12px] leading-5 text-[var(--text-secondary)]"><p className="font-semibold text-[var(--text)]">Cómo empezar</p><p className="mt-1">Escribe lo que necesitas. El botón + sirve para adjuntar archivos, carpetas o elegir conectores autorizados.</p></div> : null}
               <div className="flex min-h-10 items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"><span className="min-w-0 flex-1">Tema rápido</span><ThemeToggle className="!size-8" /></div>
               <div className="my-1 border-t border-[var(--border-subtle)]" />
               <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={16} />Cerrar sesión</button>
