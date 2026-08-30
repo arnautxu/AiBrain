@@ -153,8 +153,8 @@ describe("runCodexManagedAppPreflight", () => {
       ...installation,
       connectors: {
         codexManagedAppAction: {
-          ...installation.connectors!.codexManagedAppAction,
-          readback: { ...installation.connectors!.codexManagedAppAction.readback, server: "action-server" },
+          ...installation.connectors!.codexManagedAppAction!,
+          readback: { ...installation.connectors!.codexManagedAppAction!.readback, server: "action-server" },
         },
       },
     };

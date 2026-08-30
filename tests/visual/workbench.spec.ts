@@ -43,6 +43,8 @@ async function installAdministrationRoutes(page: Page) {
       account: { userId: "example-user", displayName: "Alex Example", email: "alex@example.test", provider: "demo", expiresAt: "2099-01-01T00:00:00.000Z" },
       company: { installationId: "example-laboratory", name: "Example Laboratory", isAdmin: true },
       apps: [],
+      connectors: [],
+      memory: { enabled: true, confirmationRequired: true, scopes: ["private", "project", "company"], provenanceVisible: true, employeeRuntimeIsolated: true, sharedComputerHistory: false },
       notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
       permissions: [],
       privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" },

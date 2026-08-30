@@ -55,6 +55,26 @@ export type SettingsSnapshot = {
     isAdmin: boolean;
   };
   apps: AppCatalogueItem[];
+  connectors: Array<{
+    id: string;
+    label: string;
+    status: "connected" | "requires_login" | "unavailable";
+    statusCode: string | null;
+    statusDetail: string;
+    accountEmail: string | null;
+    scopes: string[];
+    connectUrl: string | null;
+    disconnectUrl: string | null;
+    connectionVersion: number | null;
+  }>;
+  memory: {
+    enabled: true;
+    confirmationRequired: true;
+    scopes: Array<"private" | "project" | "company">;
+    provenanceVisible: true;
+    employeeRuntimeIsolated: true;
+    sharedComputerHistory: false;
+  };
   notifications: NotificationSettings;
   permissions: PermissionSummary[];
   privacy: {
@@ -101,7 +121,8 @@ export function isSettingsPatch(value: unknown): value is SettingsPatch {
 
 export function isSettingsSnapshot(value: unknown): value is SettingsSnapshot {
   if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.account) ||
-      !isRecord(value.company) || !Array.isArray(value.apps) ||
+      !isRecord(value.company) || !Array.isArray(value.apps) || !Array.isArray(value.connectors) ||
+      !isRecord(value.memory) ||
       !isRecord(value.notifications) || !Array.isArray(value.permissions) ||
       !isRecord(value.privacy) || !isRecord(value.browser)) return false;
   const notifications = value.notifications;
@@ -113,6 +134,11 @@ export function isSettingsSnapshot(value: unknown): value is SettingsSnapshot {
     typeof value.company.isAdmin === "boolean" &&
     value.apps.every((item) => isRecord(item) && typeof item.id === "string" &&
       typeof item.label === "string" && typeof item.effectiveEnabled === "boolean") &&
+    value.connectors.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.label === "string" &&
+      ["connected", "requires_login", "unavailable"].includes(String(item.status)) &&
+      (item.connectUrl === null || typeof item.connectUrl === "string") && (item.disconnectUrl === null || typeof item.disconnectUrl === "string")) &&
+    value.memory.enabled === true && value.memory.confirmationRequired === true && value.memory.provenanceVisible === true &&
+    value.memory.employeeRuntimeIsolated === true && value.memory.sharedComputerHistory === false && Array.isArray(value.memory.scopes) &&
     ["backgroundTurns", "approvals", "failures", "sound"].every((key) =>
       typeof notifications[key] === "boolean");
 }

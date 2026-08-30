@@ -21,6 +21,8 @@ import {
   type SettingsSnapshot,
 } from "@/settings/contracts";
 import { FileSettingsStore } from "@/settings/preferences-store";
+import { gmailCapabilityForSession } from "@/connectors/gmail-server-service";
+import { GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
 
 const ACTIONS: PermissionAction[] = ["consult", "respond", "execute", "publish"];
 
@@ -287,10 +289,11 @@ export async function featurePolicyForIdentity(installationId: string, userId: s
 
 export async function settingsSnapshot(session: AuthSession): Promise<SettingsSnapshot> {
   const { installation, store, isAdmin } = await context(session);
-  const [userSettings, permissions, apps] = await Promise.all([
+  const [userSettings, permissions, apps, gmail] = await Promise.all([
     store.readUser(session.user.id),
     permissionsForSession(session),
     appCatalogue(session, isAdmin),
+    gmailCapabilityForSession(session).catch(() => null),
   ]);
   return {
     schemaVersion: 1,
@@ -307,6 +310,28 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
       isAdmin,
     },
     apps,
+    connectors: gmail ? [{
+      id: gmail.connectorId,
+      label: gmail.label,
+      status: gmail.status === "connected" ? "connected" : gmail.status === "reauth_required" ? "requires_login" : "unavailable",
+      statusCode: gmail.statusCode,
+      statusDetail: gmail.status === "connected" ? "Cuenta personal verificada mediante lectura de perfil." :
+        gmail.status === "reauth_required" ? "Conecta tu cuenta personal de Gmail para usarla." :
+          gmail.statusCode === "GMAIL_GOOGLE_CLOUD_NOT_CONFIGURED" ? "Google Cloud OAuth todavía no está configurado en el servidor." : "Gmail no está disponible ahora mismo.",
+      accountEmail: gmail.accountEmail,
+      scopes: [...GMAIL_MINIMUM_SCOPES],
+      connectUrl: gmail.connectUrl,
+      disconnectUrl: gmail.disconnectUrl,
+      connectionVersion: gmail.connectionVersion,
+    }] : [],
+    memory: {
+      enabled: true,
+      confirmationRequired: true,
+      scopes: ["private", "project", "company"],
+      provenanceVisible: true,
+      employeeRuntimeIsolated: true,
+      sharedComputerHistory: false,
+    },
     notifications: userSettings.notifications,
     permissions,
     privacy: {

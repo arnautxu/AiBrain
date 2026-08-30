@@ -12,6 +12,7 @@ import {
   FileCompanySkillPackageStore,
   readVersionedSkillPackage,
 } from "@/catalog/skill-packages";
+import { ensureInstallationCatalog } from "@/catalog/baseline";
 
 export class CatalogAdminError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) { super(message); this.name = "CatalogAdminError"; }
@@ -23,7 +24,7 @@ async function catalogContext(session: AuthSession) {
   const workspace = await workspacePolicyForIdentity(installation.installationId, session.user.id, installation);
   if (!workspace.role.canManageWorkspace) throw new CatalogAdminError("CATALOG_ADMIN_REQUIRED", "Solo GraphikAI o un administrador del workspace puede gestionar el catálogo.", 403);
   const store = new FileCatalogStore(installation.installationId, installation.paths.dataRoot);
-  await store.ensureManagedSkills(installation.catalog?.graphikAIManagedSkills ?? []);
+  await ensureInstallationCatalog(store, installation);
   return { installation, workspace, store };
 }
 

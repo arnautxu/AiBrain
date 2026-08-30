@@ -18,8 +18,16 @@
     "publishWriteRoot": "/srv/aibrain/publish-rw",
     "backupsRoot": "/var/lib/aibrain/data/backups"
   },
+  "connectors": {
+    "gmail": { "enabled": true }
+  },
   "catalog": {
     "graphikAIManagedSkills": [
+      { "id": "business-processes", "label": "Negocio y procesos" },
+      { "id": "local-documents", "label": "Documentos locales" },
+      { "id": "web-research", "label": "Investigación y web" },
+      { "id": "business-communication", "label": "Comunicación empresarial" },
+      { "id": "governed-automations", "label": "Automatizaciones gobernadas" },
       { "id": "graphikai-business-work", "label": "Trabajo empresarial GraphikAI" },
       { "id": "company-context-work", "label": "Trabajo con contexto de empresa" },
       { "id": "arnall-company-brief", "label": "Contexto confirmado de Arnall" }

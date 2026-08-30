@@ -65,6 +65,12 @@ import {
   prepareTurnMemory,
   type WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
+import {
+  AIBRAIN_GMAIL_TOOL_NAMESPACE,
+  GMAIL_DYNAMIC_TOOLS,
+  handleGmailDynamicToolCall,
+} from "@/runtime/gmail-dynamic-tools";
+import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
 import { issueThreadToken } from "@/runtime/thread-token";
 import {
   acquireWorkerTurnActivity,
@@ -551,6 +557,7 @@ export async function runWorkerCodexTurn(
       runtimeIdentitySession ?? automationSession,
     )
     : [];
+  const gmailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
   // App Server's per-thread app configuration is the enforceable toolset
   // boundary for managed apps. The catalog revalidation above supplies these
   // IDs; the browser never supplies an app ID or a tool name directly.
@@ -685,10 +692,13 @@ export async function runWorkerCodexTurn(
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
         : runtime.client.request("thread/start", {
             ...commonThreadParams,
+            // Thread-level dynamic tools cannot be added on a later turn. Each
+            // handler still revalidates the authenticated turn and its scope.
             dynamicTools: [
               ...BROWSER_DYNAMIC_TOOLS,
               ...DOCUMENT_DYNAMIC_TOOLS,
               ...MEMORY_DYNAMIC_TOOLS,
+              ...GMAIL_DYNAMIC_TOOLS,
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
             ],
             ephemeral: false,
@@ -1140,6 +1150,16 @@ export async function runWorkerCodexTurn(
               );
             }
             return result.response as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_GMAIL_TOOL_NAMESPACE) {
+            return await handleGmailDynamicToolCall(request.params as never, {
+              config: runtime.config,
+              installationId,
+              userId: authenticatedUserId,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              gmailSelected,
+            }) as JsonValue;
           }
           if (isRecord(request.params) && typeof request.params.namespace === "string" && typeof request.params.tool === "string") {
             observedToolNames.add(`${request.params.namespace}.${request.params.tool}`);

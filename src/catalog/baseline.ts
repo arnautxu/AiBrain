@@ -1,0 +1,14 @@
+import type { InstallationConfig } from "@/config/installation-schema";
+import { GMAIL_CATALOG_RESOURCE } from "@/connectors/gmail-contracts";
+import type { FileCatalogStore } from "@/catalog/store";
+
+export async function ensureInstallationCatalog(
+  store: FileCatalogStore,
+  installation: Readonly<InstallationConfig>,
+) {
+  await store.ensureManagedSkills(installation.catalog?.graphikAIManagedSkills ?? []);
+  return store.ensureManagedResources(
+    installation.connectors?.gmail?.enabled ? [GMAIL_CATALOG_RESOURCE] : [],
+  );
+}
+
