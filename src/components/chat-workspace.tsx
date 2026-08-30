@@ -94,6 +94,7 @@ type ChatWorkspaceProps = {
   managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   onPreviewDocument: (artifact: DocumentArtifact) => void;
+  onOpenBrowser: () => void;
 };
 
 type ComposerPickerOption = {
@@ -217,6 +218,7 @@ function AssistantMessage({
   managedAppAction,
   managedAppApprovalKeys,
   onPreviewDocument,
+  onOpenBrowser,
 }: {
   message: ChatMessage;
   projectId: string | undefined;
@@ -232,6 +234,7 @@ function AssistantMessage({
   } | null;
   managedAppApprovalKeys: readonly string[];
   onPreviewDocument: (artifact: DocumentArtifact) => void;
+  onOpenBrowser: () => void;
 }) {
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message) ?? "Enviando solicitud";
@@ -239,7 +242,7 @@ function AssistantMessage({
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} projectId={projectId} onResolveApproval={onResolveApproval} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} projectId={projectId} onResolveApproval={onResolveApproval} onOpenBrowser={onOpenBrowser} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -267,7 +270,7 @@ function AssistantMessage({
       {message.artifacts.length ? (
         <div className={`mt-4 grid gap-3 ${message.artifacts.every((artifact) => artifact.type === "image") ? "sm:grid-cols-2" : "grid-cols-1"}`}>
           {message.artifacts.map((artifact) => (
-            <TurnArtifactCard key={artifact.id} artifact={artifact} onPreviewDocument={onPreviewDocument} />
+            <TurnArtifactCard key={artifact.id} artifact={artifact} onPreviewDocument={onPreviewDocument} onOpenBrowser={onOpenBrowser} />
           ))}
         </div>
       ) : null}
@@ -361,6 +364,7 @@ export function ChatWorkspace({
   managedAppApprovalKeys,
   onManagedAppPrepared,
   onPreviewDocument,
+  onOpenBrowser,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -586,6 +590,7 @@ export function ChatWorkspace({
                       onDecidePublication={onDecidePublication}
                       managedAppApprovalKeys={managedAppApprovalKeys}
                       onPreviewDocument={onPreviewDocument}
+                      onOpenBrowser={onOpenBrowser}
                       managedAppAction={managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
                         enabled: true,
                         threadId: thread.id,

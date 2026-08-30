@@ -40,6 +40,7 @@ type TurnActivityProps = {
   compact?: boolean;
   showDiff?: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
+  onOpenBrowser?: () => void;
   managedAppAction?: {
     enabled: boolean;
     threadId: string;
@@ -264,6 +265,7 @@ export function TurnActivity({
   compact = false,
   showDiff = true,
   onResolveApproval,
+  onOpenBrowser,
   managedAppAction = null,
   managedAppApprovalKeys = [],
 }: TurnActivityProps) {
@@ -371,7 +373,7 @@ export function TurnActivity({
         <ApprovalCard key={approval.id} approval={approval} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
-      <ToolResultList results={message.toolResults ?? []} />
+      <ToolResultList results={message.toolResults ?? []} onOpenBrowser={onOpenBrowser} />
 
       {managedAppAction ? <ManagedAppActionControl
         enabled={managedAppAction.enabled}

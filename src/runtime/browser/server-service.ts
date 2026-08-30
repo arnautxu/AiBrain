@@ -9,8 +9,10 @@ import { FileLocalUserStore } from "@/auth/local-user-store";
 import { BrowserGatewayTokenService } from "@/runtime/browser/gateway-token";
 import {
   ChromeBrowserRuntimeFactory,
+  ChromeRuntimeError,
   probeChromeRuntimeCapability,
 } from "@/runtime/browser/chrome-runtime";
+import { CdpClientError } from "@/runtime/browser/cdp-client";
 import {
   BrowserRegistryBackpressureError,
   BrowserRuntimeRegistry,
@@ -19,6 +21,8 @@ import { BrowserSessionStore } from "@/runtime/browser/state-store";
 import type {
   BrowserGatewayCapability,
   BrowserInputCommand,
+  BrowserViewerHistoryAction,
+  BrowserViewerNavigationState,
 } from "@/runtime/browser/types";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 import { featurePolicyForIdentity } from "@/settings/server-service";
@@ -324,29 +328,127 @@ export async function captureBrowserFrame(input: {
   return state.registry.captureFrame(input.userId, input.threadId);
 }
 
+export type BrowserFrameStreamEvent = Readonly<{
+  kind: "frame" | "heartbeat";
+  sequence: number;
+  capturedAt: string;
+  captureDurationMs: number;
+  mediaType: "image/png" | null;
+  data: Uint8Array;
+}>;
+
+function waitForNextFrame(milliseconds: number, signal: AbortSignal) {
+  if (signal.aborted || milliseconds <= 0) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(finish, milliseconds);
+    function finish() {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
+
+/**
+ * Authenticates once, then emits only changed frames over one bounded stream.
+ * Heartbeats keep idle pages attached without exposing Chrome or CDP details.
+ */
+export async function* streamBrowserFrames(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  threadId: string;
+  token: string;
+  signal: AbortSignal;
+  frameIntervalMs?: number;
+  heartbeatIntervalMs?: number;
+  maximumDurationMs?: number;
+}): AsyncGenerator<BrowserFrameStreamEvent> {
+  const state = await authorizeGateway({ ...input, capability: "view" });
+  const frameIntervalMs = Math.max(100, Math.min(1_000, input.frameIntervalMs ?? 180));
+  const heartbeatIntervalMs = Math.max(1_000, Math.min(10_000, input.heartbeatIntervalMs ?? 2_500));
+  const maximumDurationMs = Math.max(1_000, Math.min(25_000, input.maximumDurationMs ?? 20_000));
+  const deadline = Date.now() + maximumDurationMs;
+  let sequence = 0;
+  let lastDigest: string | null = null;
+  let lastEmissionAt = 0;
+  while (!input.signal.aborted && Date.now() < deadline) {
+    const captureStartedAt = Date.now();
+    const frame = await state.registry.captureFrame(input.userId, input.threadId);
+    const data = Buffer.from(frame.dataBase64, "base64");
+    const digest = createHash("sha256").update(data).digest("hex");
+    const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
+    if (digest !== lastDigest) {
+      sequence += 1;
+      lastDigest = digest;
+      lastEmissionAt = Date.now();
+      yield Object.freeze({
+        kind: "frame" as const,
+        sequence,
+        capturedAt: frame.capturedAt,
+        captureDurationMs,
+        mediaType: frame.mediaType,
+        data: new Uint8Array(data),
+      });
+    } else if (Date.now() - lastEmissionAt >= heartbeatIntervalMs) {
+      lastEmissionAt = Date.now();
+      yield Object.freeze({
+        kind: "heartbeat" as const,
+        sequence,
+        capturedAt: new Date().toISOString(),
+        captureDurationMs,
+        mediaType: null,
+        data: new Uint8Array(0),
+      });
+    }
+    await waitForNextFrame(frameIntervalMs - (Date.now() - captureStartedAt), input.signal);
+  }
+}
+
+export async function browserViewerNavigationState(input: {
+  installationId: string;
+  userId: string;
+  authSessionId: string;
+  threadId: string;
+  token: string;
+}) {
+  const state = await authorizeGateway({ ...input, capability: "view" });
+  return state.registry.viewerNavigationState(input.userId, input.threadId);
+}
+
 export async function sendBrowserViewerCommand(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
   threadId: string;
   token: string;
-  command: { action: "navigate"; url: string } | { action: "input"; command: BrowserInputCommand };
+  command:
+    | { action: "navigate"; url: string }
+    | { action: "history"; direction: BrowserViewerHistoryAction }
+    | { action: "input"; command: BrowserInputCommand };
 }) {
   const state = await authorizeGateway({ ...input, capability: "control" });
+  let navigationState: BrowserViewerNavigationState | undefined;
   if (input.command.action === "navigate") {
     await state.registry.navigate(input.userId, input.threadId, input.command.url);
+    navigationState = await state.registry.viewerNavigationState(input.userId, input.threadId);
+  } else if (input.command.action === "history") {
+    navigationState = await state.registry.navigateHistory(input.userId, input.threadId, input.command.direction);
   } else {
     await state.registry.dispatchInput(input.userId, input.threadId, input.command.command);
   }
   const action = input.command.action === "navigate"
     ? "open"
-    : input.command.command.event === "mouseWheel"
-      ? "scroll"
-      : input.command.command.event === "mouseReleased"
-        ? "click"
-        : input.command.command.event === "keyDown"
-          ? "type"
-          : null;
+    : input.command.action === "history"
+      ? "open"
+      : input.command.command.event === "mouseWheel"
+        ? "scroll"
+        : input.command.command.event === "mouseReleased"
+          ? "click"
+          : input.command.command.event === "keyDown"
+            ? "type"
+            : null;
   if (action) {
     const roots = await state.registry.store.roots(input.userId);
     await new BrowserActionHistoryStore({ userRoot: path.dirname(roots.browserRoot) }).append({
@@ -362,6 +464,7 @@ export async function sendBrowserViewerCommand(input: {
       actor: "human",
     }).catch(() => null);
   }
+  return navigationState;
 }
 
 export type BrowserAgentCommand =
@@ -382,6 +485,33 @@ export type BrowserMutationCommand = Extract<
 function isBrowserMutation(command: BrowserAgentCommand): command is BrowserMutationCommand {
   return command.action === "open" || command.action === "scroll" ||
     command.action === "click" || command.action === "type";
+}
+
+function isRecoverableBrowserReadFailure(error: unknown) {
+  return (error instanceof CdpClientError && [
+    "CDP_PIPE_EOF",
+    "CDP_CLOSED",
+    "CDP_PIPE_READ_FAILED",
+    "CDP_PIPE_WRITE_FAILED",
+    "CDP_SEND_FAILED",
+  ].includes(error.code)) || (error instanceof ChromeRuntimeError && [
+    "CHROME_NOT_RUNNING",
+    "CHROME_PAGE_STATE_INVALID",
+  ].includes(error.code));
+}
+
+async function executeBrowserReadWithRecovery<Result>(
+  registry: BrowserRuntimeRegistry,
+  userId: string,
+  operation: () => Promise<Result>,
+) {
+  try {
+    return await operation();
+  } catch (error) {
+    if (!isRecoverableBrowserReadFailure(error)) throw error;
+    await registry.start(userId);
+    return operation();
+  }
 }
 
 async function agentRegistry(input: { installationId: string; userId: string }) {
@@ -476,15 +606,31 @@ export async function executeBrowserAgentCommand(input: {
     );
   }
   if (input.command.action === "read") {
-    return registry.readPage(input.userId, input.threadId);
+    return executeBrowserReadWithRecovery(
+      registry,
+      input.userId,
+      () => registry.readPage(input.userId, input.threadId),
+    );
   }
   if (input.command.action === "screenshot") {
-    return registry.agentCaptureFrame(input.userId, input.threadId);
+    return executeBrowserReadWithRecovery(
+      registry,
+      input.userId,
+      () => registry.agentCaptureFrame(input.userId, input.threadId),
+    );
   }
   if (input.command.action === "tabs") {
-    return registry.listTabs(input.userId, input.threadId);
+    return executeBrowserReadWithRecovery(
+      registry,
+      input.userId,
+      () => registry.listTabs(input.userId, input.threadId),
+    );
   }
-  return registry.listDownloads(input.userId, input.threadId);
+  return executeBrowserReadWithRecovery(
+    registry,
+    input.userId,
+    () => registry.listDownloads(input.userId, input.threadId),
+  );
 }
 
 /** Stops only the selected employee browser without creating a service instance. */

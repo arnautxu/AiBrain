@@ -1985,6 +1985,10 @@ export function BrainApp({
           setActiveSideWindow(null);
           setPreviewDocument(artifact);
         }}
+        onOpenBrowser={() => {
+          setPreviewDocument(null);
+          setActiveSideWindow("browser");
+        }}
       />}
 
       {previewDocument ? (

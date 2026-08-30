@@ -15,6 +15,8 @@ const browser = vi.hoisted(() => ({
   frame: vi.fn(),
   command: vi.fn(),
   history: vi.fn(),
+  navigation: vi.fn(),
+  stream: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -44,6 +46,8 @@ vi.mock("@/runtime/browser/server-service", () => ({
   captureBrowserFrame: browser.frame,
   sendBrowserViewerCommand: browser.command,
   browserActionHistory: browser.history,
+  browserViewerNavigationState: browser.navigation,
+  streamBrowserFrames: browser.stream,
   BrowserServiceError: class BrowserServiceError extends Error {},
 }));
 
@@ -87,6 +91,21 @@ beforeEach(() => {
   });
   browser.command.mockReset().mockResolvedValue(undefined);
   browser.history.mockReset().mockResolvedValue([]);
+  browser.navigation.mockReset().mockResolvedValue({
+    url: "https://example.test/current",
+    canGoBack: true,
+    canGoForward: false,
+  });
+  browser.stream.mockReset().mockImplementation(async function* () {
+    yield {
+      kind: "frame",
+      sequence: 1,
+      capturedAt: "2026-08-30T10:00:00.000Z",
+      captureDurationMs: 24,
+      mediaType: "image/png",
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]),
+    };
+  });
 });
 
 describe("authenticated browser runtime routes", () => {
@@ -168,6 +187,38 @@ describe("authenticated browser runtime routes", () => {
       "payload.signature",
     ));
     expect(foreign.status).toBe(404);
+  });
+
+  it("streams bounded frames and exposes navigation without leaking runtime details", async () => {
+    const streamRoute = await import("@/app/api/runtime/browser/viewer/stream/route");
+    const stateRoute = await import("@/app/api/runtime/browser/viewer/state/route");
+    const state = await stateRoute.GET(request(
+      `/api/runtime/browser/viewer/state?threadId=${THREAD_A}`,
+      undefined,
+      "payload.signature",
+    ));
+    expect(await state.json()).toEqual({
+      url: "https://example.test/current",
+      canGoBack: true,
+      canGoForward: false,
+    });
+
+    const streamed = await streamRoute.GET(request(
+      `/api/runtime/browser/viewer/stream?threadId=${THREAD_A}`,
+      undefined,
+      "payload.signature",
+    ));
+    expect(streamed.status).toBe(200);
+    expect(streamed.headers.get("Content-Type")).toBe("application/vnd.aibrain.browser-frames");
+    expect(streamed.headers.get("X-Accel-Buffering")).toBe("no");
+    expect((await streamed.arrayBuffer()).byteLength).toBeGreaterThan(8);
+    expect(browser.stream).toHaveBeenCalledWith(expect.objectContaining({
+      installationId: "browser-lab",
+      userId: USER_A,
+      threadId: THREAD_A,
+      token: "payload.signature",
+      signal: expect.any(AbortSignal),
+    }));
   });
 
   it("returns only the authenticated user's history for an owned thread", async () => {

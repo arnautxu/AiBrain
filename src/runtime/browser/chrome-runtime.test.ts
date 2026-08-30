@@ -57,6 +57,8 @@ class FakeCdpClient implements CdpClientLike {
   readonly commands: FakeCommand[] = [];
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
   private readonly targetUrls = new Map<string, string>();
+  private readonly targetHistories = new Map<string, string[]>();
+  private readonly targetHistoryIndexes = new Map<string, number>();
   private readonly sessionTargets = new Map<string, string>();
   private nextTarget = 1;
   private nextSession = 1;
@@ -106,6 +108,8 @@ class FakeCdpClient implements CdpClientLike {
     if (method === "Target.createTarget") {
       const targetId = `target-${this.nextTarget++}`;
       this.targetUrls.set(targetId, "about:blank");
+      this.targetHistories.set(targetId, ["about:blank"]);
+      this.targetHistoryIndexes.set(targetId, 0);
       return { targetId } as Result;
     }
     if (method === "Target.attachToTarget") {
@@ -121,7 +125,10 @@ class FakeCdpClient implements CdpClientLike {
       return {} as Result;
     }
     if (method === "Target.closeTarget") {
-      this.targetUrls.delete(String(params.targetId));
+      const targetId = String(params.targetId);
+      this.targetUrls.delete(targetId);
+      this.targetHistories.delete(targetId);
+      this.targetHistoryIndexes.delete(targetId);
       return { success: true } as Result;
     }
     if (method === "Target.getTargets") {
@@ -139,7 +146,33 @@ class FakeCdpClient implements CdpClientLike {
     }
     if (method === "Page.navigate" && scopedSessionId) {
       const targetId = this.sessionTargets.get(scopedSessionId);
-      if (targetId) this.targetUrls.set(targetId, String(params.url));
+      if (targetId) {
+        const url = String(params.url);
+        const currentIndex = this.targetHistoryIndexes.get(targetId) ?? 0;
+        const history = (this.targetHistories.get(targetId) ?? ["about:blank"]).slice(0, currentIndex + 1);
+        history.push(url);
+        this.targetHistories.set(targetId, history);
+        this.targetHistoryIndexes.set(targetId, history.length - 1);
+        this.targetUrls.set(targetId, url);
+      }
+      return {} as Result;
+    }
+    if (method === "Page.getNavigationHistory" && scopedSessionId) {
+      const targetId = this.sessionTargets.get(scopedSessionId) as string;
+      const history = this.targetHistories.get(targetId) ?? ["about:blank"];
+      return {
+        currentIndex: this.targetHistoryIndexes.get(targetId) ?? 0,
+        entries: history.map((url, index) => ({ id: index + 1, url })),
+      } as Result;
+    }
+    if (method === "Page.navigateToHistoryEntry" && scopedSessionId) {
+      const targetId = this.sessionTargets.get(scopedSessionId) as string;
+      const history = this.targetHistories.get(targetId) ?? ["about:blank"];
+      const index = Number(params.entryId) - 1;
+      if (history[index]) {
+        this.targetHistoryIndexes.set(targetId, index);
+        this.targetUrls.set(targetId, history[index]);
+      }
       return {} as Result;
     }
     if (method === "Runtime.evaluate" && scopedSessionId) {
@@ -762,6 +795,42 @@ describe("ChromeCdpRuntime private pipe", () => {
         expect.objectContaining({ params: { url: "https://b.example.test/recover" } }),
       ]));
     await second.stop();
+  });
+
+  it("exposes bounded viewer navigation and supports back, forward and reload under human control", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.navigate(THREAD_A, "https://example.test/one");
+    await runtime.navigate(THREAD_A, "https://example.test/two");
+    await expect(runtime.viewerNavigationState(THREAD_A)).resolves.toEqual({
+      url: "https://example.test/two",
+      canGoBack: true,
+      canGoForward: false,
+    });
+    await expect(runtime.navigateHistory(THREAD_A, "back")).resolves.toEqual({
+      url: "https://example.test/one",
+      canGoBack: true,
+      canGoForward: true,
+    });
+    await expect(runtime.navigateHistory(THREAD_A, "forward")).resolves.toMatchObject({
+      url: "https://example.test/two",
+    });
+    await expect(runtime.navigateHistory(THREAD_A, "reload")).resolves.toMatchObject({
+      url: "https://example.test/two",
+    });
+    expect(client.commands.filter(({ method }) => method === "Page.navigateToHistoryEntry")).toHaveLength(2);
+    expect(client.commands.filter(({ method }) => method === "Page.reload")).toHaveLength(1);
+    await runtime.stop();
   });
 
   it("retries a failed pipe handshake with bounded child cleanup instead of reconnecting", async () => {

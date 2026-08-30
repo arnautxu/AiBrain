@@ -29,7 +29,7 @@ export async function POST(request: Request) {
   }
   try {
     await getThreadRuntimeContext(auth.session, command.threadId);
-    await sendBrowserViewerCommand({
+    const navigation = await sendBrowserViewerCommand({
       installationId: auth.session.tenant.id,
       userId: auth.session.user.id,
       authSessionId: auth.authSessionId,
@@ -37,7 +37,10 @@ export async function POST(request: Request) {
       token,
       command,
     });
-    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json(
+      { ok: true, navigation: navigation ?? null },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
   } catch (error) {
     if (error instanceof WorkbenchNotFoundError) {
       return NextResponse.json({ error: "Fil no trobat." }, { status: 404 });

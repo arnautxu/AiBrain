@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolResultList } from "@/components/tool-result-list";
 import { TurnSourceChips, TurnSourceList } from "@/components/turn-sources";
 
@@ -39,5 +39,15 @@ describe("turn evidence UI", () => {
     }]} />);
     expect(screen.getByText("CRM · Leer cuenta")).toBeInTheDocument();
     expect(screen.getByLabelText("Salida de CRM · Leer cuenta")).toHaveTextContent("Cuenta encontrada");
+  });
+
+  it("reopens the existing browser session from its tool card", () => {
+    const onOpenBrowser = vi.fn();
+    render(<ToolResultList onOpenBrowser={onOpenBrowser} results={[{
+      id: "tool-browser", kind: "browser", title: "Navegador · open", status: "complete",
+      summary: "browser", output: null, sourceIds: [], createdAt: "2026-08-30T09:00:00.000Z",
+    }]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reabrir Navegador · open" }));
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
   });
 });

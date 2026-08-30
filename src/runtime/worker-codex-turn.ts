@@ -46,6 +46,7 @@ import {
 } from "@/runtime/approval-store";
 import {
   BROWSER_DYNAMIC_TOOLS,
+  BrowserDynamicToolError,
   handleBrowserDynamicToolCall,
 } from "@/runtime/browser/dynamic-tools";
 import {
@@ -1143,24 +1144,37 @@ export async function runWorkerCodexTurn(
           if (isRecord(request.params) && typeof request.params.namespace === "string" && typeof request.params.tool === "string") {
             observedToolNames.add(`${request.params.namespace}.${request.params.tool}`);
           }
-          return await handleBrowserDynamicToolCall(request.params, {
-            installationId,
-            userId: authenticatedUserId,
-            runtimeThreadId: threadId,
-            runtimeTurnId,
-            browserThreadId: chatRequest.threadId,
-            permissions,
-            approvalStore,
-            signal: turnSignal,
-            emitApproval: async (item) => {
-              await emit(
-                { type: "approval", item },
-                { envelope, key: `approval:${item.status}:${item.id}` },
-              );
-            },
-            prepare: prepareBrowserAgentCommand,
-            execute: executeBrowserAgentCommand,
-          }) as JsonValue;
+          try {
+            return await handleBrowserDynamicToolCall(request.params, {
+              installationId,
+              userId: authenticatedUserId,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              browserThreadId: chatRequest.threadId,
+              permissions,
+              approvalStore,
+              signal: turnSignal,
+              emitApproval: async (item) => {
+                await emit(
+                  { type: "approval", item },
+                  { envelope, key: `approval:${item.status}:${item.id}` },
+                );
+              },
+              prepare: prepareBrowserAgentCommand,
+              execute: executeBrowserAgentCommand,
+            }) as JsonValue;
+          } catch (error) {
+            if (error instanceof BrowserDynamicToolError && error.code !== "BROWSER_TOOL_SCOPE_MISMATCH") {
+              return {
+                success: false,
+                contentItems: [{
+                  type: "inputText",
+                  text: "Browser tool request was rejected safely. Read the current page and retry with a valid browser action.",
+                }],
+              } as JsonValue;
+            }
+            throw error;
+          }
         }
         const approval = approvalFromRequest(legacyServerRequest(request));
         if (!approval || approval.item.threadId !== threadId ||

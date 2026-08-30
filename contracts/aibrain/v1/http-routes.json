@@ -31,6 +31,8 @@
     "GET /api/runtime/browser": "BrowserStatus",
     "GET /api/runtime/browser/history": "JsonObject",
     "GET /api/runtime/browser/viewer/frame": "binary:image/png",
+    "GET /api/runtime/browser/viewer/state": "JsonObject",
+    "GET /api/runtime/browser/viewer/stream": "binary:application/vnd.aibrain.browser-frames",
     "GET /api/runtime/status": "RuntimeStatus",
     "GET /api/search": "JsonObject",
     "GET /api/settings": "JsonObject",

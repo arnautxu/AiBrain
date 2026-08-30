@@ -38,6 +38,12 @@ export type BrowserActionHistoryItem = {
 
 export type BrowserViewerToken = { token: string; browserSessionId: string };
 export type BrowserControlAction = "start" | "stop" | "takeover" | "release" | "heartbeat";
+export type BrowserViewerNavigationState = {
+  url: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+};
+export type BrowserViewerHistoryAction = "back" | "forward" | "reload";
 
 export class BrowserUiRequestError extends Error {
   constructor(
@@ -187,6 +193,53 @@ export async function readBrowserFrame(threadId: string, token: string, signal?:
   return response.blob();
 }
 
+function parseNavigationState(value: unknown): BrowserViewerNavigationState | null {
+  const body = record(value);
+  if (!body || typeof body.url !== "string" || body.url.length < 1 || body.url.length > 8_192 ||
+    typeof body.canGoBack !== "boolean" || typeof body.canGoForward !== "boolean") return null;
+  try {
+    if (body.url !== "about:blank") {
+      const parsed = new URL(body.url);
+      if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password) return null;
+    }
+  } catch {
+    return null;
+  }
+  return {
+    url: body.url,
+    canGoBack: body.canGoBack,
+    canGoForward: body.canGoForward,
+  };
+}
+
+export async function readBrowserNavigationState(
+  threadId: string,
+  token: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    `/api/runtime/browser/viewer/state?threadId=${encodeURIComponent(threadId)}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal },
+  );
+  if (!response.ok) throw await responseError(response);
+  const navigation = parseNavigationState(await response.json().catch(() => null));
+  if (!navigation) throw new Error("La navegación privada no cumple el contrato seguro.");
+  return navigation;
+}
+
+export async function openBrowserFrameStream(
+  threadId: string,
+  token: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    `/api/runtime/browser/viewer/stream?threadId=${encodeURIComponent(threadId)}`,
+    { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal },
+  );
+  if (!response.ok) throw await responseError(response);
+  return response;
+}
+
 export async function readBrowserActionHistory(
   threadId: string,
   signal?: AbortSignal,
@@ -234,4 +287,10 @@ export async function sendBrowserViewerCommand(
     signal,
   });
   if (!response.ok) throw await responseError(response);
+  const body = record(await response.json().catch(() => null));
+  if (!body || body.ok !== true) throw new Error("La respuesta del control del navegador no es válida.");
+  if (body.navigation === null) return null;
+  const navigation = parseNavigationState(body.navigation);
+  if (!navigation) throw new Error("La navegación privada no cumple el contrato seguro.");
+  return navigation;
 }

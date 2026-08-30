@@ -95,6 +95,14 @@ export type BrowserFrame = Readonly<{
   capturedAt: string;
 }>;
 
+export type BrowserViewerNavigationState = Readonly<{
+  url: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}>;
+
+export type BrowserViewerHistoryAction = "back" | "forward" | "reload";
+
 export type BrowserInputCommand =
   | Readonly<{
     kind: "mouse";
@@ -144,6 +152,8 @@ export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime 
   captureFrame(threadId: string): Promise<BrowserFrame>;
   agentCaptureFrame(threadId: string): Promise<BrowserFrame>;
   navigate(threadId: string, url: string): Promise<void>;
+  viewerNavigationState(threadId: string): Promise<BrowserViewerNavigationState>;
+  navigateHistory(threadId: string, action: BrowserViewerHistoryAction): Promise<BrowserViewerNavigationState>;
   dispatchInput(threadId: string, command: BrowserInputCommand): Promise<void>;
   readPage(threadId: string): Promise<BrowserPageSnapshot>;
   listTabs(threadId: string): Promise<readonly BrowserTabSnapshot[]>;
