@@ -19,7 +19,10 @@ vi.mock("@/config/installation", () => ({
   loadInstallationConfig: async () => ({ installationId: "qa-company" }),
 }));
 vi.mock("@/workbench/store", () => ({
-  getProjectRuntimeContext: async () => ({ projectId }),
+  getProjectRuntimeContext: async (session: { user: { id: string } }) => {
+    if (session.user.id !== "00000000-0000-4000-8000-000000000001") throw new Error("Not found");
+    return { projectId };
+  },
 }));
 vi.mock("@/runtime/workers/provisioner", () => ({
   deriveWorkerRoots: () => ({ workspace: "/private/workspaces" }),
@@ -34,6 +37,7 @@ vi.mock("@/documents/workspace-preview", () => ({
 }));
 
 import { GET } from "@/app/api/projects/[projectId]/files/route";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 
 function request(filePath: string, raw = false, download = false, representation = false) {
   return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}${download ? "&download=1" : ""}${representation ? "&representation=1" : ""}`);
@@ -202,6 +206,30 @@ describe("workspace file preview route", () => {
     expect(fake.status).toBe(415);
   });
 
+  it("downloads generated PDF, DOCX, PPTX and XLSX bytes and exposes authenticated previews", async () => {
+    for (const format of ["pdf", "docx", "pptx", "xlsx"] as const) {
+      const generated = await generateLocalDocument({
+        format,
+        title: `Resultado ${format}`,
+        content: format === "xlsx" ? "Nombre\tImporte\nServicio\t1250" : "Contenido verificable",
+      });
+      mocks.readRegularFileWithin.mockResolvedValue(generated.data);
+      const filePath = `documents/resultado.${format}`;
+      const download = await GET(request(filePath, true, true), { params: Promise.resolve({ projectId }) });
+      expect(download.status).toBe(200);
+      expect(download.headers.get("Content-Type")).toBe(generated.mimeType);
+      expect(Buffer.from(await download.arrayBuffer())).toEqual(generated.data);
+
+      const preview = await GET(request(filePath, format === "pdf", false, format !== "pdf"), {
+        params: Promise.resolve({ projectId }),
+      });
+      expect(preview.status).toBe(200);
+      expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
+      expect(preview.headers.get("Content-Type")).toBe("application/pdf");
+      expect(Buffer.from(await preview.arrayBuffer()).subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    }
+  });
+
   it("rejects malformed queries before reading the workspace", async () => {
     const response = await GET(
       new Request(`https://brain.example/api/projects/${projectId}/files?path=src%2Fa.ts&path=src%2Fb.ts`),
@@ -219,6 +247,17 @@ describe("workspace file preview route", () => {
     };
     const response = await GET(request("src/example.ts"), { params: Promise.resolve({ projectId }) });
     expect(response.status).toBe(403);
+    expect(mocks.readRegularFileWithin).not.toHaveBeenCalled();
+  });
+
+  it("returns not found for another employee in the same tenant", async () => {
+    mocks.session.current = {
+      provider: "local",
+      tenant: { id: "qa-company", name: "QA" },
+      user: { id: "00000000-0000-4000-8000-000000000002", name: "David", email: "david@example.test" },
+    };
+    const response = await GET(request("documents/resultado.pdf", true, true), { params: Promise.resolve({ projectId }) });
+    expect(response.status).toBe(404);
     expect(mocks.readRegularFileWithin).not.toHaveBeenCalled();
   });
 });

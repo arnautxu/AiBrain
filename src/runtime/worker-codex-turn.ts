@@ -85,6 +85,11 @@ import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
+import {
+  AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
+  DOCUMENT_DYNAMIC_TOOLS,
+  handleLocalDocumentDynamicToolCall,
+} from "@/runtime/documents/dynamic-tools";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
   parseTurnTokenUsage,
@@ -124,6 +129,15 @@ function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDo
     "Las raíces documentales de empresa ya autorizadas para este turno son:\n" + scopedRoots,
     "Las escrituras en estas raíces autorizadas no requieren una aprobación repetida; los borrados, publicaciones y cualquier efecto externo sí siguen sujetos a la política del turno. Nunca salgas de estas raíces.",
     "Este runtime remoto no tiene acceso al disco físico del Mac u otro ordenador personal del usuario. Para consultar esos archivos hace falta un desktop bridge autorizado o que estén sincronizados o montados en una raíz de lectura aprobada; nunca afirmes que puedes verlos si no lo están.",
+  ].join("\n");
+}
+
+function localDocumentDeveloperInstructions() {
+  return [
+    "## Generación documental local",
+    "Cuando el usuario pida crear un PDF, Word/DOCX, PowerPoint/PPTX o Excel/XLSX, usa por defecto `aibrain_documents.create`. El servidor guardará y verificará el archivo dentro de `documents/` en el workspace privado de este proyecto y devolverá la previsualización y descarga autenticadas.",
+    "No uses Google Drive, Dropbox ni ningún conector o almacenamiento externo para crear o guardar estos documentos salvo que el usuario elija explícitamente ese proveedor o destino en su petición actual. Una credencial disponible no constituye esa elección.",
+    "No anuncies un archivo como creado hasta que la herramienta local devuelva `success: true`, tamaño mayor que cero, hash y ruta. Si la herramienta no está disponible en un hilo antiguo, crea el archivo dentro de `documents/` con las herramientas locales del workspace y verifica el formato; nunca sustituyas este flujo por Drive.",
   ].join("\n");
 }
 
@@ -444,15 +458,16 @@ export async function runWorkerCodexTurn(
         permissions,
       })
     : [];
-  const uploadedDocuments = await resolveWorkerOwnedPath(runtime.handle.roots.staging, "threads");
+  // App Server treats runtimeWorkspaceRoots as workspaces and performs Git
+  // discovery beneath them. Read-only mounts such as source-ro must remain
+  // visible through the outer worker sandbox but must not be promoted to an
+  // inner workspace: doing so makes nested bubblewrap attempt to create
+  // source-ro/.git and fail on the intentionally read-only mount.
   const runtimeWorkspaceRoots = uniqueAbsoluteRoots([
     projectWorkspace,
     runtime.handle.roots.workspace,
     runtime.handle.roots.artifacts,
-    runtime.config.paths.companyContextRoot,
-    runtime.config.paths.sourceReadRoot,
-    uploadedDocuments,
-    ...enterpriseDocumentRoots.map((root) => root.path),
+    ...enterpriseDocumentRoots.filter((root) => !root.readOnly).map((root) => root.path),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   // A new conversation used to wait for the optional model/skills/usage
@@ -562,6 +577,7 @@ export async function runWorkerCodexTurn(
 
   const developerInstructions = [
     buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
+    localDocumentDeveloperInstructions(),
     readableFilesDeveloperInstructions(enterpriseDocumentRoots),
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
@@ -668,7 +684,12 @@ export async function runWorkerCodexTurn(
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
         : runtime.client.request("thread/start", {
             ...commonThreadParams,
-            dynamicTools: [...BROWSER_DYNAMIC_TOOLS, ...MEMORY_DYNAMIC_TOOLS, ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : [])],
+            dynamicTools: [
+              ...BROWSER_DYNAMIC_TOOLS,
+              ...DOCUMENT_DYNAMIC_TOOLS,
+              ...MEMORY_DYNAMIC_TOOLS,
+              ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
+            ],
             ephemeral: false,
             serviceName: "aibrain_workbench",
           }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
@@ -1074,7 +1095,7 @@ export async function runWorkerCodexTurn(
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
         if (request.method === "item/tool/call") {
-          if (!runtimeTurnId) throw new Error("Browser tool call arrived before the turn was bound.");
+          if (!runtimeTurnId) throw new Error("Dynamic tool call arrived before the turn was bound.");
           if (automationSession && isRecord(request.params) && request.params.namespace === AIBRAIN_AUTOMATION_TOOL_NAMESPACE) {
             return await handleAutomationToolCall(request.params as never, {
               session: automationSession,
@@ -1098,6 +1119,26 @@ export async function runWorkerCodexTurn(
               sourceExcerpt: chatRequest.message,
               observedToolNames: [...observedToolNames],
             }) as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
+            observedToolNames.add(`${AIBRAIN_DOCUMENT_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
+            const result = await handleLocalDocumentDynamicToolCall(request.params as never, {
+              installationId,
+              userId: authenticatedUserId,
+              projectId: chatRequest.projectId,
+              projectWorkspace,
+              receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              permissions,
+            });
+            if (result.artifact) {
+              await emit(
+                { type: "artifact", item: result.artifact },
+                { envelope, key: `artifact:local-document:${result.artifact.id}` },
+              );
+            }
+            return result.response as JsonValue;
           }
           if (isRecord(request.params) && typeof request.params.namespace === "string" && typeof request.params.tool === "string") {
             observedToolNames.add(`${request.params.namespace}.${request.params.tool}`);
