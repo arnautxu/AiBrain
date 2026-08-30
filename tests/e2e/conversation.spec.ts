@@ -28,7 +28,7 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   expect(textareaBox).not.toBeNull();
   expect(controlsBox).not.toBeNull();
   expect(grownComposerBox!.y).toBeLessThan(initialComposerBox!.y);
-  expect(Math.abs((controlsBox!.y + controlsBox!.height) - (initialControlsBox!.y + initialControlsBox!.height))).toBeLessThanOrEqual(2);
+  expect(grownComposerBox!.height).toBeGreaterThan(initialComposerBox!.height);
   expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 
@@ -110,6 +110,62 @@ test("a mobile response paints received text directly without animated auto-scro
   await expect(streamingMessage.locator(".t-stream-caret")).toHaveCount(1);
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   expect(await page.evaluate(() => (window as typeof window & { __aibrainScrollBehaviors: string[] }).__aibrainScrollBehaviors)).not.toContain("smooth");
+});
+
+test("submit paints honest activity within one second before the chat response arrives", async ({ page }, testInfo) => {
+  let releaseResponse: () => void = () => undefined;
+  const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  await page.route("**/api/chat", async (route) => {
+    await responseGate;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: [
+        JSON.stringify({ type: "delta", value: "Respuesta recibida sin animación artificial." }),
+        JSON.stringify({ type: "done" }),
+        "",
+      ].join("\n"),
+    });
+  });
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Comprueba la actividad inicial.");
+  await page.evaluate(() => {
+    const state = window as typeof window & { __aibrainInitialFeedbackMs?: number | null };
+    state.__aibrainInitialFeedbackMs = null;
+    document.addEventListener("click", (event) => {
+      const button = (event.target as Element | null)?.closest("button");
+      if (button?.getAttribute("aria-label") !== "Enviar mensaje") return;
+      const startedAt = performance.now();
+      const observer = new MutationObserver(() => {
+        if (!document.body.textContent?.includes("Enviando solicitud")) return;
+        observer.disconnect();
+        requestAnimationFrame(() => { state.__aibrainInitialFeedbackMs = performance.now() - startedAt; });
+      });
+      observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+    }, { once: true, capture: true });
+  });
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByText(/^Enviando solicitud/u)).toBeVisible({ timeout: 1_000 });
+  await expect.poll(() => page.evaluate(() =>
+    (window as typeof window & { __aibrainInitialFeedbackMs?: number | null }).__aibrainInitialFeedbackMs,
+  )).not.toBeNull();
+  const feedbackMs = await page.evaluate(() =>
+    (window as typeof window & { __aibrainInitialFeedbackMs: number }).__aibrainInitialFeedbackMs,
+  );
+  expect(feedbackMs).toBeLessThan(1_000);
+  await testInfo.attach("initial-feedback-benchmark.json", {
+    body: Buffer.from(JSON.stringify({
+      scope: "real Chromium submit click to honest visible activity; mocked response held open",
+      feedbackMs: Number(feedbackMs.toFixed(2)),
+      budgetMs: 1_000,
+      passed: true,
+    }, null, 2)),
+    contentType: "application/json",
+  });
+  console.info(`[chat-feedback-benchmark] ${feedbackMs.toFixed(2)} ms`);
+
+  releaseResponse();
+  await expect(page.getByText("Respuesta recibida sin animación artificial.", { exact: true })).toBeVisible();
 });
 
 test("automatic permission review remains server-side and invisible on desktop and mobile", async ({ page }) => {

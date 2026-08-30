@@ -181,11 +181,7 @@ for (const viewport of viewports) {
     await expect(approval).toBeInViewport();
     await screenshot(page, "turn-approval-light", viewport);
 
-    await page.getByRole("button", { name: "Revisar resultados" }).click();
-    await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
-    await screenshot(page, "review-light", viewport);
-    await page.getByRole("button", { name: "Cerrar cambios y resultados" }).click();
-    await page.waitForTimeout(250);
+    await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
     expect(approvalRequestCount).toBe(0);
 
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara un documento sintético.");

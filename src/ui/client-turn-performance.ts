@@ -6,7 +6,10 @@ const MAX_PAINT_GAPS = 128;
 export type ClientTurnPerformanceTerminal = "completed" | "error" | "stopped";
 
 export type ClientTurnPerformanceReadback = Readonly<{
-  schemaVersion: 1;
+  schemaVersion: 2;
+  sendIntentToFirstFeedbackPaintMs: number | null;
+  responseAcceptedToFeedbackPaintMs: number | null;
+  responseAcceptedFeedbackWithinBudget: boolean | null;
   sendIntentToFirstDeltaPaintMs: number | null;
   paintCount: number;
   interPaintP50Ms: number | null;
@@ -33,6 +36,10 @@ const browserScheduler: ClientPaintScheduler = {
   now: () => performance.now(),
   request: (callback) => window.requestAnimationFrame(callback),
 };
+
+export const CLIENT_TURN_PERFORMANCE_BUDGET_MS = Object.freeze({
+  acceptedFeedbackPaint: 1_000,
+});
 
 function percentile(values: readonly number[], ratio: number) {
   if (values.length === 0) return null;
@@ -61,6 +68,8 @@ function appendBounded(values: number[], value: number, limit: number) {
  */
 export class ClientTurnPerformance {
   private readonly startedAt: number;
+  private firstFeedbackPaintedAt: number | null = null;
+  private acceptedFeedbackPaintedAt: number | null = null;
   private firstDeltaPaintedAt: number | null = null;
   private previousPaintedAt: number | null = null;
   private readonly interPaintGaps: number[] = [];
@@ -72,6 +81,7 @@ export class ClientTurnPerformance {
   private readonly reconnectCaughtUp: number[] = [];
   private transport: ChatStreamRecoveryMeasurement = {
     responseOpenedAtMs: null,
+    responseAcceptedAtMs: null,
     lastEventAtMs: null,
     idleObservedAtMs: null,
     closedAtMs: null,
@@ -95,6 +105,16 @@ export class ClientTurnPerformance {
     this.reconnectCount += 1;
     this.reconnectStartedAt = at;
     this.publish();
+  }
+
+  feedbackApplied(kind: "local" | "accepted") {
+    this.scheduler.request(() => {
+      const paintedAt = this.scheduler.now();
+      const firstFeedback = this.firstFeedbackPaintedAt === null;
+      this.firstFeedbackPaintedAt ??= paintedAt;
+      if (kind === "accepted") this.acceptedFeedbackPaintedAt ??= paintedAt;
+      if (firstFeedback || kind === "accepted") this.publish();
+    });
   }
 
   eventApplied(event: ChatStreamEvent) {
@@ -124,7 +144,17 @@ export class ClientTurnPerformance {
     const reconnectSnapshot = summary(this.reconnectSnapshotVisible);
     const reconnectCaughtUp = summary(this.reconnectCaughtUp);
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      sendIntentToFirstFeedbackPaintMs: this.firstFeedbackPaintedAt === null
+        ? null
+        : Math.max(0, Math.round(this.firstFeedbackPaintedAt - this.startedAt)),
+      responseAcceptedToFeedbackPaintMs: this.acceptedFeedbackPaintedAt === null || this.transport.responseAcceptedAtMs === null
+        ? null
+        : Math.max(0, Math.round(this.acceptedFeedbackPaintedAt - this.startedAt - this.transport.responseAcceptedAtMs)),
+      responseAcceptedFeedbackWithinBudget: this.acceptedFeedbackPaintedAt === null || this.transport.responseAcceptedAtMs === null
+        ? null
+        : this.acceptedFeedbackPaintedAt - this.startedAt - this.transport.responseAcceptedAtMs <=
+          CLIENT_TURN_PERFORMANCE_BUDGET_MS.acceptedFeedbackPaint,
       sendIntentToFirstDeltaPaintMs: this.firstDeltaPaintedAt === null
         ? null
         : Math.max(0, Math.round(this.firstDeltaPaintedAt - this.startedAt)),

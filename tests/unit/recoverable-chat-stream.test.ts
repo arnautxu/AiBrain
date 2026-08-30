@@ -4,7 +4,7 @@ import {
   type ChatStreamRecoveryScheduler,
 } from "@/ui/recoverable-chat-stream";
 import { createChatReattachRequest } from "@/ui/chat-reattach-request";
-import type { ChatStreamEvent } from "@/lib/chat-contract";
+import { applyChatStreamEvent, type ChatMessage, type ChatStreamEvent } from "@/lib/chat-contract";
 
 class ControlledScheduler {
   nowMs = 0;
@@ -84,12 +84,14 @@ describe("recoverable chat stream", () => {
     const source = controlledResponse();
     const measurements: unknown[] = [];
     const states: unknown[] = [];
+    const accepted = vi.fn();
     let receivedDelta: (() => void) | null = null;
     const received = new Promise<void>((resolve) => { receivedDelta = resolve; });
     const run = consumeRecoverableChatStream({
       request: vi.fn(async () => source.response),
       signal: new AbortController().signal,
       onEvent: (event) => { if (event.type === "delta") receivedDelta?.(); },
+      onAccepted: accepted,
       onRecoveryState: (state) => states.push(state),
       onMeasurement: (measurement) => measurements.push(measurement),
       scheduler: scheduler.api,
@@ -99,7 +101,8 @@ describe("recoverable chat stream", () => {
     await received;
     scheduler.advance(3_001);
     expect(states).toEqual([]);
-    expect(measurements.at(-1)).toMatchObject({ idleObservedAtMs: 3001, recoveryAttempts: 0, bannerShownAtMs: null });
+    expect(accepted).toHaveBeenCalledOnce();
+    expect(measurements.at(-1)).toMatchObject({ responseAcceptedAtMs: 0, idleObservedAtMs: 3001, recoveryAttempts: 0, bannerShownAtMs: null });
 
     source.emit({ type: "done" });
     source.close();
@@ -119,10 +122,12 @@ describe("recoverable chat stream", () => {
     const measurements: unknown[] = [];
     const states: unknown[] = [];
     const events: ChatStreamEvent[] = [];
+    const accepted = vi.fn();
     const run = consumeRecoverableChatStream({
       request,
       signal: new AbortController().signal,
       onEvent: (event) => events.push(event),
+      onAccepted: accepted,
       onRecoveryState: (state) => states.push(state),
       onMeasurement: (measurement) => measurements.push(measurement),
       scheduler: scheduler.api,
@@ -138,6 +143,7 @@ describe("recoverable chat stream", () => {
     await run;
 
     expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(accepted).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls.map(([, init]) => init?.body)).toEqual([
       fetcher.mock.calls[0]?.[1]?.body,
       fetcher.mock.calls[0]?.[1]?.body,
@@ -146,6 +152,13 @@ describe("recoverable chat stream", () => {
       threadId: "thread-current", assistantMessageId: "assistant-turn", userMessageId: "user-current",
     });
     expect(events.map((event) => event.type)).toEqual(["delta", "snapshot", "done"]);
+    const initialMessage: ChatMessage = {
+      id: "assistant-turn", role: "assistant", content: "", status: "streaming", createdAt: "2026-08-28T12:00:00.000Z",
+      activity: [], plan: [], approvals: [], diff: "", attachments: [], artifacts: [], sources: [], toolResults: [],
+    };
+    const projected = events.reduce(applyChatStreamEvent, initialMessage);
+    expect(projected.content).toBe("snapshot text");
+    expect(projected.content).not.toContain("first fragmentfirst fragment");
     expect(states).toContainEqual({ state: "recovering", attempt: 1 });
     expect(states).toContainEqual({ state: "recovered" });
     expect(states).toContainEqual({ state: "idle" });

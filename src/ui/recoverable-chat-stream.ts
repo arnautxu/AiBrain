@@ -14,6 +14,7 @@ export type ChatStreamCloseReason = "stream-ended" | "read-error" | "http-error"
  */
 export type ChatStreamRecoveryMeasurement = Readonly<{
   responseOpenedAtMs: number | null;
+  responseAcceptedAtMs: number | null;
   lastEventAtMs: number | null;
   idleObservedAtMs: number | null;
   closedAtMs: number | null;
@@ -98,6 +99,7 @@ async function responseFailure(response: Response) {
 function emptyMeasurement(): ChatStreamRecoveryMeasurement {
   return {
     responseOpenedAtMs: null,
+    responseAcceptedAtMs: null,
     lastEventAtMs: null,
     idleObservedAtMs: null,
     closedAtMs: null,
@@ -114,6 +116,7 @@ export async function consumeRecoverableChatStream(options: {
   request: (signal: AbortSignal) => Promise<Response>;
   signal: AbortSignal;
   onEvent: (event: ChatStreamEvent) => void;
+  onAccepted?: () => void;
   onRecoveryState: (state: ChatStreamRecoveryState) => void;
   onMeasurement: (measurement: ChatStreamRecoveryMeasurement) => void;
   scheduler?: ChatStreamRecoveryScheduler;
@@ -124,6 +127,7 @@ export async function consumeRecoverableChatStream(options: {
   let measurement = emptyMeasurement();
   let recoveryAttempt = 0;
   let recovered = false;
+  let accepted = false;
   let lastHttpFailure: ChatStreamHttpError | null = null;
   const elapsed = () => Math.max(0, Math.round(scheduler.now() - startedAt));
   const publish = () => options.onMeasurement(measurement);
@@ -142,13 +146,19 @@ export async function consumeRecoverableChatStream(options: {
     let sawSnapshot = false;
     try {
       const response = await options.request(options.signal);
-      update({ responseOpenedAtMs: elapsed() });
+      const responseOpenedAtMs = elapsed();
+      update({ responseOpenedAtMs: measurement.responseOpenedAtMs ?? responseOpenedAtMs });
       if (!response.ok) {
         update({ closedAtMs: elapsed(), closeReason: "http-error" });
         const failure = await responseFailure(response);
         lastHttpFailure = failure;
         if (!failure.retryable) throw failure;
       } else {
+        if (!accepted) {
+          accepted = true;
+          update({ responseAcceptedAtMs: responseOpenedAtMs });
+          options.onAccepted?.();
+        }
         idleTimer = scheduler.setTimeout(() => {
           update({ idleObservedAtMs: elapsed() });
         }, IDLE_OBSERVATION_MS);
