@@ -136,6 +136,7 @@ jobs:
             --tag "aibrain-ci:${GITHUB_SHA}" .
       - name: Exercise packaged Codex App Server through its production sandbox
         run: |
+          sudo apparmor_parser -r infra/hetzner/apparmor/aibrain-container
           mkdir -p "${RUNNER_TEMP}/aibrain-ci-data/company-context" \
             "${RUNNER_TEMP}/aibrain-ci-source" \
             "${RUNNER_TEMP}/aibrain-ci-publish"
@@ -171,6 +172,7 @@ jobs:
             --read-only \
             --cap-drop ALL \
             --security-opt no-new-privileges:true \
+            --security-opt apparmor=aibrain-container \
             --security-opt systempaths=unconfined \
             --security-opt seccomp=infra/hetzner/browser/seccomp_profile.json \
             --pids-limit 768 \
