@@ -6,11 +6,37 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
+import { chromium } from "@playwright/test";
 import type { BrowserRuntimeContext } from "@/runtime/browser/types";
 import { ChromeCdpRuntime } from "@/runtime/browser/chrome-runtime";
 
+function playwrightHeadlessShell() {
+  const bundled = chromium.executablePath();
+  const parts = bundled.split(path.sep);
+  const revisionIndex = parts.findIndex((part) => /^chromium-\d+$/u.test(part));
+  if (revisionIndex < 0) return undefined;
+  const revision = parts[revisionIndex].slice("chromium-".length);
+  const cacheRoot = parts.slice(0, revisionIndex).join(path.sep) || path.sep;
+  if (process.platform === "darwin") {
+    return path.join(
+      cacheRoot,
+      `chromium_headless_shell-${revision}`,
+      `chrome-headless-shell-mac-${process.arch === "arm64" ? "arm64" : "x64"}`,
+      "chrome-headless-shell",
+    );
+  }
+  if (process.platform === "linux") {
+    return path.join(cacheRoot, `chromium_headless_shell-${revision}`, "chrome-headless-shell-linux64", "chrome-headless-shell");
+  }
+  if (process.platform === "win32") {
+    return path.join(cacheRoot, `chromium_headless_shell-${revision}`, "chrome-headless-shell-win64", "chrome-headless-shell.exe");
+  }
+  return undefined;
+}
+
 const executableCandidates = [
   process.env.AIBRAIN_CHROME_EXECUTABLE,
+  playwrightHeadlessShell(),
   process.platform === "darwin"
     ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
     : undefined,
@@ -141,6 +167,10 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
         return;
       }
       response.setHeader("Content-Type", "text/html");
+      if (requestPath === "/form") {
+        response.end(`<html><body style="height:3000px"><input id="entry"><button id="apply" onclick="document.querySelector('#out').textContent=document.querySelector('#entry').value">Apply</button><p id="out">empty</p><a href="/next">Next</a></body></html>`);
+        return;
+      }
       response.end(`<html><body>${requestPath}</body></html>`);
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -181,7 +211,23 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       expect(runtimeA.targetIdFor(THREAD_A)).not.toBe(runtimeA.targetIdFor(THREAD_A2));
       expect(runtimeA.targetIdFor(THREAD_A)).not.toBe(runtimeB.targetIdFor(THREAD_B));
       expect(contextA.roots.profile).not.toBe(contextB.roots.profile);
+      await runtimeA.agentNavigate(THREAD_A, `${origin}/form`);
+      await eventually(async () => (await runtimeA.readPage(THREAD_A)).text.includes("Apply"));
+      await runtimeA.agentType(THREAD_A, "#entry", "real-cdp-readback", true);
+      await runtimeA.agentClick(THREAD_A, "#apply");
+      await eventually(async () => (await runtimeA.readPage(THREAD_A)).text.includes("real-cdp-readback"));
+      await runtimeA.agentScroll(THREAD_A, 0, 500);
+      await expect(runtimeA.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({
+        mediaType: "image/png",
+        dataBase64: expect.any(String),
+      });
       await Promise.all([runtimeA.takeOver(), runtimeB.takeOver()]);
+      await expect(runtimeA.readPage(THREAD_A)).rejects.toMatchObject({ code: "CHROME_HUMAN_CONTROL_ACTIVE" });
+      await runtimeA.releaseTakeover();
+      await expect(runtimeA.readPage(THREAD_A)).resolves.toMatchObject({
+        url: expect.stringContaining("/form"),
+      });
+      await runtimeA.takeOver();
       await Promise.all([
         runtimeA.navigate(THREAD_A, `${origin}/set-a`),
         runtimeB.navigate(THREAD_B, `${origin}/set-b`),

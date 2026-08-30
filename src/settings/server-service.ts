@@ -10,6 +10,7 @@ import { codexManagedAppCapabilities } from "@/connectors/server-service";
 import { MarkdownPermissionProvider } from "@/permissions";
 import type { PermissionAction } from "@/permissions/types";
 import { readRuntimeConfig } from "@/runtime/config";
+import { probeChromeRuntimeCapability } from "@/runtime/browser/chrome-runtime";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
 import {
   CONTROLLABLE_APP_IDS,
@@ -117,13 +118,20 @@ function controlledApp(
 
 async function appCatalogue(session: AuthSession, isAdmin: boolean) {
   const { installation, store } = await context(session);
-  const [user, company, workspacePolicy] = await Promise.all([
+  const [user, company, workspacePolicy, chromeCapability] = await Promise.all([
     store.readUser(session.user.id),
     store.readInstallation(),
     workspacePolicyForIdentity(session.tenant.id, session.user.id),
+    probeChromeRuntimeCapability({
+      executablePath: process.env.AIBRAIN_CHROME_BIN?.trim() || undefined,
+      expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION?.trim() || undefined,
+    }),
   ]);
   const runtime = readRuntimeConfig(installation.installationId);
   const runtimeConfigured = runtime.mode === "codex";
+  const browserGatewayConfigured = process.env.NODE_ENV !== "production" ||
+    Boolean(process.env.AIBRAIN_BROWSER_GATEWAY_SECRET?.trim());
+  const browserConfigured = runtimeConfigured && chromeCapability.available && browserGatewayConfigured;
   const switches = Object.fromEntries(CONTROLLABLE_APP_IDS.map((id) => [id, {
     installation: company.apps[id] && workspacePolicy.policy.apps[id],
     user: user.apps[id],
@@ -194,8 +202,8 @@ async function appCatalogue(session: AuthSession, isAdmin: boolean) {
       scopes: ["Perfil privado del empleado", "Internet público HTTP/HTTPS", "Descargas privadas por conversación"],
       permissionActions: ["consult", "execute"],
       approvalRequired: true,
-      configurationHint: runtimeConfigured ? null : "Configura Chrome for Testing y el gateway privado.",
-    }),
+      configurationHint: browserConfigured ? null : "Configura Chrome for Testing y el gateway privado.",
+    }, browserConfigured),
     {
       id: "documents",
       label: "Archivos y documentos",

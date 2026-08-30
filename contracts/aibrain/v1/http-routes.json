@@ -29,6 +29,7 @@
     "GET /api/projects/{projectId}/files": "JsonObject",
     "GET /api/projects/{projectId}/threads": "JsonObject",
     "GET /api/runtime/browser": "BrowserStatus",
+    "GET /api/runtime/browser/history": "JsonObject",
     "GET /api/runtime/browser/viewer/frame": "binary:image/png",
     "GET /api/runtime/status": "RuntimeStatus",
     "GET /api/search": "JsonObject",

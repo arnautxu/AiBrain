@@ -298,9 +298,14 @@ export function buildChromeArguments(context: BrowserRuntimeContext, egressProxy
 }
 
 async function resolveChromeExecutable(configured: string | undefined) {
-  const candidates = [
-    configured?.trim(),
-    process.env.AIBRAIN_CHROME_EXECUTABLE?.trim(),
+  const explicit = configured?.trim() || process.env.AIBRAIN_CHROME_EXECUTABLE?.trim();
+  if (process.env.NODE_ENV === "production" && !explicit) {
+    throw new ChromeRuntimeError(
+      "CHROME_EXECUTABLE_REQUIRED",
+      "An explicit Chrome executable is required in production.",
+    );
+  }
+  const candidates = explicit ? [explicit] : [
     process.platform === "darwin"
       ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
       : undefined,
@@ -324,6 +329,22 @@ async function resolveChromeExecutable(configured: string | undefined) {
     }
   }
   throw new ChromeRuntimeError("CHROME_EXECUTABLE_NOT_FOUND", "Chrome or Chromium executable was not found.");
+}
+
+export async function probeChromeRuntimeCapability(options: {
+  executablePath?: string;
+  expectedVersion?: string;
+} = {}) {
+  try {
+    validateExpectedVersion(options.expectedVersion ?? process.env.AIBRAIN_CHROME_EXPECTED_VERSION);
+    await resolveChromeExecutable(options.executablePath);
+    return Object.freeze({ available: true as const, code: null });
+  } catch (error) {
+    return Object.freeze({
+      available: false as const,
+      code: error instanceof ChromeRuntimeError ? error.code : "CHROME_CAPABILITY_UNAVAILABLE",
+    });
+  }
 }
 
 function boundedErrorText(value: string) {

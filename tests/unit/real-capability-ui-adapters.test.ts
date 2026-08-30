@@ -9,8 +9,10 @@ import {
   isRecoverableBrowserViewerError,
   issueBrowserViewerToken,
   parseBrowserStatus,
+  readBrowserActionHistory,
   readBrowserFrame,
   sendBrowserViewerCommand,
+  shouldPresentBrowserPanel,
 } from "@/ui/browser-ui-adapter";
 import {
   isSafePublicationTarget,
@@ -61,6 +63,8 @@ const documentResponse = {
 };
 
 const browserStatus = {
+  available: true,
+  capabilityCode: null,
   healthy: true,
   state: {
     browserSessionId,
@@ -153,7 +157,44 @@ describe("document UI adapter", () => {
 describe("browser UI adapter", () => {
   it("fails closed on malformed lifecycle state", () => {
     expect(parseBrowserStatus(browserStatus)).toMatchObject({ state: { lifecycle: "ready" } });
+    expect(shouldPresentBrowserPanel(parseBrowserStatus(browserStatus), true)).toBe(true);
+    expect(shouldPresentBrowserPanel(parseBrowserStatus({ ...browserStatus, available: false }), true)).toBe(false);
+    expect(parseBrowserStatus({ healthy: true, state: browserStatus.state, runtime: null, runningInProcess: true })).toBeNull();
     expect(parseBrowserStatus({ ...browserStatus, state: { ...browserStatus.state, lifecycle: "invented" } })).toBeNull();
+  });
+
+  it("accepts only thread-bound, secret-free browser action history", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ history: [{
+      schemaVersion: 1,
+      sequence: 2,
+      installationId: "browser-lab",
+      userId: "0198b9f0-6631-7000-8000-000000000600",
+      threadId,
+      turnId: "turn-1",
+      callId: "call-1",
+      action: "click",
+      phase: "completed",
+      success: true,
+      actor: "agent",
+      occurredAt: "2026-08-30T10:00:00.000Z",
+    }, {
+      schemaVersion: 1,
+      sequence: 3,
+      installationId: "browser-lab",
+      userId: "0198b9f0-6631-7000-8000-000000000600",
+      threadId,
+      turnId: "manual-takeover",
+      callId: "manual-call-1",
+      action: "type",
+      phase: "dispatched",
+      success: true,
+      actor: "human",
+      occurredAt: "2026-08-30T10:00:01.000Z",
+    }] })));
+    await expect(readBrowserActionHistory(threadId)).resolves.toMatchObject([
+      { threadId, action: "click", phase: "completed", success: true },
+      { threadId, action: "type", phase: "dispatched", actor: "human" },
+    ]);
   });
 
   it("keeps viewer tokens in authorization headers and outside URLs", async () => {

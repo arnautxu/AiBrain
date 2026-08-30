@@ -13,6 +13,7 @@ import {
   ChromeBrowserRuntimeFactory,
   ChromeCdpRuntime,
   ChromeRuntimeError,
+  probeChromeRuntimeCapability,
   validateBrowserNavigationUrl,
   type CdpClientLike,
 } from "@/runtime/browser/chrome-runtime";
@@ -285,6 +286,15 @@ afterEach(async () => {
 });
 
 describe("ChromeCdpRuntime private pipe", () => {
+  it("reports an explicitly missing Chrome executable as unavailable instead of falling back", async () => {
+    await expect(probeChromeRuntimeCapability({
+      executablePath: "/definitely/missing/aibrain-chrome",
+    })).resolves.toEqual({
+      available: false,
+      code: "CHROME_EXECUTABLE_NOT_FOUND",
+    });
+  });
+
   it("launches fd3/fd4 CDP, isolates thread sessions and preserves network, downloads and takeover", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();

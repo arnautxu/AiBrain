@@ -20,6 +20,7 @@ import {
   BrowserToolCallStore,
   type BrowserToolCallIdentity,
 } from "@/runtime/browser/tool-call-store";
+import { BrowserActionHistoryStore } from "@/runtime/browser/action-history";
 
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const TOOL_NAMES = ["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"] as const;
@@ -341,6 +342,22 @@ export async function handleBrowserDynamicToolCall(
     maxRecords: Number(process.env.AIBRAIN_BROWSER_TOOL_MAX_RECORDS || 100_000),
     maxRecordBytes: Number(process.env.AIBRAIN_BROWSER_TOOL_MAX_BYTES || 2 * 1024 * 1024 * 1024),
   });
+  const history = new BrowserActionHistoryStore({ userRoot: context.approvalStore.userRoot });
+  const recordHistory = (
+    phase: "started" | "completed" | "denied" | "indeterminate",
+    success: boolean | null,
+  ) => history.append({
+      schemaVersion: 1,
+      installationId: context.installationId,
+      userId: context.userId,
+      threadId: context.browserThreadId,
+      turnId: context.runtimeTurnId,
+      callId: params.callId,
+      action: tool,
+      phase,
+      success,
+      actor: "agent",
+    }).catch(() => null);
   const reserved = await store.begin(identity);
   if (reserved.status === "completed" || reserved.status === "indeterminate") {
     return reserved.response as DynamicToolCallResponse;
@@ -351,8 +368,10 @@ export async function handleBrowserDynamicToolCall(
   if (!permissionAllowsBrowser(context.permissions, command)) {
     const response = failure("Server-resolved permissions deny browser tools for this turn.");
     await store.complete(identity, response);
+    await recordHistory("denied", false);
     return response;
   }
+  await recordHistory("started", null);
 
   let approvalEvidence: BrowserInformedApprovalEvidence | undefined;
   let expectedResource: BrowserActionResourceSnapshot | undefined;
@@ -430,6 +449,7 @@ export async function handleBrowserDynamicToolCall(
           ? "Browser mutations require a fresh one-action approval; session-wide approval was rejected."
           : "Browser action approval expired or was cancelled.");
       await store.complete(identity, response);
+      await recordHistory("denied", false);
       return response;
     }
   }
@@ -450,6 +470,7 @@ export async function handleBrowserDynamicToolCall(
     });
     const response = toolResponse(command, value);
     await store.complete(identity, response);
+    await recordHistory("completed", response.success);
     return response;
   } catch (error) {
     const code = error && typeof error === "object" && "code" in error
@@ -459,6 +480,7 @@ export async function handleBrowserDynamicToolCall(
       code !== "BROWSER_ACTION_TARGET_EVIDENCE_REQUIRED") {
       const response = failure("Browser action outcome is indeterminate and was not replayed; verify the page before trying again.");
       await store.markIndeterminate(identity, response);
+      await recordHistory("indeterminate", false);
       return response;
     }
     const response = failure(isMutation(command)
@@ -467,6 +489,7 @@ export async function handleBrowserDynamicToolCall(
         : "Browser page or target changed before execution; no action was sent. Read the page and try again."
       : "Browser read failed safely without exposing internal runtime details.");
     await store.complete(identity, response);
+    await recordHistory("completed", false);
     return response;
   }
 }

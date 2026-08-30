@@ -707,8 +707,10 @@
     "BrowserStatus": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["healthy", "state", "runtime", "runningInProcess"],
+      "required": ["available", "capabilityCode", "healthy", "state", "runtime", "runningInProcess"],
       "properties": {
+        "available": { "type": "boolean" },
+        "capabilityCode": { "type": ["string", "null"] },
         "healthy": { "type": "boolean" },
         "state": {
           "type": "object",
