@@ -30,7 +30,8 @@ export function projectConnectorMention(
 ): ConnectorMention {
   const health = resource.connectorId ? connectorHealth.get(resource.connectorId) : undefined;
   const status: ConnectorMentionStatus = health
-    ? health.status === "connected" ? "connected" : health.status === "reauth_required" ? "requires_login" : "unavailable"
+    ? health.status === "connected" ? "connected" :
+      health.status === "reauth_required" || (health.status === "not_configured" && resource.credentialMode === "personal-oauth") ? "requires_login" : "unavailable"
     : resource.credentialMode === "personal-oauth" ? "requires_login" : "connected";
   return {
     id: resource.id,

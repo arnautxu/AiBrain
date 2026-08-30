@@ -138,6 +138,41 @@ export class FileCatalogStore {
     });
   }
 
+  /** Adds immutable GraphikAI connector baselines with a default installation read grant. */
+  async ensureManagedResources(resources: readonly CatalogResource[]) {
+    if (resources.length === 0) return this.read();
+    await this.prepare();
+    return this.locks.withLock(`catalog:${this.installationId}`, async () => {
+      const state = await this.readUnlocked();
+      let changed = false;
+      for (const candidate of resources) {
+        if (!isCatalogResource(candidate) || candidate.managedBy !== "graphikai" || candidate.kind === "skill") {
+          throw new Error(`Catalog baseline resource ${candidate.id} is invalid.`);
+        }
+        const existing = state.resources.find((resource) => resource.id === candidate.id);
+        if (existing) {
+          if (JSON.stringify(existing) !== JSON.stringify(candidate)) {
+            throw new Error(`Catalog baseline resource ${candidate.id} conflicts with durable state.`);
+          }
+        } else {
+          state.resources.push(structuredClone(candidate));
+          changed = true;
+        }
+        const ruleId = `installation-${candidate.id}`;
+        const existingRule = state.rules.find((rule) => rule.id === ruleId);
+        if (!existingRule) {
+          state.rules.push({ id: ruleId, scope: "installation", subjectId: null, resourceId: candidate.id, effect: "allow", operations: ["read"] });
+          changed = true;
+        }
+      }
+      if (changed) {
+        state.revision += 1;
+        await atomicWriteJson(this.statePath, catalogStateSchema.parse(state), catalogStateSchema, { mode: 0o600 });
+      }
+      return structuredClone(state);
+    });
+  }
+
   async mutate(actorUserId: string, operation: (state: CatalogState) => Omit<CatalogAuditEvent, "schemaVersion" | "installationId" | "actorUserId" | "occurredAt">) {
     await this.prepare();
     const result = await this.locks.withLock(`catalog:${this.installationId}`, async () => {

@@ -524,6 +524,7 @@ export function BrainApp({
   const autoOpenedBrowserDemandRef = useRef<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentArtifact | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
+  const [customizationInitialTab, setCustomizationInitialTab] = useState<"appearance" | "connectors" | "memory">("appearance");
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -677,6 +678,11 @@ export function BrainApp({
     if (!hydrated) return;
     const params = new URLSearchParams(window.location.search);
     const starter = params.get("starter")?.trim();
+    const requestedSettings = params.get("settings");
+    if (requestedSettings === "connectors" || requestedSettings === "memory") {
+      setCustomizationInitialTab(requestedSettings);
+      setCustomizationOpen(true);
+    }
     if (starter) setPrompt(starter.slice(0, 400));
     if (starter) {
       window.history.replaceState(null, "", window.location.pathname);
@@ -2017,10 +2023,13 @@ export function BrainApp({
       ) : null}
 
       <CustomizationPanel
+        key={customizationInitialTab}
         productName={branding.productName}
         open={customizationOpen}
+        initialTab={customizationInitialTab}
         runtimeStatus={effectiveRuntimeStatus}
         onSettingsSnapshot={setSettingsSnapshot}
+        onOpenMemory={() => { setCustomizationOpen(false); setMemoryOpen(true); }}
         onClose={() => setCustomizationOpen(false)}
       />
 

@@ -32,8 +32,13 @@ export type CodexManagedAppActionConfig = {
   };
 };
 
+export type GmailConnectorConfig = {
+  enabled: boolean;
+};
+
 export type InstallationConnectors = {
-  codexManagedAppAction: CodexManagedAppActionConfig;
+  codexManagedAppAction?: CodexManagedAppActionConfig;
+  gmail?: GmailConnectorConfig;
 };
 
 /** Immutable GraphikAI baseline; workspace admins may not modify it through the catalog API. */
@@ -91,7 +96,7 @@ const PATH_KEYS = [
   "backupsRoot",
 ] as const;
 
-const CONNECTOR_KEYS = ["codexManagedAppAction"] as const;
+const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail"] as const;
 const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
 const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
 const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -372,36 +377,55 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
   }
   addUnknownKeyIssues(value, CONNECTOR_KEYS, "$.connectors", issues);
   const action = value.codexManagedAppAction;
-  if (!isRecord(action)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction", message: "debe ser un objeto" });
+  let codexManagedAppAction: CodexManagedAppActionConfig | undefined;
+  if (action !== undefined) {
+    if (!isRecord(action)) {
+      issues.push({ path: "$.connectors.codexManagedAppAction", message: "debe ser un objeto" });
+    } else {
+      addUnknownKeyIssues(action, CODEX_MANAGED_APP_ACTION_KEYS, "$.connectors.codexManagedAppAction", issues);
+      const readbackValue = action.readback;
+      if (!isRecord(readbackValue)) {
+        issues.push({ path: "$.connectors.codexManagedAppAction.readback", message: "debe ser un objeto" });
+      } else {
+        addUnknownKeyIssues(readbackValue, CODEX_MANAGED_APP_READBACK_KEYS, "$.connectors.codexManagedAppAction.readback", issues);
+        const readback = {
+          server: parseMcpIdentifier(readbackValue.server, "$.connectors.codexManagedAppAction.readback.server", issues),
+          tool: parseMcpIdentifier(readbackValue.tool, "$.connectors.codexManagedAppAction.readback.tool", issues),
+          arguments: parseStaticArguments(readbackValue.arguments, "$.connectors.codexManagedAppAction.readback.arguments", issues),
+          correlationArgument: parseMcpIdentifier(readbackValue.correlationArgument, "$.connectors.codexManagedAppAction.readback.correlationArgument", issues),
+        };
+        if (Object.prototype.hasOwnProperty.call(readback.arguments, readback.correlationArgument)) {
+          issues.push({ path: "$.connectors.codexManagedAppAction.readback.arguments", message: "no puede fijar el argumento de correlación" });
+        }
+        codexManagedAppAction = {
+          appId: parseMcpIdentifier(action.appId, "$.connectors.codexManagedAppAction.appId", issues),
+          server: parseMcpIdentifier(action.server, "$.connectors.codexManagedAppAction.server", issues),
+          tool: parseMcpIdentifier(action.tool, "$.connectors.codexManagedAppAction.tool", issues),
+          arguments: parseStaticArguments(action.arguments, "$.connectors.codexManagedAppAction.arguments", issues),
+          correlationField: parseMcpIdentifier(action.correlationField, "$.connectors.codexManagedAppAction.correlationField", issues),
+          readback,
+        };
+      }
+    }
+  }
+  let gmail: GmailConnectorConfig | undefined;
+  if (value.gmail !== undefined) {
+    if (!isRecord(value.gmail)) {
+      issues.push({ path: "$.connectors.gmail", message: "debe ser un objeto" });
+    } else {
+      addUnknownKeyIssues(value.gmail, ["enabled"], "$.connectors.gmail", issues);
+      if (typeof value.gmail.enabled !== "boolean") {
+        issues.push({ path: "$.connectors.gmail.enabled", message: "debe ser boolean" });
+      } else {
+        gmail = { enabled: value.gmail.enabled };
+      }
+    }
+  }
+  if (!codexManagedAppAction && !gmail) {
+    issues.push({ path: "$.connectors", message: "debe configurar al menos un conector" });
     return undefined;
   }
-  addUnknownKeyIssues(action, CODEX_MANAGED_APP_ACTION_KEYS, "$.connectors.codexManagedAppAction", issues);
-  const readbackValue = action.readback;
-  if (!isRecord(readbackValue)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction.readback", message: "debe ser un objeto" });
-    return undefined;
-  }
-  addUnknownKeyIssues(readbackValue, CODEX_MANAGED_APP_READBACK_KEYS, "$.connectors.codexManagedAppAction.readback", issues);
-  const readback = {
-    server: parseMcpIdentifier(readbackValue.server, "$.connectors.codexManagedAppAction.readback.server", issues),
-    tool: parseMcpIdentifier(readbackValue.tool, "$.connectors.codexManagedAppAction.readback.tool", issues),
-    arguments: parseStaticArguments(readbackValue.arguments, "$.connectors.codexManagedAppAction.readback.arguments", issues),
-    correlationArgument: parseMcpIdentifier(readbackValue.correlationArgument, "$.connectors.codexManagedAppAction.readback.correlationArgument", issues),
-  };
-  if (Object.prototype.hasOwnProperty.call(readback.arguments, readback.correlationArgument)) {
-    issues.push({ path: "$.connectors.codexManagedAppAction.readback.arguments", message: "no puede fijar el argumento de correlación" });
-  }
-  return {
-    codexManagedAppAction: {
-      appId: parseMcpIdentifier(action.appId, "$.connectors.codexManagedAppAction.appId", issues),
-      server: parseMcpIdentifier(action.server, "$.connectors.codexManagedAppAction.server", issues),
-      tool: parseMcpIdentifier(action.tool, "$.connectors.codexManagedAppAction.tool", issues),
-      arguments: parseStaticArguments(action.arguments, "$.connectors.codexManagedAppAction.arguments", issues),
-      correlationField: parseMcpIdentifier(action.correlationField, "$.connectors.codexManagedAppAction.correlationField", issues),
-      readback,
-    },
-  };
+  return { ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}) };
 }
 
 function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {
@@ -429,10 +453,13 @@ function freezeInstallationConfig(config: InstallationConfig): Readonly<Installa
   Object.freeze(config.branding);
   Object.freeze(config.paths);
   if (config.connectors) {
-    Object.freeze(config.connectors.codexManagedAppAction.arguments);
-    Object.freeze(config.connectors.codexManagedAppAction.readback.arguments);
-    Object.freeze(config.connectors.codexManagedAppAction.readback);
-    Object.freeze(config.connectors.codexManagedAppAction);
+    if (config.connectors.codexManagedAppAction) {
+      Object.freeze(config.connectors.codexManagedAppAction.arguments);
+      Object.freeze(config.connectors.codexManagedAppAction.readback.arguments);
+      Object.freeze(config.connectors.codexManagedAppAction.readback);
+      Object.freeze(config.connectors.codexManagedAppAction);
+    }
+    if (config.connectors.gmail) Object.freeze(config.connectors.gmail);
     Object.freeze(config.connectors);
   }
   if (config.catalog) {

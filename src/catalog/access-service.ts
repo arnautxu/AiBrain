@@ -6,6 +6,7 @@ import { CatalogRuntimeEnforcer } from "@/catalog/runtime-enforcement";
 import { FileCatalogStore } from "@/catalog/store";
 import { loadInstallationConfig } from "@/config/installation";
 import { skillProvenanceInstructions, synchronizeEffectiveSkills } from "@/catalog/skill-packages";
+import { ensureInstallationCatalog } from "@/catalog/baseline";
 
 async function catalogAccessContext(installationId: string, userId: string) {
   const installation = await loadInstallationConfig();
@@ -16,7 +17,7 @@ async function catalogAccessContext(installationId: string, userId: string) {
     workspaceCanExecute: effective.policy.capabilities.execute,
   };
   const store = new FileCatalogStore(installationId, installation.paths.dataRoot);
-  const state = await store.ensureManagedSkills(installation.catalog?.graphikAIManagedSkills ?? []);
+  const state = await ensureInstallationCatalog(store, installation);
   return { installation, principal, state };
 }
 

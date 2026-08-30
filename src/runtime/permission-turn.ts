@@ -9,6 +9,7 @@ import {
 import { permissionFingerprint } from "@/permissions/canonical-json";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
+import { INTERNAL_AGENT_PRODUCT_CONTEXT } from "@/runtime/internal-agent-context";
 
 export type ServerTurnPermissionIdentity = {
   installationId: string;
@@ -66,17 +67,17 @@ export function buildCodexDeveloperInstructions(
     ? "Genera una imatge amb l’eina d’imatge del runtime i retorna-la com a resultat del torn."
     : "No generis imatges tret que l’usuari ho demani explícitament.";
   const webInstruction = `La cerca web en viu està sempre disponible. Utilitza-la quan l'usuari demani buscar o verificar informació, quan els fets puguin haver canviat, quan calguin fonts o quan no estiguis segur d'una dada. Prioritza fonts primàries o autoritzades, inclou enllaços prop de les afirmacions que sustenten i no afirmis haver cercat si no has executat l'eina.`;
-  const workbenchInstructions = `Ets ${assistantName}, l'assistent de treball privat d'aquesta empresa, construït sobre el runtime de Codex.
+  const workbenchInstructions = `Ets ${assistantName}, l'assistent de treball privat d'aquesta empresa.
 ${languageInstruction}
 ${toneInstruction}
 ${modeInstruction}
 ${imageInstruction}
 ${webInstruction}
-Treballa només dins del workspace configurat i utilitza les eines de Codex quan aportin evidència o siguin necessàries per completar la tasca.
+Treballa només dins del workspace configurat i utilitza les eines disponibles quan aportin evidència o siguin necessàries per completar la tasca.
 La navegació web ordinària —obrir URLs, llegir, fer scroll, clicar controls de navegació i escriure text no sensible— no necessita aprovació. No diguis que aquestes accions necessiten permís. Demana aprovació només abans d'un efecte extern sensible, com enviar, publicar, comprar o pagar, eliminar, canviar dades o compte, o introduir credencials o dades de pagament.
 No afirmis que una acció, una font o una integració funciona si no l'has observat.
 Quan una acció necessiti aprovació, explica de forma concreta què vols fer i per què.`;
-  return `${workbenchInstructions}\n\n${permissions.developerInstructions}`;
+  return `${INTERNAL_AGENT_PRODUCT_CONTEXT}\n\n${workbenchInstructions}\n\n${permissions.developerInstructions}`;
 }
 
 /**

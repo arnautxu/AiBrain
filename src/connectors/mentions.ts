@@ -10,6 +10,9 @@ import { codexManagedAppCapabilities } from "@/connectors/server-service";
 import {
   projectConnectorMention,
 } from "@/connectors/mentions-contract";
+import { ensureInstallationCatalog } from "@/catalog/baseline";
+import { gmailAccessForIdentity, gmailCapabilityForSession } from "@/connectors/gmail-server-service";
+import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
 
 export type { ConnectorMention, ConnectorMentionStatus, ResolvedConnectorMention } from "@/connectors/mentions-contract";
 
@@ -31,21 +34,38 @@ async function catalogForIdentity(installationId: string, userId: string) {
     workspaceCanExecute: workspace.policy.capabilities.execute,
   };
   const store = new FileCatalogStore(installationId, installation.paths.dataRoot);
-  const state = await store.ensureManagedSkills(installation.catalog?.graphikAIManagedSkills ?? []);
-  return { principal, state };
+  const state = await ensureInstallationCatalog(store, installation);
+  return { installation, principal, state };
 }
 
 async function resolvedMentions(installationId: string, userId: string, session?: AuthSession) {
-  const { state, principal } = await catalogForIdentity(installationId, userId);
-  const health = new Map<string, { status: string; statusCode: string | null }>();
-  if (session) {
-    for (const connector of await codexManagedAppCapabilities(session)) {
-      health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
-    }
-  }
+  const { installation, state, principal } = await catalogForIdentity(installationId, userId);
   const resources = visibleCatalogResources(state, principal)
     .filter((resource): resource is CatalogResource & { kind: "app" | "connector" | "mcp" } => resource.kind !== "skill")
     .sort((left, right) => left.label.localeCompare(right.label, "es"));
+  const health = new Map<string, { status: string; statusCode: string | null }>();
+  if (session) {
+    const capabilities = await Promise.all([
+      codexManagedAppCapabilities(session),
+      gmailCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
+    ]).then((groups) => groups.flat());
+    for (const connector of capabilities) {
+      health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
+    }
+  } else if (resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID)) {
+    // Turn-time revalidation has no browser session object. It still verifies
+    // the exact per-user binding and encrypted token instead of trusting the
+    // connector chip rendered earlier by the client.
+    try {
+      await gmailAccessForIdentity(installation, userId);
+      health.set(GMAIL_CONNECTOR_ID, { status: "connected", statusCode: null });
+    } catch (error) {
+      const statusCode = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+        ? error.code
+        : "GMAIL_REAUTH_REQUIRED";
+      health.set(GMAIL_CONNECTOR_ID, { status: "reauth_required", statusCode });
+    }
+  }
   return { resources, mentions: resources.map((resource) => projectConnectorMention(resource, health)) };
 }
 
