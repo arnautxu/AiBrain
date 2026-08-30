@@ -41,7 +41,7 @@ export type ReleaseReadback = {
 
 export type CollectReleaseReadbacksInput = {
   candidateSha: string;
-  ciSourcePath: string;
+  pipelineSourcePath: string;
   releaseStatePath: string;
   appContainer: string;
   gatewayContainer: string;
@@ -51,6 +51,14 @@ export type CollectReleaseReadbacksInput = {
 
 type ReleaseState = {
   current: { revision: string; image: string; egressImage: string };
+};
+
+type PipelineIdentity = {
+  backendCiRunId: string;
+  publishRunId: string;
+  deployRunId: string;
+  appDigest: string;
+  gatewayDigest: string;
 };
 
 function sha256(value: string | Buffer): string {
@@ -103,20 +111,50 @@ async function readJsonSource(pathname: string, label: string): Promise<{ value:
   }
 }
 
-function parseCiReadback(value: unknown, candidateSha: string): string {
-  if (!isRecord(value)
-    || !hasExactKeys(value, ["schemaVersion", "workflow", "conclusion", "headSha", "runId"])
-    || value.schemaVersion !== 1
-    || value.workflow !== "Backend CI"
-    || value.conclusion !== "success"
-    || typeof value.headSha !== "string"
-    || !SHA.test(value.headSha)
+function parseRun(
+  value: unknown,
+  workflow: "Backend CI" | "Publish GHCR images" | "Deploy Arnall",
+  candidateSha: string,
+  conclusionRequired: boolean,
+): string {
+  const keys = conclusionRequired ? ["workflow", "conclusion", "headSha", "runId"] : ["workflow", "headSha", "runId"];
+  if (!isRecord(value) || !hasExactKeys(value, keys)
+    || value.workflow !== workflow
+    || value.headSha !== candidateSha
     || typeof value.runId !== "string"
-    || !/^[0-9][0-9]{5,20}$/u.test(value.runId)) {
-    throw new Error("CI source does not match the sanitized Backend CI readback contract.");
+    || !/^[0-9][0-9]{5,20}$/u.test(value.runId)
+    || (conclusionRequired && value.conclusion !== "success")) {
+    throw new Error(`${workflow} source does not match the verified GitHub Actions contract.`);
   }
-  if (value.headSha !== candidateSha) throw new Error("CI source SHA does not match the requested candidate.");
-  return value.headSha;
+  return value.runId;
+}
+
+function parsePipelineReadback(value: unknown, candidateSha: string): PipelineIdentity {
+  if (!isRecord(value)
+    || !hasExactKeys(value, ["schemaVersion", "headSha", "backendCi", "publish", "deploy", "images"])
+    || value.schemaVersion !== 2
+    || value.headSha !== candidateSha
+    || !isRecord(value.images)
+    || !hasExactKeys(value.images, ["appDigest", "gatewayDigest"])
+    || typeof value.images.appDigest !== "string"
+    || typeof value.images.gatewayDigest !== "string"
+    || !DIGEST.test(value.images.appDigest)
+    || !DIGEST.test(value.images.gatewayDigest)) {
+    throw new Error("Pipeline source does not match the sanitized release correlation contract.");
+  }
+  const backendCiRunId = parseRun(value.backendCi, "Backend CI", candidateSha, true);
+  const publishRunId = parseRun(value.publish, "Publish GHCR images", candidateSha, true);
+  const deployRunId = parseRun(value.deploy, "Deploy Arnall", candidateSha, false);
+  if (new Set([backendCiRunId, publishRunId, deployRunId]).size !== 3) {
+    throw new Error("Backend CI, Publish and Deploy must have distinct GitHub Actions run IDs.");
+  }
+  return {
+    backendCiRunId,
+    publishRunId,
+    deployRunId,
+    appDigest: value.images.appDigest,
+    gatewayDigest: value.images.gatewayDigest,
+  };
 }
 
 function parseReleaseState(value: unknown, candidateSha: string): ReleaseState {
@@ -187,11 +225,12 @@ function capturedAt(input: string | undefined): string {
 export async function collectReleaseReadbacks(input: CollectReleaseReadbacksInput): Promise<ReleaseReadback[]> {
   if (!SHA.test(input.candidateSha)) throw new Error("candidateSha must be a full immutable Git SHA.");
   const at = capturedAt(input.capturedAt);
-  const [ciSource, stateSource] = await Promise.all([
-    readJsonSource(input.ciSourcePath, "CI source"),
+  const [pipelineSource, stateSource] = await Promise.all([
+    readJsonSource(input.pipelineSourcePath, "Pipeline source"),
     readJsonSource(input.releaseStatePath, "Release state"),
   ]);
-  const ciSha = parseCiReadback(ciSource.value, input.candidateSha);
+  const pipeline = parsePipelineReadback(pipelineSource.value, input.candidateSha);
+  const ciSha = input.candidateSha;
   const state = parseReleaseState(stateSource.value, input.candidateSha);
   const [appRuntime, gatewayRuntime, appImage, gatewayImage] = await Promise.all([
     inspectContainer(input.command, input.appContainer, state.current.image, input.candidateSha),
@@ -202,10 +241,26 @@ export async function collectReleaseReadbacks(input: CollectReleaseReadbacksInpu
   if (appRuntime.revision !== gatewayRuntime.revision || appImage.revision !== gatewayImage.revision) {
     throw new Error("Runtime or OCI revisions are not mutually consistent.");
   }
+  if (pipeline.appDigest !== appImage.digest || pipeline.gatewayDigest !== gatewayImage.digest) {
+    throw new Error("Published GHCR digests do not match deploy state and OCI inspection.");
+  }
   return [
     {
       route: "release:ci-readback", artifactPath: "release-ci-readback.json",
-      value: { schemaVersion: 1, kind: "aibrain-release-ci-readback", source: "ci", candidateSha: input.candidateSha, ciSha, capturedAt: at, provenance: provenance("file", ciSource.fingerprint) },
+      value: {
+        schemaVersion: 1,
+        kind: "aibrain-release-ci-readback",
+        source: "ci",
+        candidateSha: input.candidateSha,
+        ciSha,
+        backendCi: { runId: pipeline.backendCiRunId, headSha: input.candidateSha },
+        publish: { runId: pipeline.publishRunId, headSha: input.candidateSha },
+        deploy: { runId: pipeline.deployRunId, headSha: input.candidateSha },
+        appOciDigest: appImage.digest,
+        gatewayOciDigest: gatewayImage.digest,
+        capturedAt: at,
+        provenance: provenance("file", pipelineSource.fingerprint),
+      },
     },
     {
       route: "release:deploy-state", artifactPath: "release-deploy-state.json",
@@ -235,9 +290,9 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const outputRoot = option(args, "--output-root");
   const dockerBin = option(args, "--docker-bin");
-  const required = [outputRoot, dockerBin, option(args, "--candidate-sha"), option(args, "--ci-source"), option(args, "--release-state"), option(args, "--app-container"), option(args, "--gateway-container")];
+  const required = [outputRoot, dockerBin, option(args, "--candidate-sha"), option(args, "--pipeline-source"), option(args, "--release-state"), option(args, "--app-container"), option(args, "--gateway-container")];
   if (required.some((value) => !value)) {
-    process.stderr.write("Usage: npm run acceptance:collect-release-readbacks -- --output-root <private-dir> --candidate-sha <sha> --ci-source <sanitized-ci-json> --release-state <release-state.json> --docker-bin <absolute> --app-container <id> --gateway-container <id>\n");
+    process.stderr.write("Usage: npm run acceptance:collect-release-readbacks -- --output-root <private-dir> --candidate-sha <sha> --pipeline-source <sanitized-pipeline-json> --release-state <release-state.json> --docker-bin <absolute> --app-container <id> --gateway-container <id>\n");
     process.exitCode = 64;
     return;
   }
@@ -250,7 +305,7 @@ async function main(): Promise<void> {
     throw new Error("output-root must be a private directory.");
   }
   const readbacks = await collectReleaseReadbacks({
-    candidateSha: option(args, "--candidate-sha")!, ciSourcePath: option(args, "--ci-source")!, releaseStatePath: option(args, "--release-state")!,
+    candidateSha: option(args, "--candidate-sha")!, pipelineSourcePath: option(args, "--pipeline-source")!, releaseStatePath: option(args, "--release-state")!,
     appContainer: option(args, "--app-container")!, gatewayContainer: option(args, "--gateway-container")!,
     command: { run: async (commandArgs) => (await execFileAsync(dockerBin!, commandArgs, { encoding: "utf8", maxBuffer: 1024 * 1024 })).stdout },
   });

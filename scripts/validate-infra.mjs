@@ -73,6 +73,9 @@ requireMatch(arnallDeployGateway, /cleanup_previous_aibrain_images[\s\S]{0,300}l
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Publish GHCR images[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful GHCR publication after Backend CI");
 requireMatch(arnallDeployWorkflow, /deploy-ghcr \$TESTED_SHA \$APP_IMAGE \$EGRESS_IMAGE \$GHCR_USERNAME/u, "Arnall deployment does not transmit the immutable tested GHCR digests");
+requireMatch(arnallDeployWorkflow, /actions\/workflows\/backend-ci\.yml\/runs[\s\S]*\.name == "Backend CI"[\s\S]*backend_ci_run_id/u, "Arnall deployment does not resolve the real successful Backend CI run for the release SHA");
+requireMatch(arnallDeployWorkflow, /collect-readbacks \$TESTED_SHA \$BACKEND_CI_RUN_ID \$PUBLISH_RUN_ID \$DEPLOY_RUN_ID \$APP_DIGEST \$EGRESS_DIGEST/u, "Arnall readback does not preserve separate Backend CI, Publish and Deploy identities plus both digests");
+forbidMatch(arnallDeployWorkflow, /CI_RUN_ID: \$\{\{ github\.event\.workflow_run\.id \}\}/u, "Arnall deployment still labels the Publish run as Backend CI");
 requireMatch(arnallDeployWorkflow, /GHCR_PULL_TOKEN: \$\{\{ github\.token \}\}/u, "Arnall deployment does not use its temporary package token for the pull");
 requireMatch(arnallDeployWorkflow, /StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnall deployment does not pin the SSH host identity");
 

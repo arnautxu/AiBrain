@@ -367,10 +367,11 @@ function parseReadback(
   contents: Buffer,
   label: string,
   expected: Record<string, unknown>,
+  allowedExtraKeys: string[] = [],
 ): string | null {
   try {
     const value = JSON.parse(contents.toString("utf8")) as unknown;
-    if (!isRecord(value) || !hasOnlyKeys(value, [...Object.keys(expected), "capturedAt", "provenance"])
+    if (!isRecord(value) || !hasOnlyKeys(value, [...Object.keys(expected), ...allowedExtraKeys, "capturedAt", "provenance"])
       || typeof value.capturedAt !== "string" || !validTimestamp(value.capturedAt)
       || !isRecord(value.provenance) || !hasOnlyKeys(value.provenance, ["kind", "sha256"])
       || !["file", "docker-command"].includes(String(value.provenance.kind))
@@ -382,6 +383,33 @@ function parseReadback(
       : `release_identity_source_mismatch:${label}`;
   } catch {
     return `release_identity_source_invalid:${label}`;
+  }
+}
+
+function parsePipelineTrace(
+  contents: Buffer,
+  label: string,
+  candidateSha: string,
+  appOciDigest: string,
+  gatewayOciDigest: string,
+): string | null {
+  try {
+    const value = JSON.parse(contents.toString("utf8")) as unknown;
+    if (!isRecord(value) || value.appOciDigest !== appOciDigest || value.gatewayOciDigest !== gatewayOciDigest) {
+      return `release_identity_pipeline_trace_invalid:${label}`;
+    }
+    const runs = [value.backendCi, value.publish, value.deploy];
+    if (runs.some((run) => !isRecord(run)
+      || !hasOnlyKeys(run, ["runId", "headSha"])
+      || run.headSha !== candidateSha
+      || typeof run.runId !== "string"
+      || !/^[0-9][0-9]{5,20}$/u.test(run.runId))) {
+      return `release_identity_pipeline_trace_invalid:${label}`;
+    }
+    const runIds = runs.map((run) => (run as Record<string, unknown>).runId);
+    return new Set(runIds).size === 3 ? null : `release_identity_pipeline_trace_invalid:${label}`;
+  } catch {
+    return `release_identity_pipeline_trace_invalid:${label}`;
   }
 }
 
@@ -463,9 +491,25 @@ async function verifyReleaseIdentitySources(
   };
   for (const route of RELEASE_READBACK_ROUTES) {
     const artifact = artifacts.get(route)!;
-    const reason = parseReadback(artifact.contents, artifact.label, expectedByRoute[route]);
+    const reason = parseReadback(
+      artifact.contents,
+      artifact.label,
+      expectedByRoute[route],
+      route === "release:ci-readback"
+        ? ["backendCi", "publish", "deploy", "appOciDigest", "gatewayOciDigest"]
+        : [],
+    );
     if (reason) reasons.push(reason);
   }
+  const ciArtifact = artifacts.get("release:ci-readback")!;
+  const pipelineReason = parsePipelineTrace(
+    ciArtifact.contents,
+    ciArtifact.label,
+    identity.candidateSha,
+    parsed.identity.appOciDigest,
+    parsed.identity.gatewayOciDigest,
+  );
+  if (pipelineReason) reasons.push(pipelineReason);
   const checkoutReason = await verifyCheckoutFingerprints(manifest, parsed, checkoutRoot);
   if (checkoutReason) reasons.push(checkoutReason);
   return reasons;
