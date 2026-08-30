@@ -50,7 +50,11 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
   },
 }));
 
-import { runWorkerCodexTurn, workerTurnTimeoutMs } from "@/runtime/worker-codex-turn";
+import {
+  documentToolTerminalGraceMs,
+  runWorkerCodexTurn,
+  workerTurnTimeoutMs,
+} from "@/runtime/worker-codex-turn";
 
 const installationId = "qa-company";
 const userId = "00000000-0000-4000-8000-000000000001";
@@ -160,6 +164,213 @@ describe("worker Codex turn", () => {
     expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "29999" })).toThrow(/between/u);
     expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "secret" })).toThrow(/invalid/u);
   });
+
+  it("uses a short bounded reconciliation grace after local document tools", () => {
+    expect(documentToolTerminalGraceMs({})).toBe(45_000);
+    expect(documentToolTerminalGraceMs({ AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS: "1000" })).toBe(1_000);
+    expect(documentToolTerminalGraceMs({ AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS: "120000" })).toBe(120_000);
+    expect(documentToolTerminalGraceMs({ AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS: "999" })).toBe(45_000);
+    expect(documentToolTerminalGraceMs({ AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS: "secret" })).toBe(45_000);
+  });
+
+  it("creates four local formats in one tool call, projects one card per file and closes with no private path", async () => {
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-document-batch-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    let handlers: {
+      onNotification(value: unknown, envelope: unknown): Promise<void> | void;
+      onServerRequest(value: unknown, envelope: unknown): Promise<unknown> | unknown;
+    } | null = null;
+    const calls: string[] = [];
+    const envelope = (eventId: string, sequence: number) => ({
+      eventId,
+      sequence,
+      occurredAt: new Date().toISOString(),
+      message: { kind: "rpc-notification", rpc: {} },
+    });
+    const client = {
+      router: {
+        registerTurn(_runtimeThreadId: string, _localTurnId: string, value: typeof handlers) {
+          handlers = value;
+          return { bindRuntimeTurn() {}, dispose() {} };
+        },
+      },
+      async connectionSummary() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: true,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-documents", turns: [] } };
+          await beforeResolve?.(result as never, envelope("documents-thread", 1) as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          const result = { turn: { id: "runtime-turn-documents" } };
+          await beforeResolve?.(result as never, envelope("documents-turn", 2) as never);
+          queueMicrotask(() => {
+            void (async () => {
+              if (!handlers) throw new Error("Turn handlers were not registered.");
+              const toolResult = await handlers.onServerRequest({
+                method: "item/tool/call",
+                id: "document-batch-request",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turnId: "runtime-turn-documents",
+                  callId: "document-batch-call",
+                  namespace: "aibrain_documents",
+                  tool: "create_batch",
+                  arguments: {
+                    files: (["pdf", "docx", "pptx", "xlsx"] as const).map((format) => ({
+                      format,
+                      fileName: `hello-world.${format}`,
+                      title: "Hello world",
+                      content: "Hello world",
+                      ...(format === "xlsx" ? { rows: [["Message"], ["Hello world"]] } : {}),
+                    })),
+                  },
+                },
+              }, envelope("documents-tool-request", 3));
+              const privatePath = path.join(
+                workspace,
+                "projects",
+                projectId,
+                "documents",
+                "hello-world.pdf",
+              );
+              await handlers.onNotification({
+                method: "item/completed",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turnId: "runtime-turn-documents",
+                  item: {
+                    id: "document-batch-call",
+                    type: "dynamicToolCall",
+                    namespace: "aibrain_documents",
+                    tool: "create_batch",
+                    status: "completed",
+                    aggregatedOutput: privatePath,
+                    ...(toolResult as Record<string, unknown>),
+                  },
+                },
+              }, envelope("documents-tool-completed", 4));
+              await handlers.onNotification({
+                method: "item/started",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turnId: "runtime-turn-documents",
+                  item: { id: "documents-final", type: "agentMessage", phase: "final_answer", text: "" },
+                },
+              }, envelope("documents-final-started", 5));
+              await handlers.onNotification({
+                method: "item/agentMessage/delta",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turnId: "runtime-turn-documents",
+                  itemId: "documents-final",
+                  delta: `Listo: ${privatePath}`,
+                },
+              }, envelope("documents-final-delta", 6));
+              await handlers.onNotification({
+                method: "item/completed",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turnId: "runtime-turn-documents",
+                  item: {
+                    id: "documents-final",
+                    type: "agentMessage",
+                    phase: "final_answer",
+                    status: "completed",
+                    text: `Listo: ${privatePath}`,
+                  },
+                },
+              }, envelope("documents-final", 7));
+              await handlers.onNotification({
+                method: "turn/completed",
+                params: {
+                  threadId: "runtime-thread-documents",
+                  turn: { id: "runtime-turn-documents", status: "completed", items: [], error: null },
+                },
+              }, envelope("documents-completed", 8));
+            })();
+          });
+          return result;
+        }
+        throw new Error(`Unexpected request ${method} (${purpose})`);
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+    const request = chatRequest();
+    request.message = "Genera PDF, DOCX, PPTX y XLSX que digan hello world";
+
+    await runWorkerCodexTurn(
+      request,
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions([{
+        ruleId: "tools.execute",
+        action: "execute",
+        effect: "allow",
+        instruction: "Create local documents.",
+        sourceScope: "installation",
+        sourcePolicyVersion: 1,
+        precedence: 100,
+      }]),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    const artifacts = events.filter((event) => event.type === "artifact");
+    expect(artifacts).toHaveLength(4);
+    expect(new Set(artifacts.map((event) => (event.item as { id: string }).id))).toHaveProperty("size", 4);
+    expect(artifacts.map((event) => (event.item as { kind: string }).kind)).toEqual(["pdf", "docx", "pptx", "xlsx"]);
+    const finalContent = events.filter((event) => event.type === "content").at(-1);
+    expect(finalContent).toEqual({ type: "content", value: "Listo: ./documents/hello-world.pdf" });
+    expect(JSON.stringify(events)).not.toContain(userRoot);
+    expect(events).toContainEqual({ type: "done" });
+    expect(calls).toEqual(["thread/start", "turn/start"]);
+  }, 30_000);
 
   it("keeps live web search and the private browser exposed for a current Arnall query", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-turn-"));
@@ -531,7 +742,9 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
     expect(instructions).toContain("usa por defecto `aibrain_documents.create`");
+    expect(instructions).toContain("`aibrain_documents.create_batch` está disponible");
     expect(instructions).toContain("No uses Google Drive");
+    expect(instructions).toContain("Nunca muestres al usuario una ruta interna del servidor");
     expect(instructions).toContain("BEGIN AIBRAIN UI PROJECT CONTEXT JSON");
     expect(instructions).toContain(JSON.stringify({
       currentProject: { id: projectId, name: "Testing 1" },
@@ -833,9 +1046,10 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "done" });
   });
 
-  it("reconciles and interrupts a silent runtime turn with one clear terminal error", async () => {
-    vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "1000");
-    vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "1000");
+  it("reconciles and interrupts a document turn that never produces a final answer", async () => {
+    vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "5000");
+    vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "5000");
+    vi.stubEnv("AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS", "1000");
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-watchdog-"));
     const workspace = path.join(userRoot, "workspace");
     const staging = path.join(userRoot, "staging");
@@ -844,9 +1058,13 @@ describe("worker Codex turn", () => {
       await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
     });
     const calls: string[] = [];
+    let handlers: {
+      onServerRequest(request: unknown, envelope: unknown): Promise<unknown> | unknown;
+    } | null = null;
     const client = {
       router: {
-        registerTurn(runtimeThreadId: string, localTurnId: string) {
+        registerTurn(runtimeThreadId: string, localTurnId: string, value: typeof handlers) {
+          handlers = value;
           return {
             threadId: runtimeThreadId,
             localTurnId,
@@ -897,6 +1115,30 @@ describe("worker Codex turn", () => {
             occurredAt: new Date().toISOString(),
             message: { kind: "rpc-response", rpc: { id: purpose, result } },
           } as never);
+          queueMicrotask(() => {
+            void handlers?.onServerRequest({
+              method: "item/tool/call",
+              id: "watchdog-document-call",
+              params: {
+                threadId: "runtime-thread-watchdog",
+                turnId: "runtime-turn-watchdog",
+                callId: "watchdog-document-call",
+                namespace: "aibrain_documents",
+                tool: "create",
+                arguments: {
+                  format: "pdf",
+                  fileName: "hello-world.pdf",
+                  title: "Hello world",
+                  content: "Hello world",
+                },
+              },
+            }, {
+              eventId: "watchdog-document-request",
+              sequence: 3,
+              occurredAt: new Date().toISOString(),
+              message: { kind: "rpc-request", rpc: {} },
+            });
+          });
           return result;
         }
         if (method === "thread/read") {
@@ -938,7 +1180,15 @@ describe("worker Codex turn", () => {
         approvalPolicy: "on-request",
         sandbox: "workspace-write",
       },
-      permissions(),
+      permissions([{
+        ruleId: "tools.execute",
+        action: "execute",
+        effect: "allow",
+        instruction: "Create local documents.",
+        sourceScope: "installation",
+        sourcePolicyVersion: 1,
+        precedence: 100,
+      }]),
       {} as never,
       memoryDependencies(),
       [],
@@ -949,7 +1199,7 @@ describe("worker Codex turn", () => {
     expect(calls).toEqual(["thread/start", "turn/start", "thread/read", "turn/interrupt"]);
     expect(events).toContainEqual(expect.objectContaining({
       type: "error",
-      message: expect.stringContaining("ninguna acción incierta se ha repetido"),
+      message: expect.stringContaining("sin repetir ninguna creación"),
     }));
     expect(events).not.toContainEqual({ type: "done" });
   }, 15_000);

@@ -167,6 +167,16 @@ type EmitEvent = (
 
 const DEFAULT_TURN_IDLE_TIMEOUT_MS = 4 * 60_000;
 const DEFAULT_TURN_HARD_TIMEOUT_MS = 30 * 60_000;
+const DEFAULT_DOCUMENT_TOOL_TERMINAL_GRACE_MS = 45_000;
+
+export function documentToolTerminalGraceMs(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  const value = Number(environment.AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS || DEFAULT_DOCUMENT_TOOL_TERMINAL_GRACE_MS);
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= 2 * 60_000
+    ? value
+    : DEFAULT_DOCUMENT_TOOL_TERMINAL_GRACE_MS;
+}
 
 function configuredTurnTimeout(name: string, fallback: number, maximum: number) {
   const value = Number(process.env[name] || fallback);
@@ -193,6 +203,16 @@ function productSafeRuntimeMessage(message: string) {
     .slice(0, 2_000);
 }
 
+function privateWorkspaceSafeText(value: string, roots: readonly string[]) {
+  const rootSanitized = [...new Set(roots.filter((root) => path.isAbsolute(root)))]
+    .sort((left, right) => right.length - left.length)
+    .reduce((text, root) => text.replaceAll(root, "."), value);
+  return rootSanitized.replace(
+    /\/var\/lib\/aibrain\/data\/users\/[^/\s"'<>]+\/workspace(?=\/|\s|$)/giu,
+    ".",
+  );
+}
+
 function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDocumentRoot[]) {
   const scopedRoots = documentRoots.length > 0
     ? documentRoots.map((root) => `- ${root.scope}${root.scope === "department" ? " autorizado" : ""}: lectura autorizada`).join("\n")
@@ -210,8 +230,10 @@ function localDocumentDeveloperInstructions() {
   return [
     "## Generación documental local",
     "Cuando el usuario pida crear un PDF, Word/DOCX, PowerPoint/PPTX o Excel/XLSX, usa por defecto `aibrain_documents.create`. El servidor guardará y verificará el archivo dentro de `documents/` en el workspace privado de este proyecto y devolverá la previsualización y descarga autenticadas.",
+    "Si pide dos o más archivos o formatos y `aibrain_documents.create_batch` está disponible, úsala exactamente una vez con todos los archivos solicitados. Solo en una conversación antigua donde esa función no exista, usa `aibrain_documents.create` una vez por archivo; nunca cambies a almacenamiento externo.",
     "No uses Google Drive, Dropbox ni ningún conector o almacenamiento externo para crear o guardar estos documentos salvo que el usuario elija explícitamente ese proveedor o destino en su petición actual. Una credencial disponible no constituye esa elección.",
-    "No anuncies un archivo como creado hasta que la herramienta local devuelva `success: true`, tamaño mayor que cero, hash y ruta. Si la herramienta no está disponible en un hilo antiguo, crea el archivo dentro de `documents/` con las herramientas locales del workspace y verifica el formato; nunca sustituyas este flujo por Drive.",
+    "No anuncies un archivo como creado hasta que la herramienta local devuelva `success: true`, tamaño mayor que cero y hash. Si la herramienta no está disponible en un hilo antiguo, crea el archivo dentro de `documents/` con las herramientas locales del workspace y verifica el formato; nunca sustituyas este flujo por Drive.",
+    "Nunca muestres al usuario una ruta interna del servidor o del workspace (por ejemplo `/var/lib/...`). En la respuesta final menciona solo los nombres de archivo y usa las tarjetas privadas para previsualizar o descargar.",
   ].join("\n");
 }
 
@@ -352,6 +374,8 @@ async function projectGeneratedDocuments(
   turnId: string,
   envelope: AppServerEvent,
   emit: EmitEvent,
+  projectedArtifactIds: Set<string>,
+  projectingArtifactIds: Set<string>,
 ) {
   const artifacts = await generatedDocumentArtifactsFromRuntimeItem(
     item,
@@ -360,10 +384,17 @@ async function projectGeneratedDocuments(
     turnId,
   );
   for (const artifact of artifacts) {
-    await emit(
-      { type: "artifact", item: artifact },
-      { envelope, key: `artifact:document:${artifact.id}` },
-    );
+    if (projectedArtifactIds.has(artifact.id) || projectingArtifactIds.has(artifact.id)) continue;
+    projectingArtifactIds.add(artifact.id);
+    try {
+      await emit(
+        { type: "artifact", item: artifact },
+        { envelope, key: `artifact:document:${artifact.id}` },
+      );
+      projectedArtifactIds.add(artifact.id);
+    } finally {
+      projectingArtifactIds.delete(artifact.id);
+    }
   }
 }
 
@@ -447,6 +478,9 @@ export async function runWorkerCodexTurn(
   const activities = new Map<string, ActivityItem>();
   const agentMessagePhases = new Map<string, "commentary" | "final_answer" | null>();
   const commentaryText = new Map<string, string>();
+  const projectedDocumentArtifactIds = new Set<string>();
+  const projectingDocumentArtifactIds = new Set<string>();
+  let localDocumentToolInvoked = false;
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
     activities.set(item.id, item);
     telemetry.activity();
@@ -741,7 +775,7 @@ export async function runWorkerCodexTurn(
     const text = recoveredAgentText(recoveredTurnState);
     if (text !== null) {
       await emit(
-        { type: "content", value: text },
+        { type: "content", value: privateWorkspaceSafeText(text, [projectWorkspace, runtime.handle.roots.workspace]) },
         { envelope, key: `${keyPrefix}:content:${recoveredTurnState.id}` },
       );
     }
@@ -762,6 +796,8 @@ export async function runWorkerCodexTurn(
         chatRequest.assistantMessageId,
         envelope,
         emit,
+        projectedDocumentArtifactIds,
+        projectingDocumentArtifactIds,
       );
       await projectItemEvidence({ item }, true, envelope, emit);
       const activity = itemActivity({ item }, true);
@@ -895,6 +931,9 @@ export async function runWorkerCodexTurn(
   let turnStartRequested = false;
   let remoteInterruptPromise: Promise<void> | null = null;
   let terminalWatchdog: TurnTerminalWatchdog | null = null;
+  let documentToolRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let documentToolRecoveryStartedAt: number | null = null;
+  let runtimeProgressRevision = 0;
   const turnController = new AbortController();
   const forwardExternalAbort = () => turnController.abort();
   const turnSignal = turnController.signal;
@@ -911,6 +950,11 @@ export async function runWorkerCodexTurn(
       clearTimeout(finalAnswerRecoveryTimer);
       finalAnswerRecoveryTimer = null;
     }
+    if (documentToolRecoveryTimer) {
+      clearTimeout(documentToolRecoveryTimer);
+      documentToolRecoveryTimer = null;
+    }
+    documentToolRecoveryStartedAt = null;
     terminalTurnStatus = status;
     if (terminalWatchdog) terminalWatchdog.stop();
     resolveFinishedTurn(status);
@@ -960,6 +1004,82 @@ export async function runWorkerCodexTurn(
     }, 12_000);
     finalAnswerRecoveryTimer.unref?.();
   };
+  const armDocumentToolRecovery = () => {
+    if (terminalTurnStatus) return;
+    if (documentToolRecoveryTimer) clearTimeout(documentToolRecoveryTimer);
+    const graceMs = documentToolTerminalGraceMs();
+    documentToolRecoveryStartedAt ??= Date.now();
+    const deadline = documentToolRecoveryStartedAt + (2 * graceMs);
+    const delayMs = Math.max(1, Math.min(graceMs, deadline - Date.now()));
+    const armedAtRevision = runtimeProgressRevision;
+    documentToolRecoveryTimer = setTimeout(() => {
+      documentToolRecoveryTimer = null;
+      void (async () => {
+        if (terminalTurnStatus || turnSignal.aborted) return;
+        let recoveryEnvelope: AppServerEvent | null = null;
+        let recoveredDocumentTurn: RecoveredTurn | null = null;
+        try {
+          const result = await runtime.client.request(
+            "thread/read",
+            { threadId, includeTurns: true },
+            `turn-document-reconcile:${chatRequest.assistantMessageId}`,
+            15_000,
+            (_result, envelope) => { recoveryEnvelope = envelope; },
+          );
+          recoveredDocumentTurn = recoveredTurn(result, chatRequest.userMessageId);
+        } catch {
+          // A single bounded interruption below still guarantees a terminal
+          // local state without retrying any document effect.
+        }
+        if (terminalTurnStatus) return;
+        if (recoveredDocumentTurn && recoveredDocumentTurn.status !== "inProgress" && recoveryEnvelope) {
+          await projectRecoveredTurn(recoveredDocumentTurn, recoveryEnvelope, "document-tool-recovery");
+          finishTurn({ status: recoveredDocumentTurn.status, error: recoveredDocumentTurn.error });
+          return;
+        }
+        const hasFinalAnswer = recoveredDocumentTurn?.items.some((item) =>
+          item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string");
+        if (hasFinalAnswer && recoveredDocumentTurn && recoveryEnvelope) {
+          await projectRecoveredTurn(recoveredDocumentTurn, recoveryEnvelope, "document-tool-final-recovery");
+          await emit(
+            { type: "done" },
+            { envelope: recoveryEnvelope, key: `document-tool-final-recovery:done:${recoveredDocumentTurn.id}` },
+          );
+          finishTurn({ status: "completed", error: null });
+          return;
+        }
+        if (runtimeProgressRevision !== armedAtRevision && Date.now() < deadline) {
+          armDocumentToolRecovery();
+          return;
+        }
+        let interruptionConfirmed = false;
+        if (runtimeTurnId) {
+          try {
+            await runtime.client.request(
+              "turn/interrupt",
+              { threadId, turnId: runtimeTurnId },
+              `turn-document-interrupt:${chatRequest.assistantMessageId}`,
+              5_000,
+            );
+            interruptionConfirmed = true;
+          } catch {
+            interruptionConfirmed = false;
+          }
+        }
+        const message = interruptionConfirmed
+          ? "Los archivos terminaron de procesarse, pero el asistente no cerró la respuesta a tiempo. El turno se ha detenido sin repetir ninguna creación."
+          : "Los archivos terminaron de procesarse, pero no llegó una respuesta final ni se pudo confirmar la interrupción. El turno se ha cerrado sin repetir ninguna creación.";
+        await emit({ type: "error", message });
+        finishTurn({ status: "failed", error: message });
+      })().catch((error: unknown) => {
+        finishTurn({
+          status: "failed",
+          error: error instanceof Error ? productSafeRuntimeMessage(error.message) : "No se ha podido cerrar el turno documental.",
+        });
+      });
+    }, delayMs);
+    documentToolRecoveryTimer.unref?.();
+  };
   let stoppedEmitted = false;
   let errorEmitted = false;
   let turnTimedOut = false;
@@ -984,6 +1104,7 @@ export async function runWorkerCodexTurn(
     chatRequest.assistantMessageId,
     {
       onNotification: async (notification: ServerNotification, envelope: AppServerEvent) => {
+        runtimeProgressRevision += 1;
         terminalWatchdog?.resume();
         terminalWatchdog?.touch();
         const { method, params } = notification;
@@ -1128,9 +1249,13 @@ export async function runWorkerCodexTurn(
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
             }
+            // A document-producing turn may echo private server paths. Its
+            // completed final message is emitted below after whole-string
+            // sanitization, avoiding leaks split across streaming chunks.
+            if (localDocumentToolInvoked) return;
             telemetry.delta();
             await emit(
-              { type: "delta", value: delta },
+              { type: "delta", value: privateWorkspaceSafeText(delta, [projectWorkspace, runtime.handle.roots.workspace]) },
               { envelope, key: `delta:${notificationItemId(params) ?? "agent"}` },
             );
           }
@@ -1173,6 +1298,8 @@ export async function runWorkerCodexTurn(
                 chatRequest.assistantMessageId,
                 envelope,
                 emit,
+                projectedDocumentArtifactIds,
+                projectingDocumentArtifactIds,
               );
             }
           }
@@ -1191,7 +1318,20 @@ export async function runWorkerCodexTurn(
           }
           if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
               params.item.type === "agentMessage" && params.item.phase === "final_answer") {
+            if (localDocumentToolInvoked && typeof params.item.text === "string") {
+              await emit(
+                {
+                  type: "content",
+                  value: privateWorkspaceSafeText(params.item.text, [projectWorkspace, runtime.handle.roots.workspace]),
+                },
+                { envelope, key: `final-answer:content:${String(params.item.id ?? "agent")}` },
+              );
+            }
             reconcileCompletedFinalAnswer(envelope);
+          }
+          if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
+              params.item.type === "dynamicToolCall" && params.item.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
+            armDocumentToolRecovery();
           }
           return;
         }
@@ -1297,6 +1437,7 @@ export async function runWorkerCodexTurn(
         }
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
+        runtimeProgressRevision += 1;
         terminalWatchdog?.resume();
         terminalWatchdog?.touch();
         const dynamicToolParams = request.method === "item/tool/call" && isRecord(request.params)
@@ -1340,6 +1481,7 @@ export async function runWorkerCodexTurn(
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
+            localDocumentToolInvoked = true;
             observedToolNames.add(`${AIBRAIN_DOCUMENT_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
             const result = await handleLocalDocumentDynamicToolCall(request.params as never, {
               installationId,
@@ -1349,14 +1491,23 @@ export async function runWorkerCodexTurn(
               receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
               runtimeThreadId: threadId,
               runtimeTurnId,
+              sourceTurnId: chatRequest.assistantMessageId,
               permissions,
             });
-            if (result.artifact) {
-              await emit(
-                { type: "artifact", item: result.artifact },
-                { envelope, key: `artifact:local-document:${result.artifact.id}` },
-              );
+            for (const artifact of result.artifacts) {
+              if (projectedDocumentArtifactIds.has(artifact.id) || projectingDocumentArtifactIds.has(artifact.id)) continue;
+              projectingDocumentArtifactIds.add(artifact.id);
+              try {
+                await emit(
+                  { type: "artifact", item: artifact },
+                  { envelope, key: `artifact:local-document:${artifact.id}` },
+                );
+                projectedDocumentArtifactIds.add(artifact.id);
+              } finally {
+                projectingDocumentArtifactIds.delete(artifact.id);
+              }
             }
+            armDocumentToolRecovery();
             return result.response as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE) {
@@ -1777,6 +1928,7 @@ export async function runWorkerCodexTurn(
     await scheduleCompletedConversationMemory();
   } finally {
     if (finalAnswerRecoveryTimer) clearTimeout(finalAnswerRecoveryTimer);
+    if (documentToolRecoveryTimer) clearTimeout(documentToolRecoveryTimer);
     clearTimeout(turnTimeoutTimer);
     stopTerminalWatchdog();
     turnSignal.removeEventListener("abort", interrupt);
