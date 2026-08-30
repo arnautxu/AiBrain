@@ -25,6 +25,8 @@ export type ActivityItem = {
   detail?: string;
   output?: string;
   files?: ActivityFileChange[];
+  /** Monotonic App Server transport sequence for cross-kind timeline ordering. */
+  sequence?: number;
   status: ActivityStatus;
 };
 
@@ -57,6 +59,8 @@ export type ToolResult = {
   output: string | null;
   sourceIds: string[];
   createdAt: string;
+  /** Monotonic App Server transport sequence for cross-kind timeline ordering. */
+  sequence?: number;
 };
 
 export type PlanStep = {
@@ -158,6 +162,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  /** Server-observed elapsed time from request admission to terminal event. */
+  durationMs?: number;
   status: "complete" | "streaming" | "error" | "stopped";
   activity: ActivityItem[];
   plan: PlanStep[];
@@ -231,9 +237,33 @@ export type ChatStreamEvent =
   | { type: "artifact"; item: GeneratedArtifact }
   | { type: "source"; item: TurnSource }
   | { type: "toolResult"; item: ToolResult }
-  | { type: "done" }
-  | { type: "stopped" }
-  | { type: "error"; message: string };
+  | { type: "done"; durationMs?: number }
+  | { type: "stopped"; durationMs?: number }
+  | { type: "error"; message: string; durationMs?: number };
+
+type ChatStreamProjectionMetadata = {
+  sequence?: number;
+  terminalDurationMs?: number;
+};
+
+/** Adds public ordering and duration metadata before live and durable projection. */
+export function projectChatStreamEvent(
+  event: ChatStreamEvent,
+  metadata: ChatStreamProjectionMetadata,
+): ChatStreamEvent {
+  const sequence = metadata.sequence;
+  if (event.type === "activity" && sequence !== undefined) {
+    return { ...event, item: { ...event.item, sequence: event.item.sequence ?? sequence } };
+  }
+  if (event.type === "toolResult" && sequence !== undefined) {
+    return { ...event, item: { ...event.item, sequence: event.item.sequence ?? sequence } };
+  }
+  if ((event.type === "done" || event.type === "stopped" || event.type === "error") &&
+      metadata.terminalDurationMs !== undefined) {
+    return { ...event, durationMs: event.durationMs ?? metadata.terminalDurationMs };
+  }
+  return event;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object");
@@ -298,6 +328,8 @@ export function isToolResult(value: unknown): value is ToolResult {
     Array.isArray(value.sourceIds) && value.sourceIds.length <= 100 &&
     value.sourceIds.every((id) => typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(id)) &&
     new Set(value.sourceIds).size === value.sourceIds.length &&
+    (!("sequence" in value) || value.sequence === undefined ||
+      (Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0)) &&
     isIsoDate(value.createdAt);
 }
 
@@ -434,6 +466,8 @@ export function isActivityItem(value: unknown): value is ActivityItem {
     typeof value.label === "string" &&
     hasOptionalString(value, "detail") &&
     hasOptionalString(value, "output") &&
+    (!("sequence" in value) || value.sequence === undefined ||
+      (Number.isSafeInteger(value.sequence) && Number(value.sequence) >= 0)) &&
     validFiles &&
     (value.status === "pending" ||
       value.status === "running" ||
@@ -533,12 +567,14 @@ export function isTurnControlRequest(value: unknown): value is TurnControlReques
 export function isChatStreamEvent(value: unknown): value is ChatStreamEvent {
   if (!isRecord(value) || typeof value.type !== "string") return false;
 
-  if (value.type === "done" || value.type === "stopped") return true;
+  const validDuration = !("durationMs" in value) || value.durationMs === undefined ||
+    (Number.isSafeInteger(value.durationMs) && Number(value.durationMs) >= 0);
+  if (value.type === "done" || value.type === "stopped") return validDuration;
   if (value.type === "snapshot") return isChatMessage(value.message);
   if (value.type === "delta" || value.type === "diff" || value.type === "content") {
     return typeof value.value === "string";
   }
-  if (value.type === "error") return typeof value.message === "string";
+  if (value.type === "error") return typeof value.message === "string" && validDuration;
   if (value.type === "artifact") return isGeneratedArtifact(value.item);
   if (value.type === "source") return isTurnSource(value.item);
   if (value.type === "toolResult") return isToolResult(value.item);
@@ -561,6 +597,9 @@ export function isChatMessage(message: unknown): message is ChatMessage {
   if (message.role !== "user" && message.role !== "assistant") return false;
   if (typeof message.content !== "string") return false;
   if (typeof message.createdAt !== "string") return false;
+  if (message.durationMs !== undefined &&
+      (typeof message.durationMs !== "number" ||
+        !Number.isSafeInteger(message.durationMs) || message.durationMs < 0)) return false;
   if (
     message.status !== "complete" &&
     message.status !== "streaming" &&
@@ -589,7 +628,12 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
     const index = message.activity.findIndex((item) => item.id === event.item.id);
     if (index === -1) return { ...message, activity: [...message.activity, event.item] };
     const activity = [...message.activity];
-    activity[index] = event.item;
+    activity[index] = {
+      ...event.item,
+      ...(activity[index]?.sequence !== undefined || event.item.sequence !== undefined
+        ? { sequence: activity[index]?.sequence ?? event.item.sequence }
+        : {}),
+    };
     return { ...message, activity };
   }
   if (event.type === "plan") return { ...message, plan: event.steps };
@@ -621,13 +665,30 @@ export function applyChatStreamEvent(message: ChatMessage, event: ChatStreamEven
     const index = toolResults.findIndex((result) => result.id === event.item.id);
     if (index === -1) return { ...message, toolResults: [...toolResults, event.item] };
     const next = [...toolResults];
-    next[index] = event.item;
+    next[index] = {
+      ...event.item,
+      ...(next[index]?.sequence !== undefined || event.item.sequence !== undefined
+        ? { sequence: next[index]?.sequence ?? event.item.sequence }
+        : {}),
+    };
     return { ...message, toolResults: next };
   }
-  if (event.type === "done") return { ...message, status: "complete" };
-  if (event.type === "stopped") return { ...message, status: "stopped" };
+  if (event.type === "done") {
+    const durationMs = event.durationMs ?? message.durationMs;
+    return { ...message, status: "complete", ...(durationMs !== undefined ? { durationMs } : {}) };
+  }
+  if (event.type === "stopped") {
+    const durationMs = event.durationMs ?? message.durationMs;
+    return { ...message, status: "stopped", ...(durationMs !== undefined ? { durationMs } : {}) };
+  }
   if (event.type === "error") {
-    return { ...message, status: "error", content: message.content || event.message };
+    const durationMs = event.durationMs ?? message.durationMs;
+    return {
+      ...message,
+      status: "error",
+      content: message.content || event.message,
+      ...(durationMs !== undefined ? { durationMs } : {}),
+    };
   }
   return message;
 }

@@ -4,6 +4,7 @@ import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import {
   applyChatStreamEvent,
+  projectChatStreamEvent,
   type ChatMessage,
   type ChatStreamEvent,
 } from "@/lib/chat-contract";
@@ -665,30 +666,34 @@ export async function POST(request: Request) {
       }, CHAT_STREAM_KEEPALIVE_MS);
       keepalive.unref?.();
       const emit = async (event: ChatStreamEvent, projection?: WorkerTurnProjection) => {
+        const projectedEvent = projectChatStreamEvent(event, {
+          sequence: projection?.envelope.sequence,
+          terminalDurationMs: Math.max(0, Date.now() - requestStartedAt),
+        });
         if (persistent && turnProjectionStore && projectionWriter) {
           if (projection) {
             // Deliver the live App Server delta immediately. The durable
             // transport journal already owns replay; compact the refresh
             // projection in short atomic batches instead of blocking every
             // token on a full filesystem write.
-            assistantMessage = applyChatStreamEvent(assistantMessage, event);
+            assistantMessage = applyChatStreamEvent(assistantMessage, projectedEvent);
             projectionWriter.enqueue({
               envelope: projection.envelope,
               projectionKey: projection.key,
-              event,
+              event: projectedEvent,
             });
           } else {
             await projectionWriter.flush();
             assistantMessage = (await turnProjectionStore.applyLocalEvent(
               body.threadId,
               body.assistantMessageId,
-              event,
+              projectedEvent,
             )).message;
           }
         } else {
-          assistantMessage = applyChatStreamEvent(assistantMessage, event);
+          assistantMessage = applyChatStreamEvent(assistantMessage, projectedEvent);
         }
-        if (!clientDetached) controller.enqueue(line(event));
+        if (!clientDetached) controller.enqueue(line(projectedEvent));
       };
       const emitCodex = async (event: WorkerCodexTurnEvent, projection?: WorkerTurnProjection) => {
         if (event.type === "runtimeThread") {

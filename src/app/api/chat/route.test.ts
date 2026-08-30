@@ -211,4 +211,38 @@ describe("chat turn transport lifecycle", () => {
       vi.useRealTimers();
     }
   });
+
+  it("adds transport order and a measured duration before streaming terminal events", async () => {
+    mocked.runWorkerCodexTurn.mockImplementation(async (...args: unknown[]) => {
+      const emit = args[10] as (
+        event: Record<string, unknown>,
+        projection?: Record<string, unknown>,
+      ) => Promise<void>;
+      await emit({
+        type: "activity",
+        item: { id: "summary-ordered", kind: "reasoning", label: "Resumen público", status: "complete" },
+      }, {
+        envelope: {
+          eventId: "event-42",
+          sequence: 42,
+          occurredAt: "2026-08-30T10:00:00.000Z",
+          message: { kind: "rpc-notification", rpc: { method: "item/completed", params: {} } },
+        },
+        key: "activity:summary-ordered",
+      });
+      await emit({ type: "done" });
+    });
+
+    const response = await POST(chatRequest(new AbortController().signal));
+    const events = (await response.text()).trim().split("\n").map((line) => JSON.parse(line));
+
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({ id: "summary-ordered", sequence: 42 }),
+    }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "done",
+      durationMs: expect.any(Number),
+    }));
+  });
 });
