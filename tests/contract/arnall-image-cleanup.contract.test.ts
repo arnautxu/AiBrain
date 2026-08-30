@@ -67,6 +67,10 @@ docker() {
       printf '%s' "$references"
       return 0
     fi
+    if [[ "$present" == 1 ]]; then
+      return 0
+    fi
+    return 1
   fi
   if [[ "$1 $2" == "ps --all" ]]; then
     printf '%s' "$containers"
@@ -97,8 +101,13 @@ cleanup_status=$?
 set -e
 printf 'cleanup-status=%s\\n' "$cleanup_status"
 `, { mode: 0o700 });
-  return execFileSync("bash", ["-c", "bash \"$1\" 2>&1", "bash", script], { encoding: "utf8" })
-    + await readFile(log, "utf8").catch(() => "");
+  try {
+    return execFileSync("bash", ["-c", "bash \"$1\" 2>&1", "bash", script], { encoding: "utf8" })
+      + await readFile(log, "utf8").catch(() => "");
+  } catch (error) {
+    const output = error instanceof Error && "stdout" in error ? String(error.stdout) : "";
+    throw new Error(`cleanup fixture failed:\n${output}`, { cause: error });
+  }
 }
 
 afterEach(async () => {
@@ -163,6 +172,16 @@ describe("Arnall single-release image cleanup contract", () => {
 
     expect(output.match(/container-rm/g) ?? []).toHaveLength(1);
     expect(output.match(/image-rm/g) ?? []).toHaveLength(1);
+  });
+
+  it("treats digest aliases removed with an earlier reference as already clean", async () => {
+    const alias = `ghcr.io/arnautxu/aibrain@sha256:${"f".repeat(64)}`;
+    const output = await runCleanup({ references: `${oldImage}\n${alias}\n` });
+
+    expect(output).toContain(`image-rm ${oldImage}`);
+    expect(output).not.toContain(`image-rm ${alias}`);
+    expect(output).toContain("cleanup-status=0");
+    expect(output).not.toContain("reason=image-remove-failed");
   });
 
   it("does not run cleanup until the promotion and public live/readiness checks have passed", async () => {
