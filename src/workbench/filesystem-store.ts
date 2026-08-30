@@ -1029,6 +1029,7 @@ export class FileWorkbenchStore {
     threadId: string,
     userMessage: ChatMessage,
     assistantMessage: ChatMessage,
+    options: { retryExistingFailure?: boolean } = {},
   ) {
     assertFilesystemWorkbenchId(threadId);
     return this.mutate(userId, (state) => {
@@ -1053,6 +1054,20 @@ export class FileWorkbenchStore {
           existingUser.content === userMessage.content &&
           JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments)
         ) {
+          if (
+            options.retryExistingFailure === true &&
+            (existingAssistant.status === "error" || existingAssistant.status === "stopped")
+          ) {
+            if (thread.messages.some((message) =>
+              message.id !== existingAssistant.id &&
+              message.role === "assistant" &&
+              message.status === "streaming")) {
+              throw new WorkbenchConflictError("Aquest fil ja té un torn actiu.");
+            }
+            thread.messages[existingAssistantIndex] = assistantMessage;
+            thread.updatedAt = new Date().toISOString();
+            return { outcome: "existing" as const, assistantMessage };
+          }
           return { outcome: "existing" as const, assistantMessage: existingAssistant };
         }
         throw new WorkbenchConflictError("Els identificadors del torn ja existeixen amb un altre contingut.");

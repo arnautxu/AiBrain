@@ -100,7 +100,13 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   };
   const userMessage = message(userMessageId, "user", input.task.prompt, "complete", startedAt);
   let assistantMessage = message(assistantMessageId, "assistant", "", "streaming", new Date(Date.now() + 1).toISOString());
-  const begun = await beginThreadTurn(input.session, threadId, userMessage, assistantMessage);
+  const begun = await beginThreadTurn(
+    input.session,
+    threadId,
+    userMessage,
+    assistantMessage,
+    { retryExistingFailure: true },
+  );
   assistantMessage = begun.assistantMessage;
   if (begun.outcome === "existing" && assistantMessage.status !== "streaming") {
     if (assistantMessage.status !== "complete") throw new Error(assistantMessage.content || "La ejecución anterior falló.");

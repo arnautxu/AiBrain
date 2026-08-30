@@ -304,6 +304,7 @@ export class PrivateWorkerGateway {
   private state: WorkerControllerHealth["state"] = "stopped";
   private lastError: string | null = null;
   private messageChain = Promise.resolve();
+  private readonly inFlightRequests = new Set<string>();
   private readonly pendingResponseConfirmations = new Map<string, string>();
 
   constructor(options: PrivateWorkerGatewayOptions) {
@@ -581,6 +582,16 @@ export class PrivateWorkerGateway {
         else await this.completeUnscopedResponse(socket, request.clientRequestId);
         return;
       }
+      if (this.inFlightRequests.has(request.clientRequestId)) {
+        // The identical request was dispatched by this live App Server
+        // process. ACK a reconnecting client without dispatching it twice;
+        // the original output will arrive through the durable event journal.
+        this.sendAccepted(socket, request.clientRequestId);
+        return;
+      }
+      // An accepted record left by a previous App Server process is genuinely
+      // uncertain: ACKing it would leave the caller waiting forever, while
+      // redispatching it could duplicate side effects.
       this.send(socket, {
         protocolVersion: APP_SERVER_TRANSPORT_PROTOCOL_VERSION,
         type: "rejected",
@@ -603,7 +614,13 @@ export class PrivateWorkerGateway {
     const responseScopeDigest = request.kind === "rpc-response"
       ? await this.responseScopeDigest(request, false)
       : undefined;
-    await this.dispatchAppServerInput(request);
+    if (request.kind !== "rpc-response") this.inFlightRequests.add(request.clientRequestId);
+    try {
+      await this.dispatchAppServerInput(request);
+    } catch (error) {
+      this.inFlightRequests.delete(request.clientRequestId);
+      throw error;
+    }
     if (request.kind === "rpc-response") {
       if (responseScopeDigest) {
         this.pendingResponseConfirmations.set(request.clientRequestId, responseScopeDigest);
@@ -614,6 +631,7 @@ export class PrivateWorkerGateway {
     }
     if (request.kind === "rpc-notification") {
       await this.requests.complete(request.clientRequestId, { id: request.clientRequestId, result: null });
+      this.inFlightRequests.delete(request.clientRequestId);
     }
     this.sendAccepted(socket, request.clientRequestId);
   }
@@ -668,6 +686,7 @@ export class PrivateWorkerGateway {
     const value: unknown = JSON.parse(line);
     if (isRecord(value) && typeof value.id === "string" && ("result" in value || "error" in value)) {
       await this.requests.complete(value.id, value);
+      this.inFlightRequests.delete(value.id);
     }
     const event = await this.recordAppServerOutput(value);
     const scope = appServerScope(event.message);
