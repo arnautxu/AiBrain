@@ -272,6 +272,74 @@ describe("private per-user worker gateway", () => {
     }
   });
 
+  it("acknowledges an identical in-flight retry without dispatching it twice", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const request = JSON.parse(line);',
+      '  if (request.id !== undefined) setTimeout(() => write({ id: request.id, result: { acceptedMethod: request.method } }), 200);',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const worker = gateway();
+    await worker.start();
+    const firstClient = transport(worker);
+    const retryingClient = transport(worker);
+    try {
+      await firstClient.connect();
+      await firstClient.send(initializeRequest());
+      await firstClient.close();
+
+      await retryingClient.connect();
+      await retryingClient.send(initializeRequest());
+      const received = await nextEvent(retryingClient);
+      expect(received.value).toMatchObject({
+        sequence: 1,
+        message: {
+          kind: "rpc-response",
+          rpc: { id: "initialize-request-1", result: { acceptedMethod: "initialize" } },
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      const durableEvents = (await readFile(
+        path.join(context.transportAudit, "gateway-events.jsonl"),
+        "utf8",
+      )).trim().split("\n");
+      expect(durableEvents).toHaveLength(1);
+    } finally {
+      await firstClient.close();
+      await retryingClient.close();
+      await worker.stop();
+    }
+  });
+
+  it("rejects an accepted request left uncertain by an App Server restart", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'lines.on("line", () => {});',
+    ].join("\n"), { mode: 0o600 });
+    const firstWorker = gateway();
+    await firstWorker.start();
+    const firstClient = transport(firstWorker);
+    await firstClient.connect();
+    await firstClient.send(initializeRequest());
+    await firstClient.close();
+    await firstWorker.stop();
+
+    const restartedWorker = gateway();
+    await restartedWorker.start();
+    const restartedClient = transport(restartedWorker);
+    try {
+      await restartedClient.connect();
+      await expect(restartedClient.send(initializeRequest())).rejects.toThrow(/uncertain/u);
+    } finally {
+      await restartedClient.close();
+      await restartedWorker.stop();
+    }
+  });
+
   it("bounds completed request history while retaining uncertain outcomes", async () => {
     const worker = gateway({ maxRetainedCompletedRequests: 2 });
     await worker.start();

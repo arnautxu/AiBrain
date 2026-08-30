@@ -331,6 +331,7 @@ export async function beginThreadTurn(
   threadId: string,
   userMessage: ChatMessage,
   assistantMessage: ChatMessage,
+  options: { retryExistingFailure?: boolean } = {},
 ) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
@@ -341,6 +342,7 @@ export async function beginThreadTurn(
       threadId,
       userMessage,
       assistantMessage,
+      options,
     );
   }
   assertWorkbenchId(threadId);

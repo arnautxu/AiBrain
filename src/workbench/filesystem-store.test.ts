@@ -132,6 +132,35 @@ describe("FileWorkbenchStore", () => {
     )).rejects.toBeInstanceOf(WorkbenchConflictError);
   });
 
+  it("reopens the same visible turn after a failed scheduled attempt", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Scheduled retry project");
+    const thread = await store.createThread(USER_A, project.id, "Scheduled retry thread");
+    const userMessage = message("user", "complete");
+    const assistantMessage = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage);
+    await store.finishThreadTurn(
+      USER_A,
+      thread.id,
+      { ...assistantMessage, content: "Transient gateway failure", status: "error" },
+      null,
+    );
+
+    const retriedAssistant = { ...assistantMessage, content: "", status: "streaming" as const };
+    await expect(store.beginThreadTurn(
+      USER_A,
+      thread.id,
+      userMessage,
+      retriedAssistant,
+      { retryExistingFailure: true },
+    )).resolves.toMatchObject({ outcome: "existing", assistantMessage: { status: "streaming", content: "" } });
+
+    const persisted = await store.getThread(USER_A, thread.id);
+    expect(persisted.messages.filter((candidate) => candidate.id === userMessage.id)).toHaveLength(1);
+    expect(persisted.messages.filter((candidate) => candidate.id === assistantMessage.id)).toHaveLength(1);
+    expect(persisted.messages.at(-1)).toMatchObject({ id: assistantMessage.id, status: "streaming", content: "" });
+  });
+
   it("reuses a deterministic thread id after a worker recovery boundary", async () => {
     const { store } = await fixture();
     const project = await store.createProject(USER_A, "Recovery project");
