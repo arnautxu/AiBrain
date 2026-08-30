@@ -414,9 +414,6 @@ describe("worker Codex turn", () => {
         path.join(workspace, "projects", projectId),
         workspace,
         path.join(userRoot, "artifacts"),
-        "/company-context",
-        "/source-knowledge",
-        path.join(staging, "threads"),
       ],
       model: "gpt-5.6-terra",
       effort: "low",
@@ -460,6 +457,11 @@ describe("worker Codex turn", () => {
       }),
       expect.objectContaining({
         type: "namespace",
+        name: "aibrain_documents",
+        tools: expect.arrayContaining([expect.objectContaining({ name: "create" })]),
+      }),
+      expect.objectContaining({
+        type: "namespace",
         name: "aibrain_memory",
         tools: expect.arrayContaining([expect.objectContaining({ name: "propose" })]),
       }),
@@ -470,6 +472,8 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("Approved preference");
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
+    expect(instructions).toContain("usa por defecto `aibrain_documents.create`");
+    expect(instructions).toContain("No uses Google Drive");
     expect(instructions).toContain("BEGIN AIBRAIN UI PROJECT CONTEXT JSON");
     expect(instructions).toContain(JSON.stringify({
       currentProject: { id: projectId, name: "Testing 1" },

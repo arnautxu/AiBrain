@@ -215,6 +215,8 @@ requireMatch(worker, /--ro-bind "\$uploaded_documents_root" "\$uploaded_document
 forbidMatch(worker, /--bind "\$uploaded_documents_root" "\$uploaded_documents_root"/u, "worker sandbox exposes uploaded documents as writable");
 forbidMatch(worker, /--bind "\$publish_root"/u, "worker sandbox exposes publish-rw as a real writable bind");
 forbidMatch(workerCodexTurn, /runtimeWorkspaceRoots:\s*\[[^\]]*roots\.staging/gu, "Codex turn exposes the employee staging root as a workspace");
+forbidMatch(workerCodexTurn, /runtimeWorkspaceRoots[\s\S]{0,700}(?:sourceReadRoot|companyContextRoot|uploadedDocuments)/u, "Codex turn promotes a read-only mount to an inner App Server workspace");
+requireMatch(workerCodexTurn, /aibrain_documents\.create[\s\S]{0,600}No uses Google Drive/u, "Codex turn does not default document generation to the private local workspace");
 requireMatch(turnAttachments, /No filesystem staging path is exposed/u, "turn document inputs do not declare the server-only staging boundary");
 forbidMatch(turnAttachments, /result\.push\(\{\s*type:\s*"(?:mention|localImage|localAudio)"/u, "turn document inputs expose server-local staging paths");
 requireMatch(browserSandbox, /--tmpfs "\$data_root"[\s\S]*--bind "\$browser_root" "\$browser_root"/u, "browser sandbox does not hide product data before exposing one employee browser root");

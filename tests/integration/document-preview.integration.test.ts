@@ -10,6 +10,7 @@ import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { ServerTurnDocumentInputResolver } from "@/documents/turn-attachments";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { ResourceLockManager } from "@/storage/resource-lock";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 
 const run = promisify(execFile);
 function executable(environmentName: string, candidates: readonly string[]) {
@@ -97,6 +98,57 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
   ]);
   expect(JSON.stringify(turnInputs)).not.toContain(stagingRoot);
 }, 90_000);
+
+it.skipIf(!runFullMatrix)("previews all four AiBrain-generated local formats with real content", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-generated-document-matrix-"));
+  roots.push(root);
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
+  const stagingRoot = path.join(root, "staging");
+  const previewRoot = path.join(root, "previews");
+  const staging = new FileDocumentStagingStore(stagingRoot, locks);
+  const previews = new DocumentPreviewService({
+    stagingRoot,
+    previewRoot,
+    lockManager: locks,
+    tools,
+    requireQpdf: Boolean(tools.qpdf),
+  });
+  const fixtures = await Promise.all((["pdf", "docx", "pptx", "xlsx"] as const).map(async (format, index) => ({
+    format,
+    uploadId: `22222222-2222-4222-8222-22222222223${index}`,
+    generated: await generateLocalDocument({
+      format,
+      title: `AiBrain ${format} evidence`,
+      content: format === "xlsx" ? "Name\tValue\nEvidence\t42" : "Evidence content survives preview conversion",
+      ...(format === "xlsx" ? { rows: [["Name", "Value"], ["Evidence", 42]] } : {}),
+    }),
+  })));
+
+  for (const fixture of fixtures) {
+    const staged = await staging.stage({
+      threadId: "11111111-1111-4111-8111-111111111111",
+      uploadId: fixture.uploadId,
+      data: fixture.generated.data,
+      validated: validateUploadedDocument({
+        fileName: `generated.${fixture.format}`,
+        declaredMimeType: fixture.generated.mimeType,
+        data: fixture.generated.data,
+      }),
+    });
+    const preview = await previews.create(staged);
+    expect(preview).toMatchObject({ kind: fixture.format, status: "ready" });
+    expect(preview.files).toEqual(["document.pdf", "page-1.png"]);
+    const pdf = await previews.readFile(staged.threadId, staged.uploadId, "document.pdf");
+    const png = await previews.readFile(staged.threadId, staged.uploadId, "page-1.png");
+    expect(pdf.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    const pdfPath = path.join(root, `${fixture.format}-preview.pdf`);
+    const textPath = path.join(root, `${fixture.format}-preview.txt`);
+    await writeFile(pdfPath, pdf, { mode: 0o600 });
+    await run(tools.pdftotext, [pdfPath, textPath], { timeout: 30_000 });
+    expect(await readFile(textPath, "utf8")).toContain("Evidence");
+  }
+}, 180_000);
 
 it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with the real toolchain", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-real-preview-matrix-"));

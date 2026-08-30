@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import type { DocumentArtifact } from "@/lib/chat-contract";
+import { validateUploadedDocument } from "@/documents/upload-validation";
 import { readRegularFileWithin } from "@/security/safe-file";
 
 const MAXIMUM_DOCUMENT_BYTES = 50 * 1024 * 1024;
@@ -17,10 +18,17 @@ function documentArtifactId(turnId: string, relativePath: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+const GENERATED_FORMATS = {
+  ".pdf": { kind: "pdf", mimeType: "application/pdf" },
+  ".docx": { kind: "docx", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" },
+  ".pptx": { kind: "pptx", mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+  ".xlsx": { kind: "xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+} as const;
+
 function pathsInText(value: unknown) {
   if (typeof value !== "string") return [];
   const paths: string[] = [];
-  const expression = /(?:"([^"\n\r]+\.pdf)"|'([^'\n\r]+\.pdf)'|((?:\/|\.{1,2}\/)[^\s"'<>|]+\.pdf))/giu;
+  const expression = /(?:"([^"\n\r]+\.(?:pdf|docx|pptx|xlsx))"|'([^'\n\r]+\.(?:pdf|docx|pptx|xlsx))'|((?:\/|\.{1,2}\/)[^\s"'<>|]+\.(?:pdf|docx|pptx|xlsx)))/giu;
   for (const match of value.matchAll(expression)) {
     const candidate = match[1] ?? match[2] ?? match[3];
     if (candidate) paths.push(candidate);
@@ -28,19 +36,24 @@ function pathsInText(value: unknown) {
   return paths;
 }
 
-function runtimePdfPaths(item: Record<string, unknown>) {
+function runtimeDocumentPaths(item: Record<string, unknown>) {
   const candidates = [
     ...pathsInText(item.command),
     ...pathsInText(item.aggregatedOutput),
     ...pathsInText(item.text),
   ];
+  if (Array.isArray(item.contentItems)) {
+    for (const contentItem of item.contentItems) {
+      if (isRecord(contentItem)) candidates.push(...pathsInText(contentItem.text));
+    }
+  }
   if (Array.isArray(item.changes)) {
     for (const change of item.changes) {
       if (!isRecord(change)) continue;
       const candidate = typeof change.path === "string"
         ? change.path
         : typeof change.filePath === "string" ? change.filePath : null;
-      if (candidate?.toLocaleLowerCase().endsWith(".pdf")) candidates.push(candidate);
+      if (candidate && path.extname(candidate).toLocaleLowerCase() in GENERATED_FORMATS) candidates.push(candidate);
     }
   }
   return [...new Set(candidates)];
@@ -64,7 +77,7 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
   const pages = pageCount(value);
   const artifacts: DocumentArtifact[] = [];
 
-  for (const candidate of runtimePdfPaths(value)) {
+  for (const candidate of runtimeDocumentPaths(value)) {
     const relativePath = path.isAbsolute(candidate)
       ? path.relative(projectWorkspace, candidate)
       : path.normalize(candidate);
@@ -73,20 +86,26 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
 
     try {
       const contents = await readRegularFileWithin(projectWorkspace, relativePath, MAXIMUM_DOCUMENT_BYTES);
-      if (contents.length < 5 || contents.subarray(0, 5).toString("ascii") !== "%PDF-") continue;
+      const format = GENERATED_FORMATS[path.extname(relativePath).toLocaleLowerCase() as keyof typeof GENERATED_FORMATS];
+      if (!format) continue;
+      validateUploadedDocument({
+        fileName: path.basename(relativePath),
+        declaredMimeType: format.mimeType,
+        data: contents,
+      });
       const encodedPath = encodeURIComponent(relativePath.split(path.sep).join("/"));
-      const fileRoute = `/api/projects/${projectId}/files?path=${encodedPath}&raw=1`;
+      const fileRoute = `/api/projects/${projectId}/files?path=${encodedPath}`;
       artifacts.push({
         id: documentArtifactId(turnId, relativePath),
         type: "document",
         name: path.basename(relativePath),
-        url: `${fileRoute}&download=1`,
-        kind: "pdf",
-        mimeType: "application/pdf",
+        url: `${fileRoute}&raw=1&download=1`,
+        kind: format.kind,
+        mimeType: format.mimeType,
         size: contents.length,
         status: "ready",
-        pages,
-        previewUrl: fileRoute,
+        pages: format.kind === "pdf" ? pages : null,
+        previewUrl: format.kind === "pdf" ? `${fileRoute}&raw=1` : `${fileRoute}&representation=1`,
         publicationStatus: null,
         publicationError: null,
         targetLabel: null,

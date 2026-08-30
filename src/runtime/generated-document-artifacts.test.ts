@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 
 const roots: string[] = [];
 
@@ -44,5 +45,34 @@ describe("generated document artifact projection", () => {
     await expect(generatedDocumentArtifactsFromRuntimeItem({
       command: `pdfinfo '${outsidePdf}' './fake.pdf'`,
     }, workspace, "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012")).resolves.toEqual([]);
+  });
+
+  it("projects verified DOCX, PPTX and XLSX results with private converted previews", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-office-artifacts-"));
+    roots.push(workspace);
+    await mkdir(path.join(workspace, "documents"));
+    for (const format of ["docx", "pptx", "xlsx"] as const) {
+      const generated = await generateLocalDocument({
+        format,
+        title: `Documento ${format}`,
+        content: format === "xlsx" ? "Nombre\tValor\nPrueba\t1" : "Contenido real",
+      });
+      await writeFile(path.join(workspace, "documents", `resultado.${format}`), generated.data);
+    }
+
+    const artifacts = await generatedDocumentArtifactsFromRuntimeItem({
+      contentItems: [{
+        type: "inputText",
+        text: JSON.stringify({ paths: [
+          "documents/resultado.docx",
+          "documents/resultado.pptx",
+          "documents/resultado.xlsx",
+        ] }),
+      }],
+    }, workspace, "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012");
+
+    expect(artifacts.map((artifact) => artifact.kind).sort()).toEqual(["docx", "pptx", "xlsx"]);
+    expect(artifacts.every((artifact) => artifact.previewUrl?.includes("representation=1"))).toBe(true);
+    expect(artifacts.every((artifact) => artifact.url.includes("raw=1&download=1"))).toBe(true);
   });
 });
