@@ -138,13 +138,22 @@ export class FileCatalogStore {
     });
   }
 
-  /** Adds immutable GraphikAI connector baselines with a default installation read grant. */
-  async ensureManagedResources(resources: readonly CatalogResource[]) {
-    if (resources.length === 0) return this.read();
+  /** Reconciles immutable GraphikAI connector baselines with installation config. */
+  async ensureManagedResources(resources: readonly CatalogResource[], managedResourceIds: readonly string[] = resources.map(({ id }) => id)) {
     await this.prepare();
     return this.locks.withLock(`catalog:${this.installationId}`, async () => {
       const state = await this.readUnlocked();
       let changed = false;
+      const configuredIds = new Set(resources.map(({ id }) => id));
+      const reconciledIds = new Set(managedResourceIds);
+      const removedIds = new Set(state.resources
+        .filter((resource) => reconciledIds.has(resource.id) && resource.managedBy === "graphikai" && resource.kind !== "skill" && !configuredIds.has(resource.id))
+        .map(({ id }) => id));
+      if (removedIds.size > 0) {
+        state.resources = state.resources.filter((resource) => !removedIds.has(resource.id));
+        state.rules = state.rules.filter((rule) => !removedIds.has(rule.resourceId));
+        changed = true;
+      }
       for (const candidate of resources) {
         if (!isCatalogResource(candidate) || candidate.managedBy !== "graphikai" || candidate.kind === "skill") {
           throw new Error(`Catalog baseline resource ${candidate.id} is invalid.`);

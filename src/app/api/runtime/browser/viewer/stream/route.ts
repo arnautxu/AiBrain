@@ -40,7 +40,7 @@ export async function GET(request: Request) {
       token,
     };
     // Authorize before committing the streaming response status and headers.
-    await browserViewerNavigationState(binding);
+    await browserViewerNavigationState({ ...binding, signal: request.signal });
     const controller = new AbortController();
     const abort = () => controller.abort();
     request.signal.addEventListener("abort", abort, { once: true });

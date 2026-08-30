@@ -30,6 +30,7 @@ export async function GET(request: Request) {
       authSessionId: auth.authSessionId,
       threadId,
       token,
+      signal: request.signal,
     });
     return new NextResponse(Buffer.from(frame.dataBase64, "base64"), {
       status: 200,

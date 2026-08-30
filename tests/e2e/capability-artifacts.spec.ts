@@ -76,7 +76,7 @@ test("document preview, publication state and isolated browser viewer consume ar
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page.getByText("Pendiente de confirmación segura")).toBeVisible();
   await expect(page.getByRole("img", { name: "Un diagrama sintético sin datos privados" })).toBeVisible();
-  const openBrowser = page.getByRole("button", { name: "Abrir", exact: true });
+  const openBrowser = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
   await expect(openBrowser).toBeVisible();
   await expect(page.locator(`iframe[src="/api/browser/sessions/${browserId}/viewer"]`)).toHaveCount(0);
   await expect(page.getByText("Control del agente")).toBeVisible();

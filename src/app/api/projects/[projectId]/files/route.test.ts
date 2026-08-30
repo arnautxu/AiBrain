@@ -37,7 +37,9 @@ vi.mock("@/documents/workspace-preview", () => ({
 }));
 
 import { GET } from "@/app/api/projects/[projectId]/files/route";
+import { DocumentConversionBackpressureError } from "@/documents/conversion-gate";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
+import { StorageError } from "@/storage";
 
 function request(filePath: string, raw = false, download = false, representation = false) {
   return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}${download ? "&download=1" : ""}${representation ? "&representation=1" : ""}`);
@@ -204,6 +206,41 @@ describe("workspace file preview route", () => {
     mocks.readRegularFileWithin.mockResolvedValue(Buffer.from("fake office"));
     const fake = await GET(request("documents/fake.docx"), { params: Promise.resolve({ projectId }) });
     expect(fake.status).toBe(415);
+  });
+
+  it.each([
+    {
+      error: new StorageError("DOCUMENT_TOOL_TIMEOUT", "timeout"),
+      status: 504,
+      state: "failed",
+    },
+    {
+      error: new StorageError("DOCUMENT_OPERATION_ABORTED", "aborted"),
+      status: 408,
+      state: "cancelled",
+    },
+    {
+      error: new StorageError("DOCUMENT_TOOL_FAILED", "failed"),
+      status: 422,
+      state: "failed",
+    },
+    {
+      error: new DocumentConversionBackpressureError(1_500),
+      status: 503,
+      state: "retryable",
+    },
+  ])("returns a private terminal preview state for conversion error $status", async ({ error, status, state }) => {
+    mocks.readRegularFileWithin.mockResolvedValue(officeZip("word/document.xml"));
+    mocks.prepareWorkspaceDocumentPreview.mockRejectedValue(error);
+
+    const response = await GET(request("documents/brief.docx", false, false, true), {
+      params: Promise.resolve({ projectId }),
+    });
+
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await response.json()).toMatchObject({ state });
+    if (status === 503) expect(response.headers.get("Retry-After")).toBe("2");
   });
 
   it("downloads generated PDF, DOCX, PPTX and XLSX bytes and exposes authenticated previews", async () => {

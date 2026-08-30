@@ -303,7 +303,7 @@ export function TurnActivity({
         ? "Pensamiento interrumpido"
         : message.status === "error"
           ? "Trabajo interrumpido"
-          : "Trabajo completado";
+          : "Ha trabajado durante unos segundos";
 
   const activeActivity = [...visibleActivity].reverse().find((item) => item.status === "running" || item.status === "waiting");
   const visibleStepCount = visiblePlan.length + timeline.length;

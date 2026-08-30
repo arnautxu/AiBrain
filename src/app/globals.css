@@ -58,13 +58,13 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #151515;
-  --surface: #151515;
-  --surface-raised: #222222;
-  --surface-muted: #292929;
-  --surface-hover: #303030;
-  --surface-selected: #363636;
-  --sidebar: #151515;
+  --canvas: #0f0f0f;
+  --surface: #0f0f0f;
+  --surface-raised: #1f1f1f;
+  --surface-muted: #262626;
+  --surface-hover: #2d2d2d;
+  --surface-selected: #333333;
+  --sidebar: #171717;
   --header: var(--surface);
   --user-message: #2f2f2f;
   --user-message-text: #f2f2f2;
@@ -95,13 +95,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --canvas: #151515;
-    --surface: #151515;
-    --surface-raised: #222222;
-    --surface-muted: #292929;
-    --surface-hover: #303030;
-    --surface-selected: #353535;
-    --sidebar: #151515;
+    --canvas: #0f0f0f;
+    --surface: #0f0f0f;
+    --surface-raised: #1f1f1f;
+    --surface-muted: #262626;
+    --surface-hover: #2d2d2d;
+    --surface-selected: #333333;
+    --sidebar: #171717;
     --header: var(--surface);
     --user-message: #2f2f2f;
     --user-message-text: #f2f2f2;
@@ -524,14 +524,14 @@ button:disabled {
 }
 
 .chat-empty-composer-dock {
-  top: 56%;
+  top: 52%;
   bottom: auto;
   transform: translateY(-50%);
 }
 
 @media (max-width: 768px) {
   .chat-empty-composer-dock {
-    top: 52%;
+    top: 50%;
   }
 }
 
@@ -690,26 +690,24 @@ button:disabled {
 .composer-compact {
   display: grid;
   min-height: 48px;
-  grid-template-columns: minmax(5rem, 1fr) auto;
-  align-items: end;
+  grid-template-columns: auto minmax(5rem, 1fr) auto;
+  align-items: center;
   gap: 0.25rem;
   padding: 6px;
 }
 
 .composer-compact .composer-controls {
-  display: flex;
-  width: auto;
-  align-self: end;
-  gap: 0.125rem;
-  padding: 0;
+  display: contents;
 }
 
 .composer-compact .composer-controls-start {
   display: flex;
+  grid-column: 1;
+  grid-row: 1;
 }
 
 .composer-compact .composer-textarea {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 1;
   width: 100%;
   min-width: 0;
@@ -719,8 +717,8 @@ button:disabled {
   line-height: 24px;
 }
 
-.composer-compact .composer-controls {
-  grid-column: 2;
+.composer-compact .composer-controls-end {
+  grid-column: 3;
   grid-row: 1;
 }
 

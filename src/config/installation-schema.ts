@@ -36,9 +36,16 @@ export type GmailConnectorConfig = {
   enabled: boolean;
 };
 
+export type OutlookConnectorConfig = {
+  enabled: boolean;
+  /** Exact Microsoft Entra tenant; `common` and `consumers` are intentionally unsupported. */
+  tenantId: string;
+};
+
 export type InstallationConnectors = {
   codexManagedAppAction?: CodexManagedAppActionConfig;
   gmail?: GmailConnectorConfig;
+  outlook?: OutlookConnectorConfig;
 };
 
 /** Immutable GraphikAI baseline; workspace admins may not modify it through the catalog API. */
@@ -96,10 +103,11 @@ const PATH_KEYS = [
   "backupsRoot",
 ] as const;
 
-const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail"] as const;
+const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook"] as const;
 const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
 const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
 const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const MICROSOFT_TENANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const IDENTIFIER_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
@@ -421,11 +429,25 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       }
     }
   }
-  if (!codexManagedAppAction && !gmail) {
+  let outlook: OutlookConnectorConfig | undefined;
+  if (value.outlook !== undefined) {
+    if (!isRecord(value.outlook)) {
+      issues.push({ path: "$.connectors.outlook", message: "debe ser un objeto" });
+    } else {
+      addUnknownKeyIssues(value.outlook, ["enabled", "tenantId"], "$.connectors.outlook", issues);
+      if (typeof value.outlook.enabled !== "boolean") issues.push({ path: "$.connectors.outlook.enabled", message: "debe ser boolean" });
+      if (typeof value.outlook.tenantId !== "string" || !MICROSOFT_TENANT_ID.test(value.outlook.tenantId)) {
+        issues.push({ path: "$.connectors.outlook.tenantId", message: "debe ser el UUID exacto del tenant de Microsoft Entra" });
+      } else if (typeof value.outlook.enabled === "boolean") {
+        outlook = { enabled: value.outlook.enabled, tenantId: value.outlook.tenantId.toLowerCase() };
+      }
+    }
+  }
+  if (!codexManagedAppAction && !gmail && !outlook) {
     issues.push({ path: "$.connectors", message: "debe configurar al menos un conector" });
     return undefined;
   }
-  return { ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}) };
+  return { ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
 }
 
 function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {
@@ -460,6 +482,7 @@ function freezeInstallationConfig(config: InstallationConfig): Readonly<Installa
       Object.freeze(config.connectors.codexManagedAppAction);
     }
     if (config.connectors.gmail) Object.freeze(config.connectors.gmail);
+    if (config.connectors.outlook) Object.freeze(config.connectors.outlook);
     Object.freeze(config.connectors);
   }
   if (config.catalog) {

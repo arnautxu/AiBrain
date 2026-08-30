@@ -12,11 +12,33 @@ import type {
 } from "@/runtime/transport/contracts";
 
 type PendingRequest = {
+  method: ClientRequest["method"];
+  requestId: string | number;
+  startedAt: number;
+  acceptedAt: number | null;
+  activeTurnsAtStart: number;
+  pendingRequestsAtStart: number;
   resolve: (value: JsonValue) => void;
   reject: (error: Error) => void;
+  rejectSubmissionDeadline: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
   beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>;
 };
+
+export type AppServerRequestMetric = Readonly<{
+  method: ClientRequest["method"];
+  requestId: string | number;
+  outcome: "completed" | "error" | "timeout" | "connect_error" | "send_error" | "router_closed";
+  requestAcceptedMs: number | null;
+  totalMs: number;
+  activeTurnsAtStart: number;
+  pendingRequestsAtStart: number;
+}>;
+
+export type AppServerRpcRouterOptions = Readonly<{
+  now?: () => number;
+  onRequestMetric?: (metric: AppServerRequestMetric) => void;
+}>;
 
 export class AppServerRequestTimeoutError extends Error {
   constructor(
@@ -100,6 +122,7 @@ function responseError(response: JsonRpcFailure) {
  */
 export class AppServerRpcRouter {
   private readonly pending = new Map<string | number, PendingRequest>();
+  private readonly reservedRequestIds = new Set<string | number>();
   private readonly turns = new Map<string, TurnRegistrationState>();
   private startPromise: Promise<void> | null = null;
   private consumePromise: Promise<void> | null = null;
@@ -110,8 +133,13 @@ export class AppServerRpcRouter {
   private acknowledgementChain = Promise.resolve();
   private closed = false;
   private fatalError: Error | null = null;
+  private readonly now: () => number;
+  private readonly onRequestMetric: ((metric: AppServerRequestMetric) => void) | null;
 
-  constructor(readonly transport: AppServerTransport) {}
+  constructor(readonly transport: AppServerTransport, options: AppServerRpcRouterOptions = {}) {
+    this.now = options.now ?? performance.now.bind(performance);
+    this.onRequestMetric = options.onRequestMetric ?? null;
+  }
 
   start() {
     if (this.closed) return Promise.reject(new Error("App Server router is closed."));
@@ -185,32 +213,103 @@ export class AppServerRpcRouter {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
       throw new Error("App Server request timeout is invalid.");
     }
-    if (this.pending.has(rpc.id)) throw new Error("App Server request id is already pending.");
-    await this.start();
+    if (this.reservedRequestIds.has(rpc.id)) throw new Error("App Server request id is already pending.");
+    this.reservedRequestIds.add(rpc.id);
+    const startedAt = this.now();
+    const activeTurnsAtStart = this.turns.size;
+    const pendingRequestsAtStart = this.pending.size;
+    const timeoutError = new AppServerRequestTimeoutError(rpc.method, rpc.id, timeoutMs);
+    let rejectDeadline!: (error: Error) => void;
+    const deadline = new Promise<never>((_resolve, rejectPromise) => {
+      rejectDeadline = rejectPromise;
+    });
+    const timeout = setTimeout(() => {
+      const pending = this.pending.get(rpc.id);
+      if (pending) {
+        this.pending.delete(rpc.id);
+        this.emitPendingMetric(pending, "timeout");
+        pending.reject(timeoutError);
+      } else {
+        this.emitRequestMetric({
+          method: rpc.method,
+          requestId: rpc.id,
+          outcome: "timeout",
+          requestAcceptedMs: null,
+          totalMs: this.elapsed(startedAt),
+          activeTurnsAtStart,
+          pendingRequestsAtStart,
+        });
+      }
+      rejectDeadline(timeoutError);
+    }, timeoutMs);
+    timeout.unref?.();
+    const start = this.start();
+    try {
+      await Promise.race([start, deadline]);
+    } catch (error) {
+      if (error instanceof AppServerRequestTimeoutError) {
+        void start.catch(() => undefined);
+        this.reservedRequestIds.delete(rpc.id);
+        throw error;
+      }
+      clearTimeout(timeout);
+      this.reservedRequestIds.delete(rpc.id);
+      this.emitRequestMetric({
+        method: rpc.method,
+        requestId: rpc.id,
+        outcome: this.closed || this.fatalError ? "router_closed" : "connect_error",
+        requestAcceptedMs: null,
+        totalMs: this.elapsed(startedAt),
+        activeTurnsAtStart,
+        pendingRequestsAtStart,
+      });
+      throw error;
+    }
     let resolve!: (value: JsonValue) => void;
     let reject!: (error: Error) => void;
     const result = new Promise<JsonValue>((resolvePromise, rejectPromise) => {
       resolve = resolvePromise;
       reject = rejectPromise;
     });
-    const timeout = setTimeout(() => {
-      this.pending.delete(rpc.id);
-      reject(new AppServerRequestTimeoutError(rpc.method, rpc.id, timeoutMs));
-    }, timeoutMs);
-    timeout.unref?.();
-    this.pending.set(rpc.id, { resolve, reject, timeout, beforeResolve });
+    const pending: PendingRequest = {
+      method: rpc.method,
+      requestId: rpc.id,
+      startedAt,
+      acceptedAt: null,
+      activeTurnsAtStart,
+      pendingRequestsAtStart,
+      resolve,
+      reject,
+      rejectSubmissionDeadline: rejectDeadline,
+      timeout,
+      beforeResolve,
+    };
+    this.pending.set(rpc.id, pending);
+    const submission = Promise.resolve().then(() => this.transport.send({
+      clientRequestId: String(rpc.id),
+      kind: "rpc-request",
+      rpc,
+    }));
     try {
-      await this.transport.send({
-        clientRequestId: String(rpc.id),
-        kind: "rpc-request",
-        rpc,
-      });
+      await Promise.race([submission, deadline]);
+      pending.acceptedAt ??= this.now();
     } catch (error) {
+      if (error instanceof AppServerRequestTimeoutError) {
+        void submission.catch(() => undefined);
+        void result.catch(() => undefined);
+        this.reservedRequestIds.delete(rpc.id);
+        throw error;
+      }
+      void result.catch(() => undefined);
       clearTimeout(timeout);
-      this.pending.delete(rpc.id);
+      if (this.pending.get(rpc.id) === pending) {
+        this.pending.delete(rpc.id);
+        this.emitPendingMetric(pending, "send_error");
+      }
+      this.reservedRequestIds.delete(rpc.id);
       throw error;
     }
-    return result;
+    return result.finally(() => this.reservedRequestIds.delete(rpc.id));
   }
 
   async notify(rpc: ClientNotification, clientRequestId = `notification:${randomUUID()}`) {
@@ -224,7 +323,9 @@ export class AppServerRpcRouter {
     const error = new Error("App Server router closed.");
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
+      this.emitPendingMetric(pending, "router_closed");
       pending.reject(error);
+      pending.rejectSubmissionDeadline(error);
     }
     this.pending.clear();
     for (const turn of this.turns.values()) {
@@ -313,15 +414,31 @@ export class AppServerRpcRouter {
       const response = event.message.rpc;
       const pending = this.pending.get(response.id);
       if (!pending) return;
-      clearTimeout(pending.timeout);
-      this.pending.delete(response.id);
-      if ("error" in response) pending.reject(responseError(response));
+      if ("error" in response) {
+        clearTimeout(pending.timeout);
+        this.pending.delete(response.id);
+        this.emitPendingMetric(pending, "error");
+        pending.reject(responseError(response));
+      }
       else {
         try {
           await pending.beforeResolve?.(response.result, event);
+          // The request deadline includes its durable projection hook. If it
+          // expired while persistence was blocked, the projection still
+          // finishes and the event can be ACKed, but the caller must recover
+          // from the typed timeout instead of receiving a late success.
+          if (this.pending.get(response.id) !== pending) return;
+          clearTimeout(pending.timeout);
+          this.pending.delete(response.id);
+          this.emitPendingMetric(pending, "completed");
           pending.resolve(response.result);
         } catch (error) {
-          pending.reject(safeError(error));
+          if (this.pending.get(response.id) === pending) {
+            clearTimeout(pending.timeout);
+            this.pending.delete(response.id);
+            this.emitPendingMetric(pending, "error");
+            pending.reject(safeError(error));
+          }
           throw error;
         }
       }
@@ -380,7 +497,9 @@ export class AppServerRpcRouter {
     this.fatalError = error;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
+      this.emitPendingMetric(pending, "router_closed");
       pending.reject(error);
+      pending.rejectSubmissionDeadline(error);
     }
     this.pending.clear();
     for (const turn of this.turns.values()) {
@@ -388,5 +507,34 @@ export class AppServerRpcRouter {
       turn.handlers.onFailure(error);
     }
     this.turns.clear();
+  }
+
+  private elapsed(startedAt: number) {
+    return Math.max(0, Math.round(this.now() - startedAt));
+  }
+
+  private emitPendingMetric(
+    pending: PendingRequest,
+    outcome: AppServerRequestMetric["outcome"],
+  ) {
+    this.emitRequestMetric({
+      method: pending.method,
+      requestId: pending.requestId,
+      outcome,
+      requestAcceptedMs: pending.acceptedAt === null
+        ? null
+        : Math.max(0, Math.round(pending.acceptedAt - pending.startedAt)),
+      totalMs: this.elapsed(pending.startedAt),
+      activeTurnsAtStart: pending.activeTurnsAtStart,
+      pendingRequestsAtStart: pending.pendingRequestsAtStart,
+    });
+  }
+
+  private emitRequestMetric(metric: AppServerRequestMetric) {
+    try {
+      this.onRequestMetric?.(metric);
+    } catch {
+      // Operational telemetry must never change App Server request semantics.
+    }
   }
 }

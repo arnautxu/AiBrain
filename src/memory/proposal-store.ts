@@ -25,7 +25,7 @@ const TOOL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
 
 export type MemoryScope = "private" | "project" | "company";
 export type MemoryProposalProvenance = {
-  sourceType: "tool-assisted-chat";
+  sourceType: "tool-assisted-chat" | "background-conversation";
   threadId: string;
   turnId: string;
   callId: string;
@@ -74,7 +74,8 @@ export type MemoryGovernanceAuditEvent = {
   schemaVersion: 1;
   installationId: string;
   actorUserId: string;
-  action: "memory.proposed" | "memory.confirmed" | "memory.rejected" | "memory.updated" | "memory.deleted";
+  action: "memory.proposed" | "memory.confirmed" | "memory.rejected" | "memory.updated" | "memory.deleted" |
+    "memory.auto_saved" | "memory.deduplicated" | "memory.versioned" | "memory.auto_suppressed";
   targetId: string;
   scope: MemoryScope;
   projectId: string | null;
@@ -98,6 +99,13 @@ function nullableDate(value: unknown, context: ValidationContext) { return value
 function nullableUuid(value: unknown, context: ValidationContext) { return value === null ? null : expectString(value, context, { pattern: UUID }); }
 function nullableText(value: unknown, context: ValidationContext, maximum: number) { return value === null ? null : boundedText(value, context, maximum); }
 function sha256(value: unknown) { return createHash("sha256").update(JSON.stringify(value)).digest("hex"); }
+function normalizedMemoryText(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase("es").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+function automaticSemanticKey(callId: string) {
+  const match = /^automatic:([a-z0-9-]{3,80}):/u.exec(callId);
+  return match?.[1] ?? null;
+}
 function assertNoSecretMaterial(value: string) {
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*|\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{16,}/iu.test(value)) {
     throw new MemoryProposalError("MEMORY_SECRET_REJECTED", "Credential-shaped content cannot be stored as memory.");
@@ -107,7 +115,7 @@ function assertNoSecretMaterial(value: string) {
 function parseProvenance(value: unknown, context: ValidationContext): MemoryProposalProvenance {
   if (!isRecord(value) || Object.keys(value).sort().join("\0") !== ["callId", "capturedAt", "sourceExcerpt", "sourceType", "threadId", "toolNames", "turnId"].sort().join("\0")) context.fail("expected exact proposal provenance");
   return {
-    sourceType: expectLiteral(value.sourceType, "tool-assisted-chat", context.at("sourceType")),
+    sourceType: expectOneOf(value.sourceType, ["tool-assisted-chat", "background-conversation"] as const, context.at("sourceType")),
     threadId: expectString(value.threadId, context.at("threadId"), { pattern: OPAQUE_ID }),
     turnId: expectString(value.turnId, context.at("turnId"), { pattern: OPAQUE_ID }),
     callId: expectString(value.callId, context.at("callId"), { pattern: OPAQUE_ID }),
@@ -154,7 +162,7 @@ function parseGovernedRecord(value: unknown, context: ValidationContext): Govern
 
 const proposalStateSchema = defineVersionedSchema<ProposalState>({ name: "MemoryProposalState", schemaVersion: 1, keys: ["installationId", "userId", "proposals"], parse(record, context) { const installationId = expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }); const userId = expectString(record.userId, context.at("userId"), { pattern: UUID }); const proposals = expectArray(record.proposals, context.at("proposals"), parseProposal, { maxLength: 100_000 }); if (proposals.some((item) => item.installationId !== installationId || item.userId !== userId) || new Set(proposals.map(({ proposalId }) => proposalId)).size !== proposals.length) context.at("proposals").fail("proposal identities are not isolated"); return { schemaVersion: 1, installationId, userId, proposals }; } });
 const recordStateSchema = defineVersionedSchema<RecordState>({ name: "GovernedMemoryState", schemaVersion: 1, keys: ["installationId", "owner", "records"], parse(record, context) { const installationId = expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }); const owner = expectString(record.owner, context.at("owner"), { minLength: 7, maxLength: 64 }); const records = expectArray(record.records, context.at("records"), parseGovernedRecord, { maxLength: 100_000 }); if (records.some((item) => item.installationId !== installationId) || new Set(records.map(({ memoryId }) => memoryId)).size !== records.length) context.at("records").fail("record identities are not isolated"); return { schemaVersion: 1, installationId, owner, records }; } });
-const auditSchema = defineVersionedSchema<MemoryGovernanceAuditEvent>({ name: "MemoryGovernanceAuditEvent", schemaVersion: 1, keys: ["installationId", "actorUserId", "action", "targetId", "scope", "projectId", "occurredAt", "summary"], parse(record, context) { return { schemaVersion: 1, installationId: expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }), actorUserId: expectString(record.actorUserId, context.at("actorUserId"), { pattern: UUID }), action: expectOneOf(record.action, ["memory.proposed", "memory.confirmed", "memory.rejected", "memory.updated", "memory.deleted"] as const, context.at("action")), targetId: expectString(record.targetId, context.at("targetId"), { pattern: UUID }), scope: expectOneOf(record.scope, ["private", "project", "company"] as const, context.at("scope")), projectId: nullableUuid(record.projectId, context.at("projectId")), occurredAt: expectIsoDate(record.occurredAt, context.at("occurredAt")), summary: boundedText(record.summary, context.at("summary"), 500) }; } });
+const auditSchema = defineVersionedSchema<MemoryGovernanceAuditEvent>({ name: "MemoryGovernanceAuditEvent", schemaVersion: 1, keys: ["installationId", "actorUserId", "action", "targetId", "scope", "projectId", "occurredAt", "summary"], parse(record, context) { return { schemaVersion: 1, installationId: expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }), actorUserId: expectString(record.actorUserId, context.at("actorUserId"), { pattern: UUID }), action: expectOneOf(record.action, ["memory.proposed", "memory.confirmed", "memory.rejected", "memory.updated", "memory.deleted", "memory.auto_saved", "memory.deduplicated", "memory.versioned", "memory.auto_suppressed"] as const, context.at("action")), targetId: expectString(record.targetId, context.at("targetId"), { pattern: UUID }), scope: expectOneOf(record.scope, ["private", "project", "company"] as const, context.at("scope")), projectId: nullableUuid(record.projectId, context.at("projectId")), occurredAt: expectIsoDate(record.occurredAt, context.at("occurredAt")), summary: boundedText(record.summary, context.at("summary"), 500) }; } });
 
 export type MemoryProposalContext = { installationId: string; userId: string; projectId: string };
 
@@ -182,6 +190,73 @@ export class FileMemoryProposalStore {
     return this.locks.withLock(`memory-propose:${context.installationId}:${context.userId}`, async () => { const state = await this.readProposals(roots.proposalPath, context); const existing = state.proposals.find(({ provenance }) => provenance.callId === input.callId); if (existing) { if (existing.requestHash !== requestHash) throw new MemoryProposalError("MEMORY_PROPOSAL_REPLAY_CONFLICT", "Memory proposal call was replayed with different content."); return { proposal: existing, created: false }; }
       const proposal = parseProposal({ schemaVersion: 1, proposalId: randomUUID(), installationId: context.installationId, userId: context.userId, projectId: context.projectId, kind: input.kind, content: input.content, proposedScope: input.proposedScope, provenance: { sourceType: "tool-assisted-chat", threadId: input.threadId, turnId: input.turnId, callId: input.callId, toolNames: [...new Set(input.toolNames)].sort(), sourceExcerpt: input.sourceExcerpt, capturedAt: now }, status: "pending", createdAt: now, resolvedAt: null, confirmedMemoryId: null, rejectionReason: null, requestHash }, new ValidationContext("MemoryProposal", "propose"));
       state.proposals.unshift(proposal); await atomicWriteJson(roots.proposalPath, state, proposalStateSchema, { mode: 0o600 }); await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.proposed", targetId: proposal.proposalId, scope: proposal.proposedScope, projectId: proposal.projectId, summary: "Propuesta creada; todavía no es memoria." }); return { proposal, created: true }; });
+  }
+  async rememberAutomatically(context: MemoryProposalContext, input: { kind: MemoryKind; content: string; scope: "private" | "project"; semanticKey: string; threadId: string; turnId: string; extractionId: string; toolNames: string[]; sourceExcerpt: string }) {
+    assertNoSecretMaterial(input.content); assertNoSecretMaterial(input.sourceExcerpt);
+    if (!/^[a-z0-9][a-z0-9-]{2,79}$/u.test(input.semanticKey) ||
+        input.extractionId !== `automatic:${input.semanticKey}:${input.turnId}` || !OPAQUE_ID.test(input.extractionId)) {
+      throw new MemoryProposalError("MEMORY_AUTOMATIC_INPUT_INVALID", "Automatic memory identity is invalid.");
+    }
+    const roots = await this.roots(context);
+    const requestHash = sha256({ context, ...input, toolNames: [...new Set(input.toolNames)].sort() });
+    return this.locks.withLock(`memory-governance:${context.installationId}`, async () => {
+      const proposals = await this.readProposals(roots.proposalPath, context);
+      const records = await this.readRecords(roots.userRecordsPath, context.userId);
+      const replay = proposals.proposals.find(({ provenance }) => provenance.callId === input.extractionId);
+      if (replay) {
+        if (replay.requestHash !== requestHash) throw new MemoryProposalError("MEMORY_PROPOSAL_REPLAY_CONFLICT", "Automatic memory extraction was replayed with different content.");
+        const memory = records.records.find(({ memoryId }) => memoryId === replay.confirmedMemoryId);
+        if (!memory) throw new MemoryProposalError("MEMORY_CONFIRMATION_CORRUPT", "Automatic memory has no durable record.");
+        return { memory, outcome: "replayed" as const };
+      }
+
+      const now = new Date(this.now()).toISOString();
+      const projectId = input.scope === "project" ? context.projectId : null;
+      const provenance: MemoryProposalProvenance = {
+        sourceType: "background-conversation",
+        threadId: input.threadId,
+        turnId: input.turnId,
+        callId: input.extractionId,
+        toolNames: [...new Set(input.toolNames)].sort().slice(0, 32),
+        sourceExcerpt: input.sourceExcerpt,
+        capturedAt: now,
+      };
+      const scoped = records.records.filter((record) => record.kind === input.kind && record.scope === input.scope && record.projectId === projectId);
+      const semantic = scoped.find((record) => automaticSemanticKey(record.provenance.callId) === input.semanticKey);
+      if (semantic?.status === "deleted") {
+        await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.auto_suppressed", targetId: semantic.memoryId, scope: semantic.scope, projectId: semantic.projectId, summary: "La extracción automática respetó una eliminación previa y no recreó la memoria." });
+        return { memory: semantic, outcome: "suppressed" as const };
+      }
+      const exact = scoped.find((record) => record.status === "active" && normalizedMemoryText(record.content) === normalizedMemoryText(input.content));
+      const target = semantic ?? exact;
+      const proposalId = randomUUID();
+      let memory: GovernedMemoryRecord;
+      let outcome: "created" | "deduplicated" | "versioned";
+      if (target) {
+        memory = target;
+        if (normalizedMemoryText(target.content) === normalizedMemoryText(input.content)) {
+          outcome = "deduplicated";
+        } else {
+          target.content = input.content;
+          target.provenance = provenance;
+          target.revision += 1;
+          target.updatedAt = now;
+          outcome = "versioned";
+          await atomicWriteJson(roots.userRecordsPath, records, recordStateSchema, { mode: 0o600 });
+        }
+      } else {
+        memory = parseGovernedRecord({ schemaVersion: 1, memoryId: randomUUID(), proposalId, installationId: context.installationId, ownerUserId: context.userId, projectId, scope: input.scope, kind: input.kind, content: input.content, provenance, status: "active", revision: 1, createdAt: now, updatedAt: now, deletedAt: null, deletedBy: null }, new ValidationContext("GovernedMemoryRecord", "rememberAutomatically"));
+        records.records.unshift(memory);
+        outcome = "created";
+        await atomicWriteJson(roots.userRecordsPath, records, recordStateSchema, { mode: 0o600 });
+      }
+      const proposal = parseProposal({ schemaVersion: 1, proposalId, installationId: context.installationId, userId: context.userId, projectId: context.projectId, kind: input.kind, content: input.content, proposedScope: input.scope, provenance, status: "confirmed", createdAt: now, resolvedAt: now, confirmedMemoryId: memory.memoryId, rejectionReason: null, requestHash }, new ValidationContext("MemoryProposal", "rememberAutomatically"));
+      proposals.proposals.unshift(proposal);
+      await atomicWriteJson(roots.proposalPath, proposals, proposalStateSchema, { mode: 0o600 });
+      const action = outcome === "created" ? "memory.auto_saved" : outcome === "versioned" ? "memory.versioned" : "memory.deduplicated";
+      await this.appendAudit(roots, { actorUserId: context.userId, action, targetId: memory.memoryId, scope: memory.scope, projectId: memory.projectId, summary: outcome === "created" ? "Memoria útil extraída automáticamente de una conversación terminada." : outcome === "versioned" ? `Memoria automática actualizada a revisión ${memory.revision}.` : "Extracción automática deduplicada contra una memoria existente." });
+      return { memory, outcome };
+    });
   }
   async listProposals(context: MemoryProposalContext, status: MemoryProposal["status"] | "all" = "pending") { const roots = await this.roots(context); const state = await this.readProposals(roots.proposalPath, context); return state.proposals.filter((proposal) => status === "all" || proposal.status === status); }
   async confirm(context: MemoryProposalContext, input: { proposalId: string; explicit: true; content: string; scope: MemoryScope; allowCompanyScope: boolean }) {

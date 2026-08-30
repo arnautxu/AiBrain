@@ -181,6 +181,7 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
       undefined,
       undefined,
       input.session,
+      true,
     );
   } catch (error) {
     assistantMessage = applyChatStreamEvent(assistantMessage, {

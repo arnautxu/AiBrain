@@ -14,16 +14,15 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   const textarea = page.getByRole("textbox", { name: "Mensaje" });
   await expect(page.getByText("Conectando con el servicio…", { exact: true })).toHaveCount(0);
   await expect.poll(() => composer.evaluate((element) => getComputedStyle(element.parentElement?.parentElement ?? element).position)).toBe("absolute");
+  const controls = page.locator(".composer-controls");
   const initialComposerBox = await composer.boundingBox();
-  const initialControlsBox = await composer.locator(".composer-controls").boundingBox();
 
   await textarea.fill("Primera línea\nSegunda línea\nTercera línea\nCuarta línea");
   await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
   const grownComposerBox = await composer.boundingBox();
   const textareaBox = await textarea.boundingBox();
-  const controlsBox = await composer.locator(".composer-controls").boundingBox();
+  const controlsBox = await controls.boundingBox();
   expect(initialComposerBox).not.toBeNull();
-  expect(initialControlsBox).not.toBeNull();
   expect(grownComposerBox).not.toBeNull();
   expect(textareaBox).not.toBeNull();
   expect(controlsBox).not.toBeNull();
@@ -80,7 +79,7 @@ test("the mobile composer keeps every control below its growing text area", asyn
   await expect.poll(() => textarea.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThan(56);
 
   const textareaBox = await textarea.boundingBox();
-  const controlsBox = await composer.locator(".composer-controls").boundingBox();
+  const controlsBox = await page.locator(".composer-controls").boundingBox();
   expect(textareaBox).not.toBeNull();
   expect(controlsBox).not.toBeNull();
   expect(controlsBox!.y).toBeGreaterThanOrEqual(textareaBox!.y + textareaBox!.height - 1);
@@ -214,25 +213,20 @@ test("the existing chat route streams a complete turn and persists it in preview
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
   const liveActivity = page.getByTestId("turn-thinking-steps").last();
-  const liveActivityTrigger = liveActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
-  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "false");
+  const liveActivityTrigger = page.getByRole("button", { name: "Ocultar el proceso de trabajo" }).last();
+  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "true");
   const streamingLabel = liveActivityTrigger.locator(".thinking-steps-shimmer");
-  if (await streamingLabel.count()) {
-    await expect(streamingLabel).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
-    await liveActivityTrigger.click();
-    await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
-  } else {
-    await expect(liveActivityTrigger).toContainText(/Ha trabajado durante \d+m \d+s/);
-  }
+  await expect(streamingLabel).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
+  await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   const completedActivity = page.getByTestId("turn-thinking-steps").last();
-  const completedActivityTrigger = completedActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+  const completedActivityTrigger = page.getByRole("button", { name: "Mostrar el proceso de trabajo" }).last();
   await expect(completedActivityTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(completedActivityTrigger).toContainText(/Ha trabajado durante \d+m \d+s/);
   await expect(completedActivityTrigger.locator(".thinking-steps-shimmer")).toHaveCount(0);
   await completedActivityTrigger.click();
-  await expect(completedActivity.getByRole("button", { name: "Ocultar el proceso de trabajo" })).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "Ocultar el proceso de trabajo" }).last()).toHaveAttribute("aria-expanded", "true");
   await expect(completedActivity.getByText("Analizando la petición", { exact: true })).toBeVisible();
 
   await page.waitForTimeout(250);

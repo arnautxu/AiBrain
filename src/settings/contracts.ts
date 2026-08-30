@@ -69,7 +69,7 @@ export type SettingsSnapshot = {
   }>;
   memory: {
     enabled: true;
-    confirmationRequired: true;
+    confirmationRequired: false;
     scopes: Array<"private" | "project" | "company">;
     provenanceVisible: true;
     employeeRuntimeIsolated: true;
@@ -81,7 +81,7 @@ export type SettingsSnapshot = {
     conversationStorage: "company_private";
     providerTraining: "not_managed_here";
     employeeIsolation: true;
-    memoryScope: "explicit_user_memory";
+    memoryScope: "automatic_private_memory";
   };
   browser: {
     profileScope: "private_per_employee";
@@ -137,7 +137,7 @@ export function isSettingsSnapshot(value: unknown): value is SettingsSnapshot {
     value.connectors.every((item) => isRecord(item) && typeof item.id === "string" && typeof item.label === "string" &&
       ["connected", "requires_login", "unavailable"].includes(String(item.status)) &&
       (item.connectUrl === null || typeof item.connectUrl === "string") && (item.disconnectUrl === null || typeof item.disconnectUrl === "string")) &&
-    value.memory.enabled === true && value.memory.confirmationRequired === true && value.memory.provenanceVisible === true &&
+    value.memory.enabled === true && value.memory.confirmationRequired === false && value.memory.provenanceVisible === true &&
     value.memory.employeeRuntimeIsolated === true && value.memory.sharedComputerHistory === false && Array.isArray(value.memory.scopes) &&
     ["backgroundTurns", "approvals", "failures", "sound"].every((key) =>
       typeof notifications[key] === "boolean");

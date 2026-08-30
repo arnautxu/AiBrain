@@ -15,6 +15,8 @@ test("system theme follows the OS and reduced motion removes decorative animatio
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
 
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("menuitem", { name: "Configuración" }).click();
+  await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeVisible();
   await page.getByRole("button", { name: /Tema del sistema/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await page.getByRole("button", { name: /Tema claro/ }).click();

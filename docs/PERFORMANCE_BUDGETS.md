@@ -17,10 +17,31 @@ same definition.
 | Two users / four concurrent threads | validated locally | Routing is installation + user worker + runtime thread + runtime turn. `tests/integration/multi-user-worker-acceptance.integration.test.ts`. |
 | Reconnect without cross-turn projection | validated locally | Journal replay and the turn owner captured at event receipt prevent a delayed event from attaching to a later registration. `src/runtime/transport/file-event-journal.ts`, `src/runtime/transport/app-server-rpc-router.test.ts`, `src/workbench/turn-projection-store.test.ts`. |
 | NDJSON disconnect does not stop the turn | validated locally | The HTTP consumer is now separate from the server-owned turn lifetime. Only `/api/runtime/turns/control` can request `turn/interrupt`. `src/app/api/chat/route.ts`, `src/app/api/chat/route.test.ts`. Live refresh/reconnect remains pending. |
+| Silent App Server turn reaches one terminal state | validated locally | A 4-minute activity deadline and 30-minute hard deadline reconcile `thread/read` before one bounded `turn/interrupt`; no model action is resubmitted. Durable approval/user-input waits pause the watchdog. `src/runtime/turn-terminal-watchdog.ts`, `src/runtime/worker-codex-turn.test.ts`. |
 | Explicit stop is durable and scoped | validated locally | Stop resolves the private runtime IDs from the turn projection and requires the expected turn. `src/runtime/turn-control.ts`, `tests/integration/turn-control-route.integration.test.ts`. |
 | Per-turn token attribution | validated locally | Only the `last` breakdown from `thread/tokenUsage/updated` is accepted when thread and turn match. Account-wide usage remains a shared subscription snapshot and is never assigned to an employee. `src/runtime/worker-codex-turn.ts`, `src/usage/server-service.ts`, `src/usage/file-usage-store.test.ts`. |
 | Real restart recovery on Arnall | not started | Requires an authenticated turn, restart of the deployed immutable revision, reconnect with the same local IDs, one final message and one usage record. Health endpoints alone do not satisfy this row. |
-| Browser/tool exactly-once outcome | not started | A durable call record does not prove a remote side effect did not occur before a target/session error. Recovery must expose `indeterminate` and must not replay non-idempotent `open`, `click` or `type` operations. Browser owner tests by failure phase are required. |
+| Browser/tool exactly-once outcome | validated locally | A timed-out, cancelled or failed post-dispatch mutation is durable `indeterminate`, is not replayed, and forces a per-user process/session recovery before a new call. Reads may retry once after fencing. `src/runtime/browser/dynamic-tools.test.ts`, `src/runtime/browser/browser.test.ts`. Live Arnall readback remains required. |
+
+## 2026-08-30 P0 latency diagnosis
+
+The causal code path was inside the private per-user worker gateway, not the
+public NDJSON response or the browser paint scheduler. One promise chain handled
+both App Server stdout persistence and incoming WebSocket control/RPC frames.
+A busy stream or slow durable append could therefore hold `thread/start`,
+`thread/read` and `turn/interrupt` for every chat using that worker. The public
+proxy already disables response buffering and the client already applies the
+first delta synchronously, so neither is identified as the causal bottleneck by
+the available local and prior runtime evidence.
+
+The gateway now has independent ordered lanes for App Server output and client
+input. The RPC router separately applies the request deadline to transport
+admission itself, so a blocked send, router close or worker loss cannot leave a
+`thread/read` waiting outside its timeout. The same deadline remains active
+through durable response projection. Output durability and exactly-once
+server-response confirmation remain ordered; uncertain effects are not replayed.
+Authenticated Arnall logs and host metrics remain a post-deploy acceptance gate,
+not evidence available from this local-only change.
 
 ## Metric definitions and budgets
 
@@ -43,7 +64,9 @@ a controlled benchmark.
 | Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | validated locally | Later deltas coalesce once per frame with a 32 ms fallback for throttled frames. A 10,000-delta fixture preserves order in two UI applications; reconnect projection replaces the partial message instead of appending it twice. |
 | Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | The client records terminal `done`/`error`/`stopped` after rAF; `codex.turn_metrics.totalMs` remains server elapsed. Persisted-state correlation is still a live acceptance requirement. |
 | Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | Idempotent replay starts a client reconnect span; the next applied durable snapshot is measured after rAF. `codex.turn_lifecycle` remains separate server lifecycle evidence; live catch-up timing is pending. |
-| Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | not started | Browser owner must also preserve `indeterminate`; runtime must log the phase timestamps without command/body/secrets. |
+| Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | implemented | `codex.tool_phase` records queue and execution duration with bounded tool kind and opaque correlation only. Browser owner must still preserve `indeterminate`; visible paint remains client-side. |
+| Same-user concurrency | request admission in chats B/C/D while chat A is streaming or waiting on a tool | no cross-thread head-of-line blocking; admission remains bounded by its own RPC timeout | validated locally | The private gateway uses independent client-input and App-Server-output lanes. A blocked durable output test proves a new chat is admitted; a router test runs three bound chats, opens a fourth during a tool, times out one `thread/read`, then completes a trivial request. |
+| Bounded turn lifetime | accepted runtime turn → terminal state | default 10 min; configured range 30 s–30 min; one interrupt only | implemented | `AIBRAIN_WORKER_TURN_TIMEOUT_MS` aborts the scoped turn and requests one `turn/interrupt`. Failure to confirm is terminal error; uncertain effects are never replayed. Configuration bounds and the scoped cancellation path are validated locally; elapsed wall-clock expiry remains a live acceptance case. |
 
 ## Reproducible local evidence on the authorized base
 
@@ -66,6 +89,11 @@ from these numbers.
 | 10,000 subsequent deltas | one accumulated frame event | one accumulated frame event |
 | Duplicate/reordered content after reconnect snapshot | regression asserted only by event types | final projection equals snapshot exactly |
 
+The current controlled run also records two visible paints, 32 ms p50/p95/max
+between paints and 96 ms from send intent to the completed terminal paint. The
+fixture is deliberately short and deterministic; it validates client cadence
+instrumentation and ordering, not provider generation speed.
+
 The companion Chromium gate is:
 
 ```text
@@ -80,6 +108,11 @@ npx playwright test tests/e2e/conversation.spec.ts \
 It holds the synthetic response open, measures the real click-to-visible-status
 interval with `performance.now()`, asserts it is below 1,000 ms and attaches the
 numeric JSON result. It does not claim anything about provider/model latency.
+
+`npm run benchmark:chat` also completes a controlled visible delta sequence and
+reports `paintCount`, inter-paint p50/p95/max and terminal-paint time. This is
+the full visible cadence readback used by the authenticated details panel; it
+does not substitute first-event timing for streaming speed.
 
 ### Runtime admission and transport overhead
 
@@ -99,6 +132,14 @@ Controlled run on 2026-08-30 (`80` admission and `800` delivery samples):
 | Parallel/invariant admission after | 19.582 ms | 22.210 ms |
 | Direct App Server event delivery | < 0.001 ms | 0.002 ms |
 | API NDJSON encode/decode | 0.005 ms | 0.021 ms |
+
+P0 same-user lane fixture on the final local code (`20` samples, with a
+controlled 20 ms output-persistence delay rather than real filesystem I/O):
+
+| Same-user request admission | p50 | p95 |
+| --- | ---: | ---: |
+| Shared input/output chain before | 21.137 ms | 25.399 ms |
+| Independent direction lanes after | 0.003 ms | 0.015 ms |
 
 Historical lifecycle baseline: `d381ccf836516f91464f20225403996e7e8158d1`.
 
@@ -184,12 +225,27 @@ correlation, never a public route or client payload. `chat.request_phase`
 measures the status-sensitive work that must complete before the NDJSON stream
 is returned. `codex.turn_phase` then separates memory, worker startup, catalog,
 skills, thread resume/start and `turn/start`. `codex.turn_lifecycle`
-records `resumed`, `reconnected`, `disconnected` and `cancel_requested` with
+records `resumed`, `reconnected`, `disconnected`, `cancel_requested` and
+`timeout_requested` with
 opaque installation/user/project/thread/turn/request IDs and request elapsed
 time. `codex.turn_metrics` records terminal `completed`, `error` or `stopped`,
 server first-delta time, delta count, inter-delta p50/p95/max, server total and
 lifecycle counts. It deliberately excludes prompt/message/content fields,
 model output, token data, error text, file paths and credentials.
+
+`codex.app_server_request` records the RPC method and opaque request ID,
+transport-acceptance time, total time, active-turn count, pending-request count
+and a bounded outcome (`completed`, `timeout`, connection/send failure or
+router closure). `codex.worker_recovery` records the one allowed startup or
+initialization recovery and final unavailability. `codex.tool_phase` separates
+tool queue and execution time using only a bounded namespace/tool label. These
+records make “Conectando con el servicio”, service-unavailable and
+`thread/read` timeout incidents correlatable without prompts, outputs, paths,
+tokens, error text or credentials.
+
+The runtime invariant remains `web_search: "live"` for every thread and every
+turn. Web availability is not discovered or disabled on the chat admission hot
+path; server policy and egress enforcement remain authoritative.
 
 Operators read these records only from the existing authenticated operational
 log sink or an approved server-side acceptance artifact. A visible TTFT or
@@ -224,6 +280,7 @@ resize: resolve the installation-specific Compose environment, then collect
 `docker compose ... config`, `docker stats --no-stream` for `app`, `free -h`,
 `df -h`, `iostat -xz 1 3` (when available), and the last 200 `app` log lines.
 The operational log slice must include `chat.request_phase`,
+`codex.app_server_request`, `codex.worker_recovery`, `codex.tool_phase`,
 `codex.turn_phase`, `codex.turn_lifecycle`, and `codex.turn_metrics`; correlate
 only opaque IDs and numeric timings. Record the immutable revision, limits,
 sample period and raw counters with the report. Never treat a healthy endpoint,

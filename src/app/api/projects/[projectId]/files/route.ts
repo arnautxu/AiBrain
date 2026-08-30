@@ -3,11 +3,13 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { loadInstallationConfig } from "@/config/installation";
 import { contentDisposition } from "@/library/http";
+import { DocumentConversionBackpressureError } from "@/documents/conversion-gate";
 import { documentServicesForUser } from "@/documents/server-service";
 import { UploadValidationError, validateUploadedDocument } from "@/documents/upload-validation";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { readRegularFileWithin } from "@/security/safe-file";
+import { StorageError } from "@/storage";
 import { getProjectRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 
@@ -18,6 +20,12 @@ const MAXIMUM_TEXT_FILE_BYTES = 8_000_000;
 const MAXIMUM_BINARY_FILE_BYTES = 50 * 1024 * 1024;
 const MAXIMUM_TEXT_BYTES = 500_000;
 const PDF_SIGNATURE = Buffer.from("%PDF-");
+
+function privateJson(body: Record<string, unknown>, status: number, headers?: HeadersInit) {
+  const responseHeaders = new Headers(headers);
+  responseHeaders.set("Cache-Control", "private, no-store");
+  return NextResponse.json(body, { status, headers: responseHeaders });
+}
 
 const officeMimeTypes: Record<string, string> = {
   ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -79,9 +87,9 @@ export async function GET(
   context: { params: Promise<{ projectId: string }> },
 ) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  if (!session) return privateJson({ error: "No autenticado." }, 401);
   const { projectId } = await context.params;
-  if (!isUuid(projectId)) return NextResponse.json({ error: "Proyecto no válido." }, { status: 400 });
+  if (!isUuid(projectId)) return privateJson({ error: "Proyecto no válido." }, 400);
 
   const url = new URL(request.url);
   const filePath = url.searchParams.get("path");
@@ -101,13 +109,13 @@ export async function GET(
     (representation && (raw || download)) ||
     !filePath || filePath.length > 2_048 || filePath.includes("\0")
   ) {
-    return NextResponse.json({ error: "Ruta no válida." }, { status: 400 });
+    return privateJson({ error: "Ruta no válida." }, 400);
   }
 
   try {
     const installation = await loadInstallationConfig();
     if (session.provider !== "local" || installation.installationId !== session.tenant.id) {
-      return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
+      return privateJson({ error: "La sesión no pertenece a esta instalación." }, 403);
     }
     const project = await getProjectRuntimeContext(session, projectId);
     const roots = deriveWorkerRoots(installation, session.user.id);
@@ -131,7 +139,7 @@ export async function GET(
 
     if (representation) {
       if (preview.kind !== "office") {
-        return NextResponse.json({ error: "Este formato no necesita una representación convertida." }, { status: 400 });
+        return privateJson({ error: "Este formato no necesita una representación convertida." }, 400);
       }
       const services = await documentServicesForUser(installation, session.user.id);
       const converted = await prepareWorkspaceDocumentPreview({
@@ -160,10 +168,10 @@ export async function GET(
 
     if (raw) {
       if (preview.kind === "text" && !download) {
-        return NextResponse.json({ error: "Este archivo se muestra como texto." }, { status: 400 });
+        return privateJson({ error: "Este archivo se muestra como texto." }, 400);
       }
       if (preview.kind === "pdf" && !contents.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE)) {
-        return NextResponse.json({ error: "El archivo no es un PDF válido." }, { status: 415 });
+        return privateJson({ error: "El archivo no es un PDF válido." }, 415);
       }
       if (preview.kind === "office") {
         try {
@@ -174,7 +182,7 @@ export async function GET(
           });
         } catch (error) {
           if (error instanceof UploadValidationError) {
-            return NextResponse.json({ error: "El archivo Office no supera la validación segura." }, { status: 415 });
+            return privateJson({ error: "El archivo Office no supera la validación segura." }, 415);
           }
           throw error;
         }
@@ -206,7 +214,7 @@ export async function GET(
           });
         } catch (error) {
           if (error instanceof UploadValidationError) {
-            return NextResponse.json({ error: "El archivo Office no supera la validación segura." }, { status: 415 });
+            return privateJson({ error: "El archivo Office no supera la validación segura." }, 415);
           }
           throw error;
         }
@@ -214,7 +222,7 @@ export async function GET(
       const previewUrl = preview.kind === "office"
         ? `/api/projects/${projectId}/files?path=${encodedPath}&representation=1`
         : rawUrl;
-      return NextResponse.json({
+      return privateJson({
         file: {
           path: filePath,
           name: path.basename(filePath),
@@ -227,22 +235,22 @@ export async function GET(
           previewMimeType: preview.kind === "office" ? "application/pdf" : preview.mimeType,
           downloadUrl,
         },
-      }, { headers: { "Cache-Control": "private, no-store" } });
+      }, 200);
     }
 
     if (contents.length > MAXIMUM_TEXT_BYTES) {
-      return NextResponse.json({ error: "El archivo es demasiado grande para mostrarlo dentro del chat." }, { status: 413 });
+      return privateJson({ error: "El archivo es demasiado grande para mostrarlo dentro del chat." }, 413);
     }
     if (contents.includes(0)) {
-      return NextResponse.json({ error: "Este formato no admite una vista previa segura." }, { status: 415 });
+      return privateJson({ error: "Este formato no admite una vista previa segura." }, 415);
     }
     let content: string;
     try {
       content = new TextDecoder("utf-8", { fatal: true }).decode(contents);
     } catch {
-      return NextResponse.json({ error: "Este formato no admite una vista previa segura." }, { status: 415 });
+      return privateJson({ error: "Este formato no admite una vista previa segura." }, 415);
     }
-    return NextResponse.json({
+    return privateJson({
       file: {
         path: filePath,
         name: path.basename(filePath),
@@ -255,11 +263,32 @@ export async function GET(
         previewMimeType: "text/plain",
         downloadUrl,
       },
-    }, { headers: { "Cache-Control": "private, no-store" } });
+    }, 200);
   } catch (error) {
     if (error instanceof UploadValidationError) {
-      return NextResponse.json({ error: "Este formato no admite una vista previa segura." }, { status: 415 });
+      return privateJson({ error: "Este formato no admite una vista previa segura." }, 415);
     }
-    return NextResponse.json({ error: "No se ha podido abrir este archivo del proyecto." }, { status: 404 });
+    if (error instanceof DocumentConversionBackpressureError) {
+      return privateJson(
+        { error: "La vista previa está ocupada. Vuelve a intentarlo en unos segundos.", state: "retryable" },
+        503,
+        { "Retry-After": String(Math.max(1, Math.ceil(error.retryAfterMs / 1_000))) },
+      );
+    }
+    if (error instanceof StorageError && error.code === "DOCUMENT_OPERATION_ABORTED") {
+      return privateJson({ error: "La conversión de la vista previa se ha cancelado.", state: "cancelled" }, 408);
+    }
+    if (error instanceof StorageError && error.code === "DOCUMENT_TOOL_TIMEOUT") {
+      return privateJson({ error: "La conversión de la vista previa ha agotado su tiempo.", state: "failed" }, 504);
+    }
+    if (error instanceof StorageError && [
+      "DOCUMENT_TOOL_FAILED",
+      "DOCUMENT_TOOL_OUTPUT_TOO_LARGE",
+      "DOCUMENT_PREVIEW_TOO_LARGE",
+      "WORKSPACE_DOCUMENT_PREVIEW_INVALID",
+    ].includes(error.code)) {
+      return privateJson({ error: "No se ha podido crear una vista previa segura.", state: "failed" }, 422);
+    }
+    return privateJson({ error: "No se ha podido abrir este archivo del proyecto." }, 404);
   }
 }

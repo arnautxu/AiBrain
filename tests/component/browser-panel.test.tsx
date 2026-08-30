@@ -78,6 +78,7 @@ afterEach(() => {
 describe("BrowserPanel", () => {
   it("uses a minimal browser header and keeps the rest for the direct viewport", async () => {
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    expect(screen.getByText("Navegador")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Atrás" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Adelante" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Recargar" })).toBeInTheDocument();

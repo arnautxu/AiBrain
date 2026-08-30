@@ -17,10 +17,11 @@ const principal = (overrides: Partial<CatalogPrincipal> = {}): CatalogPrincipal 
 });
 const skill: CatalogResource = { id: "graphikai-company-context", kind: "skill", label: "GraphikAI context", credentialMode: "none", managedBy: "graphikai", sharedResource: false, appId: null, connectorId: null, mcp: null };
 const app: CatalogResource = { id: "mail-app", kind: "app", label: "Mail", credentialMode: "personal-oauth", managedBy: "company", sharedResource: false, appId: "mail", connectorId: null, mcp: null };
+const outlook: CatalogResource = { id: "outlook", kind: "connector", label: "Outlook", credentialMode: "personal-oauth", managedBy: "graphikai", sharedResource: false, appId: null, connectorId: "outlook", mcp: null };
 const mcp: CatalogResource = { id: "mail-mcp", kind: "mcp", label: "Mail MCP", credentialMode: "personal-oauth", managedBy: "company", sharedResource: false, appId: null, connectorId: null, mcp: { server: "mail", readTools: ["search"], sensitiveWriteTools: ["send"] } };
 const rule = (id: string, scope: CatalogRule["scope"], subjectId: string | null, resourceId: string, effect: CatalogRule["effect"], operations: CatalogRule["operations"]): CatalogRule => ({ id, scope, subjectId, resourceId, effect, operations });
 
-function state(rules: CatalogRule[]): CatalogState { return { schemaVersion: 1, installationId: "arnall-qa", revision: 1, resources: [skill, app, mcp], rules }; }
+function state(rules: CatalogRule[]): CatalogState { return { schemaVersion: 1, installationId: "arnall-qa", revision: 1, resources: [skill, app, outlook, mcp], rules }; }
 
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
@@ -46,6 +47,17 @@ describe("enterprise catalog resolution", () => {
     expect(allowsCatalogOperation(catalog, principal(), "unknown", "read")).toBe(false);
   });
 
+  it("exposes a company connector only to an allowed group and lets a group deny dominate", () => {
+    const allowed = state([rule("outlook-group", "group", GROUP, outlook.id, "allow", ["read"])]);
+    expect(allowsCatalogOperation(allowed, principal(), outlook.id, "read")).toBe(true);
+    expect(allowsCatalogOperation(allowed, principal({ userId: USER_B, groupIds: [] }), outlook.id, "read")).toBe(false);
+    const denied = state([
+      rule("outlook-group", "group", GROUP, outlook.id, "allow", ["read"]),
+      rule("outlook-group-deny", "group", GROUP, outlook.id, "deny", ["read"]),
+    ]);
+    expect(allowsCatalogOperation(denied, principal(), outlook.id, "read")).toBe(false);
+  });
+
   it("rejects non-resource shared credentials and preserves versioned state across restart", async () => {
     expect(isCatalogResource({ ...app, credentialMode: "shared-resource", sharedResource: false })).toBe(false);
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-catalog-")); roots.push(root);
@@ -59,6 +71,16 @@ describe("enterprise catalog resolution", () => {
     const restarted = new FileCatalogStore("arnall-qa", root);
     await expect(restarted.read()).resolves.toMatchObject({ schemaVersion: 1, revision: 2, resources: expect.arrayContaining([expect.objectContaining({ id: skill.id }), expect.objectContaining({ id: app.id })]) });
     await expect(restarted.auditLog()).resolves.toHaveLength(1);
+  });
+
+  it("removes disabled GraphikAI connectors and their grants from the effective catalog", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-catalog-connectors-")); roots.push(root);
+    const store = new FileCatalogStore("arnall-qa", root);
+    await store.ensureManagedResources([outlook]);
+    await expect(store.read()).resolves.toMatchObject({ resources: expect.arrayContaining([expect.objectContaining({ id: "outlook" })]) });
+    const disabled = await store.ensureManagedResources([], [outlook.id]);
+    expect(disabled.resources.some(({ id }) => id === "outlook")).toBe(false);
+    expect(disabled.rules.some(({ resourceId }) => resourceId === "outlook")).toBe(false);
   });
 });
 

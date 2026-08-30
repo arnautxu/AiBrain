@@ -133,6 +133,25 @@ describe("connector credential bindings", () => {
       expectedVersion: 1,
     })).resolves.toMatchObject({ status: "revoked", version: 2 });
   });
+
+  it("blocks a revoked personal binding and permits only the same user to version a reconnect", async () => {
+    const { store } = await fixture();
+    await store.put(binding());
+    await expect(store.revoke(principal(), "google-drive", { allowShared: false, manageShared: false, expectedVersion: 1 }))
+      .resolves.toMatchObject({ status: "revoked", version: 2 });
+    await expect(store.resolve(principal(), "google-drive", { allowShared: false }))
+      .resolves.toMatchObject({ status: "revoked", version: 2 });
+    expect(() => prepareConnectorAuthorization({
+      principal: principal(), definition, binding: binding({ status: "revoked", version: 2 }), operation: "read-file",
+      resourceId: null, args: {}, permissionFingerprint: SHA_A, workspacePolicyFingerprint: SHA_B, allowSharedCredential: false,
+    })).toThrowError(expect.objectContaining({ code: "CONNECTOR_BINDING_INACTIVE" }));
+    await expect(store.readPersonalForManagement(principal(), "google-drive"))
+      .resolves.toMatchObject({ userId: USER_ONE, status: "revoked", version: 2 });
+    await expect(store.readPersonalForManagement(principal(USER_TWO), "google-drive"))
+      .rejects.toMatchObject({ code: "ENOENT" });
+    await expect(store.put(binding({ status: "active", version: 3 })))
+      .resolves.toMatchObject({ status: "active", version: 3 });
+  });
 });
 
 describe("connector authorization snapshots", () => {

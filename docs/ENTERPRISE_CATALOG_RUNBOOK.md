@@ -21,7 +21,11 @@ Los recursos OAuth personales se enlazan por usuario. Una credencial compartida 
 
 El punto de integración para el task Runtime es `runWorkerCodexTurn` en `src/runtime/worker-codex-turn.ts`, inmediatamente antes de añadir una skill a `turn/start`. Allí el worker vuelve a resolver el principal autenticado y rechaza una skill que no tenga lectura explícita en el catálogo. No sustituye ni relaja los flujos existentes: `auto_review` sigue determinando el revisor de las aprobaciones y una política `DENY` continúa rechazando la ejecución genérica antes de crear una aprobación. Para apps, conectores y MCP, el límite equivalente es el `CatalogEnforcedTransport`: filtra los inventarios antes de devolverlos al adaptador y rechaza instalaciones, OAuth desde la sesión y herramientas MCP no declaradas.
 
-## Alta de Arnall reutilizable
+## Correo inicial y alta de Arnall reutilizable
+
+Gmail y Outlook son recursos GraphikAI gestionados pero se añaden al catálogo durable únicamente cuando su bloque de instalación tiene `enabled=true`. Deshabilitar un proveedor retira su recurso y sus reglas gestionadas; no basta con ocultarlo en la UI. Las reglas de usuario/grupo/rol pueden restringir después ese baseline de instalación. Ajustes muestra recursos permitidos aunque todavía necesiten login; el selector `@` y el menú `+` solo muestran recursos permitidos y realmente conectados.
+
+Cada proveedor usa un callback, secreto de aplicación, clave de cifrado y directorio por conector. Cada empleado tiene un binding y token cifrado bajo su UUID; no existe fallback compartido. Consulta [GMAIL_OAUTH.md](GMAIL_OAUTH.md) y [OUTLOOK_OAUTH.md](OUTLOOK_OAUTH.md) para la configuración externa exacta.
 
 `config/installations/arnall.qa.example.json` incluye una skill base de GraphikAI. Para habilitar un recurso adicional, un administrador debe crear primero el recurso y después reglas `allow` explícitas. Para una acción MCP sensible, declara el servidor, la lista de lectura y `sensitiveWriteTools`; configura el adaptador gestionado con aprobación durable y readback correlacionado antes de conceder `write`.
 

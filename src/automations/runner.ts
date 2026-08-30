@@ -127,6 +127,14 @@ export async function runAutomationSweep(options: {
       results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "succeeded", error: null });
     } catch (error) {
       const detail = error instanceof Error ? error.message.slice(0, 2_000) : "Error de ejecución";
+      if (leaseLost) {
+        // A stale process no longer owns either the task or its journal. Its
+        // successor will recover the deterministic turn and write the only
+        // terminal record. Appending here could overwrite the observable
+        // outcome after the newer worker has already succeeded.
+        results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });
+        return;
+      }
       await options.store.appendRun({
         schemaVersion: 1,
         runKey: claim.runKey,
@@ -141,11 +149,7 @@ export async function runAutomationSweep(options: {
         threadId,
         error: detail,
       });
-      if (leaseLost) {
-        // A fenced successor owns the outcome. Do not advance or retry from a
-        // stale worker; its deterministic turn ids keep the remote side safe.
-        results.push({ taskId: claim.task.id, runKey: claim.runKey, status: "failed", error: detail });
-      } else if (cancellationRequested) {
+      if (cancellationRequested) {
         // The same valid lease owns this terminal record. A cancellation must
         // never be retried or revive a paused/deleted recurrence.
         await options.store.settle(claim, { status: "failed", error: detail });

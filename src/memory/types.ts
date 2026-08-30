@@ -101,6 +101,6 @@ export interface MemoryService {
   readEmployeeContext(context: MemoryContext): Promise<EmployeeContext>;
   buildPromptSnapshot(
     context: MemoryContext,
-    options?: { maxItems?: number; maxCharacters?: number },
+    options?: { maxItems?: number; maxCharacters?: number; query?: string },
   ): Promise<MemoryPromptSnapshot>;
 }

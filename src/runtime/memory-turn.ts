@@ -5,7 +5,7 @@ import type { DynamicToolCallParams } from "../../contracts/codex/0.149.1/types/
 import type { DynamicToolCallResponse } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
 import type { DynamicToolSpec } from "../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
 import type { MemoryPromptSnapshot, MemoryService } from "@/memory";
-import { FileMemoryProposalStore, type MemoryScope } from "@/memory/proposal-store";
+import type { FileMemoryProposalStore } from "@/memory/proposal-store";
 import type { InstallationConfig } from "@/config/installation-schema";
 import {
   FileJournal,
@@ -33,11 +33,11 @@ export const AIBRAIN_MEMORY_TOOL_NAMESPACE = "aibrain_memory";
 export const MEMORY_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([{
   type: "namespace",
   name: AIBRAIN_MEMORY_TOOL_NAMESPACE,
-  description: "Propose useful durable memory for human review. This tool never saves memory: the authenticated user must inspect content, scope, and provenance and explicitly confirm or reject it in AiBrain.",
+  description: "Legacy compatibility surface. AiBrain now extracts safe private memory after the terminal turn, so this tool does not create a proposal or block the response.",
   tools: [{
     type: "function",
     name: "propose",
-    description: "Create a pending memory proposal after identifying a stable fact, preference, or decision. Do not include secrets. Unknown or time-sensitive claims must remain marked as such.",
+    description: "Acknowledge a stable fact, preference, or decision for the post-turn background extractor. Do not include secrets.",
     inputSchema: {
       type: "object",
       properties: {
@@ -356,10 +356,6 @@ export class FileMemoryTurnAuditSink implements MemoryTurnAuditSink {
   }
 }
 
-function memoryToolFailure(text: string): DynamicToolCallResponse {
-  return { success: false, contentItems: [{ type: "inputText", text }] };
-}
-
 function memoryToolSuccess(value: unknown): DynamicToolCallResponse {
   return { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(value) }] };
 }
@@ -415,31 +411,12 @@ export async function handleMemoryProposalToolCall(
       (args.scope !== "private" && args.scope !== "project" && args.scope !== "company")) {
     throw new MemoryTurnError("MEMORY_PROPOSAL_ARGUMENTS_INVALID", "Memory proposal kind or scope is invalid.");
   }
-  const store = context.store ?? new FileMemoryProposalStore({ config: context.config });
-  try {
-    const result = await store.propose({ installationId: context.installationId, userId: context.userId, projectId: context.projectId }, {
-      kind: args.kind,
-      content: proposedContent(args.content),
-      proposedScope: args.scope as MemoryScope,
-      threadId: context.sourceThreadId,
-      turnId: context.runtimeTurnId,
-      callId: params.callId,
-      toolNames: [...new Set(context.observedToolNames)].slice(0, 32),
-      sourceExcerpt: context.sourceExcerpt.trim().slice(0, 4_000) || "El usuario solicitó revisar esta memoria propuesta.",
-    });
-    return memoryToolSuccess({
-      status: "pending-user-confirmation",
-      proposalId: result.proposal.proposalId,
-      content: result.proposal.content,
-      scope: result.proposal.proposedScope,
-      provenance: result.proposal.provenance,
-      persisted: false,
-      message: "La propuesta está pendiente. Solo se convertirá en memoria si el usuario la confirma explícitamente.",
-    });
-  } catch (error) {
-    if (error instanceof MemoryTurnError) throw error;
-    return memoryToolFailure(error instanceof Error ? error.message : "Memory proposal could not be prepared.");
-  }
+  proposedContent(args.content);
+  return memoryToolSuccess({
+    status: "scheduled-after-terminal-turn",
+    persisted: false,
+    message: "AiBrain evaluará la conversación terminada en segundo plano. No se requiere confirmación individual y los secretos se descartan.",
+  });
 }
 
 export async function prepareTurnMemory(
@@ -450,6 +427,7 @@ export async function prepareTurnMemory(
     projectId: string;
     turnId: string;
     permissionFingerprint: string;
+    query?: string;
   },
 ): Promise<PreparedTurnMemory> {
   assertIdentifier(identity.installationId, INSTALLATION_ID_PATTERN, "installationId");
@@ -462,7 +440,7 @@ export async function prepareTurnMemory(
   try {
     snapshot = validateSnapshot(await dependencies.memoryService.buildPromptSnapshot(
       { installationId: identity.installationId, userId: identity.userId, projectId: identity.projectId },
-      { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS },
+      { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS, query: identity.query },
     ));
   } catch (error) {
     if (error instanceof MemoryTurnError) throw error;

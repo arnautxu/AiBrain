@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       threadId: command.threadId,
       token,
       command,
+      signal: request.signal,
     });
     return NextResponse.json(
       { ok: true, navigation: navigation ?? null },

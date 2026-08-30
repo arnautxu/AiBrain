@@ -40,6 +40,8 @@ const COMPANY_CONTEXT_FILES = [
   "50_DOCUMENT_RULES.md",
 ] as const;
 const MAX_CONTEXT_BYTES = 256 * 1024;
+const MAX_COMPANY_CONTEXT_FILES = 128;
+const MAX_COMPANY_CONTEXT_DEPTH = 8;
 const MAX_KNOWLEDGE_FILE_BYTES = 8 * 1024 * 1024;
 const MAX_KNOWLEDGE_ENTRIES = 10_000;
 const MAX_KNOWLEDGE_DEPTH = 12;
@@ -107,6 +109,7 @@ function decodeMarkdown(value: Uint8Array, label: string) {
       `${label} contains disallowed control characters.`,
     );
   }
+  rejectMemorySecretMaterial(text);
   return text;
 }
 
@@ -497,7 +500,44 @@ export class LocalFileMemoryService implements MemoryService {
 
   async readCompanyContext(context: MemoryContext): Promise<CompanyContextDocument[]> {
     const companyRoot = await this.companyContextRoot(context);
-    return Promise.all(COMPANY_CONTEXT_FILES.map(async (fileName) => {
+    const canonicalRoot = await realpath(companyRoot);
+    const nested: string[] = [];
+    const visit = async (directory: string, relativeDirectory: string, depth: number): Promise<void> => {
+      if (depth > MAX_COMPANY_CONTEXT_DEPTH) {
+        throw new MemoryServiceError("MEMORY_COMPANY_CONTEXT_LIMIT", "Company context tree is too deep.");
+      }
+      const metadata = await lstat(directory);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink() || !isInside(canonicalRoot, await realpath(directory))) {
+        throw new MemoryServiceError("MEMORY_PATH_UNSAFE", "Company context directory escapes its root.");
+      }
+      const entries = await readdir(directory, { withFileTypes: true });
+      entries.sort((left, right) => left.name.localeCompare(right.name));
+      for (const entry of entries) {
+        const relativePath = relativeDirectory ? path.posix.join(relativeDirectory, entry.name) : entry.name;
+        const target = path.join(directory, entry.name);
+        if (entry.isSymbolicLink()) {
+          throw new MemoryServiceError("MEMORY_PATH_UNSAFE", `Company context symlink rejected: ${relativePath}`);
+        }
+        if (entry.isDirectory()) {
+          if (relativePath === "knowledge") continue;
+          await visit(target, relativePath, depth + 1);
+          continue;
+        }
+        if (!entry.isFile() || !relativePath.toLocaleLowerCase().endsWith(".md")) continue;
+        if (relativePath === "PERMISSIONS.md" || relativePath === "KNOWLEDGE_INDEX.md" || COMPANY_CONTEXT_FILES.includes(relativePath as typeof COMPANY_CONTEXT_FILES[number])) continue;
+        const fileMetadata = await lstat(target);
+        if (!fileMetadata.isFile() || fileMetadata.isSymbolicLink() || fileMetadata.size > MAX_CONTEXT_BYTES) {
+          throw new MemoryServiceError("MEMORY_COMPANY_CONTEXT_LIMIT", `Company context file is invalid: ${relativePath}`);
+        }
+        nested.push(relativePath);
+        if (nested.length + COMPANY_CONTEXT_FILES.length > MAX_COMPANY_CONTEXT_FILES) {
+          throw new MemoryServiceError("MEMORY_COMPANY_CONTEXT_LIMIT", "Company context has too many files.");
+        }
+      }
+    };
+    await visit(companyRoot, "", 0);
+    const files = [...COMPANY_CONTEXT_FILES, ...nested];
+    return Promise.all(files.map(async (fileName) => {
       const raw = await readRegularFileWithin(
         companyRoot,
         fileName,
@@ -632,7 +672,7 @@ export class LocalFileMemoryService implements MemoryService {
 
   async buildPromptSnapshot(
     context: MemoryContext,
-    options: { maxItems?: number; maxCharacters?: number } = {},
+    options: { maxItems?: number; maxCharacters?: number; query?: string } = {},
   ): Promise<MemoryPromptSnapshot> {
     const maxItems = options.maxItems ?? 20;
     const maxCharacters = options.maxCharacters ?? 12_000;
@@ -674,7 +714,18 @@ export class LocalFileMemoryService implements MemoryService {
       preferences: employeeContext.preferences,
       preferencesTruncated: false,
     };
-    const explicitMemories = memories.slice(0, maxItems).map((memory) => ({
+    const queryTokens = [...new Set((options.query ?? "").normalize("NFKD").replace(/\p{M}/gu, "")
+      .toLocaleLowerCase("es").match(/[a-z0-9]{3,}/gu) ?? [])].slice(0, 64);
+    const relevance = (content: string, excerpt: string) => {
+      if (queryTokens.length === 0) return 0;
+      const haystack = `${content} ${excerpt}`.normalize("NFKD").replace(/\p{M}/gu, "").toLocaleLowerCase("es");
+      return queryTokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+    };
+    const selected = [
+      ...memories.map((memory) => ({ type: "explicit" as const, memory, score: relevance(memory.content, memory.provenance.sourceExcerpt), updatedAt: memory.createdAt })),
+      ...governed.map((memory) => ({ type: "governed" as const, memory, score: relevance(memory.content, memory.provenance.sourceExcerpt) + (memory.scope === "project" ? 1 : 0), updatedAt: memory.updatedAt })),
+    ].sort((left, right) => right.score - left.score || right.updatedAt.localeCompare(left.updatedAt)).slice(0, maxItems);
+    const explicitMemories = selected.filter((item) => item.type === "explicit").map(({ memory }) => ({
       memoryId: memory.memoryId,
       kind: memory.kind,
       content: memory.content,
@@ -682,7 +733,7 @@ export class LocalFileMemoryService implements MemoryService {
       provenance: { ...memory.provenance },
       sourceExcerptTruncated: false,
     }));
-    const governedMemories = governed.slice(0, Math.max(0, maxItems - explicitMemories.length)).map((memory) => ({
+    const governedMemories = selected.filter((item) => item.type === "governed").map(({ memory }) => ({
       memoryId: memory.memoryId,
       kind: memory.kind,
       scope: memory.scope,

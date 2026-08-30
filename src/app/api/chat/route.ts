@@ -61,6 +61,8 @@ import {
 import { recordTurnUsage } from "@/usage/server-service";
 import type { TokenUsageBreakdown } from "@/usage/contracts";
 import { featurePolicyForUser } from "@/settings/server-service";
+import { isComposerExperience } from "@/lib/composer-experience";
+import { resolveServerComposerExperience } from "@/runtime/composer-experience";
 
 export const runtime = "nodejs";
 const encoder = new TextEncoder();
@@ -294,6 +296,13 @@ export async function POST(request: Request) {
     !isUuid(body.userMessageId) || !isUuid(body.assistantMessageId)) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
   }
+  if (!isComposerExperience(body.options.experience) ||
+    body.options.model !== null || body.options.effort !== null) {
+    return NextResponse.json({ error: "Selecciona una experiència vàlida." }, { status: 400 });
+  }
+  const privateExperience = resolveServerComposerExperience(body.options.experience);
+  body.options.model = privateExperience.model;
+  body.options.effort = privateExperience.effort;
   const setupCorrelation = {
     installationId: session.tenant.id,
     userId: session.user.id,

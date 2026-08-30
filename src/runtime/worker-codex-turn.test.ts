@@ -1,7 +1,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatRequest } from "@/lib/chat-contract";
 import type { MemoryService } from "@/memory";
 import type { ResolvedPermissions } from "@/permissions";
@@ -50,7 +50,7 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
   },
 }));
 
-import { runWorkerCodexTurn } from "@/runtime/worker-codex-turn";
+import { runWorkerCodexTurn, workerTurnTimeoutMs } from "@/runtime/worker-codex-turn";
 
 const installationId = "qa-company";
 const userId = "00000000-0000-4000-8000-000000000001";
@@ -149,6 +149,18 @@ describe("worker Codex turn", () => {
     mocked.cancelTurn = null;
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses a bounded configurable lifetime for every worker turn", () => {
+    expect(workerTurnTimeoutMs({})).toBe(10 * 60_000);
+    expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "30000" })).toBe(30_000);
+    expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "1800000" })).toBe(1_800_000);
+    expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "29999" })).toThrow(/between/u);
+    expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "secret" })).toThrow(/invalid/u);
+  });
+
   it("keeps live web search and the private browser exposed for a current Arnall query", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-turn-"));
     const workspace = path.join(userRoot, "workspace");
@@ -160,7 +172,7 @@ describe("worker Codex turn", () => {
       await writeFile(documentPath, "Attachment text\n", { mode: 0o600 });
     });
     let handlers: {
-      onNotification(value: unknown): Promise<void> | void;
+      onNotification(value: unknown, envelope?: unknown): Promise<void> | void;
       onFailure(error: Error): void;
     } | null = null;
     let boundTurn: string | null = null;
@@ -290,9 +302,37 @@ describe("worker Codex turn", () => {
                 },
               });
               await handlers?.onNotification({
+                method: "item/started",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  item: { id: "commentary-1", type: "agentMessage", text: "", phase: "commentary", status: "inProgress" },
+                },
+              }, { eventId: "commentary-started", sequence: 10, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/agentMessage/delta",
+                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "commentary-1", delta: "Voy a comprobar la fuente autorizada." },
+              }, { eventId: "commentary-delta", sequence: 11, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/completed",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  item: { id: "commentary-1", type: "agentMessage", text: "Voy a comprobar la fuente autorizada.", phase: "commentary", status: "completed" },
+                },
+              }, { eventId: "commentary-completed", sequence: 12, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/started",
+                params: {
+                  threadId: "runtime-thread-1",
+                  turnId: "runtime-turn-1",
+                  item: { id: "message-1", type: "agentMessage", text: "", phase: "final_answer", status: "inProgress" },
+                },
+              }, { eventId: "final-started", sequence: 13, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
                 method: "item/agentMessage/delta",
                 params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "Fet" },
-              });
+              }, { eventId: "final-delta", sequence: 14, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               await handlers?.onNotification({
                 method: "thread/tokenUsage/updated",
                 params: {
@@ -419,6 +459,13 @@ describe("worker Codex turn", () => {
       effort: "low",
       summary: "concise",
     });
+    // Read-only mounts are available through the outer sandbox only. If one is
+    // promoted to an App Server workspace, nested bwrap attempts to create
+    // `/source-ro/.git` and fails with "Read-only file system".
+    expect((turnStart?.params as { runtimeWorkspaceRoots?: string[] }).runtimeWorkspaceRoots)
+      .not.toContain(installationPaths.sourceReadRoot);
+    expect((turnStart?.params as { runtimeWorkspaceRoots?: string[] }).runtimeWorkspaceRoots)
+      .not.toContain(installationPaths.companyContextRoot);
     // A normal selected model/effort is validated by turn/start itself. The
     // optional five-RPC picker catalog must not delay this live web turn.
     expect(modelCatalogCalls).toBe(0);
@@ -462,12 +509,15 @@ describe("worker Codex turn", () => {
       }),
       expect.objectContaining({
         type: "namespace",
-        name: "aibrain_memory",
-        tools: expect.arrayContaining([expect.objectContaining({ name: "propose" })]),
+        name: "aibrain_gmail",
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "search" }),
+          expect.objectContaining({ name: "read" }),
+        ]),
       }),
       expect.objectContaining({
         type: "namespace",
-        name: "aibrain_gmail",
+        name: "aibrain_outlook",
         tools: expect.arrayContaining([
           expect.objectContaining({ name: "search" }),
           expect.objectContaining({ name: "read" }),
@@ -494,6 +544,15 @@ describe("worker Codex turn", () => {
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(events).toContainEqual({ type: "delta", value: "Fet" });
+    expect(events).not.toContainEqual({ type: "delta", value: "Voy a comprobar la fuente autorizada." });
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "activity",
+      item: expect.objectContaining({
+        id: "commentary-1",
+        kind: "reasoning",
+        detail: "Voy a comprobar la fuente autorizada.",
+      }),
+    }));
     expect(events).toContainEqual({
       type: "activity",
       item: {
@@ -774,6 +833,127 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "done" });
   });
 
+  it("reconciles and interrupts a silent runtime turn with one clear terminal error", async () => {
+    vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "1000");
+    vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "1000");
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-watchdog-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    const calls: string[] = [];
+    const client = {
+      router: {
+        registerTurn(runtimeThreadId: string, localTurnId: string) {
+          return {
+            threadId: runtimeThreadId,
+            localTurnId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connectionSummary() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: true,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      prewarmConnection() {},
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-watchdog", turns: [] } };
+          await beforeResolve?.(result as never, {
+            eventId: "watchdog-thread",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          const result = { turn: { id: "runtime-turn-watchdog" } };
+          await beforeResolve?.(result as never, {
+            eventId: "watchdog-turn",
+            sequence: 2,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "runtime-thread-watchdog",
+              turns: [{
+                id: "runtime-turn-watchdog",
+                status: "inProgress",
+                error: null,
+                items: [{ type: "userMessage", id: "user-item", clientId: userMessageId, content: [] }],
+              }],
+            },
+          };
+        }
+        if (method === "turn/interrupt") return {};
+        throw new Error(`Unexpected request ${method}`);
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions(),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls).toEqual(["thread/start", "turn/start", "thread/read", "turn/interrupt"]);
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "error",
+      message: expect.stringContaining("ninguna acción incierta se ha repetido"),
+    }));
+    expect(events).not.toContainEqual({ type: "done" });
+  }, 15_000);
+
   it("recovers a completed turn after thread/resume times out without retrying a model action", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-recovery-"));
     const workspace = path.join(userRoot, "workspace");
@@ -824,6 +1004,7 @@ describe("worker Codex turn", () => {
               error: null,
               items: [
                 { type: "userMessage", id: "item-user", clientId: userMessageId, content: [] },
+                { type: "agentMessage", id: "item-commentary", text: "Recovered public progress", phase: "commentary" },
                 { type: "agentMessage", id: "item-agent", text: "Recovered answer", phase: "final_answer" },
               ],
             }],
@@ -870,6 +1051,11 @@ describe("worker Codex turn", () => {
     expect(calls).toEqual(["thread/resume", "thread/read"]);
     expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
     expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
+    expect(events).not.toContainEqual({ type: "content", value: "Recovered public progress" });
+    expect(events).toContainEqual({
+      type: "activity",
+      item: expect.objectContaining({ id: "item-commentary", kind: "reasoning", detail: "Recovered public progress" }),
+    });
     expect(events).toContainEqual({ type: "done" });
   });
 

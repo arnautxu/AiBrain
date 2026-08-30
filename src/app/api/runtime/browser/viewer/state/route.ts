@@ -31,6 +31,7 @@ export async function GET(request: Request) {
       authSessionId: auth.authSessionId,
       threadId,
       token,
+      signal: request.signal,
     });
     return NextResponse.json(navigation, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {

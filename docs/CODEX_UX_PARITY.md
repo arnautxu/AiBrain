@@ -18,7 +18,7 @@ file-backed y privados por empleado.
 | Composer | modos, modelo, esfuerzo, web, skills e imágenes revalidados server-side |
 | Review | diff y estado del resultado persistidos por turn |
 | Documentos | upload streaming, Office/PDF/texto/imagen, preview privado y publicación confirmada |
-| Memoria | creación/revocación explícita y snapshot trazable por turn |
+| Memoria | extracción automática privada al terminar, creación manual, corrección/borrado y snapshot relevante trazable por turn |
 | Browser | perfil por empleado, target/descargas por thread, viewer autenticado y takeover humano |
 | Runtime | worker/CODEX_HOME por empleado y transporte WebSocket privado recuperable |
 

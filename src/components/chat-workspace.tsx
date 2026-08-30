@@ -245,7 +245,7 @@ function AssistantMessage({
           <span className="activity-shimmer">{liveStatus}…</span>
         </div>
       ) : message.content ? (
-        <div className="mt-4 max-w-[76ch] text-[16px] leading-7 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
+        <div className="mt-4 max-w-[76ch] text-[15px] leading-6 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
           <MarkdownMessage streaming={message.status === "streaming"}>{message.content}</MarkdownMessage>
         </div>
       ) : null}
@@ -284,7 +284,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
   return (
     <article className="message-enter group flex justify-end">
       <div className="max-w-[86%] md:max-w-[70%]">
-      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)]">
+      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[15px] leading-6 text-[var(--user-message-text)]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -365,12 +365,13 @@ export function ChatWorkspace({
   const composerMeasurementRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
+  const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
+  const [composerMultiline, setComposerMultiline] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -388,12 +389,20 @@ export function ChatWorkspace({
     return () => cancelAnimationFrame(frame);
   }, [thread?.id]);
 
+  useEffect(() => {
+    if (!hydrated || thread?.messages.length) return;
+    const frame = requestAnimationFrame(() => composerRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [hydrated, thread?.id, thread?.messages.length]);
+
   const resizeComposer = useCallback(() => {
     const textarea = composerRef.current;
     const measurement = composerMeasurementRef.current;
     if (!textarea || !measurement) return;
     const minHeight = thread?.messages.length ? 32 : 48;
-    textarea.style.height = `${Math.min(Math.max(measurement.scrollHeight, minHeight), 192)}px`;
+    const nextHeight = Math.min(Math.max(measurement.scrollHeight, minHeight), 192);
+    textarea.style.height = `${nextHeight}px`;
+    setComposerMultiline(nextHeight > minHeight + 1);
   }, [thread?.messages.length]);
 
   useLayoutEffect(() => {
@@ -448,22 +457,20 @@ export function ChatWorkspace({
   const mentionMatch = prompt.match(/(?:^|\s)@([^\s@]*)$/u);
   const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase("es") ?? null;
   const mentionOptions = useMemo(() => mentionQuery === null ? [] : connectorMentions
-    .filter((mention) => mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery))
+    .filter((mention) => mention.canRead && mention.status === "connected" &&
+      (mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery)))
     .slice(0, 8), [connectorMentions, mentionQuery]);
   const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
 
   const openAuthorizedConnectors = () => {
-    if (!connectorMentions.some((mention) => mention.canRead)) {
-      onComposerNotice("No hay conectores autorizados disponibles.");
+    if (connectorMentions.length === 0) {
+      onComposerNotice("No hay conectores habilitados en tu catálogo.");
       setComposerMenuOpen(false);
       return;
     }
-    if (!/(?:^|\s)@[^\s@]*$/u.test(prompt)) {
-      onPromptChange(`${prompt}${prompt && !/\s$/u.test(prompt) ? " " : ""}@`);
-    }
     setComposerMenuOpen(false);
-    setMentionOpen(true);
-    requestAnimationFrame(() => composerRef.current?.focus());
+    setMentionOpen(false);
+    setConnectorCatalogOpen(true);
   };
 
   const selectConnectorMention = (mention: ConnectorMention) => {
@@ -475,19 +482,29 @@ export function ChatWorkspace({
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  const selectCatalogConnector = (mention: ConnectorMention) => {
+    if (!mention.canRead) return;
+    onPromptChange(`${prompt}${prompt && !/\s$/u.test(prompt) ? " " : ""}@${mention.label} `);
+    if (!selectedConnectorMentionIds.includes(mention.id)) onConnectorMentionIdsChange([...selectedConnectorMentionIds, mention.id]);
+    setConnectorCatalogOpen(false);
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
   useEffect(() => {
-    if (!composerMenuOpen && !composerPickerOpen && !mentionOpen) return;
+    if (!composerMenuOpen && !composerPickerOpen && !mentionOpen && !connectorCatalogOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
       if (composerShellRef.current?.contains(event.target as Node)) return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
       setMentionOpen(false);
+      setConnectorCatalogOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
       setMentionOpen(false);
+      setConnectorCatalogOpen(false);
       composerRef.current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutside);
@@ -496,7 +513,7 @@ export function ChatWorkspace({
       document.removeEventListener("pointerdown", closeOnOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [composerMenuOpen, composerPickerOpen, mentionOpen]);
+  }, [composerMenuOpen, composerPickerOpen, connectorCatalogOpen, mentionOpen]);
 
   const addImages = async (files: FileList | File[] | null) => {
     if (!files || !canAttachImages) return;
@@ -616,12 +633,12 @@ export function ChatWorkspace({
       <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
-          {!hasMessages ? <h1 className="mb-7 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
+          {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages && !attachments.length && !documents.length && !selectedMentions.length ? "composer-compact" : ""} ${hasMessages ? "" : "min-h-[104px] justify-end"} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${!composerMultiline && !attachments.length && !documents.length && !selectedMentions.length ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
@@ -631,7 +648,6 @@ export function ChatWorkspace({
             {composerMenuOpen ? (
               <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
-                {canAttachDocuments ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); folderInputRef.current?.click(); }}><FolderOpen size={17} />Añadir carpeta</button> : null}
                 <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Conectores</button>
               </div>
             ) : null}
@@ -672,7 +688,7 @@ export function ChatWorkspace({
               placeholder={`Escribe a ${placeholderName}…`}
               rows={1}
               defaultValue={prompt}
-              onChange={(event) => { onPromptChange(event.target.value); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
+              onChange={(event) => { onPromptChange(event.target.value); setConnectorCatalogOpen(false); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
               onKeyDown={(event) => {
                 if (mentionOpen && mentionOptions.length && (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter")) {
                   event.preventDefault();
@@ -690,6 +706,9 @@ export function ChatWorkspace({
             />
             {mentionOpen && mentionQuery !== null ? <div role="listbox" aria-label="Conectores disponibles" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
               {mentionOptions.length ? mentionOptions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectConnectorMention(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "requiere inicio de sesión" : "no disponible"}</span></button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
+            </div> : null}
+            {connectorCatalogOpen ? <div role="listbox" aria-label="Catálogo de conectores" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
+              {connectorMentions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectCatalogConnector(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "conecta la cuenta en Ajustes" : "no disponible"}</span></button>)}
             </div> : null}
             <div className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
@@ -709,16 +728,15 @@ export function ChatWorkspace({
                   />
                 ) : null}
                 {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
-                {canAttachDocuments ? <input ref={(node) => { folderInputRef.current = node; node?.setAttribute("webkitdirectory", ""); }} aria-label="Seleccionar carpeta para adjuntar" className="sr-only" type="file" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <ComposerPicker
                   ariaLabel="Experiencia"
                   value={composerExperience}
-                  valueLabel={composerExperience === "fast" ? "Rápido" : composerExperience === "expert" ? "Experto" : "Smart"}
+                  valueLabel={composerExperience === "fast" ? "Rápido" : composerExperience === "expert" ? "Experto" : "Inteligente"}
                   options={[
                     { value: "fast", label: "Rápido", detail: "Para avanzar con agilidad" },
-                    { value: "smart", label: "Smart", detail: "Equilibrio para el día a día" },
+                    { value: "smart", label: "Inteligente", detail: "Equilibrio para el día a día" },
                     { value: "expert", label: "Experto", detail: "Para trabajo más exigente" },
                   ]}
                   open={composerPickerOpen === "experience"}

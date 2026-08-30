@@ -11,7 +11,7 @@ export type TurnTelemetryCorrelation = Readonly<{
 }>;
 
 export type TurnTelemetryTerminal = "completed" | "error" | "stopped";
-export type TurnTelemetryLifecycle = "resumed" | "reconnected" | "disconnected" | "cancel_requested";
+export type TurnTelemetryLifecycle = "resumed" | "reconnected" | "disconnected" | "cancel_requested" | "timeout_requested";
 export type TurnTelemetryPhase =
   | "memory"
   | "worker"
@@ -47,6 +47,7 @@ export type TurnTelemetrySnapshot = Readonly<{
   reconnectCount: number;
   disconnectCount: number;
   cancelRequested: boolean;
+  timeoutRequested: boolean;
 }>;
 
 /**
@@ -93,10 +94,12 @@ export class TurnTelemetry {
   private firstToolAt: number | null = null;
   private previousDeltaAt: number | null = null;
   private readonly interDeltaMs: number[] = [];
+  private readonly toolQueuedAt = new Map<string, number>();
   private resumeCount = 0;
   private reconnectCount = 0;
   private disconnectCount = 0;
   private cancelRequested = false;
+  private timeoutRequested = false;
   private terminal: TurnTelemetryTerminal | null = null;
   private admittedAt: number | null = null;
   private workerWarm: boolean | null = null;
@@ -147,6 +150,12 @@ export class TurnTelemetry {
     this.lifecycle("cancel_requested");
   }
 
+  timeout() {
+    if (this.timeoutRequested) return;
+    this.timeoutRequested = true;
+    this.lifecycle("timeout_requested");
+  }
+
   delta() {
     const observedAt = this.now();
     this.firstDeltaAt ??= observedAt;
@@ -167,6 +176,35 @@ export class TurnTelemetry {
 
   tool() {
     this.firstToolAt ??= this.now();
+  }
+
+  toolQueued(itemId: string) {
+    if (!itemId || this.toolQueuedAt.has(itemId)) return;
+    this.toolQueuedAt.set(itemId, this.now());
+    while (this.toolQueuedAt.size > 128) {
+      const oldest = this.toolQueuedAt.keys().next().value;
+      if (oldest === undefined) break;
+      this.toolQueuedAt.delete(oldest);
+    }
+  }
+
+  toolExecution(itemId: string | null, toolKind: string) {
+    const executionStartedAt = this.now();
+    const queuedAt = itemId ? this.toolQueuedAt.get(itemId) ?? null : null;
+    if (itemId) this.toolQueuedAt.delete(itemId);
+    this.tool();
+    return (outcome: "completed" | "error") => {
+      const completedAt = this.now();
+      this.options.logger.info("codex.tool_phase", {
+        metricSchemaVersion: 1,
+        ...this.attributes(),
+        toolKind: /^[A-Za-z0-9_.:-]{1,128}$/u.test(toolKind) ? toolKind : "unknown",
+        outcome,
+        queueMs: queuedAt === null ? null : Math.max(0, Math.round(executionStartedAt - queuedAt)),
+        executionMs: Math.max(0, Math.round(completedAt - executionStartedAt)),
+        requestElapsedMs: elapsedMs(this.startedAt, () => completedAt),
+      });
+    };
   }
 
   async measure<T>(phase: TurnTelemetryPhase, operation: () => Promise<T>): Promise<T> {
@@ -253,6 +291,7 @@ export class TurnTelemetry {
       reconnectCount: this.reconnectCount,
       disconnectCount: this.disconnectCount,
       cancelRequested: this.cancelRequested,
+      timeoutRequested: this.timeoutRequested,
     };
   }
 

@@ -74,6 +74,32 @@ Shared Codex authentication used for the current Arnall QA phase is a temporary
 runtime configuration choice; it does not change these connector isolation
 rules and should not be reused for customer email or CRM identities.
 
+## Local document generation and preview
+
+PDF, DOCX, PPTX and XLSX creation is a server-local product capability, not a
+connector. `aibrain_documents.create` writes a validated, non-empty file below
+the authenticated employee's private project workspace and returns only its
+relative path, size, hash and private artifact URLs. Google Drive, Dropbox and
+other OAuth-backed storage are never consulted unless the employee explicitly
+chooses that destination in the current request. A personal OAuth binding from
+another employee is neither a fallback nor an eligible shared credential.
+
+Generated Office previews are converted to PDF inside the private document
+sandbox. Every converter runs in its own process group with a fixed timeout and
+request cancellation. Cancellation, timeout or excessive tool output terminates
+the whole process group (including LibreOffice helpers), removes the private work
+directory and returns an explicit `cancelled`, `retryable` or `failed` state.
+The route never retries an uncertain conversion effect automatically.
+
+Downloads and previews reauthorize installation, employee and project on every
+request. Responses are same-origin, bounded, type-validated and `private,
+no-store`; the protected API response keeps `X-Frame-Options: DENY` and
+`frame-ancestors 'none'`. The browser fetches the PDF with same-origin
+credentials, validates type and size, and displays only a revocable local
+`blob:` URL. Read-only company/source mounts remain outer sandbox roots and are
+not promoted to App Server workspaces, preventing nested workspace discovery
+from trying to create `.git` below `/srv/aibrain/source-ro`.
+
 ## Arnall Codex MCP action gate
 
 The only implemented mutation path is disabled unless the installation supplies

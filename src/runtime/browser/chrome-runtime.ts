@@ -848,9 +848,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     }
     await this.withThreadPageRecovery(threadId, async (page) => {
       this.assertAgentControl();
-      await this.requireBrowser().send("Input.dispatchMouseEvent", {
-        type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
-      }, { sessionId: page.sessionId });
+      await this.scrollPage(page, deltaX, deltaY);
     });
   }
 
@@ -1136,9 +1134,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         Math.abs(deltaX) > 5_000 || Math.abs(deltaY) > 5_000 || (deltaX === 0 && deltaY === 0)) {
         throw new ChromeRuntimeError("CHROME_SCROLL_INVALID", "Browser scroll delta is invalid.");
       }
-      await browser.send("Input.dispatchMouseEvent", {
-        type: "mouseWheel", x: 400, y: 300, deltaX, deltaY,
-      }, { sessionId: page.sessionId });
+      await this.scrollPage(page, deltaX, deltaY);
       return;
     }
     const selector = validateSelector(command.selector ?? "");
@@ -1201,6 +1197,18 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       throw new ChromeRuntimeError("CHROME_ELEMENT_NOT_FOUND", "Browser selector did not match an element.");
     }
     return found.nodeId as number;
+  }
+
+  private async scrollPage(page: ThreadPage, deltaX: number, deltaY: number) {
+    const evaluated = await this.requireBrowser().send<{ exceptionDetails?: unknown }>("Runtime.evaluate", {
+      expression: `window.scrollBy({ left: ${deltaX}, top: ${deltaY}, behavior: "instant" })`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: true,
+    }, { sessionId: page.sessionId });
+    if (evaluated.exceptionDetails) {
+      throw new ChromeRuntimeError("CHROME_SCROLL_FAILED", "Browser page rejected the scroll operation.");
+    }
   }
 
   async takeOver() {

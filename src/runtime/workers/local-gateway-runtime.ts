@@ -314,7 +314,13 @@ export class PrivateWorkerGateway {
   private stopping = false;
   private state: WorkerControllerHealth["state"] = "stopped";
   private lastError: string | null = null;
-  private messageChain = Promise.resolve();
+  // App Server stdout can contain a long stream of durable deltas. Client
+  // control frames travel in the opposite direction and must never queue
+  // behind that persistence work: doing so made one busy turn block
+  // thread/start, thread/read and turn/interrupt for every chat of the user.
+  private appServerOutputChain = Promise.resolve();
+  private clientFrameChain = Promise.resolve();
+  private eventRecordChain = Promise.resolve();
   private readonly inFlightRequests = new Set<string>();
   private readonly pendingResponseConfirmations = new Map<string, string>();
 
@@ -369,7 +375,7 @@ export class PrivateWorkerGateway {
       this.child = this.processFactory(this.context);
       this.lines = createInterface({ input: this.child.stdout });
       this.lines.on("line", (line) => {
-        this.messageChain = this.messageChain
+        this.appServerOutputChain = this.appServerOutputChain
           .then(() => this.receiveAppServerLine(line))
           .catch((error: unknown) => this.fail(error));
       });
@@ -462,7 +468,11 @@ export class PrivateWorkerGateway {
         child.kill("SIGTERM");
       });
     }
-    await this.messageChain.catch(() => undefined);
+    await Promise.all([
+      this.appServerOutputChain.catch(() => undefined),
+      this.clientFrameChain.catch(() => undefined),
+      this.eventRecordChain.catch(() => undefined),
+    ]);
     this.endpoint = null;
     this.state = "stopped";
     this.stopping = false;
@@ -482,7 +492,7 @@ export class PrivateWorkerGateway {
         socket.close(1003, "Text frame required");
         return;
       }
-      this.messageChain = this.messageChain
+      this.clientFrameChain = this.clientFrameChain
         .then(async () => {
           const value: unknown = JSON.parse(frame.toString("utf8"));
           if (!isRecord(value) || value.protocolVersion !== APP_SERVER_TRANSPORT_PROTOCOL_VERSION) {
@@ -588,9 +598,14 @@ export class PrivateWorkerGateway {
     if (accepted.existing && accepted.record.status === "accepted") {
       if (request.kind === "rpc-response") {
         const scopeDigest = await this.responseScopeDigest(request, true);
-        await this.dispatchAppServerInput(request);
         if (scopeDigest) this.pendingResponseConfirmations.set(request.clientRequestId, scopeDigest);
-        else await this.completeUnscopedResponse(socket, request.clientRequestId);
+        try {
+          await this.dispatchAppServerInput(request);
+        } catch (error) {
+          this.pendingResponseConfirmations.delete(request.clientRequestId);
+          throw error;
+        }
+        if (!scopeDigest) await this.completeUnscopedResponse(socket, request.clientRequestId);
         return;
       }
       if (this.inFlightRequests.has(request.clientRequestId)) {
@@ -625,17 +640,22 @@ export class PrivateWorkerGateway {
     const responseScopeDigest = request.kind === "rpc-response"
       ? await this.responseScopeDigest(request, false)
       : undefined;
+    if (responseScopeDigest) {
+      // Register before writing to App Server. With independent input/output
+      // lanes the child may emit durable progress before stdin's callback
+      // fires; pre-registration prevents losing that exactly-once receipt.
+      this.pendingResponseConfirmations.set(request.clientRequestId, responseScopeDigest);
+    }
     if (request.kind !== "rpc-response") this.inFlightRequests.add(request.clientRequestId);
     try {
       await this.dispatchAppServerInput(request);
     } catch (error) {
       this.inFlightRequests.delete(request.clientRequestId);
+      this.pendingResponseConfirmations.delete(request.clientRequestId);
       throw error;
     }
     if (request.kind === "rpc-response") {
-      if (responseScopeDigest) {
-        this.pendingResponseConfirmations.set(request.clientRequestId, responseScopeDigest);
-      } else {
+      if (!responseScopeDigest) {
         await this.completeUnscopedResponse(socket, request.clientRequestId);
       }
       return;
@@ -704,7 +724,18 @@ export class PrivateWorkerGateway {
     if (scope) await this.confirmServerResponses(scope, event.eventId);
   }
 
-  private async recordAppServerOutput(value: unknown) {
+  private recordAppServerOutput(value: unknown) {
+    const recorded = this.eventRecordChain.then(() => this.recordAppServerOutputSerially(value));
+    this.eventRecordChain = recorded.then(() => undefined, () => undefined);
+    return recorded;
+  }
+
+  /**
+   * App Server stdout and recovered request responses are intentionally fed by
+   * independent lanes.  The durable event journal itself still needs one
+   * writer so cursor allocation and append remain atomic across both lanes.
+   */
+  private async recordAppServerOutputSerially(value: unknown) {
     const cursor = await this.events.loadCursor();
     const event: AppServerEvent = {
       eventId: randomUUID(),

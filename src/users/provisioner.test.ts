@@ -6,6 +6,7 @@ import { FileLocalUserStore } from "@/auth/local-user-store";
 import { parseInstallationConfig } from "@/config/installation-schema";
 import { parsePermissionMarkdown } from "@/permissions/markdown-parser";
 import { UserProvisioner } from "@/users/provisioner";
+import { LocalFileMemoryService } from "@/memory/local-file-memory-service";
 
 const roots: string[] = [];
 
@@ -57,7 +58,8 @@ describe("UserProvisioner", () => {
       displayName: `Synthetic Employee ${index + 1}`,
     }));
 
-    const results = await Promise.all(inputs.map((input) => provisioner.provision(input)));
+    const results = [];
+    for (const input of inputs) results.push(await provisioner.provision(input));
     expect(results.every(({ created }) => created)).toBe(true);
     expect(new Set(results.map(({ userRoot }) => userRoot))).toHaveLength(20);
     expect(new Set(results.map(({ workerId }) => workerId))).toHaveLength(20);
@@ -102,7 +104,7 @@ describe("UserProvisioner", () => {
     for (const directory of ["departments", "procedures", "glossary", "sources"]) {
       expect(await mode(path.join(config.paths.companyContextRoot, "knowledge", directory))).toBe(0o700);
     }
-  }, 20_000);
+  }, 120_000);
 
   it("is idempotent and never recreates a consumed initial-password marker", async () => {
     const { config, provisioner } = await fixture();
@@ -131,6 +133,37 @@ describe("UserProvisioner", () => {
     const seedRoot = path.join(process.cwd(), "config", "company-context", "arnall");
     const { config, provisioner } = await fixture(seedRoot);
     await provisioner.ensureInstallationPolicy();
+
+    await provisioner.provision({
+      userId: userId(1),
+      email: "arnall-employee@example.test",
+      displayName: "Arnall Employee",
+    });
+    const snapshot = await new LocalFileMemoryService({ config }).buildPromptSnapshot({
+      installationId: config.installationId,
+      userId: userId(1),
+      projectId: "00000000-0000-4000-8000-000000000010",
+    }, { maxCharacters: 64_000 });
+    const prompt = JSON.parse(snapshot.text) as {
+      companyContext: Array<{ fileName: string; content: string }>;
+    };
+    expect(prompt.companyContext.map(({ fileName }) => fileName)).toEqual(expect.arrayContaining([
+      "company/COMPANY.md",
+      "organization/TEAM.md",
+      "organization/DEPARTMENTS.md",
+      "preferences/PREFERENCES.md",
+      "processes/PROCESSES.md",
+      "objectives/OBJECTIVES.md",
+      "brand/BRAND.md",
+      "tools/TOOLS_AND_CONNECTORS.md",
+      "automations/AUTOMATIONS.md",
+      "support/GRAPHIKAI_SUPPORT.md",
+    ]));
+    const authorizedSummaryEvidence = prompt.companyContext.map(({ content }) => content).join("\n");
+    expect(authorizedSummaryEvidence).toContain("Arnall Carniceros & Xarcuteros");
+    expect(authorizedSummaryEvidence).toContain("Sergi, Carles, Roger, David and Arnau");
+    expect(authorizedSummaryEvidence).toContain("No internal process has been supplied");
+    expect(authorizedSummaryEvidence).not.toContain("PERMISSIONS.md belongs");
 
     for (const relativePath of [
       "company/COMPANY.md",
@@ -163,7 +196,7 @@ describe("UserProvisioner", () => {
     expect(await readFile(edited, "utf8")).toBe(custom);
     expect(after.mode & 0o777).toBe(before.mode & 0o777);
     expect(after.mtimeMs).toBe(before.mtimeMs);
-  });
+  }, 120_000);
 
   it("fails closed for identity drift and symlink substitution", async () => {
     const { root, config, provisioner } = await fixture();

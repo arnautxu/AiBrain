@@ -1,4 +1,5 @@
 import type { RuntimeReasoningEffort } from "@/lib/runtime-status";
+import type { ComposerExperience } from "@/lib/composer-experience";
 
 export type ActivityKind =
   | "system"
@@ -127,6 +128,8 @@ export type GeneratedArtifact = ImageArtifact | DocumentArtifact | BrowserArtifa
 
 export type TurnOptions = {
   mode: ComposerMode;
+  /** Employee-facing product choice. Provider settings are resolved server-side. */
+  experience?: ComposerExperience;
   model: string | null;
   effort: RuntimeReasoningEffort | null;
   autoApprove?: boolean;
@@ -387,6 +390,7 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
   );
   return (
     (value.mode === "agent" || value.mode === "plan" || value.mode === "ask") &&
+    (value.experience === undefined || value.experience === "fast" || value.experience === "smart" || value.experience === "expert") &&
     (value.model === null || (typeof value.model === "string" && value.model.length <= 100)) &&
     (value.effort === null || value.effort === "none" || value.effort === "minimal" ||
       value.effort === "low" || value.effort === "medium" || value.effort === "high" ||

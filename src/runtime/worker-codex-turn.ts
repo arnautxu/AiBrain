@@ -59,9 +59,12 @@ import {
   permissionAllowsGenericToolExecution,
 } from "@/runtime/permission-turn";
 import {
+  loadInternalAgentProductContext,
+  productIdentityResponseForQuestion,
+} from "@/runtime/internal-agent-context";
+import {
   AIBRAIN_MEMORY_TOOL_NAMESPACE,
   handleMemoryProposalToolCall,
-  MEMORY_DYNAMIC_TOOLS,
   prepareTurnMemory,
   type WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
@@ -71,6 +74,12 @@ import {
   handleGmailDynamicToolCall,
 } from "@/runtime/gmail-dynamic-tools";
 import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
+import {
+  AIBRAIN_OUTLOOK_TOOL_NAMESPACE,
+  handleOutlookDynamicToolCall,
+  OUTLOOK_DYNAMIC_TOOLS,
+} from "@/runtime/outlook-dynamic-tools";
+import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
 import { issueThreadToken } from "@/runtime/thread-token";
 import {
   acquireWorkerTurnActivity,
@@ -89,9 +98,16 @@ import {
 import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
+import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
+import { workspacePolicyForIdentity } from "@/admin/policy-service";
+import {
+  AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE,
+  COMPANY_FILES_DYNAMIC_TOOLS,
+  handleCompanyFilesDynamicToolCall,
+} from "@/runtime/enterprise-documents/dynamic-tools";
 import {
   AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
   DOCUMENT_DYNAMIC_TOOLS,
@@ -99,9 +115,32 @@ import {
 } from "@/runtime/documents/dynamic-tools";
 import type { AgentThreadRuntimeContext } from "@/workbench/internal";
 import {
+  enqueueAutomaticMemoryExtraction,
+  scheduleAutomaticMemoryJobProcessing,
+} from "@/memory/automatic-extraction";
+import {
   parseTurnTokenUsage,
   type TokenUsageBreakdown,
 } from "@/usage/contracts";
+
+const DEFAULT_WORKER_TURN_TIMEOUT_MS = 10 * 60_000;
+const MIN_WORKER_TURN_TIMEOUT_MS = 30_000;
+const MAX_WORKER_TURN_TIMEOUT_MS = 30 * 60_000;
+
+export function workerTurnTimeoutMs(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+) {
+  const raw = environment.AIBRAIN_WORKER_TURN_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_WORKER_TURN_TIMEOUT_MS;
+  if (!/^[1-9][0-9]*$/u.test(raw)) {
+    throw new Error("AIBRAIN_WORKER_TURN_TIMEOUT_MS is invalid.");
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < MIN_WORKER_TURN_TIMEOUT_MS || value > MAX_WORKER_TURN_TIMEOUT_MS) {
+    throw new Error("AIBRAIN_WORKER_TURN_TIMEOUT_MS must be between 30000 and 1800000 ms.");
+  }
+  return value;
+}
 
 export type WorkerTurnProjection = {
   envelope: AppServerEvent;
@@ -126,15 +165,43 @@ type EmitEvent = (
   projection?: WorkerTurnProjection,
 ) => Promise<void>;
 
+const DEFAULT_TURN_IDLE_TIMEOUT_MS = 4 * 60_000;
+const DEFAULT_TURN_HARD_TIMEOUT_MS = 30 * 60_000;
+
+function configuredTurnTimeout(name: string, fallback: number, maximum: number) {
+  const value = Number(process.env[name] || fallback);
+  return Number.isSafeInteger(value) && value >= 1_000 && value <= maximum ? value : fallback;
+}
+
+function turnTerminalTimeouts() {
+  const idleTimeoutMs = configuredTurnTimeout(
+    "AIBRAIN_TURN_IDLE_TIMEOUT_MS",
+    DEFAULT_TURN_IDLE_TIMEOUT_MS,
+    30 * 60_000,
+  );
+  const hardTimeoutMs = configuredTurnTimeout(
+    "AIBRAIN_TURN_HARD_TIMEOUT_MS",
+    DEFAULT_TURN_HARD_TIMEOUT_MS,
+    2 * 60 * 60_000,
+  );
+  return { idleTimeoutMs, hardTimeoutMs: Math.max(idleTimeoutMs, hardTimeoutMs) };
+}
+
+function productSafeRuntimeMessage(message: string) {
+  return message
+    .replace(/\b(?:Codex|ChatGPT|OpenAI|App\s+Server|gpt-[a-z0-9.-]+)\b/giu, "servicio de IA")
+    .slice(0, 2_000);
+}
+
 function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDocumentRoot[]) {
   const scopedRoots = documentRoots.length > 0
-    ? documentRoots.map((root) => `- ${root.scope}: ${root.path} (${root.readOnly ? "solo lectura" : "lectura y escritura"})`).join("\n")
+    ? documentRoots.map((root) => `- ${root.scope}${root.scope === "department" ? " autorizado" : ""}: lectura autorizada`).join("\n")
     : "- No hay raíces documentales corporativas autorizadas para este turno.";
   return [
     "## Alcance de archivos autorizado",
     "Puedes listar y leer sin aprobación el workspace privado del empleado, los archivos del proyecto y sus artefactos, el contexto y conocimiento corporativo de solo lectura, la fuente documental corporativa de solo lectura y los documentos subidos por este empleado.",
     "Las raíces documentales de empresa ya autorizadas para este turno son:\n" + scopedRoots,
-    "Las escrituras en estas raíces autorizadas no requieren una aprobación repetida; los borrados, publicaciones y cualquier efecto externo sí siguen sujetos a la política del turno. Nunca salgas de estas raíces.",
+    "Usa `aibrain_company_files.search` y `aibrain_company_files.read` para localizarlas y leerlas. Estas herramientas no escriben en las raíces empresariales. No cites rutas internas del servidor. Los borrados, publicaciones y cualquier efecto externo siguen sujetos a la política del turno. Nunca intentes salir de los scopes entregados.",
     "Este runtime remoto no tiene acceso al disco físico del Mac u otro ordenador personal del usuario. Para consultar esos archivos hace falta un desktop bridge autorizado o que estén sincronizados o montados en una raíz de lectura aprobada; nunca afirmes que puedes verlos si no lo están.",
   ].join("\n");
 }
@@ -226,7 +293,10 @@ function recoveredTurn(result: unknown, clientUserMessageId: string): RecoveredT
 
 function recoveredAgentText(turn: RecoveredTurn) {
   const messages = turn.items.filter((item) => item.type === "agentMessage" && typeof item.text === "string");
-  const final = messages.filter((item) => item.phase === "final_answer").at(-1) ?? messages.at(-1);
+  // A phased commentary item is public activity, not the final answer. Only
+  // legacy messages without a phase retain the compatibility fallback.
+  const final = messages.filter((item) => item.phase === "final_answer").at(-1) ??
+    messages.filter((item) => item.phase == null).at(-1);
   return final && typeof final.text === "string" ? final.text : null;
 }
 
@@ -344,6 +414,7 @@ export async function runWorkerCodexTurn(
   admittedTelemetry?: TurnTelemetry,
   automationSession?: AuthSession,
   runtimeIdentitySession?: AuthSession,
+  backgroundExecution = false,
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
@@ -357,7 +428,7 @@ export async function runWorkerCodexTurn(
   }, { logger: operationalLogger, startedAt: requestStartedAt });
   try {
   if (runtimeConfig.mode !== "codex") {
-    throw new RuntimeNotReadyError("El runtime real de Codex no està activat.");
+    throw new RuntimeNotReadyError("El servei privat de la instal·lació no està activat.");
   }
   if (signal.aborted) throw new RuntimeNotReadyError("El torn s’ha cancel·lat abans de començar.");
   assertCodexTurnPermissionBinding(
@@ -366,7 +437,16 @@ export async function runWorkerCodexTurn(
     authenticatedUserId,
     permissions,
   );
+  const productIdentityResponse = productIdentityResponseForQuestion(chatRequest.message, assistantName);
+  if (productIdentityResponse) {
+    await emit({ type: "content", value: productIdentityResponse });
+    await emit({ type: "done" });
+    telemetry.finish("completed");
+    return;
+  }
   const activities = new Map<string, ActivityItem>();
+  const agentMessagePhases = new Map<string, "commentary" | "final_answer" | null>();
+  const commentaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
     activities.set(item.id, item);
     telemetry.activity();
@@ -426,15 +506,45 @@ export async function runWorkerCodexTurn(
       projectId: chatRequest.projectId,
       turnId: chatRequest.assistantMessageId,
       permissionFingerprint: permissions.fingerprint,
+      query: chatRequest.message,
     })),
     telemetry.measure("worker", () => workerAppServerForUser(authenticatedUserId, maintenanceActivity)),
   ]);
+  let automaticMemoryScheduled = false;
+  const scheduleCompletedConversationMemory = async () => {
+    if (automaticMemoryScheduled || typeof runtime.config.paths?.dataRoot !== "string" ||
+        typeof runtime.config.paths?.usersRoot !== "string") return;
+    automaticMemoryScheduled = true;
+    try {
+      const job = await enqueueAutomaticMemoryExtraction({
+        config: runtime.config,
+        context: { installationId, userId: authenticatedUserId, projectId: chatRequest.projectId },
+        threadId: chatRequest.threadId,
+        turnId: chatRequest.assistantMessageId,
+        message: chatRequest.message,
+        observedToolNames: [...observedToolNames],
+      });
+      if (job) {
+        scheduleAutomaticMemoryJobProcessing(runtime.config, job, (error) => operationalLogger.warn("memory.background_extraction_failed", {
+          code: error instanceof Error && "code" in error ? String(error.code) : "MEMORY_BACKGROUND_FAILED",
+        }));
+      }
+    } catch (error) {
+      operationalLogger.warn("memory.background_enqueue_failed", {
+        code: error instanceof Error && "code" in error ? String(error.code) : "MEMORY_BACKGROUND_ENQUEUE_FAILED",
+      });
+    }
+  };
   await completeRuntimePhase("runtime-context", { label: "Context preparat" });
-  await setRuntimePhase("runtime-connect", "Connectant amb Codex", "Worker privat i sessió d’App Server");
+  await setRuntimePhase("runtime-connect", "Preparant l’assistent", "Entorn privat i sessió segura");
   telemetry.workerReadiness(runtime.workerWasWarm ?? false);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
   }
+  const internalAgentContext = await telemetry.measure(
+    "memory",
+    () => loadInternalAgentProductContext(runtime.config),
+  );
   const canSynchronizeSkills = typeof runtime.handle.roots.codexHome === "string" &&
     typeof runtime.config.paths.usersRoot === "string" && typeof runtime.config.paths.dataRoot === "string";
   const synchronizedSkills = canSynchronizeSkills
@@ -458,10 +568,18 @@ export async function runWorkerCodexTurn(
   // The production installation schema always has dataRoot. Keeping this
   // guard lets older in-process test doubles remain deliberately minimal;
   // it is not a production fallback and grants no document root.
-  const enterpriseDocumentRoots = typeof runtime.config.paths.dataRoot === "string"
-    ? await new EnterpriseDocumentNetwork(runtime.config).rootsForTurn({
+  const hasEnterpriseDocumentNetwork = typeof runtime.config.paths.dataRoot === "string";
+  const enterpriseDocumentNetwork = hasEnterpriseDocumentNetwork
+    ? new EnterpriseDocumentNetwork(runtime.config)
+    : null;
+  const workspacePolicy = hasEnterpriseDocumentNetwork && typeof runtime.config.companySlug === "string"
+    ? await workspacePolicyForIdentity(installationId, authenticatedUserId, runtime.config)
+    : null;
+  const enterpriseDocumentRoots = enterpriseDocumentNetwork
+    ? await enterpriseDocumentNetwork.rootsForTurn({
         userId: authenticatedUserId,
         projectId: chatRequest.projectId,
+        departmentIds: workspacePolicy?.groups.map(({ id }) => id) ?? [],
         permissions,
       })
     : [];
@@ -474,7 +592,6 @@ export async function runWorkerCodexTurn(
     projectWorkspace,
     runtime.handle.roots.workspace,
     runtime.handle.roots.artifacts,
-    ...enterpriseDocumentRoots.filter((root) => !root.readOnly).map((root) => root.path),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   // A new conversation used to wait for the optional model/skills/usage
@@ -484,10 +601,10 @@ export async function runWorkerCodexTurn(
     "catalog",
     () => runtime.client.connectionSummary(),
   );
-  if (!account.connected) throw new RuntimeNotReadyError("Cal connectar un compte de Codex dedicat.");
+  if (!account.connected) throw new RuntimeNotReadyError("El servei privat de la instal·lació no està disponible.");
   await completeRuntimePhase("runtime-connect", {
-    label: "Codex connectat",
-    detail: account.planType ? `Pla ${account.planType}` : "Sessió dedicada verificada",
+    label: "Assistent preparat",
+    detail: "Sessió privada verificada",
   });
 
   let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
@@ -558,6 +675,7 @@ export async function runWorkerCodexTurn(
     )
     : [];
   const gmailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
+  const outlookSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === OUTLOOK_CONNECTOR_ID);
   // App Server's per-thread app configuration is the enforceable toolset
   // boundary for managed apps. The catalog revalidation above supplies these
   // IDs; the browser never supplies an app ID or a tool name directly.
@@ -584,14 +702,22 @@ export async function runWorkerCodexTurn(
   } : {};
 
   const developerInstructions = [
-    buildCodexDeveloperInstructions(chatRequest, permissions, assistantName),
+    buildCodexDeveloperInstructions(chatRequest, permissions, assistantName, internalAgentContext),
     localDocumentDeveloperInstructions(),
     readableFilesDeveloperInstructions(enterpriseDocumentRoots),
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
     synchronizedSkills.developerInstructions,
     connectorMentionDeveloperInstructions(selectedConnectorMentions),
-    ...(automationSession ? [await automationChatDeveloperInstructions(automationSession)] : []),
+    ...(automationSession ? [await automationChatDeveloperInstructions(automationSession, {
+      projectId: chatRequest.projectId,
+      currentTime: new Date(),
+      timeZone: process.env.TZ,
+    })] : []),
+    ...(backgroundExecution ? [
+      "## Ejecución background",
+      "Este turno se ejecuta sin una sesión web abierta. Usa web, skills, archivos y conectores de lectura actualmente autorizados como en un chat normal. No solicites ni esperes aprobaciones interactivas. Si una acción sensible requiere aprobación y no existe una autorización durable previa vinculada a esta ejecución, no la intentes: explica el bloqueo en el resultado.",
+    ] : []),
   ].filter(Boolean).join("\n\n");
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
@@ -653,7 +779,7 @@ export async function runWorkerCodexTurn(
       await emit({ type: "done" }, { envelope, key: `${keyPrefix}:done:${recoveredTurnState.id}` });
     } else if (recoveredTurnState.status === "failed") {
       await emit(
-        { type: "error", message: recoveredTurnState.error ?? "El torn recuperat ha fallat." },
+        { type: "error", message: productSafeRuntimeMessage(recoveredTurnState.error ?? "El torn recuperat ha fallat.") },
         { envelope, key: `${keyPrefix}:error:${recoveredTurnState.id}` },
       );
     } else if (recoveredTurnState.status === "interrupted") {
@@ -662,10 +788,10 @@ export async function runWorkerCodexTurn(
   };
   const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
     const resolvedThreadId = extractThreadId(result);
-    if (!resolvedThreadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+    if (!resolvedThreadId) throw new Error("El servei no ha retornat una conversa vàlida.");
     await completeRuntimePhase("runtime-thread", {
       label: runtimeThreadId ? "Conversa recuperada" : "Conversa oberta",
-      detail: "App Server ha confirmat el fil",
+      detail: "El servei ha confirmat la conversa",
     }, { envelope, key: "runtime-phase:thread-ready" });
     await emit({
       type: "runtimeThread",
@@ -682,7 +808,7 @@ export async function runWorkerCodexTurn(
     await setRuntimePhase(
       "runtime-thread",
       runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
-      runtimeThreadId ? "Reprenent el fil d’App Server" : "Creant el fil d’App Server",
+      runtimeThreadId ? "Reprenent la conversa segura" : "Creant la conversa segura",
     );
     try {
       threadResult = await telemetry.measure(runtimeThreadId ? "thread_resume" : "thread_start", () => runtimeThreadId
@@ -697,8 +823,9 @@ export async function runWorkerCodexTurn(
             dynamicTools: [
               ...BROWSER_DYNAMIC_TOOLS,
               ...DOCUMENT_DYNAMIC_TOOLS,
-              ...MEMORY_DYNAMIC_TOOLS,
+              ...(enterpriseDocumentNetwork ? COMPANY_FILES_DYNAMIC_TOOLS : []),
               ...GMAIL_DYNAMIC_TOOLS,
+              ...OUTLOOK_DYNAMIC_TOOLS,
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
             ],
             ephemeral: false,
@@ -721,7 +848,7 @@ export async function runWorkerCodexTurn(
         persistThreadIdentity,
       );
       if (extractThreadId(recoveredResult) !== runtimeThreadId) {
-        throw new Error("App Server ha retornat una conversa diferent durant la recuperació.");
+        throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
       }
       const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
       if (durableTurn && durableTurn.status !== "inProgress") {
@@ -747,7 +874,7 @@ export async function runWorkerCodexTurn(
     }
   }
   const threadId = extractThreadId(threadResult);
-  if (!threadId) throw new Error("Codex no ha retornat cap thread vàlid.");
+  if (!threadId) throw new Error("El servei no ha retornat una conversa vàlida.");
   telemetry.bindRuntimeThread(threadId);
   if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
   recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
@@ -759,6 +886,7 @@ export async function runWorkerCodexTurn(
         ? "completed"
         : recoveredState.status === "interrupted" ? "stopped" : "error",
     );
+    if (recoveredState.status === "completed") await scheduleCompletedConversationMemory();
     return;
   }
 
@@ -766,6 +894,7 @@ export async function runWorkerCodexTurn(
   let remoteInterruptConfirmed = false;
   let turnStartRequested = false;
   let remoteInterruptPromise: Promise<void> | null = null;
+  let terminalWatchdog: TurnTerminalWatchdog | null = null;
   const turnController = new AbortController();
   const forwardExternalAbort = () => turnController.abort();
   const turnSignal = turnController.signal;
@@ -783,7 +912,18 @@ export async function runWorkerCodexTurn(
       finalAnswerRecoveryTimer = null;
     }
     terminalTurnStatus = status;
+    if (terminalWatchdog) terminalWatchdog.stop();
     resolveFinishedTurn(status);
+  };
+  const startTerminalWatchdog = () => {
+    if (terminalWatchdog) return terminalWatchdog;
+    const timeouts = turnTerminalTimeouts();
+    terminalWatchdog = new TurnTerminalWatchdog(timeouts.idleTimeoutMs, timeouts.hardTimeoutMs);
+    terminalWatchdog.start();
+    return terminalWatchdog;
+  };
+  const stopTerminalWatchdog = () => {
+    if (terminalWatchdog) terminalWatchdog.stop();
   };
   const reconcileCompletedFinalAnswer = (sourceEnvelope: AppServerEvent) => {
     if (finalAnswerRecoveryTimer || terminalTurnStatus) return;
@@ -821,12 +961,31 @@ export async function runWorkerCodexTurn(
     finalAnswerRecoveryTimer.unref?.();
   };
   let stoppedEmitted = false;
+  let errorEmitted = false;
+  let turnTimedOut = false;
+  const turnTimeout = workerTurnTimeoutMs();
+  const turnTimeoutTimer = setTimeout(() => {
+    if (terminalTurnStatus) return;
+    turnTimedOut = true;
+    telemetry.timeout();
+    void upsertActivity({
+      id: "runtime-turn-timeout",
+      kind: "system",
+      label: "Temps màxim assolit",
+      detail: "S’ha demanat aturar el torn; no es repetirà cap acció amb resultat incert.",
+      status: "failed",
+    }).catch(() => undefined);
+    turnController.abort(new Error("Worker turn exceeded its bounded runtime."));
+  }, turnTimeout);
+  turnTimeoutTimer.unref?.();
 
   const registration = runtime.client.router.registerTurn(
     threadId,
     chatRequest.assistantMessageId,
     {
       onNotification: async (notification: ServerNotification, envelope: AppServerEvent) => {
+        terminalWatchdog?.resume();
+        terminalWatchdog?.touch();
         const { method, params } = notification;
         const phaseProjection = (key: string): WorkerTurnProjection => ({
           envelope,
@@ -835,12 +994,12 @@ export async function runWorkerCodexTurn(
         if (method === "turn/started") {
           await completeRuntimePhase("runtime-turn-start", {
             label: "Torn iniciat",
-            detail: "App Server ha acceptat la petició",
+            detail: "El servei ha acceptat la petició",
           }, phaseProjection("turn-started"));
           await setRuntimePhase(
             "runtime-awaiting-model",
-            "Esperant activitat del model",
-            "El torn ja està actiu a Codex",
+            "Esperant activitat de l’assistent",
+            "El torn ja està actiu",
             phaseProjection("awaiting-model"),
           );
           return;
@@ -853,10 +1012,13 @@ export async function runWorkerCodexTurn(
           const flagLabels = flags.map((flag) => flag === "waitingOnApproval"
             ? "Esperant aprovació"
             : flag === "waitingOnUserInput" ? "Esperant resposta de l’usuari" : flag);
+          if (flags.some((flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput")) {
+            terminalWatchdog?.pause();
+          }
           await setRuntimePhase(
             "runtime-model-active",
-            "Codex està treballant",
-            flagLabels.length ? flagLabels.join(" · ") : "Activitat confirmada per App Server",
+            "L’assistent està treballant",
+            flagLabels.length ? flagLabels.join(" · ") : "Activitat confirmada",
             phaseProjection("thread-active"),
           );
           return;
@@ -866,7 +1028,7 @@ export async function runWorkerCodexTurn(
           await setRuntimePhase(
             "runtime-reasoning",
             "Preparant el resum del raonament",
-            "Codex ha iniciat una nova part del resum",
+            "L’assistent ha iniciat una nova part del resum",
             phaseProjection("reasoning-summary-part"),
           );
           return;
@@ -874,7 +1036,7 @@ export async function runWorkerCodexTurn(
         if (method === "item/reasoning/textDelta") {
           await setRuntimePhase(
             "runtime-reasoning",
-            "Codex està raonant",
+            "L’assistent està preparant la resposta",
             "Esperant el resum publicable",
             phaseProjection("reasoning-private"),
           );
@@ -883,8 +1045,8 @@ export async function runWorkerCodexTurn(
         if (method === "model/verification") {
           await setRuntimePhase(
             "runtime-model-verification",
-            "Verificant el model",
-            "Comprovació informada per App Server",
+            "Verificant la resposta",
+            "Comprovació del servei en curs",
             phaseProjection("model-verification"),
           );
           return;
@@ -892,8 +1054,8 @@ export async function runWorkerCodexTurn(
         if (method === "model/rerouted" && isRecord(params)) {
           await setRuntimePhase(
             "runtime-model-reroute",
-            "Canviant de model",
-            typeof params.toModel === "string" ? `Continuant amb ${params.toModel}` : "Codex ha redirigit el torn",
+            "Ajustant el processament",
+            "El servei ha redirigit el torn sense canviar-ne l’abast",
             phaseProjection("model-rerouted"),
           );
           return;
@@ -930,7 +1092,7 @@ export async function runWorkerCodexTurn(
           }
           await setRuntimePhase(
             "runtime-response-processing",
-            "Processant la resposta del model",
+            "Processant la resposta",
             typeof params.item.type === "string" ? `Element ${params.item.type} rebut` : "Element rebut",
             phaseProjection("raw-response-item"),
           );
@@ -939,15 +1101,30 @@ export async function runWorkerCodexTurn(
         if (method === "rawResponse/completed") {
           await setRuntimePhase(
             "runtime-response-processing",
-            "Resposta del model rebuda",
-            "Codex està preparant el resultat final",
+            "Resposta rebuda",
+            "L’assistent està preparant el resultat final",
             phaseProjection("raw-response-completed"),
           );
           return;
         }
         if (method === "item/agentMessage/delta") {
           const delta = notificationDelta(params);
-          if (delta) {
+          const itemId = notificationItemId(params);
+          const phase = itemId ? agentMessagePhases.get(itemId) : undefined;
+          if (delta && itemId && phase === "commentary") {
+            const detail = `${commentaryText.get(itemId) ?? ""}${delta}`.slice(0, 12_000);
+            commentaryText.set(itemId, detail);
+            if (activeRuntimePhaseId) {
+              await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-commentary-text"));
+            }
+            await upsertActivity({
+              id: itemId,
+              kind: "reasoning",
+              label: "Actualización de trabajo",
+              detail,
+              status: "running",
+            }, { envelope, key: `commentary:${itemId}` });
+          } else if (delta && phase !== "commentary") {
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
             }
@@ -969,6 +1146,16 @@ export async function runWorkerCodexTurn(
         if (method === "item/started" || method === "item/completed") {
           if (method === "item/started" && activeRuntimePhaseId) {
             await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("item-started"));
+          }
+          if (isRecord(params) && isRecord(params.item) && params.item.type === "agentMessage" &&
+              typeof params.item.id === "string") {
+            const phase = params.item.phase === "commentary" || params.item.phase === "final_answer"
+              ? params.item.phase
+              : null;
+            agentMessagePhases.set(params.item.id, phase);
+            if (phase === "commentary" && typeof params.item.text === "string") {
+              commentaryText.set(params.item.id, params.item.text.slice(0, 12_000));
+            }
           }
           if (method === "item/completed") {
             await persistGeneratedImage(
@@ -993,6 +1180,10 @@ export async function runWorkerCodexTurn(
           const activity = itemActivity(params, method === "item/completed");
           if (activity) {
             if (activity.kind === "command" || activity.kind === "tool" || activity.kind === "web") telemetry.tool();
+            if (method === "item/started" &&
+                (activity.kind === "command" || activity.kind === "tool" || activity.kind === "web")) {
+              telemetry.toolQueued(activity.id);
+            }
             await upsertActivity(activity, {
               envelope,
               key: `activity:${method === "item/completed" ? "completed" : "started"}:${activity.id}`,
@@ -1075,8 +1266,8 @@ export async function runWorkerCodexTurn(
             await upsertActivity({
               id: `runtime-${randomUUID()}`,
               kind: "system",
-              label: method === "error" ? "Error del runtime" : "Avís del runtime",
-              detail: message,
+              label: method === "error" ? "Error del servei" : "Avís del servei",
+              detail: productSafeRuntimeMessage(message),
               status: method === "error" ? "failed" : "complete",
             }, { envelope, key: `runtime:${method}` });
           }
@@ -1088,13 +1279,14 @@ export async function runWorkerCodexTurn(
           }
           const status = completedTurnStatus(params) ?? {
             status: null,
-            error: "Resposta incompleta de Codex.",
+            error: "Resposta incompleta del servei.",
           };
           if (status.status === "failed") {
             await emit(
-              { type: "error", message: status.error ?? "El torn de Codex ha fallat." },
+              { type: "error", message: productSafeRuntimeMessage(status.error ?? "El torn del servei ha fallat.") },
               { envelope, key: "turn:error" },
             );
+            errorEmitted = true;
           } else if (status.status === "completed") {
             await emit({ type: "done" }, { envelope, key: "turn:done" });
           } else if (status.status === "interrupted") {
@@ -1105,6 +1297,22 @@ export async function runWorkerCodexTurn(
         }
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
+        terminalWatchdog?.resume();
+        terminalWatchdog?.touch();
+        const dynamicToolParams = request.method === "item/tool/call" && isRecord(request.params)
+          ? request.params
+          : null;
+        const finishToolMetric = dynamicToolParams
+          ? telemetry.toolExecution(
+              typeof dynamicToolParams.callId === "string" ? dynamicToolParams.callId : null,
+              [
+                typeof dynamicToolParams.namespace === "string" ? dynamicToolParams.namespace : "unknown",
+                typeof dynamicToolParams.tool === "string" ? dynamicToolParams.tool : "unknown",
+              ].join("."),
+            )
+          : null;
+        let toolOutcome: "completed" | "error" = "completed";
+        try {
         if (request.method === "item/tool/call") {
           if (!runtimeTurnId) throw new Error("Dynamic tool call arrived before the turn was bound.");
           if (automationSession && isRecord(request.params) && request.params.namespace === AIBRAIN_AUTOMATION_TOOL_NAMESPACE) {
@@ -1151,6 +1359,16 @@ export async function runWorkerCodexTurn(
             }
             return result.response as JsonValue;
           }
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE) {
+            if (!enterpriseDocumentNetwork) throw new Error("La red documental no está disponible.");
+            observedToolNames.add(`${AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
+            return await handleCompanyFilesDynamicToolCall(request.params as never, {
+              network: enterpriseDocumentNetwork,
+              roots: enterpriseDocumentRoots,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+            }) as JsonValue;
+          }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_GMAIL_TOOL_NAMESPACE) {
             return await handleGmailDynamicToolCall(request.params as never, {
               config: runtime.config,
@@ -1159,6 +1377,16 @@ export async function runWorkerCodexTurn(
               runtimeThreadId: threadId,
               runtimeTurnId,
               gmailSelected,
+            }) as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_OUTLOOK_TOOL_NAMESPACE) {
+            return await handleOutlookDynamicToolCall(request.params as never, {
+              config: runtime.config,
+              installationId,
+              userId: authenticatedUserId,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              outlookSelected,
             }) as JsonValue;
           }
           if (isRecord(request.params) && typeof request.params.namespace === "string" && typeof request.params.tool === "string") {
@@ -1184,17 +1412,36 @@ export async function runWorkerCodexTurn(
               execute: executeBrowserAgentCommand,
             }) as JsonValue;
           } catch (error) {
-            if (error instanceof BrowserDynamicToolError && error.code !== "BROWSER_TOOL_SCOPE_MISMATCH") {
-              return {
-                success: false,
-                contentItems: [{
-                  type: "inputText",
-                  text: "Browser tool request was rejected safely. Read the current page and retry with a valid browser action.",
-                }],
-              } as JsonValue;
+            if (error instanceof BrowserDynamicToolError && error.code === "BROWSER_TOOL_SCOPE_MISMATCH") {
+              throw error;
             }
-            throw error;
+            operationalLogger.error("browser.dynamic_tool_failed", {
+              installationId,
+              userId: authenticatedUserId,
+              threadId: chatRequest.threadId,
+              turnId: chatRequest.assistantMessageId,
+              code: error && typeof error === "object" && "code" in error
+                ? String((error as { code?: unknown }).code).slice(0, 120)
+                : "BROWSER_DYNAMIC_TOOL_FAILED",
+            });
+            // Returning a normal dynamic-tool failure keeps App Server and the
+            // user turn alive after errors such as
+            // `aibrain_browser dynamic tool request failed`. Scope mismatches
+            // remain fatal; no input or internal error text is reflected.
+            return {
+              success: false,
+              contentItems: [{
+                type: "inputText",
+                text: "The private browser action failed safely. Its session was recovered when required; read the current page before trying a new action. The failed action was not replayed.",
+              }],
+            } as JsonValue;
           }
+        }
+        } catch (error) {
+          toolOutcome = "error";
+          throw error;
+        } finally {
+          finishToolMetric?.(toolOutcome);
         }
         const approval = approvalFromRequest(legacyServerRequest(request));
         if (!approval || approval.item.threadId !== threadId ||
@@ -1209,6 +1456,13 @@ export async function runWorkerCodexTurn(
           await emit(
             { type: "approval", item: resolvedApproval(permissionBoundItem, "decline") },
             { envelope, key: `approval:policy-denied:${approval.item.id}` },
+          );
+          return approval.response("decline") as JsonValue;
+        }
+        if (backgroundExecution) {
+          await emit(
+            { type: "approval", item: resolvedApproval(permissionBoundItem, "decline") },
+            { envelope, key: `approval:background-denied:${approval.item.id}` },
           );
           return approval.response("decline") as JsonValue;
         }
@@ -1272,7 +1526,7 @@ export async function runWorkerCodexTurn(
     return remoteInterruptPromise;
   };
   const interrupt = () => {
-    telemetry.cancellationRequested();
+    if (!turnTimedOut) telemetry.cancellationRequested();
     if (remoteInterruptConfirmed) {
       finishTurn({ status: "interrupted", error: null });
       return;
@@ -1296,17 +1550,18 @@ export async function runWorkerCodexTurn(
       runtimeTurnId = recoveredState.id;
       registration.bindRuntimeTurn(recoveredState.id);
       telemetry.bindRuntimeTurn(recoveredState.id);
+      startTerminalWatchdog();
       await setRuntimePhase(
         "runtime-awaiting-model",
         "Torn recuperat",
-        "Escoltant els esdeveniments d’App Server",
+        "Escoltant els esdeveniments del servei",
       );
     } else {
       turnStartRequested = true;
       await setRuntimePhase(
         "runtime-turn-start",
         "Iniciant el torn",
-        "Enviant la petició al model",
+        "Enviant la petició a l’assistent",
       );
       let turnResult: JsonValue;
       try {
@@ -1345,7 +1600,7 @@ export async function runWorkerCodexTurn(
       sandboxPolicy: sandboxPolicy(
         { ...runtimeConfig, workspace: projectWorkspace },
         chatRequest,
-        enterpriseDocumentRoots.filter((root) => !root.readOnly).map((root) => root.path),
+        [],
       ),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
@@ -1357,20 +1612,21 @@ export async function runWorkerCodexTurn(
         : "concise",
       }, `turn-start:${chatRequest.assistantMessageId}`, 60_000, async (result) => {
         const resolvedTurnId = extractTurnId(result);
-        if (!resolvedTurnId) throw new Error("Codex no ha iniciat el torn.");
+        if (!resolvedTurnId) throw new Error("El servei no ha iniciat el torn.");
         runtimeTurnId = resolvedTurnId;
         registration.bindRuntimeTurn(resolvedTurnId);
         telemetry.bindRuntimeTurn(resolvedTurnId);
+        startTerminalWatchdog();
         await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
         await completeRuntimePhase("runtime-turn-start", {
           label: "Torn iniciat",
-          detail: "App Server ha confirmat la petició",
+          detail: "El servei ha confirmat la petició",
         });
         if (!terminalTurnStatus) {
           await setRuntimePhase(
             "runtime-awaiting-model",
-            "Esperant activitat del model",
-            "El torn ja està actiu a Codex",
+            "Esperant activitat de l’assistent",
+            "El torn ja està actiu",
           );
         }
         if (turnSignal.aborted && !remoteInterruptConfirmed) {
@@ -1398,7 +1654,7 @@ export async function runWorkerCodexTurn(
             id: "runtime-turn-recovery",
             kind: "system",
             label: "No s’ha pogut recuperar el torn",
-            detail: "App Server no ha retornat cap torn associat a aquesta petició",
+            detail: "El servei no ha retornat cap torn associat a aquesta petició",
             status: "failed",
           });
           throw error;
@@ -1410,34 +1666,98 @@ export async function runWorkerCodexTurn(
           detail: "Continuant amb el torn existent, sense duplicar-lo",
         });
         if (recoveredAfterTimeout.status !== "inProgress") {
-          if (!recoveryEnvelope) throw new Error("App Server no ha proporcionat evidència de recuperació.");
+          if (!recoveryEnvelope) throw new Error("El servei no ha proporcionat evidència de recuperació.");
           await projectRecoveredTurn(recoveredAfterTimeout, recoveryEnvelope, "timeout-recovery");
           telemetry.finish(
             recoveredAfterTimeout.status === "completed"
               ? "completed"
               : recoveredAfterTimeout.status === "interrupted" ? "stopped" : "error",
           );
+          if (recoveredAfterTimeout.status === "completed") await scheduleCompletedConversationMemory();
           return;
         }
         registration.bindRuntimeTurn(recoveredAfterTimeout.id);
+        startTerminalWatchdog();
         await emit({ type: "runtimeTurn", turnId: recoveredAfterTimeout.id });
         if (!terminalTurnStatus) {
           await setRuntimePhase(
             "runtime-awaiting-model",
             "Torn recuperat",
-            "Escoltant els esdeveniments d’App Server",
+            "Escoltant els esdeveniments del servei",
           );
         }
         turnResult = { turn: { id: recoveredAfterTimeout.id } };
       }
       runtimeTurnId ??= extractTurnId(turnResult);
-      if (!runtimeTurnId) throw new Error("Codex no ha iniciat el torn.");
+      if (!runtimeTurnId) throw new Error("El servei no ha iniciat el torn.");
       registration.bindRuntimeTurn(runtimeTurnId);
       telemetry.bindRuntimeTurn(runtimeTurnId);
+      startTerminalWatchdog();
     }
-    const completed = await turnFinished;
+    const watchdog = startTerminalWatchdog();
+    const terminalRace = await Promise.race([
+      turnFinished.then((status) => ({ kind: "terminal" as const, status })),
+      watchdog.timedOut.then((timeout) => ({ kind: "timeout" as const, timeout })),
+    ]);
+    if (terminalRace.kind === "timeout" && !terminalTurnStatus && !turnSignal.aborted) {
+      await setRuntimePhase(
+        "runtime-turn-timeout",
+        "Comprovant un torn sense resposta",
+        terminalRace.timeout === "hard"
+          ? "S’ha assolit el límit màxim del torn"
+          : "App Server no ha enviat progrés dins del límit segur",
+      );
+      let recoveredTimedOutTurn: RecoveredTurn | null = null;
+      let recoveryEnvelope: AppServerEvent | null = null;
+      try {
+        const recoveredResult = await runtime.client.request(
+          "thread/read",
+          { threadId, includeTurns: true },
+          `turn-watchdog-read:${chatRequest.assistantMessageId}`,
+          15_000,
+          (_result, envelope) => { recoveryEnvelope = envelope; },
+        );
+        recoveredTimedOutTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+      } catch {
+        // The interruption below remains the final bounded recovery step.
+      }
+      if (!terminalTurnStatus && recoveredTimedOutTurn && recoveredTimedOutTurn.status !== "inProgress" && recoveryEnvelope) {
+        await projectRecoveredTurn(recoveredTimedOutTurn, recoveryEnvelope, "watchdog-recovery");
+        finishTurn({
+          status: recoveredTimedOutTurn.status,
+          error: recoveredTimedOutTurn.error,
+        });
+      }
+      if (!terminalTurnStatus && runtimeTurnId) {
+        let interruptionConfirmed = false;
+        try {
+          await runtime.client.request(
+            "turn/interrupt",
+            { threadId, turnId: runtimeTurnId },
+            `turn-watchdog-interrupt:${chatRequest.assistantMessageId}`,
+            5_000,
+          );
+          interruptionConfirmed = true;
+        } catch {
+          interruptionConfirmed = false;
+        }
+        const message = interruptionConfirmed
+          ? "El turno se ha detenido porque el runtime dejó de enviar progreso dentro del límite seguro. Puedes volver a intentarlo; ninguna acción incierta se ha repetido."
+          : "El runtime dejó de responder y no se pudo confirmar su interrupción. El turno se ha cerrado sin repetir ninguna acción incierta; revisa el último estado antes de reintentarlo.";
+        await emit({ type: "error", message });
+        finishTurn({ status: "failed", error: message });
+      }
+    }
+    const completed = terminalRace.kind === "terminal" ? terminalRace.status : await turnFinished;
     if (activeRuntimePhaseId) await completeRuntimePhase(activeRuntimePhaseId);
     if (completed.status === "failed") {
+      if (!errorEmitted) {
+        await emit({
+          type: "error",
+          message: completed.error ?? "El torn ha fallat sense un estat terminal confirmat.",
+        });
+        errorEmitted = true;
+      }
       telemetry.finish("error");
       return;
     }
@@ -1454,8 +1774,11 @@ export async function runWorkerCodexTurn(
       detail: `${metrics.serverFirstDeltaMs === null ? "Sense text incremental" : `Primer text ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker ${metrics.workerWarm ? "calent" : "fred"}`,
       status: "complete",
     });
+    await scheduleCompletedConversationMemory();
   } finally {
     if (finalAnswerRecoveryTimer) clearTimeout(finalAnswerRecoveryTimer);
+    clearTimeout(turnTimeoutTimer);
+    stopTerminalWatchdog();
     turnSignal.removeEventListener("abort", interrupt);
     signal.removeEventListener("abort", forwardExternalAbort);
     unregisterCancellation();

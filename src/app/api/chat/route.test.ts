@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
+
 const mocked = vi.hoisted(() => ({
   releaseMaintenance: vi.fn(),
   runWorkerCodexTurn: vi.fn(),
@@ -123,7 +125,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function chatRequest(signal: AbortSignal) {
+function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknown> = {}) {
   return new Request("http://localhost/api/chat", {
     method: "POST",
     signal,
@@ -137,12 +139,14 @@ function chatRequest(signal: AbortSignal) {
       preferences: { tone: "direct", language: "en", showActivity: true },
       options: {
         mode: "agent",
+        experience: "smart",
         model: null,
         effort: null,
         webSearch: false,
         imageGeneration: false,
         skill: null,
         attachments: [],
+        ...optionOverrides,
       },
     }),
   });
@@ -151,6 +155,15 @@ function chatRequest(signal: AbortSignal) {
 describe("chat turn transport lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("rejects browser-supplied provider settings", async () => {
+    const response = await POST(chatRequest(new AbortController().signal, {
+      model: "gpt-5.6-sol",
+      effort: "high",
+    }));
+    expect(response.status).toBe(400);
+    expect(mocked.runWorkerCodexTurn).not.toHaveBeenCalled();
   });
 
   it("keeps the server-owned turn alive when the NDJSON client disconnects", async () => {

@@ -85,4 +85,12 @@ describe("durable UI event adapter", () => {
     expect(() => adapter.receive(envelope(2, { type: "done" }))).toThrow(DurableUiEventProtocolError);
     expect(applied).toHaveBeenCalledTimes(1);
   });
+
+  it("treats an explicitly stopped turn as terminal", () => {
+    const adapter = new DurableChatEventAdapter(scope, { onEvent: () => undefined, onReplayRequired: () => undefined });
+    adapter.markConnected();
+    adapter.receive(envelope(1, { type: "stopped" }));
+    expect(() => adapter.receive(envelope(2, { type: "delta", value: "late" })))
+      .toThrow(DurableUiEventProtocolError);
+  });
 });

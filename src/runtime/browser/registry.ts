@@ -413,6 +413,21 @@ export class BrowserRuntimeRegistry {
     return promise;
   }
 
+  /**
+   * Fences the current process and session before launching a fresh runtime
+   * against the same employee-owned profile.  `start()` alone is not a
+   * recovery primitive: a stalled CDP command can leave the child looking
+   * healthy enough to be reused.  Stop/start coalescing keeps concurrent
+   * recovery requests scoped to this one user and never discovers or kills an
+   * unowned process.
+   */
+  async restart(userId: string) {
+    validateWorkerUserId(userId);
+    if (this.closed) throw new Error("Browser registry is closed.");
+    await this.stop(userId);
+    return this.start(userId);
+  }
+
   async close() {
     if (this.closed) return;
     this.closed = true;

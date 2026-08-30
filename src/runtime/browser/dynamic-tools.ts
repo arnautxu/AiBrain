@@ -293,6 +293,7 @@ export type BrowserDynamicToolContext = {
     userId: string;
     threadId: string;
     command: BrowserMutationCommand;
+    signal?: AbortSignal;
   }): Promise<BrowserActionResourceSnapshot>;
   execute(input: {
     installationId: string;
@@ -301,6 +302,7 @@ export type BrowserDynamicToolContext = {
     command: BrowserAgentCommand;
     approvalEvidence?: BrowserInformedApprovalEvidence;
     expectedResource?: BrowserActionResourceSnapshot;
+    signal?: AbortSignal;
   }): Promise<unknown>;
   callStore?: BrowserToolCallStore;
 };
@@ -387,6 +389,7 @@ export async function handleBrowserDynamicToolCall(
           userId: context.userId,
           threadId: context.browserThreadId,
           command,
+          signal: context.signal,
         });
       } catch {
         const response = failure("Browser session reconnected before the action was dispatched. Read the page and try again.");
@@ -474,6 +477,7 @@ export async function handleBrowserDynamicToolCall(
       command,
       approvalEvidence,
       expectedResource,
+      signal: context.signal,
     });
     const response = toolResponse(command, value);
     await store.complete(identity, response);

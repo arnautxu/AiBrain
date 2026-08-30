@@ -288,6 +288,49 @@ describe("private per-user worker gateway", () => {
     }
   });
 
+  it("admits a new chat while an earlier App Server output is still being persisted", async () => {
+    const worker = gateway();
+    await worker.start();
+    const client = transport(worker);
+    let releaseOutput!: () => void;
+    const outputGate = new Promise<void>((resolve) => { releaseOutput = resolve; });
+    let outputPersistenceStarted!: () => void;
+    const outputPersistence = new Promise<void>((resolve) => { outputPersistenceStarted = resolve; });
+    const internals = worker as unknown as {
+      events: { append(event: Parameters<FileTransportEventJournal["append"]>[0]): Promise<boolean> };
+    };
+    const append = internals.events.append.bind(internals.events);
+    let firstOutput = true;
+    internals.events.append = async (event) => {
+      if (firstOutput) {
+        firstOutput = false;
+        outputPersistenceStarted();
+        await outputGate;
+      }
+      return append(event);
+    };
+    try {
+      await client.connect();
+      await client.send(initializeRequest("busy-chat"));
+      await outputPersistence;
+
+      let newChatAdmitted = false;
+      const newChat = client.send(initializeRequest("new-chat")).then(() => { newChatAdmitted = true; });
+      await vi.waitFor(() => expect(newChatAdmitted).toBe(true), { timeout: 5_000 });
+
+      releaseOutput();
+      await newChat;
+      const responses = await Promise.all([nextEvent(client), nextEvent(client)]);
+      expect(responses.map(({ value }) => value && value.message.kind === "rpc-response"
+        ? value.message.rpc.id
+        : null)).toEqual(["busy-chat", "new-chat"]);
+    } finally {
+      releaseOutput();
+      await client.close();
+      await worker.stop();
+    }
+  });
+
   it("rejects unauthenticated WebSockets before protocol negotiation", async () => {
     const worker = gateway();
     await worker.start();

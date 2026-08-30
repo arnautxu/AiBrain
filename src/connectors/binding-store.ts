@@ -154,6 +154,20 @@ export class FileConnectorBindingStore {
     throw new ConnectorError("CONNECTOR_BINDING_NOT_FOUND", "No credential binding is available for this principal.");
   }
 
+  /** Reads only this user's exact binding, including a revoked record, so a
+   * completed OAuth reconnect can advance its durable version. Never falls
+   * back to a shared credential and never returns another user's record. */
+  async readPersonalForManagement(principal: ConnectorPrincipal, connectorId: string) {
+    if (principal.installationId !== this.installationId) {
+      throw new ConnectorError("CONNECTOR_BINDING_INSTALLATION_MISMATCH", "Principal belongs to another installation.");
+    }
+    const binding = await this.readExact(connectorId, principal.userId);
+    if (binding.installationId !== principal.installationId || binding.userId !== principal.userId) {
+      throw new ConnectorError("CONNECTOR_BINDING_USER_MISMATCH", "Credential binding belongs to another user.");
+    }
+    return binding;
+  }
+
   async revoke(
     principal: ConnectorPrincipal,
     connectorId: string,

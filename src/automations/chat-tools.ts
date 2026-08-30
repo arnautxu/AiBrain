@@ -8,7 +8,7 @@ import type { DynamicToolCallResponse } from "../../contracts/codex/0.149.1/type
 import type { DynamicToolSpec } from "../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
 import type { JsonValue } from "../../contracts/codex/0.149.1/types/serde_json/JsonValue";
 import type { AuthSession } from "@/auth/types";
-import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, parseAutomationInput, type AutomationTaskInput } from "@/automations/contracts";
+import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, isRecord, isValidTimeZone, parseAutomationInput, type AutomationTaskInput } from "@/automations/contracts";
 import { automationWorkspaceForSession, createAutomationTask, validateAutomationAudience } from "@/automations/server-service";
 import { atomicWriteFile, ResourceLockManager } from "@/storage";
 import { getProject, loadWorkbench } from "@/workbench/store";
@@ -59,11 +59,10 @@ export const AUTOMATION_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freez
   }, {
     type: "function",
     name: "confirm",
-    description: "Create a pending proposal only after the user explicitly confirms it in a later message. Never call in the same turn as propose.",
+    description: "Create the latest pending proposal in this conversation only after the user explicitly confirms it in a later message. Pass proposalId when available; omit it only to confirm the single latest pending proposal. Never call in the same turn as propose.",
     inputSchema: {
       type: "object",
       properties: { proposalId: { type: "string", pattern: "^[0-9a-fA-F-]{36}$" } },
-      required: ["proposalId"],
       additionalProperties: false,
     } as JsonValue,
   }],
@@ -180,11 +179,20 @@ export class FileAutomationProposalStore {
     });
   }
 
-  async confirm(proposalId: string, binding: { sourceThreadId: string; currentTurnId: string; currentMessage: string }, create: (proposal: Proposal) => Promise<void>) {
+  async confirm(proposalId: string | null, binding: { sourceThreadId: string; currentTurnId: string; currentMessage: string }, create: (proposal: Proposal) => Promise<void>) {
     await this.prepare();
     return this.locks.withLock("automation-chat-proposals", async () => {
       const proposals = await this.read();
-      const proposal = proposals.find((item) => item.id === proposalId && item.installationId === this.options.installationId && item.userId === this.options.userId);
+      const available = proposals.filter((item) => item.installationId === this.options.installationId &&
+        item.userId === this.options.userId && item.sourceThreadId === binding.sourceThreadId);
+      const pending = available.filter((item) => item.status === "pending");
+      if (!proposalId && pending.length > 1) {
+        throw new Error("Hay varias propuestas pendientes en esta conversación; indica cuál quieres confirmar.");
+      }
+      const proposal = proposalId
+        ? available.find((item) => item.id === proposalId)
+        : pending[0] ??
+          available.filter((item) => item.status === "confirmed").at(-1);
       if (!proposal || proposal.sourceThreadId !== binding.sourceThreadId) throw new Error("La propuesta de automatización no está disponible en esta conversación.");
       if (proposal.status === "confirmed") return proposal;
       if (proposal.sourceTurnId === binding.currentTurnId || !isExplicitAutomationConfirmation(binding.currentMessage)) {
@@ -199,20 +207,41 @@ export class FileAutomationProposalStore {
   }
 }
 
-export async function automationChatDeveloperInstructions(session: AuthSession) {
+export async function automationChatDeveloperInstructions(session: AuthSession, defaults: {
+  projectId: string;
+  currentTime?: Date;
+  timeZone?: string;
+}) {
   const [{ directory }, workbench] = await Promise.all([
     import("@/automations/server-service").then(({ listAutomationTasks }) => listAutomationTasks(session)),
     loadWorkbench(session),
   ]);
+  const currentProject = workbench.projects.find((project) => project.id === defaults.projectId && project.status === "active");
+  const timeZone = isValidTimeZone(defaults.timeZone) ? defaults.timeZone : "Europe/Madrid";
+  const currentTime = defaults.currentTime && Number.isFinite(defaults.currentTime.getTime())
+    ? defaults.currentTime
+    : new Date();
   return [
     "## Creación de automatizaciones desde chat",
-    "Si el usuario pide programar o automatizar trabajo, usa aibrain_automations.propose solo cuando estén claros acción, horario, zona horaria, proyecto o Sin proyecto y audiencia.",
-    "Después presenta esos cinco campos y pide confirmación. No llames a confirm en el mismo turno. Solo confirma tras un mensaje posterior explícito del usuario.",
-    "Cada ejecución tendrá búsqueda web activa y volverá a resolver las skills y conectores actualmente autorizados; una revocación hará que dejen de estar disponibles.",
+    "Reconoce instrucciones naturales de programación, incluidas expresiones relativas como «envíame hello dentro de 2 minutos», «mañana a las 9» o «cada lunes». Calcula runAt desde currentTime y la zona indicada abajo.",
+    "Si el usuario no indica proyecto, zona horaria o audiencia, usa directamente el proyecto actual, la zona por defecto y el usuario actual indicados en defaults; no pidas aclaraciones por esos campos. Conserva en el prompt las menciones @ y las referencias a archivos o skills que el usuario haya escrito.",
+    "Usa aibrain_automations.propose cuando estén claros acción y horario. Después presenta acción, horario, zona horaria, proyecto o Sin proyecto y audiencia, y pide confirmación. No llames a confirm en el mismo turno. Ante un mensaje posterior inequívoco como «sí», «confirmo» o «adelante», llama a confirm aunque el usuario no repita el id de propuesta.",
+    "Cada ejecución background tendrá búsqueda web activa y volverá a resolver las skills y conectores @ actualmente autorizados; una revocación hará que dejen de estar disponibles. Nunca prometas una escritura sensible que no tenga autorización durable previa.",
     "BEGIN AIBRAIN AUTOMATION DIRECTORY JSON",
     JSON.stringify({
       projects: workbench.projects.filter((project) => project.status === "active").map((project) => ({ id: project.id, name: project.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project.name })),
       audience: directory,
+      defaults: {
+        currentTime: currentTime.toISOString(),
+        timeZone,
+        projectId: currentProject?.id ?? null,
+        projectName: currentProject
+          ? currentProject.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : currentProject.name
+          : null,
+        audience: directory.currentUserId
+          ? { membershipPolicy: "current", userIds: [directory.currentUserId], groupIds: [] }
+          : null,
+      },
     }),
     "END AIBRAIN AUTOMATION DIRECTORY JSON",
   ].join("\n");
@@ -246,8 +275,13 @@ export async function handleAutomationToolCall(params: DynamicToolCallParams, co
     return success({ status: "pending-user-confirmation", proposalId: proposal.id, action: parsed.prompt, schedule: parsed.schedule, timeZone: parsed.timeZone, project: parsed.projectName, audience: parsed.audience, webSearch: "always", authorizedSkillsAndConnectors: "revalidated-on-every-run" });
   }
   if (params.tool === "confirm") {
-    if (!strictObject(params.arguments, ["proposalId"]) || typeof (params.arguments as { proposalId?: unknown }).proposalId !== "string") throw new Error("La confirmación de automatización no es válida.");
-    const proposal = await store.confirm((params.arguments as { proposalId: string }).proposalId, { sourceThreadId: context.sourceThreadId, currentTurnId: context.sourceTurnId, currentMessage: context.sourceMessage }, async (item) => {
+    const keys = isRecord(params.arguments) ? Object.keys(params.arguments) : [];
+    const proposalId = isRecord(params.arguments) && "proposalId" in params.arguments ? params.arguments.proposalId : null;
+    if (!isRecord(params.arguments) || keys.some((key) => key !== "proposalId") || keys.length > 1 ||
+        !(proposalId === null || (typeof proposalId === "string" && UUID.test(proposalId)))) {
+      throw new Error("La confirmación de automatización no es válida.");
+    }
+    const proposal = await store.confirm(proposalId, { sourceThreadId: context.sourceThreadId, currentTurnId: context.sourceTurnId, currentMessage: context.sourceMessage }, async (item) => {
       const project = await getProject(context.session, item.input.projectId);
       if (project.status !== "active") throw new Error("El proyecto ya no está disponible.");
       await createAutomationTask(context.session, { ...item.input, projectName: project.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project.name }, { taskId: item.taskId });
