@@ -19,6 +19,8 @@ import type {
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
   BrowserRuntimeHealth,
+  BrowserViewerHistoryAction,
+  BrowserViewerNavigationState,
 } from "@/runtime/browser/types";
 import {
   CdpClientError,
@@ -605,6 +607,37 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     await this.navigatePage(threadId, url, () => this.assertHumanControl());
   }
 
+  async viewerNavigationState(threadId: string): Promise<BrowserViewerNavigationState> {
+    return this.withThreadPageRecovery(threadId, (page) => this.navigationStateForPage(page));
+  }
+
+  async navigateHistory(
+    threadId: string,
+    action: BrowserViewerHistoryAction,
+  ): Promise<BrowserViewerNavigationState> {
+    this.assertHumanControl();
+    return this.withThreadPageRecovery(threadId, async (page) => {
+      this.assertHumanControl();
+      const browser = this.requireBrowser();
+      if (action === "reload") {
+        await browser.send("Page.reload", { ignoreCache: false }, { sessionId: page.sessionId });
+      } else {
+        const history = await this.navigationHistory(page);
+        const targetIndex = history.currentIndex + (action === "back" ? -1 : 1);
+        const target = history.entries[targetIndex];
+        if (!target) return this.navigationStateFromHistory(history);
+        const destination = validateBrowserNavigationUrl(target.url);
+        await this.networkPolicy.assertAllowed(destination);
+        this.assertHumanControl();
+        await browser.send("Page.navigateToHistoryEntry", { entryId: target.id }, { sessionId: page.sessionId });
+      }
+      await this.waitForReadablePage(page, () => this.assertHumanControl());
+      const current = await this.navigationStateForPage(page);
+      await this.persistNavigation(page, current.url);
+      return current;
+    });
+  }
+
   async agentNavigate(threadId: string, url: string) {
     this.assertAgentControl();
     await this.navigatePage(threadId, url, () => this.assertAgentControl());
@@ -629,6 +662,42 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
     if (!result.isDownload && navigatedPage) await this.persistNavigation(navigatedPage, destination);
+  }
+
+  private async navigationHistory(page: ThreadPage) {
+    const result = await this.requireBrowser().send<{
+      currentIndex?: number;
+      entries?: Array<{ id?: number; url?: string }>;
+    }>("Page.getNavigationHistory", {}, { sessionId: page.sessionId });
+    if (!Number.isSafeInteger(result.currentIndex) || !Array.isArray(result.entries) ||
+      result.entries.length < 1 || result.entries.length > 10_000 ||
+      (result.currentIndex as number) < 0 || (result.currentIndex as number) >= result.entries.length) {
+      throw new ChromeRuntimeError("CHROME_PAGE_STATE_INVALID", "Chrome returned invalid navigation history.");
+    }
+    const entries = result.entries.map((entry) => {
+      if (!Number.isSafeInteger(entry.id) || (entry.id as number) < 0 ||
+        typeof entry.url !== "string" || entry.url.length > 8_192) {
+        throw new ChromeRuntimeError("CHROME_PAGE_STATE_INVALID", "Chrome returned an invalid navigation entry.");
+      }
+      return { id: entry.id as number, url: validateBrowserNavigationUrl(entry.url) };
+    });
+    return { currentIndex: result.currentIndex as number, entries };
+  }
+
+  private navigationStateFromHistory(history: Awaited<ReturnType<ChromeCdpRuntime["navigationHistory"]>>) {
+    const current = history.entries[history.currentIndex];
+    if (!current) {
+      throw new ChromeRuntimeError("CHROME_PAGE_STATE_INVALID", "Chrome did not report the current navigation entry.");
+    }
+    return Object.freeze({
+      url: current.url,
+      canGoBack: history.currentIndex > 0,
+      canGoForward: history.currentIndex + 1 < history.entries.length,
+    });
+  }
+
+  private async navigationStateForPage(page: ThreadPage) {
+    return this.navigationStateFromHistory(await this.navigationHistory(page));
   }
 
   async dispatchInput(threadId: string, command: BrowserInputCommand) {

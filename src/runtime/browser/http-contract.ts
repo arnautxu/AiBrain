@@ -1,6 +1,7 @@
 import type {
   BrowserGatewayCapability,
   BrowserInputCommand,
+  BrowserViewerHistoryAction,
 } from "@/runtime/browser/types";
 
 export type BrowserControlRequest = Readonly<{
@@ -15,6 +16,7 @@ export type BrowserGatewayTokenRequest = Readonly<{
 
 export type BrowserViewerCommand =
   | Readonly<{ threadId: string; action: "navigate"; url: string }>
+  | Readonly<{ threadId: string; action: "history"; direction: BrowserViewerHistoryAction }>
   | Readonly<{ threadId: string; action: "input"; command: BrowserInputCommand }>;
 
 const CONTROL_ACTIONS = ["start", "stop", "takeover", "release", "heartbeat"] as const;
@@ -22,6 +24,7 @@ const CAPABILITIES = ["view", "control", "heartbeat", "takeover"] as const;
 const MOUSE_EVENTS = ["mouseMoved", "mousePressed", "mouseReleased", "mouseWheel"] as const;
 const MOUSE_BUTTONS = ["none", "left", "middle", "right"] as const;
 const KEY_EVENTS = ["keyDown", "keyUp", "char"] as const;
+const HISTORY_ACTIONS = ["back", "forward", "reload"] as const;
 
 function exactRecord(value: unknown, required: readonly string[], optional: readonly string[] = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -121,6 +124,16 @@ export function parseBrowserViewerCommand(value: unknown): BrowserViewerCommand 
       return { threadId: navigation.threadId, action: "navigate", url: "about:blank" };
     }
     return null;
+  }
+  const history = exactRecord(value, ["threadId", "action", "direction"]);
+  if (history?.action === "history" && canonicalUuid(history.threadId) &&
+    typeof history.direction === "string" &&
+    HISTORY_ACTIONS.includes(history.direction as BrowserViewerHistoryAction)) {
+    return {
+      threadId: history.threadId,
+      action: "history",
+      direction: history.direction as BrowserViewerHistoryAction,
+    };
   }
   const input = exactRecord(value, ["threadId", "action", "command"]);
   if (input?.action !== "input" || !canonicalUuid(input.threadId)) return null;

@@ -84,15 +84,16 @@ function DocumentCard({ artifact, onPreview }: {
   );
 }
 
-export function TurnArtifactCard({ artifact, onPreviewDocument }: {
+export function TurnArtifactCard({ artifact, onPreviewDocument, onOpenBrowser }: {
   artifact: GeneratedArtifact;
   onPreviewDocument?: (artifact: DocumentArtifact) => void;
+  onOpenBrowser?: () => void;
 }) {
   if (artifact.type === "document") return <DocumentCard artifact={artifact} onPreview={onPreviewDocument} />;
   if (artifact.type === "browser") {
     return (
       <article className="max-w-[420px] overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface-raised)]">
-        <header className="flex items-center gap-2.5 px-3 py-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)]"><Browser size={16} className="text-[var(--text-secondary)]" /></span><div className="min-w-0 flex-1"><h3 className="truncate text-[11px] font-semibold text-[var(--text)]">{artifact.name}</h3><p className="mt-0.5 text-[9px] text-[var(--text-muted)]">{browserStatusCopy[artifact.status]}</p></div>{artifact.viewerUrl ? <a href={artifact.viewerUrl} target="_blank" rel="noreferrer" className="text-[9px] font-semibold text-[var(--text)] hover:underline">Abrir</a> : null}</header>
+        <header className="flex items-center gap-2.5 px-3 py-2.5"><span className="grid size-8 shrink-0 place-items-center rounded-md bg-[var(--surface-muted)]"><Browser size={16} className="text-[var(--text-secondary)]" /></span><div className="min-w-0 flex-1"><h3 className="truncate text-[11px] font-semibold text-[var(--text)]">{artifact.name}</h3><p className="mt-0.5 text-[9px] text-[var(--text-muted)]">{browserStatusCopy[artifact.status]}</p></div>{onOpenBrowser ? <button type="button" className="text-[9px] font-semibold text-[var(--text)] hover:underline" onClick={onOpenBrowser}>Abrir</button> : artifact.viewerUrl ? <a href={artifact.viewerUrl} target="_blank" rel="noreferrer" className="text-[9px] font-semibold text-[var(--text)] hover:underline">Abrir</a> : null}</header>
         {!artifact.viewerUrl && (artifact.status === "starting" || artifact.status === "reconnecting" || artifact.status === "error" || artifact.status === "disconnected" || artifact.status === "closed") ? <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--text-muted)]" role={artifact.status === "error" ? "alert" : "status"}>{artifact.status === "starting" || artifact.status === "reconnecting" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <WarningCircle size={12} />}{artifact.error ?? (artifact.status === "disconnected" ? "La conexión se ha perdido." : artifact.status === "closed" ? "El viewer se ha cerrado de forma segura." : "Preparando la sesión aislada…")}</div> : null}
         {artifact.control || artifact.downloadUrl ? <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--text-muted)]">{artifact.control ? <span className="font-medium">{browserControlCopy[artifact.control]}</span> : <span />}{artifact.downloadUrl ? <a href={artifact.downloadUrl} download className="font-medium text-[var(--text)] hover:underline">Descargar resultado</a> : null}</footer> : null}
       </article>

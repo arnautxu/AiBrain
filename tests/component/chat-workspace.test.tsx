@@ -73,6 +73,7 @@ function renderWorkspace(
     prompt: initialPrompt = "",
     hydrated: initialHydrated = true,
     onPromptChange = vi.fn(),
+    onOpenBrowser = vi.fn(),
     ...remainingOverrides
   } = overrides;
   let finishHydration: () => void = () => undefined;
@@ -130,6 +131,7 @@ function renderWorkspace(
     managedAppApprovalKeys={[]}
     onManagedAppPrepared={vi.fn()}
     onPreviewDocument={vi.fn()}
+    onOpenBrowser={onOpenBrowser}
     {...remainingOverrides}
   />;
   }

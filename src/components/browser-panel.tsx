@@ -2,40 +2,50 @@
 /* eslint-disable @next/next/no-img-element -- authenticated blob URLs cannot be optimized by next/image. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent, PointerEvent, WheelEvent } from "react";
+import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, WheelEvent } from "react";
 import {
   ArrowClockwise,
-  Browser,
-  DownloadSimple,
-  Hand,
-  PaperPlaneTilt,
+  ArrowLeft,
+  ArrowRight,
+  ArrowsIn,
+  ArrowsOut,
   SpinnerGap,
-  Stop,
-  WarningCircle,
   X,
 } from "@phosphor-icons/react";
 import {
   controlBrowser,
-  isRecoverableBrowserViewerError,
   issueBrowserViewerToken,
-  readBrowserActionHistory,
-  readBrowserFrame,
+  openBrowserFrameStream,
+  readBrowserNavigationState,
   readBrowserStatus,
   sendBrowserViewerCommand,
-  type BrowserControlAction,
   type BrowserUiStatus,
+  type BrowserViewerHistoryAction,
+  type BrowserViewerNavigationState,
   type BrowserViewerToken,
-  type BrowserActionHistoryItem,
 } from "@/ui/browser-ui-adapter";
+import { consumeBrowserFrameStream } from "@/ui/browser-frame-stream";
 
-const lifecycleCopy: Record<BrowserUiStatus["state"]["lifecycle"], string> = {
-  stopped: "Navegador detenido",
-  starting: "Iniciando navegador…",
-  ready: "Listo para el agente",
-  "human-control": "Tienes el control",
-  recovering: "Recuperando sesión…",
-  degraded: "Navegador degradado",
-};
+type ViewerMetrics = Readonly<{ fps: number; latencyMs: number; captureMs: number }>;
+
+function normalizedAddress(value: string) {
+  const trimmed = value.trim();
+  if (trimmed === "about:blank" || /^https?:\/\//iu.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
+function wait(milliseconds: number, signal: AbortSignal) {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = window.setTimeout(finish, milliseconds);
+    function finish() {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    }
+    signal.addEventListener("abort", finish, { once: true });
+  });
+}
 
 export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: {
   threadId: string | null;
@@ -45,17 +55,27 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 }) {
   const [status, setStatus] = useState<BrowserUiStatus | null>(initialStatus);
   const [viewerToken, setViewerToken] = useState<BrowserViewerToken | null>(null);
+  const [navigation, setNavigation] = useState<BrowserViewerNavigationState>({
+    url: "about:blank", canGoBack: false, canGoForward: false,
+  });
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
-  const [address, setAddress] = useState("https://example.com/");
-  const [busy, setBusy] = useState<BrowserControlAction | "navigate" | "input" | null>(null);
+  const [address, setAddress] = useState("about:blank");
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<BrowserActionHistoryItem[]>([]);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
+  const [metrics, setMetrics] = useState<ViewerMetrics | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
-  const [lastInteraction, setLastInteraction] = useState<string | null>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const frameUrlRef = useRef<string | null>(null);
   const viewerTokenRef = useRef<BrowserViewerToken | null>(null);
+  const viewerTokenControlsRef = useRef(false);
+  const takeoverPromiseRef = useRef<Promise<BrowserViewerToken> | null>(null);
+  const humanControlRef = useRef(false);
+  const addressEditingRef = useRef(false);
   const lastPointerSentAtRef = useRef(0);
+  const frameTimesRef = useRef<number[]>([]);
+  const lastMetricsAtRef = useRef(0);
+  const pendingPaintRef = useRef<number | null>(null);
 
   const replaceFrame = useCallback((blob: Blob) => {
     const next = URL.createObjectURL(blob);
@@ -65,12 +85,13 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   }, []);
 
   useEffect(() => () => {
+    if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
     if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
+    if (humanControlRef.current) void controlBrowser("release").catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    viewerTokenRef.current = viewerToken;
-  }, [viewerToken]);
+  useEffect(() => { viewerTokenRef.current = viewerToken; }, [viewerToken]);
+  useEffect(() => { humanControlRef.current = status?.state.lifecycle === "human-control"; }, [status?.state.lifecycle]);
 
   const refreshStatus = useCallback(async (signal?: AbortSignal) => {
     const next = await readBrowserStatus(signal);
@@ -80,124 +101,136 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 
   const renewViewerToken = useCallback(async (control: boolean, signal?: AbortSignal) => {
     if (!threadId) throw new Error("Abre una conversación antes de iniciar el navegador.");
-    const current = await refreshStatus(signal);
-    if (current.state.lifecycle !== "ready" && current.state.lifecycle !== "human-control") {
-      throw new Error("El navegador privado se está recuperando.");
-    }
-    if (control && current.state.lifecycle !== "human-control") {
-      throw new Error("Vuelve a tomar el control del navegador para continuar.");
-    }
     const next = await issueBrowserViewerToken(threadId, control, signal);
     viewerTokenRef.current = next;
+    viewerTokenControlsRef.current = control;
     setViewerToken(next);
     return next;
-  }, [refreshStatus, threadId]);
+  }, [threadId]);
 
-  const withViewerRecovery = useCallback(async <Result,>(
-    control: boolean,
-    operation: (token: BrowserViewerToken) => Promise<Result>,
-  ) => {
-    const currentToken = viewerTokenRef.current;
-    if (!currentToken) throw new Error("El visor privado se está conectando.");
-    try {
-      return await operation(currentToken);
-    } catch (reason) {
-      if (!isRecoverableBrowserViewerError(reason)) throw reason;
-      const renewed = await renewViewerToken(control);
-      return operation(renewed);
+  const ensureControl = useCallback(async () => {
+    if (!threadId) throw new Error("Abre una conversación antes de controlar el navegador.");
+    if (humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current) {
+      return viewerTokenRef.current;
     }
-  }, [renewViewerToken]);
+    if (takeoverPromiseRef.current) return takeoverPromiseRef.current;
+    const takeover = (async () => {
+      const current = await refreshStatus();
+      if (current.state.lifecycle !== "human-control") {
+        if (current.state.lifecycle !== "ready") throw new Error("La sesión se está reconectando.");
+        const controlled = await controlBrowser("takeover");
+        setStatus(controlled);
+        humanControlRef.current = true;
+      }
+      return renewViewerToken(true);
+    })();
+    takeoverPromiseRef.current = takeover;
+    try {
+      return await takeover;
+    } finally {
+      if (takeoverPromiseRef.current === takeover) takeoverPromiseRef.current = null;
+    }
+  }, [refreshStatus, renewViewerToken, threadId]);
 
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    const initial = window.setTimeout(() => {
-      void refreshStatus(controller.signal).catch((reason: unknown) => {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido leer el navegador.");
+    const poll = () => {
+      void refreshStatus(controller.signal).then((next) => {
+        if ((next.state.lifecycle === "stopped" || next.state.lifecycle === "degraded") && threadId) {
+          return controlBrowser("start", controller.signal).then(setStatus);
+        }
+      }).catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido conectar el navegador.");
       });
-    }, 0);
-    const interval = window.setInterval(() => {
-      void refreshStatus(controller.signal).catch(() => undefined);
-    }, 2_000);
-    return () => {
-      controller.abort();
-      window.clearTimeout(initial);
-      window.clearInterval(interval);
     };
-  }, [open, refreshStatus]);
-
-  useEffect(() => {
-    if (!open || !threadId) return;
-    const controller = new AbortController();
-    const refresh = () => {
-      void readBrowserActionHistory(threadId, controller.signal)
-        .then(setHistory)
-        .catch(() => undefined);
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 1_500);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [open, threadId]);
+    poll();
+    const interval = window.setInterval(poll, 2_000);
+    return () => { controller.abort(); window.clearInterval(interval); };
+  }, [open, refreshStatus, threadId]);
 
   useEffect(() => {
     if (!open || !threadId || !status?.state.browserSessionId ||
-        (status.state.lifecycle !== "ready" && status.state.lifecycle !== "human-control")) {
-      return;
-    }
+      (status.state.lifecycle !== "ready" && status.state.lifecycle !== "human-control")) return;
     const controller = new AbortController();
-    const refresh = () => {
-      void issueBrowserViewerToken(threadId, status.state.lifecycle === "human-control", controller.signal)
-        .then((next) => {
-          viewerTokenRef.current = next;
-          setViewerToken(next);
-        })
-        .catch((reason: unknown) => {
-          if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido abrir el visor.");
-        });
-    };
-    refresh();
-    const interval = window.setInterval(refresh, 20_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [open, status?.state.browserSessionId, status?.state.lifecycle, threadId]);
+    const timer = window.setTimeout(() => {
+      void renewViewerToken(status.state.lifecycle === "human-control", controller.signal).catch((reason: unknown) => {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido abrir el visor.");
+      });
+    }, 0);
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [open, renewViewerToken, status?.state.browserSessionId, status?.state.lifecycle, threadId]);
 
   useEffect(() => {
-    if (!open || !threadId || !viewerToken ||
-        (status?.state.lifecycle !== "ready" && status?.state.lifecycle !== "human-control")) return;
+    if (!open || !threadId || !viewerToken) return;
     const controller = new AbortController();
-    const refresh = () => {
-      void readBrowserFrame(threadId, viewerToken.token, controller.signal)
-        .then(replaceFrame)
-        .catch((reason: unknown) => {
-          if (controller.signal.aborted) return;
-          if (!isRecoverableBrowserViewerError(reason)) {
-            setError(reason instanceof Error ? reason.message : "La pantalla del navegador no responde.");
-            return;
-          }
-          setError("Reconectando la pantalla privada…");
-          void renewViewerToken(status?.state.lifecycle === "human-control", controller.signal)
-            .then((renewed) => readBrowserFrame(threadId, renewed.token, controller.signal))
-            .then(replaceFrame)
-            .then(() => setError(null))
-            .catch((retryReason: unknown) => {
-              if (!controller.signal.aborted) {
-                setError(retryReason instanceof Error ? retryReason.message : "No se ha podido reconectar la pantalla.");
-              }
+    const updateNavigation = () => {
+      void readBrowserNavigationState(threadId, viewerToken.token, controller.signal).then((next) => {
+        setNavigation(next);
+        if (!addressEditingRef.current) setAddress(next.url);
+      }).catch(() => undefined);
+    };
+    updateNavigation();
+    const interval = window.setInterval(updateNavigation, 1_500);
+    return () => { controller.abort(); window.clearInterval(interval); };
+  }, [open, threadId, viewerToken]);
+
+  useEffect(() => {
+    if (!open || !threadId || !viewerToken) return;
+    const controller = new AbortController();
+    let reconnectAttempt = 0;
+    let currentToken = viewerToken;
+    const run = async () => {
+      while (!controller.signal.aborted) {
+        try {
+          setConnection(reconnectAttempt === 0 ? "connecting" : "reconnecting");
+          const response = await openBrowserFrameStream(threadId, currentToken.token, controller.signal);
+          await consumeBrowserFrameStream(response, (record) => {
+            if (record.metadata.kind === "heartbeat") return;
+            reconnectAttempt = 0;
+            setConnection("live");
+            setError(null);
+            const now = performance.now();
+            frameTimesRef.current = [...frameTimesRef.current.filter((value) => now - value <= 2_000), now].slice(-30);
+            const first = frameTimesRef.current[0] ?? now;
+            const fps = frameTimesRef.current.length > 1
+              ? (frameTimesRef.current.length - 1) * 1_000 / Math.max(1, now - first) : 0;
+            if (now - lastMetricsAtRef.current >= 400) {
+              lastMetricsAtRef.current = now;
+              setMetrics({
+                fps,
+                latencyMs: Math.max(0, Date.now() - Date.parse(record.metadata.capturedAt)),
+                captureMs: record.metadata.captureDurationMs,
+              });
+            }
+            const blob = new Blob([record.data.slice().buffer], { type: "image/png" });
+            if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
+            pendingPaintRef.current = window.requestAnimationFrame(() => {
+              pendingPaintRef.current = null;
+              if (!controller.signal.aborted) replaceFrame(blob);
             });
-        });
+          }, controller.signal);
+          if (controller.signal.aborted) return;
+          reconnectAttempt += 1;
+          setConnection("reconnecting");
+          currentToken = await renewViewerToken(humanControlRef.current, controller.signal);
+        } catch (reason) {
+          if (controller.signal.aborted) return;
+          reconnectAttempt += 1;
+          setConnection("reconnecting");
+          if (reconnectAttempt >= 4) setError(reason instanceof Error ? reason.message : "La pantalla se está reconectando.");
+          await wait(Math.min(2_000, 150 * (2 ** Math.min(reconnectAttempt, 4))), controller.signal);
+          try {
+            currentToken = await renewViewerToken(humanControlRef.current, controller.signal);
+          } catch {
+            // Retry only the viewer attachment. Browser inputs are never replayed.
+          }
+        }
+      }
     };
-    refresh();
-    const interval = window.setInterval(refresh, 1_200);
-    return () => {
-      controller.abort();
-      window.clearInterval(interval);
-    };
-  }, [open, renewViewerToken, replaceFrame, status?.state.lifecycle, threadId, viewerToken]);
+    void run();
+    return () => controller.abort();
+  }, [open, renewViewerToken, replaceFrame, threadId, viewerToken]);
 
   useEffect(() => {
     if (!open || status?.state.lifecycle !== "human-control") return;
@@ -207,64 +240,54 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     return () => window.clearInterval(interval);
   }, [open, status?.state.lifecycle]);
 
-  const runControl = async (action: BrowserControlAction) => {
-    setBusy(action);
+  const runViewerCommand = useCallback(async (command: Record<string, unknown>) => {
+    if (!threadId) return null;
     setError(null);
     try {
-      const next = await controlBrowser(action);
-      setStatus(next);
-      if (action === "stop" || action === "release") {
-        viewerTokenRef.current = null;
-        setViewerToken(null);
+      const token = await ensureControl();
+      const next = await sendBrowserViewerCommand(threadId, token.token, command);
+      if (next) {
+        setNavigation(next);
+        if (!addressEditingRef.current) setAddress(next.url);
       }
+      return next;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
-    } finally {
-      setBusy(null);
+      return null;
     }
-  };
+  }, [ensureControl, threadId]);
 
   const navigate = async () => {
-    if (!threadId || !viewerToken || !address.trim()) return;
-    setBusy("navigate");
-    setError(null);
-    try {
-      await withViewerRecovery(true, (token) =>
-        sendBrowserViewerCommand(threadId, token.token, { action: "navigate", url: address.trim() }));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido abrir esa dirección.");
-    } finally {
-      setBusy(null);
-    }
+    await runViewerCommand({ action: "navigate", url: normalizedAddress(address) });
+  };
+
+  const navigateHistory = async (direction: BrowserViewerHistoryAction) => {
+    await runViewerCommand({ action: "history", direction });
   };
 
   const clickFrame = async (event: MouseEvent<HTMLImageElement>) => {
-    if (!threadId || !viewerToken || status?.state.lifecycle !== "human-control") return;
     const image = imageRef.current;
-    if (!image) return;
+    if (!image || !threadId) return;
     const bounds = image.getBoundingClientRect();
     const x = Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width);
     const y = Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height);
     setPointer({ x: (event.clientX - bounds.left) / bounds.width, y: (event.clientY - bounds.top) / bounds.height });
-    setLastInteraction("Clic manual enviado");
-    setBusy("input");
+    const token = await ensureControl().catch(() => null);
+    if (!token) return;
     try {
       for (const pointerEvent of ["mousePressed", "mouseReleased"] as const) {
-        await withViewerRecovery(true, (token) =>
-          sendBrowserViewerCommand(threadId, token.token, {
-            action: "input",
-            command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
-          }));
+        await sendBrowserViewerCommand(threadId, token.token, {
+          action: "input",
+          command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
+        });
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "No se ha podido enviar el clic.");
-    } finally {
-      setBusy(null);
     }
   };
 
   const moveFrame = (event: PointerEvent<HTMLImageElement>) => {
-    if (!threadId || !viewerToken || status?.state.lifecycle !== "human-control") return;
+    if (!threadId || !humanControlRef.current || !viewerTokenRef.current || !viewerTokenControlsRef.current) return;
     const image = imageRef.current;
     if (!image) return;
     const bounds = image.getBoundingClientRect();
@@ -274,137 +297,128 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const now = Date.now();
     if (now - lastPointerSentAtRef.current < 80) return;
     lastPointerSentAtRef.current = now;
-    const x = Math.round(relativeX * image.naturalWidth);
-    const y = Math.round(relativeY * image.naturalHeight);
-    void withViewerRecovery(true, (token) => sendBrowserViewerCommand(threadId, token.token, {
+    void sendBrowserViewerCommand(threadId, viewerTokenRef.current.token, {
       action: "input",
-      command: { kind: "mouse", event: "mouseMoved", x, y, button: "none" },
-    })).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "No se ha podido mover el cursor.");
-    });
+      command: {
+        kind: "mouse", event: "mouseMoved",
+        x: Math.round(relativeX * image.naturalWidth),
+        y: Math.round(relativeY * image.naturalHeight), button: "none",
+      },
+    }).catch(() => undefined);
   };
 
   const scrollFrame = async (event: WheelEvent<HTMLImageElement>) => {
-    if (!threadId || !viewerToken || status?.state.lifecycle !== "human-control") return;
     event.preventDefault();
     const image = imageRef.current;
-    if (!image) return;
+    if (!image || !threadId) return;
     const bounds = image.getBoundingClientRect();
-    const x = Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width);
-    const y = Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height);
-    setBusy("input");
-    setLastInteraction("Desplazamiento manual enviado");
-    try {
-      await withViewerRecovery(true, (token) => sendBrowserViewerCommand(threadId, token.token, {
-        action: "input",
-        command: {
-          kind: "mouse",
-          event: "mouseWheel",
-          x,
-          y,
-          button: "none",
-          deltaX: Math.max(-100_000, Math.min(100_000, event.deltaX)),
-          deltaY: Math.max(-100_000, Math.min(100_000, event.deltaY)),
-        },
-      }));
-    } catch (reason) {
+    const token = await ensureControl().catch(() => null);
+    if (!token) return;
+    await sendBrowserViewerCommand(threadId, token.token, {
+      action: "input",
+      command: {
+        kind: "mouse", event: "mouseWheel",
+        x: Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width),
+        y: Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height),
+        button: "none",
+        deltaX: Math.max(-100_000, Math.min(100_000, event.deltaX)),
+        deltaY: Math.max(-100_000, Math.min(100_000, event.deltaY)),
+      },
+    }).catch((reason: unknown) => {
       setError(reason instanceof Error ? reason.message : "No se ha podido desplazar la página.");
-    } finally {
-      setBusy(null);
-    }
+    });
   };
 
   const keyFrame = async (event: KeyboardEvent<HTMLImageElement>) => {
-    if (!threadId || !viewerToken || status?.state.lifecycle !== "human-control" || event.key.length > 128) return;
+    if (!threadId || event.key.length > 128) return;
     event.preventDefault();
-    setLastInteraction(event.key.length === 1 ? "Texto manual enviado" : `Tecla ${event.key} enviada`);
+    const token = await ensureControl().catch(() => null);
+    if (!token) return;
+    const modifiers = (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) |
+      (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
     try {
-      await withViewerRecovery(true, (token) =>
-        sendBrowserViewerCommand(threadId, token.token, {
+      for (const keyEvent of ["keyDown", "keyUp"] as const) {
+        await sendBrowserViewerCommand(threadId, token.token, {
           action: "input",
           command: {
-            kind: "key",
-            event: "keyDown",
-            key: event.key,
-            code: event.code,
-            ...(event.key.length === 1 ? { text: event.key } : {}),
+            kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
+            ...(keyEvent === "keyDown" && event.key.length === 1 ? { text: event.key } : {}),
           },
-        }));
-      await withViewerRecovery(true, (token) =>
-        sendBrowserViewerCommand(threadId, token.token, {
-          action: "input",
-          command: { kind: "key", event: "keyUp", key: event.key, code: event.code },
-        }));
+        });
+      }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido enviar la tecla.");
+      setError(reason instanceof Error ? reason.message : "No se ha podido escribir en la página.");
     }
   };
 
-  const lifecycle = status?.state.lifecycle ?? null;
-  const humanControl = lifecycle === "human-control";
-  const canView = lifecycle === "ready" || humanControl;
-  const actionCopy: Record<BrowserActionHistoryItem["action"], string> = {
-    open: "Abrir página",
-    read: "Leer página",
-    screenshot: "Capturar pantalla",
-    scroll: "Desplazar",
-    click: "Clic",
-    type: "Escribir",
-    tabs: "Consultar pestaña",
-    downloads: "Consultar descargas",
+  const pasteFrame = async (event: ClipboardEvent<HTMLImageElement>) => {
+    const text = event.clipboardData.getData("text").slice(0, 4_096);
+    if (!text || !threadId) return;
+    event.preventDefault();
+    const token = await ensureControl().catch(() => null);
+    if (!token) return;
+    await sendBrowserViewerCommand(threadId, token.token, {
+      action: "input", command: { kind: "key", event: "char", key: "Unidentified", text },
+    }).catch((reason: unknown) => {
+      setError(reason instanceof Error ? reason.message : "No se ha podido pegar el texto.");
+    });
   };
 
+  const closePanel = async () => {
+    humanControlRef.current = false;
+    if (status?.state.lifecycle === "human-control") {
+      const released = await controlBrowser("release").catch(() => null);
+      if (released) setStatus(released);
+    }
+    setFullscreen(false);
+    setPointer(null);
+    onClose();
+  };
+
+  const live = connection === "live";
+  const humanControl = status?.state.lifecycle === "human-control";
+  const indicator = live
+    ? metrics ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
+    : connection === "reconnecting" ? "Reconectando" : "Conectando";
+
   return (
-    <aside className={`fixed inset-y-0 right-0 z-30 flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] transition-transform xl:static xl:w-[520px] xl:shrink-0 xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`} aria-label="Navegador">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--border)] px-3.5">
-        <Browser size={16} className="text-[var(--text-secondary)]" />
-        <h2 className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[var(--text)]">Navegador</h2>
-        <span className="text-[12px] font-medium text-[var(--text-muted)]">{lifecycle ? lifecycleCopy[lifecycle] : "Conectando…"}</span>
-        <button type="button" aria-label="Cerrar navegador" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={15} /></button>
+    <aside
+      className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
+      aria-label="Navegador"
+    >
+      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-2">
+        <button type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
+        <button type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
+        <button type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}><ArrowClockwise size={15} /></button>
+        <form className="mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
+          <label className="sr-only" htmlFor="browser-address">Dirección web</label>
+          <input id="browser-address" type="text" inputMode="url" spellCheck={false}
+            className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)] focus:text-left"
+            value={address} onChange={(event) => setAddress(event.target.value)}
+            onFocus={() => { addressEditingRef.current = true; }}
+            onBlur={() => { addressEditingRef.current = false; }} />
+        </form>
+        <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
+          className={`mx-1 size-2 shrink-0 rounded-full ${live ? "bg-[var(--positive)]" : connection === "reconnecting" ? "bg-[var(--warning)] motion-safe:animate-pulse" : "bg-[var(--text-subtle)] motion-safe:animate-pulse"}`} role="status" />
+        <button type="button" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
+        <button type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={() => void closePanel()}><X size={15} /></button>
       </header>
 
-      <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2">
-        {lifecycle === "stopped" ? <button type="button" className="browser-action" disabled={!threadId || busy !== null} onClick={() => void runControl("start")}><Browser size={13} />Iniciar</button> : null}
-        {lifecycle === "degraded" ? <button type="button" className="browser-action" disabled={!threadId || busy !== null} onClick={() => void runControl("start")}><ArrowClockwise size={13} />Reiniciar</button> : null}
-        {lifecycle === "ready" ? <button type="button" className="browser-action" disabled={!threadId || busy !== null} onClick={() => void runControl("takeover")}><Hand size={13} />Tomar control</button> : null}
-        {humanControl ? <button type="button" className="browser-action" disabled={busy !== null} onClick={() => void runControl("release")}><PaperPlaneTilt size={13} />Devolver al agente</button> : null}
-        {lifecycle && lifecycle !== "stopped" ? <button type="button" className="browser-action text-[var(--danger)]" disabled={busy !== null} onClick={() => void runControl("stop")}><Stop size={13} />Detener</button> : null}
-        <button type="button" aria-label="Actualizar estado" className="browser-action ml-auto" disabled={busy !== null} onClick={() => void refreshStatus().catch(() => undefined)}><ArrowClockwise size={13} /></button>
-      </div>
-
-      {humanControl ? (
-        <form className="flex gap-2 border-b border-[var(--border-subtle)] px-3 py-2" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
-          <label className="sr-only" htmlFor="browser-address">Dirección web</label>
-          <input id="browser-address" type="url" className="min-h-10 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 text-[13px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" value={address} onChange={(event) => setAddress(event.target.value)} />
-          <button type="submit" className="browser-action" disabled={busy !== null}><PaperPlaneTilt size={13} />Abrir</button>
-        </form>
-      ) : null}
-
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto bg-[#e9e9e7] p-3">
-        {canView && frameUrl ? (
-          <div className="relative max-h-full max-w-full">
-          <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={humanControl ? 0 : -1} onClick={(event) => void clickFrame(event)} onPointerMove={moveFrame} onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)} className={`max-h-full max-w-full rounded-md border border-black/15 bg-white object-contain shadow-sm outline-none ${humanControl ? "cursor-none focus:ring-2 focus:ring-[var(--brain-accent)]" : ""}`} />
-          {humanControl && pointer ? <span aria-hidden="true" className="pointer-events-none absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--brain-accent)] shadow" style={{ left: `${pointer.x * 100}%`, top: `${pointer.y * 100}%` }} /> : null}
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9e9e7]">
+        {frameUrl ? (
+          <div className="relative inline-flex max-h-full max-w-full">
+            <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
+              onClick={(event) => void clickFrame(event)} onPointerMove={moveFrame}
+              onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)}
+              onPaste={(event) => void pasteFrame(event)}
+              className="max-h-full max-w-full bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]" />
+            {humanControl && pointer ? <span aria-hidden="true" className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--brain-accent)] shadow" style={{ left: `${pointer.x * 100}%`, top: `${pointer.y * 100}%` }} /> : null}
           </div>
-        ) : lifecycle === "starting" || lifecycle === "recovering" || !status ? (
-          <div className="flex items-center gap-2 text-[13px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={16} className="motion-safe:animate-spin" />Preparando el navegador privado…</div>
         ) : (
-          <div className="max-w-xs text-center text-[13px] leading-5 text-[var(--text-secondary)]"><Browser size={25} className="mx-auto mb-2" /><p>{threadId ? "Inicia el navegador cuando necesites ver o controlar una tarea web." : "Abre una conversación antes de iniciar el navegador."}</p></div>
+          <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>
         )}
-        {busy === "input" ? <span className="absolute bottom-5 right-5 rounded-full bg-black/75 px-2.5 py-1 text-[12px] text-white">Enviando interacción…</span> : null}
-        {lastInteraction && humanControl ? <span className="absolute bottom-5 left-5 rounded-full bg-black/75 px-2.5 py-1 text-[12px] text-white">{lastInteraction}</span> : null}
+        {error ? <div className="absolute left-1/2 top-3 max-w-[80%] -translate-x-1/2 rounded-full bg-black/70 px-3 py-1.5 text-center text-[11px] text-white" role="alert">{error}</div> : null}
       </div>
-
-      {error ? <div className="flex items-start gap-2 border-t border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert"><WarningCircle size={14} className="mt-0.5 shrink-0" /><span>{error}</span></div> : null}
-      {status?.runtime?.detail ? <div className="border-t border-[var(--border)] px-3 py-2 text-[12px] text-[var(--text-muted)]">{status.runtime.detail}</div> : null}
-      {history.length ? <div className="max-h-32 overflow-y-auto border-t border-[var(--border)] px-3 py-2" aria-label="Actividad reciente del navegador">
-        <p className="mb-1.5 text-[12px] font-semibold text-[var(--text)]">Actividad reciente</p>
-        {history.slice(0, 6).map((item) => <div key={`${item.callId}:${item.phase}`} className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-muted)]"><span className={`size-1.5 rounded-full ${item.phase === "indeterminate" || item.phase === "denied" ? "bg-[var(--danger)]" : item.phase === "started" ? "bg-[var(--warning)]" : "bg-[var(--positive)]"}`} /><span className="min-w-0 flex-1 truncate">{actionCopy[item.action]}{item.actor === "human" ? " · tú" : ""}</span><span>{item.phase === "started" ? "En curso" : item.phase === "dispatched" ? "Enviado" : item.phase === "completed" ? item.success ? "Hecho" : "Falló" : item.phase === "denied" ? "Bloqueado" : "Por verificar"}</span></div>)}
-      </div> : null}
-      {status?.state.downloads.length ? <footer className="max-h-28 overflow-y-auto border-t border-[var(--border)] px-3 py-2">
-        <p className="mb-1.5 text-[12px] font-semibold text-[var(--text)]">Descargas</p>
-        {status.state.downloads.map((download) => <div key={download.id} className="flex items-center gap-2 py-1 text-[12px] text-[var(--text-muted)]"><DownloadSimple size={12} /><span className="min-w-0 flex-1 truncate">{download.fileName}</span><span>{download.status === "complete" ? "Completada" : download.status === "active" ? "En curso" : "Fallida"}</span></div>)}
-      </footer> : null}
     </aside>
   );
 }

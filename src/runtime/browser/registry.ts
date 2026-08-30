@@ -7,6 +7,7 @@ import type {
   BrowserRuntimeHandle,
   BrowserFrame,
   BrowserInputCommand,
+  BrowserViewerHistoryAction,
   InteractiveManagedBrowserRuntime,
   ManagedBrowserRuntime,
 } from "@/runtime/browser/types";
@@ -258,6 +259,25 @@ export class BrowserRuntimeRegistry {
     return runtime.captureFrame(threadId);
   }
 
+  async viewerNavigationState(userId: string, threadId: string) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.recoverExpired(userId);
+    this.assertCurrentSession(userId, state);
+    if (state.lifecycle !== "ready" && state.lifecycle !== "human-control") {
+      throw new Error("Browser viewer is unavailable in the current lifecycle state.");
+    }
+    return runtime.viewerNavigationState(threadId);
+  }
+
+  async navigateHistory(userId: string, threadId: string, action: BrowserViewerHistoryAction) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.recoverExpired(userId);
+    this.assertHumanControl(userId, state);
+    return runtime.navigateHistory(threadId, action);
+  }
+
   async readPage(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);
@@ -483,6 +503,8 @@ export class BrowserRuntimeRegistry {
     const runtime = this.requireEntry(userId).runtime as ManagedBrowserRuntime;
     if (!("captureFrame" in runtime) || typeof runtime.captureFrame !== "function" ||
       !("navigate" in runtime) || typeof runtime.navigate !== "function" ||
+      !("viewerNavigationState" in runtime) || typeof runtime.viewerNavigationState !== "function" ||
+      !("navigateHistory" in runtime) || typeof runtime.navigateHistory !== "function" ||
       !("dispatchInput" in runtime) || typeof runtime.dispatchInput !== "function") {
       throw new Error("Browser runtime does not provide the interactive viewer contract.");
     }

@@ -88,6 +88,19 @@ class FakeBrowserRuntime implements ManagedBrowserRuntime {
       capturedAt: "2026-08-27T00:00:00.000Z",
     };
   }
+  async viewerNavigationState() {
+    return {
+      schemaVersion: 1 as const,
+      url: "about:blank",
+      title: "",
+      canGoBack: false,
+      canGoForward: false,
+    };
+  }
+  async navigateHistory(threadId: string, direction: "back" | "forward" | "reload") {
+    this.navigations.push(`${threadId}:history:${direction}`);
+    return this.viewerNavigationState();
+  }
   async agentCaptureFrame(threadId: string) {
     return this.captureFrame(threadId);
   }

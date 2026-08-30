@@ -208,14 +208,23 @@ describe("browser UI adapter", () => {
       }
       if (url.endsWith("/viewer/input")) {
         expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer private-token-value-with-signature");
-        return Response.json({ ok: true });
+        return Response.json({ ok: true, navigation: {
+          schemaVersion: 1,
+          url: "https://example.com/",
+          title: "Example Domain",
+          canGoBack: true,
+          canGoForward: false,
+        } });
       }
       return Response.json(browserStatus);
     });
     vi.stubGlobal("fetch", fetchMock);
     const issued = await issueBrowserViewerToken(threadId, true);
     await expect(readBrowserFrame(threadId, issued.token)).resolves.toBeInstanceOf(Blob);
-    await expect(sendBrowserViewerCommand(threadId, issued.token, { action: "navigate", url: "https://example.com/" })).resolves.toBeUndefined();
+    await expect(sendBrowserViewerCommand(threadId, issued.token, { action: "navigate", url: "https://example.com/" })).resolves.toMatchObject({
+      url: "https://example.com/",
+      canGoBack: true,
+    });
     await expect(controlBrowser("takeover")).resolves.toMatchObject({ state: { lifecycle: "ready" } });
   });
 

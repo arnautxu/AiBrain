@@ -23,6 +23,9 @@ describe("browser HTTP contracts", () => {
     expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "navigate", url: "https://example.test/path" }))
       .toEqual({ threadId: THREAD_ID, action: "navigate", url: "https://example.test/path" });
     expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "navigate", url: "file:///etc/passwd" })).toBeNull();
+    expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "history", direction: "back" }))
+      .toEqual({ threadId: THREAD_ID, action: "history", direction: "back" });
+    expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "history", direction: "evaluate" })).toBeNull();
     expect(parseBrowserViewerCommand({
       threadId: THREAD_ID,
       action: "input",

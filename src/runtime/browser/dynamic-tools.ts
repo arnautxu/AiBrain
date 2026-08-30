@@ -381,12 +381,19 @@ export async function handleBrowserDynamicToolCall(
       approvalEvidence = reserved.approvalEvidence;
       expectedResource = reserved.approvalResource;
     } else {
-      expectedResource = await context.prepare({
-        installationId: context.installationId,
-        userId: context.userId,
-        threadId: context.browserThreadId,
-        command,
-      });
+      try {
+        expectedResource = await context.prepare({
+          installationId: context.installationId,
+          userId: context.userId,
+          threadId: context.browserThreadId,
+          command,
+        });
+      } catch {
+        const response = failure("Browser session reconnected before the action was dispatched. Read the page and try again.");
+        await store.complete(identity, response);
+        await recordHistory("completed", false);
+        return response;
+      }
     }
     humanApprovalRequired = browserInteractionRequiresApproval(command, expectedResource);
     if (humanApprovalRequired && !approvalEvidence) {

@@ -410,6 +410,26 @@ describe("closed browser dynamic tools", () => {
     expect(audit.at(-1)?.payload.success).toBe(false);
   });
 
+  it("returns a normal tool failure when the browser reconnects before dispatch", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn();
+    const prepare = vi.fn(async () => {
+      const error = new Error("Chrome closed the CDP response pipe") as Error & { code: string };
+      error.code = "CDP_PIPE_EOF";
+      throw error;
+    });
+    const input = request("open", { url: "https://example.test/reconnect" });
+    const ctx = context(approvalStore, execute, [], { callStore, prepare });
+    const first = await handleBrowserDynamicToolCall(input, ctx);
+    const replay = await handleBrowserDynamicToolCall(input, ctx);
+    expect(first).toEqual(replay);
+    expect(first).toMatchObject({ success: false });
+    expect(first.contentItems[0]).toMatchObject({ text: expect.stringContaining("before the action was dispatched") });
+    expect(prepare).toHaveBeenCalledOnce();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("keeps a typed secret out of the response, record and audit when post-dispatch readback fails", async () => {
     const { userRoot, approvalStore } = await fixture();
     const callStore = new BrowserToolCallStore({ userRoot });
