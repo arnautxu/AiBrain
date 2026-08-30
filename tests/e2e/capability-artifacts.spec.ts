@@ -76,10 +76,14 @@ test("document preview, publication state and isolated browser viewer consume ar
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page.getByText("Pendiente de confirmación segura")).toBeVisible();
   await expect(page.getByRole("img", { name: "Un diagrama sintético sin datos privados" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Abrir", exact: true })).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+  const openBrowser = page.getByRole("button", { name: "Abrir", exact: true });
+  await expect(openBrowser).toBeVisible();
   await expect(page.locator(`iframe[src="/api/browser/sessions/${browserId}/viewer"]`)).toHaveCount(0);
   await expect(page.getByText("Control del agente")).toBeVisible();
   await expect(page.getByRole("link", { name: "Descargar resultado" })).toBeVisible();
+  await openBrowser.click();
+  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
+  await expect(page.locator(`iframe[src="/api/browser/sessions/${browserId}/viewer"]`)).toHaveCount(0);
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
   await page.getByRole("menuitem", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL(/\/login/);

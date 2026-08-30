@@ -366,6 +366,31 @@ describe("WebSocketAppServerTransport contract", () => {
     await transport.close();
   });
 
+  it("queues a request when the socket closes just before submission and sends it after reconnect", async () => {
+    vi.useFakeTimers();
+    const factory = new FakeSocketFactory();
+    const transport = createTransport(factory);
+    const connecting = transport.connect();
+    await settle();
+    const first = factory.sockets[0];
+    first.open();
+    ready(first);
+    await connecting;
+
+    first.readyState = 3;
+    const sending = transport.send(request);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(factory.sockets).toHaveLength(2);
+    const second = factory.sockets[1];
+    second.open();
+    ready(second, "session-2");
+    await settle();
+    expect(second.sent.at(-1)).toEqual({ protocolVersion: 1, type: "request", request });
+    second.receive({ protocolVersion: 1, type: "accepted", clientRequestId: "request-1" });
+    await sending;
+    await transport.close();
+  });
+
   it("uses application heartbeat and reconnects after a missing pong", async () => {
     vi.useFakeTimers();
     const factory = new FakeSocketFactory();

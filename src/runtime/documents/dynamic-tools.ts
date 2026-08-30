@@ -350,7 +350,9 @@ export async function handleLocalDocumentDynamicToolCall(
       const selected = await availableTarget(documents, input.fileName);
       let written = false;
       try {
-        const handle = await open(selected.target, "wx", 0o600);
+        // This runtime-owned, ACL-validated workspace path must not make the
+        // production bundler trace the repository as a build-time asset.
+        const handle = await open(/* turbopackIgnore: true */ selected.target, "wx", 0o600);
         try {
           await handle.writeFile(generated.data);
           await handle.sync();

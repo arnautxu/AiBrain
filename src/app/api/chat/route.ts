@@ -668,7 +668,7 @@ export async function POST(request: Request) {
       const emit = async (event: ChatStreamEvent, projection?: WorkerTurnProjection) => {
         const projectedEvent = projectChatStreamEvent(event, {
           sequence: projection?.envelope.sequence,
-          terminalDurationMs: Math.max(0, Date.now() - requestStartedAt),
+          terminalDurationMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
         });
         if (persistent && turnProjectionStore && projectionWriter) {
           if (projection) {

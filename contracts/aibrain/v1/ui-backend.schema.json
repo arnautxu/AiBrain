@@ -26,6 +26,15 @@
         "retryAfterMs": { "type": "integer", "minimum": 0 }
       }
     },
+    "RedirectResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "location"],
+      "properties": {
+        "status": { "enum": [302, 303, 307, 308] },
+        "location": { "type": "string", "minLength": 1 }
+      }
+    },
     "AuthSession": {
       "type": "object",
       "additionalProperties": false,
@@ -91,6 +100,7 @@
         "label": { "type": "string" },
         "detail": { "type": "string" },
         "output": { "type": "string" },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "status": { "enum": ["pending", "running", "waiting", "complete", "failed", "stopped"] }
       }
     },
@@ -120,6 +130,7 @@
         "summary": { "type": ["string", "null"], "maxLength": 4000 },
         "output": { "type": ["string", "null"], "maxLength": 64000 },
         "sourceIds": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$" } },
+        "sequence": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "createdAt": { "$ref": "#/$defs/IsoDate" }
       }
     },
@@ -268,6 +279,7 @@
         "role": { "enum": ["user", "assistant"] },
         "content": { "type": "string" },
         "createdAt": { "$ref": "#/$defs/IsoDate" },
+        "durationMs": { "type": "integer", "minimum": 0, "maximum": 9007199254740991 },
         "status": { "enum": ["complete", "streaming", "error", "stopped"] },
         "activity": { "type": "array", "items": { "$ref": "#/$defs/ActivityItem" } },
         "plan": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } },
