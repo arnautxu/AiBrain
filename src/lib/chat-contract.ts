@@ -129,6 +129,10 @@ export type TurnOptions = {
   webSearch: boolean;
   imageGeneration: boolean;
   skill: string | null;
+  /** Server-owned scheduled turns may request every currently authorized
+   * managed skill. Browser clients can only request this boolean; catalog and
+   * user policy are still revalidated by the server. */
+  inheritAuthorizedSkills?: boolean;
   /** Catalog resource IDs selected through the @ connector autocomplete. */
   connectorMentions?: string[];
   attachments: ChatInputAttachment[];
@@ -359,6 +363,7 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
     typeof value.webSearch === "boolean" &&
     typeof value.imageGeneration === "boolean" &&
     (value.skill === null || (typeof value.skill === "string" && value.skill.length <= 100)) &&
+    (value.inheritAuthorizedSkills === undefined || typeof value.inheritAuthorizedSkills === "boolean") &&
     (connectorMentions === undefined || (
       Array.isArray(connectorMentions) && connectorMentions.length <= 20 &&
       connectorMentions.every((id) => typeof id === "string" && /^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$/.test(id)) &&

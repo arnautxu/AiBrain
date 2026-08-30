@@ -743,6 +743,7 @@ export async function POST(request: Request) {
             context,
             requestStartedAt,
             streamTelemetry,
+            session,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

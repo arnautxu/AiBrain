@@ -20,6 +20,22 @@ export type AutomationSchedule =
   | { kind: "daily"; hour: number; minute: number }
   | { kind: "weekly"; weekdays: number[]; hour: number; minute: number };
 
+export type AutomationExecutionContext = {
+  /** Scheduled work always requests live web search and fails closed if the
+   * current user or runtime no longer authorizes it. */
+  webSearch: true;
+  /** Effective managed skills and connected catalog resources are resolved
+   * again for the owner immediately before every run. */
+  inheritAuthorizedSkills: true;
+  inheritAuthorizedConnectors: true;
+};
+
+export const DEFAULT_AUTOMATION_EXECUTION_CONTEXT: AutomationExecutionContext = {
+  webSearch: true,
+  inheritAuthorizedSkills: true,
+  inheritAuthorizedConnectors: true,
+};
+
 export type AutomationLease = {
   runKey: string;
   ownerId: string;
@@ -42,6 +58,7 @@ export type AutomationTask = {
   projectName: string;
   timeZone: AutomationTimeZone;
   schedule: AutomationSchedule;
+  executionContext: AutomationExecutionContext;
   state: AutomationState;
   nextRunAt: string | null;
   lastRunAt: string | null;
@@ -49,6 +66,9 @@ export type AutomationTask = {
   lastRunError: string | null;
   /** Retry retains the same occurrence and its deterministic idempotency key. */
   retryAt: string | null;
+  /** A manual occurrence is independent from the recurring schedule and its
+   * request id is the durable exactly-once key for repeated HTTP requests. */
+  manualRun: { requestId: string; scheduledFor: string } | null;
   /** A soft-deleted task stays available to the worker only long enough to
    * fence and record an in-flight turn. It is never returned to its owner. */
   deletedAt: string | null;
@@ -81,6 +101,7 @@ export type AutomationTaskInput = {
   projectName: string;
   timeZone: string;
   schedule: AutomationSchedule;
+  executionContext?: AutomationExecutionContext;
   /** Omitted only by legacy clients; the server defaults it to the owner. */
   audience?: AutomationAudience;
 };
@@ -152,6 +173,12 @@ export function isAutomationAudience(value: unknown): value is AutomationAudienc
     new Set(value.groupIds).size === value.groupIds.length;
 }
 
+export function isAutomationExecutionContext(value: unknown): value is AutomationExecutionContext {
+  return isRecord(value) && Object.keys(value).length === 3 &&
+    value.webSearch === true && value.inheritAuthorizedSkills === true &&
+    value.inheritAuthorizedConnectors === true;
+}
+
 export function parseAutomationInput(value: unknown): AutomationTaskInput | null {
   if (!isRecord(value)) return null;
   const name = typeof value.name === "string" ? value.name.trim() : "";
@@ -161,6 +188,7 @@ export function parseAutomationInput(value: unknown): AutomationTaskInput | null
   if (!name || name.length > 100 || !prompt || prompt.length > 20_000 ||
     !/^[0-9a-f-]{36}$/i.test(projectId) || !projectName || projectName.length > 100 ||
     !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) ||
+    ("executionContext" in value && !isAutomationExecutionContext(value.executionContext)) ||
     ("audience" in value && !isAutomationAudience(value.audience))) return null;
   return {
     name,
@@ -169,6 +197,8 @@ export function parseAutomationInput(value: unknown): AutomationTaskInput | null
     projectName,
     timeZone: value.timeZone,
     schedule: value.schedule,
+    executionContext: isAutomationExecutionContext(value.executionContext)
+      ? value.executionContext : DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
     ...(isAutomationAudience(value.audience) ? { audience: value.audience } : {}),
   };
 }

@@ -1,10 +1,18 @@
 # Automatizaciones
 
-AiBrain puede ejecutar un prompt una vez, cada día o ciertos días de la semana. Cada tarea pertenece a un único usuario y proyecto, conserva su próxima y última ejecución y crea una conversación normal para que el resultado quede visible en el workbench.
+AiBrain puede ejecutar un prompt una vez, cada día o ciertos días de la semana. Cada tarea pertenece a un único usuario y a un proyecto, incluido el proyecto técnico `Sin proyecto`, conserva su próxima y última ejecución y crea una conversación normal para que el resultado quede visible en el workbench y el Centro de tareas.
 
 ## Garantía operativa honesta
 
-No es un servicio cloud. Una tarea solo se procesa mientras `scripts/run-automations.ts` esté vivo en el servidor de la instalación. La UI muestra la última señal del worker y deja las tareas pendientes cuando está desconectado. El worker tampoco envía correos, mensajes ni publicaciones por sí solo; ejecuta un turno normal y respeta las mismas políticas y aprobaciones que una conversación interactiva.
+No es un servicio cloud. Una tarea solo se procesa mientras `scripts/run-automations.ts` esté vivo en el servidor de la instalación. Al ser un worker del servidor, sigue procesando tareas aunque el navegador o el dispositivo del usuario estén cerrados. La UI muestra la última señal del worker y deja las tareas pendientes cuando está desconectado. El worker tampoco envía correos, mensajes ni publicaciones por sí solo; ejecuta un turno normal y respeta las mismas políticas y aprobaciones que una conversación interactiva.
+
+Cada ejecución solicita búsqueda web en vivo. Inmediatamente antes de iniciar el turno, el servidor vuelve a comprobar la política de web, las skills efectivas y los conectores disponibles para el propietario. Una revocación no queda congelada en la tarea: el recurso deja de incluirse y, si se revoca la web, la ejecución falla cerrada y queda registrada.
+
+## Creación y control
+
+La superficie principal permite crear, editar, pausar, reanudar, eliminar y ejecutar ahora una tarea, además de consultar su historial y abrir la conversación de resultado. `Ejecutar ahora` usa un id de solicitud durable: repetir la misma petición no crea otra ocurrencia, y una segunda petición distinta se rechaza mientras haya una ejecución manual pendiente o en curso. Una ejecución manual puede arrancar con la recurrencia en pausa y no la reactiva al terminar.
+
+El chat también puede preparar una automatización mediante herramientas dinámicas internas. Antes de persistirla debe conocer y mostrar acción, horario, zona horaria, proyecto o `Sin proyecto` y audiencia. La propuesta se guarda por usuario, tenant, conversación y turno, pero no crea ninguna tarea. La creación exige una confirmación explícita en un mensaje posterior; propuesta y tarea usan ids durables para que un reintento tras reinicio no duplique la automatización.
 
 La zona por defecto es `Europe/Madrid`, pero se guarda por tarea. En el salto de primavera, una hora inexistente se mueve al primer minuto válido posterior del mismo día. En la repetición de otoño se usa la primera aparición de la hora.
 
@@ -56,9 +64,10 @@ RestartSec=5
 
 - Tareas: `<usersRoot>/<userId>/automations/tasks.json`.
 - Historial append-only: `<usersRoot>/<userId>/automations/runs.jsonl`.
+- Propuestas pendientes del chat: `<usersRoot>/<userId>/automations/chat-proposals.json`.
 - Locks: `<usersRoot>/<userId>/automations/locks/`.
 - Señal del worker: `<dataRoot>/automations/worker-status.json`.
-- El identificador de ejecución deriva de tarea + instante programado.
+- El identificador de una ejecución programada deriva de tarea + instante; el de una ejecución manual deriva de tarea + id de solicitud del cliente.
 - La concesión expira si el proceso muere y se renueva mientras el turno sigue activo.
 - La conversación y los mensajes del turno usan ids deterministas. Tras una recuperación, el store y el workbench reutilizan el mismo resultado visible y rechazan duplicados ya terminales.
 - Pausar o eliminar una tarea con una ejecución en curso no borra su fence de

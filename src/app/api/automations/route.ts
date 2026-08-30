@@ -6,6 +6,7 @@ import { AutomationAccessError, createAutomationTask, listAutomationTasks } from
 import { loadInstallationConfig } from "@/config/installation";
 import { readAutomationWorkerStatus } from "@/automations/worker-status";
 import { getProject } from "@/workbench/store";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,10 @@ export async function POST(request: Request) {
   if (!input) return NextResponse.json({ error: "Revisa el nombre, prompt, proyecto y horario." }, { status: 400, headers: HEADERS });
   try {
     const project = await getProject(session, input.projectId);
-    const task = await createAutomationTask(session, { ...input, projectName: project.name });
+    const task = await createAutomationTask(session, {
+      ...input,
+      projectName: project.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project.name,
+    });
     return NextResponse.json({ schemaVersion: 1, task }, { status: 201, headers: HEADERS });
   } catch (error) {
     return errorResponse(error);
