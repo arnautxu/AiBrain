@@ -20,6 +20,7 @@ import type {
   RememberInput,
 } from "@/memory/types";
 import { UserProvisioner } from "@/users/provisioner";
+import { FileMemoryProposalStore } from "@/memory/proposal-store";
 
 const USER_A = "00000000-0000-4000-8000-000000000001";
 const USER_B = "00000000-0000-4000-8000-000000000002";
@@ -104,6 +105,28 @@ afterEach(async () => {
 });
 
 describe("LocalFileMemoryService", () => {
+  it("injects only confirmed governed memory for the current project and removes deleted memory", async () => {
+    const { config, service, contextA, contextB } = await fixture();
+    const projectId = "00000000-0000-4000-8000-000000000011";
+    const governed = new FileMemoryProposalStore({ config });
+    const context = { ...contextA, projectId };
+    const proposal = (await governed.propose(context, { kind: "decision", content: "Use the confirmed Arnall handoff.", proposedScope: "project", threadId: "thread-1", turnId: "turn-1", callId: "call-1", toolNames: ["aibrain_browser.read"], sourceExcerpt: "Confirmed in this assisted chat." })).proposal;
+    const memory = (await governed.confirm(context, { proposalId: proposal.proposalId, explicit: true, content: proposal.content, scope: "project", allowCompanyScope: false })).memory;
+    const snapshot = await service.buildPromptSnapshot(context, { maxItems: 20, maxCharacters: 12_000 });
+    expect(snapshot.memoryIds).toContain(memory.memoryId);
+    expect(snapshot.text).toContain("Use the confirmed Arnall handoff");
+    expect(snapshot.text).toContain('"scope":"project"');
+    const otherProject = await service.buildPromptSnapshot({ ...context, projectId: "00000000-0000-4000-8000-000000000012" }, { maxItems: 20, maxCharacters: 12_000 });
+    expect(otherProject.memoryIds).not.toContain(memory.memoryId);
+    const companyProposal = (await governed.propose(context, { kind: "recollection", content: "Company-wide confirmed context.", proposedScope: "company", threadId: "thread-1", turnId: "turn-1", callId: "call-company", toolNames: [], sourceExcerpt: "Confirmed for the company." })).proposal;
+    const companyMemory = (await governed.confirm(context, { proposalId: companyProposal.proposalId, explicit: true, content: companyProposal.content, scope: "company", allowCompanyScope: true })).memory;
+    const employeeB = await service.buildPromptSnapshot({ ...contextB, projectId }, { maxItems: 20, maxCharacters: 12_000 });
+    expect(employeeB.memoryIds).toContain(companyMemory.memoryId);
+    expect(employeeB.memoryIds).not.toContain(memory.memoryId);
+    await governed.delete(context, { memoryId: memory.memoryId, explicit: true, expectedRevision: 1, allowCompanyScope: false });
+    expect((await service.buildPromptSnapshot(context, { maxItems: 20, maxCharacters: 12_000 })).memoryIds).not.toContain(memory.memoryId);
+  });
+
   it("reads stable company context, indexed knowledge and only the authenticated employee profile", async () => {
     const { config, service, contextA, contextB } = await fixture();
     const knowledgePath = path.join(config.paths.companyContextRoot, "knowledge", "procedures", "handoff.md");

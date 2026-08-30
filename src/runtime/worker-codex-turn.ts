@@ -19,6 +19,7 @@ import {
   itemToolResult,
   notificationDelta,
   notificationItemId,
+  parseSkills,
   planFromNotification,
   resolvedApproval,
   RuntimeNotReadyError,
@@ -28,7 +29,7 @@ import {
   type LegacyServerRequest,
 } from "@/runtime/codex-app-server";
 import type { RuntimeConfig } from "@/runtime/config";
-import { catalogRuntimeEnforcer } from "@/catalog/access-service";
+import { catalogRuntimeEnforcer, synchronizeCatalogSkillsForUser } from "@/catalog/access-service";
 import { resolveConnectorMentionsForTurn } from "@/connectors/mentions";
 import { connectorMentionDeveloperInstructions } from "@/connectors/mentions-contract";
 import {
@@ -50,6 +51,9 @@ import {
   permissionAllowsGenericToolExecution,
 } from "@/runtime/permission-turn";
 import {
+  AIBRAIN_MEMORY_TOOL_NAMESPACE,
+  handleMemoryProposalToolCall,
+  MEMORY_DYNAMIC_TOOLS,
   prepareTurnMemory,
   type WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
@@ -381,6 +385,7 @@ export async function runWorkerCodexTurn(
   };
 
   await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
+  const observedToolNames = new Set<string>();
   const preparedMemory = await telemetry.measure("memory", () => prepareTurnMemory(memory, {
     installationId,
     userId: authenticatedUserId,
@@ -399,6 +404,12 @@ export async function runWorkerCodexTurn(
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
   }
+  const canSynchronizeSkills = typeof runtime.handle.roots.codexHome === "string" &&
+    typeof runtime.config.paths.usersRoot === "string" && typeof runtime.config.paths.dataRoot === "string";
+  const synchronizedSkills = canSynchronizeSkills
+    ? await telemetry.measure("skills", () =>
+        synchronizeCatalogSkillsForUser(installationId, authenticatedUserId, chatRequest.options.skill))
+    : { result: { revision: 0, installed: [], updated: [], revoked: [], unchanged: [], skills: [] }, developerInstructions: "" };
   const documentUploadIds = chatRequest.options.documentUploadIds ?? [];
   if (documentUploadIds.length > 0 || turnDocuments.length > 0) {
     assertWorkerTurnDocuments({
@@ -491,9 +502,15 @@ export async function runWorkerCodexTurn(
     ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
     : null;
   const selectedSkill = chatRequest.options.skill
-    ? (await telemetry.measure("skills", () => runtime.client.resolvedSkills(projectWorkspace)))
+    ? parseSkills(await telemetry.measure("skills", () => runtime.client.request(
+      "skills/list",
+      { cwds: [projectWorkspace], forceReload: true },
+      `skills-resolved:${chatRequest.assistantMessageId}`,
+      10_000,
+    )))
       .filter((skill) => catalog?.allowsSkill(skill.id))
-      .find((skill) => skill.id === chatRequest.options.skill) ?? null
+      .find((skill) => skill.id === chatRequest.options.skill &&
+        skill.path === synchronizedSkills.result.skills.find(({ id }) => id === skill.id)?.path) ?? null
     : null;
   if (chatRequest.options.skill && !selectedSkill) {
     throw new Error("La skill seleccionada ja no està disponible.");
@@ -535,6 +552,7 @@ export async function runWorkerCodexTurn(
     readableFilesDeveloperInstructions(enterpriseDocumentRoots),
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
+    synchronizedSkills.developerInstructions,
     connectorMentionDeveloperInstructions(selectedConnectorMentions),
   ].filter(Boolean).join("\n\n");
   const commonThreadParams = {
@@ -636,7 +654,7 @@ export async function runWorkerCodexTurn(
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
         : runtime.client.request("thread/start", {
             ...commonThreadParams,
-            dynamicTools: [...BROWSER_DYNAMIC_TOOLS],
+            dynamicTools: [...BROWSER_DYNAMIC_TOOLS, ...MEMORY_DYNAMIC_TOOLS],
             ephemeral: false,
             serviceName: "aibrain_workbench",
           }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
@@ -1043,6 +1061,22 @@ export async function runWorkerCodexTurn(
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
         if (request.method === "item/tool/call") {
           if (!runtimeTurnId) throw new Error("Browser tool call arrived before the turn was bound.");
+          if (isRecord(request.params) && request.params.namespace === AIBRAIN_MEMORY_TOOL_NAMESPACE) {
+            return await handleMemoryProposalToolCall(request.params as never, {
+              config: runtime.config,
+              installationId,
+              userId: authenticatedUserId,
+              projectId: chatRequest.projectId,
+              sourceThreadId: chatRequest.threadId,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              sourceExcerpt: chatRequest.message,
+              observedToolNames: [...observedToolNames],
+            }) as JsonValue;
+          }
+          if (isRecord(request.params) && typeof request.params.namespace === "string" && typeof request.params.tool === "string") {
+            observedToolNames.add(`${request.params.namespace}.${request.params.tool}`);
+          }
           return await handleBrowserDynamicToolCall(request.params, {
             installationId,
             userId: authenticatedUserId,

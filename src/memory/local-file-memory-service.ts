@@ -29,6 +29,7 @@ import {
   type RememberInput,
   type RevokeMemoryInput,
 } from "@/memory/types";
+import { FileMemoryProposalStore } from "@/memory/proposal-store";
 
 const COMPANY_CONTEXT_FILES = [
   "00_SYSTEM.md",
@@ -81,6 +82,12 @@ function isInside(root: string, candidate: string) {
 
 function sha256(value: unknown) {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function rejectMemorySecretMaterial(value: string) {
+  if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*|\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{16,}/iu.test(value)) {
+    throw new MemoryServiceError("MEMORY_SECRET_REJECTED", "Credential-shaped content cannot be stored as memory.");
+  }
 }
 
 function decodeMarkdown(value: Uint8Array, label: string) {
@@ -312,6 +319,8 @@ export class LocalFileMemoryService implements MemoryService {
   }
 
   async remember(context: MemoryContext, input: RememberInput) {
+    rejectMemorySecretMaterial(input.content);
+    rejectMemorySecretMaterial(input.provenance.sourceExcerpt);
     assertIdempotencyKey(input.idempotencyKey);
     const occurredAt = new Date(this.now()).toISOString();
     const candidate = memoryRecordSchema.parse({
@@ -642,6 +651,13 @@ export class LocalFileMemoryService implements MemoryService {
     const knowledgeIndexContent = await this.readKnowledgeIndex(context);
     const employeeContext = await this.readEmployeeContext(context);
     const memories = await this.list(context, { status: "active", limit: 10_000 });
+    const governed = context.projectId
+      ? await new FileMemoryProposalStore({ config: this.config, now: this.now }).listRecords({
+          installationId: context.installationId,
+          userId: context.userId,
+          projectId: context.projectId,
+        })
+      : [];
     const companyContext = companyDocuments.map(({ fileName, content }) => ({
       fileName,
       content,
@@ -666,6 +682,17 @@ export class LocalFileMemoryService implements MemoryService {
       provenance: { ...memory.provenance },
       sourceExcerptTruncated: false,
     }));
+    const governedMemories = governed.slice(0, Math.max(0, maxItems - explicitMemories.length)).map((memory) => ({
+      memoryId: memory.memoryId,
+      kind: memory.kind,
+      scope: memory.scope,
+      projectId: memory.projectId,
+      content: memory.content,
+      contentTruncated: false,
+      provenance: { ...memory.provenance },
+      sourceExcerptTruncated: false,
+      revision: memory.revision,
+    }));
     const payload = {
       schemaVersion: 1,
       trust: "untrusted-data-only",
@@ -673,6 +700,7 @@ export class LocalFileMemoryService implements MemoryService {
       knowledgeIndex,
       employeeContext: employee,
       explicitMemories,
+      governedMemories,
     };
     type Truncatable = {
       get(): string;
@@ -712,8 +740,20 @@ export class LocalFileMemoryService implements MemoryService {
           mark: () => { memory.sourceExcerptTruncated = true; },
         },
       ])),
+      ...governedMemories.flatMap((memory) => ([
+        {
+          get: () => memory.content,
+          set: (value: string) => { memory.content = value; },
+          mark: () => { memory.contentTruncated = true; },
+        },
+        {
+          get: () => memory.provenance.sourceExcerpt,
+          set: (value: string) => { memory.provenance.sourceExcerpt = value; },
+          mark: () => { memory.sourceExcerptTruncated = true; },
+        },
+      ])),
     ];
-    let truncated = memories.length > explicitMemories.length;
+    let truncated = memories.length + governed.length > explicitMemories.length + governedMemories.length;
     let text = JSON.stringify(payload);
     while (text.length > maxCharacters) {
       const longest = truncatable.reduce<Truncatable | null>((selected, candidate) => (
@@ -728,6 +768,9 @@ export class LocalFileMemoryService implements MemoryService {
       } else if (explicitMemories.length > 0) {
         explicitMemories.pop();
         truncated = true;
+      } else if (governedMemories.length > 0) {
+        governedMemories.pop();
+        truncated = true;
       } else {
         throw new MemoryServiceError(
           "MEMORY_SNAPSHOT_INVALID",
@@ -738,7 +781,7 @@ export class LocalFileMemoryService implements MemoryService {
     }
     return {
       text,
-      memoryIds: explicitMemories.map(({ memoryId }) => memoryId),
+      memoryIds: [...explicitMemories, ...governedMemories].map(({ memoryId }) => memoryId),
       truncated,
     };
   }

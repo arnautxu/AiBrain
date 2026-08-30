@@ -80,3 +80,30 @@ export function parseMemoryListQuery(searchParams: URLSearchParams): MemoryListQ
     limit,
   };
 }
+
+export function isMemoryProjectId(value: unknown): value is string {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+export function isConfirmMemoryProposalRequest(value: unknown): value is {
+  explicit: true; projectId: string; content: string; scope: "private" | "project" | "company";
+} {
+  return isRecord(value) && hasExactKeys(value, ["explicit", "projectId", "content", "scope"]) &&
+    value.explicit === true && isMemoryProjectId(value.projectId) && boundedText(value.content, 32_000) &&
+    (value.scope === "private" || value.scope === "project" || value.scope === "company");
+}
+
+export function isRejectMemoryProposalRequest(value: unknown): value is { explicit: true; projectId: string; reason: string } {
+  return isRecord(value) && hasExactKeys(value, ["explicit", "projectId", "reason"]) && value.explicit === true &&
+    isMemoryProjectId(value.projectId) && boundedText(value.reason, 2_000);
+}
+
+export function isUpdateGovernedMemoryRequest(value: unknown): value is { explicit: true; projectId: string; expectedRevision: number; content: string } {
+  return isRecord(value) && hasExactKeys(value, ["explicit", "projectId", "expectedRevision", "content"]) && value.explicit === true &&
+    isMemoryProjectId(value.projectId) && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 1 && boundedText(value.content, 32_000);
+}
+
+export function isDeleteGovernedMemoryRequest(value: unknown): value is { explicit: true; projectId: string; expectedRevision: number } {
+  return isRecord(value) && hasExactKeys(value, ["explicit", "projectId", "expectedRevision"]) && value.explicit === true &&
+    isMemoryProjectId(value.projectId) && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 1;
+}

@@ -8,6 +8,10 @@ import type { CatalogCommand } from "@/catalog/contracts";
 import { catalogRuntimeEnforcer } from "@/catalog/access-service";
 import { loadInstallationConfig } from "@/config/installation";
 import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
+import {
+  FileCompanySkillPackageStore,
+  readVersionedSkillPackage,
+} from "@/catalog/skill-packages";
 
 export class CatalogAdminError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) { super(message); this.name = "CatalogAdminError"; }
@@ -25,11 +29,53 @@ async function catalogContext(session: AuthSession) {
 
 export async function catalogSnapshot(session: AuthSession) {
   const { installation, store } = await catalogContext(session);
-  return { schemaVersion: 1, installationId: installation.installationId, state: await store.read(), audit: await store.auditLog(100) };
+  const packageStore = new FileCompanySkillPackageStore(installation.installationId, installation.paths.dataRoot);
+  const [companyPackages, packageAudit, managedPackages] = await Promise.all([
+    packageStore.read(),
+    packageStore.auditLog(100),
+    Promise.all((installation.catalog?.graphikAIManagedSkills ?? []).map(async ({ id }) => {
+      const skill = await readVersionedSkillPackage(`${process.cwd()}/skills`, id);
+      return { ...skill.manifest, digest: skill.digest, source: skill.source };
+    })),
+  ]);
+  return {
+    schemaVersion: 1,
+    installationId: installation.installationId,
+    state: await store.read(),
+    packages: [
+      ...managedPackages.map((skill) => ({ ...skill, status: "active" as const })),
+      ...companyPackages.packages.map(({ package: skill, status, revision, updatedAt, updatedBy }) => ({ ...skill.manifest, digest: skill.digest, source: skill.source, status, revision, updatedAt, updatedBy })),
+    ],
+    audit: [...await store.auditLog(100), ...packageAudit]
+      .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt)).slice(0, 100),
+  };
 }
 
 export async function executeCatalogCommand(session: AuthSession, command: CatalogCommand) {
-  const { store } = await catalogContext(session);
+  const { installation, store } = await catalogContext(session);
+  if (command.action === "upsert-skill-package") {
+    const packageStore = new FileCompanySkillPackageStore(installation.installationId, installation.paths.dataRoot);
+    const result = await packageStore.upsert(session.user.id, command.package);
+    const current = await store.read();
+    const existing = current.resources.find((resource) => resource.id === command.package.id);
+    if (existing?.managedBy === "graphikai") {
+      throw new CatalogAdminError("CATALOG_MANAGED_RESOURCE", "Una skill base de GraphikAI no puede sustituirse desde la empresa.", 409);
+    }
+    if (!existing || existing.kind !== "skill" || existing.label !== command.package.label) {
+      await store.mutate(session.user.id, (state) => {
+        const resource = state.resources.find((candidate) => candidate.id === command.package.id);
+        const next = { id: command.package.id, kind: "skill" as const, label: command.package.label, credentialMode: "none" as const, managedBy: "company" as const, sharedResource: false, appId: null, connectorId: null, mcp: null };
+        if (resource) Object.assign(resource, next); else state.resources.push(next);
+        return { action: "catalog.resource-upserted" as const, targetId: command.package.id, summary: `Paquete de skill ${command.package.id} registrado.` };
+      });
+    }
+    return { schemaVersion: 1, changed: result.changed, record: result.record, snapshot: await catalogSnapshot(session) };
+  }
+  if (command.action === "revoke-skill-package") {
+    const packageStore = new FileCompanySkillPackageStore(installation.installationId, installation.paths.dataRoot);
+    const result = await packageStore.revoke(session.user.id, command.skillId);
+    return { schemaVersion: 1, changed: result.changed, record: result.record, snapshot: await catalogSnapshot(session) };
+  }
   const state = await store.mutate(session.user.id, (current) => {
     if (command.action === "upsert-resource") {
       const existing = current.resources.find((resource) => resource.id === command.resource.id);

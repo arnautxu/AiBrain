@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CatalogPrincipal, CatalogResource, CatalogRule, CatalogState } from "@/catalog/contracts";
-import { isCatalogResource } from "@/catalog/contracts";
+import { isCatalogCommand, isCatalogResource } from "@/catalog/contracts";
 import { allowsCatalogOperation } from "@/catalog/resolver";
 import { CatalogEnforcedTransport, CatalogRuntimeDeniedError, CatalogRuntimeEnforcer } from "@/catalog/runtime-enforcement";
 import { FileCatalogStore } from "@/catalog/store";
@@ -25,6 +25,13 @@ function state(rules: CatalogRule[]): CatalogState { return { schemaVersion: 1, 
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("enterprise catalog resolution", () => {
+  it("accepts only bounded administrative skill packages", () => {
+    const command = { action: "upsert-skill-package", package: { id: "company-handoff", label: "Company handoff", version: "1.0.0", category: "company", provenance: "Confirmed by workspace administration.", files: [{ path: "SKILL.md", content: "---\nname: company-handoff\ndescription: Use the confirmed handoff.\n---\n\n# Handoff" }] } };
+    expect(isCatalogCommand(command)).toBe(true);
+    expect(isCatalogCommand({ ...command, package: { ...command.package, files: [{ path: "../SKILL.md", content: "unsafe" }] } })).toBe(false);
+    expect(isCatalogCommand({ action: "revoke-skill-package", skillId: "company-handoff" })).toBe(true);
+  });
+
   it("uses user, group, role, then installation precedence and fails closed", () => {
     const catalog = state([
       rule("base-mail", "installation", null, "mail-app", "allow", ["read"]),
