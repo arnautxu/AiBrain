@@ -80,7 +80,10 @@ import {
   OUTLOOK_DYNAMIC_TOOLS,
 } from "@/runtime/outlook-dynamic-tools";
 import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
-import { issueThreadToken } from "@/runtime/thread-token";
+import {
+  issueThreadToken,
+  toolsetRevisionForIssuedThreadToken,
+} from "@/runtime/thread-token";
 import {
   acquireWorkerTurnActivity,
   registerWorkerTurnCancellation,
@@ -446,6 +449,7 @@ export async function runWorkerCodexTurn(
   automationSession?: AuthSession,
   runtimeIdentitySession?: AuthSession,
   backgroundExecution = false,
+  resumedThreadToolsetRevision: string | null = null,
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
@@ -831,7 +835,12 @@ export async function runWorkerCodexTurn(
     }, { envelope, key: "runtime-phase:thread-ready" });
     await emit({
       type: "runtimeThread",
-      threadToken: issueThreadToken(installationId, authenticatedUserId, resolvedThreadId),
+      threadToken: issueThreadToken(
+        installationId,
+        authenticatedUserId,
+        resolvedThreadId,
+        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision),
+      ),
     });
     recovered = recoveredTurn(result, chatRequest.userMessageId);
     if (!recovered) return;

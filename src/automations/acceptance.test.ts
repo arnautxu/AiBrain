@@ -58,15 +58,46 @@ describe("automation product acceptance", () => {
       installationId: "acceptance",
       userId: userA,
       scheduledFor: claim.scheduledFor,
+      status: "running",
+      attempt: 1,
+      startedAt: new Date(baseTime).toISOString(),
+      finishedAt: null,
+      threadId: null,
+      error: null,
+    });
+    await store.appendRun({
+      schemaVersion: 1,
+      runKey: claim.runKey,
+      taskId: task.id,
+      installationId: "acceptance",
+      userId: userA,
+      scheduledFor: claim.scheduledFor,
+      status: "running",
+      attempt: 1,
+      startedAt: new Date(baseTime).toISOString(),
+      finishedAt: null,
+      threadId: "30000000-0000-4000-8000-000000000001",
+      error: null,
+    });
+    await store.appendRun({
+      schemaVersion: 1,
+      runKey: claim.runKey,
+      taskId: task.id,
+      installationId: "acceptance",
+      userId: userA,
+      scheduledFor: claim.scheduledFor,
       status: "succeeded",
       attempt: 1,
       startedAt: new Date(baseTime).toISOString(),
       finishedAt: new Date(baseTime + 1).toISOString(),
-      threadId: null,
+      threadId: "30000000-0000-4000-8000-000000000001",
       error: null,
     });
     await store.settle(claim, { status: "succeeded" });
     expect(await store.get(task.id)).toMatchObject({ state: "paused", manualRun: null, lastRunStatus: "succeeded" });
+    expect(await store.listRuns(task.id)).toEqual([
+      expect.objectContaining({ runKey: claim.runKey, attempt: 1, status: "succeeded" }),
+    ]);
     expect(await store.runNow(task.id, requestId)).toMatchObject({ manualRun: null });
     expect(await store.claimDue("worker-manual")).toEqual([]);
   }, 30_000);
@@ -82,6 +113,9 @@ describe("automation product acceptance", () => {
     const proposal = await first.propose(input(), { sourceThreadId: projectId, sourceTurnId: requestId, callId: "call-1" });
     expect(isExplicitAutomationConfirmation("Sí, confírmala")).toBe(true);
     expect(isExplicitAutomationConfirmation("No, todavía no la crees")).toBe(false);
+    expect(isExplicitAutomationConfirmation("yes, don't create it")).toBe(false);
+    expect(isExplicitAutomationConfirmation("sí, espera")).toBe(false);
+    expect(isExplicitAutomationConfirmation("confirmar si esto se puede editar")).toBe(false);
     await expect(first.confirm(proposal.id, { sourceThreadId: projectId, currentTurnId: requestId, currentMessage: "Sí" }, async () => undefined))
       .rejects.toThrow("mensaje posterior");
     const restarted = new FileAutomationProposalStore({ installationId: "acceptance", userId: userA, usersRoot });
@@ -90,5 +124,28 @@ describe("automation product acceptance", () => {
     expect(confirmed.status).toBe("confirmed");
     await restarted.confirm(proposal.id, { sourceThreadId: projectId, currentTurnId: userB, currentMessage: "Confirmo" }, create);
     expect(create).toHaveBeenCalledTimes(1);
+  }, 120_000);
+
+  it("reconciles a crash after durable confirmation without asking for consent again", async () => {
+    const usersRoot = await mkdtemp(path.join(os.tmpdir(), "aibrain-automation-confirming-"));
+    const proposals = new FileAutomationProposalStore({ installationId: "acceptance", userId: userA, usersRoot });
+    const proposal = await proposals.propose(input(), { sourceThreadId: projectId, sourceTurnId: requestId, callId: "call-crash" });
+    const firstEffect = vi.fn(async () => { throw new Error("crash-after-create"); });
+    await expect(proposals.confirm(proposal.id, {
+      sourceThreadId: projectId,
+      currentTurnId: userB,
+      currentMessage: "Sí, confírmala",
+    }, firstEffect)).rejects.toThrow("crash-after-create");
+
+    const restarted = new FileAutomationProposalStore({ installationId: "acceptance", userId: userA, usersRoot });
+    const reconcile = vi.fn(async () => undefined);
+    const confirmed = await restarted.confirm(proposal.id, {
+      sourceThreadId: projectId,
+      currentTurnId: "00000000-0000-4000-8000-000000000005",
+      currentMessage: "recovery does not grant new consent",
+    }, reconcile);
+    expect(confirmed).toMatchObject({ status: "confirmed", confirmationTurnId: userB });
+    expect(firstEffect).toHaveBeenCalledTimes(1);
+    expect(reconcile).toHaveBeenCalledTimes(1);
   }, 120_000);
 });

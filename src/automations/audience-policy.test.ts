@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { defaultWorkspacePolicy, type WorkspaceGroup } from "@/admin/contracts";
 import type { LocalUser } from "@/auth/local-user-store";
 import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTask } from "@/automations/contracts";
-import { invalidAutomationAudienceTargets, resolveCurrentAutomationAudience } from "@/automations/audience-policy";
+import {
+  canonicalAutomationUsers,
+  canonicalizeAutomationAudience,
+  invalidAutomationAudienceTargets,
+  resolveCurrentAutomationAudience,
+} from "@/automations/audience-policy";
 import { validateAutomationAudience, visibleAutomationTasks, type AutomationWorkspaceContext } from "@/automations/server-service";
 
 vi.mock("server-only", () => ({}));
@@ -99,6 +104,45 @@ describe("automation current-membership audience", () => {
       .toEqual([userB, userC].sort());
     expect([...resolveCurrentAutomationAudience(audience, users, [group([])])])
       .toEqual([userB]);
+  });
+
+  it("normalizes duplicate local profiles to one recipient identity", () => {
+    const duplicateId = "00000000-0000-4000-8000-000000000005";
+    const duplicate = {
+      schemaVersion: 1 as const,
+      userId: duplicateId,
+      email: "b@example.com",
+      displayName: "B Full Name",
+      enabled: true,
+      workerId: "b-full-worker",
+    };
+    const duplicatedUsers = [...users, duplicate];
+    expect(canonicalAutomationUsers(duplicatedUsers).filter(({ email }) => email === "b@example.com"))
+      .toEqual([duplicate]);
+    expect(canonicalizeAutomationAudience({
+      membershipPolicy: "current",
+      userIds: [userB, duplicateId],
+      groupIds: [],
+    }, duplicatedUsers)).toEqual({
+      membershipPolicy: "current",
+      userIds: [duplicateId],
+      groupIds: [],
+    });
+    expect([...resolveCurrentAutomationAudience({
+      membershipPolicy: "current",
+      userIds: [userB],
+      groupIds: [groupId],
+    }, duplicatedUsers, [group([duplicateId])])].sort()).toEqual([userB, duplicateId].sort());
+    expect([...resolveCurrentAutomationAudience({
+      membershipPolicy: "current",
+      userIds: [duplicateId],
+      groupIds: [],
+    }, duplicatedUsers, [])]).toEqual([duplicateId]);
+    expect([...resolveCurrentAutomationAudience({
+      membershipPolicy: "current",
+      userIds: [duplicateId],
+      groupIds: [],
+    }, duplicatedUsers, [])]).not.toContain(userB);
   });
 
   it("rejects cross-company, removed, and disabled target ids", () => {

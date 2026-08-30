@@ -224,6 +224,7 @@ describe("FileWorkbenchStore", () => {
     const secondAssistant = { ...message("assistant", "complete"), content: "Second result" };
     await store.beginThreadTurn(USER_A, parent.id, firstUser, firstAssistant);
     await store.beginThreadTurn(USER_A, parent.id, secondUser, secondAssistant);
+    expect(await store.getThreadConversationHistory(USER_A, parent.id)).toContain("Second result");
 
     const edited = await store.branchThread(USER_A, parent.id, {
       kind: "edit", messageId: secondUser.id, editedContent: "Edited second request",

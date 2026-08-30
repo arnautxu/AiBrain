@@ -22,7 +22,9 @@ vi.mock("@/auth/session", () => ({
   getSigningSecret: () => "test-signing-secret-with-at-least-thirty-two-bytes",
 }));
 vi.mock("@/runtime/thread-token", () => ({
+  CURRENT_THREAD_TOOLSET_REVISION: "test-current-toolset",
   issueThreadToken: () => "user-bound-runtime-thread-token",
+  toolsetRevisionForIssuedThreadToken: (threadId: string | null, revision: string | null) => threadId ? revision : "test-current-toolset",
 }));
 vi.mock("@/runtime/worker-runtime-service", () => ({
   acquireWorkerTurnActivity: async () => {

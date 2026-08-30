@@ -26,7 +26,7 @@
     "acceptance:verify": "tsx scripts/verify-live-acceptance.ts",
     "acceptance:release-evidence": "tsx scripts/create-predeploy-release-evidence.ts",
     "acceptance:collect-release-readbacks": "node --experimental-strip-types scripts/collect-release-readbacks.ts",
-    "acceptance:automations-offline": "tsx scripts/verify-automation-worker-offline.ts",
+    "acceptance:automations-offline": "node --import ./scripts/register-server-only-stub.mjs --import tsx scripts/verify-automation-worker-offline.ts",
     "test:soak": "tsx scripts/soak.ts",
     "test:soak:qa": "tsx scripts/soak.ts --qa",
     "test:coverage": "vitest run --coverage",

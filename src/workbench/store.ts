@@ -309,12 +309,14 @@ export async function prepareThreadTurn(session: AuthSession, threadId: string) 
   if (access.role === "viewer") {
     throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
   }
-  const [runtimeContext, visibleSnapshot] = await Promise.all([
+  const [runtimeContext, visibleSnapshot, rebootstrapHistory] = await Promise.all([
     access.store.getThreadRuntimeContext(access.ownerUserId, threadId),
     loadSharedWorkbenchForResolvedThread(access),
+    access.store.getThreadConversationHistory(access.ownerUserId, threadId),
   ]);
   return {
     context: withVisibleProjects(runtimeContext, visibleSnapshot),
+    rebootstrapHistory,
     begin(userMessage: ChatMessage, assistantMessage: ChatMessage) {
       return access.store.beginThreadTurn(
         access.ownerUserId,

@@ -138,4 +138,49 @@ describe("AutomationsPanel audience", () => {
     expect(emptyAction).toHaveClass("mx-auto");
     expect(emptyAction.parentElement).toHaveClass("workspace-empty-state");
   });
+
+  it("persists an edited one-time date and minute instead of the form default", async () => {
+    const onceTask: AutomationTaskView = {
+      ...viewerTask,
+      access: { canManage: true, canViewResults: true },
+      audience: { membershipPolicy: "current", userIds: [ownerId], groupIds: [] },
+      schedule: { kind: "once", runAt: "2030-08-29T23:28:00.000Z" },
+    };
+    const requests: Array<{ method: string; body: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      const method = init?.method ?? "GET";
+      if (method === "GET") {
+        return new Response(JSON.stringify({
+          tasks: [onceTask],
+          audienceDirectory: {
+            membershipPolicy: "current",
+            currentUserId: ownerId,
+            users: [{ id: ownerId, name: "Owner" }],
+            groups: [],
+          },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push({ method, body });
+      return new Response(JSON.stringify({ task: { ...onceTask, ...body } }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    render(<AutomationsPanel open projects={[project]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Informe compartido" }));
+    fireEvent.change(screen.getByLabelText("Fecha"), { target: { value: "2030-08-30" } });
+    fireEvent.change(screen.getByLabelText("Hora"), { target: { value: "00:31" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toMatchObject({
+      method: "PATCH",
+      body: {
+        schedule: { kind: "once", runAt: "2030-08-29T22:31:00.000Z" },
+        timeZone: "Europe/Madrid",
+      },
+    });
+  });
 });

@@ -13,6 +13,7 @@ import {
   beginThreadTurn,
   createThread,
   finishThreadTurn,
+  getThread,
   getThreadRuntimeContext,
 } from "@/workbench/store";
 import type { AutomationTask } from "@/automations/contracts";
@@ -104,6 +105,19 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
 
   const userMessageId = stableUuid(`${input.runKey}:user`);
   const assistantMessageId = stableUuid(`${input.runKey}:assistant`);
+  const assertPersistedResult = async (result: ChatMessage) => {
+    if (result.status !== "complete" || !result.content.trim()) {
+      throw new Error(result.content || "La ejecución programada terminó sin un resultado visible.");
+    }
+    const persisted = await getThread(input.session, threadId);
+    const persistedPrompt = persisted.messages.find(({ id }) => id === userMessageId);
+    const persistedResult = persisted.messages.find(({ id }) => id === assistantMessageId);
+    if (persistedPrompt?.role !== "user" || persistedPrompt.content !== input.task.prompt ||
+        persistedResult?.role !== "assistant" || persistedResult.status !== "complete" ||
+        !persistedResult.content.trim()) {
+      throw new Error("La conversación programada no conserva el prompt y el resultado terminal.");
+    }
+  };
   const startedAt = new Date().toISOString();
   const request: ChatRequest = {
     projectId: input.task.projectId,
@@ -129,6 +143,7 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   assistantMessage = begun.assistantMessage;
   if (begun.outcome === "existing" && assistantMessage.status !== "streaming") {
     if (assistantMessage.status !== "complete") throw new Error(assistantMessage.content || "La ejecución anterior falló.");
+    await assertPersistedResult(assistantMessage);
     return { threadId };
   }
 
@@ -191,6 +206,6 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   }
   if (assistantMessage.status === "streaming") assistantMessage = { ...assistantMessage, status: "error" };
   await finishThreadTurn(input.session, threadId, assistantMessage, runtimeThreadToken);
-  if (assistantMessage.status !== "complete") throw new Error(assistantMessage.content || "La ejecución programada ha fallado.");
+  await assertPersistedResult(assistantMessage);
   return { threadId };
 }

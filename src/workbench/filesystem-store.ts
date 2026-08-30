@@ -17,6 +17,7 @@ import {
 } from "@/storage";
 import {
   branchHistory,
+  conversationHistory,
   publicProject,
   publicThread,
   uniqueSlug,
@@ -958,6 +959,16 @@ export class FileWorkbenchStore {
       runtimeThreadToken: thread.runtimeThreadToken,
       branchHistory: branchHistory(thread),
     };
+  }
+
+  async getThreadConversationHistory(userId: string, threadId: string) {
+    assertFilesystemWorkbenchId(threadId);
+    const state = await this.read(userId);
+    const thread = state.threads.find((candidate) => candidate.id === threadId);
+    if (!thread || thread.status !== "active") {
+      throw new WorkbenchNotFoundError("Fil actiu no trobat.");
+    }
+    return conversationHistory(thread);
   }
 
   async branchThread(
