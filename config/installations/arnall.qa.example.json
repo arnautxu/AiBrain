@@ -7,7 +7,7 @@
   "branding": {
     "productName": "Arnall AI",
     "logoPath": "/branding/arnall/logo.jpg",
-    "faviconPath": "/branding/aibrain/favicon.svg",
+    "faviconPath": "/branding/arnall/logo.jpg",
     "accentColor": "#315ee7"
   },
   "paths": {
@@ -20,7 +20,7 @@
   },
   "connectors": {
     "gmail": { "enabled": true },
-    "outlook": { "enabled": false, "tenantId": "11111111-1111-4111-8111-111111111111" }
+    "outlook": { "enabled": true }
   },
   "catalog": {
     "graphikAIManagedSkills": [

@@ -27,7 +27,7 @@ function kindLabel(kind: MemoryKind) {
 
 function scopeLabel(scope: MemoryScope) { return scope === "private" ? "Privada" : scope === "project" ? "Proyecto" : "Empresa"; }
 
-export function MemoryPanel({ open, projectId, onClose, embedded = false }: { open: boolean; projectId: string | null; onClose: () => void; embedded?: boolean }) {
+export function MemoryPanel({ open, projectId, productName, onClose, embedded = false }: { open: boolean; projectId: string | null; productName: string; onClose: () => void; embedded?: boolean }) {
   const panelRef = useModalFocus(open && !embedded, onClose);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
@@ -124,7 +124,7 @@ export function MemoryPanel({ open, projectId, onClose, embedded = false }: { op
 
         <div className={embedded ? "min-h-0" : "scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6"}>
           <p className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-[12px] leading-5 text-[var(--text-muted)]">
-            AiBrain extrae en segundo plano preferencias, hechos estables y decisiones útiles al terminar cada turno. Filtra secretos y datos efímeros; puedes corregir o eliminar cualquier recuerdo.
+            {productName} extrae en segundo plano preferencias, hechos estables y decisiones útiles al terminar cada turno. Filtra secretos y datos efímeros; puedes corregir o eliminar cualquier recuerdo.
           </p>
 
           {proposals.some((proposal) => proposal.status === "pending") ? <section className="mt-6"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Propuestas pendientes</h3><span className="text-[10px] text-[var(--text-subtle)]">No guardadas</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">Revisa contenido, alcance y procedencia. Rechazar nunca crea una memoria.</p><div className="mt-3 space-y-3">{proposals.filter((proposal) => proposal.status === "pending").map((proposal) => <ProposalCard key={proposal.proposalId} proposal={proposal} allowCompanyScope={allowCompanyScope} disabled={saving || !projectId} onConfirm={(content, scope) => void runGovernance(() => confirmMemoryProposal({ proposalId: proposal.proposalId, projectId: projectId!, content, scope }))} onReject={() => void runGovernance(() => rejectMemoryProposal(proposal.proposalId, projectId!))} />)}</div></section> : null}

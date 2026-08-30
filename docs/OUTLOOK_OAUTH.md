@@ -5,7 +5,7 @@ Outlook usa OAuth delegado por empleado contra un tenant exacto de Microsoft Ent
 ## Configuración externa exacta
 
 1. En Microsoft Entra registra una aplicación web para la instalación.
-2. Configura como tenant en `connectors.outlook.tenantId` el UUID real del directorio y activa `enabled` solo cuando los pasos siguientes estén terminados.
+2. `connectors.outlook.enabled=true` publica Outlook únicamente en el catálogo autorizado de la instalación. Hasta que configures `connectors.outlook.tenantId` con el UUID real del directorio y completes los secretos siguientes, Ajustes lo muestra como pendiente de configuración administrativa y el inicio OAuth falla cerrado.
 3. Registra exactamente este redirect URI de tipo Web:
 
    `https://<dominio-instalacion>/api/connectors/outlook/oauth/callback`
@@ -18,6 +18,8 @@ Outlook usa OAuth delegado por empleado contra un tenant exacto de Microsoft Ent
    - `AIBRAIN_MICROSOFT_OAUTH_ENCRYPTION_KEY` — 32 bytes aleatorios en base64.
 
 No copies estos valores al repositorio, JSON de instalación, logs o tickets.
+
+La configuración externa queda completa solo cuando el UUID de `tenantId`, el redirect URI y las tres variables anteriores están presentes. No uses un UUID de ejemplo, `common` ni `consumers`; si falta cualquiera de esos valores, no se genera state ni se redirige al proveedor.
 
 ## Flujo, revocación y aceptación
 

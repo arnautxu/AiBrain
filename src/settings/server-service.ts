@@ -22,9 +22,11 @@ import {
 } from "@/settings/contracts";
 import { FileSettingsStore } from "@/settings/preferences-store";
 import { gmailCapabilityForSession } from "@/connectors/gmail-server-service";
-import { GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
+import { GMAIL_CONNECTOR_ID, GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
 import { outlookCapabilityForSession } from "@/connectors/outlook-server-service";
-import { OUTLOOK_API_SCOPES } from "@/connectors/outlook-contracts";
+import { OUTLOOK_API_SCOPES, OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
+import { catalogRuntimeEnforcer } from "@/catalog/access-service";
+import { projectPersonalConnectorSettings, type PersonalConnectorSettings } from "@/settings/connector-settings";
 
 const ACTIONS: PermissionAction[] = ["consult", "respond", "execute", "publish"];
 
@@ -291,13 +293,65 @@ export async function featurePolicyForIdentity(installationId: string, userId: s
 
 export async function settingsSnapshot(session: AuthSession): Promise<SettingsSnapshot> {
   const { installation, store, isAdmin } = await context(session);
+  const catalog = await catalogRuntimeEnforcer(installation.installationId, session.user.id);
+  const gmailAuthorized = catalog.allowsConnector(GMAIL_CONNECTOR_ID);
+  const outlookAuthorized = catalog.allowsConnector(OUTLOOK_CONNECTOR_ID);
   const [userSettings, permissions, apps, gmail, outlook] = await Promise.all([
     store.readUser(session.user.id),
     permissionsForSession(session),
     appCatalogue(session, isAdmin),
-    gmailCapabilityForSession(session).catch(() => null),
-    outlookCapabilityForSession(session).catch(() => null),
+    gmailAuthorized ? gmailCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
+    outlookAuthorized ? outlookCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
   ]);
+  const connectors: PersonalConnectorSettings[] = [];
+  if (gmailAuthorized) {
+    connectors.push(projectPersonalConnectorSettings(
+      gmail ?? {
+        connectorId: GMAIL_CONNECTOR_ID,
+        label: "Gmail",
+        status: "degraded",
+        statusCode: "GMAIL_CAPABILITY_CHECK_FAILED",
+        checkedAt: null,
+        effectiveOperations: [],
+        approvalRequiredOperations: [],
+        connectUrl: null,
+        disconnectUrl: null,
+        accountEmail: null,
+        connectionVersion: null,
+      },
+      GMAIL_MINIMUM_SCOPES,
+      {
+        connected: "Cuenta personal verificada mediante lectura de perfil.",
+        requiresLogin: "Disponible para conectar con tu cuenta personal de Gmail.",
+        adminSetupRequired: "Disponible para conectar cuando el administrador complete Google Cloud OAuth.",
+        unavailable: "Gmail está autorizado, pero no se puede comprobar ahora mismo.",
+      },
+    ));
+  }
+  if (outlookAuthorized) {
+    connectors.push(projectPersonalConnectorSettings(
+      outlook ?? {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+        label: "Outlook",
+        status: "degraded",
+        statusCode: "OUTLOOK_CAPABILITY_CHECK_FAILED",
+        checkedAt: null,
+        effectiveOperations: [],
+        approvalRequiredOperations: [],
+        connectUrl: null,
+        disconnectUrl: null,
+        accountEmail: null,
+        connectionVersion: null,
+      },
+      OUTLOOK_API_SCOPES,
+      {
+        connected: "Cuenta personal verificada mediante Microsoft Graph.",
+        requiresLogin: "Disponible para conectar con tu cuenta personal de Outlook.",
+        adminSetupRequired: "Disponible para conectar cuando el administrador complete Microsoft Entra OAuth.",
+        unavailable: "Outlook está autorizado, pero no se puede comprobar ahora mismo.",
+      },
+    ));
+  }
   return {
     schemaVersion: 1,
     account: {
@@ -313,36 +367,7 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
       isAdmin,
     },
     apps,
-    connectors: [
-      gmail ? {
-        id: gmail.connectorId,
-        label: gmail.label,
-        status: gmail.status === "connected" ? "connected" as const : gmail.status === "reauth_required" ? "requires_login" as const : "unavailable" as const,
-        statusCode: gmail.statusCode,
-        statusDetail: gmail.status === "connected" ? "Cuenta personal verificada mediante lectura de perfil." :
-          gmail.status === "reauth_required" ? "Conecta tu cuenta personal de Gmail para usarla." :
-            gmail.statusCode === "GMAIL_GOOGLE_CLOUD_NOT_CONFIGURED" ? "Google Cloud OAuth todavía no está configurado en el servidor." : "Gmail no está disponible ahora mismo.",
-        accountEmail: gmail.accountEmail,
-        scopes: [...GMAIL_MINIMUM_SCOPES],
-        connectUrl: gmail.connectUrl,
-        disconnectUrl: gmail.disconnectUrl,
-        connectionVersion: gmail.connectionVersion,
-      } : null,
-      outlook ? {
-        id: outlook.connectorId,
-        label: outlook.label,
-        status: outlook.status === "connected" ? "connected" as const : outlook.status === "reauth_required" ? "requires_login" as const : "unavailable" as const,
-        statusCode: outlook.statusCode,
-        statusDetail: outlook.status === "connected" ? "Cuenta personal verificada mediante Microsoft Graph." :
-          outlook.status === "reauth_required" ? "Conecta tu cuenta personal de Outlook para usarla." :
-            outlook.statusCode === "OUTLOOK_ENTRA_NOT_CONFIGURED" ? "Microsoft Entra OAuth todavía no está configurado en el servidor." : "Outlook no está disponible ahora mismo.",
-        accountEmail: outlook.accountEmail,
-        scopes: [...OUTLOOK_API_SCOPES],
-        connectUrl: outlook.connectUrl,
-        disconnectUrl: outlook.disconnectUrl,
-        connectionVersion: outlook.connectionVersion,
-      } : null,
-    ].filter((connector): connector is NonNullable<typeof connector> => connector !== null),
+    connectors,
     memory: {
       enabled: true,
       confirmationRequired: false,

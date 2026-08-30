@@ -20,6 +20,8 @@ Gmail usa OAuth personal por empleado. El servidor genera `state` de un solo uso
 
 No escribas ninguno de esos valores en JSON de instalación, documentación, logs, imágenes ni tickets. `connectors.gmail.enabled=true` solo habilita el producto; no contiene credenciales.
 
+Mientras falte cualquiera de las tres variables, Ajustes muestra Gmail como pendiente de configuración administrativa y el inicio OAuth falla cerrado: no se genera state ni se redirige a Google.
+
 ## Flujo y verificación
 
 - Ajustes → Conectores → Gmail inicia `/api/connectors/gmail/oauth/start`.

@@ -39,7 +39,7 @@ export type GmailConnectorConfig = {
 export type OutlookConnectorConfig = {
   enabled: boolean;
   /** Exact Microsoft Entra tenant; `common` and `consumers` are intentionally unsupported. */
-  tenantId: string;
+  tenantId?: string;
 };
 
 export type InstallationConnectors = {
@@ -436,10 +436,13 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
     } else {
       addUnknownKeyIssues(value.outlook, ["enabled", "tenantId"], "$.connectors.outlook", issues);
       if (typeof value.outlook.enabled !== "boolean") issues.push({ path: "$.connectors.outlook.enabled", message: "debe ser boolean" });
-      if (typeof value.outlook.tenantId !== "string" || !MICROSOFT_TENANT_ID.test(value.outlook.tenantId)) {
+      if (value.outlook.tenantId !== undefined && (typeof value.outlook.tenantId !== "string" || !MICROSOFT_TENANT_ID.test(value.outlook.tenantId))) {
         issues.push({ path: "$.connectors.outlook.tenantId", message: "debe ser el UUID exacto del tenant de Microsoft Entra" });
       } else if (typeof value.outlook.enabled === "boolean") {
-        outlook = { enabled: value.outlook.enabled, tenantId: value.outlook.tenantId.toLowerCase() };
+        outlook = {
+          enabled: value.outlook.enabled,
+          ...(typeof value.outlook.tenantId === "string" ? { tenantId: value.outlook.tenantId.toLowerCase() } : {}),
+        };
       }
     }
   }

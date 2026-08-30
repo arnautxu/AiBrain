@@ -41,6 +41,7 @@ function code(error: unknown) {
 function oauthConfiguration(config: Readonly<InstallationConfig>) {
   const outlook = config.connectors?.outlook;
   if (!outlook?.enabled) throw new OutlookConnectorError("OUTLOOK_NOT_ENABLED", "Outlook is not enabled for this installation.", 404);
+  if (!outlook.tenantId) throw new OutlookConnectorError("OUTLOOK_ENTRA_TENANT_NOT_CONFIGURED", "The Microsoft Entra tenant is not configured on this server.", 503);
   const clientId = process.env.AIBRAIN_MICROSOFT_CLIENT_ID?.trim();
   const clientSecret = process.env.AIBRAIN_MICROSOFT_CLIENT_SECRET?.trim();
   if (!clientId || !clientSecret) throw new OutlookConnectorError("OUTLOOK_ENTRA_NOT_CONFIGURED", "Microsoft Entra OAuth is not configured on this server.", 503);

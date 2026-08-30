@@ -49,3 +49,21 @@ Antes de arrancar:
 7. Ejecutar `npm run typecheck`, `npm run test:unit` y `npm run build`.
 
 La configuración no contiene un literal reservado para una empresa concreta. `installationId` y `companySlug` aceptan cualquier identificador canónico; la primera instalación real se crea con el mismo comando después de confirmar nombre, dominio, rutas y branding.
+
+## Readback de la instalación Arnall
+
+El fixture versionado `config/installations/arnall.qa.example.json` es la referencia no secreta para el canary Arnall. Antes de una futura publicación autorizada, el operador debe aplicar en el `AIBRAIN_INSTALLATION_CONFIG` privado del host estos valores exactos y conservar el resto de rutas/identidad de la instalación:
+
+```json
+{
+  "companyName": "Arnall",
+  "companySlug": "arnall",
+  "branding": {
+    "productName": "Arnall AI",
+    "logoPath": "/branding/arnall/logo.jpg",
+    "faviconPath": "/branding/arnall/logo.jpg"
+  }
+}
+```
+
+`public/branding/arnall/logo.jpg` es el asset original versionado. No sustituyas esos paths por `/branding/aibrain/*`. Tras reiniciar una release autorizada, verifica por separado la proyección autenticada de instalación, el `src` del logo, el título `Arnall AI · Arnall` y la respuesta 200 del asset; un health check no prueba el branding visible.

@@ -11,6 +11,7 @@ describe("connector mentions", () => {
   it("projects OAuth state without exposing credentials and labels unavailable providers honestly", () => {
     expect(projectConnectorMention(gmail, new Map())).toMatchObject({ id: "gmail", status: "requires_login", canRead: false });
     expect(projectConnectorMention(gmail, new Map([["gmail", { status: "connected", statusCode: null }]]))).toMatchObject({ status: "connected", canRead: true });
+    expect(projectConnectorMention(gmail, new Map([["gmail", { status: "not_configured", statusCode: "GMAIL_GOOGLE_CLOUD_NOT_CONFIGURED" }]]))).toMatchObject({ status: "admin_setup_required", canRead: false });
     expect(projectConnectorMention(gmail, new Map([["gmail", { status: "revoked", statusCode: "CONNECTOR_BINDING_REVOKED" }]]))).toMatchObject({ status: "unavailable", canRead: false });
   });
 
