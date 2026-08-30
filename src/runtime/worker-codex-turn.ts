@@ -22,6 +22,7 @@ import {
   planFromNotification,
   resolvedApproval,
   RuntimeNotReadyError,
+  safeRuntimeOutput,
   sandboxPolicy,
   type CodexTurnEvent,
   type LegacyServerRequest,
@@ -950,7 +951,7 @@ export async function runWorkerCodexTurn(
             status: "running",
           } satisfies ActivityItem;
           await upsertActivity(
-            { ...current, output: `${current.output ?? ""}${delta}` },
+            { ...current, output: safeRuntimeOutput(`${current.output ?? ""}${delta}`) ?? "" },
             { envelope, key: `command-output:${itemId}` },
           );
           return;
