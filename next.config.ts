@@ -31,6 +31,7 @@ const nextConfig: NextConfig = {
               "font-src 'self'",
               "form-action 'self'",
               "frame-ancestors 'none'",
+              "frame-src 'self' blob:",
               "img-src 'self' data: blob:",
               "media-src 'self' blob:",
               "object-src 'none'",
