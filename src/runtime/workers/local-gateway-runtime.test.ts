@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileTransportEventJournal, WebSocketAppServerTransport } from "@/runtime/transport";
 import {
   NodeWebSocketFactory,
+  LocalGatewayWorkerRuntimeFactory,
   PrivateWorkerGateway,
   workerEgressEnvironment,
+  workerTransportAuditRoot,
 } from "@/runtime/workers/local-gateway-runtime";
 import type { WorkerLaunchContext } from "@/runtime/workers/types";
 import { ResourceLockManager } from "@/storage";
@@ -61,6 +63,23 @@ describe("worker egress environment", () => {
       AIBRAIN_EGRESS_PROXY_URL: "http://attacker:password@egress-gateway:8080",
       AIBRAIN_EGRESS_WORKER_TOKEN: "worker_token_000000000000000000000000000000000",
     })).toThrow(/credential-free/u);
+  });
+});
+
+describe("worker transport audit isolation", () => {
+  it("uses stable disjoint journals for the app and detached automation worker", () => {
+    const root = "/var/lib/aibrain/data/users/user/audit/transport";
+    expect(workerTransportAuditRoot(root, "app")).toBe(path.join(root, "runtime-instances", "app"));
+    expect(workerTransportAuditRoot(root, "automation-worker")).toBe(
+      path.join(root, "runtime-instances", "automation-worker"),
+    );
+    expect(workerTransportAuditRoot(root, "app")).not.toBe(workerTransportAuditRoot(root, "automation-worker"));
+  });
+
+  it("rejects traversal and unstable instance identifiers", () => {
+    expect(() => workerTransportAuditRoot("/audit", "../worker")).toThrow(/invalid/u);
+    expect(() => workerTransportAuditRoot("/audit", "worker/other")).toThrow(/invalid/u);
+    expect(() => workerTransportAuditRoot("/audit", "Automation Worker")).toThrow(/invalid/u);
   });
 });
 
@@ -202,6 +221,47 @@ describe("private per-user worker gateway", () => {
       reconnectJitterRatio: 0,
     });
   }
+
+  it("runs app and automation transports concurrently without sharing replay journals", async () => {
+    const processFactory = () => spawn(process.execPath, [fakeServer], {
+      cwd: context.workspace,
+      env: { NODE_ENV: "test", ...context.environment },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    const appRuntime = new LocalGatewayWorkerRuntimeFactory({
+      processFactory,
+      runtimeInstanceId: "app",
+    }).create(context);
+    const automationRuntime = new LocalGatewayWorkerRuntimeFactory({
+      processFactory,
+      runtimeInstanceId: "automation-worker",
+    }).create(context);
+    try {
+      await Promise.all([appRuntime.start(), automationRuntime.start()]);
+      await Promise.all([appRuntime.transport.connect(), automationRuntime.transport.connect()]);
+      await Promise.all([
+        appRuntime.transport.send(initializeRequest("shared-request-id")),
+        automationRuntime.transport.send(initializeRequest("shared-request-id")),
+      ]);
+      const [appEvent, automationEvent] = await Promise.all([
+        appRuntime.transport.events()[Symbol.asyncIterator]().next(),
+        automationRuntime.transport.events()[Symbol.asyncIterator]().next(),
+      ]);
+      expect(appEvent.value).toMatchObject({ message: { kind: "rpc-response", rpc: { id: "shared-request-id" } } });
+      expect(automationEvent.value).toMatchObject({ message: { kind: "rpc-response", rpc: { id: "shared-request-id" } } });
+      await Promise.all([
+        readFile(path.join(workerTransportAuditRoot(context.transportAudit, "app"), "gateway-events.jsonl"), "utf8"),
+        readFile(path.join(workerTransportAuditRoot(context.transportAudit, "automation-worker"), "gateway-events.jsonl"), "utf8"),
+      ]);
+    } finally {
+      await Promise.allSettled([
+        appRuntime.transport.close(),
+        automationRuntime.transport.close(),
+        appRuntime.stop(),
+        automationRuntime.stop(),
+      ]);
+    }
+  });
 
   it("authenticates on loopback, validates the pinned RPC contract and persists the event before delivery", async () => {
     const worker = gateway();
