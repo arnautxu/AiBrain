@@ -8,6 +8,7 @@ import {
   PencilSimple,
   Play,
   Plus,
+  SidebarSimple,
   SpinnerGap,
   Trash,
 } from "@phosphor-icons/react";
@@ -52,10 +53,11 @@ function audienceLabel(task: AutomationTask, directory: AutomationAudienceDirect
   return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} y ${labels.length - 2} más` : labels.join(", ");
 }
 
-export function AutomationsPanel({ open, projects, onOpenThread }: {
+export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar }: {
   open: boolean;
   projects: WorkbenchProject[];
   onOpenThread?: (threadId: string) => void;
+  onToggleSidebar?: () => void;
 }) {
   const availableProjects = useMemo(() => projects.filter((project) => project.status === "active"), [projects]);
   const [tasks, setTasks] = useState<AutomationTaskView[]>([]);
@@ -233,7 +235,10 @@ export function AutomationsPanel({ open, projects, onOpenThread }: {
 
   if (!open) return null;
   return <main aria-labelledby="automations-title" className="automations-page automations-page-panel workspace-panel relative flex min-w-0 flex-1 flex-col bg-[var(--surface-raised)]">
-      <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-5">
+      <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-2 md:px-5">
+        <button type="button" aria-label="Mostrar u ocultar la barra lateral" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
+          <SidebarSimple size={17} />
+        </button>
         <CalendarBlank size={19} />
         <div className="min-w-0 flex-1"><h2 id="automations-title" className="workspace-panel-title text-[var(--text)]">Automatizaciones</h2></div>
         {tasks.length ? <button type="button" disabled={!availableProjects.length} onClick={() => openForm(null)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button> : null}

@@ -30,6 +30,13 @@ async function openSettings(page: Page) {
   await page.getByRole("menuitem", { name: "Configuración" }).click();
 }
 
+async function assertLandingComposer(page: Page) {
+  const composer = page.getByTestId("composer");
+  await expect(composer).toHaveAttribute("data-layout", "landing");
+  await expect(composer).not.toHaveClass(/composer-compact/);
+  await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(116);
+}
+
 async function installAdministrationRoutes(page: Page) {
   const policy = {
     apps: { "web-search": true, "image-generation": true, skills: true, "managed-browser": true },
@@ -121,12 +128,15 @@ async function installPendingTurnRoute(page: Page) {
 
 test("employee shell light", async ({ page }) => {
   await login(page);
+  await assertLandingComposer(page);
   await expect(page).toHaveScreenshot("employee-shell-light.png", { fullPage: true });
 });
 
 test("employee shell dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
+  await assertLandingComposer(page);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim())).toBe("#000000");
   await expect(page).toHaveScreenshot("employee-shell-dark.png", { fullPage: true });
 });
 
@@ -236,7 +246,7 @@ test("project actions surface light", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
   const project = page.getByRole("button", { name: primaryProject, exact: true });
-  await project.hover();
+  await project.hover({ position: { x: 20, y: 20 } });
   await page.getByRole("button", { name: `Acciones de ${primaryProject}` }).click();
   await expect(page.getByRole("menuitem", { name: "Renombrar" })).toBeVisible();
   await expect(page).toHaveScreenshot("project-actions-surface-light.png", { fullPage: true });
@@ -265,10 +275,11 @@ test("employee shell mobile drawer", async ({ page }, testInfo) => {
   await login(page);
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   await expect(page.getByTestId("workbench-sidebar")).toBeVisible();
+  await assertLandingComposer(page);
   await expect(page).toHaveScreenshot("employee-shell-mobile-drawer.png", { fullPage: true });
 });
 
-test("completed conversation", async ({ page }) => {
+test("completed conversation", async ({ page }, testInfo) => {
   await installCompletedTurnRoute(page);
   await login(page);
   await submitPrompt(page, "Resume este contenido sintético en tres ideas claras.");
@@ -281,7 +292,21 @@ test("completed conversation", async ({ page }) => {
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await expect(page.getByRole("button", { name: "Volver al final" })).toHaveCount(0);
+  if (testInfo.project.name === "visual-mobile") {
+    const composer = page.getByTestId("composer");
+    await page.getByRole("textbox", { name: "Mensaje" }).evaluate((element) => (element as HTMLElement).blur());
+    await expect(composer).toHaveAttribute("data-focused", "false");
+    await expect(page.getByRole("button", { name: "Experiencia" })).toBeHidden();
+  }
   await expect(page).toHaveScreenshot("completed-conversation.png", { fullPage: true });
+  if (testInfo.project.name === "visual-mobile") {
+    const composer = page.getByTestId("composer");
+    await page.getByRole("textbox", { name: "Mensaje" }).focus();
+    await expect(composer).toHaveAttribute("data-focused", "true");
+    await expect(page.getByRole("button", { name: "Experiencia" })).toBeVisible();
+    await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(108);
+    await expect(page).toHaveScreenshot("completed-conversation-mobile-focused.png", { fullPage: true });
+  }
 });
 
 test("completed conversation dark", async ({ page }) => {

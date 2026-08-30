@@ -18,11 +18,11 @@ describe("TurnActivity timeline", () => {
     expect([...container.querySelectorAll("[data-timeline-key]")].map((node) =>
       node.getAttribute("data-timeline-key"))).toEqual(orderGolden.multipleTools);
 
-    const commandCard = screen.getByText("npm test").closest("details");
+    const commandCard = screen.getByText("Ejecutando comprobaciones").closest("details");
     expect(commandCard).not.toHaveAttribute("open");
-    fireEvent.click(screen.getByText("npm test"));
+    fireEvent.click(screen.getByText("Ejecutando comprobaciones"));
     expect(commandCard).toHaveAttribute("open");
-    expect(screen.getByLabelText("Salida de npm test")).toHaveTextContent("12 pruebas superadas");
+    expect(screen.getByLabelText("Salida de Ejecutando comprobaciones")).toHaveTextContent("12 pruebas superadas");
   });
 
   it("collapses completed recovery activity under the measured duration", () => {
@@ -42,5 +42,36 @@ describe("TurnActivity timeline", () => {
     render(<TurnActivity message={turnActivityScenarios[scenarioName]} onResolveApproval={vi.fn()} />);
     expect(screen.queryByText(/chain[- ]of[- ]thought|razonamiento privado/i)).not.toBeInTheDocument();
     expect(screen.getByTestId("turn-thinking-steps")).toBeInTheDocument();
+  });
+
+  it("sanitizes persisted activity before rendering", () => {
+    const uuid = "fc71a2c4-0db0-4914-af82-9564038ea964";
+    const path = `/var/lib/aibrain/data/users/${uuid}/runtime/codex-home/skills/web/SKILL.md`;
+    const message = {
+      ...turnActivityScenarios.text,
+      activity: [{
+        id: "reasoning-sensitive",
+        kind: "reasoning" as const,
+        label: "Raonament completat",
+        detail: `**Identifying access issue** Codex ${path} Instalación: company-qa ${uuid}`,
+        status: "complete" as const,
+      }],
+      toolResults: [{
+        id: "command-sensitive",
+        kind: "command" as const,
+        title: `/bin/sh -lc "sed -n '1,260p' ${path}"`,
+        status: "complete" as const,
+        summary: "Código de salida 0",
+        output: `AiBrain ${path} ${uuid}`,
+        sourceIds: [],
+        createdAt: "2026-08-30T10:00:02.000Z",
+      }],
+    };
+    const { container } = render(<TurnActivity message={message} onResolveApproval={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+
+    expect(screen.getByText(/Identifying access issue/)).toBeInTheDocument();
+    expect(screen.getByText("Consultando archivos del proyecto")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/\*\*|Codex|AiBrain|\/var\/lib|company-qa|fc71a2c4/iu);
   });
 });

@@ -29,6 +29,7 @@ import type { ComposerExperience } from "@/lib/composer-experience";
 import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { currentTurnStatusLabel, hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
+import { publicAssistantText } from "@/ui/public-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
@@ -174,14 +175,14 @@ function ComposerPicker({
   );
 }
 
-function ResultActions({ message }: { message: ChatMessage }) {
+function ResultActions({ content }: { content: string }) {
   const [copied, setCopied] = useState(false);
   const copyResult = async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
+      await navigator.clipboard.writeText(content);
     } catch {
       const textarea = document.createElement("textarea");
-      textarea.value = message.content;
+      textarea.value = content;
       textarea.setAttribute("readonly", "");
       textarea.style.position = "fixed";
       textarea.style.opacity = "0";
@@ -203,6 +204,7 @@ function ResultActions({ message }: { message: ChatMessage }) {
 
 function AssistantMessage({
   message,
+  assistantName,
   projectId,
   showActivity,
   onResolveApproval,
@@ -215,6 +217,7 @@ function AssistantMessage({
   onOpenBrowser,
 }: {
   message: ChatMessage;
+  assistantName: string;
   projectId: string | undefined;
   showActivity: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
@@ -232,6 +235,7 @@ function AssistantMessage({
 }) {
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message) ?? "Enviando solicitud";
+  const publicContent = publicAssistantText(message.content, assistantName);
 
   return (
     <article className="message-enter group">
@@ -244,9 +248,9 @@ function AssistantMessage({
           <ThinkingOrb state="working" size={20} aria-hidden="true" />
           <span className="activity-shimmer">{liveStatus}…</span>
         </div>
-      ) : message.content ? (
-        <div className="mt-4 max-w-[76ch] text-[15px] leading-6 text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
-          <MarkdownMessage streaming={message.status === "streaming"}>{message.content}</MarkdownMessage>
+      ) : publicContent ? (
+        <div className="mt-4 max-w-[76ch] text-[14px] leading-[23px] text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
+          <MarkdownMessage streaming={message.status === "streaming"}>{publicContent}</MarkdownMessage>
         </div>
       ) : null}
 
@@ -273,7 +277,7 @@ function AssistantMessage({
         <DocumentPublicationCard key={draft.id} draft={draft} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
       ))}
 
-      {message.status === "complete" && message.content ? <ResultActions message={message} /> : null}
+      {message.status === "complete" && publicContent ? <ResultActions content={publicContent} /> : null}
     </article>
   );
 }
@@ -284,7 +288,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
   return (
     <article className="message-enter group flex justify-end">
       <div className="max-w-[86%] md:max-w-[70%]">
-      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[15px] leading-6 text-[var(--user-message-text)]">
+      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[14px] leading-[23px] text-[var(--user-message-text)]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -372,6 +376,7 @@ export function ChatWorkspace({
   const [mentionOpen, setMentionOpen] = useState(false);
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [composerMultiline, setComposerMultiline] = useState(false);
+  const [composerFocused, setComposerFocused] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -606,6 +611,7 @@ export function ChatWorkspace({
                   {message.role === "user" ? <UserMessage message={message} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
+                      assistantName={assistantName}
                       projectId={project?.id}
                       showActivity={preferences.showActivityPanel}
                       onResolveApproval={(approval, decision) => void onResolveApproval(message.id, approval, decision)}
@@ -638,7 +644,13 @@ export function ChatWorkspace({
           <div
             ref={composerShellRef}
             data-testid="composer"
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${!composerMultiline && !attachments.length && !documents.length && !selectedMentions.length ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            data-layout={hasMessages ? "conversation" : "landing"}
+            data-focused={composerFocused ? "true" : "false"}
+            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !selectedMentions.length ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            onFocusCapture={() => setComposerFocused(true)}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false);
+            }}
             onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
             onDragOver={(event) => { event.preventDefault(); }}
             onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
@@ -710,7 +722,7 @@ export function ChatWorkspace({
             {connectorCatalogOpen ? <div role="listbox" aria-label="Catálogo de conectores" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
               {connectorMentions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectCatalogConnector(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "conecta la cuenta en Ajustes" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span></button>)}
             </div> : null}
-            <div className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
+            <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 {!hasMessages ? (

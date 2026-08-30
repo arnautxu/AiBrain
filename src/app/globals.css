@@ -58,13 +58,13 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --canvas: #0f0f0f;
-  --surface: #0f0f0f;
+  --canvas: #000000;
+  --surface: #000000;
   --surface-raised: #1f1f1f;
   --surface-muted: #262626;
   --surface-hover: #2d2d2d;
   --surface-selected: #333333;
-  --sidebar: #171717;
+  --sidebar: #000000;
   --header: var(--surface);
   --user-message: #2f2f2f;
   --user-message-text: #f2f2f2;
@@ -95,13 +95,13 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
-    --canvas: #0f0f0f;
-    --surface: #0f0f0f;
+    --canvas: #000000;
+    --surface: #000000;
     --surface-raised: #1f1f1f;
     --surface-muted: #262626;
     --surface-hover: #2d2d2d;
     --surface-selected: #333333;
-    --sidebar: #171717;
+    --sidebar: #000000;
     --header: var(--surface);
     --user-message: #2f2f2f;
     --user-message-text: #f2f2f2;
@@ -512,6 +512,11 @@ button:disabled {
   letter-spacing: 0.01em;
 }
 
+[data-context-menu-open="true"] .sidebar-item-action.context-menu-suppressed {
+  pointer-events: none;
+  opacity: 0 !important;
+}
+
 .chat-empty-state {
   padding-top: clamp(4.25rem, calc(50vh - 20rem), 7rem);
   transition: opacity 180ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
@@ -744,6 +749,58 @@ button:disabled {
   display: none;
 }
 
+.composer-landing {
+  min-height: 124px;
+  padding: 10px;
+}
+
+.composer-landing .composer-textarea {
+  min-height: 64px;
+  padding: 10px;
+}
+
+.composer-landing .composer-controls {
+  margin-top: auto;
+}
+
+@media (max-width: 479px) {
+  .composer-landing {
+    min-height: 116px;
+  }
+
+  .composer-landing .composer-textarea {
+    min-height: 56px;
+  }
+
+  .composer-conversation.composer-compact:not(.composer-focused) .composer-experience {
+    display: none;
+  }
+
+  .composer-conversation.composer-compact.composer-focused {
+    display: flex;
+    min-height: 108px;
+    align-items: stretch;
+    gap: 0.25rem;
+    padding: 10px;
+  }
+
+  .composer-conversation.composer-compact.composer-focused .composer-textarea {
+    width: 100%;
+    min-height: 52px;
+    padding: 8px 10px;
+  }
+
+  .composer-conversation.composer-compact.composer-focused .composer-controls {
+    display: flex;
+    margin-top: auto;
+  }
+
+  .composer-conversation.composer-compact.composer-focused .composer-controls-start,
+  .composer-conversation.composer-compact.composer-focused .composer-controls-end {
+    display: flex;
+  }
+}
+
 .markdown-body {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -777,10 +834,10 @@ button:disabled {
   letter-spacing: -0.02em;
 }
 
-.markdown-body h1 { font-size: 1.45rem; }
-.markdown-body h2 { font-size: 1.2rem; }
-.markdown-body h3 { font-size: 1.05rem; }
-.markdown-body h4 { font-size: 0.95rem; }
+.markdown-body h1 { font-size: 1.35rem; }
+.markdown-body h2 { font-size: 1.15rem; }
+.markdown-body h3 { font-size: 1rem; }
+.markdown-body h4 { font-size: 0.925rem; }
 
 .markdown-body ul,
 .markdown-body ol {

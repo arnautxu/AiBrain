@@ -61,4 +61,24 @@ describe("runtime source and tool result projection", () => {
     expect(isChatStreamEvent({ type: "toolResult", item: result })).toBe(true);
     expect(isChatStreamEvent({ type: "activity", item: activity })).toBe(true);
   });
+
+  it("projects commands and outputs without internal runtime details", () => {
+    const uuid = "fc71a2c4-0db0-4914-af82-9564038ea964";
+    const path = `/var/lib/aibrain/data/users/${uuid}/runtime/codex-home/skills/web/SKILL.md`;
+    const params = { item: {
+      id: "command-sensitive",
+      type: "commandExecution",
+      command: `/bin/sh -lc "sed -n '1,260p' ${path}"`,
+      status: "completed",
+      exitCode: 0,
+      aggregatedOutput: `Instalación: company-qa\nCodex\n${path}\n${uuid}`,
+    } };
+
+    const result = itemToolResult(params, true, observedAt);
+    const activity = itemActivity(params, true);
+    expect(result?.title).toBe("Consultando archivos del proyecto");
+    expect(activity?.detail).toBe("Consultando archivos del proyecto");
+    expect(JSON.stringify({ result, activity })).not.toMatch(/\/bin\/sh|\/var\/lib|company-qa|Codex|fc71a2c4/iu);
+    expect(result?.output).toContain("Arnall");
+  });
 });

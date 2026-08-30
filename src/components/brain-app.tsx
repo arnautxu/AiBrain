@@ -1957,6 +1957,7 @@ export function BrainApp({
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
+        onToggleSidebar={() => setMobileSidebarOpen((open) => !open)}
         onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
       /> : <ChatWorkspace
         manifest={manifest}

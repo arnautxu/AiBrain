@@ -173,6 +173,15 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByRole("heading", { name: "Informe final" })).toHaveLength(1);
     expect(screen.getByText("Evidencia verificada").closest("li")).toBeInTheDocument();
     expect(screen.getByText("He comprobado la fuente autorizada.")).not.toBeVisible();
+    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[14px]");
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "conversation");
+    expect(screen.getByTestId("composer")).toHaveClass("composer-compact");
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "false");
+    fireEvent.focus(screen.getByRole("textbox", { name: "Mensaje" }));
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "true");
+    expect(screen.getByTestId("composer")).toHaveClass("composer-focused");
+    fireEvent.blur(screen.getByRole("textbox", { name: "Mensaje" }), { relatedTarget: null });
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "false");
   });
 
   it("adopts a draft typed before hydration instead of resetting it", () => {
@@ -215,6 +224,10 @@ describe("chat workspace simplificado", () => {
   it("keeps the landing focused on its editable destination and honest suggestions", () => {
     renderWorkspace();
 
+    expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "landing");
+    expect(screen.getByTestId("composer")).toHaveClass("composer-landing");
+    expect(screen.getByTestId("composer")).not.toHaveClass("composer-compact");
+    expect(screen.getByTestId("composer-controls")).toContainElement(screen.getByRole("button", { name: "Añadir al mensaje" }));
     expect(screen.getAllByText("Operaciones Arnall").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "¿Cómo puedo ayudarte en Operaciones Arnall?" })).toBeInTheDocument();
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");

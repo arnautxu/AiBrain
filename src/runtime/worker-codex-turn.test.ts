@@ -516,25 +516,29 @@ describe("worker Codex turn", () => {
                 },
               });
               await handlers?.onNotification({
+                method: "item/agentMessage/delta",
+                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "commentary-1", delta: "**Voy a comprobar la fuente autorizada.** Codex Instalación: company-qa /var/lib/aibrain/data/users/fc71a2c4-0db0-4914-af82-9564038ea964/runtime/codex-home/skills/web/SKILL.md" },
+              }, { eventId: "commentary-delta", sequence: 10, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
                 method: "item/started",
                 params: {
                   threadId: "runtime-thread-1",
                   turnId: "runtime-turn-1",
                   item: { id: "commentary-1", type: "agentMessage", text: "", phase: "commentary", status: "inProgress" },
                 },
-              }, { eventId: "commentary-started", sequence: 10, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
-              await handlers?.onNotification({
-                method: "item/agentMessage/delta",
-                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "commentary-1", delta: "Voy a comprobar la fuente autorizada." },
-              }, { eventId: "commentary-delta", sequence: 11, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              }, { eventId: "commentary-started", sequence: 11, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               await handlers?.onNotification({
                 method: "item/completed",
                 params: {
                   threadId: "runtime-thread-1",
                   turnId: "runtime-turn-1",
-                  item: { id: "commentary-1", type: "agentMessage", text: "Voy a comprobar la fuente autorizada.", phase: "commentary", status: "completed" },
+                  item: { id: "commentary-1", type: "agentMessage", text: "**Voy a comprobar la fuente autorizada.** Codex Instalación: company-qa /var/lib/aibrain/data/users/fc71a2c4-0db0-4914-af82-9564038ea964/runtime/codex-home/skills/web/SKILL.md", phase: "commentary", status: "completed" },
                 },
               }, { eventId: "commentary-completed", sequence: 12, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/agentMessage/delta",
+                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "Resultado " },
+              }, { eventId: "final-delta", sequence: 13, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               await handlers?.onNotification({
                 method: "item/started",
                 params: {
@@ -542,11 +546,15 @@ describe("worker Codex turn", () => {
                   turnId: "runtime-turn-1",
                   item: { id: "message-1", type: "agentMessage", text: "", phase: "final_answer", status: "inProgress" },
                 },
-              }, { eventId: "final-started", sequence: 13, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              }, { eventId: "final-started", sequence: 14, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               await handlers?.onNotification({
                 method: "item/agentMessage/delta",
-                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "Fet" },
-              }, { eventId: "final-delta", sequence: 14, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "fc71a2c4-0db0-" },
+              }, { eventId: "final-id-fragment-1", sequence: 15, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/agentMessage/delta",
+                params: { threadId: "runtime-thread-1", turnId: "runtime-turn-1", itemId: "message-1", delta: "4914-af82-9564038ea964." },
+              }, { eventId: "final-id-fragment-2", sequence: 16, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               await handlers?.onNotification({
                 method: "thread/tokenUsage/updated",
                 params: {
@@ -759,14 +767,14 @@ describe("worker Codex turn", () => {
       .toBeLessThan(instructions.indexOf("BEGIN AIBRAIN EXPLICIT MEMORY JSON DATA"));
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
-    expect(events).toContainEqual({ type: "delta", value: "Fet" });
+    expect(events).toContainEqual({ type: "content", value: "Resultado identificador interno." });
     expect(events).not.toContainEqual({ type: "delta", value: "Voy a comprobar la fuente autorizada." });
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
       item: expect.objectContaining({
         id: "commentary-1",
         kind: "reasoning",
-        detail: "Voy a comprobar la fuente autorizada.",
+        detail: expect.stringContaining("Voy a comprobar la fuente autorizada."),
       }),
     }));
     expect(events).toContainEqual({
@@ -808,7 +816,12 @@ describe("worker Codex turn", () => {
       type: "activity",
       item: expect.objectContaining({ kind: "reasoning", detail: "Resum final verificat" }),
     }));
-    expect(JSON.stringify(events)).not.toContain("private reasoning must not be exposed");
+    expect(events.filter((event) => event.type === "delta")).toEqual([]);
+    expect(events.filter((event) => event.type === "content")).toEqual([
+      { type: "content", value: "Resultado " },
+      { type: "content", value: "Resultado identificador interno." },
+    ]);
+    expect(JSON.stringify(events)).not.toMatch(/private reasoning must not be exposed|\*\*|Codex|AiBrain|\/var\/lib|company-qa|fc71a2c4/iu);
     expect(mocked.maintenanceReleases).toBe(1);
   });
 

@@ -10,6 +10,13 @@ import type {
   ToolResult,
   TurnSource,
 } from "@/lib/chat-contract";
+import {
+  publicActivityText,
+  publicCommandTitle,
+  publicProjectPath,
+  publicToolName,
+  publicToolOutput,
+} from "@/ui/public-activity";
 import type { ApprovalRequestType } from "@/runtime/approval-store";
 import type { RuntimeConfig } from "@/runtime/config";
 import type {
@@ -188,14 +195,13 @@ function fileActivityChanges(changes: unknown): ActivityItem["files"] {
     if (
       !isRecord(change) ||
       typeof change.path !== "string" ||
-      change.path.length === 0 ||
-      change.path.length > 2_048 ||
-      change.path.includes("\0") ||
       !isRecord(change.kind)
     ) return [];
+    const publicPath = publicProjectPath(change.path);
+    if (!publicPath) return [];
     const type = change.kind.type;
     if (type !== "add" && type !== "update" && type !== "delete") return [];
-    return [{ path: change.path, change: type } satisfies ActivityFileChange];
+    return [{ path: publicPath, change: type } satisfies ActivityFileChange];
   });
   return files.length > 0 ? files : undefined;
 }
@@ -375,13 +381,13 @@ export function itemToolResult(
     createdAt: itemObservedAt(params, observedAt),
   };
   if (item.type === "commandExecution") {
-    const command = compactRuntimeText(item.command, 240);
+    const running = toolResultStatus(item, completed) === "running";
     return {
       ...common,
       kind: "command",
-      title: command ?? "Comando de terminal",
+      title: publicCommandTitle(item.command, running),
       summary: typeof item.exitCode === "number" ? `Código de salida ${item.exitCode}` : null,
-      output: safeRuntimeOutput(item.aggregatedOutput),
+      output: publicToolOutput(item.aggregatedOutput),
     };
   }
   if (item.type === "fileChange") {
@@ -406,15 +412,15 @@ export function itemToolResult(
   }
   if (item.type === "mcpToolCall") {
     const appContext = isRecord(item.appContext) ? item.appContext : null;
-    const app = compactRuntimeText(appContext?.appName, 100);
-    const tool = compactRuntimeText(appContext?.actionName ?? item.tool, 120) ?? "Herramienta";
-    const error = isRecord(item.error) ? compactRuntimeText(item.error.message, 4_000) : null;
+    const app = publicToolName(appContext?.appName, "");
+    const tool = publicToolName(appContext?.actionName ?? item.tool);
+    const error = isRecord(item.error) ? publicActivityText(item.error.message, 4_000) : null;
     return {
       ...common,
       kind: "app",
       title: app ? `${app} · ${tool}` : tool,
-      summary: error ?? compactRuntimeText(item.server, 4_000),
-      output: mcpOutput(item.result),
+      summary: error,
+      output: publicToolOutput(mcpOutput(item.result)),
     };
   }
   if (item.type === "dynamicToolCall") {
@@ -425,9 +431,9 @@ export function itemToolResult(
     return {
       ...common,
       kind: browser ? "browser" : "app",
-      title: `${browser ? "Navegador" : "Herramienta"} · ${compactRuntimeText(item.tool, 120) ?? "acción"}`,
-      summary: compactRuntimeText(item.namespace, 4_000),
-      output: content.length ? safeRuntimeOutput(content.join("\n\n")) : null,
+      title: `${publicToolName(item.namespace, browser ? "Navegador" : "Herramienta")} · ${publicToolName(item.tool, "Acción")}`,
+      summary: null,
+      output: content.length ? publicToolOutput(content.join("\n\n")) : null,
     };
   }
   return null;
@@ -441,14 +447,13 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
   const status = statusFromItem(item.status, completed);
 
   if (item.type === "commandExecution") {
-    const command = typeof item.command === "string" ? item.command : "Ordre de terminal";
     return {
       id: item.id,
       kind: "command",
       label: status === "running" ? "Executant una ordre" : "Ordre executada",
-      detail: safeRuntimeOutput(command) ?? "Ordre de terminal",
+      detail: publicCommandTitle(item.command, status === "running"),
       ...(typeof item.aggregatedOutput === "string"
-        ? { output: safeRuntimeOutput(item.aggregatedOutput) ?? "" }
+        ? { output: publicToolOutput(item.aggregatedOutput) ?? "" }
         : {}),
       status,
     };
@@ -469,24 +474,22 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
   }
 
   if (item.type === "mcpToolCall") {
-    const server = typeof item.server === "string" ? item.server : "MCP";
-    const tool = typeof item.tool === "string" ? item.tool : "eina";
+    const appContext = isRecord(item.appContext) ? item.appContext : null;
+    const tool = publicToolName(appContext?.appName ?? item.tool);
     return {
       id: item.id,
       kind: "tool",
       label: status === "running" ? `Utilitzant ${tool}` : `${tool} completat`,
-      detail: server,
       status,
     };
   }
 
   if (item.type === "dynamicToolCall") {
-    const tool = typeof item.tool === "string" ? item.tool : "Eina";
+    const tool = publicToolName(item.namespace, "Herramienta");
     return {
       id: item.id,
       kind: "tool",
       label: status === "running" ? `Utilitzant ${tool}` : `${tool} completat`,
-      ...(typeof item.namespace === "string" ? { detail: item.namespace } : {}),
       status,
     };
   }
@@ -496,7 +499,7 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
       id: item.id,
       kind: "web",
       label: status === "running" ? "Cercant al web" : "Cerca web completada",
-      ...(typeof item.query === "string" ? { detail: item.query } : {}),
+      ...(publicActivityText(item.query, 240) ? { detail: publicActivityText(item.query, 240) ?? undefined } : {}),
       status,
     };
   }
@@ -506,13 +509,13 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
       id: item.id,
       kind: "reasoning",
       label: status === "running" ? "Raonant" : "Raonament completat",
-      ...(joinedStrings(item.summary) ? { detail: joinedStrings(item.summary) ?? undefined } : {}),
+      ...(publicActivityText(joinedStrings(item.summary)) ? { detail: publicActivityText(joinedStrings(item.summary)) ?? undefined } : {}),
       status,
     };
   }
 
   if (item.type === "agentMessage" && item.phase === "commentary" && typeof item.text === "string") {
-    const detail = compactRuntimeText(item.text, 12_000);
+    const detail = publicActivityText(item.text, 12_000);
     if (!detail) return null;
     return {
       id: item.id,
@@ -528,7 +531,7 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
       id: item.id,
       kind: "plan",
       label: status === "running" ? "Preparant el pla" : "Pla preparat",
-      ...(typeof item.text === "string" ? { detail: item.text } : {}),
+      ...(publicActivityText(item.text) ? { detail: publicActivityText(item.text) ?? undefined } : {}),
       status,
     };
   }
@@ -538,7 +541,7 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
       id: item.id,
       kind: "agent",
       label: status === "running" ? "Coordinant agents" : "Coordinació completada",
-      ...(typeof item.tool === "string" ? { detail: item.tool } : {}),
+      ...(publicActivityText(item.tool, 240) ? { detail: publicActivityText(item.tool, 240) ?? undefined } : {}),
       status,
     };
   }
@@ -563,15 +566,17 @@ export function planFromNotification(params: unknown): {
   const steps: PlanStep[] = [];
   for (const value of params.plan) {
     if (!isRecord(value) || typeof value.step !== "string") continue;
+    const step = publicActivityText(value.step, 1_000);
+    if (!step) continue;
     if (value.status === "pending" || value.status === "completed") {
-      steps.push({ step: value.step, status: value.status });
+      steps.push({ step, status: value.status });
     } else if (value.status === "inProgress") {
-      steps.push({ step: value.step, status: "in_progress" });
+      steps.push({ step, status: "in_progress" });
     }
   }
 
   return {
-    explanation: typeof params.explanation === "string" ? params.explanation : null,
+    explanation: publicActivityText(params.explanation),
     steps,
   };
 }

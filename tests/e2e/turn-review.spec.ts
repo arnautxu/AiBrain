@@ -10,6 +10,8 @@ async function login(page: Page) {
 
 test("plan, command, diff and approval decisions consume the typed turn contract inline", async ({ page }) => {
   const decisions: unknown[] = [];
+  const uuid = "fc71a2c4-0db0-4914-af82-9564038ea964";
+  const internalPath = `/var/lib/aibrain/data/users/${uuid}/runtime/codex-home/skills/web/SKILL.md`;
   await page.route("**/api/runtime/approvals", async (route) => {
     decisions.push(route.request().postDataJSON());
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
@@ -20,12 +22,14 @@ test("plan, command, diff and approval decisions consume the typed turn contract
         { step: "Inspeccionar el proyecto", status: "completed" },
         { step: "Preparar el cambio", status: "in_progress" },
       ] },
-      { type: "activity", item: { id: "command-qa", kind: "command", label: "Comprobar proyecto", detail: "Lectura sintética terminada", output: "status: clean", status: "complete" } },
+      { type: "activity", item: { id: "reasoning-sensitive", kind: "reasoning", label: "Raonament completat", detail: `**Identifying access issue** Codex Instalación: company-qa ${internalPath} ${uuid}`, status: "complete" } },
+      { type: "activity", item: { id: "command-qa", kind: "command", label: "Ordre executada", detail: `/bin/sh -lc "sed -n '1,260p' ${internalPath}"`, output: `status: clean\nAiBrain ${internalPath}`, status: "complete" } },
+      { type: "toolResult", item: { id: "command-qa", kind: "command", title: `/bin/sh -lc "sed -n '1,260p' ${internalPath}"`, status: "complete", summary: "Código de salida 0", output: `status: clean\nAiBrain ${internalPath}`, sourceIds: [], createdAt: "2026-08-31T00:00:00.000Z" } },
       { type: "activity", item: { id: "file-qa", kind: "file", label: "Canvis de fitxers", detail: "src/resultado.ts", files: [{ path: "src/resultado.ts", change: "update" }], status: "complete" } },
       { type: "diff", value: "diff --git a/resultado.txt b/resultado.txt\n--- a/resultado.txt\n+++ b/resultado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
       { type: "approval", item: { id: "approval-command", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-command-qa", kind: "command", title: "Ejecutar comprobación", detail: "Comprueba únicamente el estado sintético.", command: "check --synthetic", cwd: "/workspace/synthetic", status: "pending" } },
       { type: "approval", item: { id: "approval-file", threadId: "thread-qa", turnId: "turn-qa", itemId: "item-file-qa", kind: "file", title: "Aplicar cambio preparado", detail: "Modifica únicamente resultado.txt.", status: "pending" } },
-      { type: "delta", value: "## Resultado de la prueba\n\nEl turno está listo para revisión." },
+      { type: "delta", value: `## Resultado de la prueba\n\nEl turno está listo para revisión.\n\nAiBrain Instalación: company-qa ${internalPath} ${uuid}\n\n[Abrir artefacto](/api/projects/00000000-0000-4000-8000-000000000011/artifacts/00000000-0000-4000-8000-000000000012)` },
       { type: "done" },
     ];
     await route.fulfill({
@@ -60,10 +64,21 @@ test("plan, command, diff and approval decisions consume the typed turn contract
   const resultHeading = page.getByRole("heading", { name: "Resultado de la prueba" });
   await expect(resultHeading).toBeVisible();
   const assistantTurn = resultHeading.locator("xpath=ancestor::article");
-  await assistantTurn.getByRole("button", { name: "Mostrar el proceso de trabajo" }).click();
+  const activityToggle = assistantTurn.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+  await expect(activityToggle).toHaveAttribute("aria-expanded", "false");
+  await activityToggle.click();
   await expect(assistantTurn.getByText("Inspeccionar el proyecto", { exact: true })).toBeVisible();
-  await expect(page.getByText("Comprobar proyecto")).toBeVisible();
-  await expect(page.getByText("Lectura sintética terminada")).toBeVisible();
+  await expect(assistantTurn.getByText("Identifying access issue", { exact: false })).toBeVisible();
+  await expect(page.getByText("Consultando archivos del proyecto")).toBeVisible();
+  await expect(assistantTurn).not.toContainText("/var/lib");
+  await expect(assistantTurn).not.toContainText("company-qa");
+  await expect(assistantTurn).not.toContainText(uuid);
+  await expect(assistantTurn).not.toContainText("Codex");
+  await expect(assistantTurn).not.toContainText("AiBrain");
+  await expect(assistantTurn.getByRole("link", { name: "Abrir artefacto" })).toHaveAttribute(
+    "href",
+    "/api/projects/00000000-0000-4000-8000-000000000011/artifacts/00000000-0000-4000-8000-000000000012",
+  );
   await page.getByRole("button", { name: /src\/resultado\.ts/ }).click();
   await expect(page.getByText("export const resultado = 'listo';")).toBeVisible();
   await expect(page.getByText("Cambios preparados", { exact: true })).toBeVisible();
