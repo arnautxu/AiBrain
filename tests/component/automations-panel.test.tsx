@@ -60,6 +60,16 @@ afterEach(() => {
 });
 
 describe("AutomationsPanel audience", () => {
+  it("keeps the mobile sidebar control available on the automations surface", () => {
+    const onToggleSidebar = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+
+    render(<AutomationsPanel open projects={[project]} onToggleSidebar={onToggleSidebar} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }));
+
+    expect(onToggleSidebar).toHaveBeenCalledOnce();
+  });
+
   it("shows only authorized controls and defaults a new task to the current user with optional users and groups", async () => {
     const requests: Array<{ method: string; body: unknown }> = [];
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {

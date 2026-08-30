@@ -33,6 +33,12 @@ import {
   turnDurationMs,
 } from "@/ui/turn-timeline";
 import {
+  publicActivityText,
+  publicCommandTitle,
+  publicProjectPath,
+  publicToolOutput,
+} from "@/ui/public-activity";
+import {
   ThinkingStep,
   ThinkingSteps,
   ThinkingStepsContent,
@@ -142,10 +148,11 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
 }
 
 function activityPresentation(item: ActivityItem) {
-  const detail = item.detail?.trim();
+  const detail = publicActivityText(item.detail) ?? undefined;
   const active = item.status === "running" || item.status === "waiting";
-  const customLabel = item.label.trim() && !GENERIC_RUNTIME_LABELS.has(item.label)
-    ? SYSTEM_ACTIVITY_LABELS[item.label] ?? translatedRuntimeLabel(item.label)
+  const safeLabel = publicActivityText(item.label, 240) ?? "Actividad completada";
+  const customLabel = safeLabel && !GENERIC_RUNTIME_LABELS.has(item.label)
+    ? SYSTEM_ACTIVITY_LABELS[item.label] ?? translatedRuntimeLabel(safeLabel)
     : null;
   let title = customLabel;
   let secondaryDetail: string | undefined = detail;
@@ -155,7 +162,7 @@ function activityPresentation(item: ActivityItem) {
       title = detail || (active ? "Pensando" : "Razonamiento completado");
       secondaryDetail = undefined;
     } else if (item.kind === "command") {
-      title = detail ? `${active ? "Ejecutando" : "Ejecutado"}: ${detail}` : active ? "Ejecutando un comando" : "Comando completado";
+      title = publicCommandTitle(item.detail, active);
       secondaryDetail = undefined;
     } else if (item.kind === "file") {
       title = detail ? `${active ? "Preparando cambios en" : "Cambios preparados en"} ${detail}` : active ? "Editando archivos" : "Cambios preparados";
@@ -226,7 +233,7 @@ function ApprovalCard({
     declined: "Acción rechazada",
     pending: "Esperando tu decisión",
   }[approval.status];
-  const title = approval.title;
+  const title = publicActivityText(approval.title, 240) ?? "Acción pendiente";
   const explanation = approval.kind === "file"
     ? "El asistente ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
     : approval.kind === "browser"
@@ -245,8 +252,8 @@ function ApprovalCard({
           <details className="mt-2">
             <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver por qué necesita permiso</summary>
             <div className="mt-2 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[9px] leading-4 text-[var(--text)]">
-              <p>{approval.detail}</p>
-              {approval.command ? <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-28 overflow-auto whitespace-pre-wrap font-mono text-[8px] text-[var(--text)]">{approval.command}</pre> : null}
+              <p>{publicActivityText(approval.detail, 1_000) ?? "Esta acción necesita confirmación."}</p>
+              {approval.command ? <p className="mt-2 text-[9px] font-medium text-[var(--text-secondary)]">{publicCommandTitle(approval.command)}</p> : null}
             </div>
           </details>
         </div>
@@ -286,9 +293,24 @@ export function TurnActivity({
     ? manualDisclosure.open
     : streaming;
 
-  const visiblePlan = message.plan.filter((step) => step.status !== "pending");
-  const visibleActivity = message.activity.filter((item) =>
-    item.status !== "pending" && isRelevantProcessActivity(item));
+  const visiblePlan = message.plan.flatMap((step) => {
+    const publicStep = publicActivityText(step.step, 1_000);
+    return step.status !== "pending" && publicStep ? [{ ...step, step: publicStep }] : [];
+  });
+  const visibleActivity = message.activity
+    .filter((item) => item.status !== "pending" && isRelevantProcessActivity(item))
+    .map((item) => ({
+      ...item,
+      label: publicActivityText(item.label, 240) ?? "Actividad",
+      ...(item.detail ? { detail: publicActivityText(item.detail) ?? undefined } : {}),
+      ...(item.output ? { output: publicToolOutput(item.output) ?? undefined } : {}),
+      ...(item.files ? {
+        files: item.files.flatMap((file) => {
+          const safePath = publicProjectPath(file.path);
+          return safePath ? [{ ...file, path: safePath }] : [];
+        }),
+      } : {}),
+    }));
   const timeline = buildTurnTimeline(visibleActivity, message.toolResults ?? []);
   const hasWorkProcess = visiblePlan.length > 0 || timeline.length > 0;
   const hasDetails = hasWorkProcess || message.approvals.length > 0 ||
@@ -385,7 +407,7 @@ export function TurnActivity({
                       {item.output ? (
                         <details className="mt-2">
                           <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
-                          <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
+                          <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{publicToolOutput(item.output)}</pre>
                         </details>
                       ) : null}
                     </ThinkingStep>

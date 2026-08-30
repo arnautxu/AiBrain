@@ -152,4 +152,43 @@ describe("Sidebar", () => {
     expect(onNewThread).toHaveBeenNthCalledWith(1, "project-operations");
     expect(onNewThread).toHaveBeenNthCalledWith(2);
   });
+
+  it("uses one left content guide without indenting projects or their chats", () => {
+    renderSidebar();
+
+    expect(screen.getByTestId("sidebar-brand")).toHaveClass("px-2");
+    expect(screen.getByTestId("sidebar-chats-label")).toHaveClass("px-2");
+    expect(screen.getByTestId("sidebar-projects-label")).toHaveClass("px-2");
+    expect(within(screen.getByRole("navigation", { name: "Navegación principal" })).getByRole("button", { name: "Nueva conversación" })).toHaveClass("pl-2");
+    for (const row of screen.getAllByTestId("sidebar-project-row")) {
+      expect(row).toHaveClass("pl-2");
+      expect(row).not.toHaveClass("pl-7");
+    }
+    for (const row of screen.getAllByTestId("sidebar-project-thread")) {
+      expect(row).toHaveClass("px-2");
+      expect(row.parentElement?.parentElement?.parentElement).not.toHaveClass("ml-5");
+    }
+  });
+
+  it("shows only one contextual action trigger and manages menu focus", () => {
+    renderSidebar();
+    const sidebar = screen.getByTestId("workbench-sidebar");
+    const trigger = screen.getByRole("button", { name: "Acciones de Recordatorio personal" });
+
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const menu = screen.getByRole("menu", { name: "Acciones de Recordatorio personal" });
+    expect(sidebar).toHaveAttribute("data-context-menu-open", "true");
+    expect(within(menu).getByRole("menuitem", { name: "Renombrar" })).toHaveFocus();
+    expect(trigger).not.toHaveClass("context-menu-suppressed");
+    for (const other of screen.getAllByRole("button", { name: /Acciones de/ }).filter((button) => button !== trigger)) {
+      expect(other).toHaveClass("context-menu-suppressed");
+    }
+
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Acciones de Recordatorio personal" })).not.toBeInTheDocument();
+    expect(sidebar).toHaveAttribute("data-context-menu-open", "false");
+    expect(trigger).toHaveFocus();
+  });
 });

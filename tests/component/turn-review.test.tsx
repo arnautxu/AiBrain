@@ -97,7 +97,7 @@ describe("turn activity and Review", () => {
 
     trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
-    expect(trigger).toHaveTextContent("Ejecutando: npm run typecheck");
+    expect(trigger).toHaveTextContent("En curso: Validando el proyecto");
     expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
 
     rerender(<TurnActivity

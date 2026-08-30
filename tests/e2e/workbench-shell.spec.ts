@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const northwind = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa";
 const accountName = northwind ? "Taylor" : "Alex";
@@ -13,6 +13,25 @@ async function login(page: Page) {
   await expect(page.getByTestId("composer")).toBeVisible();
 }
 
+async function contentStartX(locator: Locator) {
+  return locator.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    return bounds.x + Number.parseFloat(getComputedStyle(element).paddingLeft || "0");
+  });
+}
+
+async function expectSidebarContentGuide(page: Page) {
+  const guide = await contentStartX(page.getByTestId("sidebar-brand"));
+  const rows = [
+    page.getByRole("navigation", { name: "Navegación principal" }).getByRole("button", { name: "Nueva conversación" }),
+    page.getByTestId("sidebar-chats-label"),
+    page.getByTestId("sidebar-projects-label"),
+    page.getByTestId("sidebar-project-row").first(),
+    page.getByTestId("sidebar-project-thread").first(),
+  ];
+  for (const row of rows) await expect.poll(() => contentStartX(row)).toBeCloseTo(guide, 0);
+}
+
 test("the employee shell exposes work, not implementation details", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -21,15 +40,19 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("img", { name: new RegExp(productName) })).toBeVisible();
   await expect(page.getByTestId("workbench-sidebar")).toBeVisible();
   await expect(page.getByTestId("composer")).toBeVisible();
+  await expect(page.getByTestId("composer")).toHaveAttribute("data-layout", "landing");
+  await expect(page.getByTestId("composer")).not.toHaveClass(/composer-compact/);
+  await expect.poll(() => page.getByTestId("composer").evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(116);
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Automatizaciones" })).toBeVisible();
+  await expectSidebarContentGuide(page);
   await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
   await expect(page.getByText("Centro de tareas", { exact: true })).toHaveCount(0);
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });
-  await projectButton.hover();
+  await projectButton.hover({ position: { x: 20, y: 20 } });
   const projectActions = page.getByRole("button", { name: `Acciones de ${primaryProject}` });
   await projectActions.click();
   await expect(page.getByRole("menuitem", { name: "Renombrar" })).toBeVisible();
@@ -97,8 +120,18 @@ test("the mobile drawer opens and the composer remains available", async ({ page
   await expect(page.getByTestId("composer")).toBeVisible();
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   await expect(page.getByTestId("workbench-sidebar")).toBeVisible();
+  await expectSidebarContentGuide(page);
+  const contextTrigger = page.locator('button[aria-label^="Acciones de"]').first();
+  await contextTrigger.click();
+  await expect(page.getByTestId("workbench-sidebar")).toHaveAttribute("data-context-menu-open", "true");
+  await expect(page.locator('button[aria-label^="Acciones de"]:visible')).toHaveCount(1);
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Cerrar menú" })).toBeVisible();
-  await page.getByRole("button", { name: "Cerrar menú" }).click();
+  await page.getByRole("button", { name: "Automatizaciones", exact: true }).click();
   await expect(page.getByTestId("workbench-sidebar")).toBeHidden();
+  await expect(page.getByRole("main", { name: "Automatizaciones" })).toBeVisible();
+  await page.getByRole("main", { name: "Automatizaciones" }).getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await expect(page.getByTestId("workbench-sidebar")).toBeVisible();
+  await page.getByRole("navigation", { name: "Navegación principal" }).getByRole("button", { name: "Nueva conversación" }).click();
   await expect(page.getByTestId("composer")).toBeVisible();
 });

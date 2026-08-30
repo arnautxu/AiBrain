@@ -24,4 +24,21 @@ describe("Codex file activity", () => {
       ],
     });
   });
+
+  it("drops host paths and traversal from employee-visible file activity", () => {
+    const activity = itemActivity({
+      item: {
+        id: "file-change-sensitive",
+        type: "fileChange",
+        status: "completed",
+        changes: [
+          { path: "/var/lib/aibrain/data/users/user-a/private.txt", kind: { type: "update" } },
+          { path: "../other-user/private.txt", kind: { type: "update" } },
+          { path: "documents/report.pdf", kind: { type: "add" } },
+        ],
+      },
+    }, true);
+    expect(activity?.files).toEqual([{ path: "documents/report.pdf", change: "add" }]);
+    expect(activity?.detail).toBe("documents/report.pdf");
+  });
 });

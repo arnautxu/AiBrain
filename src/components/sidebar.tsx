@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
   CalendarBlank,
@@ -159,8 +159,25 @@ function ItemActions({ kind, item, onAction, onClose }: {
   onAction: (action: ProjectMenuAction | ThreadMenuAction) => void;
   onClose: () => void;
 }) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    menuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) onClose();
+    };
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+    };
+  }, [onClose]);
+
+  const itemLabel = "name" in item ? item.name : item.title;
   return (
-    <div role="menu" className="menu-enter absolute right-1 top-8 z-20 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]" onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+    <div ref={menuRef} role="menu" aria-label={`Acciones de ${itemLabel}`} className="menu-enter absolute right-1 top-8 z-50 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
       {item.status === "active" ? (
         <>
           <MenuButton icon={<NotePencil size={14} />} label="Renombrar" onClick={() => onAction("rename")} />
@@ -224,12 +241,13 @@ export function Sidebar({
     [standaloneProject, threads],
   );
   const activeStandaloneThreads = standaloneThreads.filter((thread) => thread.status === "active");
-  const closeMenus = () => {
+  const contextMenuOpen = Boolean(projectMenuId || threadMenuId);
+  const closeMenus = useCallback(() => {
     setProjectMenuId(null);
     setThreadMenuId(null);
     setProfileMenuOpen(false);
     setHelpOpen(false);
-  };
+  }, []);
 
   useEffect(() => {
     if (!profileMenuOpen) return;
@@ -272,6 +290,7 @@ export function Sidebar({
         aria-label={mobileOpen ? "Navegación" : undefined}
         data-testid="workbench-sidebar"
         data-desktop-state={desktopOpen ? "expanded" : "collapsed"}
+        data-context-menu-open={contextMenuOpen ? "true" : "false"}
         className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
         <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
@@ -286,9 +305,9 @@ export function Sidebar({
           </div>
         </div>
         <div aria-hidden={!(desktopOpen || mobileOpen)} inert={!(desktopOpen || mobileOpen) ? true : undefined} className={`flex h-full w-[min(280px,88vw)] shrink-0 flex-col transition-opacity duration-150 md:w-[260px] ${desktopOpen ? "md:opacity-100" : "md:pointer-events-none md:opacity-0"}`}>
-        <div className="flex h-16 shrink-0 items-center justify-between px-3">
-          <button type="button" aria-label={`${branding.productName}. Nueva conversación sin proyecto`} className="flex h-10 min-w-0 items-center gap-2.5 rounded-lg px-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => { onNewThread(); onCloseMobile(); }}><BrandMark branding={branding} /><span className="truncate text-[14px] font-semibold tracking-[-.01em] text-[var(--text)]">{branding.productName}</span></button>
-          <div className="flex items-center gap-0.5">
+        <div className="flex h-16 shrink-0 items-center justify-between gap-1 px-3">
+          <button data-testid="sidebar-brand" type="button" aria-label={`${branding.productName}. Nueva conversación sin proyecto`} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 overflow-hidden rounded-lg px-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => { onNewThread(); onCloseMobile(); }}><BrandMark branding={branding} /><span className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-[-.01em] text-[var(--text)]">{branding.productName}</span></button>
+          <div className="flex shrink-0 items-center gap-0.5">
             <button aria-label="Buscar" title="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
             <button ref={desktopCloseButtonRef} aria-label="Ocultar barra lateral" className="touch-target hidden rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:grid" onClick={() => { onCloseDesktop(); requestAnimationFrame(() => railOpenButtonRef.current?.focus()); }}><SidebarSimple size={18} /></button>
             <button aria-label="Cerrar menú" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)] md:hidden" onClick={onCloseMobile}><X size={18} /></button>
@@ -313,23 +332,23 @@ export function Sidebar({
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 pb-3">
           <section aria-labelledby="standalone-conversations-label" className="group/chats">
             <div className="flex items-center justify-between pb-1 pt-3">
-              <button id="standalone-conversations-label" type="button" aria-expanded={chatsOpen} aria-controls="standalone-conversations" className="sidebar-section-label flex items-center gap-1 py-1 text-[var(--text-subtle)]" onClick={() => setChatsOpen((open) => !open)}>Chats{chatsOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}</button>
+              <button data-testid="sidebar-chats-label" id="standalone-conversations-label" type="button" aria-expanded={chatsOpen} aria-controls="standalone-conversations" className="sidebar-section-label flex items-center gap-1 px-2 py-1 text-[var(--text-subtle)]" onClick={() => setChatsOpen((open) => !open)}>Chats{chatsOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}</button>
               <button disabled={!standaloneProject || busy} aria-label="Nueva conversación independiente" className="grid size-7 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/chats:opacity-100 group-focus-within/chats:opacity-100 disabled:opacity-40" onClick={() => onNewThread()}><Plus size={14} /></button>
             </div>
             {chatsOpen ? <SidebarMenu id="standalone-conversations" size="compact" className="gap-0.5">
               {activeStandaloneThreads.length === 0 ? (
-                <li className="px-3 py-2 text-[12px] leading-5 text-[var(--text-subtle)]">Tus chats sin proyecto aparecerán aquí.</li>
+                <li className="px-2 py-2 text-[12px] leading-5 text-[var(--text-subtle)]">Tus chats sin proyecto aparecerán aquí.</li>
               ) : activeStandaloneThreads.map((thread) => {
                 const active = thread.id === activeThreadId;
                 const menuOpen = threadMenuId === thread.id;
                 return (
-                  <SidebarMenuItem key={thread.id} className="group/thread">
+                  <SidebarMenuItem key={thread.id} className={`group/thread ${menuOpen ? "z-40" : ""}`}>
                     <SidebarMenuButton isActive={active} className="sidebar-touch-row" render={<button onClick={() => selectThread(thread.id)} />}>
                       {thread.title}
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
                     </SidebarMenuButton>
-                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${thread.title}`} aria-expanded={menuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !menuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(menuOpen ? null : thread.id); }}><DotsThree size={14} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                   </SidebarMenuItem>
                 );
@@ -339,7 +358,7 @@ export function Sidebar({
 
           <section aria-labelledby="projects-label" className="group/projects mt-3 pt-2">
             <div className="flex items-center justify-between pb-1 pt-2">
-              <button id="projects-label" type="button" aria-expanded={projectsOpen} aria-controls="projects-list" className="sidebar-section-label flex items-center gap-1 py-1 text-[var(--text-subtle)]" onClick={() => setProjectsOpen((open) => !open)}>Proyectos{projectsOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}</button>
+              <button data-testid="sidebar-projects-label" id="projects-label" type="button" aria-expanded={projectsOpen} aria-controls="projects-list" className="sidebar-section-label flex items-center gap-1 px-2 py-1 text-[var(--text-subtle)]" onClick={() => setProjectsOpen((open) => !open)}>Proyectos{projectsOpen ? <CaretDown size={11} /> : <CaretRight size={11} />}</button>
               <button aria-label="Crear proyecto" className="touch-target grid size-7 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/projects:opacity-100 group-focus-within/projects:opacity-100" onClick={onNewProject}><Plus size={14} /></button>
             </div>
             {projectsOpen ? <SidebarMenu id="projects-list" className="gap-0.5">
@@ -355,29 +374,29 @@ export function Sidebar({
                   .map((thread) => threadActivityById[thread.id])
                   .filter((activity): activity is ThreadActivity => Boolean(activity));
                 return (
-                  <SidebarMenuItem key={project.id} className="group/project">
-                    <SidebarMenuButton icon={active ? FluidFolderOpen : FluidFolder} isActive={active} className="sidebar-touch-row pl-7 pr-[5.5rem]" render={<button onClick={() => selectProject(project.id)} />}>
+                  <SidebarMenuItem key={project.id} className={`group/project ${menuOpen ? "z-40" : ""}`}>
+                    <SidebarMenuButton icon={active ? FluidFolderOpen : FluidFolder} isActive={active} className="sidebar-touch-row pr-2 group-hover/project:pr-[8.25rem] group-focus-within/project:pr-[8.25rem]" render={<button data-testid="sidebar-project-row" onClick={() => selectProject(project.id)} />}>
                       {project.name}
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </SidebarMenuButton>
-                    <button aria-label={projectThreadsOpen ? `Contraer ${project.name}` : `Expandir ${project.name}`} aria-expanded={projectThreadsOpen} className="absolute left-0 top-0 z-20 grid h-11 w-7 place-items-center text-[var(--text-subtle)] transition hover:text-[var(--text)]" onClick={() => setCollapsedProjectIds((current) => projectThreadsOpen ? [...current, project.id] : current.filter((id) => id !== project.id))}>{projectThreadsOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}</button>
+                    <button aria-label={projectThreadsOpen ? `Contraer ${project.name}` : `Expandir ${project.name}`} aria-expanded={projectThreadsOpen} className="pointer-events-none absolute right-[5.5rem] top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100" onClick={() => setCollapsedProjectIds((current) => projectThreadsOpen ? [...current, project.id] : current.filter((id) => id !== project.id))}>{projectThreadsOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}</button>
                     <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="absolute right-[2.75rem] top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={14} /></button>
-                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100" onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
+                    <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 ${contextMenuOpen && !menuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
                     {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
-                    {projectThreadsOpen ? <div aria-label={`Chats de ${project.name}`} className="ml-5 pl-1">
+                    {projectThreadsOpen ? <div aria-label={`Chats de ${project.name}`} className="mt-0.5">
                       <div className="space-y-0.5">
-                        {activeProjectThreads.length === 0 ? <p className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">Aún no hay conversaciones.</p> : activeProjectThreads.map((thread) => {
+                        {activeProjectThreads.length === 0 ? <p data-testid="sidebar-project-thread" className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">Aún no hay conversaciones.</p> : activeProjectThreads.map((thread) => {
                           const threadActive = thread.id === activeThreadId;
                           const threadMenuOpen = threadMenuId === thread.id;
                           return (
-                            <div key={thread.id} className="relative group/thread">
-                              <button aria-current={threadActive ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center rounded-lg px-2 py-1.5 pr-11 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
+                            <div key={thread.id} className={`relative group/thread ${threadMenuOpen ? "z-40" : ""}`}>
+                              <button data-testid="sidebar-project-thread" aria-current={threadActive ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center rounded-lg px-2 py-1.5 pr-11 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                                 <span className="min-w-0 flex-1 truncate text-[12px] font-normal">{thread.title}</span>
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
-                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className="sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100" onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
+                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !threadMenuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
                               {threadMenuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                             </div>
                           );

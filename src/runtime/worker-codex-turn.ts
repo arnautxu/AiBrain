@@ -30,7 +30,6 @@ import {
   planFromNotification,
   resolvedApproval,
   RuntimeNotReadyError,
-  safeRuntimeOutput,
   sandboxPolicy,
   type CodexTurnEvent,
   type LegacyServerRequest,
@@ -125,6 +124,7 @@ import {
   parseTurnTokenUsage,
   type TokenUsageBreakdown,
 } from "@/usage/contracts";
+import { publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
 
 const DEFAULT_WORKER_TURN_TIMEOUT_MS = 10 * 60_000;
 const MIN_WORKER_TURN_TIMEOUT_MS = 30_000;
@@ -201,9 +201,7 @@ function turnTerminalTimeouts() {
 }
 
 function productSafeRuntimeMessage(message: string) {
-  return message
-    .replace(/\b(?:Codex|ChatGPT|OpenAI|App\s+Server|gpt-[a-z0-9.-]+)\b/giu, "servicio de IA")
-    .slice(0, 2_000);
+  return publicActivityText(message, 2_000) ?? "El servicio no ha podido completar esta operación.";
 }
 
 function privateWorkspaceSafeText(value: string, roots: readonly string[]) {
@@ -521,6 +519,11 @@ export async function runWorkerCodexTurn(
   const projectedDocumentArtifactIds = new Set<string>();
   const projectingDocumentArtifactIds = new Set<string>();
   let localDocumentToolInvoked = false;
+  const pendingAgentText = new Map<string, string>();
+  const finalAnswerText = new Map<string, string>();
+  const publishedFinalAnswerText = new Map<string, string>();
+  const commandOutputText = new Map<string, string>();
+  const reasoningSummaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
     activities.set(item.id, item);
     telemetry.activity();
@@ -567,6 +570,51 @@ export async function runWorkerCodexTurn(
       ...(detail ? { detail } : {}),
       status: "running",
     }, projection);
+  };
+  const upsertCommentary = async (
+    itemId: string,
+    rawText: string,
+    status: ActivityItem["status"],
+    projection?: WorkerTurnProjection,
+  ) => {
+    commentaryText.set(itemId, rawText.slice(0, 24_000));
+    if (status === "running" && !/(?:\s|[.!?…:;])$/u.test(rawText)) return;
+    const detail = publicActivityText(rawText);
+    if (!detail) return;
+    await upsertActivity({
+      id: itemId,
+      kind: "reasoning",
+      label: "Actualización de trabajo",
+      detail,
+      status,
+    }, projection);
+  };
+  const emitFinalChunk = async (
+    itemId: string,
+    value: string,
+    projection?: WorkerTurnProjection,
+  ) => {
+    const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
+    finalAnswerText.set(itemId, rawValue);
+    if (!/(?:\s|[.!?…:;])$/u.test(rawValue)) return;
+    const publicValue = publicAssistantText(rawValue, assistantName);
+    if (!publicValue || publishedFinalAnswerText.get(itemId) === publicValue) return;
+    publishedFinalAnswerText.set(itemId, publicValue);
+    telemetry.delta();
+    await emit({ type: "content", value: publicValue }, projection);
+  };
+  const reconcileFinalText = async (
+    itemId: string,
+    value: string,
+    projection?: WorkerTurnProjection,
+  ) => {
+    const publicValue = publicAssistantText(value, assistantName);
+    finalAnswerText.set(itemId, value.slice(0, 128_000));
+    if (publicValue && publishedFinalAnswerText.get(itemId) !== publicValue) {
+      publishedFinalAnswerText.set(itemId, publicValue);
+      telemetry.delta();
+      await emit({ type: "content", value: publicValue }, projection);
+    }
   };
 
   await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
@@ -1245,10 +1293,11 @@ export async function runWorkerCodexTurn(
         }
         if (method === "rawResponseItem/completed" && isRecord(params) && isRecord(params.item)) {
           if (params.item.type === "reasoning" && Array.isArray(params.item.summary)) {
-            const summary = params.item.summary.flatMap((part) =>
+            const rawSummary = params.item.summary.flatMap((part) =>
               isRecord(part) && part.type === "summary_text" && typeof part.text === "string"
                 ? [part.text.trim()]
                 : []).filter(Boolean).join("\n\n").slice(0, 12_000);
+            const summary = publicActivityText(rawSummary);
             if (summary) {
               telemetry.summary();
               if (activeRuntimePhaseId) {
@@ -1285,32 +1334,29 @@ export async function runWorkerCodexTurn(
           const delta = notificationDelta(params);
           const itemId = notificationItemId(params);
           const phase = itemId ? agentMessagePhases.get(itemId) : undefined;
-          if (delta && itemId && phase === "commentary") {
-            const detail = `${commentaryText.get(itemId) ?? ""}${delta}`.slice(0, 12_000);
-            commentaryText.set(itemId, detail);
+          if (!delta || !itemId) return;
+          if (phase === undefined) {
+            pendingAgentText.set(itemId, `${pendingAgentText.get(itemId) ?? ""}${delta}`.slice(0, 24_000));
+            return;
+          }
+          if (phase === "commentary") {
+            const detail = `${commentaryText.get(itemId) ?? ""}${delta}`.slice(0, 24_000);
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-commentary-text"));
             }
-            await upsertActivity({
-              id: itemId,
-              kind: "reasoning",
-              label: "Actualización de trabajo",
-              detail,
-              status: "running",
-            }, { envelope, key: `commentary:${itemId}` });
-          } else if (delta && phase !== "commentary") {
+            await upsertCommentary(itemId, detail, "running", { envelope, key: `commentary:${itemId}` });
+          } else {
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
             }
             // A document-producing turn may echo private server paths. Its
             // completed final message is emitted below after whole-string
             // sanitization, avoiding leaks split across streaming chunks.
-            if (localDocumentToolInvoked) return;
-            telemetry.delta();
-            await emit(
-              { type: "delta", value: privateWorkspaceSafeText(delta, [projectWorkspace, runtime.handle.roots.workspace]) },
-              { envelope, key: `delta:${notificationItemId(params) ?? "agent"}` },
-            );
+            if (localDocumentToolInvoked) {
+              finalAnswerText.set(itemId, `${finalAnswerText.get(itemId) ?? ""}${delta}`.slice(0, 128_000));
+              return;
+            }
+            await emitFinalChunk(itemId, delta, { envelope, key: `delta:${itemId}` });
           }
           return;
         }
@@ -1327,12 +1373,35 @@ export async function runWorkerCodexTurn(
           }
           if (isRecord(params) && isRecord(params.item) && params.item.type === "agentMessage" &&
               typeof params.item.id === "string") {
+            const itemId = params.item.id;
             const phase = params.item.phase === "commentary" || params.item.phase === "final_answer"
               ? params.item.phase
               : null;
-            agentMessagePhases.set(params.item.id, phase);
-            if (phase === "commentary" && typeof params.item.text === "string") {
-              commentaryText.set(params.item.id, params.item.text.slice(0, 12_000));
+            agentMessagePhases.set(itemId, phase);
+            const buffered = pendingAgentText.get(itemId) ?? "";
+            pendingAgentText.delete(itemId);
+            if (phase === "commentary") {
+              const itemText = typeof params.item.text === "string" ? params.item.text : "";
+              const observed = itemText || `${commentaryText.get(itemId) ?? ""}${buffered}`;
+              if (observed) {
+                await upsertCommentary(
+                  itemId,
+                  observed,
+                  method === "item/completed" ? "complete" : "running",
+                  { envelope, key: `commentary:${method}:${itemId}` },
+                );
+              }
+            } else {
+              if (buffered) {
+                await emitFinalChunk(itemId, buffered, { envelope, key: `delta:buffered:${itemId}` });
+              }
+              if (method === "item/completed" && typeof params.item.text === "string" && params.item.text) {
+                await reconcileFinalText(itemId, params.item.text, { envelope, key: `content:final:${itemId}` });
+              } else if (method === "item/completed" && finalAnswerText.get(itemId)) {
+                await reconcileFinalText(itemId, finalAnswerText.get(itemId)!, { envelope, key: `content:final:${itemId}` });
+              } else if (typeof params.item.text === "string" && params.item.text && !buffered) {
+                await emitFinalChunk(itemId, params.item.text, { envelope, key: `content:started:${itemId}` });
+              }
             }
           }
           if (method === "item/completed") {
@@ -1371,15 +1440,6 @@ export async function runWorkerCodexTurn(
           }
           if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
               params.item.type === "agentMessage" && params.item.phase === "final_answer") {
-            if (localDocumentToolInvoked && typeof params.item.text === "string") {
-              await emit(
-                {
-                  type: "content",
-                  value: privateWorkspaceSafeText(params.item.text, [projectWorkspace, runtime.handle.roots.workspace]),
-                },
-                { envelope, key: `final-answer:content:${String(params.item.id ?? "agent")}` },
-              );
-            }
             reconcileCompletedFinalAnswer(envelope);
           }
           if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
@@ -1392,6 +1452,8 @@ export async function runWorkerCodexTurn(
           const itemId = notificationItemId(params);
           const delta = notificationDelta(params);
           if (!itemId || !delta) return;
+          const rawOutput = `${commandOutputText.get(itemId) ?? ""}${delta}`.slice(0, 128_000);
+          commandOutputText.set(itemId, rawOutput);
           const current = activities.get(itemId) ?? {
             id: itemId,
             kind: "command",
@@ -1399,7 +1461,7 @@ export async function runWorkerCodexTurn(
             status: "running",
           } satisfies ActivityItem;
           await upsertActivity(
-            { ...current, output: safeRuntimeOutput(`${current.output ?? ""}${delta}`) ?? "" },
+            { ...current, output: publicToolOutput(rawOutput) ?? "" },
             { envelope, key: `command-output:${itemId}` },
           );
           return;
@@ -1424,6 +1486,8 @@ export async function runWorkerCodexTurn(
           const itemId = notificationItemId(params);
           const delta = notificationDelta(params);
           if (!itemId || !delta) return;
+          const rawSummary = `${reasoningSummaryText.get(itemId) ?? ""}${delta}`.slice(0, 24_000);
+          reasoningSummaryText.set(itemId, rawSummary);
           telemetry.summary();
           if (activeRuntimePhaseId) {
             await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("reasoning-summary-text"));
@@ -1434,8 +1498,10 @@ export async function runWorkerCodexTurn(
             label: "Raonant",
             status: "running",
           } satisfies ActivityItem;
+          const publicSummary = publicActivityText(rawSummary);
+          if (!publicSummary) return;
           await upsertActivity(
-            { ...current, detail: `${current.detail ?? ""}${delta}` },
+            { ...current, detail: publicSummary },
             { envelope, key: `reasoning-summary:${itemId}` },
           );
           return;
@@ -1481,6 +1547,9 @@ export async function runWorkerCodexTurn(
             );
             errorEmitted = true;
           } else if (status.status === "completed") {
+            for (const [itemId, rawText] of finalAnswerText) {
+              await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
+            }
             await emit({ type: "done" }, { envelope, key: "turn:done" });
           } else if (status.status === "interrupted") {
             await emit({ type: "stopped" }, { envelope, key: "turn:stopped" });
