@@ -41,6 +41,33 @@ describe("CustomizationPanel", () => {
     expect(screen.getByText("2 min")).toBeInTheDocument();
   });
 
+  it("distinguishes administrator OAuth setup from a personal connection", async () => {
+    const snapshot = settings(false);
+    snapshot.connectors = [{
+      id: "outlook",
+      label: "Outlook",
+      status: "admin_setup_required",
+      statusCode: "OUTLOOK_ENTRA_TENANT_NOT_CONFIGURED",
+      statusDetail: "Disponible para conectar cuando el administrador complete Microsoft Entra OAuth.",
+      accountEmail: null,
+      scopes: ["User.Read", "Mail.Read"],
+      connectUrl: null,
+      disconnectUrl: null,
+      connectionVersion: null,
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? new Response(JSON.stringify(snapshot), { status: 200 })
+      : new Response(JSON.stringify(usage("personal")), { status: 200 })));
+
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    fireEvent.click(await screen.findByRole("button", { name: "Conectores" }));
+
+    expect(screen.getByText("Falta configuración")).toBeInTheDocument();
+    expect(screen.getByText(/administrador complete Microsoft Entra OAuth/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Conectar Outlook" })).not.toBeInTheDocument();
+    expect(screen.queryByText("No tienes conectores autorizados.")).not.toBeInTheDocument();
+  });
+
   it("keeps archived projects and conversations in settings and restores them explicitly", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
@@ -76,6 +103,7 @@ describe("CustomizationPanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open activeProjectId={projectId} runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
     fireEvent.click(await screen.findByRole("button", { name: "Memoria" }));
+    expect(screen.getAllByText(/Arnall AI/).length).toBeGreaterThan(0);
     expect(await screen.findByText("Prefiero informes en PDF.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Editar" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Eliminar" })).toBeInTheDocument();

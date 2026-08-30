@@ -1,4 +1,4 @@
-export type ConnectorMentionStatus = "connected" | "requires_login" | "unavailable";
+export type ConnectorMentionStatus = "connected" | "requires_login" | "admin_setup_required" | "unavailable";
 
 /** Sanitized, per-user projection used by the composer. No provider ref or scope is exposed. */
 export type ConnectorMention = {
@@ -16,7 +16,7 @@ export function isConnectorMention(value: unknown): value is ConnectorMention {
     typeof (value as { id?: unknown }).id === "string" && /^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$/.test((value as { id: string }).id) &&
     typeof (value as { label?: unknown }).label === "string" && (value as { label: string }).label.length > 0 &&
     ((value as { kind?: unknown }).kind === "app" || (value as { kind?: unknown }).kind === "connector" || (value as { kind?: unknown }).kind === "mcp") &&
-    ((value as { status?: unknown }).status === "connected" || (value as { status?: unknown }).status === "requires_login" || (value as { status?: unknown }).status === "unavailable") &&
+    ((value as { status?: unknown }).status === "connected" || (value as { status?: unknown }).status === "requires_login" || (value as { status?: unknown }).status === "admin_setup_required" || (value as { status?: unknown }).status === "unavailable") &&
     ((value as { statusCode?: unknown }).statusCode === null || typeof (value as { statusCode?: unknown }).statusCode === "string") &&
     typeof (value as { canRead?: unknown }).canRead === "boolean" &&
     typeof (value as { requiresApprovalForWrites?: unknown }).requiresApprovalForWrites === "boolean");
@@ -31,7 +31,8 @@ export function projectConnectorMention(
   const health = resource.connectorId ? connectorHealth.get(resource.connectorId) : undefined;
   const status: ConnectorMentionStatus = health
     ? health.status === "connected" ? "connected" :
-      health.status === "reauth_required" || (health.status === "not_configured" && resource.credentialMode === "personal-oauth") ? "requires_login" : "unavailable"
+      health.status === "reauth_required" ? "requires_login" :
+        health.status === "not_configured" ? "admin_setup_required" : "unavailable"
     : resource.credentialMode === "personal-oauth" ? "requires_login" : "connected";
   return {
     id: resource.id,

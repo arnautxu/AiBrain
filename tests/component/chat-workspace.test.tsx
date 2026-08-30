@@ -248,6 +248,8 @@ describe("chat workspace simplificado", () => {
     fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
     expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Añadir carpeta" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("webkitdirectory");
+    expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("directory");
     expect(screen.getByRole("menuitem", { name: "Conectores" })).toBeInTheDocument();
     for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen", "Desactivar búsqueda web"]) {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();

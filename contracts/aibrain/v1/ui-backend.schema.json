@@ -192,7 +192,7 @@
         "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$" },
         "label": { "type": "string", "minLength": 1, "maxLength": 160 },
         "kind": { "enum": ["app", "connector", "mcp"] },
-        "status": { "enum": ["connected", "requires_login", "unavailable"] },
+        "status": { "enum": ["connected", "requires_login", "admin_setup_required", "unavailable"] },
         "statusCode": { "type": ["string", "null"], "maxLength": 160 },
         "canRead": { "type": "boolean" },
         "requiresApprovalForWrites": { "type": "boolean" }

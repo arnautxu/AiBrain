@@ -23,7 +23,7 @@ El punto de integración para el task Runtime es `runWorkerCodexTurn` en `src/ru
 
 ## Correo inicial y alta de Arnall reutilizable
 
-Gmail y Outlook son recursos GraphikAI gestionados pero se añaden al catálogo durable únicamente cuando su bloque de instalación tiene `enabled=true`. Deshabilitar un proveedor retira su recurso y sus reglas gestionadas; no basta con ocultarlo en la UI. Las reglas de usuario/grupo/rol pueden restringir después ese baseline de instalación. Ajustes muestra recursos permitidos aunque todavía necesiten login; el selector `@` y el menú `+` solo muestran recursos permitidos y realmente conectados.
+Gmail y Outlook son recursos GraphikAI gestionados pero se añaden al catálogo durable únicamente cuando su bloque de instalación tiene `enabled=true`. Deshabilitar un proveedor retira su recurso y sus reglas gestionadas; no basta con ocultarlo en la UI. Las reglas de usuario/grupo/rol pueden restringir después ese baseline de instalación. Ajustes distingue un recurso autorizado pendiente de configuración administrativa de otro listo para el OAuth personal; la ausencia de tarjeta significa que la instalación o la política efectiva no lo autoriza. El selector `@` solo ofrece recursos permitidos y conectados; el menú `+` puede mostrar los recursos permitidos todavía pendientes, deshabilitados y con su estado honesto.
 
 Cada proveedor usa un callback, secreto de aplicación, clave de cifrado y directorio por conector. Cada empleado tiene un binding y token cifrado bajo su UUID; no existe fallback compartido. Consulta [GMAIL_OAUTH.md](GMAIL_OAUTH.md) y [OUTLOOK_OAUTH.md](OUTLOOK_OAUTH.md) para la configuración externa exacta.
 
