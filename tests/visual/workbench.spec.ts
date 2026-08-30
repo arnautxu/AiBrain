@@ -1,16 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
+import { establishDemoSession, submitPrompt } from "../helpers/playwright-auth";
 
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
+const accountName = demoUserId === "operations-user" ? "Taylor" : "Alex";
+const primaryProject = demoUserId === "operations-user" ? "Operacions" : "Espacio principal";
 
 async function login(page: Page) {
-  await page.goto("/login");
-  const origin = new URL(page.url()).origin;
-  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
-    data: { userId: demoUserId },
-    headers: { Origin: origin },
-  });
-  expect(loginResponse.ok()).toBe(true);
-  await page.goto("/");
+  await establishDemoSession(page, demoUserId);
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
@@ -22,6 +18,12 @@ async function openMobileDrawerIfNeeded(page: Page) {
   if ((page.viewportSize()?.width ?? 1440) >= 768) return;
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+}
+
+async function openSettings(page: Page) {
+  await openMobileDrawerIfNeeded(page);
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("menuitem", { name: "Configuración" }).click();
 }
 
 async function installAdministrationRoutes(page: Page) {
@@ -125,8 +127,7 @@ test("employee shell dark", async ({ page }) => {
 test("immediate activity light", async ({ page }) => {
   await login(page);
   const release = await installPendingTurnRoute(page);
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara una respuesta breve.");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await submitPrompt(page, "Prepara una respuesta breve.");
   await expect(page.getByText(/^Enviando solicitud/u)).toBeVisible({ timeout: 1_000 });
   await expect(page).toHaveScreenshot("immediate-activity-light.png", { fullPage: true });
   release();
@@ -137,8 +138,7 @@ test("immediate activity dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   const release = await installPendingTurnRoute(page);
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara una respuesta breve.");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await submitPrompt(page, "Prepara una respuesta breve.");
   await expect(page.getByText(/^Enviando solicitud/u)).toBeVisible({ timeout: 1_000 });
   await expect(page).toHaveScreenshot("immediate-activity-dark.png", { fullPage: true });
   release();
@@ -158,7 +158,7 @@ test("employee shell collapsed rail light", async ({ page }, testInfo) => {
 test("preferences dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
-  await page.getByRole("button", { name: "Abrir preferencias" }).click();
+  await openSettings(page);
   const preferences = page.getByRole("dialog", { name: /Configuración de/ });
   await expect(preferences).toBeVisible();
   await preferences.evaluate(async (element) => {
@@ -185,15 +185,15 @@ test("composer tools menu light", async ({ page }) => {
 
 test("composer mode menu light", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: "Modo del turno" }).click();
-  await expect(page.getByRole("menu", { name: "Modo del turno" })).toBeVisible();
+  await page.getByRole("button", { name: "Experiencia" }).click();
+  await expect(page.getByRole("menu", { name: "Experiencia" })).toBeVisible();
   await expect(page).toHaveScreenshot("composer-mode-menu-light.png", { fullPage: true });
 });
 
 test("account menu light", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
-  await page.getByRole("button", { name: new RegExp(`${demoUserId === "operations-user" ? "Taylor" : "Alex"}.*Abrir menú de cuenta`) }).click();
+  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
   await expect(page.getByRole("menu", { name: "Cuenta y preferencias" })).toBeVisible();
   await expect(page).toHaveScreenshot("account-menu-light.png", { fullPage: true });
 });
@@ -218,7 +218,7 @@ test("task center surface dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   await openMobileDrawerIfNeeded(page);
-  await page.getByRole("button", { name: "Tareas", exact: true }).click();
+  await page.getByRole("button", { name: /Centro de tareas/ }).click();
   await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeVisible();
   await expect(page).toHaveScreenshot("task-center-surface-dark.png", { fullPage: true });
 });
@@ -234,21 +234,23 @@ test("automations occupy the main surface", async ({ page }) => {
   await expect(page).toHaveScreenshot("scheduled-work-surface-light.png", { fullPage: true });
 });
 
-test("project context surface light", async ({ page }) => {
+test("project actions surface light", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: /Abrir contexto de/ }).click();
-  await expect(page.getByRole("dialog", { name: "Configurar proyecto" })).toBeVisible();
-  await expect(page).toHaveScreenshot("project-context-surface-light.png", { fullPage: true });
+  await openMobileDrawerIfNeeded(page);
+  const project = page.getByRole("button", { name: primaryProject, exact: true });
+  await project.hover();
+  await page.getByRole("button", { name: `Acciones de ${primaryProject}` }).click();
+  await expect(page.getByRole("menuitem", { name: "Renombrar" })).toBeVisible();
+  await expect(page).toHaveScreenshot("project-actions-surface-light.png", { fullPage: true });
 });
 
-test("team administration surface dark", async ({ page }) => {
+test("administration entry point dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await installAdministrationRoutes(page);
   await login(page);
-  await page.getByRole("button", { name: "Abrir preferencias" }).click();
-  await page.getByRole("button", { name: "Equipo", exact: true }).click();
-  await expect(page.getByText("Centro de administración", { exact: true })).toBeVisible();
-  await expect(page).toHaveScreenshot("team-administration-surface-dark.png", { fullPage: true });
+  await openSettings(page);
+  await expect(page.getByRole("link", { name: "Administración" })).toHaveAttribute("href", "/admin");
+  await expect(page).toHaveScreenshot("administration-entry-point-dark.png", { fullPage: true });
 });
 
 test("create project dialog light", async ({ page }) => {
@@ -270,8 +272,7 @@ test("employee shell mobile drawer", async ({ page }, testInfo) => {
 test("completed conversation", async ({ page }) => {
   await installCompletedTurnRoute(page);
   await login(page);
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await submitPrompt(page, "Resume este contenido sintético en tres ideas claras.");
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
@@ -288,8 +289,7 @@ test("completed conversation dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await installCompletedTurnRoute(page);
   await login(page);
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Resume este contenido sintético en tres ideas claras.");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await submitPrompt(page, "Resume este contenido sintético en tres ideas claras.");
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));

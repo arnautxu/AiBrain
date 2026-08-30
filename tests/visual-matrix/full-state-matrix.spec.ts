@@ -1,4 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { establishDemoSession, submitPrompt } from "../helpers/playwright-auth";
 
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
@@ -13,6 +14,22 @@ const viewports = [
   { width: 390, height: 844 },
   { width: 375, height: 812 },
 ];
+
+function validPdf() {
+  const header = "%PDF-1.4\n";
+  const objects = [
+    "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n",
+    "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n",
+    "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n",
+  ];
+  const offsets: number[] = [];
+  let offset = header.length;
+  for (const object of objects) {
+    offsets.push(offset);
+    offset += object.length;
+  }
+  return `${header}${objects.join("")}xref\n0 4\n0000000000 65535 f \n${offsets.map((value) => `${String(value).padStart(10, "0")} 00000 n \n`).join("")}trailer\n<< /Size 4 /Root 1 0 R >>\nstartxref\n${offset}\n%%EOF\n`;
+}
 
 const approvalEvents = [
   { type: "plan", explanation: "Matriz visual sintética", steps: [
@@ -110,8 +127,8 @@ async function installRoutes(page: Page) {
   }));
   await page.route(`**/api/projects/${projectId}/artifacts/${documentId}/preview/1`, (route) => route.fulfill({
     status: 200,
-    contentType: "image/svg+xml",
-    body: '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><rect width="100%" height="100%" fill="#fff"/><rect x="60" y="55" width="840" height="430" rx="18" fill="#f4f4f1" stroke="#d8d7d2"/><text x="105" y="145" font-family="Arial" font-size="34" font-weight="700" fill="#252522">Informe sintético</text><text x="105" y="205" font-family="Arial" font-size="20" fill="#64615c">Vista previa segura · Página 1 de 2</text><rect x="105" y="260" width="570" height="16" rx="8" fill="#d8d7d2"/><rect x="105" y="300" width="690" height="16" rx="8" fill="#e2e1dd"/></svg>',
+    contentType: "application/pdf",
+    body: validPdf(),
   }));
   await page.route(`**/api/browser/sessions/${browserId}/viewer`, (route) => route.fulfill({
     status: 200,
@@ -145,17 +162,15 @@ for (const viewport of viewports) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await screenshot(page, "login-dark", viewport);
 
-    const origin = new URL(page.url()).origin;
-    const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
-      data: { userId: demoUserId },
-      headers: { Origin: origin },
-    });
-    expect(loginResponse.ok()).toBe(true);
-    await page.goto("/");
-    await expect(page.getByTestId("composer")).toBeVisible();
+    await establishDemoSession(page, demoUserId);
     await screenshot(page, "shell-dark", viewport);
 
-    await page.getByRole("button", { name: "Abrir preferencias" }).click();
+    if (viewport.width < 768) {
+      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+    }
+    await page.getByRole("button", { name: /Abrir menú de cuenta/ }).click();
+    await page.getByRole("menuitem", { name: "Configuración" }).click();
     const preferences = page.getByRole("dialog", { name: /Configuración de/ });
     await expect(preferences).toBeVisible();
     await preferences.evaluate(async (element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
@@ -173,8 +188,7 @@ for (const viewport of viewports) {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
     await offlineCapture(page, context, viewport);
 
-    await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara la matriz visual sintética.");
-    await page.getByRole("button", { name: "Enviar mensaje" }).click();
+    await submitPrompt(page, "Prepara la matriz visual sintética.");
     await expect(page.getByRole("heading", { name: "Resultado preparado" })).toBeVisible();
     const approval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
     await settleAtWorkbenchBottom(page);
@@ -184,14 +198,13 @@ for (const viewport of viewports) {
     await expect(page.getByRole("button", { name: "Revisar resultados" })).toHaveCount(0);
     expect(approvalRequestCount).toBe(0);
 
-    await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara un documento sintético.");
-    await page.getByRole("button", { name: "Enviar mensaje" }).click();
-    const document = page.getByRole("heading", { name: "informe-sintetico.pdf" });
+    await submitPrompt(page, "Prepara un documento sintético.");
+    const document = page.getByRole("heading", { name: "informe-sintetico.pdf" }).first();
     await expect(document).toBeVisible();
-    await page.getByText("Vista previa ›", { exact: true }).click();
-    const preview = page.getByRole("img", { name: "Vista previa de informe-sintetico.pdf" });
+    await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
+    const preview = page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" });
     await expect(preview).toBeVisible();
-    await preview.evaluate((element) => element instanceof HTMLImageElement ? element.decode() : Promise.resolve());
+    await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
     await centerArtifactInWorkbench(page, document);
     await expect(document).toBeInViewport();
     expect(approvalRequestCount).toBe(0);
@@ -199,9 +212,9 @@ for (const viewport of viewports) {
     await expect(page.getByText("Esta aprobación ya no está pendiente.")).toBeHidden({ timeout: 6_000 });
     await screenshot(page, "document-light", viewport);
     expect(approvalRequestCount).toBe(0);
+    await page.getByRole("button", { name: "Cerrar vista previa" }).click();
 
-    await page.getByRole("textbox", { name: "Mensaje" }).fill("Abre una comprobación web sintética.");
-    await page.getByRole("button", { name: "Enviar mensaje" }).click();
+    await submitPrompt(page, "Abre una comprobación web sintética.");
     const browserHeading = page.getByRole("heading", { name: "Sesión preparada" });
     await expect(browserHeading).toBeVisible();
     const viewer = page.getByRole("link", { name: "Abrir", exact: true });
@@ -209,7 +222,7 @@ for (const viewport of viewports) {
     await centerArtifactInWorkbench(page, browserHeading);
     await expect(viewer).toBeInViewport();
     await expect(viewer).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
-    await expect(page.locator("iframe")).toHaveCount(0);
+    await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
     await screenshot(page, "browser-light", viewport);
   });
 }

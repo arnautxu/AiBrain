@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { useState } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
@@ -69,9 +69,17 @@ function renderWorkspace(
   activeProject: WorkbenchProject | null = project,
   overrides: Partial<ComponentProps<typeof ChatWorkspace>> = {},
 ) {
-  const { prompt: initialPrompt = "", onPromptChange = vi.fn(), ...remainingOverrides } = overrides;
+  const {
+    prompt: initialPrompt = "",
+    hydrated: initialHydrated = true,
+    onPromptChange = vi.fn(),
+    ...remainingOverrides
+  } = overrides;
+  let finishHydration: () => void = () => undefined;
   function ControlledWorkspace() {
     const [prompt, setPrompt] = useState(initialPrompt);
+    const [hydrated, setHydrated] = useState(initialHydrated);
+    finishHydration = () => setHydrated(true);
     return <ChatWorkspace
     manifest={baseBrainManifest}
     preferences={preferences}
@@ -81,7 +89,7 @@ function renderWorkspace(
     userName="Ada"
     companyName="Arnall"
     assistantName="Arnall AI"
-    hydrated
+    hydrated={hydrated}
     prompt={prompt}
     composerExperience="smart"
     webSearch
@@ -127,7 +135,7 @@ function renderWorkspace(
     {...remainingOverrides}
   />;
   }
-  return render(<ControlledWorkspace />);
+  return { ...render(<ControlledWorkspace />), finishHydration };
 }
 
 afterEach(cleanup);
@@ -137,6 +145,21 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
+  it("adopts a draft typed before hydration instead of resetting it", () => {
+    const onPromptChange = vi.fn();
+    const { finishHydration } = renderWorkspace(null, project, {
+      hydrated: false,
+      onPromptChange,
+    });
+    const composer = screen.getByRole("textbox", { name: "Mensaje" }) as HTMLTextAreaElement;
+
+    composer.value = "Borrador escrito durante la carga";
+    act(() => finishHydration());
+
+    expect(composer).toHaveValue("Borrador escrito durante la carga");
+    expect(onPromptChange).toHaveBeenLastCalledWith("Borrador escrito durante la carga");
+  });
+
   it("shows only the authorized connector autocomplete and binds a selected @ source", () => {
     const onPromptChange = vi.fn();
     const onConnectorMentionIdsChange = vi.fn();
