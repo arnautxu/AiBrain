@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { newThreadDestination } from "@/components/brain-app";
+import {
+  composerDraftKey,
+  newThreadDestination,
+  parseComposerDrafts,
+} from "@/components/brain-app";
 import { STANDALONE_PROJECT_SLUG, type WorkbenchProject } from "@/workbench/types";
 
 function project(id: string, slug: string): WorkbenchProject {
@@ -26,5 +30,19 @@ describe("new conversation destination", () => {
   it("uses the requested project for its next thread and reserves no-id for Sin proyecto", () => {
     expect(newThreadDestination([standalone, arnall], arnall.id)?.id).toBe(arnall.id);
     expect(newThreadDestination([standalone, arnall])?.id).toBe(standalone.id);
+  });
+
+  it("keeps bounded drafts isolated by project and thread", () => {
+    expect(composerDraftKey("project-a", "thread-a")).toBe("project-a:thread-a");
+    expect(composerDraftKey("project-a", null)).toBe("project-a:new");
+    expect(parseComposerDrafts(JSON.stringify({
+      "project-a:thread-a": "Draft A",
+      "project-a:new": "Draft B",
+      unsafe: 42,
+    }))).toEqual({
+      "project-a:thread-a": "Draft A",
+      "project-a:new": "Draft B",
+    });
+    expect(parseComposerDrafts("not-json")).toEqual({});
   });
 });

@@ -122,6 +122,35 @@ describe("AppServerRpcRouter", () => {
     await router.close();
   });
 
+  it("delivers a late response to the original timeout without dispatching a second request", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    const result = router.request(
+      { method: "thread/read", id: "late-read", params: { threadId: "thread-a", includeTurns: true } },
+      5,
+    );
+    const timeout = await result.catch((error: unknown) => error);
+    expect(timeout).toBeInstanceOf(AppServerRequestTimeoutError);
+    expect(transport.sent).toHaveLength(1);
+    await expect(router.request(
+      { method: "thread/read", id: "late-read", params: { threadId: "thread-a", includeTurns: true } },
+      50,
+    )).rejects.toThrow(/late response/u);
+    expect(transport.sent).toHaveLength(1);
+
+    transport.queue.push(event(1, {
+      kind: "rpc-response",
+      rpc: { id: "late-read", result: { thread: { id: "thread-a", turns: [] } } },
+    }));
+
+    await expect((timeout as AppServerRequestTimeoutError).lateResponse).resolves.toEqual({
+      thread: { id: "thread-a", turns: [] },
+    });
+    expect(transport.sent).toHaveLength(1);
+    await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    await router.close();
+  });
+
   it("applies the request deadline while the private worker is still connecting", async () => {
     let releaseConnect!: () => void;
     const connectGate = new Promise<void>((resolve) => { releaseConnect = resolve; });
@@ -254,6 +283,38 @@ describe("AppServerRpcRouter", () => {
     expect(transport.acknowledged).toHaveLength(0);
     releaseProjection();
     await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    await router.close();
+  });
+
+  it("keeps another thread responsive while one response projection is blocked", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    let releaseProjection!: () => void;
+    const projectionGate = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    const first = router.request(
+      { method: "thread/read", id: "blocked-thread-a", params: { threadId: "thread-a", includeTurns: true } },
+      30_000,
+      async () => projectionGate,
+    );
+    const second = router.request(
+      { method: "thread/read", id: "free-thread-b", params: { threadId: "thread-b", includeTurns: true } },
+      1_000,
+    );
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    transport.queue.push(event(1, {
+      kind: "rpc-response",
+      rpc: { id: "blocked-thread-a", result: { thread: { id: "thread-a", turns: [] } } },
+    }));
+    transport.queue.push(event(2, {
+      kind: "rpc-response",
+      rpc: { id: "free-thread-b", result: { thread: { id: "thread-b", turns: [] } } },
+    }));
+
+    await expect(second).resolves.toEqual({ thread: { id: "thread-b", turns: [] } });
+    expect(transport.acknowledged).toHaveLength(0);
+    releaseProjection();
+    await expect(first).resolves.toEqual({ thread: { id: "thread-a", turns: [] } });
+    await vi.waitFor(() => expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual([1, 2]));
     await router.close();
   });
 

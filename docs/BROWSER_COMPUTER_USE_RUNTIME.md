@@ -129,11 +129,13 @@ private profile; it never discovers or kills a PID recovered from disk.
 
 Agent and viewer operations also have a server deadline (30 seconds by
 default, configurable from 1 to 120 seconds with
-`AIBRAIN_BROWSER_OPERATION_TIMEOUT_MS`). A timeout or cancellation does not
-call ordinary `start`, because a stalled CDP pipe can still look superficially
+`AIBRAIN_BROWSER_OPERATION_TIMEOUT_MS`). A real operation timeout does not call
+ordinary `start`, because a stalled CDP pipe can still look superficially
 healthy. It stops only that employee's owned child, rotates the private browser
-session, and starts a fresh process against the same employee profile. Safe
-reads may be attempted once after that fenced recovery. `open`, `scroll`,
+session, and starts a fresh process against the same employee profile. Closing
+or replacing a viewer stream is a normal attachment cancellation and never
+restarts Chrome or rotates the browser session. Safe reads may be attempted
+once after that fenced runtime recovery. `open`, `scroll`,
 `click`, `type` and manual viewer input are never replayed after dispatch may
 have begun; their durable result remains `indeterminate` until the page is read
 again.
@@ -233,7 +235,9 @@ hardlink/corruption and symlink rejection.
 
 The employee panel consumes a bounded authenticated frame stream rather than a
 static screenshot. Historical browser tool and artifact cards reopen the
-active thread's viewer. The panel exposes only its title, close/fullscreen,
+active thread's viewer. Only the newest attachment for that user and thread may
+emit frames; it fences the older stream without touching the owned Chrome
+process. The panel exposes only its title, close/fullscreen,
 URL, back/forward/reload and the remaining direct viewport; its first click,
 wheel or key action acquires scoped control internally without a separate
 "take control" step or synthetic success toast.

@@ -216,6 +216,42 @@ function privateWorkspaceSafeText(value: string, roots: readonly string[]) {
   );
 }
 
+async function awaitLateAppServerResponse(
+  error: AppServerRequestTimeoutError,
+  maximumWaitMs: number,
+) {
+  if (!error.lateResponse) throw error;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(error), maximumWaitMs);
+    timeout.unref?.();
+  });
+  try {
+    return await Promise.race([error.lateResponse, deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function requestWithLateResponseRecovery(
+  request: () => Promise<JsonValue>,
+  maximumWaitMs = 30_000,
+) {
+  try {
+    return await request();
+  } catch (error) {
+    if (!(error instanceof AppServerRequestTimeoutError)) throw error;
+    return awaitLateAppServerResponse(error, maximumWaitMs);
+  }
+}
+
+export class WorkerTurnRecoveryPendingError extends Error {
+  constructor(message = "El runtime s’ha desconnectat mentre el torn continuava actiu.") {
+    super(message);
+    this.name = "WorkerTurnRecoveryPendingError";
+  }
+}
+
 function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDocumentRoot[]) {
   const scopedRoots = documentRoots.length > 0
     ? documentRoots.map((root) => `- ${root.scope}${root.scope === "department" ? " autorizado" : ""}: lectura autorizada`).join("\n")
@@ -880,41 +916,47 @@ export async function runWorkerCodexTurn(
       if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
         throw error;
       }
-      await setRuntimePhase(
-        "runtime-thread-recovery",
-        "Comprovant la conversa",
-        "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
-      );
-      const recoveredResult = await runtime.client.request(
-        "thread/read",
-        { threadId: runtimeThreadId, includeTurns: true },
-        `thread-resume-recover:${chatRequest.assistantMessageId}`,
-        15_000,
-        persistThreadIdentity,
-      );
-      if (extractThreadId(recoveredResult) !== runtimeThreadId) {
-        throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
-      }
-      const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
-      if (durableTurn && durableTurn.status !== "inProgress") {
-        threadResult = recoveredResult;
-        await completeRuntimePhase("runtime-thread-recovery", {
-          label: "Conversa recuperada",
-          detail: "S’ha trobat el resultat durable sense repetir la petició",
-        });
-      } else {
-        // `thread/resume` does not submit a model turn.  Once the durable read
-        // has proved the thread identity, one identical resume is safe to
-        // reattach the stream; there is deliberately no retry loop.
+      try {
+        threadResult = await awaitLateAppServerResponse(error, 15_000);
+      } catch {
         await setRuntimePhase(
-          "runtime-thread-retry",
-          "Reprenent la conversa",
-          "L’estat durable s’ha verificat; reconnectant una sola vegada",
+          "runtime-thread-recovery",
+          "Comprovant la conversa",
+          "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
         );
-        threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
-          threadId: runtimeThreadId,
-          ...commonThreadParams,
-        }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+        const recoveredResult = await requestWithLateResponseRecovery(
+          () => runtime.client.request(
+            "thread/read",
+            { threadId: runtimeThreadId, includeTurns: true },
+            `thread-resume-recover:${chatRequest.assistantMessageId}`,
+            15_000,
+            persistThreadIdentity,
+          ),
+        );
+        if (extractThreadId(recoveredResult) !== runtimeThreadId) {
+          throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
+        }
+        const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+        if (durableTurn && durableTurn.status !== "inProgress") {
+          threadResult = recoveredResult;
+          await completeRuntimePhase("runtime-thread-recovery", {
+            label: "Conversa recuperada",
+            detail: "S’ha trobat el resultat durable sense repetir la petició",
+          });
+        } else {
+          // `thread/resume` does not submit a model turn. Once the durable read
+          // has proved the thread identity, one identical resume is safe to
+          // reattach the stream; there is deliberately no retry loop.
+          await setRuntimePhase(
+            "runtime-thread-retry",
+            "Reprenent la conversa",
+            "L’estat durable s’ha verificat; reconnectant una sola vegada",
+          );
+          threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
+            threadId: runtimeThreadId,
+            ...commonThreadParams,
+          }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+        }
       }
     }
   }
@@ -985,12 +1027,14 @@ export async function runWorkerCodexTurn(
       void (async () => {
         if (terminalTurnStatus) return;
         let recoveryEnvelope: AppServerEvent | null = null;
-        const result = await runtime.client.request(
-          "thread/read",
-          { threadId, includeTurns: true },
-          `turn-final-answer-reconcile:${chatRequest.assistantMessageId}`,
-          15_000,
-          (_result, envelope) => { recoveryEnvelope = envelope; },
+        const result = await requestWithLateResponseRecovery(
+          () => runtime.client.request(
+            "thread/read",
+            { threadId, includeTurns: true },
+            `turn-final-answer-reconcile:${chatRequest.assistantMessageId}`,
+            15_000,
+            (_result, envelope) => { recoveryEnvelope = envelope; },
+          ),
         );
         const recovered = recoveredTurn(result, chatRequest.userMessageId);
         if (!recovered) return;
@@ -1648,7 +1692,9 @@ export async function runWorkerCodexTurn(
         );
         return approval.response(decision) as JsonValue;
       },
-      onFailure: (error) => finishTurn({ status: "failed", error: error.message }),
+      // A broken event stream is not an authoritative terminal result for the
+      // remote turn. Leave it recoverable so the next attach can reconcile it.
+      onFailure: (error) => finishTurn({ status: "recovering", error: error.message }),
     },
   );
 
@@ -1795,58 +1841,64 @@ export async function runWorkerCodexTurn(
       }, maintenanceActivity));
       } catch (error) {
         if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "turn/start") throw error;
-        await setRuntimePhase(
-          "runtime-turn-recovery",
-          "Recuperant el torn",
-          "La confirmació ha trigat massa; comprovant el fil sense repetir la petició",
-        );
-        let recoveryEnvelope: AppServerEvent | null = null;
-        const recoveredResult = await runtime.client.request(
-          "thread/read",
-          { threadId, includeTurns: true },
-          `turn-recover:${chatRequest.assistantMessageId}`,
-          15_000,
-          (_result, envelope) => { recoveryEnvelope = envelope; },
-        );
-        const recoveredAfterTimeout = recoveredTurn(recoveredResult, chatRequest.userMessageId);
-        if (!recoveredAfterTimeout) {
-          await upsertActivity({
-            id: "runtime-turn-recovery",
-            kind: "system",
-            label: "No s’ha pogut recuperar el torn",
-            detail: "El servei no ha retornat cap torn associat a aquesta petició",
-            status: "failed",
-          });
-          throw error;
-        }
-        runtimeTurnId = recoveredAfterTimeout.id;
-        telemetry.bindRuntimeTurn(recoveredAfterTimeout.id);
-        await completeRuntimePhase("runtime-turn-recovery", {
-          label: "Torn recuperat",
-          detail: "Continuant amb el torn existent, sense duplicar-lo",
-        });
-        if (recoveredAfterTimeout.status !== "inProgress") {
-          if (!recoveryEnvelope) throw new Error("El servei no ha proporcionat evidència de recuperació.");
-          await projectRecoveredTurn(recoveredAfterTimeout, recoveryEnvelope, "timeout-recovery");
-          telemetry.finish(
-            recoveredAfterTimeout.status === "completed"
-              ? "completed"
-              : recoveredAfterTimeout.status === "interrupted" ? "stopped" : "error",
-          );
-          if (recoveredAfterTimeout.status === "completed") await scheduleCompletedConversationMemory();
-          return;
-        }
-        registration.bindRuntimeTurn(recoveredAfterTimeout.id);
-        startTerminalWatchdog();
-        await emit({ type: "runtimeTurn", turnId: recoveredAfterTimeout.id });
-        if (!terminalTurnStatus) {
+        try {
+          turnResult = await awaitLateAppServerResponse(error, 30_000);
+        } catch {
           await setRuntimePhase(
-            "runtime-awaiting-model",
-            "Torn recuperat",
-            "Escoltant els esdeveniments del servei",
+            "runtime-turn-recovery",
+            "Recuperant el torn",
+            "La confirmació ha trigat massa; comprovant el fil sense repetir la petició",
           );
+          let recoveryEnvelope: AppServerEvent | null = null;
+          const recoveredResult = await requestWithLateResponseRecovery(
+            () => runtime.client.request(
+              "thread/read",
+              { threadId, includeTurns: true },
+              `turn-recover:${chatRequest.assistantMessageId}`,
+              15_000,
+              (_result, envelope) => { recoveryEnvelope = envelope; },
+            ),
+          );
+          const recoveredAfterTimeout = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+          if (!recoveredAfterTimeout) {
+            await upsertActivity({
+              id: "runtime-turn-recovery",
+              kind: "system",
+              label: "No s’ha pogut recuperar el torn",
+              detail: "El servei no ha retornat cap torn associat a aquesta petició",
+              status: "failed",
+            });
+            throw error;
+          }
+          runtimeTurnId = recoveredAfterTimeout.id;
+          telemetry.bindRuntimeTurn(recoveredAfterTimeout.id);
+          await completeRuntimePhase("runtime-turn-recovery", {
+            label: "Torn recuperat",
+            detail: "Continuant amb el torn existent, sense duplicar-lo",
+          });
+          if (recoveredAfterTimeout.status !== "inProgress") {
+            if (!recoveryEnvelope) throw new Error("El servei no ha proporcionat evidència de recuperació.");
+            await projectRecoveredTurn(recoveredAfterTimeout, recoveryEnvelope, "timeout-recovery");
+            telemetry.finish(
+              recoveredAfterTimeout.status === "completed"
+                ? "completed"
+                : recoveredAfterTimeout.status === "interrupted" ? "stopped" : "error",
+            );
+            if (recoveredAfterTimeout.status === "completed") await scheduleCompletedConversationMemory();
+            return;
+          }
+          registration.bindRuntimeTurn(recoveredAfterTimeout.id);
+          startTerminalWatchdog();
+          await emit({ type: "runtimeTurn", turnId: recoveredAfterTimeout.id });
+          if (!terminalTurnStatus) {
+            await setRuntimePhase(
+              "runtime-awaiting-model",
+              "Torn recuperat",
+              "Escoltant els esdeveniments del servei",
+            );
+          }
+          turnResult = { turn: { id: recoveredAfterTimeout.id } };
         }
-        turnResult = { turn: { id: recoveredAfterTimeout.id } };
       }
       runtimeTurnId ??= extractTurnId(turnResult);
       if (!runtimeTurnId) throw new Error("El servei no ha iniciat el torn.");
@@ -1870,12 +1922,14 @@ export async function runWorkerCodexTurn(
       let recoveredTimedOutTurn: RecoveredTurn | null = null;
       let recoveryEnvelope: AppServerEvent | null = null;
       try {
-        const recoveredResult = await runtime.client.request(
-          "thread/read",
-          { threadId, includeTurns: true },
-          `turn-watchdog-read:${chatRequest.assistantMessageId}`,
-          15_000,
-          (_result, envelope) => { recoveryEnvelope = envelope; },
+        const recoveredResult = await requestWithLateResponseRecovery(
+          () => runtime.client.request(
+            "thread/read",
+            { threadId, includeTurns: true },
+            `turn-watchdog-read:${chatRequest.assistantMessageId}`,
+            15_000,
+            (_result, envelope) => { recoveryEnvelope = envelope; },
+          ),
         );
         recoveredTimedOutTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
       } catch {
@@ -1910,6 +1964,10 @@ export async function runWorkerCodexTurn(
     }
     const completed = terminalRace.kind === "terminal" ? terminalRace.status : await turnFinished;
     if (activeRuntimePhaseId) await completeRuntimePhase(activeRuntimePhaseId);
+    if (completed.status === "recovering") {
+      telemetry.reconnected();
+      throw new WorkerTurnRecoveryPendingError(completed.error ?? undefined);
+    }
     if (completed.status === "failed") {
       if (!errorEmitted) {
         await emit({
@@ -1950,6 +2008,9 @@ export async function runWorkerCodexTurn(
   }
   } catch (error) {
     telemetry.finish("error");
+    if (error instanceof AppServerRequestTimeoutError) {
+      throw new WorkerTurnRecoveryPendingError(error.message);
+    }
     throw error;
   } finally {
     if (ownsMaintenanceActivity) maintenanceActivity.release();

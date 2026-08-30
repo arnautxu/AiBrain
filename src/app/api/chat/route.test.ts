@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const mocked = vi.hoisted(() => ({
-  releaseMaintenance: vi.fn(),
-  runWorkerCodexTurn: vi.fn(),
-}));
+const mocked = vi.hoisted(() => {
+  class WorkerTurnRecoveryPendingError extends Error {}
+  return {
+    releaseMaintenance: vi.fn(),
+    runWorkerCodexTurn: vi.fn(),
+    WorkerTurnRecoveryPendingError,
+  };
+});
 
 vi.mock("@/auth/request-security", () => ({
   isSameOriginMutation: vi.fn(async () => true),
@@ -41,6 +45,7 @@ vi.mock("@/config/installation", () => ({
 
 vi.mock("@/runtime/worker-codex-turn", () => ({
   runWorkerCodexTurn: mocked.runWorkerCodexTurn,
+  WorkerTurnRecoveryPendingError: mocked.WorkerTurnRecoveryPendingError,
 }));
 
 vi.mock("@/runtime/permission-turn", () => ({
@@ -232,6 +237,18 @@ describe("chat turn transport lifecycle", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("does not invent a terminal error when the remote turn needs reconciliation", async () => {
+    mocked.runWorkerCodexTurn.mockRejectedValueOnce(
+      new mocked.WorkerTurnRecoveryPendingError("event stream disconnected"),
+    );
+
+    const response = await POST(chatRequest(new AbortController().signal));
+    const events = (await response.text()).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "error" }));
+    expect(mocked.releaseMaintenance).toHaveBeenCalledOnce();
   });
 
   it("adds transport order and a measured duration before streaming terminal events", async () => {
