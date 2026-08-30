@@ -18,7 +18,7 @@ GitHub main SHA
   -> Deploy Arnall run with three distinct run IDs
   -> restricted client pull by digest
   -> transactional release manager + health/readiness
-  -> cleanup limited to superseded AiBrain images
+  -> cleanup limited to validated inactive AiBrain images and legacy release directories
   -> private release, runtime and OCI readbacks
   -> separate authenticated live acceptance
 ```

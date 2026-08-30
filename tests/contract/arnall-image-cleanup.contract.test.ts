@@ -21,7 +21,9 @@ type Fixture = {
   repeat?: boolean;
   hasPrevious?: boolean;
   usePreviousCleanup?: boolean;
+  useInactiveCleanup?: boolean;
   currentSharesImageId?: boolean;
+  inventory?: string;
 };
 
 async function runCleanup(fixture: Fixture): Promise<string> {
@@ -40,6 +42,7 @@ async function runCleanup(fixture: Fixture): Promise<string> {
     .replace(/\nmain "\$@"\n$/u, "\n");
   const script = path.join(root, "cleanup.sh");
   const references = fixture.references ?? `${oldImage}\n`;
+  const inventory = fixture.inventory ?? `${oldImage}\n${currentImage}\n`;
   const containers = fixture.containers ?? "";
   const details = fixture.containerDetails ?? "";
   await writeFile(script, `#!/usr/bin/env bash
@@ -48,8 +51,13 @@ present=1
 containers="$(printf '%b' ${JSON.stringify(containers)})"$'\n'
 references="$(printf '%b' ${JSON.stringify(references)})"$'\n'
 fixture_details=${JSON.stringify(details)}
+inventory=${JSON.stringify(inventory)}
 log=${JSON.stringify(log)}
 docker() {
+  if [[ "$1 $2" == "image ls" ]]; then
+    printf '%b' "$inventory"
+    return 0
+  fi
   if [[ "$1 $2" == "image inspect" ]]; then
     if [[ "$*" == *'{{.Id}}'* ]]; then
       if [[ "$*" == *${currentDigest}* ]]; then
@@ -95,7 +103,7 @@ docker() {
 }
 ${sourceable}
 set +e
-${fixture.usePreviousCleanup ? "cleanup_previous_aibrain_images" : `remove_unused_aibrain_image ${JSON.stringify(oldImage)}`}
+${fixture.useInactiveCleanup ? "cleanup_inactive_aibrain_images" : fixture.usePreviousCleanup ? "cleanup_previous_aibrain_images" : `remove_unused_aibrain_image ${JSON.stringify(oldImage)}`}
 ${fixture.repeat ? `remove_unused_aibrain_image ${JSON.stringify(oldImage)}` : ""}
 cleanup_status=$?
 set -e
@@ -120,6 +128,14 @@ describe("Arnall single-release image cleanup contract", () => {
 
     expect(output).not.toContain("container-rm");
     expect(output).not.toContain("image-rm");
+  });
+
+  it("removes every inactive AiBrain digest even when it is older than previous", async () => {
+    const output = await runCleanup({ hasPrevious: false, useInactiveCleanup: true });
+
+    expect(output).toContain(`ARNALL_RELEASE_CLEANUP_REMOVED_IMAGE image=${oldImage} image_id=${imageId}`);
+    expect(output).toContain(`image-rm ${oldImage}`);
+    expect(output).not.toContain(`image-rm ${currentImage}`);
   });
 
   it("removes only an obsolete stopped container in this installation, then its prior image", async () => {
@@ -187,14 +203,14 @@ describe("Arnall single-release image cleanup contract", () => {
   it("does not run cleanup until the promotion and public live/readiness checks have passed", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
     const promotion = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
-    const live = gateway.indexOf("/api/health/live");
-    const ready = gateway.indexOf("/api/health/ready");
-    const cleanup = gateway.lastIndexOf("cleanup_previous_aibrain_images");
+    const health = gateway.indexOf("verify_public_health", promotion);
+    const cleanup = gateway.lastIndexOf("cleanup_inactive_aibrain_images");
 
     expect(promotion).toBeGreaterThan(-1);
-    expect(live).toBeGreaterThan(promotion);
-    expect(ready).toBeGreaterThan(live);
-    expect(cleanup).toBeGreaterThan(ready);
+    expect(health).toBeGreaterThan(promotion);
+    expect(cleanup).toBeGreaterThan(health);
+    expect(gateway).toContain("/api/health/live");
+    expect(gateway).toContain("/api/health/ready");
     expect(gateway).not.toMatch(/docker\s+(?:system|builder|image)\s+prune/u);
     expect(gateway).not.toContain("docker buildx prune");
   });
