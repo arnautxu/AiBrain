@@ -65,8 +65,6 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
 function renderSidebar() {
   const onNewThread = vi.fn();
   const onOpenCommandPalette = vi.fn();
-  const onOpenTaskCenter = vi.fn();
-  const onOpenLibrary = vi.fn();
   const onOpenAutomations = vi.fn();
   const operations = project("project-operations", "Operaciones");
   const product = project("project-product", "Producto");
@@ -88,13 +86,10 @@ function renderSidebar() {
       desktopOpen
       busy={false}
       threadActivityById={{}}
-      taskSummary={{ unread: 2, running: 1, needsAttention: 0 }}
       onCloseMobile={vi.fn()}
       onCloseDesktop={vi.fn()}
       onOpenDesktop={vi.fn()}
       onOpenCommandPalette={onOpenCommandPalette}
-      onOpenLibrary={onOpenLibrary}
-      onOpenTaskCenter={onOpenTaskCenter}
       onOpenAutomations={onOpenAutomations}
       onSelectProject={vi.fn()}
       onSelectThread={vi.fn()}
@@ -106,28 +101,23 @@ function renderSidebar() {
     />,
   );
 
-  return { onNewThread, onOpenAutomations, onOpenCommandPalette, onOpenLibrary, onOpenTaskCenter };
+  return { onNewThread, onOpenAutomations, onOpenCommandPalette };
 }
 
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("keeps search compact and exposes task notifications, the document library and automations", () => {
-    const { onOpenAutomations, onOpenCommandPalette, onOpenLibrary, onOpenTaskCenter } = renderSidebar();
+  it("keeps the primary navigation focused on conversations and automations", () => {
+    const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
-    expect(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
-    fireEvent.click(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" }));
-    fireEvent.click(within(navigation).getByRole("button", { name: "Biblioteca" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Automatizaciones" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
-    expect(onOpenTaskCenter).toHaveBeenCalledOnce();
-    expect(onOpenLibrary).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();
-    expect(within(navigation).getAllByText("Biblioteca")).toHaveLength(2);
-    expect(within(navigation).queryByText("Tareas programadas")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
+    expect(within(navigation).queryByText("Centro de tareas")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("⌘K")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("Buscar")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Abrir preferencias" })).not.toBeInTheDocument();
@@ -139,8 +129,7 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Abrir menú de cuenta/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Ayuda" }));
 
-    expect(screen.getByRole("note")).toHaveTextContent("Acciones guiadas");
-    expect(screen.getByRole("note")).toHaveTextContent("revisar los cambios");
+    expect(screen.getByRole("note")).toHaveTextContent("archivos, carpetas o elegir conectores autorizados");
   });
 
   it("nests every project chat below its project and keeps standalone chats separate", () => {

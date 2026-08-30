@@ -27,14 +27,13 @@ export function BrandMark({
       className={classes("ui-brand", compact && "ui-brand-compact", className)}
     >
       <Image
-        priority
-        src={branding.faviconPath}
+        preload
+        src={compact ? branding.faviconPath : branding.logoPath}
         alt=""
-        width={40}
-        height={40}
+        width={compact ? 40 : 194}
+        height={compact ? 40 : 194}
         className="ui-brand-image"
       />
-      {!compact ? <span className="ui-brand-name">{branding.productName}</span> : null}
     </span>
   );
 }

@@ -8,4 +8,13 @@ describe("landing suggestions", () => {
     expect(suggestions.map((suggestion) => suggestion.prompt).join(" ")).toContain("Operaciones");
     expect(suggestions.map((suggestion) => suggestion.prompt).join(" ")).not.toMatch(/correo|email/i);
   });
+
+  it("offers Gmail only when the connector is authorized", () => {
+    const withoutGmail = landingSuggestions(null, "Arnall");
+    const withGmail = landingSuggestions(null, "Arnall", { gmailAuthorized: true });
+
+    expect(withoutGmail.map((suggestion) => suggestion.label).join(" ")).not.toMatch(/Gmail/i);
+    expect(withGmail.map((suggestion) => suggestion.label).join(" ")).toMatch(/Gmail/i);
+    expect(withGmail).toHaveLength(3);
+  });
 });

@@ -41,13 +41,14 @@ for (const viewport of viewports) {
     expect(composer!.y - (emptyHeading!.y + emptyHeading!.height)).toBeGreaterThanOrEqual(16);
 
     await page.getByRole("button", { name: "Añadir al mensaje" }).click();
-    await page.getByRole("menuitem", { name: "Acciones guiadas" }).click();
-    await expect(page.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeVisible();
-    await expect(page.getByTestId("composer")).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Ver todas las acciones" })).toBeVisible();
+    const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
+    await expect(addMenu.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
+    const addMenuBox = await addMenu.boundingBox();
+    expect(addMenuBox).not.toBeNull();
+    expect(addMenuBox!.x).toBeGreaterThanOrEqual(0);
+    expect(addMenuBox!.x + addMenuBox!.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
-    await page.getByRole("button", { name: "Prefiero escribir directamente" }).click();
-    await expect(page.getByTestId("composer")).toBeVisible();
+    await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Experiencia" }).click();
     const experienceMenu = await page.getByRole("menu", { name: "Experiencia" }).boundingBox();

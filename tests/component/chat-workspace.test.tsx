@@ -93,7 +93,6 @@ function renderWorkspace(
     hydrated={hydrated}
     prompt={prompt}
     composerExperience="smart"
-    imageGeneration={false}
     connectorMentions={[]}
     selectedConnectorMentionIds={[]}
     attachments={[]}
@@ -103,7 +102,6 @@ function renderWorkspace(
     sending={false}
     stopping={false}
     runtimeStatus={{ ...initialRuntimeStatus, mode: "demo", codex: "disabled", ready: true }}
-    appPolicy={{ imageGeneration: true, skills: true }}
     networkOnline
     streamRecovery={null}
     onRetryRuntime={vi.fn()}
@@ -113,7 +111,6 @@ function renderWorkspace(
     }}
     onComposerExperienceChange={vi.fn()}
     onDestinationChange={vi.fn()}
-    onImageGenerationChange={vi.fn()}
     onConnectorMentionIdsChange={vi.fn()}
     onAttachmentsChange={vi.fn()}
     onDocumentsChange={vi.fn()}
@@ -186,6 +183,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByText("Operaciones Arnall").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "¿Cómo puedo ayudarte en Operaciones Arnall?" })).toBeInTheDocument();
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveFocus();
     expect(screen.queryByText("Trabajar")).not.toBeInTheDocument();
     expect(screen.getByText("Prioridades")).toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
@@ -203,23 +201,24 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByText("David Liria", { exact: true })).not.toBeInTheDocument();
   });
 
-  it("replaces the composer with a focused guided flow and reveals secondary actions on request", () => {
-    renderWorkspace();
+  it("keeps the add menu limited to files, folders and authorized connectors", () => {
+    renderWorkspace(null, project, {
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
+      connectorMentions: [
+        { id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true },
+      ],
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Acciones guiadas" }));
+    expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Añadir carpeta" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Conectores" })).toBeInTheDocument();
+    for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen"]) {
+      expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
+    }
 
-    expect(screen.getByRole("heading", { name: "¿Qué quieres conseguir?" })).toBeInTheDocument();
-    expect(screen.queryByTestId("composer")).not.toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Cómo funciona" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Informe de seguimiento/ })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Analiza" })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Ver todas las acciones" }));
-    expect(screen.getByRole("button", { name: /^Analiza/ })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: "Prefiero escribir directamente" }));
-    expect(screen.getByTestId("composer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Conectores" }));
+    expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Gmail");
   });
 
   it("submits with Enter while preserving composition and multiline input", () => {
@@ -241,6 +240,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByRole("menuitemradio", { name: /Rápido/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Smart/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Experto/ })).toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "Experiencia" })).not.toHaveTextContent(/GPT|Terra|Sol/i);
     expect(screen.queryByRole("button", { name: "Aprobar permisos automáticamente" })).not.toBeInTheDocument();
   });
 
