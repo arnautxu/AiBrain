@@ -31,6 +31,7 @@ test("a response exposes real citations and reviewable tool output inline", asyn
 
   await page.getByText("Fuentes", { exact: true }).click();
   await expect(page.getByRole("link", { name: "Abrir fuente 1: Informe oficial" })).toHaveAttribute("href", source.url);
+  await page.getByRole("button", { name: "Mostrar el proceso de trabajo" }).click();
   await expect(page.getByText("CRM · Leer cuenta")).toBeVisible();
   await page.getByText("CRM · Leer cuenta").click();
   await expect(page.getByLabel("Salida de CRM · Leer cuenta")).toContainText("Ejemplo SA");

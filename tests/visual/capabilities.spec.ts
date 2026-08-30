@@ -54,9 +54,11 @@ test("document preview, publication state and browser viewer", async ({ page }) 
   await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page).toHaveScreenshot("document-preview.png", { fullPage: true });
-  const viewer = page.getByRole("link", { name: "Abrir", exact: true });
+  await page.getByRole("button", { name: "Cerrar vista previa" }).click();
+  const viewer = page.getByRole("button", { name: "Abrir", exact: true });
   await viewer.scrollIntoViewIfNeeded();
-  await expect(viewer).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+  await viewer.click();
+  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
   await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
   await expect(page).toHaveScreenshot("browser-viewer.png", { fullPage: true });
 });
@@ -70,9 +72,11 @@ test("document preview and browser viewer dark", async ({ page }) => {
   await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page).toHaveScreenshot("document-preview-dark.png", { fullPage: true });
-  const viewer = page.getByRole("link", { name: "Abrir", exact: true });
+  await page.getByRole("button", { name: "Cerrar vista previa" }).click();
+  const viewer = page.getByRole("button", { name: "Abrir", exact: true });
   await viewer.scrollIntoViewIfNeeded();
-  await expect(viewer).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+  await viewer.click();
+  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
   await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
   await expect(page).toHaveScreenshot("browser-viewer-dark.png", { fullPage: true });
 });

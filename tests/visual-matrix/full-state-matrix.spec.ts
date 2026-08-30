@@ -217,11 +217,11 @@ for (const viewport of viewports) {
     await submitPrompt(page, "Abre una comprobación web sintética.");
     const browserHeading = page.getByRole("heading", { name: "Sesión preparada" });
     await expect(browserHeading).toBeVisible();
-    const viewer = page.getByRole("link", { name: "Abrir", exact: true });
+    const viewer = page.getByRole("button", { name: "Abrir", exact: true });
     await expect(viewer).toBeVisible();
     await centerArtifactInWorkbench(page, browserHeading);
     await expect(viewer).toBeInViewport();
-    await expect(viewer).toHaveAttribute("href", `/api/browser/sessions/${browserId}/viewer`);
+    await expect(viewer).toHaveAttribute("type", "button");
     await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
     await screenshot(page, "browser-light", viewport);
   });

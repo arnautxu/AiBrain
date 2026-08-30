@@ -240,9 +240,13 @@ describe("chat turn transport lifecycle", () => {
       type: "activity",
       item: expect.objectContaining({ id: "summary-ordered", sequence: 42 }),
     }));
-    expect(events).toContainEqual(expect.objectContaining({
+    const done = events.find((event) => event.type === "done");
+    expect(done).toEqual(expect.objectContaining({
       type: "done",
       durationMs: expect.any(Number),
     }));
+    expect(Number.isSafeInteger(done.durationMs)).toBe(true);
+    expect(done.durationMs).toBeGreaterThanOrEqual(0);
+    expect(done.durationMs).toBeLessThan(10_000);
   });
 });

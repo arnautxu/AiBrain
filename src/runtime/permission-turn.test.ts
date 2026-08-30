@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseInstallationConfig, type InstallationConfig } from "@/config/installation-schema";
 import type { ChatRequest } from "@/lib/chat-contract";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
@@ -11,6 +11,8 @@ import {
   permissionAllowsGenericToolExecution,
   resolveServerTurnPermissions,
 } from "@/runtime/permission-turn";
+
+vi.mock("server-only", () => ({}));
 
 const USER_ID = "11a11111-1111-4111-8111-111111111111";
 const PROJECT_ID = "22b22222-2222-4222-8222-222222222222";

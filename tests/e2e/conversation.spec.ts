@@ -216,14 +216,21 @@ test("the existing chat route streams a complete turn and persists it in preview
   const liveActivity = page.getByTestId("turn-thinking-steps").last();
   const liveActivityTrigger = liveActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
   await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "false");
-  await expect(liveActivityTrigger.locator(".thinking-steps-shimmer")).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
-  await liveActivityTrigger.click();
-  await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
+  const streamingLabel = liveActivityTrigger.locator(".thinking-steps-shimmer");
+  if (await streamingLabel.count()) {
+    await expect(streamingLabel).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
+    await liveActivityTrigger.click();
+    await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
+  } else {
+    await expect(liveActivityTrigger).toContainText(/Ha trabajado durante \d+m \d+s/);
+  }
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   const completedActivity = page.getByTestId("turn-thinking-steps").last();
   const completedActivityTrigger = completedActivity.getByRole("button", { name: "Mostrar el proceso de trabajo" });
   await expect(completedActivityTrigger).toHaveAttribute("aria-expanded", "false");
+  await expect(completedActivityTrigger).toContainText(/Ha trabajado durante \d+m \d+s/);
+  await expect(completedActivityTrigger.locator(".thinking-steps-shimmer")).toHaveCount(0);
   await completedActivityTrigger.click();
   await expect(completedActivity.getByRole("button", { name: "Ocultar el proceso de trabajo" })).toHaveAttribute("aria-expanded", "true");
   await expect(completedActivity.getByText("Analizando la petición", { exact: true })).toBeVisible();

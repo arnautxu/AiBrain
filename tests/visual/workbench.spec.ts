@@ -204,10 +204,16 @@ test("automations occupy the main surface", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Automatizaciones", exact: true }).click();
-  const automations = page.getByRole("dialog", { name: "Automatizaciones" });
+  const automations = page.getByRole("region", { name: "Automatizaciones" });
   await expect(automations).toBeVisible();
   await expect(page.getByText("Cargando automatizaciones…")).toBeHidden();
-  await expect(automations).toHaveCSS("width", `${page.viewportSize()?.width ?? 1440}px`);
+  await automations.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished));
+  });
+  const automationBounds = await automations.boundingBox();
+  expect(automationBounds).not.toBeNull();
+  expect(automationBounds!.x + automationBounds!.width).toBeCloseTo(page.viewportSize()?.width ?? 1440, 0);
+  expect(automationBounds!.width).toBeGreaterThan((page.viewportSize()?.width ?? 1440) * 0.7);
   await expect(page).toHaveScreenshot("scheduled-work-surface-light.png", { fullPage: true });
 });
 

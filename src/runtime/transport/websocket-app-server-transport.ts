@@ -572,6 +572,15 @@ export class WebSocketAppServerTransport implements AppServerTransport {
       submission.state = "queued";
       return;
     }
+    const socket = this.socket;
+    if (!socket || socket.readyState !== SOCKET_OPEN) {
+      submission.state = "queued";
+      this.recordError(new Error("WebSocket became unavailable before the request was sent."));
+      this.detachSocket();
+      socket?.close(1001, "Reconnecting unavailable transport");
+      this.scheduleReconnect();
+      return;
+    }
     this.sendFrame({
       protocolVersion: APP_SERVER_TRANSPORT_PROTOCOL_VERSION,
       type: "request",
