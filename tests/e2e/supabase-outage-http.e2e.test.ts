@@ -341,7 +341,7 @@ describe("real worker HTTP session during Supabase outage", () => {
         type: "activity",
         item: expect.objectContaining({ id: "runtime-connect", status: "complete" }),
       }),
-      { type: "delta", value: WORKER_REPLY },
+      { type: "content", value: WORKER_REPLY },
       expect.objectContaining({ type: "done", durationMs: expect.any(Number) }),
     ]));
 
