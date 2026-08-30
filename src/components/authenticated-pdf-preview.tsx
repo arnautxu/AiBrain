@@ -75,7 +75,6 @@ export function AuthenticatedPdfPreview({
     <iframe
       title={title}
       src={preview.url}
-      sandbox=""
       referrerPolicy="no-referrer"
       className={className}
       onLoad={onLoad}

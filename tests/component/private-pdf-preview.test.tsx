@@ -27,7 +27,11 @@ describe("AuthenticatedPdfPreview", () => {
 
     const frame = await screen.findByTitle("Documento report.pdf");
     expect(frame).toHaveAttribute("src", "blob:https://brain.example/private-preview");
-    expect(frame).toHaveAttribute("sandbox", "");
+    // Chromium treats its native PDF viewer as a plugin and blocks it in every
+    // sandboxed iframe. The frame may omit sandbox only because its source is
+    // the validated, bounded, revocable blob produced above, never the private
+    // API route or an arbitrary URL.
+    expect(frame).not.toHaveAttribute("sandbox");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/projects/project/files?path=report.pdf&raw=1",
       expect.objectContaining({ cache: "no-store", credentials: "same-origin" }),
