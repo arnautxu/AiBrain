@@ -17,6 +17,9 @@ import {
 } from "@/workbench/store";
 import type { AutomationTask } from "@/automations/contracts";
 import { FileAutomationAudienceStore } from "@/automations/audience-store";
+import { authorizedConnectorMentionIdsForTurn } from "@/connectors/mentions";
+import { featurePolicyForIdentity } from "@/settings/server-service";
+import { scheduledTurnOptions } from "@/automations/execution-context";
 
 function stableUuid(value: string) {
   const bytes = createHash("sha256").update(value).digest("hex").slice(0, 32).split("");
@@ -91,6 +94,13 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
   if (context.projectId !== input.task.projectId) throw new Error("El proyecto de la automatización ha cambiado.");
   const runtimeConfig = readRuntimeConfig(input.installation.installationId, context.workspaceKey);
   if (runtimeConfig.mode !== "codex") throw new Error("El runtime real de Codex no está activo.");
+  const featurePolicy = await featurePolicyForIdentity(input.installation.installationId, input.session.user.id);
+  if (!featurePolicy["web-search"]) {
+    throw new Error("La búsqueda web de esta automatización ya no está autorizada para el usuario.");
+  }
+  const connectorMentions = input.task.executionContext.inheritAuthorizedConnectors
+    ? await authorizedConnectorMentionIdsForTurn(input.session)
+    : [];
 
   const userMessageId = stableUuid(`${input.runKey}:user`);
   const assistantMessageId = stableUuid(`${input.runKey}:assistant`);
@@ -102,15 +112,10 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
     assistantMessageId,
     message: input.task.prompt,
     preferences: { tone: "balanced", language: "es", showActivity: true },
-    options: {
-      mode: "agent",
-      model: null,
-      effort: null,
-      webSearch: false,
-      imageGeneration: false,
-      skill: null,
-      attachments: [],
-    },
+    options: scheduledTurnOptions({
+      skillsAuthorized: input.task.executionContext.inheritAuthorizedSkills && featurePolicy.skills,
+      connectorMentions,
+    }),
   };
   const userMessage = message(userMessageId, "user", input.task.prompt, "complete", startedAt);
   let assistantMessage = message(assistantMessageId, "assistant", "", "streaming", new Date(Date.now() + 1).toISOString());
@@ -172,6 +177,10 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
       undefined,
       input.installation.branding.productName,
       context,
+      undefined,
+      undefined,
+      undefined,
+      input.session,
     );
   } catch (error) {
     assistantMessage = applyChatStreamEvent(assistantMessage, {

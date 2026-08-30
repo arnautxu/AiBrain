@@ -157,14 +157,14 @@ export async function listAutomationTasks(session: AuthSession) {
   return { tasks: tasks.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)), directory };
 }
 
-export async function createAutomationTask(session: AuthSession, input: AutomationTaskInput) {
+export async function createAutomationTask(session: AuthSession, input: AutomationTaskInput, options: { taskId?: string } = {}) {
   const context = await automationWorkspaceForSession(session);
   const audience = validateAutomationAudience(input.audience ?? {
     membershipPolicy: "current",
     userIds: [context.principal.userId],
     groupIds: [],
   }, context);
-  const task = await storeForOwner(context, context.principal.userId).create({ ...input, audience });
+  const task = await storeForOwner(context, context.principal.userId).create({ ...input, audience }, { id: options.taskId });
   return { ...task, access: { canManage: true, canViewResults: true } } satisfies AutomationTaskView;
 }
 
@@ -190,6 +190,17 @@ export async function deleteAutomationTask(session: AuthSession, taskId: string)
     throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
   }
   return located.store.delete(taskId);
+}
+
+export async function runAutomationTaskNow(session: AuthSession, taskId: string, clientRequestId: string) {
+  const context = await automationWorkspaceForSession(session);
+  const located = await locateTask(context, taskId);
+  const access = automationTaskAccess(located.task, context.principal.userId, context, context.isAdmin);
+  if (!access.canManage || located.task.deletedAt !== null) {
+    throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
+  }
+  const task = await located.store.runNow(taskId, clientRequestId);
+  return { ...task, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
 }
 
 export async function automationRunsForSession(session: AuthSession, taskId: string) {

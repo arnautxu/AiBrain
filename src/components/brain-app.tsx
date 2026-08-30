@@ -1915,16 +1915,23 @@ export function BrainApp({
         onOpenLibrary={() => { setMobileSidebarOpen(false); setLibraryOpen(true); }}
         onOpenTaskCenter={() => { setMobileSidebarOpen(false); setTaskCenterOpen(true); }}
         onOpenAutomations={() => { setMobileSidebarOpen(false); setAutomationsOpen(true); }}
-        onSelectProject={selectProject}
-        onSelectThread={selectThread}
-        onNewThread={startNewThread}
+        onSelectProject={(projectId) => { setAutomationsOpen(false); selectProject(projectId); }}
+        onSelectThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
+        onNewThread={(projectId) => { setAutomationsOpen(false); startNewThread(projectId); }}
         onNewProject={() => { setMobileSidebarOpen(false); setTextDialog({ kind: "create-project" }); }}
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
         onOpenCustomization={() => { setMobileSidebarOpen(false); setCustomizationOpen(true); }}
       />
 
-      <ChatWorkspace
+      {automationsOpen ? <AutomationsPanel
+        open
+        projects={projects}
+        fullPage
+        onClose={() => setAutomationsOpen(false)}
+        onOpenTaskCenter={() => { setAutomationsOpen(false); setTaskCenterOpen(true); }}
+        onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
+      /> : <ChatWorkspace
         manifest={manifest}
         preferences={preferences}
         project={activeProject}
@@ -1978,7 +1985,7 @@ export function BrainApp({
           setActiveSideWindow(null);
           setPreviewDocument(artifact);
         }}
-      />
+      />}
 
       {previewDocument ? (
         <DocumentPreviewPanel key={previewDocument.id} artifact={previewDocument} onClose={() => setPreviewDocument(null)} />
@@ -2052,13 +2059,6 @@ export function BrainApp({
         onMarkAllRead={markAllTasksRead}
         onPreferencesChange={(next) => void updateTaskCenter({ action: "preferences", preferences: next })}
         onRequestDesktopNotifications={() => void requestDesktopNotifications()}
-      />
-
-      <AutomationsPanel
-        open={automationsOpen}
-        projects={projects}
-        fullPage
-        onClose={() => setAutomationsOpen(false)}
       />
 
       <CommandPalette

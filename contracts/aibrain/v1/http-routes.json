@@ -63,6 +63,7 @@
     "POST /api/auth/password/recovery": "JsonObject",
     "POST /api/auth/password/reset/request": "JsonObject",
     "POST /api/automations": "JsonObject",
+    "POST /api/automations/{taskId}/run": "JsonObject",
     "POST /api/chat": "stream:ChatStreamEvent",
     "POST /api/connectors/codex-managed-app/action": "ConnectorActionResponse",
     "POST /api/memory": "JsonObject",

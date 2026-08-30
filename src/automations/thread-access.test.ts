@@ -166,7 +166,7 @@ describe("automation result thread audience", () => {
     await admin.mutate(userIds, ownerId, (current) => {
       const group = current.groups.find(({ id }) => id === groupId)!;
       group.memberIds = [];
-      group.updatedAt = "2026-08-30T10:00:00.000Z";
+      group.updatedAt = new Date(Math.max(Date.now(), Date.parse(group.createdAt)) + 1).toISOString();
       return { action: "group.updated", targetType: "group", targetId: group.id, summary: "Miembro retirado." };
     });
     await expect(resolveThreadAccess(memberSession, thread.id)).rejects.toThrow("Fil no trobat");

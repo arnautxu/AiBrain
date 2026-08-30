@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AutomationTaskView } from "@/automations/contracts";
+import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTaskView } from "@/automations/contracts";
 import { AutomationsPanel } from "@/components/automations-panel";
 import type { WorkbenchProject } from "@/workbench/types";
 
@@ -38,12 +38,14 @@ const viewerTask: AutomationTaskView = {
   projectName: project.name,
   timeZone: "Europe/Madrid",
   schedule: { kind: "daily", hour: 9, minute: 0 },
+  executionContext: DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
   state: "active",
   nextRunAt: "2030-08-30T07:00:00.000Z",
   lastRunAt: null,
   lastRunStatus: null,
   lastRunError: null,
   retryAt: null,
+  manualRun: null,
   deletedAt: null,
   cancellationRequestedAt: null,
   lease: null,

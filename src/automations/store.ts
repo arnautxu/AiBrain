@@ -9,7 +9,9 @@ import type {
   AutomationTaskPatch,
 } from "@/automations/contracts";
 import {
+  DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
   isAutomationAudience,
+  isAutomationExecutionContext,
   isAutomationSchedule,
   isIsoDate,
   isRecord,
@@ -61,12 +63,16 @@ function parseTask(value: unknown): AutomationTask {
     typeof value.prompt !== "string" || !value.prompt || value.prompt.length > 20_000 ||
     !UUID_PATTERN.test(String(value.projectId)) || typeof value.projectName !== "string" ||
     !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) ||
+    !(value.executionContext === undefined || isAutomationExecutionContext(value.executionContext)) ||
     !["active", "paused", "completed"].includes(String(value.state)) ||
     !(value.nextRunAt === null || isIsoDate(value.nextRunAt)) ||
     !(value.lastRunAt === null || isIsoDate(value.lastRunAt)) ||
     !(value.lastRunStatus === null || value.lastRunStatus === "succeeded" || value.lastRunStatus === "failed") ||
     !(value.lastRunError === null || typeof value.lastRunError === "string") ||
     !(value.retryAt === undefined || value.retryAt === null || isIsoDate(value.retryAt)) ||
+    !(value.manualRun === undefined || value.manualRun === null || (isRecord(value.manualRun) &&
+      Object.keys(value.manualRun).length === 2 && typeof value.manualRun.requestId === "string" &&
+      UUID_PATTERN.test(value.manualRun.requestId) && isIsoDate(value.manualRun.scheduledFor))) ||
     !(value.deletedAt === undefined || value.deletedAt === null || isIsoDate(value.deletedAt)) ||
     !(value.cancellationRequestedAt === undefined || value.cancellationRequestedAt === null || isIsoDate(value.cancellationRequestedAt)) ||
     !isIsoDate(value.createdAt) || !isIsoDate(value.updatedAt)) invalid("task");
@@ -79,7 +85,9 @@ function parseTask(value: unknown): AutomationTask {
       userIds: [value.userId],
       groupIds: [],
     },
+    executionContext: value.executionContext ?? DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
     retryAt: value.retryAt ?? null,
+    manualRun: value.manualRun ?? null,
     deletedAt: value.deletedAt ?? null,
     cancellationRequestedAt: value.cancellationRequestedAt ?? null,
     lease: parseLease(value.lease),
@@ -173,7 +181,8 @@ export class FileAutomationStore {
     try {
       const raw: unknown = JSON.parse(await readFile(this.tasksPath, "utf8"));
       const migrated = isRecord(raw) && Array.isArray(raw.tasks) &&
-        raw.tasks.some((task) => isRecord(task) && !("audience" in task));
+        raw.tasks.some((task) => isRecord(task) &&
+          (!("audience" in task) || !("executionContext" in task) || !("manualRun" in task)));
       return { snapshot: snapshotSchema.parse(raw, this.tasksPath), migrated };
     } catch (error) {
       if (isNodeError(error, "ENOENT")) return { snapshot: { schemaVersion: 1, tasks: [] }, migrated: false };
@@ -231,16 +240,17 @@ export class FileAutomationStore {
     });
   }
 
-  async create(input: AutomationTaskInput) {
+  async create(input: AutomationTaskInput, options: { id?: string } = {}) {
     const now = new Date(this.now());
     const nextRunAt = nextScheduledInstant(input.schedule, input.timeZone, new Date(now.getTime() - 1));
     if (!nextRunAt) throw new AutomationStoreError("AUTOMATION_DATE_PAST", "La fecha de ejecución ya ha pasado.");
     const task: AutomationTask = {
       schemaVersion: 1,
-      id: randomUUID(),
+      id: options.id ?? randomUUID(),
       installationId: this.options.installationId,
       userId: this.options.userId,
       ...input,
+      executionContext: input.executionContext ?? DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
       audience: input.audience ?? {
         membershipPolicy: "current",
         userIds: [this.options.userId],
@@ -252,14 +262,28 @@ export class FileAutomationStore {
       lastRunStatus: null,
       lastRunError: null,
       retryAt: null,
+      manualRun: null,
       deletedAt: null,
       cancellationRequestedAt: null,
       lease: null,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     };
-    await this.mutate((snapshot) => snapshot.tasks.push(task));
-    return task;
+    return this.mutate((snapshot) => {
+      const existing = snapshot.tasks.find((candidate) => candidate.id === task.id);
+      if (!existing) {
+        snapshot.tasks.push(task);
+        return task;
+      }
+      const sameInput = JSON.stringify({ ...existing, state: undefined, nextRunAt: undefined, lastRunAt: undefined,
+        lastRunStatus: undefined, lastRunError: undefined, retryAt: undefined, manualRun: undefined,
+        deletedAt: undefined, cancellationRequestedAt: undefined, lease: undefined, createdAt: undefined, updatedAt: undefined }) ===
+        JSON.stringify({ ...task, state: undefined, nextRunAt: undefined, lastRunAt: undefined,
+          lastRunStatus: undefined, lastRunError: undefined, retryAt: undefined, manualRun: undefined,
+          deletedAt: undefined, cancellationRequestedAt: undefined, lease: undefined, createdAt: undefined, updatedAt: undefined });
+      if (!sameInput) throw new AutomationStoreError("AUTOMATION_CREATE_CONFLICT", "La creación idempotente no coincide con la automatización existente.");
+      return { ...existing };
+    });
   }
 
   async update(taskId: string, patch: AutomationTaskPatch) {
@@ -319,18 +343,46 @@ export class FileAutomationStore {
     });
   }
 
+  async runNow(taskId: string, requestId: string) {
+    if (!UUID_PATTERN.test(taskId) || !UUID_PATTERN.test(requestId)) {
+      throw new AutomationStoreError("AUTOMATION_RUN_REQUEST_INVALID", "La solicitud de ejecución no es válida.");
+    }
+    const runKey = `${taskId}:manual:${requestId}`;
+    // The journal is the durable idempotency ledger after manualRun is cleared
+    // on settlement. Replaying the same client request must remain a read even
+    // after restart or completion, including an uncertain terminal response.
+    if (await this.latestRun(runKey)) return this.get(taskId);
+    return this.mutate((snapshot) => {
+      const task = snapshot.tasks.find((candidate) => candidate.id === taskId);
+      if (!task || task.deletedAt !== null) throw new AutomationStoreError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.");
+      this.assertOwnership(task);
+      if (task.manualRun?.requestId === requestId) return { ...task };
+      if (task.manualRun || task.lease) {
+        throw new AutomationStoreError("AUTOMATION_RUN_PENDING", "Ya hay una ejecución pendiente o en curso.");
+      }
+      const now = new Date(this.now()).toISOString();
+      task.manualRun = { requestId, scheduledFor: now };
+      task.updatedAt = now;
+      return { ...task };
+    });
+  }
+
   async claimDue(ownerId: string, limit = 10): Promise<ClaimedAutomation[]> {
     if (!IDENTITY_PATTERN.test(ownerId)) throw new AutomationStoreError("AUTOMATION_OWNER_INVALID", "Identidad de worker no válida.");
     return this.mutate((snapshot) => {
       const now = this.now();
       const claims: ClaimedAutomation[] = [];
-      for (const task of snapshot.tasks.toSorted((a, b) => (a.nextRunAt ?? "").localeCompare(b.nextRunAt ?? ""))) {
-        const dueAt = task.retryAt ?? task.nextRunAt;
-        if (claims.length >= limit || task.deletedAt !== null || task.state !== "active" || !task.nextRunAt || !dueAt ||
+      for (const task of snapshot.tasks.toSorted((a, b) =>
+        (a.retryAt ?? a.manualRun?.scheduledFor ?? a.nextRunAt ?? "").localeCompare(
+          b.retryAt ?? b.manualRun?.scheduledFor ?? b.nextRunAt ?? ""))) {
+        const scheduledFor = task.manualRun?.scheduledFor ?? task.nextRunAt;
+        const dueAt = task.retryAt ?? scheduledFor;
+        if (claims.length >= limit || task.deletedAt !== null || (!task.manualRun && task.state !== "active") || !scheduledFor || !dueAt ||
           new Date(dueAt).getTime() > now ||
           (task.lease && new Date(task.lease.expiresAt).getTime() > now)) continue;
-        const scheduledFor = task.nextRunAt;
-        const runKey = `${task.id}:${scheduledFor}`;
+        const runKey = task.manualRun
+          ? `${task.id}:manual:${task.manualRun.requestId}`
+          : `${task.id}:${scheduledFor}`;
         task.lease = {
           runKey,
           ownerId,
@@ -357,9 +409,12 @@ export class FileAutomationStore {
       task.lastRunAt = new Date(this.now()).toISOString();
       task.lastRunStatus = outcome.status;
       task.lastRunError = outcome.status === "failed" ? (outcome.error ?? "Error de ejecución") : null;
+      const manualOccurrence = task.manualRun !== null && claim.runKey === `${task.id}:manual:${task.manualRun.requestId}`;
       // Bound restart catch-up to one occurrence. A long outage must not turn
       // into a burst of every missed daily/weekly job.
-      if (task.deletedAt !== null) {
+      if (manualOccurrence) {
+        task.manualRun = null;
+      } else if (task.deletedAt !== null) {
         task.nextRunAt = null;
         task.state = "completed";
       } else if (task.state === "paused") {
@@ -386,7 +441,7 @@ export class FileAutomationStore {
         task.lease.fenceToken !== claim.task.lease?.fenceToken) {
         throw new AutomationStoreError("AUTOMATION_LEASE_LOST", "La concesión de ejecución ya no pertenece a este worker.");
       }
-      if (task.deletedAt !== null || task.state !== "active" || task.cancellationRequestedAt !== null) {
+      if (task.deletedAt !== null || (!task.manualRun && task.state !== "active") || task.cancellationRequestedAt !== null) {
         throw new AutomationStoreError("AUTOMATION_CANCELLED", "La automatización fue cancelada por su propietario.");
       }
       task.lease.expiresAt = new Date(this.now() + this.leaseMs).toISOString();
@@ -414,7 +469,7 @@ export class FileAutomationStore {
       task.lastRunAt = new Date(this.now()).toISOString();
       task.lastRunStatus = "failed";
       task.lastRunError = outcome.error;
-      task.retryAt = task.deletedAt === null && task.state === "active" ? outcome.retryAt : null;
+      task.retryAt = task.deletedAt === null && (task.state === "active" || task.manualRun !== null) ? outcome.retryAt : null;
       task.cancellationRequestedAt = null;
       task.lease = null;
       task.updatedAt = task.lastRunAt;

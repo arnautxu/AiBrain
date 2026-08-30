@@ -4,6 +4,7 @@ import { isSameOriginMutation } from "@/auth/request-security";
 import { parseAutomationPatch } from "@/automations/contracts";
 import { AutomationAccessError, deleteAutomationTask, updateAutomationTask } from "@/automations/server-service";
 import { getProject } from "@/workbench/store";
+import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ taskI
   try {
     if (patch.projectId) {
       const project = await getProject(session, patch.projectId);
-      patch.projectName = project.name;
+      patch.projectName = project.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project.name;
     }
     const task = await updateAutomationTask(session, (await context.params).taskId, patch);
     return NextResponse.json({ schemaVersion: 1, task }, { headers: HEADERS });

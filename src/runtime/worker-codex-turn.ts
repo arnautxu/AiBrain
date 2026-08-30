@@ -7,6 +7,13 @@ import type {
   ActivityItem,
   ChatRequest,
 } from "@/lib/chat-contract";
+import type { AuthSession } from "@/auth/types";
+import {
+  AIBRAIN_AUTOMATION_TOOL_NAMESPACE,
+  AUTOMATION_DYNAMIC_TOOLS,
+  automationChatDeveloperInstructions,
+  handleAutomationToolCall,
+} from "@/automations/chat-tools";
 import type { ResolvedPermissions } from "@/permissions";
 import {
   approvalFromRequest,
@@ -314,6 +321,8 @@ export async function runWorkerCodexTurn(
   > | null = null,
   requestStartedAt?: number,
   admittedTelemetry?: TurnTelemetry,
+  automationSession?: AuthSession,
+  runtimeIdentitySession?: AuthSession,
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
@@ -495,22 +504,27 @@ export async function runWorkerCodexTurn(
   // server boundary before a selected skill is placed in turn/start input.
   // Keep the generic runtime transport unchanged; catalog filtering belongs at
   // its own inventory/action boundaries and must not weaken approvals or DENY.
+  const inheritAuthorizedSkills = chatRequest.options.inheritAuthorizedSkills === true;
   const hasConnectorMentions = (chatRequest.options.connectorMentions?.length ?? 0) > 0;
-  const catalog = chatRequest.options.skill || hasConnectorMentions
+  const catalog = chatRequest.options.skill || inheritAuthorizedSkills || hasConnectorMentions
     ? await catalogRuntimeEnforcer(installationId, authenticatedUserId)
     : null;
-  const selectedSkill = chatRequest.options.skill
+  const runtimeSkills = chatRequest.options.skill || inheritAuthorizedSkills
     ? parseSkills(await telemetry.measure("skills", () => runtime.client.request(
       "skills/list",
       { cwds: [projectWorkspace], forceReload: true },
       `skills-resolved:${chatRequest.assistantMessageId}`,
       10_000,
-    )))
-      .filter((skill) => catalog?.allowsSkill(skill.id))
-      .find((skill) => skill.id === chatRequest.options.skill &&
-        skill.path === synchronizedSkills.result.skills.find(({ id }) => id === skill.id)?.path) ?? null
-    : null;
-  if (chatRequest.options.skill && !selectedSkill) {
+    ))) : [];
+  const authorizedRuntimeSkills = runtimeSkills.filter((skill) =>
+    catalog?.allowsSkill(skill.id) &&
+    skill.path === synchronizedSkills.result.skills.find(({ id }) => id === skill.id)?.path);
+  const selectedSkills = inheritAuthorizedSkills
+    ? authorizedRuntimeSkills
+    : chatRequest.options.skill
+      ? authorizedRuntimeSkills.filter((skill) => skill.id === chatRequest.options.skill)
+      : [];
+  if (chatRequest.options.skill && selectedSkills.length !== 1) {
     throw new Error("La skill seleccionada ja no està disponible.");
   }
   const selectedConnectorMentions = hasConnectorMentions
@@ -518,6 +532,7 @@ export async function runWorkerCodexTurn(
       installationId,
       authenticatedUserId,
       chatRequest.options.connectorMentions ?? [],
+      runtimeIdentitySession ?? automationSession,
     )
     : [];
   // App Server's per-thread app configuration is the enforceable toolset
@@ -552,6 +567,7 @@ export async function runWorkerCodexTurn(
     preparedMemory.developerInstructions,
     synchronizedSkills.developerInstructions,
     connectorMentionDeveloperInstructions(selectedConnectorMentions),
+    ...(automationSession ? [await automationChatDeveloperInstructions(automationSession)] : []),
   ].filter(Boolean).join("\n\n");
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
@@ -652,7 +668,7 @@ export async function runWorkerCodexTurn(
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
         : runtime.client.request("thread/start", {
             ...commonThreadParams,
-            dynamicTools: [...BROWSER_DYNAMIC_TOOLS, ...MEMORY_DYNAMIC_TOOLS],
+            dynamicTools: [...BROWSER_DYNAMIC_TOOLS, ...MEMORY_DYNAMIC_TOOLS, ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : [])],
             ephemeral: false,
             serviceName: "aibrain_workbench",
           }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
@@ -1059,6 +1075,17 @@ export async function runWorkerCodexTurn(
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
         if (request.method === "item/tool/call") {
           if (!runtimeTurnId) throw new Error("Browser tool call arrived before the turn was bound.");
+          if (automationSession && isRecord(request.params) && request.params.namespace === AIBRAIN_AUTOMATION_TOOL_NAMESPACE) {
+            return await handleAutomationToolCall(request.params as never, {
+              session: automationSession,
+              sourceThreadId: chatRequest.threadId,
+              sourceTurnId: chatRequest.assistantMessageId,
+              sourceMessage: chatRequest.message,
+              runtimeThreadId: threadId,
+              runtimeTurnId,
+              usersRoot: runtime.config.paths.usersRoot,
+            }) as JsonValue;
+          }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_MEMORY_TOOL_NAMESPACE) {
             return await handleMemoryProposalToolCall(request.params as never, {
               config: runtime.config,
@@ -1230,7 +1257,7 @@ export async function runWorkerCodexTurn(
             ].join("\n\n")
           : chatRequest.message, text_elements: [] },
         ...turnDocumentCodexInputs(turnDocuments),
-        ...(selectedSkill ? [{ type: "skill" as const, name: selectedSkill.id, path: selectedSkill.path }] : []),
+        ...selectedSkills.map((skill) => ({ type: "skill" as const, name: skill.id, path: skill.path })),
         ...chatRequest.options.attachments.map((attachment) => ({
           type: "image" as const,
           url: attachment.dataUrl,

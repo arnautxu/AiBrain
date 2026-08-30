@@ -64,11 +64,15 @@ export async function resolveConnectorMentionsForTurn(
   installationId: string,
   userId: string,
   resourceIds: readonly string[],
+  session?: AuthSession,
 ) {
   if (resourceIds.length > 20 || new Set(resourceIds).size !== resourceIds.length) {
     throw new ConnectorMentionError("CONNECTOR_MENTION_INVALID", "Las menciones de conectores no son válidas.");
   }
-  const { resources, mentions } = await resolvedMentions(installationId, userId);
+  if (session && (session.tenant.id !== installationId || session.user.id !== userId)) {
+    throw new ConnectorMentionError("CONNECTOR_MENTION_IDENTITY_MISMATCH", "La sesión del conector no coincide con el turno.");
+  }
+  const { resources, mentions } = await resolvedMentions(installationId, userId, session);
   const byId = new Map(resources.map((resource) => [resource.id, resource]));
   const projected = new Map(mentions.map((mention) => [mention.id, mention]));
   const selected = resourceIds.map((id) => {
@@ -83,4 +87,14 @@ export async function resolveConnectorMentionsForTurn(
     return { resource, mention };
   });
   return selected;
+}
+
+/** Returns only catalog resources that are both currently visible and
+ * callable for this identity. The turn resolver is still called afterwards,
+ * so this convenience projection never becomes an authorization cache. */
+export async function authorizedConnectorMentionIdsForTurn(
+  session: AuthSession,
+) {
+  const { mentions } = await resolvedMentions(session.tenant.id, session.user.id, session);
+  return mentions.filter((mention) => mention.canRead).map((mention) => mention.id);
 }

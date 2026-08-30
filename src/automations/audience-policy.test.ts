@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { defaultWorkspacePolicy, type WorkspaceGroup } from "@/admin/contracts";
 import type { LocalUser } from "@/auth/local-user-store";
-import type { AutomationTask } from "@/automations/contracts";
+import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTask } from "@/automations/contracts";
 import { invalidAutomationAudienceTargets, resolveCurrentAutomationAudience } from "@/automations/audience-policy";
 import { validateAutomationAudience, visibleAutomationTasks, type AutomationWorkspaceContext } from "@/automations/server-service";
 
@@ -46,12 +46,14 @@ function task(audience: AutomationTask["audience"]): AutomationTask {
     projectName: "Operaciones",
     timeZone: "Europe/Madrid",
     schedule: { kind: "daily", hour: 9, minute: 0 },
+    executionContext: DEFAULT_AUTOMATION_EXECUTION_CONTEXT,
     state: "active",
     nextRunAt: "2026-08-31T07:00:00.000Z",
     lastRunAt: null,
     lastRunStatus: null,
     lastRunError: null,
     retryAt: null,
+    manualRun: null,
     deletedAt: null,
     cancellationRequestedAt: null,
     lease: null,
