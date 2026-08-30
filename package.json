@@ -29,6 +29,7 @@
     "test:soak:qa": "tsx scripts/soak.ts --qa",
     "test:coverage": "vitest run --coverage",
     "benchmark:chat": "tsx scripts/benchmark-chat-client.ts",
+    "benchmark:chat:runtime": "node scripts/benchmark-chat-runtime.mjs",
     "contracts:generate": "npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-ts --experimental --out contracts/codex/0.149.1/types && npm exec --yes --package=@openai/codex@0.149.1 -- codex app-server generate-json-schema --experimental --out contracts/codex/0.149.1/schema",
     "contracts:verify": "node scripts/verify-codex-contracts.mjs",
     "installation:new": "node scripts/create-installation.mjs",

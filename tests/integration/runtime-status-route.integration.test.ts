@@ -70,7 +70,7 @@ describe("runtime status capability exposure", () => {
       ready: true,
       capabilities: { webSearch: true },
     });
-    expect(mocked.capabilities).toHaveBeenCalledOnce();
+    expect(mocked.capabilities).not.toHaveBeenCalled();
     expect(mocked.prewarmConnection).toHaveBeenCalledWith(
       "/tmp/aibrain-runtime-status-route/projects/default",
     );

@@ -14,10 +14,15 @@ import {
 class EventQueue implements AsyncIterable<AppServerEvent> {
   private values: AppServerEvent[] = [];
   private waiters: Array<(value: IteratorResult<AppServerEvent>) => void> = [];
+  private closed = false;
   push(value: AppServerEvent) {
     const waiter = this.waiters.shift();
     if (waiter) waiter({ done: false, value });
     else this.values.push(value);
+  }
+  close() {
+    this.closed = true;
+    for (const waiter of this.waiters.splice(0)) waiter({ done: true, value: undefined });
   }
   get pending() { return this.values.length; }
   [Symbol.asyncIterator](): AsyncIterator<AppServerEvent> {
@@ -25,6 +30,7 @@ class EventQueue implements AsyncIterable<AppServerEvent> {
       next: () => {
         const value = this.values.shift();
         if (value) return Promise.resolve({ done: false, value });
+        if (this.closed) return Promise.resolve({ done: true, value: undefined });
         return new Promise((resolve) => this.waiters.push(resolve));
       },
     };
@@ -67,6 +73,28 @@ function event(sequence: number, message: AppServerEvent["message"]): AppServerE
 }
 
 describe("AppServerRpcRouter", () => {
+  it("stays failed after an unexpected EOF so a cached initializer cannot mask a dead transport", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    const failed = vi.fn();
+    await router.start();
+    router.registerTurn("thread-a", "local-a", {
+      onNotification: vi.fn(),
+      onServerRequest: vi.fn(),
+      onFailure: failed,
+    });
+
+    transport.queue.close();
+    await vi.waitFor(() => expect(router.failed).toBe(true));
+
+    expect(failed).toHaveBeenCalledOnce();
+    expect(router.hasActiveTurn("thread-a", "local-a")).toBe(false);
+    await expect(router.start()).rejects.toThrow("event stream closed unexpectedly");
+    await expect(router.request({ method: "account/read", id: "after-eof", params: { refreshToken: false } }))
+      .rejects.toThrow("event stream closed unexpectedly");
+    await router.close();
+  });
+
   it("returns a typed timeout so callers can recover without resubmitting a turn", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);

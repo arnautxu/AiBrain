@@ -80,13 +80,15 @@ export class WorkerAppServerClient {
   }
 
   async initialize() {
+    if (this.router.failed) throw new Error("App Server transport is unavailable.");
     if (!this.initialized) {
       this.initialized = this.initializeOnce().catch((error) => {
         this.initialized = null;
         throw error;
       });
     }
-    return this.initialized;
+    await this.initialized;
+    if (this.router.failed) throw new Error("App Server transport is unavailable.");
   }
 
   private async initializeOnce() {
