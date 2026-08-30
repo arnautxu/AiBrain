@@ -370,6 +370,7 @@ export function ChatWorkspace({
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerDraftAdoptedRef = useRef(false);
   const composerShellRef = useRef<HTMLDivElement>(null);
   const composerMeasurementRef = useRef<HTMLDivElement>(null);
   const shouldStickToBottomRef = useRef(true);
@@ -408,6 +409,19 @@ export function ChatWorkspace({
   useLayoutEffect(() => {
     resizeComposer();
   }, [prompt, resizeComposer]);
+
+  useLayoutEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea || !hydrated) return;
+    if (!composerDraftAdoptedRef.current) {
+      composerDraftAdoptedRef.current = true;
+      if (textarea.value && textarea.value !== prompt) {
+        onPromptChange(textarea.value);
+        return;
+      }
+    }
+    if (textarea.value !== prompt) textarea.value = prompt;
+  }, [hydrated, onPromptChange, prompt]);
 
   useEffect(() => {
     const shell = composerShellRef.current;
@@ -540,7 +554,7 @@ export function ChatWorkspace({
   };
 
   return (
-    <main className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+    <main aria-busy={!hydrated} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       <header data-testid="mobile-app-header" className="mobile-app-header flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
         <div className="flex min-w-0 items-center gap-2">
           <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
@@ -651,7 +665,7 @@ export function ChatWorkspace({
               className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[26px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] ${hasMessages ? "min-h-[26px]" : "min-h-14"}`}
               placeholder={`Escribe a ${placeholderName}…`}
               rows={1}
-              value={prompt}
+              defaultValue={prompt}
               onChange={(event) => { onPromptChange(event.target.value); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
               onKeyDown={(event) => {
                 if (mentionOpen && mentionOptions.length && (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter")) {

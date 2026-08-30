@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { establishDemoSession, submitPrompt } from "../helpers/playwright-auth";
 
 const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 const events = [
@@ -19,16 +20,8 @@ async function openSyntheticTurn(page: Page) {
     headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
     body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
   }));
-  await page.goto("/login");
-  const origin = new URL(page.url()).origin;
-  const loginResponse = await page.context().request.post(`${origin}/api/auth/login`, {
-    data: { userId: demoUserId },
-    headers: { Origin: origin },
-  });
-  expect(loginResponse.ok()).toBe(true);
-  await page.goto("/");
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Ejecuta una comprobación sintética.");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await establishDemoSession(page, demoUserId);
+  await submitPrompt(page, "Ejecuta una comprobación sintética.");
   await expect(page.getByRole("heading", { name: "Resultado preparado" })).toBeVisible();
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
 }
