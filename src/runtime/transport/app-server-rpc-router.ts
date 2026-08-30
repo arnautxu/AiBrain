@@ -14,6 +14,7 @@ import type {
 type PendingRequest = {
   method: ClientRequest["method"];
   requestId: string | number;
+  threadId: string | null;
   startedAt: number;
   acceptedAt: number | null;
   activeTurnsAtStart: number;
@@ -23,6 +24,13 @@ type PendingRequest = {
   rejectSubmissionDeadline: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
   beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>;
+  resolveLate: (value: JsonValue) => void;
+  rejectLate: (error: Error) => void;
+};
+
+type TimedOutRequest = {
+  pending: PendingRequest;
+  cleanup: ReturnType<typeof setTimeout>;
 };
 
 export type AppServerRequestMetric = Readonly<{
@@ -45,6 +53,7 @@ export class AppServerRequestTimeoutError extends Error {
     readonly method: ClientRequest["method"],
     readonly requestId: string | number,
     readonly timeoutMs: number,
+    readonly lateResponse: Promise<JsonValue> | null = null,
   ) {
     super(`App Server request timed out: ${method}.`);
     this.name = "AppServerRequestTimeoutError";
@@ -100,6 +109,18 @@ function eventScope(rpc: ServerNotification | ServerRequest) {
   return { threadId: params.threadId, turnId };
 }
 
+function requestThreadId(rpc: ClientRequest) {
+  const params = isRecord(rpc.params) ? rpc.params as unknown as Record<string, unknown> : null;
+  return params && typeof params.threadId === "string"
+    ? params.threadId
+    : null;
+}
+
+function responseThreadId(response: JsonRpcSuccess | JsonRpcFailure) {
+  if (!("result" in response) || !isRecord(response.result) || !isRecord(response.result.thread)) return null;
+  return typeof response.result.thread.id === "string" ? response.result.thread.id : null;
+}
+
 function serverResponseClientRequestId(event: AppServerEvent, request: ServerRequest) {
   const scope = eventScope(request);
   const scopeDigest = scope
@@ -122,6 +143,7 @@ function responseError(response: JsonRpcFailure) {
  */
 export class AppServerRpcRouter {
   private readonly pending = new Map<string | number, PendingRequest>();
+  private readonly timedOut = new Map<string | number, TimedOutRequest>();
   private readonly reservedRequestIds = new Set<string | number>();
   private readonly turns = new Map<string, TurnRegistrationState>();
   private startPromise: Promise<void> | null = null;
@@ -213,12 +235,24 @@ export class AppServerRpcRouter {
     if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 10 * 60_000) {
       throw new Error("App Server request timeout is invalid.");
     }
-    if (this.reservedRequestIds.has(rpc.id)) throw new Error("App Server request id is already pending.");
+    if (this.reservedRequestIds.has(rpc.id) || this.timedOut.has(rpc.id)) {
+      throw new Error("App Server request id is already pending or awaiting a late response.");
+    }
     this.reservedRequestIds.add(rpc.id);
     const startedAt = this.now();
     const activeTurnsAtStart = this.turns.size;
     const pendingRequestsAtStart = this.pending.size;
-    const timeoutError = new AppServerRequestTimeoutError(rpc.method, rpc.id, timeoutMs);
+    let resolveLate!: (value: JsonValue) => void;
+    let rejectLate!: (error: Error) => void;
+    const lateResponse = new Promise<JsonValue>((resolvePromise, rejectPromise) => {
+      resolveLate = resolvePromise;
+      rejectLate = rejectPromise;
+    });
+    // Most requests finish within their primary deadline and never expose the
+    // late promise. Suppress an unhandled rejection while still allowing a
+    // timeout-aware caller to await the same, already-dispatched request.
+    void lateResponse.catch(() => undefined);
+    const timeoutError = new AppServerRequestTimeoutError(rpc.method, rpc.id, timeoutMs, lateResponse);
     let rejectDeadline!: (error: Error) => void;
     const deadline = new Promise<never>((_resolve, rejectPromise) => {
       rejectDeadline = rejectPromise;
@@ -227,6 +261,14 @@ export class AppServerRpcRouter {
       const pending = this.pending.get(rpc.id);
       if (pending) {
         this.pending.delete(rpc.id);
+        const cleanup = setTimeout(() => {
+          const late = this.timedOut.get(rpc.id);
+          if (late?.pending !== pending) return;
+          this.timedOut.delete(rpc.id);
+          pending.rejectLate(timeoutError);
+        }, Math.max(60_000, Math.min(5 * 60_000, timeoutMs * 2)));
+        cleanup.unref?.();
+        this.timedOut.set(rpc.id, { pending, cleanup });
         this.emitPendingMetric(pending, "timeout");
         pending.reject(timeoutError);
       } else {
@@ -239,6 +281,7 @@ export class AppServerRpcRouter {
           activeTurnsAtStart,
           pendingRequestsAtStart,
         });
+        rejectLate(timeoutError);
       }
       rejectDeadline(timeoutError);
     }, timeoutMs);
@@ -263,6 +306,7 @@ export class AppServerRpcRouter {
         activeTurnsAtStart,
         pendingRequestsAtStart,
       });
+      rejectLate(safeError(error));
       throw error;
     }
     let resolve!: (value: JsonValue) => void;
@@ -274,6 +318,7 @@ export class AppServerRpcRouter {
     const pending: PendingRequest = {
       method: rpc.method,
       requestId: rpc.id,
+      threadId: requestThreadId(rpc),
       startedAt,
       acceptedAt: null,
       activeTurnsAtStart,
@@ -283,6 +328,8 @@ export class AppServerRpcRouter {
       rejectSubmissionDeadline: rejectDeadline,
       timeout,
       beforeResolve,
+      resolveLate,
+      rejectLate,
     };
     this.pending.set(rpc.id, pending);
     const submission = Promise.resolve().then(() => this.transport.send({
@@ -307,6 +354,7 @@ export class AppServerRpcRouter {
         this.emitPendingMetric(pending, "send_error");
       }
       this.reservedRequestIds.delete(rpc.id);
+      rejectLate(safeError(error));
       throw error;
     }
     return result.finally(() => this.reservedRequestIds.delete(rpc.id));
@@ -326,8 +374,14 @@ export class AppServerRpcRouter {
       this.emitPendingMetric(pending, "router_closed");
       pending.reject(error);
       pending.rejectSubmissionDeadline(error);
+      pending.rejectLate(error);
     }
     this.pending.clear();
+    for (const { pending, cleanup } of this.timedOut.values()) {
+      clearTimeout(cleanup);
+      pending.rejectLate(error);
+    }
+    this.timedOut.clear();
     for (const turn of this.turns.values()) {
       turn.resolveRuntimeTurnBinding(null);
       turn.handlers.onFailure(error);
@@ -339,8 +393,7 @@ export class AppServerRpcRouter {
     try {
       for await (const event of this.transport.events()) {
         if (this.closed) break;
-        const completed = this.dispatch(event);
-        if (event.message.kind === "rpc-response") await completed;
+        this.dispatch(event);
         if (this.inFlightEvents.size >= 512) {
           await Promise.race(this.inFlightEvents);
         }
@@ -353,9 +406,14 @@ export class AppServerRpcRouter {
   }
 
   private scopeKey(event: AppServerEvent) {
-    if (event.message.kind === "rpc-response") return null;
+    if (event.message.kind === "rpc-response") {
+      const response = event.message.rpc;
+      const threadId = this.pending.get(response.id)?.threadId ??
+        this.timedOut.get(response.id)?.pending.threadId ?? responseThreadId(response);
+      return threadId ? `thread:${threadId}` : null;
+    }
     const scope = eventScope(event.message.rpc);
-    return scope ? `${scope.threadId}:${scope.turnId ?? "thread"}` : null;
+    return scope ? `thread:${scope.threadId}` : null;
   }
 
   private dispatch(event: AppServerEvent) {
@@ -413,32 +471,47 @@ export class AppServerRpcRouter {
     if (event.message.kind === "rpc-response") {
       const response = event.message.rpc;
       const pending = this.pending.get(response.id);
-      if (!pending) return;
+      const late = pending ? null : this.timedOut.get(response.id) ?? null;
+      const request = pending ?? late?.pending;
+      if (!request) return;
+      if (late) {
+        clearTimeout(late.cleanup);
+        this.timedOut.delete(response.id);
+      }
       if ("error" in response) {
-        clearTimeout(pending.timeout);
-        this.pending.delete(response.id);
-        this.emitPendingMetric(pending, "error");
-        pending.reject(responseError(response));
+        const error = responseError(response);
+        if (pending) {
+          clearTimeout(pending.timeout);
+          this.pending.delete(response.id);
+          this.emitPendingMetric(pending, "error");
+          pending.reject(error);
+        }
+        request.rejectLate(error);
       }
       else {
         try {
-          await pending.beforeResolve?.(response.result, event);
+          await request.beforeResolve?.(response.result, event);
           // The request deadline includes its durable projection hook. If it
           // expired while persistence was blocked, the projection still
           // finishes and the event can be ACKed, but the caller must recover
           // from the typed timeout instead of receiving a late success.
-          if (this.pending.get(response.id) !== pending) return;
-          clearTimeout(pending.timeout);
-          this.pending.delete(response.id);
-          this.emitPendingMetric(pending, "completed");
-          pending.resolve(response.result);
+          if (pending) {
+            if (this.pending.get(response.id) !== pending) return;
+            clearTimeout(pending.timeout);
+            this.pending.delete(response.id);
+            this.emitPendingMetric(pending, "completed");
+            pending.resolve(response.result);
+          }
+          request.resolveLate(response.result);
         } catch (error) {
-          if (this.pending.get(response.id) === pending) {
+          const safe = safeError(error);
+          if (pending && this.pending.get(response.id) === pending) {
             clearTimeout(pending.timeout);
             this.pending.delete(response.id);
             this.emitPendingMetric(pending, "error");
-            pending.reject(safeError(error));
+            pending.reject(safe);
           }
+          request.rejectLate(safe);
           throw error;
         }
       }
@@ -500,8 +573,14 @@ export class AppServerRpcRouter {
       this.emitPendingMetric(pending, "router_closed");
       pending.reject(error);
       pending.rejectSubmissionDeadline(error);
+      pending.rejectLate(error);
     }
     this.pending.clear();
+    for (const { pending, cleanup } of this.timedOut.values()) {
+      clearTimeout(cleanup);
+      pending.rejectLate(error);
+    }
+    this.timedOut.clear();
     for (const turn of this.turns.values()) {
       turn.resolveRuntimeTurnBinding(null);
       turn.handlers.onFailure(error);

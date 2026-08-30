@@ -19,6 +19,7 @@ import { readRuntimeConfig } from "@/runtime/config";
 import { loadInstallationConfig } from "@/config/installation";
 import {
   runWorkerCodexTurn,
+  WorkerTurnRecoveryPendingError,
   type WorkerCodexTurnEvent,
   type WorkerTurnProjection,
 } from "@/runtime/worker-codex-turn";
@@ -686,6 +687,7 @@ export async function POST(request: Request) {
       let runtimeTurnId: string | null = null;
       let firstTextAt: number | null = null;
       let tokenUsage: TokenUsageBreakdown | null = null;
+      let recoveryPending = false;
       const projectionWriter = persistent && turnProjectionStore
         ? new TurnProjectionBatchWriter(
             turnProjectionStore,
@@ -810,10 +812,19 @@ export async function POST(request: Request) {
           if (!request.signal.aborted) await emit({ type: "done" });
         }
       } catch (error) {
-        await emit({
-          type: "error",
-          message: error instanceof Error ? error.message : "El runtime no està disponible.",
-        });
+        if (error instanceof WorkerTurnRecoveryPendingError) {
+          recoveryPending = true;
+          operationalLogger.warn("turn.recovery_pending", {
+            threadId: body.threadId,
+            assistantMessageId: body.assistantMessageId,
+            error,
+          });
+        } else {
+          await emit({
+            type: "error",
+            message: error instanceof Error ? error.message : "El runtime no està disponible.",
+          });
+        }
       } finally {
         clearInterval(keepalive);
         try {
@@ -829,7 +840,7 @@ export async function POST(request: Request) {
             controller.enqueue(line(event));
           }
         }
-        if (assistantMessage.status === "streaming") {
+        if (assistantMessage.status === "streaming" && !recoveryPending) {
           assistantMessage = {
             ...assistantMessage,
             status: "error",
@@ -850,7 +861,7 @@ export async function POST(request: Request) {
             }
           }
         }
-        if (persistent && config.mode === "codex" && turnOutcome === "created") {
+        if (persistent && config.mode === "codex" && !recoveryPending) {
           const completedAt = new Date();
           const status = assistantMessage.status === "complete"
             ? "completed"

@@ -108,6 +108,7 @@ type BrowserServiceState = {
   config: Readonly<InstallationConfig>;
   registry: BrowserRuntimeRegistry;
   tokens: BrowserGatewayTokenService;
+  viewerStreams: Map<string, AbortController>;
 };
 
 const browserGlobal = globalThis as typeof globalThis & {
@@ -140,7 +141,12 @@ async function serviceState(): Promise<BrowserServiceState> {
   const config = await loadInstallationConfig();
   const fingerprint = installationFingerprint(config);
   const existing = browserGlobal.__aibrainBrowserRuntimeService;
-  if (existing?.fingerprint === fingerprint) return existing;
+  if (existing?.fingerprint === fingerprint) {
+    // Dev hot reloads can retain a service created before viewer attachment
+    // fencing was introduced. Upgrade that process-local state in place.
+    existing.viewerStreams ??= new Map();
+    return existing;
+  }
   const inFlight = browserGlobal.__aibrainBrowserRuntimeServicePromise;
   if (inFlight) {
     const initialized = await inFlight;
@@ -148,7 +154,11 @@ async function serviceState(): Promise<BrowserServiceState> {
   }
   const initialize = (async () => {
     const replaced = browserGlobal.__aibrainBrowserRuntimeService;
-    if (replaced) await replaced.registry.close();
+    if (replaced) {
+      for (const controller of replaced.viewerStreams?.values() ?? []) controller.abort();
+      replaced.viewerStreams?.clear();
+      await replaced.registry.close();
+    }
     const state: BrowserServiceState = {
       fingerprint,
       config,
@@ -162,6 +172,7 @@ async function serviceState(): Promise<BrowserServiceState> {
         maxPendingStarts: Number(process.env.AIBRAIN_BROWSER_MAX_PENDING_STARTS || 20),
       }),
       tokens: new BrowserGatewayTokenService({ secret: gatewaySecret() }),
+      viewerStreams: new Map(),
     };
     browserGlobal.__aibrainBrowserRuntimeService = state;
     return state;
@@ -378,15 +389,25 @@ async function executeViewerOperation<Result>(input: {
   userId: string;
   operation: () => Promise<Result>;
   signal?: AbortSignal;
+  recoverOnCancellation?: boolean;
 }) {
   try {
     return await withBrowserOperationDeadline(input.operation, input.signal);
   } catch (error) {
-    if (shouldRecoverBrowserProcess(error)) {
+    if (viewerOperationRequiresProcessRecovery(error, input.recoverOnCancellation)) {
       await recoverBrowserProcess(input.registry, input.userId);
     }
     throw error;
   }
+}
+
+export function viewerOperationRequiresProcessRecovery(
+  error: unknown,
+  recoverOnCancellation = true,
+) {
+  const normalViewerDetach = recoverOnCancellation === false &&
+    error instanceof BrowserServiceError && error.code === "BROWSER_OPERATION_CANCELLED";
+  return !normalViewerDetach && shouldRecoverBrowserProcess(error);
 }
 
 export async function captureBrowserFrame(input: {
@@ -402,6 +423,7 @@ export async function captureBrowserFrame(input: {
     registry: state.registry,
     userId: input.userId,
     signal: input.signal,
+    recoverOnCancellation: false,
     operation: () => state.registry.captureFrame(input.userId, input.threadId),
   });
 }
@@ -444,6 +466,14 @@ export async function* streamBrowserFrames(input: {
   maximumDurationMs?: number;
 }): AsyncGenerator<BrowserFrameStreamEvent> {
   const state = await authorizeGateway({ ...input, capability: "view" });
+  const streamKey = `${input.userId}:${input.threadId}`;
+  const streamController = new AbortController();
+  const previousStream = state.viewerStreams.get(streamKey);
+  state.viewerStreams.set(streamKey, streamController);
+  previousStream?.abort();
+  const detach = () => streamController.abort();
+  input.signal.addEventListener("abort", detach, { once: true });
+  if (input.signal.aborted) detach();
   const frameIntervalMs = Math.max(100, Math.min(1_000, input.frameIntervalMs ?? 180));
   const heartbeatIntervalMs = Math.max(1_000, Math.min(10_000, input.heartbeatIntervalMs ?? 2_500));
   const maximumDurationMs = Math.max(1_000, Math.min(25_000, input.maximumDurationMs ?? 20_000));
@@ -451,41 +481,55 @@ export async function* streamBrowserFrames(input: {
   let sequence = 0;
   let lastDigest: string | null = null;
   let lastEmissionAt = 0;
-  while (!input.signal.aborted && Date.now() < deadline) {
-    const captureStartedAt = Date.now();
-    const frame = await executeViewerOperation({
-      registry: state.registry,
-      userId: input.userId,
-      signal: input.signal,
-      operation: () => state.registry.captureFrame(input.userId, input.threadId),
-    });
-    const data = Buffer.from(frame.dataBase64, "base64");
-    const digest = createHash("sha256").update(data).digest("hex");
-    const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
-    if (digest !== lastDigest) {
-      sequence += 1;
-      lastDigest = digest;
-      lastEmissionAt = Date.now();
-      yield Object.freeze({
-        kind: "frame" as const,
-        sequence,
-        capturedAt: frame.capturedAt,
-        captureDurationMs,
-        mediaType: frame.mediaType,
-        data: new Uint8Array(data),
+  try {
+    while (!streamController.signal.aborted && Date.now() < deadline) {
+      const captureStartedAt = Date.now();
+      const frame = await executeViewerOperation({
+        registry: state.registry,
+        userId: input.userId,
+        signal: streamController.signal,
+        recoverOnCancellation: false,
+        operation: () => state.registry.captureFrame(input.userId, input.threadId),
       });
-    } else if (Date.now() - lastEmissionAt >= heartbeatIntervalMs) {
-      lastEmissionAt = Date.now();
-      yield Object.freeze({
-        kind: "heartbeat" as const,
-        sequence,
-        capturedAt: new Date().toISOString(),
-        captureDurationMs,
-        mediaType: null,
-        data: new Uint8Array(0),
-      });
+      if (streamController.signal.aborted) break;
+      const data = Buffer.from(frame.dataBase64, "base64");
+      const digest = createHash("sha256").update(data).digest("hex");
+      const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
+      if (digest !== lastDigest) {
+        sequence += 1;
+        lastDigest = digest;
+        lastEmissionAt = Date.now();
+        yield Object.freeze({
+          kind: "frame" as const,
+          sequence,
+          capturedAt: frame.capturedAt,
+          captureDurationMs,
+          mediaType: frame.mediaType,
+          data: new Uint8Array(data),
+        });
+      } else if (Date.now() - lastEmissionAt >= heartbeatIntervalMs) {
+        lastEmissionAt = Date.now();
+        yield Object.freeze({
+          kind: "heartbeat" as const,
+          sequence,
+          capturedAt: new Date().toISOString(),
+          captureDurationMs,
+          mediaType: null,
+          data: new Uint8Array(0),
+        });
+      }
+      await waitForNextFrame(
+        frameIntervalMs - (Date.now() - captureStartedAt),
+        streamController.signal,
+      );
     }
-    await waitForNextFrame(frameIntervalMs - (Date.now() - captureStartedAt), input.signal);
+  } catch (error) {
+    if (!streamController.signal.aborted) throw error;
+  } finally {
+    input.signal.removeEventListener("abort", detach);
+    if (state.viewerStreams.get(streamKey) === streamController) {
+      state.viewerStreams.delete(streamKey);
+    }
   }
 }
 
@@ -502,6 +546,7 @@ export async function browserViewerNavigationState(input: {
     registry: state.registry,
     userId: input.userId,
     signal: input.signal,
+    recoverOnCancellation: false,
     operation: () => state.registry.viewerNavigationState(input.userId, input.threadId),
   });
 }

@@ -445,6 +445,26 @@ export function newThreadDestination(
     project.slug === STANDALONE_PROJECT_SLUG && project.status === "active") ?? null;
 }
 
+const MAX_COMPOSER_DRAFTS = 50;
+const MAX_COMPOSER_DRAFT_CHARS = 20_000;
+
+export function composerDraftKey(projectId: string | null, threadId: string | null) {
+  return projectId ? `${projectId}:${threadId ?? "new"}` : "none:new";
+}
+
+export function parseComposerDrafts(value: string | null) {
+  if (!value) return {} as Record<string, string>;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed)
+      .filter(([key, draft]) => key.length <= 80 && typeof draft === "string" && draft.length <= MAX_COMPOSER_DRAFT_CHARS)
+      .slice(-MAX_COMPOSER_DRAFTS)) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
 function localBranchThread(parent: WorkbenchThread, input: BranchThreadInput) {
   const targetIndex = parent.messages.findIndex((message) => message.id === input.messageId);
   const target = parent.messages[targetIndex];
@@ -487,6 +507,7 @@ export function BrainApp({
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.workbench.preview.v1`;
   const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
+  const composerDraftsKey = `aibrain.${session.tenant.id}.${session.user.id}.composer-drafts.v1`;
   const threadReadKey = `aibrain.${session.tenant.id}.${session.user.id}.thread-read.v1`;
   const taskCenterKey = `aibrain.${session.tenant.id}.${session.user.id}.task-center.v1`;
   const [projects, setProjects] = useState(initialWorkbench.projects);
@@ -496,6 +517,7 @@ export function BrainApp({
   const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
   const [preferences, setPreferences] = useState<BrainPreferences>(() => preferencesFromManifest(manifest));
   const [prompt, setPrompt] = useState("");
+  const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
   const [composerExperience, setComposerExperience] = useState<ComposerExperience>("smart");
   const [imageGeneration, setImageGeneration] = useState(false);
@@ -509,7 +531,7 @@ export function BrainApp({
   const [hydrated, setHydrated] = useState(false);
   const [runningThreadIds, setRunningThreadIds] = useState<Set<string>>(() => new Set());
   const [stoppingThreadIds, setStoppingThreadIds] = useState<Set<string>>(() => new Set());
-  const [draftStarting, setDraftStarting] = useState(false);
+  const [startingDraftKeys, setStartingDraftKeys] = useState<Set<string>>(() => new Set());
   const [threadReadMarkers, setThreadReadMarkers] = useState<Record<string, ThreadReadMarker>>({});
   const [actionBusy, setActionBusy] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -547,6 +569,9 @@ export function BrainApp({
     controller: AbortController;
   }>());
   const turnReservationsRef = useRef(new Set<string>());
+  const promptRef = useRef("");
+  const composerDraftsRef = useRef<Record<string, string>>({});
+  const selectionGenerationRef = useRef(0);
   const activeSelectionRef = useRef<{ projectId: string | null; threadId: string | null }>({
     projectId: null,
     threadId: null,
@@ -571,6 +596,13 @@ export function BrainApp({
     setThreads(snapshot.threads);
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
+    const storedDrafts = parseComposerDrafts(localStorage.getItem(composerDraftsKey));
+    const restoredPrompt = storedDrafts[composerDraftKey(project?.id ?? null, thread?.id ?? null)] || "";
+    activeSelectionRef.current = { projectId: project?.id ?? null, threadId: thread?.id ?? null };
+    composerDraftsRef.current = storedDrafts;
+    promptRef.current = restoredPrompt;
+    setComposerDrafts(storedDrafts);
+    setPrompt((current) => current || restoredPrompt);
     setPreferences(loadPreferences(preferencesKey, defaultPreferences));
     setThreadReadMarkers(loadThreadReadMarkers(threadReadKey, snapshot.threads));
     if (initialWorkbench.persistence === "browser-preview") {
@@ -580,7 +612,15 @@ export function BrainApp({
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
-  }, [defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
+  }, [composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const bounded = Object.fromEntries(Object.entries(composerDrafts)
+      .filter(([, draft]) => draft.length > 0)
+      .slice(-MAX_COMPOSER_DRAFTS));
+    localStorage.setItem(composerDraftsKey, JSON.stringify(bounded));
+  }, [composerDrafts, composerDraftsKey, hydrated]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -671,7 +711,11 @@ export function BrainApp({
       setCustomizationInitialTab(requestedSettings);
       setCustomizationOpen(true);
     }
-    if (starter) setPrompt(starter.slice(0, 400));
+    if (starter) {
+      const value = starter.slice(0, 400);
+      promptRef.current = value;
+      setPrompt(value);
+    }
     if (starter) {
       window.history.replaceState(null, "", window.location.pathname);
     }
@@ -684,6 +728,63 @@ export function BrainApp({
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads],
   );
+  const updateComposerPrompt = useCallback((value: string) => {
+    const bounded = value.slice(0, MAX_COMPOSER_DRAFT_CHARS);
+    const key = composerDraftKey(
+      activeSelectionRef.current.projectId,
+      activeSelectionRef.current.threadId,
+    );
+    setComposerDrafts((current) => {
+      if (!bounded) {
+        if (!(key in current)) return current;
+        const next = { ...current };
+        delete next[key];
+        composerDraftsRef.current = next;
+        return next;
+      }
+      if (current[key] === bounded) return current;
+      const next = { ...current, [key]: bounded };
+      composerDraftsRef.current = next;
+      return next;
+    });
+    promptRef.current = bounded;
+    setPrompt(bounded);
+  }, []);
+  const switchComposerSelection = useCallback((next: { projectId: string | null; threadId: string | null }) => {
+    const currentKey = composerDraftKey(
+      activeSelectionRef.current.projectId,
+      activeSelectionRef.current.threadId,
+    );
+    const nextKey = composerDraftKey(next.projectId, next.threadId);
+    const currentPrompt = promptRef.current;
+    const drafts = composerDraftsRef.current;
+    const withCurrent = currentPrompt
+      ? { ...drafts, [currentKey]: currentPrompt.slice(0, MAX_COMPOSER_DRAFT_CHARS) }
+      : drafts;
+    if (withCurrent !== drafts) {
+      composerDraftsRef.current = withCurrent;
+      setComposerDrafts(withCurrent);
+    }
+    selectionGenerationRef.current += 1;
+    activeSelectionRef.current = next;
+    const nextPrompt = withCurrent[nextKey] ?? "";
+    promptRef.current = nextPrompt;
+    setPrompt(nextPrompt);
+  }, []);
+  const adoptCurrentComposerThread = useCallback((projectId: string, threadId: string) => {
+    const previousKey = composerDraftKey(
+      activeSelectionRef.current.projectId,
+      activeSelectionRef.current.threadId,
+    );
+    const nextKey = composerDraftKey(projectId, threadId);
+    const nextDrafts = { ...composerDraftsRef.current };
+    if (promptRef.current) nextDrafts[nextKey] = promptRef.current;
+    delete nextDrafts[previousKey];
+    composerDraftsRef.current = nextDrafts;
+    setComposerDrafts(nextDrafts);
+    selectionGenerationRef.current += 1;
+    activeSelectionRef.current = { projectId, threadId };
+  }, []);
   const activeBrowserDemandKey = useMemo(() => {
     const latestAssistant = activeThread?.messages.findLast((message) => message.role === "assistant") ?? null;
     if (!latestAssistant) return null;
@@ -703,7 +804,7 @@ export function BrainApp({
   const sending = activeThread
     ? runningThreadIds.has(activeThread.id) || activeThread.messages.some((message) =>
         message.role === "assistant" && message.status === "streaming")
-    : draftStarting;
+    : startingDraftKeys.has(composerDraftKey(activeProjectId, null));
   const selectedMessage = useMemo(
     () => activeThread?.messages.find((message) => message.id === selectedMessageId) ??
       activeThread?.messages.findLast((message) => message.role === "assistant") ?? null,
@@ -762,14 +863,14 @@ export function BrainApp({
       );
       notification.onclick = () => {
         window.focus();
-        activeSelectionRef.current = { projectId: newest.projectId, threadId: newest.threadId };
+        switchComposerSelection({ projectId: newest.projectId, threadId: newest.threadId });
         setActiveProjectId(newest.projectId);
         setActiveThreadId(newest.threadId);
         setSelectedMessageId(null);
         notification.close();
       };
     }
-  }, [branding.productName]);
+  }, [branding.productName, switchComposerSelection]);
 
   const refreshTaskCenter = useCallback(async (notify = true) => {
     const response = await fetch("/api/task-center", { cache: "no-store" });
@@ -940,7 +1041,7 @@ export function BrainApp({
     const remembered = threads.find((thread) =>
       thread.id === rememberedId && thread.projectId === projectId && thread.status === "active");
     const thread = remembered ?? firstActiveThread(threads, projectId);
-    activeSelectionRef.current = { projectId, threadId: thread?.id ?? null };
+    switchComposerSelection({ projectId, threadId: thread?.id ?? null });
     setActiveProjectId(projectId);
     setActiveThreadId(thread?.id ?? null);
     setPendingRuntimeContext(null);
@@ -949,7 +1050,7 @@ export function BrainApp({
     setSelectedMessageId(null);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [activeProjectId, activeThreadId, documentUploading, projects, threads]);
+  }, [activeProjectId, activeThreadId, documentUploading, projects, switchComposerSelection, threads]);
 
   const selectThread = useCallback((threadId: string) => {
     if (documentUploading) {
@@ -958,7 +1059,7 @@ export function BrainApp({
     }
     const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
     if (!thread) return;
-    activeSelectionRef.current = { projectId: thread.projectId, threadId: thread.id };
+    switchComposerSelection({ projectId: thread.projectId, threadId: thread.id });
     setActiveProjectId(thread.projectId);
     setActiveThreadId(thread.id);
     setPendingRuntimeContext(null);
@@ -967,7 +1068,7 @@ export function BrainApp({
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
-  }, [documentUploading, threads]);
+  }, [documentUploading, switchComposerSelection, threads]);
 
   const startNewThread = useCallback((projectId?: string) => {
     if (documentUploading) return;
@@ -977,17 +1078,16 @@ export function BrainApp({
       return;
     }
     delete threadByProjectRef.current[destination.id];
-    activeSelectionRef.current = { projectId: destination.id, threadId: null };
+    switchComposerSelection({ projectId: destination.id, threadId: null });
     setActiveProjectId(destination.id);
     setActiveThreadId(null);
     setSelectedMessageId(null);
-    setPrompt("");
     setPendingRuntimeContext(null);
     setAttachments([]);
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [documentUploading, projects]);
+  }, [documentUploading, projects, switchComposerSelection]);
 
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
@@ -1008,6 +1108,7 @@ export function BrainApp({
       if (!thread) {
         thread = await createThreadRequest(activeProject.id, "Conversación con documentos");
         setThreads((current) => [thread as WorkbenchThread, ...current]);
+        adoptCurrentComposerThread(activeProject.id, thread.id);
         setActiveThreadId(thread.id);
         threadByProjectRef.current[activeProject.id] = thread.id;
       }
@@ -1052,7 +1153,7 @@ export function BrainApp({
     } finally {
       setDocumentUploading(false);
     }
-  }, [activeProject, activeThread, documentUploading, documents, initialWorkbench.persistence, sending]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, documentUploading, documents, initialWorkbench.persistence, sending]);
 
   const freezePublication = useCallback(async (draftId: string, targetRelativePath: string) => {
     const draft = publications.find((candidate) => candidate.id === draftId);
@@ -1176,11 +1277,15 @@ export function BrainApp({
       projectId: activeProject.id,
       threadId: initialThreadId,
     };
+    const selectionGenerationAtStart = selectionGenerationRef.current;
+    const selectionDraftKey = composerDraftKey(selectionAtStart.projectId, selectionAtStart.threadId);
     const reservationKey = initialThreadId ?? `project:${activeProject.id}:new`;
     if (turnReservationsRef.current.has(reservationKey)) return;
     turnReservationsRef.current.add(reservationKey);
     const sendIntentAt = performance.now();
-    if (!initialThreadId) setDraftStarting(true);
+    if (!initialThreadId) {
+      setStartingDraftKeys((current) => new Set(current).add(selectionDraftKey));
+    }
     let thread = activeThread && activeThread.status === "active" &&
       activeThread.projectId === activeProject.id ? activeThread : null;
     let assistantMessage: ChatMessage | null = null;
@@ -1194,12 +1299,12 @@ export function BrainApp({
         thread = initialWorkbench.persistence === "browser-preview"
           ? localThread(activeProject.id, title)
           : await createThreadRequest(activeProject.id, title);
-        setDraftStarting(false);
         setThreads((current) => [thread as WorkbenchThread, ...current]);
-        ownsVisibleComposer = activeSelectionRef.current.projectId === selectionAtStart.projectId &&
+        ownsVisibleComposer = selectionGenerationRef.current === selectionGenerationAtStart &&
+          activeSelectionRef.current.projectId === selectionAtStart.projectId &&
           activeSelectionRef.current.threadId === selectionAtStart.threadId;
         if (ownsVisibleComposer) {
-          activeSelectionRef.current = { projectId: activeProject.id, threadId: thread.id };
+          adoptCurrentComposerThread(activeProject.id, thread.id);
           setActiveThreadId(thread.id);
           threadByProjectRef.current[activeProject.id] = thread.id;
         }
@@ -1270,8 +1375,20 @@ export function BrainApp({
           }
         : candidate));
       clientTurnPerformance.feedbackApplied("local");
+      setComposerDrafts((current) => {
+        const next = { ...current };
+        // Consume only the exact draft that started this turn. If the user
+        // left, came back and typed a newer draft while thread creation was
+        // pending, that newer value belongs to the visible composer.
+        if (next[selectionDraftKey] === prompt) delete next[selectionDraftKey];
+        const threadDraftKey = composerDraftKey(activeProject.id, threadId);
+        if (next[threadDraftKey] === prompt) delete next[threadDraftKey];
+        composerDraftsRef.current = next;
+        return next;
+      });
       if (ownsVisibleComposer) {
         setSelectedMessageId(assistantId);
+        promptRef.current = "";
         setPrompt("");
         setPendingRuntimeContext(null);
         setAttachments([]);
@@ -1349,10 +1466,17 @@ export function BrainApp({
         });
       }
       turnReservationsRef.current.delete(reservationKey);
-      if (!initialThreadId) setDraftStarting(false);
+      if (!initialThreadId) {
+        setStartingDraftKeys((current) => {
+          if (!current.has(selectionDraftKey)) return current;
+          const next = new Set(current);
+          next.delete(selectionDraftKey);
+          return next;
+        });
+      }
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1366,11 +1490,23 @@ export function BrainApp({
         ? localBranchThread(activeThread, input)
         : await branchThreadRequest(activeThread.id, input);
       setThreads((current) => [result.thread, ...current]);
+      switchComposerSelection({ projectId: result.thread.projectId, threadId: result.thread.id });
       setActiveProjectId(result.thread.projectId);
       setActiveThreadId(result.thread.id);
       threadByProjectRef.current[result.thread.projectId] = result.thread.id;
       setSelectedMessageId(null);
-      setPrompt(result.draftMessage ?? "");
+      if (result.draftMessage) {
+        setComposerDrafts((current) => {
+          const next = {
+            ...current,
+            [composerDraftKey(result.thread.projectId, result.thread.id)]: result.draftMessage as string,
+          };
+          composerDraftsRef.current = next;
+          return next;
+        });
+        promptRef.current = result.draftMessage;
+        setPrompt(result.draftMessage);
+      }
       setPendingRuntimeContext(null);
       setAttachments([]);
       setDocuments([]);
@@ -1385,7 +1521,7 @@ export function BrainApp({
     } finally {
       setActionBusy(false);
     }
-  }, [actionBusy, activeThread, initialWorkbench.persistence, sending]);
+  }, [actionBusy, activeThread, initialWorkbench.persistence, sending, switchComposerSelection]);
 
   useEffect(() => {
     if (!pendingBranchSend || pendingBranchSend.threadId !== activeThreadId || sending || actionBusy) return;
@@ -1533,8 +1669,10 @@ export function BrainApp({
       setProjects(nextProjects);
       if (updated.status === "archived" && activeProjectId === updated.id) {
         const next = firstActiveProject(nextProjects);
+        const nextThread = next ? firstActiveThread(threads, next.id) : null;
+        switchComposerSelection({ projectId: next?.id ?? null, threadId: nextThread?.id ?? null });
         setActiveProjectId(next?.id ?? null);
-        setActiveThreadId(next ? firstActiveThread(threads, next.id)?.id ?? null : null);
+        setActiveThreadId(nextThread?.id ?? null);
         setSelectedMessageId(null);
       }
       return updated;
@@ -1544,7 +1682,7 @@ export function BrainApp({
     } finally {
       setActionBusy(false);
     }
-  }, [activeProjectId, initialWorkbench.persistence, projects, threads]);
+  }, [activeProjectId, initialWorkbench.persistence, projects, switchComposerSelection, threads]);
 
   const persistThreadPatch = useCallback(async (
     thread: WorkbenchThread,
@@ -1565,6 +1703,7 @@ export function BrainApp({
       setThreads(nextThreads);
       if (updated.status === "archived" && activeThreadId === updated.id) {
         const next = firstActiveThread(nextThreads, updated.projectId);
+        switchComposerSelection({ projectId: updated.projectId, threadId: next?.id ?? null });
         setActiveThreadId(next?.id ?? null);
         setSelectedMessageId(null);
       }
@@ -1575,7 +1714,7 @@ export function BrainApp({
     } finally {
       setActionBusy(false);
     }
-  }, [activeThreadId, initialWorkbench.persistence, threads]);
+  }, [activeThreadId, initialWorkbench.persistence, switchComposerSelection, threads]);
 
   const submitTextDialog = useCallback(async (value: string) => {
     if (!textDialog) return;
@@ -1586,6 +1725,7 @@ export function BrainApp({
           ? localProject(projects, value)
           : await createProjectRequest(value);
         setProjects((current) => [project, ...current]);
+        switchComposerSelection({ projectId: project.id, threadId: null });
         setActiveProjectId(project.id);
         setActiveThreadId(null);
         setSelectedMessageId(null);
@@ -1602,7 +1742,7 @@ export function BrainApp({
       return;
     }
     if (await persistThreadPatch(textDialog.thread, { title: value })) setTextDialog(null);
-  }, [initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, textDialog]);
+  }, [initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog]);
 
   const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction) => {
     if (action === "archive" && threads.some((thread) =>
@@ -1844,7 +1984,7 @@ export function BrainApp({
           ? { attempt: streamRecoveryNotice.attempt }
           : null}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
-        onPromptChange={setPrompt}
+        onPromptChange={updateComposerPrompt}
         onComposerExperienceChange={setComposerExperience}
         onDestinationChange={startNewThread}
         onConnectorMentionIdsChange={setSelectedConnectorMentionIds}

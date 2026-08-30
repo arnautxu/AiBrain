@@ -54,9 +54,16 @@ test("conversations run independently, cancel independently and notify on backgr
 
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿En qué te puedo ayudar, .+\?/ })).toBeVisible();
-  await page.getByRole("textbox", { name: "Mensaje" }).fill("Segunda tarea cancelable");
-  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  const composer = page.getByRole("textbox", { name: "Mensaje" });
+  await composer.fill("Segunda tarea cancelable");
+  await page.getByRole("button", { name: /^Primera tarea en segundo plano/ }).click();
+  await expect(page.getByRole("textbox", { name: "Mensaje" })).toHaveValue("");
+  await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
+  await expect(page.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Segunda tarea cancelable");
+  await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
+  await page.getByRole("textbox", { name: "Mensaje" }).press("Enter");
   await expect.poll(() => chatRequests).toBe(2);
+  await expect(page.getByRole("textbox", { name: "Mensaje" })).toHaveValue("");
 
   await page.getByRole("button", { name: "Detener respuesta" }).click();
   second.release();
@@ -66,7 +73,7 @@ test("conversations run independently, cancel independently and notify on backgr
   await expect(runningProject).toBeVisible();
   await runningProject.click();
 
-  const firstThread = page.getByRole("button", { name: /Primera tarea en segundo plano/ });
+  const firstThread = page.getByRole("button", { name: /^Primera tarea en segundo plano/ });
   await expect(firstThread.getByLabel("Trabajando")).toBeVisible();
   await page.getByRole("button", { name: /^Segunda tarea cancelable(?: Hoy)?$/ }).click();
 
