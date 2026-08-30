@@ -24,10 +24,13 @@ Crear fuera del repositorio un JSON regular, protegido y sin contraseñas ni tok
 
 ```bash
 export AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json
+npm run company-context:seed
 npm run users:provision -- --input /secure/operator/users.json
 ```
 
-La salida contiene solo instalación y recuentos, nunca emails, paths, tokens o contenido. Repetir exactamente el comando devuelve los usuarios como `unchanged`. Si el empleado ya consumió `password-change-required`, una repetición no lo recrea.
+El seed busca `config/company-context/<companySlug>/`, crea únicamente carpetas y Markdown ausentes y nunca sustituye ni cambia el modo de un archivo de contexto existente. `users:provision` ejecuta la misma operación antes de crear usuarios, por lo que el comando separado es opcional pero útil para una instalación aún sin empleados. Si no existe un seed versionado para la empresa, se conservan las plantillas genéricas.
+
+La salida de usuarios contiene solo instalación y recuentos, nunca emails, paths, tokens o contenido. Repetir exactamente el comando devuelve los usuarios como `unchanged`. Si el empleado ya consumió `password-change-required`, una repetición no lo recrea.
 
 ## Resultado por usuario
 
@@ -47,7 +50,7 @@ La salida contiene solo instalación y recuentos, nunca emails, paths, tokens o 
   browser/downloads/
 ```
 
-La primera ejecución también crea `<companyContextRoot>/PERMISSIONS.md` con una política de instalación conservadora. La publicación queda denegada hasta que el administrador sustituya de forma atómica la regla correspondiente, incremente `policyVersion` y conserve la versión anterior. `PERMISSIONS.md` se mantiene `0400`; directorios privados `0700`, secretos/estado `0600`.
+La primera ejecución también crea `<companyContextRoot>/PERMISSIONS.md` con una política de instalación conservadora. La publicación queda denegada hasta que el administrador sustituya de forma atómica la regla correspondiente, incremente `policyVersion` y conserve la versión anterior. `PERMISSIONS.md` se valida y mantiene `0400`; los demás archivos de contexto existentes no se reescriben ni se les cambia el modo. Directorios privados usan `0700` y secretos/estado `0600`.
 
 El command no crea el usuario remoto, no cambia suscripciones, no toca Supabase product data y no realiza ninguna acción sobre NAS, DNS o producción.
 

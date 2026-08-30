@@ -1,5 +1,8 @@
-# Arnall workflows
+# Work and process index
 
-No internal Arnall process has yet been supplied as authoritative documentation.
+- `work/CURRENT_WORK.md`: current work known to the seed.
+- `processes/PROCESSES.md`: internal process inventory.
+- `objectives/OBJECTIVES.md`: supplied business objectives and installation objectives.
+- `automations/AUTOMATIONS.md`: reviewed automation inventory and its authorization boundary.
 
-Arnall AI may research public information and help draft, analyze or organize work, but it must distinguish public facts from internal company facts. It must not invent stock, prices, schedules, suppliers, recipes, financial data, employee responsibilities or operating procedures.
+No internal Arnall operating process has yet been supplied as authoritative documentation.
