@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { itemSources, itemToolResult } from "@/runtime/codex-app-server";
+import { isChatStreamEvent } from "@/lib/chat-contract";
+import { itemActivity, itemSources, itemToolResult } from "@/runtime/codex-app-server";
 
 const observedAt = "2026-08-28T09:00:00.000Z";
 
@@ -45,5 +46,19 @@ describe("runtime source and tool result projection", () => {
   it("does not fabricate a source for a command or a web result without a URL", () => {
     expect(itemSources({ item: { id: "command-1", type: "commandExecution", command: "pwd" } })).toEqual([]);
     expect(itemSources({ item: { id: "web-2", type: "webSearch", results: [{ title: "Sin enlace" }] } })).toEqual([]);
+  });
+
+  it("normalizes terminal control bytes before durable projection", () => {
+    const params = { item: {
+      id: "command-pdf", type: "commandExecution", command: "pdftotext file.pdf -",
+      status: "completed", exitCode: 0, aggregatedOutput: "Pages: 1\n\f\u0000",
+    } };
+    const result = itemToolResult(params, true, observedAt);
+    const activity = itemActivity(params, true);
+
+    expect(result?.output).toBe("Pages: 1\n��");
+    expect(activity?.output).toBe("Pages: 1\n��");
+    expect(isChatStreamEvent({ type: "toolResult", item: result })).toBe(true);
+    expect(isChatStreamEvent({ type: "activity", item: activity })).toBe(true);
   });
 });

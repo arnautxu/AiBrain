@@ -207,7 +207,10 @@ function fileChangeSummary(changes: unknown) {
 
 function compactRuntimeText(value: unknown, maximum: number) {
   if (typeof value !== "string") return null;
-  const compact = value.replace(/\s+/gu, " ").trim();
+  const compact = value
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "\uFFFD")
+    .replace(/\s+/gu, " ")
+    .trim();
   return compact ? compact.slice(0, maximum) : null;
 }
 
@@ -311,14 +314,20 @@ export function itemSources(params: unknown): TurnSource[] {
   return [...unique.values()].slice(0, 100);
 }
 
-function safeRuntimeOutput(value: unknown) {
-  if (typeof value === "string") return value.slice(0, 64_000);
-  if (value === null || value === undefined) return null;
-  try {
-    return JSON.stringify(value, null, 2).slice(0, 64_000);
-  } catch {
-    return null;
+export function safeRuntimeOutput(value: unknown) {
+  let output: string;
+  if (typeof value === "string") output = value;
+  else if (value === null || value === undefined) return null;
+  else {
+    try {
+      output = JSON.stringify(value, null, 2);
+    } catch {
+      return null;
+    }
   }
+  return output
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "\uFFFD")
+    .slice(0, 64_000);
 }
 
 function mcpOutput(result: unknown) {
@@ -329,7 +338,7 @@ function mcpOutput(result: unknown) {
       if (isRecord(entry) && typeof entry.text === "string") parts.push(entry.text);
     }
   }
-  if (parts.length > 0) return parts.join("\n\n").slice(0, 64_000);
+  if (parts.length > 0) return safeRuntimeOutput(parts.join("\n\n"));
   return safeRuntimeOutput(result.structuredContent);
 }
 
@@ -418,7 +427,7 @@ export function itemToolResult(
       kind: browser ? "browser" : "app",
       title: `${browser ? "Navegador" : "Herramienta"} · ${compactRuntimeText(item.tool, 120) ?? "acción"}`,
       summary: compactRuntimeText(item.namespace, 4_000),
-      output: content.length ? content.join("\n\n").slice(0, 64_000) : null,
+      output: content.length ? safeRuntimeOutput(content.join("\n\n")) : null,
     };
   }
   return null;
@@ -437,9 +446,9 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
       id: item.id,
       kind: "command",
       label: status === "running" ? "Executant una ordre" : "Ordre executada",
-      detail: command,
+      detail: safeRuntimeOutput(command) ?? "Ordre de terminal",
       ...(typeof item.aggregatedOutput === "string"
-        ? { output: item.aggregatedOutput }
+        ? { output: safeRuntimeOutput(item.aggregatedOutput) ?? "" }
         : {}),
       status,
     };
