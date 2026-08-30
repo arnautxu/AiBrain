@@ -597,7 +597,10 @@ export async function runWorkerCodexTurn(
     const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
     finalAnswerText.set(itemId, rawValue);
     if (!/(?:\s|[.!?…:;])$/u.test(rawValue)) return;
-    const publicValue = publicAssistantText(rawValue, assistantName);
+    const publicValue = publicAssistantText(
+      privateWorkspaceSafeText(rawValue, [projectWorkspace, runtime.handle.roots.workspace]),
+      assistantName,
+    );
     if (!publicValue || publishedFinalAnswerText.get(itemId) === publicValue) return;
     publishedFinalAnswerText.set(itemId, publicValue);
     telemetry.delta();
@@ -608,7 +611,10 @@ export async function runWorkerCodexTurn(
     value: string,
     projection?: WorkerTurnProjection,
   ) => {
-    const publicValue = publicAssistantText(value, assistantName);
+    const publicValue = publicAssistantText(
+      privateWorkspaceSafeText(value, [projectWorkspace, runtime.handle.roots.workspace]),
+      assistantName,
+    );
     finalAnswerText.set(itemId, value.slice(0, 128_000));
     if (publicValue && publishedFinalAnswerText.get(itemId) !== publicValue) {
       publishedFinalAnswerText.set(itemId, publicValue);
@@ -863,7 +869,13 @@ export async function runWorkerCodexTurn(
     const text = recoveredAgentText(recoveredTurnState);
     if (text !== null) {
       await emit(
-        { type: "content", value: privateWorkspaceSafeText(text, [projectWorkspace, runtime.handle.roots.workspace]) },
+        {
+          type: "content",
+          value: publicAssistantText(
+            privateWorkspaceSafeText(text, [projectWorkspace, runtime.handle.roots.workspace]),
+            assistantName,
+          ),
+        },
         { envelope, key: `${keyPrefix}:content:${recoveredTurnState.id}` },
       );
     }
