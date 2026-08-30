@@ -44,6 +44,31 @@ require_release_readback_runtime() {
   ' >/dev/null 2>&1 || fail "host Node runtime cannot execute the release readback collector"
 }
 
+require_noninteractive_browser_policy() {
+  local compose_file="$1" effective
+  effective="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" config --format json)" \
+    || fail "effective Compose policy cannot be resolved"
+  jq -e '
+    .services.app.environment.CODEX_APPROVAL_POLICY == "never" and
+    .services.app.environment.AIBRAIN_BROWSER_INTERACTIVE_APPROVALS == "disabled" and
+    .services["automation-worker"].environment.CODEX_APPROVAL_POLICY == "never" and
+    .services["automation-worker"].environment.AIBRAIN_BROWSER_INTERACTIVE_APPROVALS == "disabled"
+  ' <<<"$effective" >/dev/null || fail "effective Compose policy permits interactive browser approvals"
+}
+
+runtime_noninteractive_browser_policy_is_active() {
+  local compose_file="$1" service container
+  for service in app automation-worker; do
+    container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q "$service")"
+    [[ "$container" =~ ^[a-f0-9]{12,64}$ ]] || return 1
+    docker container inspect "$container" --format '{{json .Config.Env}}' \
+      | jq -e '
+        index("CODEX_APPROVAL_POLICY=never") != null and
+        index("AIBRAIN_BROWSER_INTERACTIVE_APPROVALS=disabled") != null
+      ' >/dev/null || return 1
+  done
+}
+
 cleanup_readback_staging() {
   local status="$?"
   set +e
@@ -229,9 +254,11 @@ deploy_ghcr_release() {
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
   require_release_readback_runtime
+  require_noninteractive_browser_policy "$compose_file"
 
   if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null \
-      && automation_worker_is_healthy; then
+      && automation_worker_is_healthy \
+      && runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml"; then
     cleanup_previous_aibrain_images
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
     return
@@ -258,6 +285,8 @@ deploy_ghcr_release() {
   docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" up -d --no-deps alert-dispatcher
   AIBRAIN_AUTOMATION_WORKER_ENABLED="$AUTOMATION_WORKER_ENABLED" \
     node "${OPS_ROOT}/manage-release.mjs" "${manager_args[@]}"
+  runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml" \
+    || fail "deployed runtime permits interactive browser approvals"
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
   cleanup_previous_aibrain_images
@@ -365,6 +394,9 @@ collect_release_readbacks() {
   require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   jq -e --arg revision "$revision" '.schemaVersion == 3 and .current.revision == $revision' "$STATE_FILE" >/dev/null \
     || fail "release state does not match the requested candidate"
+  require_noninteractive_browser_policy "$compose_file"
+  runtime_noninteractive_browser_policy_is_active "$compose_file" \
+    || fail "release readback found interactive browser approvals enabled"
   [[ "$backend_ci_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
   [[ "$publish_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Publish run ID is invalid"
   [[ "$deploy_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Deploy run ID is invalid"
