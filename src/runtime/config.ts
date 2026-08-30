@@ -67,7 +67,7 @@ export function readRuntimeConfig(tenantId: string, workspaceKey = "workspace"):
       : path.join(workspaceRoot, tenantId, "projects", workspaceKey),
     model: configuredValue(process.env.CODEX_MODEL),
     approvalPolicy:
-      process.env.CODEX_APPROVAL_POLICY === "never" ? "never" : "on-request",
+      process.env.CODEX_APPROVAL_POLICY === "on-request" ? "on-request" : "never",
     sandbox:
       process.env.CODEX_SANDBOX === "read-only" ? "read-only" : "workspace-write",
   };

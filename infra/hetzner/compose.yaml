@@ -17,7 +17,8 @@ services:
       AIBRAIN_CODEX_EXPECTED_VERSION: "0.149.1"
       CHAT_RUNTIME: codex
       CODEX_BIN: /usr/local/bin/aibrain-codex-worker
-      CODEX_APPROVAL_POLICY: on-request
+      CODEX_APPROVAL_POLICY: never
+      AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled
       CODEX_SANDBOX: workspace-write
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
@@ -119,7 +120,8 @@ services:
       AIBRAIN_CODEX_EXPECTED_VERSION: "0.149.1"
       CHAT_RUNTIME: codex
       CODEX_BIN: /usr/local/bin/aibrain-codex-worker
-      CODEX_APPROVAL_POLICY: on-request
+      CODEX_APPROVAL_POLICY: never
+      AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled
       CODEX_SANDBOX: workspace-write
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"

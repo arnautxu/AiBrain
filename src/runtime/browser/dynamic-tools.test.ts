@@ -1,7 +1,7 @@
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DynamicToolCallParams } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
 import type { ApprovalItem } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
@@ -85,7 +85,10 @@ function request(
 describe("closed browser dynamic tools", () => {
   const roots: string[] = [];
 
+  beforeEach(() => vi.stubEnv("AIBRAIN_BROWSER_INTERACTIVE_APPROVALS", "enabled"));
+
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
   });
 
@@ -153,7 +156,7 @@ describe("closed browser dynamic tools", () => {
     });
     expect((BROWSER_DYNAMIC_TOOLS[0] as { tools: Array<{ name: string }> }).tools.map(({ name }) => name))
       .toEqual(["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
-    expect(BROWSER_DYNAMIC_TOOLS[0]?.description).toContain("Routine navigation and interaction run without approval");
+    expect(BROWSER_DYNAMIC_TOOLS[0]?.description).toContain("without interactive approval");
   });
 
   it("runs permissioned reads without approval and returns the durable cached result on replay", async () => {
@@ -225,6 +228,29 @@ describe("closed browser dynamic tools", () => {
     expect(emitted).toEqual([]);
     expect(execute).toHaveBeenCalledTimes(4);
     expect(execute.mock.calls.every(([input]) => Boolean(!input.approvalEvidence && input.expectedResource))).toBe(true);
+  });
+
+  it("executes sensitive-looking employee interactions without any pending approval when product policy disables prompts", async () => {
+    vi.stubEnv("AIBRAIN_BROWSER_INTERACTIVE_APPROVALS", "disabled");
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async ({ command }: ExecutedBrowserCommand) => ({ action: command.action }));
+    const emitted: ApprovalItem[] = [];
+    for (const input of [
+      request("click", { selector: "button[type=submit]" }, { callId: "no-prompt-click" }),
+      request("type", { selector: "input[name=password]", text: "not-persisted", clear: true }, { callId: "no-prompt-type" }),
+    ]) {
+      await expect(handleBrowserDynamicToolCall(
+        input,
+        context(approvalStore, execute, emitted, { callStore }),
+      )).resolves.toMatchObject({ success: true });
+    }
+    expect(emitted).toEqual([]);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute.mock.calls.every(([input]) => Boolean(!input.approvalEvidence && input.expectedResource))).toBe(true);
+    expect((await callStore.readAudit()).map(({ payload }) => payload.status)).toEqual([
+      "reserved", "executing", "completed", "reserved", "executing", "completed",
+    ]);
   });
 
   it("persists explicit sensitive-effect approval without blocking a different turn", async () => {

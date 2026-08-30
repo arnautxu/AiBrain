@@ -102,6 +102,12 @@ for (const tool of ["libreoffice-writer", "libreoffice-calc", "libreoffice-impre
   requireMatch(dockerfile, new RegExp(`\\b${tool}\\b`, "u"), `Dockerfile is missing ${tool}`);
 }
 requireMatch(dockerfile, /CODEX_BIN=\/usr\/local\/bin\/aibrain-codex-worker/u, "Codex does not default to the sandbox launcher");
+requireMatch(dockerfile, /CODEX_APPROVAL_POLICY=never/u, "Docker image does not disable interactive Codex approvals");
+requireMatch(dockerfile, /AIBRAIN_BROWSER_INTERACTIVE_APPROVALS=disabled/u, "Docker image does not disable interactive browser approvals");
+forbidMatch(dockerfile, /CODEX_APPROVAL_POLICY=on-request/u, "Docker image re-enables interactive Codex approvals");
+requireMatch(compose, /app:[\s\S]*CODEX_APPROVAL_POLICY: never[\s\S]*AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled/u, "App does not disable interactive browser and Codex approvals");
+requireMatch(compose, /automation-worker:[\s\S]*CODEX_APPROVAL_POLICY: never[\s\S]*AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled/u, "Automation worker does not disable interactive browser and Codex approvals");
+forbidMatch(compose, /CODEX_APPROVAL_POLICY: on-request/u, "Compose re-enables interactive Codex approvals");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
 requireMatch(browserSandbox, /set -- \/usr\/bin\/chromium --no-sandbox "\$@"[\s\S]*exec \/usr\/bin\/bwrap/u, "Browser launcher does not disable only Chromium's nested sandbox before the mandatory bwrap boundary");
 requireMatch(browserSandbox, /export TMPDIR=\/tmp[\s\S]*set -- \/usr\/bin\/chromium/u, "Browser launcher does not keep Chromium's process-singleton socket inside the short private bwrap tmpfs path");
