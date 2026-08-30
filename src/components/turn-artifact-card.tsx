@@ -69,6 +69,13 @@ function DocumentCard({ artifact, onPreview }: {
         <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--danger)]" role="alert"><WarningCircle size={13} />{artifact.error ?? "No se ha podido generar la vista previa."}</div>
       ) : artifact.previewUrl && onPreview ? (
         <button type="button" className="flex min-h-10 w-full items-center justify-between border-t border-[var(--border-subtle)] px-3 text-left text-[11px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:bg-[var(--surface-selected)]" onClick={() => onPreview(artifact)}><span>Revisar antes de descargar</span><span aria-hidden>›</span></button>
+      ) : artifact.previewUrl ? (
+        <details className="border-t border-[var(--border-subtle)]">
+          <summary className="cursor-pointer list-none px-3 py-2 text-[9px] font-medium text-[var(--text-muted)] hover:text-[var(--text)] [&::-webkit-details-marker]:hidden">Vista previa ›</summary>
+          <a href={artifact.url} target="_blank" rel="noreferrer" className="block bg-[var(--surface-muted)] p-3" aria-label={`Abrir ${artifact.name}`}>
+            <NextImage unoptimized width={960} height={540} src={artifact.previewUrl} alt={`Vista previa de ${artifact.name}`} className="mx-auto max-h-72 w-auto rounded-md border border-[var(--border)] bg-white object-contain shadow-[var(--shadow-sm)]" />
+          </a>
+        </details>
       ) : (
         <div className="border-t border-[var(--border-subtle)] px-3 py-2 text-[9px] text-[var(--text-muted)]">Documento listo para descargar.</div>
       )}

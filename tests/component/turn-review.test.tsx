@@ -170,6 +170,8 @@ describe("turn activity and Review", () => {
         language: "TypeScript",
         content: "export const ready = true;",
         previewUrl: null,
+        previewMimeType: "text/plain",
+        downloadUrl: "/api/projects/00000000-0000-4000-8000-000000000001/files?path=src%2Fexample.ts&download=1",
       },
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchPreview);
