@@ -46,6 +46,7 @@ const hostPreflight = read("scripts/validate-host-preflight.mjs");
 const releaseManager = read("scripts/manage-release.mjs");
 const backupOrchestrator = read("scripts/orchestrate-backup.mjs");
 const backupRecoveryUnit = read("infra/hetzner/systemd/aibrain-backup-recovery@.service");
+const journaldRetention = read("infra/hetzner/systemd/journald-disk-retention.conf");
 const backupControllerEnv = read("infra/hetzner/backup-controller.env.example");
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
@@ -69,7 +70,8 @@ requireMatch(arnallDeployGateway, /SSH_ORIGINAL_COMMAND[\s\S]{0,240}\^deploy-ghc
 requireMatch(arnallDeployGateway, /AIBRAIN_INSTALLATION_ID=\$\{INSTALLATION_ID\}[\s\S]{0,250}AIBRAIN_COMPOSE_PROJECT_NAME=\$\{COMPOSE_PROJECT\}/u, "Arnall deploy gateway does not verify the exact installation and Compose project");
 requireMatch(arnallDeployGateway, /GHCR_APP_REPOSITORY="ghcr\.io\/arnautxu\/aibrain"[\s\S]{0,160}GHCR_EGRESS_REPOSITORY="ghcr\.io\/arnautxu\/aibrain-egress"/u, "Arnall deploy gateway does not pin the two approved GHCR repositories");
 requireMatch(arnallDeployGateway, /mktemp -d "\$\{RELEASE_ROOT\}\/.ghcr-docker\.[X]+"[\s\S]{0,500}docker --config "\$ghcr_docker_config" pull "\$app_image"[\s\S]{0,160}pull "\$egress_image"/u, "Arnall deploy gateway does not use ephemeral GHCR authentication for exact pulls");
-requireMatch(arnallDeployGateway, /cleanup_previous_aibrain_images[\s\S]{0,300}last-deployment\.json/u, "Arnall deploy gateway does not clean only the superseded AiBrain release after acceptance");
+requireMatch(arnallDeployGateway, /verify_public_health[\s\S]{0,180}cleanup_inactive_aibrain_images[\s\S]{0,120}cleanup_legacy_release_directories/u, "Arnall deploy gateway does not run bounded storage retention after public health");
+requireMatch(journaldRetention, /^\[Journal\]\nSystemMaxUse=512M\n$/u, "journald retention does not enforce the reviewed persistent disk cap");
 requireMatch(arnallDeployGateway, /manage-release\.mjs[\s\S]*health\/live[\s\S]*health\/ready/u, "Arnall deploy gateway does not promote transactionally and verify public health");
 requireMatch(arnallDeployGateway, /require_noninteractive_browser_policy[\s\S]*CODEX_APPROVAL_POLICY=never[\s\S]*AIBRAIN_BROWSER_INTERACTIVE_APPROVALS=disabled/u, "Arnall deploy gateway does not fail closed on interactive browser approval policy");
 requireMatch(arnallDeployWorkflow, /workflow_run:[\s\S]*Publish GHCR images[\s\S]*conclusion == 'success'/u, "Arnall deployment is not gated on successful GHCR publication after Backend CI");

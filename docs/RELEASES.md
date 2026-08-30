@@ -39,13 +39,25 @@ guardado en el estado de release.
 Después de una aceptación satisfactoria el invariante local es exactamente un
 digest activo para `ghcr.io/arnautxu/aibrain` y uno para
 `ghcr.io/arnautxu/aibrain-egress`: los de `current` en `release-state.json`.
-No se conserva rollback local. El rollback automático antes de la aceptación
-sigue usando la release previa que conserva el estado durable y GHCR. El host
-no ejecuta builds desde esta ruta; por seguridad la gateway no usa
+La retención enumera todos los digests locales de esos dos repositorios, vuelve
+a validar label, referencias y consumidores y elimina cada digest inactivo de
+forma individual. También elimina directorios legacy con nombre de revisión
+solo después de `health/live` + `health/ready`, sin transacción pendiente y
+protegiendo las revisiones `current` y `previous`; nombres no reconocidos y
+ficheros de recibos se conservan. No se conserva rollback local. El rollback
+automático antes de la aceptación sigue usando la release previa que conserva
+el estado durable y GHCR. El host no ejecuta builds desde esta ruta; por
+seguridad la gateway no usa
 `docker builder prune` ni un prune general, porque Docker no permite atribuir
 de forma fiable una entrada de caché histórica a una instalación. Cualquier
 caché antigua sin esa atribución queda fuera de esta operación, sin tocar otros
 workloads.
+
+El host debe instalar `infra/hetzner/systemd/journald-disk-retention.conf` como
+`/etc/systemd/journald.conf.d/99-disk-retention.conf` y reiniciar
+`systemd-journald`. El límite de 512 MB es global al host y por eso se gestiona
+como configuración revisada del servidor, nunca desde el gateway de una sola
+instalación.
 
 ## Precondiciones
 

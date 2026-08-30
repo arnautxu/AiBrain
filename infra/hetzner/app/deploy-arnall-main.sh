@@ -232,6 +232,49 @@ cleanup_previous_aibrain_images() {
   done < <(jq -r '.previous.image?, .previous.egressImage? // empty' "$STATE_FILE")
 }
 
+cleanup_inactive_aibrain_images() {
+  local image
+  [[ -f "$STATE_FILE" ]] || return 0
+  while IFS= read -r image; do
+    [[ -n "$image" ]] || continue
+    remove_unused_aibrain_image "$image" || return 1
+  done < <(
+    {
+      jq -r '.previous.image?, .previous.egressImage? // empty' "$STATE_FILE"
+      docker image ls --digests --no-trunc --format '{{.Repository}}@{{.Digest}}'
+    } | sort -u
+  )
+}
+
+cleanup_legacy_release_directories() {
+  local legacy_root="${RELEASE_ROOT}/releases"
+  local current_revision previous_revision target revision
+  [[ -d "$legacy_root" && ! -L "$legacy_root" ]] || return 0
+  [[ ! -e "${STATE_FILE}.transaction.json" ]] || fail "release transaction exists; legacy release cleanup is blocked"
+  current_revision="$(jq -er '.current.revision' "$STATE_FILE")" || fail "current release revision is unavailable"
+  previous_revision="$(jq -r '.previous.revision? // empty' "$STATE_FILE")"
+  while IFS= read -r -d '' target; do
+    revision="${target##*/}"
+    [[ "$revision" =~ ^[0-9a-f]{7}([0-9a-f]{33})?$ ]] || {
+      printf 'ARNALL_RELEASE_DIRECTORY_SKIPPED path=%s reason=unrecognized-name\n' "$target" >&2
+      continue
+    }
+    [[ "$revision" != "$current_revision" && "$revision" != "${current_revision:0:7}" \
+      && "$revision" != "$previous_revision" && "$revision" != "${previous_revision:0:7}" ]] || continue
+    [[ ! -L "$target" && "$(stat -c '%u' "$target")" == "0" ]] \
+      || fail "legacy release directory is not root-controlled: ${target}"
+    (( (8#$(stat -c '%a' "$target") & 8#022) == 0 )) \
+      || fail "legacy release directory is group/world writable: ${target}"
+    rm -rf --one-file-system -- "$target"
+    printf 'ARNALL_RELEASE_DIRECTORY_REMOVED path=%s\n' "$target"
+  done < <(find "$legacy_root" -mindepth 1 -maxdepth 1 -type d -print0)
+}
+
+verify_public_health() {
+  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
+  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
+}
+
 deploy_ghcr_release() {
   local revision="$1" app_image="$2" egress_image="$3" ghcr_user="$4"
   local short_revision="${revision:0:7}"
@@ -259,7 +302,9 @@ deploy_ghcr_release() {
   if jq -e --arg revision "$revision" '.current.revision == $revision' "$STATE_FILE" >/dev/null \
       && automation_worker_is_healthy \
       && runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml"; then
-    cleanup_previous_aibrain_images
+    verify_public_health
+    cleanup_inactive_aibrain_images
+    cleanup_legacy_release_directories
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
     return
   fi
@@ -287,9 +332,9 @@ deploy_ghcr_release() {
     node "${OPS_ROOT}/manage-release.mjs" "${manager_args[@]}"
   runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml" \
     || fail "deployed runtime permits interactive browser approvals"
-  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/live >/dev/null
-  curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
-  cleanup_previous_aibrain_images
+  verify_public_health
+  cleanup_inactive_aibrain_images
+  cleanup_legacy_release_directories
 
   jq -n --arg revision "$revision" --arg image "$app_image" --arg egressImage "$egress_image" \
     '{schemaVersion:1,installationId:"company-qa",revision:$revision,image:$image,egressImage:$egressImage,deployedAt:(now|todateiso8601)}' \

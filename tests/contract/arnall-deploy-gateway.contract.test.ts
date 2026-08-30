@@ -27,7 +27,9 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).toContain("effective Compose policy permits interactive browser approvals");
     expect(gateway).toContain("deployed runtime permits interactive browser approvals");
     expect(gateway).toContain('worker_state" == "true|healthy"');
-    expect(gateway).toContain('cleanup_previous_aibrain_images');
+    expect(gateway).toContain('cleanup_inactive_aibrain_images');
+    expect(gateway).toContain('cleanup_legacy_release_directories');
+    expect(gateway).toContain('verify_public_health');
     expect(gateway).not.toContain("docker buildx prune");
     expect(gateway).not.toContain("docker build ");
     expect(gateway).not.toContain("docker push ");
@@ -47,12 +49,14 @@ describe("Arnall deployment gateway contract", () => {
   it("adds post-deploy readbacks after health validation, with separate fail-closed sources", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
     const deployment = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
-    const health = gateway.indexOf("/api/health/ready");
+    const health = gateway.indexOf("verify_public_health", deployment);
     const collection = gateway.indexOf("collect_release_readbacks()");
 
     expect(deployment).toBeGreaterThan(-1);
     expect(health).toBeGreaterThan(deployment);
     expect(collection).toBeGreaterThan(health);
+    expect(gateway).toContain("/api/health/live");
+    expect(gateway).toContain("/api/health/ready");
     for (const required of [
       "^collect-readbacks\\ ([0-9a-f]{40})\\ ([0-9]{6,20})\\ ([0-9]{6,20})\\ ([0-9]{6,20})\\ (sha256:[0-9a-f]{64})\\ (sha256:[0-9a-f]{64})$",
       "release state is unavailable",
