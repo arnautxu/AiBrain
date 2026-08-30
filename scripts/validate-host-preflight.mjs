@@ -226,6 +226,13 @@ if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origi
   fail("Supabase auth URL and server egress origin must match exactly");
 }
 const alertPolicy = parseEnv(readFileSync(alertsEnv, "utf8"));
+const healthToken = required(egressPolicy, "AIBRAIN_EGRESS_HEALTH_TOKEN");
+if (!CHANNEL_TOKEN.test(healthToken) || channelTokens.includes(healthToken)) {
+  fail("egress health token must be strong and distinct from channel tokens");
+}
+if (required(alertPolicy, "AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN") !== healthToken) {
+  fail("alert dispatcher health token must match the dedicated egress health token");
+}
 if (required(alertPolicy, "AIBRAIN_ALERT_SINK") !== "webhook") fail("external alert sink must be webhook");
 let alertWebhook;
 try {

@@ -366,7 +366,7 @@ services:
       - aibrain-internal
       - aibrain-egress
     healthcheck:
-      test: [CMD-SHELL, "test -f /tmp/aibrain-alert-controller-heartbeat && now=$$(date +%s) && last=$$(cat /tmp/aibrain-alert-controller-heartbeat) && test $$((now-last)) -le 180"]
+      test: [CMD, node, /usr/local/share/aibrain/alert-controller-healthcheck.mjs]
       interval: 30s
       timeout: 3s
       retries: 4

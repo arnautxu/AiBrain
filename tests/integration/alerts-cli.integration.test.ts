@@ -93,10 +93,17 @@ describe("operational alerts CLI", () => {
       "1",
     ];
     const first = await execFile(executable, arguments_, { cwd: repositoryRoot, env: test.environment });
-    const result = JSON.parse(first.stdout) as { status: string; codes: string[]; queued: number; delivered: number };
+    const result = JSON.parse(first.stdout) as {
+      status: string;
+      codes: string[];
+      queued: number;
+      delivered: number;
+      delivery: { pending: number; exhausted: number };
+    };
     expect(result.status).toBe("critical");
     expect(result.queued).toBeGreaterThanOrEqual(2);
     expect(result.delivered).toBe(result.queued);
+    expect(result.delivery).toMatchObject({ pending: 0, exhausted: 0 });
     expect(result.codes).toEqual(expect.arrayContaining(["RESTART_LOOP", "PREFLIGHT_FAILURE"]));
 
     const replay = await execFile(executable, arguments_, { cwd: repositoryRoot, env: test.environment });

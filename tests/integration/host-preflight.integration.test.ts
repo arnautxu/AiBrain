@@ -36,6 +36,7 @@ async function fixture(installationId = "company-alpha") {
       `AIBRAIN_EGRESS_BROWSER_TOKEN=${"a".repeat(96)}`,
       `AIBRAIN_EGRESS_WORKER_TOKEN=${"b".repeat(96)}`,
       `AIBRAIN_EGRESS_SERVER_TOKEN=${"c".repeat(96)}`,
+      `AIBRAIN_EGRESS_HEALTH_TOKEN=${"e".repeat(96)}`,
       "AIBRAIN_EGRESS_WORKER_HOSTS=api.openai.com",
       "AIBRAIN_EGRESS_SUPABASE_ORIGIN=https://project-ref.supabase.co",
       "",
@@ -44,6 +45,7 @@ async function fixture(installationId = "company-alpha") {
       "AIBRAIN_ALERT_SINK=webhook",
       "AIBRAIN_ALERT_WEBHOOK_URL=https://alerts.example.test/aibrain",
       `AIBRAIN_ALERT_WEBHOOK_TOKEN=${"d".repeat(96)}`,
+      `AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN=${"e".repeat(96)}`,
       "",
     ].join("\n"), { mode: 0o600 }),
     writeFile(path.join(configRoot, "replica.env"), [

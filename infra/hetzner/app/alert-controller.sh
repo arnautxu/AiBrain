@@ -15,9 +15,12 @@ esac
   || { echo "AIBRAIN_ALERT_WEBHOOK_URL is required" >&2; exit 78; }
 
 while :; do
-  /usr/local/bin/aibrain-alerts \
+  status=$(/usr/local/bin/aibrain-alerts \
     --restart-count-15m "${AIBRAIN_ALERT_RESTART_COUNT_15M:-0}" \
-    --preflight-failure-count-15m "${AIBRAIN_ALERT_PREFLIGHT_FAILURE_COUNT_15M:-0}"
-  date +%s > /tmp/aibrain-alert-controller-heartbeat
+    --preflight-failure-count-15m "${AIBRAIN_ALERT_PREFLIGHT_FAILURE_COUNT_15M:-0}")
+  printf '%s\n' "$status"
+  printf '%s\n' "$status" > /tmp/.aibrain-alert-controller-status.pending
+  chmod 0600 /tmp/.aibrain-alert-controller-status.pending
+  mv /tmp/.aibrain-alert-controller-status.pending /tmp/aibrain-alert-controller-status.json
   sleep "$interval"
 done
