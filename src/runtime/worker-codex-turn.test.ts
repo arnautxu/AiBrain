@@ -468,7 +468,7 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
-    expect(instructions).toContain("La cerca web en viu està disponible");
+    expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
     expect(instructions).toContain("BEGIN AIBRAIN UI PROJECT CONTEXT JSON");
     expect(instructions).toContain(JSON.stringify({
@@ -873,7 +873,7 @@ describe("worker Codex turn", () => {
     const calls: Array<{ method: string; params: unknown }> = [];
     const client = {
       canReuseLoadedThread(runtimeThreadId: string, webSearchEnabled: boolean) {
-        return runtimeThreadId === "runtime-thread-1" && webSearchEnabled === false;
+        return runtimeThreadId === "runtime-thread-1" && webSearchEnabled === true;
       },
       router: {
         registerTurn(_runtimeThreadId: string, _localTurnId: string, value: typeof handlers) {

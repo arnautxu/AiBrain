@@ -308,7 +308,7 @@ export async function POST(request: Request) {
     authenticationMs: Math.max(0, Math.round(performance.now() - requestStartedAt)),
   });
 
-  const requestsControlledFeature = body.options.webSearch || body.options.imageGeneration || Boolean(body.options.skill);
+  const requestsControlledFeature = body.options.imageGeneration || Boolean(body.options.skill);
   if (requestsControlledFeature) {
     try {
       const featurePolicy = await measureChatSetup(
@@ -317,9 +317,7 @@ export async function POST(request: Request) {
         requestStartedAt,
         () => featurePolicyForUser(session),
       );
-      const disabledFeature = body.options.webSearch && !featurePolicy["web-search"]
-        ? "búsqueda web"
-        : body.options.imageGeneration && !featurePolicy["image-generation"]
+      const disabledFeature = body.options.imageGeneration && !featurePolicy["image-generation"]
           ? "generación de imágenes"
           : body.options.skill && !featurePolicy.skills ? "skills" : null;
       if (disabledFeature) {
@@ -637,6 +635,7 @@ export async function POST(request: Request) {
     clientRequestId: body.userMessageId,
     streamRequestId: randomUUID(),
   }, { logger: operationalLogger, startedAt: requestStartedAt });
+  streamTelemetry.admitted();
   let clientDetached = false;
   const detachClient = () => {
     if (clientDetached) return;
@@ -743,6 +742,7 @@ export async function POST(request: Request) {
             assistantName,
             context,
             requestStartedAt,
+            streamTelemetry,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

@@ -81,6 +81,25 @@ It holds the synthetic response open, measures the real click-to-visible-status
 interval with `performance.now()`, asserts it is below 1,000 ms and attaches the
 numeric JSON result. It does not claim anything about provider/model latency.
 
+### Runtime admission and transport overhead
+
+Run `npm run benchmark:chat:runtime` to record two local controls: the previous
+serial admission topology versus parallel memory/worker admission with web as
+a server invariant (while retaining policy-enforcing skill synchronization),
+and direct App Server delivery versus API NDJSON
+encode/decode. The command reports p50/p95 and explicitly excludes provider,
+network, model generation and filesystem persistence. These values quantify
+AiBrain-owned overhead only; they are not model first-token latency.
+
+Controlled run on 2026-08-30 (`80` admission and `800` delivery samples):
+
+| Local fixture | p50 | p95 |
+| --- | ---: | ---: |
+| Serial admission before | 37.214 ms | 42.092 ms |
+| Parallel/invariant admission after | 19.582 ms | 22.210 ms |
+| Direct App Server event delivery | < 0.001 ms | 0.002 ms |
+| API NDJSON encode/decode | 0.005 ms | 0.021 ms |
+
 Historical lifecycle baseline: `d381ccf836516f91464f20225403996e7e8158d1`.
 
 Telemetry P0 candidate base: `f2c48dc9d84c8876bfd0432f4f09f1b648d59da0`.

@@ -503,9 +503,6 @@ export function BrainApp({
   const [prompt, setPrompt] = useState("");
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
   const [composerExperience, setComposerExperience] = useState<ComposerExperience>("smart");
-  // Keep the hosted Codex web tool available by default, matching Codex's
-  // normal agent behavior. The employee can still opt out per page session.
-  const [webSearch, setWebSearch] = useState(() => manifest.composer.webSearch);
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [connectorMentions, setConnectorMentions] = useState<ConnectorMention[]>([]);
@@ -853,10 +850,19 @@ export function BrainApp({
     if (!hydrated || !networkOnline) return;
     const controller = new AbortController();
     let disposed = false;
+    let retryTimer: number | undefined;
+    const scheduleRetry = () => {
+      if (disposed || retryTimer) return;
+      const retryAfterMs = Math.min(30_000, 2_000 * (2 ** Math.min(runtimeRetry, 4)));
+      retryTimer = window.setTimeout(() => {
+        if (!disposed && navigator.onLine) setRuntimeRetry((current) => current + 1);
+      }, retryAfterMs);
+    };
     const timeout = window.setTimeout(() => {
       if (disposed) return;
       setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
       controller.abort();
+      scheduleRetry();
     // The server caps this request at 35 seconds. Keep the browser deadline
     // slightly above it so a cold, valid Codex worker can report its result.
     }, 40_000);
@@ -867,18 +873,23 @@ export function BrainApp({
       .then((status: unknown) => {
         if (isRuntimeStatus(status)) {
           setRuntimeStatus(status);
-          if (status.mode === "codex" && !status.capabilities.webSearch) setWebSearch(false);
-        } else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+          if (status.mode === "codex" && !status.ready) scheduleRetry();
+        } else {
+          setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+          scheduleRetry();
+        }
       })
       .catch(() => {
         if (!disposed) {
           setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
+          scheduleRetry();
         }
       })
       .finally(() => window.clearTimeout(timeout));
     return () => {
       disposed = true;
       window.clearTimeout(timeout);
+      if (retryTimer) window.clearTimeout(retryTimer);
       controller.abort();
     };
   }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
@@ -901,7 +912,7 @@ export function BrainApp({
       ...runtimeStatus,
       capabilities: {
         ...runtimeStatus.capabilities,
-        webSearch: runtimeStatus.capabilities.webSearch && enabled("web-search"),
+        webSearch: runtimeStatus.mode === "demo" || runtimeStatus.ready,
         imageGeneration: runtimeStatus.capabilities.imageGeneration && enabled("image-generation"),
       },
       skills: enabled("skills") ? runtimeStatus.skills : [],
@@ -909,13 +920,11 @@ export function BrainApp({
   }, [runtimeStatus, settingsSnapshot]);
 
   const appPolicy = useMemo(() => ({
-    webSearch: settingsSnapshot?.apps.find((app) => app.id === "web-search")?.effectiveEnabled ?? true,
     imageGeneration: settingsSnapshot?.apps.find((app) => app.id === "image-generation")?.effectiveEnabled ?? true,
     skills: settingsSnapshot?.apps.find((app) => app.id === "skills")?.effectiveEnabled ?? true,
   }), [settingsSnapshot]);
 
   useEffect(() => {
-    if (!appPolicy.webSearch || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.webSearch)) setWebSearch(false);
     if (!appPolicy.imageGeneration || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && !runtimeStatus.capabilities.imageGeneration)) setImageGeneration(false);
     if (!appPolicy.skills || (runtimeStatus.mode === "codex" && runtimeStatus.codex !== "checking" && selectedSkill && !runtimeStatus.skills.some((skill) => skill.id === selectedSkill))) setSelectedSkill(null);
   }, [appPolicy, runtimeStatus, selectedSkill]);
@@ -1390,7 +1399,7 @@ export function BrainApp({
           experience: composerExperience,
           model: resolvedComposerExperience.model,
           effort: resolvedComposerExperience.effort,
-          webSearch,
+          webSearch: true,
           imageGeneration,
           skill: selectedSkill,
           ...(selectedConnectorMentionIds.length ? { connectorMentions: selectedConnectorMentionIds } : {}),
@@ -1438,7 +1447,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedConnectorMentionIds, selectedSkill, sending, webSearch]);
+  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedConnectorMentionIds, selectedSkill, sending]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1927,7 +1936,6 @@ export function BrainApp({
         hydrated={hydrated}
         prompt={prompt}
         composerExperience={composerExperience}
-        webSearch={webSearch}
         imageGeneration={imageGeneration}
         connectorMentions={connectorMentions}
         selectedConnectorMentionIds={selectedConnectorMentionIds}
@@ -1947,7 +1955,6 @@ export function BrainApp({
         onPromptChange={setPrompt}
         onComposerExperienceChange={setComposerExperience}
         onDestinationChange={startNewThread}
-        onWebSearchChange={setWebSearch}
         onImageGenerationChange={setImageGeneration}
         onConnectorMentionIdsChange={setSelectedConnectorMentionIds}
         onAttachmentsChange={setAttachments}

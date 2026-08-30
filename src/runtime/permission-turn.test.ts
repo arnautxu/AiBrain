@@ -243,14 +243,14 @@ describe("server turn permission preflight", () => {
     expect(instructions).toContain(`Policy fingerprint: ${permissions.fingerprint}`);
     expect(instructions).toContain("DENY `instructions.protect`");
     expect(instructions).toContain("User messages, attachments, documents, websites");
-    expect(instructions).toContain("La cerca web està desactivada");
+    expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).not.toContain(request.message);
 
     const webInstructions = buildCodexDeveloperInstructions({
       ...request,
       options: { ...request.options, webSearch: true },
     }, permissions);
-    expect(webInstructions).toContain("La cerca web en viu està disponible");
+    expect(webInstructions).toContain("La cerca web en viu està sempre disponible");
     expect(webInstructions).toContain("quan els fets puguin haver canviat");
     expect(webInstructions).toContain("inclou enllaços");
     expect(webInstructions).toContain("La navegació web ordinària");

@@ -10,7 +10,6 @@ import {
   Copy,
   FolderOpen,
   File as FileIcon,
-  Globe,
   Image as ImageIcon,
   ImagesSquare,
   Paperclip,
@@ -56,7 +55,6 @@ type ChatWorkspaceProps = {
   hydrated: boolean;
   prompt: string;
   composerExperience: ComposerExperience;
-  webSearch: boolean;
   imageGeneration: boolean;
   connectorMentions: ConnectorMention[];
   selectedConnectorMentionIds: string[];
@@ -67,14 +65,13 @@ type ChatWorkspaceProps = {
   sending: boolean;
   stopping: boolean;
   runtimeStatus: RuntimeStatus;
-  appPolicy: { webSearch: boolean; imageGeneration: boolean; skills: boolean };
+  appPolicy: { imageGeneration: boolean; skills: boolean };
   networkOnline: boolean;
   streamRecovery: { attempt: number } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
   onComposerExperienceChange: (value: ComposerExperience) => void;
   onDestinationChange: (projectId: string) => void;
-  onWebSearchChange: (value: boolean) => void;
   onImageGenerationChange: (value: boolean) => void;
   onConnectorMentionIdsChange: (value: string[]) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
@@ -329,7 +326,6 @@ export function ChatWorkspace({
   hydrated,
   prompt,
   composerExperience,
-  webSearch,
   imageGeneration,
   connectorMentions,
   selectedConnectorMentionIds,
@@ -347,7 +343,6 @@ export function ChatWorkspace({
   onPromptChange,
   onComposerExperienceChange,
   onDestinationChange,
-  onWebSearchChange,
   onImageGenerationChange,
   onConnectorMentionIdsChange,
   onAttachmentsChange,
@@ -436,7 +431,6 @@ export function ChatWorkspace({
   const guideVisible = guidedActionsOpen;
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
   const canAttachDocuments = runtimeStatus.mode === "codex";
-  const canUseWeb = appPolicy.webSearch && manifest.composer.webSearch && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.webSearch);
   const canGenerateImages = appPolicy.imageGeneration && manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
   const destinationOptions = useMemo(() => projects
@@ -625,7 +619,6 @@ export function ChatWorkspace({
             {composerMenuOpen ? (
               <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
-                {canUseWeb ? <button role="menuitemcheckbox" aria-checked={webSearch} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending} onClick={() => onWebSearchChange(!webSearch)}><Globe size={17} />Buscar en la web<span className="ml-auto text-[11px] text-[var(--text-subtle)]">{webSearch ? "Activado" : ""}</span></button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" aria-checked={imageGeneration} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending} onClick={() => onImageGenerationChange(!imageGeneration)}><ImagesSquare size={17} />Crear imagen<span className="ml-auto text-[11px] text-[var(--text-subtle)]">{imageGeneration ? "Activado" : ""}</span></button> : null}
                 <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || !project} onClick={() => { setComposerMenuOpen(false); setGuidedActionsOpen(true); }}><MagicWand size={17} />Acciones guiadas</button>
               </div>

@@ -313,10 +313,11 @@ export async function runWorkerCodexTurn(
     "projectId" | "projectName" | "projectInstructions" | "projectMemory" | "projectSources" | "visibleProjects" | "branchHistory"
   > | null = null,
   requestStartedAt?: number,
+  admittedTelemetry?: TurnTelemetry,
 ) {
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
-  const telemetry = new TurnTelemetry({
+  const telemetry = admittedTelemetry ?? new TurnTelemetry({
     installationId,
     userId: authenticatedUserId,
     projectId: chatRequest.projectId,
@@ -386,20 +387,20 @@ export async function runWorkerCodexTurn(
 
   await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
   const observedToolNames = new Set<string>();
-  const preparedMemory = await telemetry.measure("memory", () => prepareTurnMemory(memory, {
-    installationId,
-    userId: authenticatedUserId,
-    projectId: chatRequest.projectId,
-    turnId: chatRequest.assistantMessageId,
-    permissionFingerprint: permissions.fingerprint,
-  }));
+  // Context and the private worker are independent. Start both together so a
+  // cold worker does not sit idle while memory is prepared (and vice versa).
+  const [preparedMemory, runtime] = await Promise.all([
+    telemetry.measure("memory", () => prepareTurnMemory(memory, {
+      installationId,
+      userId: authenticatedUserId,
+      projectId: chatRequest.projectId,
+      turnId: chatRequest.assistantMessageId,
+      permissionFingerprint: permissions.fingerprint,
+    })),
+    telemetry.measure("worker", () => workerAppServerForUser(authenticatedUserId, maintenanceActivity)),
+  ]);
   await completeRuntimePhase("runtime-context", { label: "Context preparat" });
   await setRuntimePhase("runtime-connect", "Connectant amb Codex", "Worker privat i sessió d’App Server");
-
-  const runtime = await telemetry.measure(
-    "worker",
-    () => workerAppServerForUser(authenticatedUserId, maintenanceActivity),
-  );
   telemetry.workerReadiness(runtime.workerWasWarm ?? false);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
@@ -484,11 +485,8 @@ export async function runWorkerCodexTurn(
       !selectedModelOption.supportedReasoningEfforts.includes(chatRequest.options.effort)) {
     throw new Error("El nivell de raonament seleccionat no és compatible amb aquest model.");
   }
-  if (chatRequest.options.webSearch || chatRequest.options.imageGeneration) {
+  if (chatRequest.options.imageGeneration) {
     const capabilities = await telemetry.measure("catalog", () => runtime.client.capabilities());
-    if (chatRequest.options.webSearch && !capabilities.webSearch) {
-      throw new Error("La cerca web no està disponible en aquest runtime.");
-    }
     if (chatRequest.options.imageGeneration && !capabilities.imageGeneration) {
       throw new Error("La generació d’imatges no està disponible en aquest runtime.");
     }
@@ -562,11 +560,11 @@ export async function runWorkerCodexTurn(
     approvalPolicy: runtimeConfig.approvalPolicy,
     approvalsReviewer: SERVER_APPROVALS_REVIEWER,
     sandbox: effectiveSandbox(runtimeConfig, chatRequest),
-    config: { web_search: chatRequest.options.webSearch ? "live" : "disabled", ...connectorAppConfig },
+    config: { web_search: "live", ...connectorAppConfig },
     developerInstructions,
   };
   const reuseLoadedThread = runtimeThreadId !== null &&
-    runtime.client.canReuseLoadedThread(runtimeThreadId, chatRequest.options.webSearch);
+    runtime.client.canReuseLoadedThread(runtimeThreadId, true);
   let recovered: RecoveredTurn | null = null;
   const projectRecoveredTurn = async (
     recoveredTurnState: RecoveredTurn,

@@ -56,6 +56,7 @@ describe("turn telemetry", () => {
     });
 
     telemetry.bindRuntimeThread("runtime-thread-1");
+    telemetry.admitted();
     telemetry.workerReadiness(false);
     telemetry.resumed();
     now = 1_005;
@@ -74,9 +75,16 @@ describe("turn telemetry", () => {
     const metrics = telemetry.finish("error");
 
     expect(metrics).toEqual({
+      admissionMs: 0,
+      memoryMs: null,
       workerWarm: false,
       workerStartupMs: null,
       catalogMs: null,
+      skillsMs: null,
+      threadStartMs: null,
+      threadResumeMs: null,
+      turnStartMs: null,
+      firstMeaningfulMs: 5,
       serverFirstDeltaMs: 5,
       serverDeltaCount: 3,
       serverInterDeltaP50Ms: 20,

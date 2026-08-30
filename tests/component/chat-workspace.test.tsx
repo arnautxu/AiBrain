@@ -92,7 +92,6 @@ function renderWorkspace(
     hydrated={hydrated}
     prompt={prompt}
     composerExperience="smart"
-    webSearch
     imageGeneration={false}
     connectorMentions={[]}
     selectedConnectorMentionIds={[]}
@@ -103,7 +102,7 @@ function renderWorkspace(
     sending={false}
     stopping={false}
     runtimeStatus={{ ...initialRuntimeStatus, mode: "demo", codex: "disabled", ready: true }}
-    appPolicy={{ webSearch: true, imageGeneration: true, skills: true }}
+    appPolicy={{ imageGeneration: true, skills: true }}
     networkOnline
     streamRecovery={null}
     onRetryRuntime={vi.fn()}
@@ -113,7 +112,6 @@ function renderWorkspace(
     }}
     onComposerExperienceChange={vi.fn()}
     onDestinationChange={vi.fn()}
-    onWebSearchChange={vi.fn()}
     onImageGenerationChange={vi.fn()}
     onConnectorMentionIdsChange={vi.fn()}
     onAttachmentsChange={vi.fn()}

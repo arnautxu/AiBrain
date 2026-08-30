@@ -109,17 +109,25 @@ export class AppServerRpcRouter {
   private nextAcknowledgementSequence: number | null = null;
   private acknowledgementChain = Promise.resolve();
   private closed = false;
+  private fatalError: Error | null = null;
 
   constructor(readonly transport: AppServerTransport) {}
 
   start() {
     if (this.closed) return Promise.reject(new Error("App Server router is closed."));
+    if (this.fatalError) return Promise.reject(this.fatalError);
     if (!this.startPromise) {
       this.startPromise = this.transport.connect().then(() => {
         this.consumePromise = this.consume();
       });
     }
-    return this.startPromise;
+    return this.startPromise.then(() => {
+      if (this.fatalError) throw this.fatalError;
+    });
+  }
+
+  get failed() {
+    return this.fatalError !== null;
   }
 
   registerTurn(
@@ -127,7 +135,7 @@ export class AppServerRpcRouter {
     localTurnId: string,
     handlers: AppServerTurnHandlers,
   ): AppServerTurnRegistration {
-    if (!threadId || !localTurnId || this.closed) throw new Error("Turn registration scope is invalid.");
+    if (!threadId || !localTurnId || this.closed || this.fatalError) throw new Error("Turn registration scope is invalid.");
     if (this.turns.has(threadId)) throw new Error("A thread already has an active turn.");
     let resolveRuntimeTurnBinding!: (turnId: string | null) => void;
     const runtimeTurnBinding = new Promise<string | null>((resolve) => {
@@ -368,11 +376,17 @@ export class AppServerRpcRouter {
   }
 
   private fail(error: Error) {
+    if (this.fatalError || this.closed) return;
+    this.fatalError = error;
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(error);
     }
     this.pending.clear();
-    for (const turn of this.turns.values()) turn.handlers.onFailure(error);
+    for (const turn of this.turns.values()) {
+      turn.resolveRuntimeTurnBinding(null);
+      turn.handlers.onFailure(error);
+    }
+    this.turns.clear();
   }
 }

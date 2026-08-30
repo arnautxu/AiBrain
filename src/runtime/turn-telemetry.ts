@@ -22,9 +22,16 @@ export type TurnTelemetryPhase =
   | "turn_start";
 
 export type TurnTelemetrySnapshot = Readonly<{
+  admissionMs: number | null;
+  memoryMs: number | null;
   workerWarm: boolean | null;
   workerStartupMs: number | null;
   catalogMs: number | null;
+  skillsMs: number | null;
+  threadStartMs: number | null;
+  threadResumeMs: number | null;
+  turnStartMs: number | null;
+  firstMeaningfulMs: number | null;
   serverFirstDeltaMs: number | null;
   serverDeltaCount: number;
   serverInterDeltaP50Ms: number | null;
@@ -91,6 +98,7 @@ export class TurnTelemetry {
   private disconnectCount = 0;
   private cancelRequested = false;
   private terminal: TurnTelemetryTerminal | null = null;
+  private admittedAt: number | null = null;
   private workerWarm: boolean | null = null;
   private readonly phaseElapsedMs = new Map<TurnTelemetryPhase, number>();
 
@@ -112,6 +120,10 @@ export class TurnTelemetry {
 
   workerReadiness(warm: boolean) {
     this.workerWarm = warm;
+  }
+
+  admitted() {
+    this.admittedAt ??= this.now();
   }
 
   resumed() {
@@ -204,10 +216,20 @@ export class TurnTelemetry {
   }
 
   private snapshot(): TurnTelemetrySnapshot {
+    const firstMeaningfulAt = [this.firstDeltaAt, this.firstSummaryAt, this.firstToolAt]
+      .filter((value): value is number => value !== null)
+      .toSorted((left, right) => left - right)[0] ?? null;
     return {
+      admissionMs: this.admittedAt === null ? null : Math.max(0, Math.round(this.admittedAt - this.startedAt)),
+      memoryMs: this.phaseElapsedMs.get("memory") ?? null,
       workerWarm: this.workerWarm,
       workerStartupMs: this.phaseElapsedMs.get("worker") ?? null,
       catalogMs: this.phaseElapsedMs.get("catalog") ?? null,
+      skillsMs: this.phaseElapsedMs.get("skills") ?? null,
+      threadStartMs: this.phaseElapsedMs.get("thread_start") ?? null,
+      threadResumeMs: this.phaseElapsedMs.get("thread_resume") ?? null,
+      turnStartMs: this.phaseElapsedMs.get("turn_start") ?? null,
+      firstMeaningfulMs: firstMeaningfulAt === null ? null : Math.max(0, Math.round(firstMeaningfulAt - this.startedAt)),
       serverFirstDeltaMs: this.firstDeltaAt === null
         ? null
         : Math.max(0, Math.round(this.firstDeltaAt - this.startedAt)),

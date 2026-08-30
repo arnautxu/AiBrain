@@ -81,12 +81,9 @@ export async function GET(request: Request) {
           path.posix.join("projects", projectContext.projectId ?? "default"),
         );
         await mkdir(workspace, { recursive: true, mode: 0o700 });
-        const [connection, capabilities] = await Promise.all([
-          worker.client.connectionSummary(),
-          worker.client.capabilities(),
-        ]);
+        const connection = await worker.client.connectionSummary();
         worker.client.prewarmConnection(workspace);
-        return { connection: { ...connection, ...capabilities }, workspace };
+        return { connection, workspace };
       })());
       workerWorkspace = runtimeConnection.workspace;
       const connection = runtimeConnection.connection;
@@ -98,7 +95,10 @@ export async function GET(request: Request) {
       usage = connection.usage;
       models = connection.models;
       skills = connection.skills;
-      webSearch = connection.webSearch;
+      // Web is a server-side invariant for every connected Codex runtime.
+      // Capability discovery is optional picker metadata and must never hold
+      // readiness hostage or disable the live web tool.
+      webSearch = connection.connected;
       imageGeneration = connection.imageGeneration;
     } catch {
       codex = "unavailable";
