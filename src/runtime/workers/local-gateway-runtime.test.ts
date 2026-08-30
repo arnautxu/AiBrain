@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { FileTransportEventJournal, WebSocketAppServerTransport } from "@/runtime/transport";
+import {
+  AppServerRpcRouter,
+  FileTransportEventJournal,
+  WebSocketAppServerTransport,
+} from "@/runtime/transport";
 import {
   NodeWebSocketFactory,
   LocalGatewayWorkerRuntimeFactory,
@@ -492,10 +496,12 @@ describe("private per-user worker gateway", () => {
         message: { kind: "rpc-request", rpc: { id: "approval-1" } },
       });
       if (!initialized.done) await client.acknowledge(initialized.value);
-      if (!approval.done) await client.acknowledge(approval.value);
+      if (approval.done) throw new Error("Expected a durable approval event.");
+      await client.acknowledge(approval.value);
+      const responseId = `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`;
 
       let confirmed = false;
-      const submission = client.send(approvalResponse()).then(() => { confirmed = true; });
+      const submission = client.send(approvalResponse(responseId)).then(() => { confirmed = true; });
       await new Promise((resolve) => setTimeout(resolve, 25));
       expect(confirmed).toBe(false);
       await submission;
@@ -533,8 +539,10 @@ describe("private per-user worker gateway", () => {
       const initialized = await nextEvent(firstClient);
       const approval = await nextEvent(firstClient);
       if (!initialized.done) await firstClient.acknowledge(initialized.value);
-      if (!approval.done) await firstClient.acknowledge(approval.value);
-      await firstClient.send(approvalResponse());
+      if (approval.done) throw new Error("Expected a durable approval event.");
+      await firstClient.acknowledge(approval.value);
+      const responseId = `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`;
+      await firstClient.send(approvalResponse(responseId));
       const progress = await nextEvent(firstClient);
       if (!progress.done) await firstClient.acknowledge(progress.value);
       await firstClient.close();
@@ -543,7 +551,7 @@ describe("private per-user worker gateway", () => {
       try {
         await recoveredClient.connect();
         await expect(recoveredClient.send({
-          ...approvalResponse(),
+          ...approvalResponse(responseId),
           rpc: { id: "approval-1", error: { code: -32602, message: "No active route." } },
         })).resolves.toBeUndefined();
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -564,7 +572,163 @@ describe("private per-user worker gateway", () => {
     }
   });
 
-  it("retries the same server response after a child crash before processing evidence", async () => {
+  it("drains an uncertain response from an earlier child before a new initialize response", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) {',
+      '    write({ id: rpc.id, result: {} });',
+      '    write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
+      '    return;',
+      '  }',
+      '  process.exit(42);',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const firstWorker = gateway();
+    await firstWorker.start();
+    const firstClient = transport(firstWorker);
+    await firstClient.connect();
+    await firstClient.send(initializeRequest());
+    const initialized = await nextEvent(firstClient);
+    const approval = await nextEvent(firstClient);
+    if (!initialized.done) await firstClient.acknowledge(initialized.value);
+    expect(approval.value).toMatchObject({
+      message: { kind: "rpc-request", rpc: { id: "approval-1" } },
+    });
+    if (approval.done) throw new Error("Expected a durable approval event.");
+    const uncertain = firstClient.send(approvalResponse(
+      `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`,
+    )).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
+    await firstClient.close();
+    expect(await uncertain).toBeInstanceOf(Error);
+    await firstWorker.stop();
+
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) write({ id: rpc.id, result: {} });',
+      '  else write({ method: "warning", params: { message: "stale response was dispatched" } });',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const restartedWorker = gateway();
+    await restartedWorker.start();
+    const restartedClient = transport(restartedWorker);
+    const router = new AppServerRpcRouter(restartedClient);
+    try {
+      await expect(router.request(
+        initializeRequest("initialize-after-stale-replay").rpc,
+        3_000,
+      )).resolves.toEqual({});
+      const durableEvents = (await readFile(
+        path.join(context.transportAudit, "gateway-events.jsonl"),
+        "utf8",
+      )).trim().split("\n").map((line) => JSON.parse(line) as {
+        payload: { message: { kind: string; rpc: { method?: string } } };
+      });
+      expect(durableEvents.filter((entry) =>
+        entry.payload.message.kind === "rpc-notification"
+        && entry.payload.message.rpc.method === "warning"
+      )).toHaveLength(0);
+      await vi.waitFor(async () => {
+        const cursor = JSON.parse(await readFile(
+          path.join(context.transportAudit, "test-client-events.jsonl.delivery.json"),
+          "utf8",
+        )) as { sequence: number };
+        expect(cursor.sequence).toBeGreaterThanOrEqual(3);
+      }, { timeout: 5_000 });
+    } finally {
+      await router.close();
+      await restartedClient.close();
+      await restartedWorker.stop();
+    }
+  }, 15_000);
+
+  it("does not dispatch a first response to a server request from an earlier App Server", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  write({ id: rpc.id, result: {} });',
+      '  write({ method: "item/commandExecution/requestApproval", id: "approval-1", params: { threadId: "thread-1", turnId: "turn-1", itemId: "item-1", startedAtMs: 1, environmentId: null, command: "pwd" } });',
+      '  setTimeout(() => process.exit(42), 25);',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const firstWorker = gateway();
+    await firstWorker.start();
+    const firstClient = transport(firstWorker);
+    await firstClient.connect();
+    await firstClient.send(initializeRequest());
+    const initialized = await nextEvent(firstClient);
+    const approval = await nextEvent(firstClient);
+    if (!initialized.done) await firstClient.acknowledge(initialized.value);
+    if (approval.done) throw new Error("Expected a durable approval event.");
+    expect(approval.value).toMatchObject({
+      message: { kind: "rpc-request", rpc: { id: "approval-1" } },
+    });
+    const responseId = `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`;
+    await vi.waitFor(async () => expect((await firstWorker.health()).state).toBe("failed"));
+    await firstClient.close();
+    await firstWorker.stop();
+
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const lines = createInterface({ input: process.stdin });',
+      'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'lines.on("line", (line) => {',
+      '  const rpc = JSON.parse(line);',
+      '  if (rpc.method) write({ id: rpc.id, result: {} });',
+      '  else write({ method: "warning", params: { threadId: "thread-1", turnId: "turn-1", message: "response for old request was dispatched" } });',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const restartedWorker = gateway();
+    await restartedWorker.start();
+    const restartedClient = transport(restartedWorker);
+    try {
+      await restartedClient.connect();
+      const replayedApproval = await nextEvent(restartedClient);
+      expect(replayedApproval.value).toMatchObject({
+        message: { kind: "rpc-request", rpc: { id: "approval-1" } },
+      });
+
+      await expect(restartedClient.send(approvalResponse(responseId))).resolves.toBeUndefined();
+      if (!replayedApproval.done) await restartedClient.acknowledge(replayedApproval.value);
+      await restartedClient.send(initializeRequest("initialize-after-old-request"));
+      const next = await nextEvent(restartedClient);
+      expect(next.value).toMatchObject({
+        message: {
+          kind: "rpc-response",
+          rpc: { id: "initialize-after-old-request", result: {} },
+        },
+      });
+      const receipt = (await readFile(
+        path.join(context.transportAudit, "gateway-requests.jsonl"),
+        "utf8",
+      )).trim().split("\n").map((line) => JSON.parse(line) as {
+        payload: { clientRequestId: string; status: string };
+      }).findLast((entry) => entry.payload.clientRequestId === responseId);
+      expect(receipt?.payload).toMatchObject({
+        clientRequestId: responseId,
+        status: "accepted",
+      });
+    } finally {
+      await restartedClient.close();
+      await restartedWorker.stop();
+    }
+  }, 15_000);
+
+  it("does not replay the same uncertain server response into a restarted child", async () => {
     await writeFile(fakeServer, [
       'import { createInterface } from "node:readline";',
       'const lines = createInterface({ input: process.stdin });',
@@ -585,7 +749,9 @@ describe("private per-user worker gateway", () => {
     const initialized = await nextEvent(firstClient);
     const approval = await nextEvent(firstClient);
     if (!initialized.done) await firstClient.acknowledge(initialized.value);
-    if (!approval.done) await firstClient.acknowledge(approval.value);
+    if (approval.done) throw new Error("Expected a durable approval event.");
+    await firstClient.acknowledge(approval.value);
+    const responseId = `server-response:${approval.value.eventId}:${APPROVAL_SCOPE_DIGEST}`;
     await vi.waitFor(async () => {
       const cursor = JSON.parse(await readFile(
         path.join(context.transportAudit, "gateway-events.jsonl.delivery.json"),
@@ -593,7 +759,7 @@ describe("private per-user worker gateway", () => {
       )) as { sequence: number };
       expect(cursor.sequence).toBe(2);
     });
-    const firstSubmission = firstClient.send(approvalResponse()).then(
+    const firstSubmission = firstClient.send(approvalResponse(responseId)).then(
       () => null,
       (error: unknown) => error,
     );
@@ -655,11 +821,19 @@ describe("private per-user worker gateway", () => {
     const restartedClient = transport(restartedWorker);
     try {
       await restartedClient.connect();
-      await expect(restartedClient.send(approvalResponse())).resolves.toBeUndefined();
-      const progress = await nextEvent(restartedClient);
-      expect(progress.value).toMatchObject({
-        message: { kind: "rpc-notification", rpc: { params: { delta: "recovered approval" } } },
+      await expect(restartedClient.send(approvalResponse(responseId))).resolves.toBeUndefined();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const durableEvents = (await readFile(
+        path.join(context.transportAudit, "gateway-events.jsonl"),
+        "utf8",
+      )).trim().split("\n").map((line) => JSON.parse(line) as {
+        payload: { message: { kind: string; rpc: { method?: string; params?: { threadId?: string } } } };
       });
+      expect(durableEvents.filter((entry) =>
+        entry.payload.message.kind === "rpc-notification"
+        && entry.payload.message.rpc.method === "item/agentMessage/delta"
+        && entry.payload.message.rpc.params?.threadId === "thread-1"
+      )).toHaveLength(0);
     } finally {
       await restartedClient.close();
       await restartedWorker.stop();

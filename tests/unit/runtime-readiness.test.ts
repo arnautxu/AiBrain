@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { runtimeReadinessProbes } from "@/operations/runtime-readiness";
 
 const environment = {
+  AIBRAIN_CODEX_APP_SERVER_ACCEPTED: "1",
   CODEX_BIN: "/usr/local/bin/aibrain-codex-worker",
   AIBRAIN_CHROME_BIN: "/usr/local/bin/aibrain-chrome",
   AIBRAIN_CHROME_EXPECTED_VERSION: "140.0.0.0",
@@ -44,5 +45,22 @@ describe("runtime readiness probes", () => {
         { status: "unavailable", code: "CHROME_VERSION_MISMATCH" },
         { status: "unavailable", code: "DOCUMENT_TOOLCHAIN_UNAVAILABLE" },
       ]);
+  });
+
+  it("stays unavailable until this container startup completed a real App Server handshake", async () => {
+    const probes = runtimeReadinessProbes({
+      ...environment,
+      AIBRAIN_CODEX_APP_SERVER_ACCEPTED: undefined,
+    }, {
+      async executable() { return true; },
+      async version(executable) {
+        return executable.endsWith("codex-real") ? "codex-cli 0.149.1" : "Chromium 140.0.0.0";
+      },
+    });
+    const controller = new AbortController();
+    await expect(probes[0]?.check(controller.signal)).resolves.toEqual({
+      status: "unavailable",
+      code: "CODEX_APP_SERVER_ACCEPTANCE_REQUIRED",
+    });
   });
 });
