@@ -65,6 +65,11 @@ import {
   type DocumentPublicationDraft,
 } from "@/ui/publication-ui-adapter";
 import {
+  readBrowserStatus,
+  shouldPresentBrowserPanel,
+  type BrowserUiStatus,
+} from "@/ui/browser-ui-adapter";
+import {
   initialRuntimeStatus,
   isRuntimeStatus,
   type RuntimeStatus,
@@ -518,6 +523,8 @@ export function BrainApp({
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarOpen, setDesktopSidebarOpen] = useState(true);
   const [activeSideWindow, setActiveSideWindow] = useState<SideWindowId | null>(null);
+  const [browserMonitorStatus, setBrowserMonitorStatus] = useState<BrowserUiStatus | null>(null);
+  const autoOpenedBrowserDemandRef = useRef<string | null>(null);
   const [previewDocument, setPreviewDocument] = useState<DocumentArtifact | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
@@ -686,6 +693,14 @@ export function BrainApp({
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads],
   );
+  const activeBrowserDemandKey = useMemo(() => {
+    const latestAssistant = activeThread?.messages.findLast((message) => message.role === "assistant") ?? null;
+    if (!latestAssistant) return null;
+    const activity = latestAssistant.activity.findLast((item) => item.detail === "aibrain_browser");
+    if (activity) return `${latestAssistant.id}:${activity.id}`;
+    const result = latestAssistant.toolResults?.findLast((item) => item.kind === "browser");
+    return result ? `${latestAssistant.id}:${result.id}` : null;
+  }, [activeThread]);
   const resolvedComposerExperience = useMemo(
     () => resolveComposerExperience(composerExperience),
     [composerExperience],
@@ -1736,8 +1751,37 @@ export function BrainApp({
   const enabledWindows = manifest.windows.filter((window) =>
     window.enabled && (window.id === "chat" || window.id === "inspector" || window.id === "browser"));
   const inspectorEnabled = enabledWindows.some((window) => window.id === "inspector");
-  const browserEnabled = enabledWindows.some((window) => window.id === "browser") &&
-    (settingsSnapshot?.apps.find((app) => app.id === "managed-browser")?.effectiveEnabled ?? true);
+  const browserDeclared = enabledWindows.some((window) => window.id === "browser");
+  const browserSetting = settingsSnapshot?.apps.find((app) => app.id === "managed-browser") ?? null;
+  const browserEnabled = browserDeclared &&
+    (browserSetting ? browserSetting.effectiveEnabled === true : browserMonitorStatus?.available === true);
+
+  useEffect(() => {
+    if (!browserDeclared || !activeBrowserDemandKey || !activeThreadId ||
+        autoOpenedBrowserDemandRef.current === activeBrowserDemandKey) return;
+    const controller = new AbortController();
+    let interval: number | null = null;
+    const refresh = () => {
+      void readBrowserStatus(controller.signal).then((status) => {
+        setBrowserMonitorStatus(status);
+        if (!shouldPresentBrowserPanel(status, true)) return;
+        setActiveSideWindow((current) => {
+          if (current && current !== "browser") return current;
+          autoOpenedBrowserDemandRef.current = activeBrowserDemandKey;
+          if (interval !== null) window.clearInterval(interval);
+          return "browser";
+        });
+      }).catch(() => {
+        if (!controller.signal.aborted) setBrowserMonitorStatus(null);
+      });
+    };
+    refresh();
+    interval = window.setInterval(refresh, 750);
+    return () => {
+      controller.abort();
+      if (interval !== null) window.clearInterval(interval);
+    };
+  }, [activeBrowserDemandKey, activeThreadId, browserDeclared]);
 
   const toggleSidebar = useCallback(() => {
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -1930,6 +1974,7 @@ export function BrainApp({
         <BrowserPanel
           threadId={activeThreadId}
           open
+          initialStatus={browserMonitorStatus}
           onClose={() => setActiveSideWindow(null)}
         />
       ) : null}

@@ -7,6 +7,8 @@ export type BrowserDownload = {
   sizeBytes: number | null;
 };
 export type BrowserUiStatus = {
+  available: boolean;
+  capabilityCode: string | null;
   healthy: boolean;
   state: {
     browserSessionId: string | null;
@@ -18,6 +20,20 @@ export type BrowserUiStatus = {
   };
   runtime: { healthy: boolean; detail?: string } | null;
   runningInProcess: boolean;
+};
+
+export type BrowserActionHistoryItem = {
+  sequence: number;
+  installationId: string;
+  userId: string;
+  threadId: string;
+  turnId: string;
+  callId: string;
+  action: "open" | "read" | "screenshot" | "scroll" | "click" | "type" | "tabs" | "downloads";
+  phase: "started" | "dispatched" | "completed" | "denied" | "indeterminate";
+  success: boolean | null;
+  actor: "agent" | "human";
+  occurredAt: string;
 };
 
 export type BrowserViewerToken = { token: string; browserSessionId: string };
@@ -36,6 +52,8 @@ export class BrowserUiRequestError extends Error {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const INSTALLATION_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const LIFECYCLES = new Set<BrowserLifecycle>(["stopped", "starting", "ready", "human-control", "recovering", "degraded"]);
 const CONTROLLERS = new Set<BrowserController>(["none", "agent", "human"]);
 
@@ -49,7 +67,9 @@ export function parseBrowserStatus(value: unknown): BrowserUiStatus | null {
   const root = record(value);
   const state = record(root?.state);
   const runtime = root?.runtime === null ? null : record(root?.runtime);
-  if (!root || !state || typeof root.healthy !== "boolean" || typeof root.runningInProcess !== "boolean" ||
+  if (!root || !state || typeof root.available !== "boolean" ||
+      !(root.capabilityCode === null || typeof root.capabilityCode === "string") ||
+      typeof root.healthy !== "boolean" || typeof root.runningInProcess !== "boolean" ||
       !(state.browserSessionId === null || (typeof state.browserSessionId === "string" && UUID.test(state.browserSessionId))) ||
       typeof state.lifecycle !== "string" || !LIFECYCLES.has(state.lifecycle as BrowserLifecycle) ||
       typeof state.controller !== "string" || !CONTROLLERS.has(state.controller as BrowserController) ||
@@ -72,6 +92,8 @@ export function parseBrowserStatus(value: unknown): BrowserUiStatus | null {
     });
   }
   return {
+    available: root.available,
+    capabilityCode: root.capabilityCode as string | null,
     healthy: root.healthy,
     state: {
       browserSessionId: state.browserSessionId as string | null,
@@ -87,6 +109,11 @@ export function parseBrowserStatus(value: unknown): BrowserUiStatus | null {
     } : null,
     runningInProcess: root.runningInProcess,
   };
+}
+
+export function shouldPresentBrowserPanel(status: BrowserUiStatus | null, turnNeedsBrowser: boolean) {
+  return Boolean(turnNeedsBrowser && status?.available && status.healthy && status.runningInProcess &&
+    (status.state.lifecycle === "ready" || status.state.lifecycle === "human-control"));
 }
 
 async function responseError(response: Response) {
@@ -158,6 +185,40 @@ export async function readBrowserFrame(threadId: string, token: string, signal?:
     throw new Error("El visor ha devuelto un formato inesperado.");
   }
   return response.blob();
+}
+
+export async function readBrowserActionHistory(
+  threadId: string,
+  signal?: AbortSignal,
+): Promise<BrowserActionHistoryItem[]> {
+  const response = await fetch(
+    `/api/runtime/browser/history?threadId=${encodeURIComponent(threadId)}&limit=50`,
+    { cache: "no-store", signal },
+  );
+  if (!response.ok) throw await responseError(response);
+  const body = record(await response.json().catch(() => null));
+  if (!body || !Array.isArray(body.history) || body.history.length > 50) {
+    throw new Error("El historial del navegador no cumple el contrato seguro.");
+  }
+  const result: BrowserActionHistoryItem[] = [];
+  for (const value of body.history) {
+    const item = record(value);
+    if (!item || !Number.isSafeInteger(item.sequence) || Number(item.sequence) < 1 ||
+        typeof item.installationId !== "string" || !INSTALLATION_ID.test(item.installationId) ||
+        typeof item.userId !== "string" || !UUID.test(item.userId) ||
+        typeof item.threadId !== "string" || item.threadId !== threadId || !UUID.test(item.threadId) ||
+        typeof item.turnId !== "string" || !OPAQUE_ID.test(item.turnId) ||
+        typeof item.callId !== "string" || !OPAQUE_ID.test(item.callId) ||
+        !["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"].includes(String(item.action)) ||
+        !["started", "dispatched", "completed", "denied", "indeterminate"].includes(String(item.phase)) ||
+        !(item.success === null || typeof item.success === "boolean") ||
+        (item.actor !== "agent" && item.actor !== "human") ||
+        typeof item.occurredAt !== "string" || !Number.isFinite(Date.parse(item.occurredAt))) {
+      throw new Error("El historial del navegador no cumple el contrato seguro.");
+    }
+    result.push(item as BrowserActionHistoryItem);
+  }
+  return result;
 }
 
 export async function sendBrowserViewerCommand(

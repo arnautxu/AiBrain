@@ -14,6 +14,7 @@ const browser = vi.hoisted(() => ({
   issue: vi.fn(),
   frame: vi.fn(),
   command: vi.fn(),
+  history: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -42,6 +43,7 @@ vi.mock("@/runtime/browser/server-service", () => ({
   issueBrowserGatewayToken: browser.issue,
   captureBrowserFrame: browser.frame,
   sendBrowserViewerCommand: browser.command,
+  browserActionHistory: browser.history,
   BrowserServiceError: class BrowserServiceError extends Error {},
 }));
 
@@ -84,6 +86,7 @@ beforeEach(() => {
     capturedAt: "2026-08-27T00:00:00.000Z",
   });
   browser.command.mockReset().mockResolvedValue(undefined);
+  browser.history.mockReset().mockResolvedValue([]);
 });
 
 describe("authenticated browser runtime routes", () => {
@@ -165,5 +168,26 @@ describe("authenticated browser runtime routes", () => {
       "payload.signature",
     ));
     expect(foreign.status).toBe(404);
+  });
+
+  it("returns only the authenticated user's history for an owned thread", async () => {
+    const route = await import("@/app/api/runtime/browser/history/route");
+    const response = await route.GET(request(
+      `/api/runtime/browser/history?threadId=${THREAD_A}&limit=25`,
+    ));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ history: [] });
+    expect(browser.history).toHaveBeenCalledWith("browser-lab", USER_A, THREAD_A, 25);
+
+    const foreign = await route.GET(request(
+      `/api/runtime/browser/history?threadId=${THREAD_B}`,
+    ));
+    expect(foreign.status).toBe(404);
+    expect(browser.history).toHaveBeenCalledTimes(1);
+
+    const traversal = await route.GET(request(
+      "/api/runtime/browser/history?threadId=../../foreign",
+    ));
+    expect(traversal.status).toBe(400);
   });
 });

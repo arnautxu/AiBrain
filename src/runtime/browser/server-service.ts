@@ -1,12 +1,16 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { loadInstallationConfig } from "@/config/installation";
 import { getSigningSecret } from "@/auth/session";
 import { FileLocalUserStore } from "@/auth/local-user-store";
 import { BrowserGatewayTokenService } from "@/runtime/browser/gateway-token";
-import { ChromeBrowserRuntimeFactory } from "@/runtime/browser/chrome-runtime";
+import {
+  ChromeBrowserRuntimeFactory,
+  probeChromeRuntimeCapability,
+} from "@/runtime/browser/chrome-runtime";
 import {
   BrowserRegistryBackpressureError,
   BrowserRuntimeRegistry,
@@ -25,6 +29,7 @@ import {
   type BrowserActionResourceSnapshot,
   type BrowserInformedApprovalEvidence,
 } from "@/runtime/browser/action-evidence";
+import { BrowserActionHistoryStore } from "@/runtime/browser/action-history";
 
 export class BrowserServiceError extends Error {
   constructor(
@@ -148,6 +153,25 @@ async function ensureBrowserEnabled(installationId: string, userId: string) {
   }
 }
 
+async function browserCapability() {
+  return probeChromeRuntimeCapability({
+    executablePath: process.env.AIBRAIN_CHROME_BIN?.trim() || undefined,
+    expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION?.trim() || undefined,
+  });
+}
+
+async function ensureBrowserCapability() {
+  const capability = await browserCapability();
+  if (!capability.available) {
+    throw new BrowserServiceError(
+      capability.code ?? "CHROME_CAPABILITY_UNAVAILABLE",
+      "The managed Chrome capability is not available on this server.",
+      503,
+      true,
+    );
+  }
+}
+
 async function currentHandle(state: BrowserServiceState, userId: string) {
   await state.registry.start(userId);
   const handle = state.registry.get(userId);
@@ -168,13 +192,34 @@ export async function browserStatus(installationId: string, userId: string) {
   ensureBinding(state, installationId, userId);
   await ensureEnabledUser(state, userId);
   await ensureBrowserEnabled(installationId, userId);
-  const health = await state.registry.health(userId);
+  const [health, capability] = await Promise.all([
+    state.registry.health(userId),
+    browserCapability(),
+  ]);
   return {
-    healthy: health.healthy,
+    available: capability.available,
+    capabilityCode: capability.code,
+    healthy: capability.available && health.healthy,
     state: health.state,
     runtime: health.runtime,
     runningInProcess: state.registry.get(userId) !== null,
   };
+}
+
+export async function browserActionHistory(
+  installationId: string,
+  userId: string,
+  threadId: string,
+  limit = 50,
+) {
+  const state = await serviceState();
+  ensureBinding(state, installationId, userId);
+  await ensureEnabledUser(state, userId);
+  await ensureBrowserEnabled(installationId, userId);
+  const roots = await state.registry.store.roots(userId);
+  return new BrowserActionHistoryStore({
+    userRoot: path.dirname(roots.browserRoot),
+  }).list(threadId, limit);
 }
 
 export async function controlBrowser(
@@ -186,11 +231,15 @@ export async function controlBrowser(
   ensureBinding(state, installationId, userId);
   if (action !== "stop") await ensureBrowserEnabled(installationId, userId);
   if (action !== "stop") await ensureEnabledUser(state, userId);
+  if (action !== "stop") await ensureBrowserCapability();
   try {
     if (action === "start") await state.registry.start(userId);
     else if (action === "stop") {
       await state.registry.stop(userId);
+      const capability = await browserCapability();
       return {
+        available: capability.available,
+        capabilityCode: capability.code,
         healthy: false,
         state: await state.registry.state(userId),
         runtime: null,
@@ -220,6 +269,7 @@ export async function issueBrowserGatewayToken(input: {
   ensureBinding(state, input.installationId, input.userId);
   await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
+  await ensureBrowserCapability();
   const { handle, persistent } = await currentHandle(state, input.userId);
   if (persistent.lifecycle !== "ready" && persistent.lifecycle !== "human-control") {
     throw new BrowserServiceError("BROWSER_VIEWER_UNAVAILABLE", "Browser viewer is unavailable.", 409, true);
@@ -250,6 +300,7 @@ async function authorizeGateway(input: {
   ensureBinding(state, input.installationId, input.userId);
   await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
+  await ensureBrowserCapability();
   const { handle } = await currentHandle(state, input.userId);
   state.tokens.verify(input.token, {
     installationId: input.installationId,
@@ -287,6 +338,30 @@ export async function sendBrowserViewerCommand(input: {
   } else {
     await state.registry.dispatchInput(input.userId, input.threadId, input.command.command);
   }
+  const action = input.command.action === "navigate"
+    ? "open"
+    : input.command.command.event === "mouseWheel"
+      ? "scroll"
+      : input.command.command.event === "mouseReleased"
+        ? "click"
+        : input.command.command.event === "keyDown"
+          ? "type"
+          : null;
+  if (action) {
+    const roots = await state.registry.store.roots(input.userId);
+    await new BrowserActionHistoryStore({ userRoot: path.dirname(roots.browserRoot) }).append({
+      schemaVersion: 1,
+      installationId: input.installationId,
+      userId: input.userId,
+      threadId: input.threadId,
+      turnId: "manual-takeover",
+      callId: randomUUID(),
+      action,
+      phase: "dispatched",
+      success: true,
+      actor: "human",
+    }).catch(() => null);
+  }
 }
 
 export type BrowserAgentCommand =
@@ -314,6 +389,7 @@ async function agentRegistry(input: { installationId: string; userId: string }) 
   ensureBinding(state, input.installationId, input.userId);
   await ensureBrowserEnabled(input.installationId, input.userId);
   await ensureEnabledUser(state, input.userId);
+  await ensureBrowserCapability();
   try {
     await state.registry.start(input.userId);
   } catch (error) {
