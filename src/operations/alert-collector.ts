@@ -8,6 +8,7 @@ export type OperationalAlertCollectorOptions = {
   publishWriteRoot: string;
   readinessUrl: string;
   egressReadinessUrl?: string;
+  egressReadinessToken?: string;
   restartCount15m: number;
   preflightFailureCount15m: number;
   readBackupReceipt: () => Promise<BackupVerificationReceipt | null>;
@@ -63,6 +64,16 @@ export async function collectOperationalAlertInput(
   )) {
     throw new Error("egressReadinessUrl must be the exact approved egress health endpoint.");
   }
+  const egressReadinessToken = options.egressReadinessToken?.trim() || null;
+  const composeEgressProbe = egressReadinessUrl?.hostname === "egress-gateway";
+  if (composeEgressProbe && (
+    !egressReadinessToken
+    || Buffer.byteLength(egressReadinessToken, "utf8") < 32
+    || Buffer.byteLength(egressReadinessToken, "utf8") > 512
+    || /[\u0000-\u0020\u007f]/u.test(egressReadinessToken)
+  )) {
+    throw new Error("egressReadinessToken is required for the Compose egress health endpoint.");
+  }
   const readFilesystemCapacity = options.readFilesystemCapacity
     ?? (async (root: string) => statfs(root, { bigint: true }));
   const [capacity, publishCapacity, backupReceipt, replicaReceipt, readiness, egressGateway] = await Promise.all([
@@ -80,6 +91,9 @@ export async function collectOperationalAlertInput(
       ? fetchImplementation(egressReadinessUrl, {
           cache: "no-store",
           redirect: "error",
+          headers: composeEgressProbe
+            ? { Authorization: `Bearer ${egressReadinessToken}` }
+            : undefined,
           signal: AbortSignal.timeout(timeoutMs),
         }).then((response) => response.ok ? "ready" as const : "degraded" as const)
         .catch(() => "degraded" as const)

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   EgressGateway,
   EgressGatewayError,
+  isHealthProbeAuthorized,
   type EgressGatewayConfig,
   type GatewayConnection,
 } from "../../infra/hetzner/egress/gateway.mjs";
@@ -11,6 +12,7 @@ import {
 const BROWSER_TOKEN = "browser-token-0000000000000000000000000000";
 const WORKER_TOKEN = "worker-token-00000000000000000000000000000";
 const SERVER_TOKEN = "server-token-00000000000000000000000000000";
+const HEALTH_TOKEN = "health-token-00000000000000000000000000000";
 
 function config(overrides: Partial<EgressGatewayConfig> = {}): EgressGatewayConfig {
   return {
@@ -19,6 +21,7 @@ function config(overrides: Partial<EgressGatewayConfig> = {}): EgressGatewayConf
     browserToken: BROWSER_TOKEN,
     workerToken: WORKER_TOKEN,
     serverToken: SERVER_TOKEN,
+    healthToken: HEALTH_TOKEN,
     workerHosts: new Set(["api.openai.com"]),
     supabaseHostname: "project-ref.supabase.co",
     maxHeaderBytes: 8_192,
@@ -277,6 +280,7 @@ describe("physical egress gateway", () => {
 
   it("has idempotent lifecycle, loopback health and fail-closed secret validation", async () => {
     expect(() => new EgressGateway({ config: config({ serverToken: WORKER_TOKEN }) })).toThrowError(EgressGatewayError);
+    expect(() => new EgressGateway({ config: config({ healthToken: SERVER_TOKEN }) })).toThrowError(EgressGatewayError);
     expect(() => new EgressGateway({ config: config({ workerHosts: new Set(["localhost"]) }) })).toThrowError(EgressGatewayError);
 
     const gateway = new EgressGateway({ config: config() });
@@ -293,5 +297,12 @@ describe("physical egress gateway", () => {
     await gateway.stop();
     await gateway.stop();
     expect(gateway.health().healthy).toBe(false);
+  });
+
+  it("requires the dedicated secret for a non-loopback health probe", () => {
+    expect(isHealthProbeAuthorized("172.20.0.4", undefined, HEALTH_TOKEN)).toBe(false);
+    expect(isHealthProbeAuthorized("172.20.0.4", bearer(WORKER_TOKEN), HEALTH_TOKEN)).toBe(false);
+    expect(isHealthProbeAuthorized("172.20.0.4", bearer(HEALTH_TOKEN), HEALTH_TOKEN)).toBe(true);
+    expect(isHealthProbeAuthorized("127.0.0.1", undefined, HEALTH_TOKEN)).toBe(true);
   });
 });

@@ -28,6 +28,7 @@ const backup = read("infra/hetzner/app/backup.sh");
 const backupReplicate = read("infra/hetzner/app/backup-replicate.sh");
 const alerts = read("infra/hetzner/app/alerts.sh");
 const alertController = read("infra/hetzner/app/alert-controller.sh");
+const alertControllerHealthcheck = read("infra/hetzner/app/alert-controller-healthcheck.mjs");
 const documentMaintenance = read("infra/hetzner/app/document-maintenance.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
@@ -56,7 +57,7 @@ const turnAttachments = read("src/documents/turn-attachments.ts");
 const productionRunbook = read("docs/PRODUCTION.md");
 const arnallDeployGateway = read("infra/hetzner/app/deploy-arnall-main.sh");
 const arnallDeployWorkflow = read(".github/workflows/deploy-arnall.yml");
-const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway, arnallDeployGateway].join("\n");
+const deployArtifacts = [dockerfile, compose, worker, browserSandbox, backup, backupReplicate, alerts, alertController, alertControllerHealthcheck, documentMaintenance, entrypoint, soffice, runtimeEnv, composeEnv, egressEnv, alertsEnv, replicaEnv, egressGateway, ingressGateway, arnallDeployGateway].join("\n");
 
 forbidMatch([compose, runtimeEnv, composeEnv].join("\n"), /\b(?:Arnay|studio|operations)\b/iu, "Compose/env artifacts contain a tenant/user hardcode");
 forbidMatch(dockerfile, /\/(?:codex|workspaces|computer)\/(?:studio|operations)(?:\/|\s|$)/iu, "Dockerfile contains a tenant/user filesystem hardcode");
@@ -144,7 +145,7 @@ requireMatch(compose, /alert-dispatcher:[\s\S]*?entrypoint: \[\/usr\/bin\/tini, 
 forbidMatch(compose.match(/  alert-dispatcher:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /depends_on:[\s\S]*?condition: service_healthy/u, "alert dispatcher cannot wait for app health before reporting app failure");
 requireMatch(compose, /alert-dispatcher:[\s\S]*?target: \/var\/lib\/aibrain\/data\/backups\n\s*read_only: true[\s\S]*?target: \/srv\/aibrain\/publish-rw\n\s*read_only: true[\s\S]*?target: \/var\/lib\/aibrain-replication\n\s*read_only: true/u, "alert dispatcher does not keep evidence mounts read-only");
 forbidMatch(compose.match(/  alert-dispatcher:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "alert dispatcher publishes a host port");
-requireMatch(alertController, /AIBRAIN_ALERT_SINK[\s\S]{0,100}= webhook[\s\S]*aibrain-alerts[\s\S]*aibrain-alert-controller-heartbeat/u, "alert controller does not require webhook delivery and durable collection");
+requireMatch(alertController, /AIBRAIN_ALERT_SINK[\s\S]{0,100}= webhook[\s\S]*aibrain-alerts[\s\S]*aibrain-alert-controller-status\.json/u, "alert controller does not require webhook delivery and durable status publication");
 requireMatch(alertsEnv, /^AIBRAIN_ALERT_WEBHOOK_URL=https:\/\//mu, "alert env example lacks an HTTPS external sink");
 requireMatch(alertsEnv, /^AIBRAIN_ALERT_EGRESS_READINESS_URL=http:\/\/egress-gateway:8080\/__aibrain_egress_health$/mu, "alert controller does not probe the private egress gateway");
 requireMatch(compose, /backup-replicator:[\s\S]*?profiles: \[backup\][\s\S]*?entrypoint: \[\/usr\/bin\/tini, --, \/usr\/local\/bin\/aibrain-backup-replicate\]/u, "Compose lacks the explicit one-shot backup replicator profile");
@@ -275,6 +276,11 @@ requireMatch(backupOrchestrator, /"stop", "app"[\s\S]*createSnapshot[\s\S]*verif
 requireMatch(backupOrchestrator, /\/usr\/bin\/flock/u, "backup orchestrator lacks Linux OS advisory locking");
 requireMatch(backupOrchestrator, /\/usr\/bin\/lockf/u, "backup orchestrator lacks macOS OS advisory locking");
 requireMatch(backupRecoveryUnit, /After=docker\.service[\s\S]*orchestrate-backup\.mjs recover[\s\S]*NoNewPrivileges=true/u, "systemd does not recover interrupted backups after Docker startup");
+requireMatch(alertController, /aibrain-alert-controller-status\.pending[\s\S]*mv[\s\S]*aibrain-alert-controller-status\.json/u, "alert controller does not publish status atomically");
+requireMatch(alertControllerHealthcheck, /AIBRAIN_ALERT_PENDING_WARN_AGE_MS[\s\S]*delivery: "degraded"/u, "alert dispatcher health does not expose degraded delivery separately from controller liveness");
+requireMatch(egressGateway, /healthToken[\s\S]*timingSafeEqual[\s\S]*AIBRAIN_EGRESS_HEALTH_TOKEN/u, "egress health is not authenticated with its dedicated secret");
+requireMatch(alertsEnv, /AIBRAIN_ALERT_MAX_ATTEMPTS/u, "alert environment lacks bounded delivery");
+requireMatch(alertsEnv, /AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN/u, "alert environment lacks health authentication");
 requireMatch(backupControllerEnv, /^AIBRAIN_BACKUP_COMPOSE_FILE=.*active\.compose\.yaml$/mu, "backup controller is not pinned to the active versioned Compose input");
 requireMatch(chromeRuntime, /"--remote-debugging-pipe"/u, "Chrome runtime does not use the inherited private CDP pipe");
 requireMatch(chromeRuntime, /stdio: \["ignore", "ignore", "pipe", "pipe", "pipe"\]/u, "Chrome runtime does not reserve inherited CDP fds 3 and 4");

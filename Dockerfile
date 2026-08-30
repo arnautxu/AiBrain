@@ -164,6 +164,7 @@ COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/backup-replicate.sh /usr/local/bin/aibrain-backup-replicate
 COPY --chown=root:root infra/hetzner/app/alerts.sh /usr/local/bin/aibrain-alerts
 COPY --chown=root:root infra/hetzner/app/alert-controller.sh /usr/local/bin/aibrain-alert-controller
+COPY --chown=root:root infra/hetzner/app/alert-controller-healthcheck.mjs /usr/local/share/aibrain/alert-controller-healthcheck.mjs
 COPY --chown=root:root infra/hetzner/app/document-maintenance.sh /usr/local/bin/aibrain-document-maintenance
 COPY --chown=root:root infra/hetzner/app/healthcheck.mjs /usr/local/share/aibrain/healthcheck.mjs
 COPY --chown=root:root infra/hetzner/app/automation-worker-healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs
@@ -182,7 +183,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-alerts \
   /usr/local/bin/aibrain-alert-controller \
   /usr/local/bin/aibrain-document-maintenance \
-  && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs \
+  && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs /usr/local/share/aibrain/alert-controller-healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs \
   && chmod -R a-w /app /usr/local/share/aibrain/internal-agent-context /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
 

@@ -152,8 +152,13 @@ reinicios y preflight de 15 minutos. El outbox file-backed deduplica
 raised/updated/resolved, aplica backoff y entrega primero a un sink local
 durable; no requiere `docker.sock`. `alert-dispatcher` arranca sin depender de
 la salud de app, conserva su propio health y entrega mediante el adapter webhook
-HTTPS. Solo su destino/token reales y la confirmación externa siguen pendientes
-por instalación. Procedimiento: `docs/ALERTING.md`.
+HTTPS. El probe de gateway entre contenedores usa un secreto dedicado que no
+autoriza egress; los retries tienen límite durable y el health del dispatcher
+solo falla si el controlador deja de publicar estado reciente. Los jobs agotados
+se archivan como evidencia fuera del outbox activo y se reportan como delivery
+degradado sin provocar un bucle de reinicios. Solo su destino/token reales y la
+confirmación externa siguen pendientes por instalación. Procedimiento:
+`docs/ALERTING.md`.
 
 Los logs esperados son códigos y métricas acotadas. No añadir bodies, cookies, tokens, credenciales, contenido documental o variables de entorno a logs. La retención local por defecto es cinco ficheros de 10 MB; la exportación remota y el canal de alertas son configuración externa por instalación.
 

@@ -1,5 +1,27 @@
 # Backup, restore y rollback del estado local y documental
 
+## Comprobación de evidencia sin mutación
+
+`npm run backup:evidence` valida los receipts locales y de réplica existentes,
+los correlaciona por backup y fingerprint, y marca como no vigente cualquier
+evidencia con más de 26 horas o fechada en el futuro. No crea snapshots, no copia,
+no restaura y no borra datos.
+
+Para inspeccionar además un restore ya realizado sobre raíces aisladas:
+
+```bash
+npm run backup:evidence -- \
+  --restore-data-root /ruta/absoluta/restore-data \
+  --restore-publish-root /ruta/absoluta/restore-publish
+```
+
+La lectura está limitada al marcador `.aibrain-restore.json` (2 MiB) y exige
+directorios reales, no enlaces simbólicos. `receipt-present` solo confirma la
+identidad del marcador; `contentVerified: false` y
+`restoreAcceptance: not-proven` son deliberados. La aceptación real sigue
+requiriendo el procedimiento aislado y las verificaciones funcionales de este
+runbook.
+
 El manifest V2 contiene dos componentes verificados por separado y por un fingerprint global: `product-data` para el estado file-backed y `published-documents` para el `publishWriteRoot` oficial. Del primer componente excluye `backupsRoot`, cualquier directorio `locks` y toda identidad o credencial efímera: `sessions/`, `auth-challenges/`, `auth-rate-limits/`, `secrets/`, ficheros `.env*`, cualquier `auth.json` y `users/<userId>/browser/profile/`. Por tanto, las cookies Chromium, sesiones web y autenticación Codex no se copian ni se restauran. El estado durable del browser y las descargas fuera del perfil sí pueden formar parte del snapshot. El árbol publicado no aplica exclusiones de contenido: debe recuperarse completo.
 
 Cada fichero de ambos componentes se abre sin seguir symlinks, se exige regular y con un solo hardlink, se copia con `fsync`, se vuelve a comprobar que no cambió durante la lectura y se registra con SHA-256. El backup comparte un lock físico de barrera con el publicador server-side, por lo que una confirmación documental termina antes del snapshot o espera hasta después; nunca cruza la copia del árbol publicado. El manifest se escribe al final y el snapshot queda read-only.

@@ -16,7 +16,7 @@ propiedad, ficheros y digests antes de levantar servicios.
 ## Política y autenticación
 
 El gateway escucha solo dentro de Compose en `http://egress-gateway:8080`. Los
-tres tokens son independientes y seleccionan la política; un header de canal no
+tres tokens de canal son independientes y seleccionan la política; un header de canal no
 tiene autoridad:
 
 | Canal | Autenticación | Destinos |
@@ -84,9 +84,17 @@ docker compose --env-file /etc/aibrain/<installation>/compose.env \
   -f infra/hetzner/compose.yaml config --quiet
 ```
 
+Genera también `AIBRAIN_EGRESS_HEALTH_TOKEN` de forma independiente. Debe ser
+distinto de los tres tokens de canal y estar presente con el mismo valor en
+`alerts.env` como `AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN`; el preflight compara ambos
+sin imprimirlos.
+
 El healthcheck consulta `GET /__aibrain_egress_health` por loopback dentro del
-sidecar. El endpoint devuelve únicamente estado y contadores, y responde 404 a
-clientes de la red. No expone política, destinos ni secretos. Para inspección:
+sidecar sin autenticación. El mismo path desde otro contenedor exige
+`Authorization: Bearer <health-token>` y devuelve 404 si falta o no coincide.
+El gateway no publica puertos en el host, y este cuarto token no autoriza proxy,
+DNS ni CONNECT. El endpoint devuelve únicamente estado y contadores; no expone
+política, destinos ni secretos. Para inspección:
 
 ```sh
 docker compose --env-file /etc/aibrain/<installation>/compose.env \

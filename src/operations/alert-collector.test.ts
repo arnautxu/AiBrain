@@ -75,6 +75,32 @@ describe("collectOperationalAlertInput", () => {
   it("allows only the exact app service health endpoint when Compose mode is explicit", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-alert-collector-"));
     roots.push(root);
+    const requests: Array<{ url: string; authorization: string | null }> = [];
+    await expect(collectOperationalAlertInput({
+      dataRoot: root,
+      publishWriteRoot: root,
+      readinessUrl: "http://app:3000/api/health/ready",
+      egressReadinessUrl: "http://egress-gateway:8080/__aibrain_egress_health",
+      egressReadinessToken: "health-token-00000000000000000000000000000",
+      allowComposeServiceReadiness: true,
+      restartCount15m: 0,
+      preflightFailureCount15m: 0,
+      readBackupReceipt: async () => null,
+      fetchImplementation: async (input, init) => {
+        requests.push({
+          url: String(input),
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        return new Response("ok");
+      },
+    })).resolves.toMatchObject({ readiness: "ready", egressGateway: "ready" });
+    expect(requests).toEqual([
+      { url: "http://app:3000/api/health/ready", authorization: null },
+      {
+        url: "http://egress-gateway:8080/__aibrain_egress_health",
+        authorization: "Bearer health-token-00000000000000000000000000000",
+      },
+    ]);
     await expect(collectOperationalAlertInput({
       dataRoot: root,
       publishWriteRoot: root,
@@ -84,8 +110,7 @@ describe("collectOperationalAlertInput", () => {
       restartCount15m: 0,
       preflightFailureCount15m: 0,
       readBackupReceipt: async () => null,
-      fetchImplementation: async () => new Response("ok"),
-    })).resolves.toMatchObject({ readiness: "ready", egressGateway: "ready" });
+    })).rejects.toThrow("egressReadinessToken");
     await expect(collectOperationalAlertInput({
       dataRoot: root,
       publishWriteRoot: root,

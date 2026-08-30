@@ -16,7 +16,7 @@ import type { OperationalAlert, OperationalAlertEvaluation } from "@/operations/
 const roots: string[] = [];
 let clock = Date.parse("2026-08-27T12:00:00.000Z");
 
-async function fixture(maximumPending = 1_000) {
+async function fixture(maximumPending = 1_000, maximumAttempts = 8) {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-alert-delivery-"));
   roots.push(root);
   const stateRoot = path.join(root, "state");
@@ -27,6 +27,7 @@ async function fixture(maximumPending = 1_000) {
       installationId: "alerts-qa",
       stateRoot,
       maximumPending,
+      maximumAttempts,
       now: () => clock,
     }),
   };
@@ -128,6 +129,52 @@ describe("FileAlertDeliveryService", () => {
     clock += 1_000;
     await expect(test.service.dispatch(sink)).resolves.toHaveLength(1);
     expect(attempts).toBe(2);
+  });
+
+  it("stops retrying at the durable attempt bound and reports exhausted work", async () => {
+    const test = await fixture(1_000, 2);
+    await test.service.reconcile(evaluation([readiness]));
+    let attempts = 0;
+    const sink: AlertSink = {
+      id: "bounded-sink",
+      async deliver() {
+        attempts += 1;
+        throw new AlertSinkError("unavailable", "synthetic outage");
+      },
+    };
+    await test.service.dispatch(sink);
+    clock += 1_000;
+    await test.service.dispatch(sink);
+    clock += 60_000;
+    await expect(test.service.dispatch(sink)).resolves.toEqual([]);
+    expect(attempts).toBe(2);
+    await expect(test.service.status()).resolves.toMatchObject({
+      pending: 0,
+      retryable: 0,
+      deferred: 0,
+      exhausted: 1,
+      lastFailureCounts: { unavailable: 1 },
+    });
+    expect(await readdir(path.join(test.stateRoot, "outbox"))).toEqual([]);
+    expect(await readdir(path.join(test.stateRoot, "failed"))).toHaveLength(1);
+  });
+
+  it("does not retry a permanent webhook rejection", async () => {
+    const test = await fixture(1_000, 8);
+    await test.service.reconcile(evaluation([readiness]));
+    let attempts = 0;
+    const sink: AlertSink = {
+      id: "rejected-sink",
+      async deliver() {
+        attempts += 1;
+        throw new AlertSinkError("rejected", "synthetic rejection");
+      },
+    };
+    await test.service.dispatch(sink);
+    clock += 60_000;
+    await test.service.dispatch(sink);
+    expect(attempts).toBe(1);
+    await expect(test.service.status()).resolves.toMatchObject({ pending: 0, exhausted: 1 });
   });
 
   it("fails before partial reconciliation when the outbox is saturated", async () => {

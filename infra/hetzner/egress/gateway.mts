@@ -60,6 +60,7 @@ export type EgressGatewayConfig = Readonly<{
   browserToken: string;
   workerToken: string;
   serverToken: string;
+  healthToken: string;
   workerHosts: ReadonlySet<string>;
   supabaseHostname: string;
   maxHeaderBytes: number;
@@ -186,6 +187,19 @@ function isGlobalIpv6(address: string) {
 export function isGlobalAddress(address: string) {
   const family = isIP(address);
   return family === 4 ? isGlobalIpv4(address) : family === 6 ? isGlobalIpv6(address) : false;
+}
+
+export function isHealthProbeAuthorized(
+  remoteAddress: string | undefined,
+  authorization: string | string[] | undefined,
+  healthToken: string,
+) {
+  if (isLoopback(remoteAddress)) return true;
+  if (typeof authorization !== "string" || !authorization.startsWith("Bearer ")
+    || authorization.length > 768) return false;
+  const expected = validateToken("healthToken", healthToken);
+  const candidate = digest(authorization.slice(7));
+  return candidate.length === expected.length && timingSafeEqual(candidate, expected);
 }
 
 function normalizeHostname(value: string) {
@@ -405,8 +419,10 @@ export class EgressGateway {
     const browser = validateToken("browserToken", this.config.browserToken);
     const worker = validateToken("workerToken", this.config.workerToken);
     const server = validateToken("serverToken", this.config.serverToken);
-    if (browser.equals(worker) || browser.equals(server) || worker.equals(server)) {
-      throw new EgressGatewayError("CONFIG_INVALID", "Egress channel secrets must be pairwise distinct.");
+    const health = validateToken("healthToken", this.config.healthToken);
+    const secrets = [browser, worker, server, health];
+    if (secrets.some((secret, index) => secrets.slice(index + 1).some((candidate) => secret.equals(candidate)))) {
+      throw new EgressGatewayError("CONFIG_INVALID", "Egress channel and health secrets must be pairwise distinct.");
     }
     this.tokens = new Map<Channel, Buffer>([["browser", browser], ["worker", worker], ["server", server]]);
   }
@@ -565,7 +581,11 @@ export class EgressGateway {
 
   private async handleRequest(request: IncomingMessage, response: ServerResponse) {
     if (request.method === "GET" && request.url === HEALTH_PATH) {
-      if (!isLoopback(request.socket.remoteAddress)) return sendHttp(response, 404, "Not found.\n");
+      if (!isHealthProbeAuthorized(
+        request.socket.remoteAddress,
+        request.headers.authorization,
+        this.config.healthToken,
+      )) return sendHttp(response, 404, "Not found.\n");
       const body = `${JSON.stringify(this.health())}\n`;
       response.writeHead(200, { "cache-control": "no-store", "content-type": "application/json", "content-length": Buffer.byteLength(body) });
       response.end(body);
@@ -710,6 +730,7 @@ export function configFromEnvironment(): EgressGatewayConfig {
     browserToken: process.env.AIBRAIN_EGRESS_BROWSER_TOKEN ?? "",
     workerToken: process.env.AIBRAIN_EGRESS_WORKER_TOKEN ?? "",
     serverToken: process.env.AIBRAIN_EGRESS_SERVER_TOKEN ?? "",
+    healthToken: process.env.AIBRAIN_EGRESS_HEALTH_TOKEN ?? "",
     workerHosts,
     supabaseHostname: normalizeHostname(supabase.hostname),
     maxHeaderBytes: envInteger("AIBRAIN_EGRESS_MAX_HEADER_BYTES", 32 * 1_024),

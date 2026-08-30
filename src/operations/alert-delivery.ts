@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type {
   OperationalAlert,
@@ -235,13 +235,29 @@ export type FileAlertDeliveryServiceOptions = {
   installationId: string;
   stateRoot: string;
   maximumPending?: number;
+  maximumAttempts?: number;
   now?: () => number;
 };
+
+export type AlertDeliveryStatus = Readonly<{
+  pending: number;
+  retryable: number;
+  deferred: number;
+  exhausted: number;
+  oldestCreatedAt: string | null;
+  nextAttemptAt: string | null;
+  lastFailureCounts: Readonly<Record<AlertDeliveryFailureCode, number>>;
+}>;
+
+function earlierIsoDate(current: string | null, candidate: string) {
+  return current === null || candidate < current ? candidate : current;
+}
 
 export class FileAlertDeliveryService {
   readonly #installationId: string;
   readonly #stateRoot: string;
   readonly #maximumPending: number;
+  readonly #maximumAttempts: number;
   readonly #now: () => number;
   readonly #locks: ResourceLockManager;
 
@@ -253,9 +269,14 @@ export class FileAlertDeliveryService {
     if (!Number.isSafeInteger(maximumPending) || maximumPending < 1 || maximumPending > 100_000) {
       throw new AlertDeliveryError("ALERT_DELIVERY_CONFIG_INVALID", "maximumPending is invalid.");
     }
+    const maximumAttempts = options.maximumAttempts ?? 8;
+    if (!Number.isSafeInteger(maximumAttempts) || maximumAttempts < 1 || maximumAttempts > 100) {
+      throw new AlertDeliveryError("ALERT_DELIVERY_CONFIG_INVALID", "maximumAttempts is invalid.");
+    }
     this.#installationId = options.installationId;
     this.#stateRoot = path.resolve(options.stateRoot);
     this.#maximumPending = maximumPending;
+    this.#maximumAttempts = maximumAttempts;
     this.#now = options.now ?? Date.now;
     this.#locks = new ResourceLockManager({ rootDirectory: path.join(this.#stateRoot, "locks") });
   }
@@ -364,11 +385,12 @@ export class FileAlertDeliveryService {
       throw new AlertDeliveryError("ALERT_DELIVERY_CONFIG_INVALID", "Alert sink or dispatch limit is invalid.");
     }
     await mkdir(path.join(this.#stateRoot, "outbox"), { recursive: true, mode: 0o700 });
+    await mkdir(path.join(this.#stateRoot, "failed"), { recursive: true, mode: 0o700 });
     const names = (await readdir(path.join(this.#stateRoot, "outbox")))
       .filter((name) => /^[0-9a-f]{64}\.json$/u.test(name))
-      .sort()
-      .slice(0, limit);
+      .sort();
     const receipts: AlertDeliveryReceipt[] = [];
+    let attempted = 0;
     for (const name of names) {
       const eventId = name.slice(0, -5);
       const receipt = await this.#locks.withLock(`alert-dispatch:${this.#installationId}:${eventId}`, async () => {
@@ -378,10 +400,16 @@ export class FileAlertDeliveryService {
           return existingReceipt;
         }
         const job = await readOptional(this.#outboxPath(eventId), alertDeliveryJobSchema);
-        if (!job || Date.parse(job.nextAttemptAt) > this.#now()) return null;
+        if (!job) return null;
         if (job.event.installationId !== this.#installationId || job.event.eventId !== eventId) {
           throw new AlertDeliveryError("ALERT_JOB_CONFLICT", "Alert job identity is invalid.");
         }
+        if (job.attempts >= this.#maximumAttempts) {
+          await this.#archiveExhausted(eventId, job);
+          return null;
+        }
+        if (Date.parse(job.nextAttemptAt) > this.#now() || attempted >= limit) return null;
+        attempted += 1;
         try {
           const delivered = await sink.deliver(Object.freeze(job.event));
           if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(delivered.receiptId)) {
@@ -399,20 +427,81 @@ export class FileAlertDeliveryService {
           await rm(this.#outboxPath(eventId), { force: true });
           return completed;
         } catch (error) {
-          const attempts = Math.min(job.attempts + 1, 1_000_000);
+          const lastFailure = failureCode(error);
+          const attempts = lastFailure === "rejected"
+            ? this.#maximumAttempts
+            : Math.min(job.attempts + 1, this.#maximumAttempts);
           const delayMs = Math.min(5 * 60 * 1_000, 1_000 * (2 ** Math.min(attempts - 1, 8)));
           await atomicWriteJson(this.#outboxPath(eventId), {
             ...job,
             attempts,
             nextAttemptAt: new Date(this.#now() + delayMs).toISOString(),
-            lastFailure: failureCode(error),
+            lastFailure,
           }, alertDeliveryJobSchema, { mode: 0o600 });
+          if (attempts >= this.#maximumAttempts) {
+            await this.#archiveExhausted(eventId, { ...job, attempts, lastFailure });
+          }
           return null;
         }
       });
       if (receipt) receipts.push(receipt);
     }
     return Object.freeze(receipts);
+  }
+
+  async status(): Promise<AlertDeliveryStatus> {
+    await mkdir(path.join(this.#stateRoot, "outbox"), { recursive: true, mode: 0o700 });
+    const names = (await readdir(path.join(this.#stateRoot, "outbox")))
+      .filter((name) => /^[0-9a-f]{64}\.json$/u.test(name))
+      .sort();
+    const failedNames = await this.#failedNames();
+    const counts: Record<AlertDeliveryFailureCode, number> = {
+      timeout: 0,
+      rejected: 0,
+      unavailable: 0,
+      unknown: 0,
+    };
+    let retryable = 0;
+    let deferred = 0;
+    let exhausted = 0;
+    let oldestCreatedAt: string | null = null;
+    let nextAttemptAt: string | null = null;
+    for (const name of names) {
+      const eventId = name.slice(0, -5);
+      const job = await readOptional(this.#outboxPath(eventId), alertDeliveryJobSchema);
+      if (!job) continue;
+      if (job.event.installationId !== this.#installationId || job.event.eventId !== eventId) {
+        throw new AlertDeliveryError("ALERT_JOB_CONFLICT", "Alert job identity is invalid.");
+      }
+      if (job.lastFailure) counts[job.lastFailure] += 1;
+      oldestCreatedAt = earlierIsoDate(oldestCreatedAt, job.event.createdAt);
+      if (job.attempts >= this.#maximumAttempts) exhausted += 1;
+      else if (Date.parse(job.nextAttemptAt) <= this.#now()) retryable += 1;
+      else {
+        deferred += 1;
+        nextAttemptAt = earlierIsoDate(nextAttemptAt, job.nextAttemptAt);
+      }
+    }
+    for (const name of failedNames) {
+      const eventId = name.slice(0, -5);
+      const job = await readOptional(this.#failedPath(eventId), alertDeliveryJobSchema);
+      if (!job) continue;
+      if (job.event.installationId !== this.#installationId || job.event.eventId !== eventId
+        || job.attempts < this.#maximumAttempts) {
+        throw new AlertDeliveryError("ALERT_JOB_CONFLICT", "Exhausted alert job identity is invalid.");
+      }
+      exhausted += 1;
+      if (job.lastFailure) counts[job.lastFailure] += 1;
+    }
+    return Object.freeze({
+      pending: names.length,
+      retryable,
+      deferred,
+      exhausted,
+      oldestCreatedAt,
+      nextAttemptAt,
+      lastFailureCounts: Object.freeze(counts),
+    });
   }
 
   async #pendingCount() {
@@ -425,6 +514,29 @@ export class FileAlertDeliveryService {
     }
   }
 
+  async #failedNames() {
+    try {
+      return (await readdir(path.join(this.#stateRoot, "failed")))
+        .filter((name) => /^[0-9a-f]{64}\.json$/u.test(name)).sort();
+    } catch (error) {
+      if (isNodeError(error, "ENOENT")) return [];
+      throw error;
+    }
+  }
+
+  async #archiveExhausted(eventId: string, job: AlertDeliveryJob) {
+    const existing = await readOptional(this.#failedPath(eventId), alertDeliveryJobSchema);
+    if (existing) {
+      if (existing.event.eventId !== job.event.eventId
+        || existing.event.installationId !== job.event.installationId) {
+        throw new AlertDeliveryError("ALERT_JOB_CONFLICT", "Exhausted alert job conflicts with existing evidence.");
+      }
+      await rm(this.#outboxPath(eventId), { force: true });
+      return;
+    }
+    await rename(this.#outboxPath(eventId), this.#failedPath(eventId));
+  }
+
   #statePath(code: OperationalAlertCode) {
     return path.join(this.#stateRoot, "state", `${code}.json`);
   }
@@ -435,6 +547,10 @@ export class FileAlertDeliveryService {
 
   #receiptPath(eventId: string) {
     return path.join(this.#stateRoot, "receipts", `${eventId}.json`);
+  }
+
+  #failedPath(eventId: string) {
+    return path.join(this.#stateRoot, "failed", `${eventId}.json`);
   }
 }
 
