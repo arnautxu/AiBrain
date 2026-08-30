@@ -65,6 +65,7 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
 function renderSidebar() {
   const onNewThread = vi.fn();
   const onOpenCommandPalette = vi.fn();
+  const onOpenTaskCenter = vi.fn();
   const onOpenAutomations = vi.fn();
   const operations = project("project-operations", "Operaciones");
   const product = project("project-product", "Producto");
@@ -92,7 +93,7 @@ function renderSidebar() {
       onOpenDesktop={vi.fn()}
       onOpenCommandPalette={onOpenCommandPalette}
       onOpenLibrary={vi.fn()}
-      onOpenTaskCenter={vi.fn()}
+      onOpenTaskCenter={onOpenTaskCenter}
       onOpenAutomations={onOpenAutomations}
       onSelectProject={vi.fn()}
       onSelectThread={vi.fn()}
@@ -104,20 +105,23 @@ function renderSidebar() {
     />,
   );
 
-  return { onNewThread, onOpenAutomations, onOpenCommandPalette };
+  return { onNewThread, onOpenAutomations, onOpenCommandPalette, onOpenTaskCenter };
 }
 
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("keeps search as a compact header action and limits navigation to conversation and automations", () => {
-    const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
+  it("keeps search compact and exposes conversations, task notifications and automations", () => {
+    const { onOpenAutomations, onOpenCommandPalette, onOpenTaskCenter } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
+    expect(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Automatizaciones" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
+    expect(onOpenTaskCenter).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();
     expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("Tareas programadas")).not.toBeInTheDocument();
