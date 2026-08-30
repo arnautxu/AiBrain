@@ -271,27 +271,39 @@ deploy_ghcr_release() {
 }
 
 validate_existing_release_readbacks() {
-  local revision="$1" run_id="$2" evidence_root="$3"
+  local revision="$1" backend_ci_run_id="$2" publish_run_id="$3" deploy_run_id="$4"
+  local app_digest="$5" gateway_digest="$6" evidence_root="$7"
   local captured_at expected_manifest actual_manifest
   local ci_file="${evidence_root}/release-ci-readback.json"
   local deploy_file="${evidence_root}/release-deploy-state.json"
   local runtime_file="${evidence_root}/release-runtime-readback.json"
   local app_file="${evidence_root}/release-app-oci-inspect.json"
   local gateway_file="${evidence_root}/release-gateway-oci-inspect.json"
-  local source_file="${evidence_root}/backend-ci-source.json"
+  local source_file="${evidence_root}/release-pipeline-source.json"
   local manifest_file="${evidence_root}/acceptance-release-readbacks.json"
 
   require_root_owned_directory "$evidence_root"
   for artifact in "$ci_file" "$deploy_file" "$runtime_file" "$app_file" "$gateway_file" "$source_file" "$manifest_file"; do
     require_root_owned_file "$artifact"
   done
-  jq -e --arg revision "$revision" --arg runId "$run_id" '
-    .schemaVersion == 1 and .workflow == "Backend CI" and .conclusion == "success"
-    and .headSha == $revision and .runId == $runId
-  ' "$source_file" >/dev/null || fail "existing Backend CI source does not match the requested retry"
-  jq -e --arg revision "$revision" '
+  jq -e --arg revision "$revision" --arg backendCiRunId "$backend_ci_run_id" \
+    --arg publishRunId "$publish_run_id" --arg deployRunId "$deploy_run_id" \
+    --arg appDigest "$app_digest" --arg gatewayDigest "$gateway_digest" '
+    .schemaVersion == 2 and .headSha == $revision
+    and .backendCi == {workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$backendCiRunId}
+    and .publish == {workflow:"Publish GHCR images",conclusion:"success",headSha:$revision,runId:$publishRunId}
+    and .deploy == {workflow:"Deploy Arnall",headSha:$revision,runId:$deployRunId}
+    and .images == {appDigest:$appDigest,gatewayDigest:$gatewayDigest}
+  ' "$source_file" >/dev/null || fail "existing release pipeline source does not match the requested retry"
+  jq -e --arg revision "$revision" --arg backendCiRunId "$backend_ci_run_id" \
+    --arg publishRunId "$publish_run_id" --arg deployRunId "$deploy_run_id" \
+    --arg appDigest "$app_digest" --arg gatewayDigest "$gateway_digest" '
     .schemaVersion == 1 and .kind == "aibrain-release-ci-readback" and .source == "ci"
     and .candidateSha == $revision and .ciSha == $revision
+    and .backendCi == {runId:$backendCiRunId,headSha:$revision}
+    and .publish == {runId:$publishRunId,headSha:$revision}
+    and .deploy == {runId:$deployRunId,headSha:$revision}
+    and .appOciDigest == $appDigest and .gatewayOciDigest == $gatewayDigest
     and (.capturedAt | type == "string") and (.provenance.kind == "file")
     and (.provenance.sha256 | test("^[0-9a-f]{64}$"))
   ' "$ci_file" >/dev/null || fail "existing CI readback does not match the requested retry"
@@ -316,13 +328,16 @@ validate_existing_release_readbacks() {
     .schemaVersion == 1 and .kind == "aibrain-release-oci-inspect" and .source == "oci-inspect"
     and .component == "gateway" and .revision == $revision and .digest == $digest and .capturedAt == $capturedAt
   ' "$gateway_file" >/dev/null || fail "existing gateway OCI readback does not match the requested retry"
-  expected_manifest="$(jq -cn --arg releaseSha "$revision" --arg runId "$run_id" --arg capturedAt "$captured_at" \
+  expected_manifest="$(jq -cn --arg releaseSha "$revision" --arg backendCiRunId "$backend_ci_run_id" \
+    --arg publishRunId "$publish_run_id" --arg deployRunId "$deploy_run_id" \
+    --arg appOciDigest "$app_digest" --arg gatewayOciDigest "$gateway_digest" --arg capturedAt "$captured_at" \
     --arg ciHash "$(sha256sum "$ci_file" | awk '{print $1}')" \
     --arg deployHash "$(sha256sum "$deploy_file" | awk '{print $1}')" \
     --arg runtimeHash "$(sha256sum "$runtime_file" | awk '{print $1}')" \
     --arg appHash "$(sha256sum "$app_file" | awk '{print $1}')" \
     --arg gatewayHash "$(sha256sum "$gateway_file" | awk '{print $1}')" \
-    '{schemaVersion:1,releaseSha:$releaseSha,ciRunId:$runId,capturedAt:$capturedAt,evidence:[
+    '{schemaVersion:2,releaseSha:$releaseSha,backendCiRunId:$backendCiRunId,publishRunId:$publishRunId,
+      deployRunId:$deployRunId,appOciDigest:$appOciDigest,gatewayOciDigest:$gatewayOciDigest,capturedAt:$capturedAt,evidence:[
       {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
       {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
       {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
@@ -334,7 +349,8 @@ validate_existing_release_readbacks() {
 }
 
 collect_release_readbacks() {
-  local revision="$1" run_id="$2"
+  local revision="$1" backend_ci_run_id="$2" publish_run_id="$3" deploy_run_id="$4"
+  local app_digest="$5" gateway_digest="$6"
   local compose_file="${STATE_FILE}.active.compose.yaml"
   local evidence_parent="${CONFIG_DIR}/acceptance"
   local evidence_root="${evidence_parent}/${revision}"
@@ -349,12 +365,26 @@ collect_release_readbacks() {
   require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   jq -e --arg revision "$revision" '.schemaVersion == 3 and .current.revision == $revision' "$STATE_FILE" >/dev/null \
     || fail "release state does not match the requested candidate"
-  [[ "$run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
+  [[ "$backend_ci_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Backend CI run ID is invalid"
+  [[ "$publish_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Publish run ID is invalid"
+  [[ "$deploy_run_id" =~ ^[0-9]{6,20}$ ]] || fail "Deploy run ID is invalid"
+  [[ "$backend_ci_run_id" != "$publish_run_id" && "$backend_ci_run_id" != "$deploy_run_id" \
+    && "$publish_run_id" != "$deploy_run_id" ]] || fail "release workflow run IDs must be distinct"
+  [[ "$app_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "published application digest is invalid"
+  [[ "$gateway_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "published gateway digest is invalid"
+  jq -e --arg appDigest "$app_digest" --arg gatewayDigest "$gateway_digest" '
+    .current.image | endswith("@" + $appDigest)
+  ' "$STATE_FILE" >/dev/null || fail "published application digest does not match release state"
+  jq -e --arg gatewayDigest "$gateway_digest" '
+    .current.egressImage | endswith("@" + $gatewayDigest)
+  ' "$STATE_FILE" >/dev/null || fail "published gateway digest does not match release state"
 
   install -d -m 0700 -o root -g root "$evidence_parent"
   if [[ -e "$evidence_root" ]]; then
-    validate_existing_release_readbacks "$revision" "$run_id" "$evidence_root"
-    printf 'ARNALL_READBACKS_ALREADY_COLLECTED revision=%s run_id=%s\n' "$revision" "$run_id"
+    validate_existing_release_readbacks "$revision" "$backend_ci_run_id" "$publish_run_id" "$deploy_run_id" \
+      "$app_digest" "$gateway_digest" "$evidence_root"
+    printf 'ARNALL_READBACKS_ALREADY_COLLECTED revision=%s backend_ci_run_id=%s publish_run_id=%s deploy_run_id=%s\n' \
+      "$revision" "$backend_ci_run_id" "$publish_run_id" "$deploy_run_id"
     return
   fi
 
@@ -370,14 +400,20 @@ collect_release_readbacks() {
   trap cleanup_readback_staging EXIT
   chmod 0700 "$readback_staging"
   require_root_owned_directory "$readback_staging"
-  jq -n --arg revision "$revision" --arg runId "$run_id" \
-    '{schemaVersion:1,workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$runId}' \
-    > "${readback_staging}/backend-ci-source.json"
-  chmod 0600 "${readback_staging}/backend-ci-source.json"
+  jq -n --arg revision "$revision" --arg backendCiRunId "$backend_ci_run_id" \
+    --arg publishRunId "$publish_run_id" --arg deployRunId "$deploy_run_id" \
+    --arg appDigest "$app_digest" --arg gatewayDigest "$gateway_digest" \
+    '{schemaVersion:2,headSha:$revision,
+      backendCi:{workflow:"Backend CI",conclusion:"success",headSha:$revision,runId:$backendCiRunId},
+      publish:{workflow:"Publish GHCR images",conclusion:"success",headSha:$revision,runId:$publishRunId},
+      deploy:{workflow:"Deploy Arnall",headSha:$revision,runId:$deployRunId},
+      images:{appDigest:$appDigest,gatewayDigest:$gatewayDigest}}' \
+    > "${readback_staging}/release-pipeline-source.json"
+  chmod 0600 "${readback_staging}/release-pipeline-source.json"
   node "${OPS_ROOT}/collect-release-readbacks.mjs" \
     --output-root "$readback_staging" \
     --candidate-sha "$revision" \
-    --ci-source "${readback_staging}/backend-ci-source.json" \
+    --pipeline-source "${readback_staging}/release-pipeline-source.json" \
     --release-state "$STATE_FILE" \
     --docker-bin /usr/bin/docker \
     --app-container "$app_container" \
@@ -387,13 +423,16 @@ collect_release_readbacks() {
   done
   captured_at="$(jq -r '.capturedAt' "${readback_staging}/release-ci-readback.json")"
   [[ "$captured_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T ]] || fail "collector capture time is invalid"
-  jq -n --arg releaseSha "$revision" --arg runId "$run_id" --arg capturedAt "$captured_at" \
+  jq -n --arg releaseSha "$revision" --arg backendCiRunId "$backend_ci_run_id" \
+    --arg publishRunId "$publish_run_id" --arg deployRunId "$deploy_run_id" \
+    --arg appOciDigest "$app_digest" --arg gatewayOciDigest "$gateway_digest" --arg capturedAt "$captured_at" \
     --arg ciHash "$(sha256sum "${readback_staging}/release-ci-readback.json" | awk '{print $1}')" \
     --arg deployHash "$(sha256sum "${readback_staging}/release-deploy-state.json" | awk '{print $1}')" \
     --arg runtimeHash "$(sha256sum "${readback_staging}/release-runtime-readback.json" | awk '{print $1}')" \
     --arg appHash "$(sha256sum "${readback_staging}/release-app-oci-inspect.json" | awk '{print $1}')" \
     --arg gatewayHash "$(sha256sum "${readback_staging}/release-gateway-oci-inspect.json" | awk '{print $1}')" \
-    '{schemaVersion:1,releaseSha:$releaseSha,ciRunId:$runId,capturedAt:$capturedAt,evidence:[
+    '{schemaVersion:2,releaseSha:$releaseSha,backendCiRunId:$backendCiRunId,publishRunId:$publishRunId,
+      deployRunId:$deployRunId,appOciDigest:$appOciDigest,gatewayOciDigest:$gatewayOciDigest,capturedAt:$capturedAt,evidence:[
       {kind:"release",route:"release:ci-readback",artifactPath:"release-ci-readback.json",sha256:$ciHash},
       {kind:"release",route:"release:deploy-state",artifactPath:"release-deploy-state.json",sha256:$deployHash},
       {kind:"release",route:"release:runtime-readback",artifactPath:"release-runtime-readback.json",sha256:$runtimeHash},
@@ -461,8 +500,9 @@ main() {
     deploy_ghcr_release "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
     return
   fi
-  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^collect-readbacks\ ([0-9a-f]{40})\ ([0-9]{6,20})$ ]]; then
-    collect_release_readbacks "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+  if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^collect-readbacks\ ([0-9a-f]{40})\ ([0-9]{6,20})\ ([0-9]{6,20})\ ([0-9]{6,20})\ (sha256:[0-9a-f]{64})\ (sha256:[0-9a-f]{64})$ ]]; then
+    collect_release_readbacks "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" \
+      "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[6]}"
     return
   fi
   if [[ "${SSH_ORIGINAL_COMMAND:-}" =~ ^bootstrap-admin\ ([0-9a-f-]{36})$ ]]; then

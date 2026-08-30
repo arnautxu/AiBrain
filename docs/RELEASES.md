@@ -16,6 +16,14 @@ un artefacto de siete días y `Deploy Arnall` descarga ese manifiesto, rechaza
 una revisión que ya no sea la punta de `main`, y transmite el `GITHUB_TOKEN`
 temporal por stdin al gateway restringido.
 
+Antes de promover, `Deploy Arnall` consulta GitHub Actions y exige un único run
+exitoso de `Backend CI`, evento `push`, rama `main` y el mismo SHA. El ID del
+workflow `Publish GHCR images` nunca se reutiliza como ID de CI. El paquete
+privado posterior conserva por separado los IDs de Backend CI, Publish y
+Deploy, el SHA común y los dos digests. La fase Deploy aún está en ejecución
+cuando se captura su ID, por lo que no se autodeclara exitosa: despliegue y
+aceptación live se verifican con readback separado.
+
 El gateway usa una configuración Docker temporal para el login, hace pull de
 ambos digests exactos, elimina esa configuración antes de promover y ejecuta el
 release manager. Nunca recibe un archivo fuente, no construye ni publica en

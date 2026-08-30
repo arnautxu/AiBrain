@@ -170,18 +170,22 @@ app/gateway OCI inspections (`release:app-oci-inspect` and
 with the manifest and with one another. Verify them against the reviewed
 candidate checkout, not an arbitrary working directory:
 
-Do not hand-write those five artifacts. Save a sanitized CI source with exactly
-`schemaVersion`, `workflow: "Backend CI"`, `conclusion: "success"`, `headSha`
-and the numeric GitHub `runId`; it must contain no credentials or logs. On the
-host, after the authorized deployment, collect all five artifacts from that
-source, the versioned `release-state.json`, and the same Docker inspect/OCI
-label commands used by `manage-release`:
+Do not hand-write those five artifacts. Save a sanitized schema-v2 pipeline
+source containing the common full `headSha`; separate `backendCi`, `publish`
+and `deploy` workflow names/run IDs; successful conclusions only for the two
+already-completed upstream runs; and both published OCI digests. It must
+contain no credentials or logs. The Backend CI ID must be resolved from the
+successful `Backend CI` push run for that SHA through GitHub's API. Never copy
+the triggering Publish ID into the Backend CI field. On the host, after the
+authorized deployment, collect all five artifacts from that source, the
+versioned `release-state.json`, and the same Docker inspect/OCI label commands
+used by `manage-release`:
 
 ```bash
 npm run acceptance:collect-release-readbacks -- \
   --output-root /private/evidence \
   --candidate-sha "$CANDIDATE_SHA" \
-  --ci-source /private/evidence/backend-ci-source.json \
+  --pipeline-source /private/evidence/release-pipeline-source.json \
   --release-state /etc/aibrain/company-qa/release-state.json \
   --docker-bin /usr/bin/docker \
   --app-container "$APP_CONTAINER_ID" \
@@ -194,15 +198,16 @@ its source, a source-or-command fingerprint and capture time.
 
 For the protected Arnall workflow, this collection is automatic only after the
 restricted deploy returns successfully. The workflow supplies the immutable
-`workflow_run` SHA and numeric run ID; the host regenerates the sanitized CI
-source, rechecks live/ready, resolves the running app and ingress-gateway IDs
+`workflow_run` SHA, the API-verified Backend CI ID, the triggering Publish ID,
+the current Deploy ID and both artifact digests; the host regenerates the
+sanitized pipeline source, rechecks live/ready, resolves the running app and ingress-gateway IDs
 through the active release Compose file, and atomically stores a private
 `acceptance-release-readbacks.json` package with the five relative evidence
-paths, hashes and CI run ID. It prints neither the artifacts nor Docker output.
+paths, hashes, three run IDs and two digests. It prints neither the artifacts nor Docker output.
 Before receiving an archive, the deploy gateway also verifies that the host
 Node runtime can execute the typed collector. A retry never overwrites this
 directory: it succeeds only after revalidating the package, all five hashes,
-the requested SHA and CI run ID; any mismatch is fail-closed.
+the requested SHA, run IDs and digests; any mismatch is fail-closed.
 
 ```bash
 npm run acceptance:verify -- --manifest /private/evidence/manifest.json \
@@ -263,28 +268,12 @@ Stop in maintenance and follow [BACKUP_RESTORE.md](BACKUP_RESTORE.md) if either
 side fails health, identity or data checks. Never delete release directories,
 images, volumes, journals or backups during the rehearsal.
 
-## 9. Current baseline evidence, not candidate acceptance
+## 9. Current repository baseline, not release acceptance
 
-At 2026-08-28 13:20 Europe/Madrid:
-
-- `origin/main`: `9fe848ae84ca808533dceb1c8a43779abe1e221a`;
-- the one-commit delta from `390bbb06…` changes only the Arnall deploy gateway
-  and adds its contract test;
-- [Backend CI 33164764500](https://github.com/arnautxu/AiBrain/actions/runs/33164764500) passed all four jobs for `9fe848ae…`;
-- [Deploy 33165012869](https://github.com/arnautxu/AiBrain/actions/runs/33165012869) logged `ARNALL_DEPLOY_OK` for `9fe848ae…`;
-- current app digest: `sha256:671d7f652efcec9133099790fca6fec036b77ae28a3ff3f4d0271dae00855c9f`;
-- current gateway digest: `sha256:926117c1caa82e4b212d7ab5cadeaf722de1edb7ca1ac44f7f4f2f18431c0c09`;
-- post-deploy process start: `2026-08-28T10:54:16.471Z`; live and ready returned HTTP 200, 33.97% disk free and all required checks/components `OK`;
-- the prior fully green and deployed baseline was `390bbb06c1dac491b89b3c2a133713c6439584bb`;
-- [Backend CI 33157502708](https://github.com/arnautxu/AiBrain/actions/runs/33157502708): success, four jobs;
-- [Deploy 33157794229](https://github.com/arnautxu/AiBrain/actions/runs/33157794229): success and `ARNALL_DEPLOY_OK` for that SHA;
-- app digest logged: `sha256:59c402d472ddf7f21208141f435b9f62b70d4ff0f205dea57be7bac2d69399fa`;
-- gateway digest logged: `sha256:6b8ead9665c05cbc1a09b7d546b1bdd04a5c99b6c8f539d2b9836ba83bc02775`;
-- live and ready returned HTTP 200; readiness reported 35.97% disk free and
-  all storage/toolchain checks passing;
-- root redirected to `/login` with HTTP 307;
-- master readback reported anonymous `/api/auth/session` HTTP 401 and login DOM
-  `data-installation="company-qa"`; re-check both on the candidate because the
-  marker remains an acceptance risk, not a passed product gate;
-- this is the pre-integration baseline only. It does not validate the pending
-  work-parity merge, dirty fixups, future workstream handoffs or final rollback.
+The 2026-08-30 operating-truth refresh began from `faac15c` and incorporated
+the newer `origin/main=af2c36388b518feb8fc2cc86eeff7d0302672491` before commit. Those Git values prove
+only the versioned source baseline. Consult [OPERATING_TRUTH.md](OPERATING_TRUTH.md)
+for maturity and gaps. Obtain fresh GitHub and host readback before citing any
+CI, Publish, Deploy, digest, health or authenticated live state for `af2c363` or
+a descendant; this runbook intentionally does not preserve a historical
+release as though it were current acceptance.

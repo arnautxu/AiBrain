@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -29,13 +29,21 @@ async function fixture(options: { ciSha?: string; includeCi?: boolean } = {}) {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-release-readbacks-"));
   roots.push(root);
   await mkdir(path.join(root, "sources"), { recursive: true, mode: 0o700 });
-  const ciSourcePath = path.join(root, "sources", "backend-ci.json");
+  const pipelineSourcePath = path.join(root, "sources", "release-pipeline.json");
   const releaseStatePath = path.join(root, "sources", "release-state.json");
   if (options.includeCi !== false) {
-    await writeFile(ciSourcePath, `${JSON.stringify({ schemaVersion: 1, workflow: "Backend CI", conclusion: "success", headSha: options.ciSha ?? candidateSha, runId: "33165012869" })}\n`, { mode: 0o600 });
+    const headSha = options.ciSha ?? candidateSha;
+    await writeFile(pipelineSourcePath, `${JSON.stringify({
+      schemaVersion: 2,
+      headSha,
+      backendCi: { workflow: "Backend CI", conclusion: "success", headSha, runId: "33165012869" },
+      publish: { workflow: "Publish GHCR images", conclusion: "success", headSha, runId: "33165012870" },
+      deploy: { workflow: "Deploy Arnall", headSha, runId: "33165012871" },
+      images: { appDigest: appImage.split("@")[1], gatewayDigest: gatewayImage.split("@")[1] },
+    })}\n`, { mode: 0o600 });
   }
   await writeFile(releaseStatePath, `${JSON.stringify({ schemaVersion: 3, current: { revision: candidateSha, image: appImage, egressImage: gatewayImage } })}\n`, { mode: 0o600 });
-  return { ciSourcePath, releaseStatePath };
+  return { pipelineSourcePath, releaseStatePath };
 }
 
 afterEach(async () => {
@@ -62,18 +70,42 @@ describe("release readback collectors", () => {
     for (const { value } of readbacks) {
       expect(value).toMatchObject({ capturedAt: "2026-08-28T10:05:00.000Z", provenance: { sha256: expect.stringMatching(/^[0-9a-f]{64}$/u) } });
     }
+    expect(readbacks[0]?.value).toMatchObject({
+      backendCi: { runId: "33165012869", headSha: candidateSha },
+      publish: { runId: "33165012870", headSha: candidateSha },
+      deploy: { runId: "33165012871", headSha: candidateSha },
+      appOciDigest: appImage.split("@")[1],
+      gatewayOciDigest: gatewayImage.split("@")[1],
+    });
   });
 
   it("fails when the independent CI source is absent or does not match the candidate", async () => {
     const absent = await fixture({ includeCi: false });
     await expect(collectReleaseReadbacks({
       candidateSha, ...absent, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12), command: commandAdapter(),
-    })).rejects.toThrow(/CI source/u);
+    })).rejects.toThrow(/Pipeline source/u);
 
     const mismatch = await fixture({ ciSha: "d".repeat(40) });
     await expect(collectReleaseReadbacks({
       candidateSha, ...mismatch, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12), command: commandAdapter(),
-    })).rejects.toThrow("CI source SHA does not match the requested candidate.");
+    })).rejects.toThrow(/Pipeline source|Backend CI source/u);
+  });
+
+  it("rejects reused workflow IDs and published digests that do not match deployment", async () => {
+    const files = await fixture();
+    const pipeline = JSON.parse(await readFile(files.pipelineSourcePath, "utf8"));
+    pipeline.publish.runId = pipeline.backendCi.runId;
+    await writeFile(files.pipelineSourcePath, `${JSON.stringify(pipeline)}\n`, { mode: 0o600 });
+    await expect(collectReleaseReadbacks({
+      candidateSha, ...files, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12), command: commandAdapter(),
+    })).rejects.toThrow("must have distinct GitHub Actions run IDs");
+
+    pipeline.publish.runId = "33165012870";
+    pipeline.images.appDigest = `sha256:${"f".repeat(64)}`;
+    await writeFile(files.pipelineSourcePath, `${JSON.stringify(pipeline)}\n`, { mode: 0o600 });
+    await expect(collectReleaseReadbacks({
+      candidateSha, ...files, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12), command: commandAdapter(),
+    })).rejects.toThrow("Published GHCR digests do not match");
   });
 
   it("fails when runtime or OCI command readback disagrees with deploy state", async () => {

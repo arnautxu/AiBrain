@@ -49,7 +49,39 @@ jobs:
           [[ "$revision" == "$TESTED_SHA" && "$revision" =~ ^[0-9a-f]{40}$ ]]
           [[ "$app_image" =~ ^ghcr\.io/arnautxu/aibrain@sha256:[0-9a-f]{64}$ ]]
           [[ "$egress_image" =~ ^ghcr\.io/arnautxu/aibrain-egress@sha256:[0-9a-f]{64}$ ]]
-          printf 'revision=%s\napp_image=%s\negress_image=%s\n' "$revision" "$app_image" "$egress_image" >> "$GITHUB_OUTPUT"
+          printf 'revision=%s\napp_image=%s\negress_image=%s\napp_digest=%s\negress_digest=%s\n' \
+            "$revision" "$app_image" "$egress_image" "${app_image##*@}" "${egress_image##*@}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve and verify the real Backend CI run
+        id: pipeline
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
+          PUBLISH_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+        run: |
+          [[ "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PUBLISH_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$DEPLOY_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          publish_json="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PUBLISH_RUN_ID}")"
+          jq -e \
+            --arg sha "$TESTED_SHA" \
+            --argjson runId "$PUBLISH_RUN_ID" \
+            '.id == $runId and .name == "Publish GHCR images" and .conclusion == "success"
+              and .head_sha == $sha and .head_branch == "main" and .event == "workflow_run"' \
+            <<<"$publish_json" > /dev/null
+          backend_json="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/actions/workflows/backend-ci.yml/runs" \
+            -f head_sha="$TESTED_SHA" -f branch=main -f event=push -f status=completed -f per_page=100)"
+          mapfile -t backend_run_ids < <(jq -r \
+            --arg sha "$TESTED_SHA" \
+            '[.workflow_runs[] | select(.name == "Backend CI" and .conclusion == "success"
+              and .head_sha == $sha and .head_branch == "main" and .event == "push") | .id] | unique[]' \
+            <<<"$backend_json")
+          [[ "${#backend_run_ids[@]}" == "1" ]]
+          backend_ci_run_id="${backend_run_ids[0]}"
+          [[ "$backend_ci_run_id" =~ ^[0-9]{6,20}$ ]]
+          [[ "$backend_ci_run_id" != "$PUBLISH_RUN_ID" && "$backend_ci_run_id" != "$DEPLOY_RUN_ID" && "$PUBLISH_RUN_ID" != "$DEPLOY_RUN_ID" ]]
+          printf 'backend_ci_run_id=%s\n' "$backend_ci_run_id" >> "$GITHUB_OUTPUT"
 
       - name: Refuse a superseded main revision
         id: current
@@ -120,15 +152,23 @@ jobs:
         env:
           DEPLOY_HOST: ${{ vars.ARNALL_DEPLOY_HOST }}
           TESTED_SHA: ${{ github.event.workflow_run.head_sha }}
-          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+          BACKEND_CI_RUN_ID: ${{ steps.pipeline.outputs.backend_ci_run_id }}
+          PUBLISH_RUN_ID: ${{ github.event.workflow_run.id }}
+          DEPLOY_RUN_ID: ${{ github.run_id }}
+          APP_DIGEST: ${{ steps.release.outputs.app_digest }}
+          EGRESS_DIGEST: ${{ steps.release.outputs.egress_digest }}
         run: |
           test -n "$DEPLOY_HOST"
           [[ "$TESTED_SHA" =~ ^[0-9a-f]{40}$ ]]
-          [[ "$CI_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$BACKEND_CI_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$PUBLISH_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$DEPLOY_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          [[ "$APP_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$EGRESS_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
           ssh \
             -i "$RUNNER_TEMP/arnall-ssh/id_ed25519" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$RUNNER_TEMP/arnall-ssh/known_hosts" \
-            root@"$DEPLOY_HOST" "collect-readbacks $TESTED_SHA $CI_RUN_ID" > /dev/null
+            root@"$DEPLOY_HOST" "collect-readbacks $TESTED_SHA $BACKEND_CI_RUN_ID $PUBLISH_RUN_ID $DEPLOY_RUN_ID $APP_DIGEST $EGRESS_DIGEST" > /dev/null

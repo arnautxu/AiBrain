@@ -112,13 +112,20 @@ async function fixture() {
   await mkdir(evidenceRoot, { recursive: true, mode: 0o700 });
   const appImage = `registry.example.test/aibrain@sha256:${"b".repeat(64)}`;
   const gatewayImage = `registry.example.test/aibrain-gateway@sha256:${"c".repeat(64)}`;
-  const ciSource = path.join(root, "backend-ci.json");
+  const pipelineSource = path.join(root, "release-pipeline.json");
   const releaseState = path.join(root, "release-state.json");
-  await writeFile(ciSource, `${JSON.stringify({ schemaVersion: 1, workflow: "Backend CI", conclusion: "success", headSha: releaseSha, runId: "33165012869" })}\n`, { mode: 0o600 });
+  await writeFile(pipelineSource, `${JSON.stringify({
+    schemaVersion: 2,
+    headSha: releaseSha,
+    backendCi: { workflow: "Backend CI", conclusion: "success", headSha: releaseSha, runId: "33165012869" },
+    publish: { workflow: "Publish GHCR images", conclusion: "success", headSha: releaseSha, runId: "33165012870" },
+    deploy: { workflow: "Deploy Arnall", headSha: releaseSha, runId: "33165012871" },
+    images: { appDigest: appImage.split("@")[1], gatewayDigest: gatewayImage.split("@")[1] },
+  })}\n`, { mode: 0o600 });
   await writeFile(releaseState, `${JSON.stringify({ schemaVersion: 3, current: { revision: releaseSha, image: appImage, egressImage: gatewayImage } })}\n`, { mode: 0o600 });
   const releaseArtifacts = new Map((await collectReleaseReadbacks({
     candidateSha: releaseSha,
-    ciSourcePath: ciSource,
+    pipelineSourcePath: pipelineSource,
     releaseStatePath: releaseState,
     appContainer: "a".repeat(12),
     gatewayContainer: "b".repeat(12),

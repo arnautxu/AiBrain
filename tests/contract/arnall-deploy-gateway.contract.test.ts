@@ -48,12 +48,12 @@ describe("Arnall deployment gateway contract", () => {
     expect(health).toBeGreaterThan(deployment);
     expect(collection).toBeGreaterThan(health);
     for (const required of [
-      "^collect-readbacks\\ ([0-9a-f]{40})\\ ([0-9]{6,20})$",
+      "^collect-readbacks\\ ([0-9a-f]{40})\\ ([0-9]{6,20})\\ ([0-9]{6,20})\\ ([0-9]{6,20})\\ (sha256:[0-9a-f]{64})\\ (sha256:[0-9a-f]{64})$",
       "release state is unavailable",
       "release state does not match the requested candidate",
       "application container is unavailable",
       "gateway container is unavailable",
-      "backend-ci-source.json",
+      "release-pipeline-source.json",
       "acceptance-release-readbacks.json",
       "collect-release-readbacks.mjs",
       'require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"',
@@ -87,9 +87,10 @@ describe("Arnall deployment gateway contract", () => {
 
   it("is idempotent only for a matching final package and removes failed staging evidence", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
-    expect(gateway).toContain('validate_existing_release_readbacks "$revision" "$run_id" "$evidence_root"');
-    expect(gateway).toContain('ARNALL_READBACKS_ALREADY_COLLECTED revision=%s run_id=%s');
-    expect(gateway).toContain('ciRunId:$runId');
+    expect(gateway).toContain('validate_existing_release_readbacks "$revision" "$backend_ci_run_id" "$publish_run_id" "$deploy_run_id"');
+    expect(gateway).toContain('ARNALL_READBACKS_ALREADY_COLLECTED revision=%s backend_ci_run_id=%s publish_run_id=%s deploy_run_id=%s');
+    expect(gateway).toContain('backendCiRunId:$backendCiRunId,publishRunId:$publishRunId');
+    expect(gateway).toContain('deployRunId:$deployRunId,appOciDigest:$appOciDigest,gatewayOciDigest:$gatewayOciDigest');
     expect(gateway).toContain("existing acceptance evidence does not match the requested retry");
     expect(gateway).toContain("trap cleanup_readback_staging EXIT");
     expect(gateway).toContain('rm -rf --one-file-system -- "$readback_staging"');
