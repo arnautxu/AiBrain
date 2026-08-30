@@ -165,38 +165,49 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
   it("generates PDF, DOCX, PPTX and XLSX locally without invoking Drive or another OAuth account", async () => {
     const { handleLocalDocumentDynamicToolCall } = await import("@/runtime/documents/dynamic-tools");
     const providerFetch = vi.spyOn(globalThis, "fetch");
-    for (const format of ["pdf", "docx", "pptx", "xlsx"] as const) {
-      const result = await handleLocalDocumentDynamicToolCall({
-        threadId: "runtime-thread",
-        turnId: "runtime-turn",
-        callId: `hello-world-${format}`,
-        namespace: "aibrain_documents",
-        tool: "create",
-        arguments: {
+    const result = await handleLocalDocumentDynamicToolCall({
+      threadId: "runtime-thread",
+      turnId: "runtime-turn",
+      callId: "hello-world-all-formats",
+      namespace: "aibrain_documents",
+      tool: "create_batch",
+      arguments: {
+        files: (["pdf", "docx", "pptx", "xlsx"] as const).map((format) => ({
           format,
           fileName: `hello-world.${format}`,
           title: "Hello world",
           content: format === "xlsx" ? "Message\nHello world" : "Hello world",
           ...(format === "xlsx" ? { rows: [["Message"], ["Hello world"]] } : {}),
-        },
-      }, {
-        installationId: INSTALLATION_ID,
-        userId: USER_A,
-        projectId,
-        projectWorkspace,
-        receiptRoot,
-        runtimeThreadId: "runtime-thread",
-        runtimeTurnId: "runtime-turn",
-        permissions: permissions(USER_A, projectId),
-      });
-      expect(
-        result.response.success,
-        (result.response.contentItems[0] as { text: string }).text,
-      ).toBe(true);
-      const payload = JSON.parse((result.response.contentItems[0] as { text: string }).text);
-      expect(payload).toMatchObject({ status: "created", format, externalConnectorUsed: false });
-      expect(result.artifact).toMatchObject({ kind: format, status: "ready" });
-      generated.set(format, { path: payload.path, size: payload.size, sha256: payload.sha256 });
+        })),
+      },
+    }, {
+      installationId: INSTALLATION_ID,
+      userId: USER_A,
+      projectId,
+      projectWorkspace,
+      receiptRoot,
+      runtimeThreadId: "runtime-thread",
+      runtimeTurnId: "runtime-turn",
+      sourceTurnId: "0198b9f0-6631-7000-8000-000000000911",
+      permissions: permissions(USER_A, projectId),
+    });
+    expect(
+      result.response.success,
+      (result.response.contentItems[0] as { text: string }).text,
+    ).toBe(true);
+    const payload = JSON.parse((result.response.contentItems[0] as { text: string }).text);
+    expect(payload).toMatchObject({ status: "created", externalConnectorUsed: false });
+    expect(payload.files).toHaveLength(4);
+    expect(JSON.stringify(payload)).not.toContain(projectWorkspace);
+    expect(JSON.stringify(payload)).not.toContain("/var/lib/");
+    expect(result.artifacts).toHaveLength(4);
+    expect(new Set(result.artifacts.map(({ id }) => id))).toHaveProperty("size", 4);
+    for (const artifact of result.artifacts) {
+      expect(artifact).toMatchObject({ status: "ready", targetLabel: null });
+      const relativePath = `documents/${artifact.name}`;
+      const file = payload.files.find((candidate: { fileName?: string }) => candidate.fileName === artifact.name);
+      expect(file).toBeTruthy();
+      generated.set(artifact.kind, { path: relativePath, size: file.size, sha256: file.sha256 });
     }
     expect(providerFetch).not.toHaveBeenCalled();
     providerFetch.mockRestore();

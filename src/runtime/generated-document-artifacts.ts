@@ -10,7 +10,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
-function documentArtifactId(turnId: string, relativePath: string) {
+export function generatedDocumentArtifactId(turnId: string, relativePath: string) {
   const digest = createHash("sha256").update(`${turnId}\0${relativePath}`).digest("hex").slice(0, 32).split("");
   digest[12] = "4";
   digest[16] = "8";
@@ -96,7 +96,7 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
       const encodedPath = encodeURIComponent(relativePath.split(path.sep).join("/"));
       const fileRoute = `/api/projects/${projectId}/files?path=${encodedPath}`;
       artifacts.push({
-        id: documentArtifactId(turnId, relativePath),
+        id: generatedDocumentArtifactId(turnId, relativePath),
         type: "document",
         name: path.basename(relativePath),
         url: `${fileRoute}&raw=1&download=1`,

@@ -77,12 +77,23 @@ rules and should not be reused for customer email or CRM identities.
 ## Local document generation and preview
 
 PDF, DOCX, PPTX and XLSX creation is a server-local product capability, not a
-connector. `aibrain_documents.create` writes a validated, non-empty file below
-the authenticated employee's private project workspace and returns only its
-relative path, size, hash and private artifact URLs. Google Drive, Dropbox and
-other OAuth-backed storage are never consulted unless the employee explicitly
-chooses that destination in the current request. A personal OAuth binding from
-another employee is neither a fallback nor an eligible shared credential.
+connector. `aibrain_documents.create` writes one validated, non-empty file;
+`aibrain_documents.create_batch` creates two to eight requested files in one
+bounded model/tool cycle. Both operate below the authenticated employee's
+private project workspace. Tool output exposes only file name, format, MIME,
+size, hash and preview/download availability—never a server or workspace path.
+Google Drive, Dropbox and other OAuth-backed storage are never consulted unless
+the employee explicitly chooses that destination in the current request. A
+personal OAuth binding from another employee is neither a fallback nor an
+eligible shared credential.
+
+Every generated document uses the same deterministic turn-and-relative-file
+artifact identity whether it was emitted directly by the dynamic tool or later
+observed in runtime output. The turn projector keeps a per-turn identity set,
+so one file produces one card even when both evidence paths mention it. After a
+document tool response, a shorter bounded reconciliation timer reads durable
+turn state once and then either projects the final answer or interrupts with an
+honest terminal error; it never replays a document creation.
 
 Generated Office previews are converted to PDF inside the private document
 sandbox. Every converter runs in its own process group with a fixed timeout and
