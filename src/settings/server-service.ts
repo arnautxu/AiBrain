@@ -23,6 +23,8 @@ import {
 import { FileSettingsStore } from "@/settings/preferences-store";
 import { gmailCapabilityForSession } from "@/connectors/gmail-server-service";
 import { GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
+import { outlookCapabilityForSession } from "@/connectors/outlook-server-service";
+import { OUTLOOK_API_SCOPES } from "@/connectors/outlook-contracts";
 
 const ACTIONS: PermissionAction[] = ["consult", "respond", "execute", "publish"];
 
@@ -289,11 +291,12 @@ export async function featurePolicyForIdentity(installationId: string, userId: s
 
 export async function settingsSnapshot(session: AuthSession): Promise<SettingsSnapshot> {
   const { installation, store, isAdmin } = await context(session);
-  const [userSettings, permissions, apps, gmail] = await Promise.all([
+  const [userSettings, permissions, apps, gmail, outlook] = await Promise.all([
     store.readUser(session.user.id),
     permissionsForSession(session),
     appCatalogue(session, isAdmin),
     gmailCapabilityForSession(session).catch(() => null),
+    outlookCapabilityForSession(session).catch(() => null),
   ]);
   return {
     schemaVersion: 1,
@@ -310,23 +313,39 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
       isAdmin,
     },
     apps,
-    connectors: gmail ? [{
-      id: gmail.connectorId,
-      label: gmail.label,
-      status: gmail.status === "connected" ? "connected" : gmail.status === "reauth_required" ? "requires_login" : "unavailable",
-      statusCode: gmail.statusCode,
-      statusDetail: gmail.status === "connected" ? "Cuenta personal verificada mediante lectura de perfil." :
-        gmail.status === "reauth_required" ? "Conecta tu cuenta personal de Gmail para usarla." :
-          gmail.statusCode === "GMAIL_GOOGLE_CLOUD_NOT_CONFIGURED" ? "Google Cloud OAuth todavía no está configurado en el servidor." : "Gmail no está disponible ahora mismo.",
-      accountEmail: gmail.accountEmail,
-      scopes: [...GMAIL_MINIMUM_SCOPES],
-      connectUrl: gmail.connectUrl,
-      disconnectUrl: gmail.disconnectUrl,
-      connectionVersion: gmail.connectionVersion,
-    }] : [],
+    connectors: [
+      gmail ? {
+        id: gmail.connectorId,
+        label: gmail.label,
+        status: gmail.status === "connected" ? "connected" as const : gmail.status === "reauth_required" ? "requires_login" as const : "unavailable" as const,
+        statusCode: gmail.statusCode,
+        statusDetail: gmail.status === "connected" ? "Cuenta personal verificada mediante lectura de perfil." :
+          gmail.status === "reauth_required" ? "Conecta tu cuenta personal de Gmail para usarla." :
+            gmail.statusCode === "GMAIL_GOOGLE_CLOUD_NOT_CONFIGURED" ? "Google Cloud OAuth todavía no está configurado en el servidor." : "Gmail no está disponible ahora mismo.",
+        accountEmail: gmail.accountEmail,
+        scopes: [...GMAIL_MINIMUM_SCOPES],
+        connectUrl: gmail.connectUrl,
+        disconnectUrl: gmail.disconnectUrl,
+        connectionVersion: gmail.connectionVersion,
+      } : null,
+      outlook ? {
+        id: outlook.connectorId,
+        label: outlook.label,
+        status: outlook.status === "connected" ? "connected" as const : outlook.status === "reauth_required" ? "requires_login" as const : "unavailable" as const,
+        statusCode: outlook.statusCode,
+        statusDetail: outlook.status === "connected" ? "Cuenta personal verificada mediante Microsoft Graph." :
+          outlook.status === "reauth_required" ? "Conecta tu cuenta personal de Outlook para usarla." :
+            outlook.statusCode === "OUTLOOK_ENTRA_NOT_CONFIGURED" ? "Microsoft Entra OAuth todavía no está configurado en el servidor." : "Outlook no está disponible ahora mismo.",
+        accountEmail: outlook.accountEmail,
+        scopes: [...OUTLOOK_API_SCOPES],
+        connectUrl: outlook.connectUrl,
+        disconnectUrl: outlook.disconnectUrl,
+        connectionVersion: outlook.connectionVersion,
+      } : null,
+    ].filter((connector): connector is NonNullable<typeof connector> => connector !== null),
     memory: {
       enabled: true,
-      confirmationRequired: true,
+      confirmationRequired: false,
       scopes: ["private", "project", "company"],
       provenanceVisible: true,
       employeeRuntimeIsolated: true,
@@ -338,7 +357,7 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
       conversationStorage: "company_private",
       providerTraining: "not_managed_here",
       employeeIsolation: true,
-      memoryScope: "explicit_user_memory",
+      memoryScope: "automatic_private_memory",
     },
     browser: {
       profileScope: "private_per_employee",

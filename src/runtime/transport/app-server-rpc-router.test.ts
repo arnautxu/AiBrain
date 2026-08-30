@@ -97,7 +97,8 @@ describe("AppServerRpcRouter", () => {
 
   it("returns a typed timeout so callers can recover without resubmitting a turn", async () => {
     const transport = new FakeTransport();
-    const router = new AppServerRpcRouter(transport);
+    const metrics = vi.fn();
+    const router = new AppServerRpcRouter(transport, { onRequestMetric: metrics });
     const result = router.request(
       { method: "turn/start", id: "slow-turn", params: { threadId: "thread-a", input: [] } },
       5,
@@ -109,7 +110,86 @@ describe("AppServerRpcRouter", () => {
       requestId: "slow-turn",
       timeoutMs: 5,
     } satisfies Partial<AppServerRequestTimeoutError>);
+    expect(metrics).toHaveBeenCalledWith(expect.objectContaining({
+      method: "turn/start",
+      requestId: "slow-turn",
+      outcome: "timeout",
+      requestAcceptedMs: expect.any(Number),
+      totalMs: expect.any(Number),
+      activeTurnsAtStart: 0,
+      pendingRequestsAtStart: 0,
+    }));
     await router.close();
+  });
+
+  it("applies the request deadline while the private worker is still connecting", async () => {
+    let releaseConnect!: () => void;
+    const connectGate = new Promise<void>((resolve) => { releaseConnect = resolve; });
+    class BlockedConnectTransport extends FakeTransport {
+      override async connect() { await connectGate; }
+    }
+    const transport = new BlockedConnectTransport();
+    const metrics = vi.fn();
+    const router = new AppServerRpcRouter(transport, { onRequestMetric: metrics });
+    const result = router.request(
+      { method: "thread/read", id: "blocked-connect", params: { threadId: "thread-a", includeTurns: true } },
+      5,
+    );
+
+    await expect(result).rejects.toBeInstanceOf(AppServerRequestTimeoutError);
+    expect(metrics).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: "blocked-connect",
+      outcome: "timeout",
+      requestAcceptedMs: null,
+    }));
+    releaseConnect();
+    await router.close();
+  });
+
+  it("enforces the request timeout even when transport admission itself is blocked", async () => {
+    let releaseSend!: () => void;
+    const sendGate = new Promise<void>((resolve) => { releaseSend = resolve; });
+    class BlockedAdmissionTransport extends FakeTransport {
+      override async send(request: AppServerRequest) {
+        this.sent.push(request);
+        await sendGate;
+      }
+    }
+    const transport = new BlockedAdmissionTransport();
+    const router = new AppServerRpcRouter(transport);
+    const result = router.request(
+      { method: "thread/read", id: "blocked-admission", params: { threadId: "thread-a", includeTurns: true } },
+      5,
+    );
+
+    await expect(result).rejects.toMatchObject({
+      name: "AppServerRequestTimeoutError",
+      method: "thread/read",
+      requestId: "blocked-admission",
+    });
+    releaseSend();
+    await router.close();
+  });
+
+  it("releases a blocked transport admission when the router closes", async () => {
+    const sendGate = new Promise<void>(() => undefined);
+    class BlockedAdmissionTransport extends FakeTransport {
+      override async send(request: AppServerRequest) {
+        this.sent.push(request);
+        await sendGate;
+      }
+    }
+    const transport = new BlockedAdmissionTransport();
+    const router = new AppServerRpcRouter(transport);
+    const result = router.request(
+      { method: "thread/read", id: "close-blocked-admission", params: { threadId: "thread-a", includeTurns: true } },
+      30_000,
+    );
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+
+    await router.close();
+
+    await expect(result).rejects.toThrow("App Server router closed");
   });
 
   it("resolves concurrent RPC responses by id even when they arrive out of order", async () => {
@@ -147,6 +227,32 @@ describe("AppServerRpcRouter", () => {
     expect(transport.acknowledged).toHaveLength(0);
     releaseProjection();
     await expect(result).resolves.toEqual({ thread: { id: "thread-a" } });
+    await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    await router.close();
+  });
+
+  it("keeps the request deadline active while durable response projection is blocked", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    let releaseProjection!: () => void;
+    const projectionGate = new Promise<void>((resolve) => { releaseProjection = resolve; });
+    const projected = vi.fn(async () => projectionGate);
+    const result = router.request(
+      { method: "thread/read", id: "projection-timeout", params: { threadId: "thread-a", includeTurns: false } },
+      500,
+      projected,
+    );
+    const timedOut = expect(result).rejects.toBeInstanceOf(AppServerRequestTimeoutError);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    transport.queue.push(event(1, {
+      kind: "rpc-response",
+      rpc: { id: "projection-timeout", result: { thread: { id: "thread-a" } } },
+    }));
+    await vi.waitFor(() => expect(projected).toHaveBeenCalledOnce());
+
+    await timedOut;
+    expect(transport.acknowledged).toHaveLength(0);
+    releaseProjection();
     await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
     await router.close();
   });
@@ -438,6 +544,84 @@ describe("AppServerRpcRouter", () => {
     expect(transport.acknowledged).toHaveLength(0);
     releaseApproval();
     await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1, 2]));
+    await router.close();
+  });
+
+  it("runs three chats and opens a fourth while one tool is blocked, then remains usable after a read timeout", async () => {
+    const transport = new FakeTransport();
+    const metrics = vi.fn();
+    const router = new AppServerRpcRouter(transport, { onRequestMetric: metrics });
+    await router.start();
+    let releaseTool!: () => void;
+    const toolGate = new Promise<void>((resolve) => { releaseTool = resolve; });
+    const notifications = [vi.fn(), vi.fn(), vi.fn()];
+    ["thread-a", "thread-b", "thread-c"].forEach((threadId, index) => {
+      router.registerTurn(threadId, `local-${threadId}`, {
+        onNotification: notifications[index]!,
+        onServerRequest: index === 0
+          ? async () => { await toolGate; return { success: true }; }
+          : vi.fn(async () => ({ success: true })),
+        onFailure: vi.fn(),
+      }).bindRuntimeTurn(`turn-${threadId.at(-1)}`);
+    });
+
+    transport.queue.push(event(1, {
+      kind: "rpc-request",
+      rpc: {
+        method: "item/tool/call",
+        id: "tool-create",
+        params: {
+          threadId: "thread-a",
+          turnId: "turn-a",
+          callId: "tool-create",
+          namespace: "aibrain_documents",
+          tool: "create",
+          arguments: {},
+        },
+      },
+    }));
+    transport.queue.push(event(2, {
+      kind: "rpc-notification",
+      rpc: { method: "item/agentMessage/delta", params: { threadId: "thread-b", turnId: "turn-b", itemId: "b", delta: "B" } },
+    }));
+    transport.queue.push(event(3, {
+      kind: "rpc-notification",
+      rpc: { method: "item/agentMessage/delta", params: { threadId: "thread-c", turnId: "turn-c", itemId: "c", delta: "C" } },
+    }));
+    await vi.waitFor(() => {
+      expect(notifications[1]).toHaveBeenCalledOnce();
+      expect(notifications[2]).toHaveBeenCalledOnce();
+    });
+
+    const newChat = router.request({
+      method: "thread/start",
+      id: "new-chat",
+      params: { cwd: "/private/workspace", approvalPolicy: "never", sandbox: "read-only" },
+    }, 1_000);
+    await vi.waitFor(() => expect(transport.sent.some(({ clientRequestId }) => clientRequestId === "new-chat")).toBe(true));
+    transport.queue.push(event(4, {
+      kind: "rpc-response",
+      rpc: { id: "new-chat", result: { thread: { id: "thread-d" } } },
+    }));
+    await expect(newChat).resolves.toEqual({ thread: { id: "thread-d" } });
+
+    await expect(router.request({
+      method: "thread/read",
+      id: "bounded-read",
+      params: { threadId: "missing", includeTurns: true },
+    }, 5)).rejects.toBeInstanceOf(AppServerRequestTimeoutError);
+    const trivial = router.request({ method: "account/read", id: "trivial", params: { refreshToken: false } }, 1_000);
+    await vi.waitFor(() => expect(transport.sent.some(({ clientRequestId }) => clientRequestId === "trivial")).toBe(true));
+    transport.queue.push(event(5, {
+      kind: "rpc-response",
+      rpc: { id: "trivial", result: { account: { type: "chatgpt" } } },
+    }));
+    await expect(trivial).resolves.toEqual({ account: { type: "chatgpt" } });
+
+    expect(metrics).toHaveBeenCalledWith(expect.objectContaining({ requestId: "bounded-read", outcome: "timeout" }));
+    expect(metrics).toHaveBeenCalledWith(expect.objectContaining({ requestId: "trivial", outcome: "completed" }));
+    releaseTool();
+    await vi.waitFor(() => expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4, 5]));
     await router.close();
   });
 });

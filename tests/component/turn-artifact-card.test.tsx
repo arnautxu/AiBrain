@@ -87,6 +87,23 @@ describe("TurnArtifactCard", () => {
     expect(screen.getByRole("link", { name: "Descargar resultado" })).toBeInTheDocument();
   });
 
+  it("reopens a historical browser artifact from the whole card header", () => {
+    const onOpenBrowser = vi.fn();
+    render(<TurnArtifactCard onOpenBrowser={onOpenBrowser} artifact={{
+      id: "018f5f68-4a6e-7abc-8def-0123456789af",
+      type: "browser",
+      name: "Navegador · Wikipedia",
+      status: "closed",
+      control: null,
+      viewerUrl: null,
+      captureUrl: null,
+      downloadUrl: null,
+      error: null,
+    }} />);
+    screen.getByRole("button", { name: "Reabrir Navegador · Wikipedia" }).click();
+    expect(onOpenBrowser).toHaveBeenCalledOnce();
+  });
+
   it.each([
     ["starting", "Iniciando navegador…"],
     ["reconnecting", "Reconectando…"],

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedPermissions } from "@/permissions";
 import {
   AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
@@ -16,6 +16,8 @@ const PROJECT_ID = "20000000-0000-4000-8000-000000000001";
 const roots: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -135,5 +137,43 @@ describe("local document dynamic tool", () => {
       userId: USER_A,
     });
     expect(wrongIdentity.response.success).toBe(false);
+  });
+
+  it("uses no external connector and never inherits another employee's OAuth-backed result", async () => {
+    const userA = await context(USER_A);
+    const userB = await context(USER_B);
+    const externalFetch = vi.fn(() => {
+      throw new Error("local document generation must not access a provider");
+    });
+    vi.stubGlobal("fetch", externalFetch);
+    vi.stubEnv("GOOGLE_DRIVE_OAUTH_TOKEN", "arnau-token-must-remain-unused");
+
+    const privateRequest = {
+      ...request("arnau-private-call", "docx"),
+      arguments: {
+        ...request("arnau-private-call", "docx").arguments,
+        title: "Hello world",
+        content: "Hello world",
+      },
+    };
+    const created = await handleLocalDocumentDynamicToolCall(privateRequest, userA);
+    expect(created.response.success).toBe(true);
+    expect(JSON.parse((created.response.contentItems[0] as { text: string }).text)).toMatchObject({
+      status: "created",
+      externalConnectorUsed: false,
+    });
+    expect(externalFetch).not.toHaveBeenCalled();
+
+    const foreignReplay = await handleLocalDocumentDynamicToolCall(
+      privateRequest,
+      { ...userB, receiptRoot: userA.receiptRoot },
+    );
+    expect(foreignReplay.response.success).toBe(false);
+    expect(JSON.parse((foreignReplay.response.contentItems[0] as { text: string }).text)).toMatchObject({
+      status: "failed",
+      code: "LOCAL_DOCUMENT_RECEIPT_CONFLICT",
+      externalConnectorUsed: false,
+    });
+    expect(externalFetch).not.toHaveBeenCalled();
   });
 });

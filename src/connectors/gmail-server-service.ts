@@ -96,8 +96,8 @@ export async function completeGmailOAuth(session: AuthSession, input: { state: s
   const profile = await readGmailProfile(fetcher, token.accessToken);
   const bindings = new FileConnectorBindingStore(config.installationId, config.paths.dataRoot);
   let existing: CredentialBinding | null = null;
-  try { existing = await bindings.resolve(principal, GMAIL_CONNECTOR_ID, { allowShared: false }); }
-  catch (error) { if (code(error) !== "CONNECTOR_BINDING_NOT_FOUND") throw error; }
+  try { existing = await bindings.readPersonalForManagement(principal, GMAIL_CONNECTOR_ID); }
+  catch (error) { if (code(error) !== "ENOENT") throw error; }
   const stored = await new FileGmailTokenStore(config, oauth.encryptionKey).put(session.user.id, token, existing?.credentialRef);
   const binding = await bindings.put({ schemaVersion: 1, connectorId: GMAIL_CONNECTOR_ID, credentialRef: stored.credentialRef, installationId: config.installationId, userId: session.user.id, scopes: [...GMAIL_MINIMUM_SCOPES], status: "active", version: (existing?.version ?? 0) + 1 });
   return { profile, bindingVersion: binding.version, bindingFingerprint: credentialBindingFingerprint(binding) };
@@ -152,4 +152,3 @@ export function gmailConnectorErrorCode(error: unknown) {
 }
 
 export { GMAIL_RESOURCE_ID };
-

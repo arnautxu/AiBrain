@@ -9,9 +9,7 @@ import { CommandPalette } from "@/components/command-palette";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { DetailsPanel } from "@/components/details-panel";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
-import { MemoryPanel } from "@/components/memory-panel";
 import { ProjectPanel } from "@/components/project-panel";
-import { TaskCenterPanel } from "@/components/task-center-panel";
 import { AutomationsPanel } from "@/components/automations-panel";
 import {
   Sidebar,
@@ -73,7 +71,6 @@ import {
   type RuntimeStatus,
 } from "@/lib/runtime-status";
 import {
-  resolveComposerExperience,
   type ComposerExperience,
 } from "@/lib/composer-experience";
 import {
@@ -108,7 +105,6 @@ import {
   deriveTaskCenterItems,
   isTaskCenterPayload,
   type TaskCenterItem,
-  type TaskNotificationPreferences,
   type TaskCenterPayload,
 } from "@/task-center/contracts";
 
@@ -524,17 +520,13 @@ export function BrainApp({
   const [previewDocument, setPreviewDocument] = useState<DocumentArtifact | null>(null);
   const [customizationOpen, setCustomizationOpen] = useState(false);
   const [customizationInitialTab, setCustomizationInitialTab] = useState<"appearance" | "connectors" | "memory">("appearance");
-  const [memoryOpen, setMemoryOpen] = useState(false);
   const [projectOpen, setProjectOpen] = useState(false);
-  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
   const [taskCenterPayload, setTaskCenterPayload] = useState<TaskCenterPayload>({
     tasks: [],
     readTaskIds: [],
     preferences: DEFAULT_TASK_NOTIFICATION_PREFERENCES,
     continuity: "worker_required",
   });
-  const [taskCenterBusy, setTaskCenterBusy] = useState(false);
-  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | "unsupported">("unsupported");
   const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
@@ -700,10 +692,6 @@ export function BrainApp({
     const result = latestAssistant.toolResults?.findLast((item) => item.kind === "browser");
     return result ? `${latestAssistant.id}:${result.id}` : null;
   }, [activeThread]);
-  const resolvedComposerExperience = useMemo(
-    () => resolveComposerExperience(composerExperience),
-    [composerExperience],
-  );
   const threadActivityById = useMemo(() => Object.fromEntries(threads.map((thread) => [
     thread.id,
     getThreadActivity(
@@ -790,10 +778,6 @@ export function BrainApp({
     applyTaskCenterPayload(value, notify);
     return value;
   }, [applyTaskCenterPayload]);
-
-  useEffect(() => {
-    if (typeof Notification !== "undefined") setNotificationPermission(Notification.permission);
-  }, []);
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
@@ -938,11 +922,11 @@ export function BrainApp({
       "--brain-accent-strong": "#3b3b3b",
       "--brain-accent-on-soft": "var(--text-secondary)",
       "--brain-accent-soft": "var(--surface-muted)",
-      "--notification-accent": branding.accentColor,
+      "--notification-accent": "#2563eb",
       "--brain-contrast": "var(--surface)",
       "--brain-radius": cornerTokens[preferences.corners],
     };
-  }, [branding.accentColor, preferences.corners]);
+  }, [preferences.corners]);
 
   const selectProject = useCallback((projectId: string) => {
     if (documentUploading) {
@@ -984,71 +968,6 @@ export function BrainApp({
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
   }, [documentUploading, threads]);
-
-  const updateTaskCenter = useCallback(async (
-    body: { action: "mark_read"; taskIds: string[] } |
-      { action: "preferences"; preferences: TaskNotificationPreferences },
-  ) => {
-    setTaskCenterBusy(true);
-    try {
-      if (initialWorkbench.persistence === "browser-preview") {
-        setTaskCenterPayload((current) => body.action === "preferences"
-          ? { ...current, preferences: body.preferences }
-          : {
-              ...current,
-              readTaskIds: [...new Set([...current.readTaskIds, ...body.taskIds])],
-              tasks: current.tasks.map((task) => body.taskIds.includes(task.id)
-                ? { ...task, unread: false }
-                : task),
-            });
-        return;
-      }
-      const response = await fetch("/api/task-center", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const value: unknown = await response.json().catch(() => null);
-      if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido guardar el centro de tareas.");
-      applyTaskCenterPayload(value, false);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.");
-    } finally {
-      setTaskCenterBusy(false);
-    }
-  }, [applyTaskCenterPayload, initialWorkbench.persistence]);
-
-  const markTaskRead = useCallback((taskId: string) => {
-    void updateTaskCenter({ action: "mark_read", taskIds: [taskId] });
-  }, [updateTaskCenter]);
-
-  const markAllTasksRead = useCallback(() => {
-    const taskIds = taskCenterItems.filter((task) => task.unread).map((task) => task.id);
-    if (taskIds.length) void updateTaskCenter({ action: "mark_read", taskIds });
-  }, [taskCenterItems, updateTaskCenter]);
-
-  const requestDesktopNotifications = useCallback(async () => {
-    if (typeof Notification === "undefined") {
-      setNotificationPermission("unsupported");
-      return;
-    }
-    const permission = await Notification.requestPermission();
-    setNotificationPermission(permission);
-    if (permission === "granted") {
-      void updateTaskCenter({
-        action: "preferences",
-        preferences: { ...taskCenterPayload.preferences, desktop: true },
-      });
-    } else {
-      setNotice("Los avisos del navegador no se han activado.");
-    }
-  }, [taskCenterPayload.preferences, updateTaskCenter]);
-
-  const openTaskConversation = useCallback((task: TaskCenterItem) => {
-    if (task.unread) markTaskRead(task.id);
-    setTaskCenterOpen(false);
-    selectThread(task.threadId);
-  }, [markTaskRead, selectThread]);
 
   const startNewThread = useCallback((projectId?: string) => {
     if (documentUploading) return;
@@ -1383,8 +1302,8 @@ export function BrainApp({
         options: {
           mode: "agent",
           experience: composerExperience,
-          model: resolvedComposerExperience.model,
-          effort: resolvedComposerExperience.effort,
+          model: null,
+          effort: null,
           webSearch: true,
           imageGeneration,
           skill: selectedSkill,
@@ -1433,7 +1352,7 @@ export function BrainApp({
       if (!initialThreadId) setDraftStarting(false);
     }
     return succeeded;
-  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, resolvedComposerExperience, selectedConnectorMentionIds, selectedSkill, sending]);
+  }, [activeProject, activeThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -1837,8 +1756,6 @@ export function BrainApp({
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
-      else if (memoryOpen) setMemoryOpen(false);
-      else if (taskCenterOpen) setTaskCenterOpen(false);
       else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
       else if (confirmDialog && !actionBusy) setConfirmDialog(null);
@@ -1855,8 +1772,6 @@ export function BrainApp({
     commandPaletteOpen,
     confirmDialog,
     customizationOpen,
-    memoryOpen,
-    taskCenterOpen,
     automationsOpen,
     mobileSidebarOpen,
     previewDocument,
@@ -1902,9 +1817,6 @@ export function BrainApp({
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
-        fullPage
-        onClose={() => setAutomationsOpen(false)}
-        onOpenTaskCenter={() => { setAutomationsOpen(false); setTaskCenterOpen(true); }}
         onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
       /> : <ChatWorkspace
         manifest={manifest}
@@ -2000,14 +1912,8 @@ export function BrainApp({
         onRestoreProject={(project) => handleProjectAction(project, "restore")}
         onRestoreThread={(thread) => handleThreadAction(thread, "restore")}
         onSettingsSnapshot={setSettingsSnapshot}
-        onOpenMemory={() => { setCustomizationOpen(false); setMemoryOpen(true); }}
+        activeProjectId={activeProject?.id ?? null}
         onClose={() => setCustomizationOpen(false)}
-      />
-
-      <MemoryPanel
-        open={memoryOpen}
-        projectId={activeProject?.id ?? null}
-        onClose={() => setMemoryOpen(false)}
       />
 
       <ProjectPanel
@@ -2016,20 +1922,6 @@ export function BrainApp({
         open={projectOpen}
         onClose={() => setProjectOpen(false)}
         onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
-      />
-
-      <TaskCenterPanel
-        open={taskCenterOpen}
-        tasks={taskCenterItems}
-        preferences={taskCenterPayload.preferences}
-        notificationPermission={notificationPermission}
-        busy={taskCenterBusy}
-        onClose={() => setTaskCenterOpen(false)}
-        onOpenConversation={(task) => void openTaskConversation(task)}
-        onMarkRead={markTaskRead}
-        onMarkAllRead={markAllTasksRead}
-        onPreferencesChange={(next) => void updateTaskCenter({ action: "preferences", preferences: next })}
-        onRequestDesktopNotifications={() => void requestDesktopNotifications()}
       />
 
       <CommandPalette
@@ -2071,8 +1963,8 @@ export function BrainApp({
       />
 
       {notice ? (
-        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[90] max-w-[min(24rem,calc(100%-2rem))] rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
-          {notice}
+        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[90] flex max-w-[min(24rem,calc(100%-2rem))] items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
+          <span className="mt-1 size-2 shrink-0 rounded-full bg-[var(--notification-accent)]" aria-hidden="true" />{notice}
         </div>
       ) : null}
     </div>

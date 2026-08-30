@@ -1,8 +1,7 @@
-import { execFile } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdtemp, rm } from "node:fs/promises";
 import path from "node:path";
-import { promisify } from "node:util";
 import type { StagedDocument } from "@/documents/staging-store";
 import type { DocumentConversionAdmission } from "@/documents/conversion-gate";
 import { ensurePrivateDirectoryTree } from "@/documents/staging-store";
@@ -20,8 +19,6 @@ import {
   expectString,
   ValidationContext,
 } from "@/storage/schema";
-
-const execFileAsync = promisify(execFile);
 
 export type DocumentPreview = {
   schemaVersion: 2;
@@ -120,26 +117,112 @@ export interface DocumentToolRunner {
   run(command: string, args: readonly string[], options: ToolRunOptions): Promise<{ stdout: string; stderr: string }>;
 }
 
+const MAXIMUM_TOOL_OUTPUT_BYTES = 4 * 1024 * 1024;
+const TOOL_TERMINATION_GRACE_MS = 250;
+
+type ToolTerminationReason = "aborted" | "output" | "timeout";
+
+function signalProcessTree(child: ChildProcess, signal: NodeJS.Signals) {
+  if (!child.pid) return;
+  try {
+    // Every converter starts as a new process-group leader. Killing the group
+    // also reaches LibreOffice helpers instead of leaving them behind after a
+    // request cancellation or timeout. Windows has no negative-PID groups.
+    if (process.platform === "win32") child.kill(signal);
+    else process.kill(-child.pid, signal);
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ESRCH") throw error;
+  }
+}
+
 export class SystemDocumentToolRunner implements DocumentToolRunner {
   async run(command: string, args: readonly string[], options: ToolRunOptions) {
-    try {
-      const result = await execFileAsync(command, [...args], {
+    if (options.signal?.aborted) {
+      throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Document operation was aborted.");
+    }
+    return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(command, [...args], {
         cwd: options.cwd,
         env: { NODE_ENV: process.env.NODE_ENV ?? "production", ...options.env },
-        timeout: options.timeoutMs,
-        signal: options.signal,
-        killSignal: "SIGKILL",
-        maxBuffer: 4 * 1024 * 1024,
-        encoding: "utf8",
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
       });
-      return { stdout: result.stdout, stderr: result.stderr };
-    } catch (error) {
-      if (options.signal?.aborted) {
-        throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Document operation was aborted.");
-      }
-      const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
-      throw new StorageError("DOCUMENT_TOOL_FAILED", `Document tool failed with code ${code}.`);
-    }
+
+      const stdout: Buffer[] = [];
+      const stderr: Buffer[] = [];
+      let outputBytes = 0;
+      let spawnError: Error | null = null;
+      let terminationReason: ToolTerminationReason | null = null;
+      let forceKillTimer: NodeJS.Timeout | null = null;
+
+      const terminate = (reason: ToolTerminationReason) => {
+        if (terminationReason) return;
+        terminationReason = reason;
+        try {
+          signalProcessTree(child, "SIGTERM");
+        } catch {
+          // The bounded SIGKILL below remains the authoritative cleanup.
+        }
+        forceKillTimer = setTimeout(() => {
+          try {
+            signalProcessTree(child, "SIGKILL");
+          } catch {
+            // close/error still settles the request without exposing details.
+          }
+        }, TOOL_TERMINATION_GRACE_MS);
+        forceKillTimer.unref();
+      };
+
+      const collect = (target: Buffer[], chunk: Buffer | string) => {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        outputBytes += value.length;
+        if (outputBytes > MAXIMUM_TOOL_OUTPUT_BYTES) {
+          terminate("output");
+          return;
+        }
+        target.push(value);
+      };
+      child.stdout.on("data", (chunk: Buffer | string) => collect(stdout, chunk));
+      child.stderr.on("data", (chunk: Buffer | string) => collect(stderr, chunk));
+
+      const abort = () => terminate("aborted");
+      options.signal?.addEventListener("abort", abort, { once: true });
+      const timeout = setTimeout(() => terminate("timeout"), options.timeoutMs);
+      timeout.unref();
+
+      child.once("error", (error) => {
+        spawnError = error;
+      });
+      child.once("close", (code) => {
+        clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        options.signal?.removeEventListener("abort", abort);
+        if (terminationReason) {
+          // A wrapper can exit before a helper. One final group kill closes that
+          // race and makes cleanup independent of the wrapper's exit order.
+          try {
+            signalProcessTree(child, "SIGKILL");
+          } catch {
+            // The group is already gone.
+          }
+        }
+        if (terminationReason === "aborted") {
+          reject(new StorageError("DOCUMENT_OPERATION_ABORTED", "Document operation was aborted."));
+        } else if (terminationReason === "timeout") {
+          reject(new StorageError("DOCUMENT_TOOL_TIMEOUT", "Document conversion exceeded its time limit."));
+        } else if (terminationReason === "output") {
+          reject(new StorageError("DOCUMENT_TOOL_OUTPUT_TOO_LARGE", "Document tool output exceeded its safety limit."));
+        } else if (spawnError || code !== 0) {
+          const failureCode = spawnError && "code" in spawnError ? String(spawnError.code) : String(code ?? "unknown");
+          reject(new StorageError("DOCUMENT_TOOL_FAILED", `Document tool failed with code ${failureCode}.`));
+        } else {
+          resolve({
+            stdout: Buffer.concat(stdout).toString("utf8"),
+            stderr: Buffer.concat(stderr).toString("utf8"),
+          });
+        }
+      });
+    });
   }
 }
 

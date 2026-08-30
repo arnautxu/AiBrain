@@ -220,9 +220,19 @@ function responseFor(receipt: Receipt): DynamicToolCallResponse {
   };
 }
 
-function failure(message: string): LocalDocumentDynamicToolResult {
+function failure(
+  code: string,
+  message: string,
+  status: "failed" | "indeterminate" = "failed",
+): LocalDocumentDynamicToolResult {
   return {
-    response: { success: false, contentItems: [{ type: "inputText", text: message }] },
+    response: {
+      success: false,
+      contentItems: [{
+        type: "inputText",
+        text: JSON.stringify({ status, code, message, externalConnectorUsed: false }),
+      }],
+    },
     artifact: null,
   };
 }
@@ -317,7 +327,7 @@ export async function handleLocalDocumentDynamicToolCall(
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_IDENTITY_MISMATCH", "Document tool call does not belong to this turn.");
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
-      return failure("La política de este usuario no permite crear archivos locales.");
+      return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
     }
     const input = parseArguments(params.arguments);
     const inputFingerprint = createHash("sha256").update(canonicalInput(input)).digest("hex");
@@ -333,7 +343,11 @@ export async function handleLocalDocumentDynamicToolCall(
       if (!isRecord(error) || error.code !== "EEXIST") throw error;
       const existing = await readReceipt(receiptPath);
       if (!existing) {
-        return failure("La creación de este documento ya está en curso o quedó en un estado incierto; no se repetirá automáticamente.");
+        return failure(
+          "LOCAL_DOCUMENT_CALL_INDETERMINATE",
+          "La creación de este documento ya está en curso o quedó en un estado incierto; no se repetirá automáticamente.",
+          "indeterminate",
+        );
       }
       await verifyReceipt(existing, inputFingerprint, context);
       return { response: responseFor(existing), artifact: artifactFromReceipt(existing, context.projectId) };
@@ -393,9 +407,8 @@ export async function handleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    const message = error instanceof LocalDocumentDynamicToolError
-      ? error.message
-      : "No se ha podido crear y verificar el documento local.";
-    return failure(message);
+    return error instanceof LocalDocumentDynamicToolError
+      ? failure(error.code, error.message)
+      : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el documento local.");
   }
 }

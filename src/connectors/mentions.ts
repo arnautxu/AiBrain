@@ -13,6 +13,8 @@ import {
 import { ensureInstallationCatalog } from "@/catalog/baseline";
 import { gmailAccessForIdentity, gmailCapabilityForSession } from "@/connectors/gmail-server-service";
 import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
+import { outlookAccessForIdentity, outlookCapabilityForSession } from "@/connectors/outlook-server-service";
+import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
 
 export type { ConnectorMention, ConnectorMentionStatus, ResolvedConnectorMention } from "@/connectors/mentions-contract";
 
@@ -48,22 +50,27 @@ async function resolvedMentions(installationId: string, userId: string, session?
     const capabilities = await Promise.all([
       codexManagedAppCapabilities(session),
       gmailCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
+      outlookCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
     ]).then((groups) => groups.flat());
     for (const connector of capabilities) {
       health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
     }
-  } else if (resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID)) {
+  } else {
     // Turn-time revalidation has no browser session object. It still verifies
     // the exact per-user binding and encrypted token instead of trusting the
     // connector chip rendered earlier by the client.
-    try {
-      await gmailAccessForIdentity(installation, userId);
-      health.set(GMAIL_CONNECTOR_ID, { status: "connected", statusCode: null });
-    } catch (error) {
-      const statusCode = error && typeof error === "object" && "code" in error && typeof error.code === "string"
-        ? error.code
-        : "GMAIL_REAUTH_REQUIRED";
-      health.set(GMAIL_CONNECTOR_ID, { status: "reauth_required", statusCode });
+    const checks = [
+      resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID) ? { id: GMAIL_CONNECTOR_ID, access: () => gmailAccessForIdentity(installation, userId), fallback: "GMAIL_REAUTH_REQUIRED" } : null,
+      resources.some((resource) => resource.connectorId === OUTLOOK_CONNECTOR_ID) ? { id: OUTLOOK_CONNECTOR_ID, access: () => outlookAccessForIdentity(installation, userId), fallback: "OUTLOOK_REAUTH_REQUIRED" } : null,
+    ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);
+    for (const check of checks) {
+      try {
+        await check.access();
+        health.set(check.id, { status: "connected", statusCode: null });
+      } catch (error) {
+        const statusCode = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : check.fallback;
+        health.set(check.id, { status: "reauth_required", statusCode });
+      }
     }
   }
   return { resources, mentions: resources.map((resource) => projectConnectorMention(resource, health)) };

@@ -22,6 +22,28 @@ class FakeRunner implements DocumentToolRunner {
   }
 }
 
+async function eventually<T>(read: () => Promise<T>, timeoutMs = 2_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await read();
+    } catch (error) {
+      if (Date.now() >= deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+}
+
+function processIsAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ESRCH") return false;
+    throw error;
+  }
+}
+
 describe("document preview service", () => {
   let root: string;
   let stagingRoot: string;
@@ -158,18 +180,37 @@ describe("document preview service", () => {
       .filter((entry) => entry.startsWith(".work-"))).toEqual([]);
   });
 
-  it("kills a running converter when its request is aborted", async () => {
+  it.each([
+    { reason: "request cancellation", expectedCode: "DOCUMENT_OPERATION_ABORTED", abort: true },
+    { reason: "conversion timeout", expectedCode: "DOCUMENT_TOOL_TIMEOUT", abort: false },
+  ])("kills the complete converter process group after $reason", async ({ expectedCode, abort }) => {
+    const pidFile = path.join(root, `converter-child-${abort ? "abort" : "timeout"}.pid`);
+    const childProgram = "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)";
+    const parentProgram = [
+      "const {spawn}=require('node:child_process')",
+      "const {writeFileSync}=require('node:fs')",
+      `const child=spawn(process.execPath,['-e',${JSON.stringify(childProgram)}],{stdio:'ignore'})`,
+      "writeFileSync(process.argv[1],String(child.pid))",
+      "process.on('SIGTERM',()=>{})",
+      "setInterval(()=>{},1000)",
+    ].join(";");
     const controller = new AbortController();
     const runner = new SystemDocumentToolRunner();
     const startedAt = Date.now();
-    const running = runner.run("/bin/sh", ["-c", "while :; do :; done"], {
+    const running = runner.run(process.execPath, ["-e", parentProgram, pidFile], {
       cwd: root,
       env: {},
-      timeoutMs: 5_000,
+      timeoutMs: abort ? 5_000 : 250,
       signal: controller.signal,
     });
-    setTimeout(() => controller.abort(), 25);
-    await expect(running).rejects.toMatchObject({ code: "DOCUMENT_OPERATION_ABORTED" });
+    const childPid = Number(await eventually(async () => await readFile(pidFile, "utf8")));
+    expect(processIsAlive(childPid)).toBe(true);
+    if (abort) controller.abort();
+    await expect(running).rejects.toMatchObject({ code: expectedCode });
+    await eventually(async () => {
+      if (processIsAlive(childPid)) throw new Error("converter child is still alive");
+      return true;
+    });
     expect(Date.now() - startedAt).toBeLessThan(2_000);
   });
 

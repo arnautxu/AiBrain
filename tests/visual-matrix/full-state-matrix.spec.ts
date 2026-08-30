@@ -217,7 +217,7 @@ for (const viewport of viewports) {
     await submitPrompt(page, "Abre una comprobación web sintética.");
     const browserHeading = page.getByRole("heading", { name: "Sesión preparada" });
     await expect(browserHeading).toBeVisible();
-    const viewer = page.getByRole("button", { name: "Abrir", exact: true });
+    const viewer = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
     await expect(viewer).toBeVisible();
     await centerArtifactInWorkbench(page, browserHeading);
     await expect(viewer).toBeInViewport();

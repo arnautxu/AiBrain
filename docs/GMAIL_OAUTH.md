@@ -26,9 +26,9 @@ No escribas ninguno de esos valores en JSON de instalación, documentación, log
 - El callback consume `state` una sola vez, intercambia el código con el verifier PKCE, exige el scope mínimo y realiza readback de `/gmail/v1/users/me/profile` antes de marcar la conexión como activa.
 - Access tokens próximos a caducar se refrescan server-side; el refresh token nunca llega al navegador ni al agente.
 - Desconectar marca primero el binding local como revocado, después solicita revocación a Google y solo borra el token cifrado cuando Google la confirma. Si Google no responde, AiBrain sigue bloqueando el uso y devuelve un código para reintento operativo.
+- Una reconexión posterior conserva la identidad del binding, incrementa su versión durable y no puede reutilizar la credencial de otro empleado.
 - `@gmail` aparece solo si el catálogo efectivo autoriza el recurso para ese usuario. Las tools son read-only (`search` y `read`) y además exigen que `@gmail` haya sido seleccionado en ese turno.
 
 Después de configurar Google Cloud, valida con dos usuarios reales: A conecta y lee su propio perfil; B no ve ni puede consumir el state, binding o token de A; desconectar A elimina `@gmail` como fuente legible; volver a conectar A incrementa la versión del binding. Una respuesta HTTP o un health check no sustituyen este readback.
 
 Los documentos generados siguen guardándose en el workspace local del servidor. Conectar Gmail no habilita Google Drive ni cambia el destino documental por defecto.
-

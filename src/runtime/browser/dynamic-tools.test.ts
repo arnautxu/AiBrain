@@ -28,6 +28,7 @@ const USER_ID = "11a11111-1111-4111-8111-111111111111";
 const BROWSER_THREAD_A = "11a11111-1111-4111-8111-111111111121";
 const BROWSER_THREAD_B = "11a11111-1111-4111-8111-111111111122";
 const FINGERPRINT = "a".repeat(64);
+const STORAGE_WAIT_OPTIONS = { timeout: 10_000, interval: 50 } as const;
 
 type ExecutedBrowserCommand = {
   installationId: string;
@@ -36,6 +37,7 @@ type ExecutedBrowserCommand = {
   command: BrowserAgentCommand;
   approvalEvidence?: BrowserInformedApprovalEvidence;
   expectedResource?: BrowserActionResourceSnapshot;
+  signal?: AbortSignal;
 };
 
 function permissions(allowed = true): ResolvedPermissions {
@@ -271,7 +273,10 @@ describe("closed browser dynamic tools", () => {
         },
       }),
     );
-    await vi.waitFor(() => expect(emitted.find((item) => item.status === "pending")).toBeDefined());
+    await vi.waitFor(
+      () => expect(emitted.find((item) => item.status === "pending")).toBeDefined(),
+      STORAGE_WAIT_OPTIONS,
+    );
     const approval = emitted.find((item) => item.status === "pending") as ApprovalItem;
     expect(approval).toMatchObject({
       kind: "browser",
@@ -382,30 +387,28 @@ describe("closed browser dynamic tools", () => {
     expect(emitted.at(-1)).toMatchObject({ status: "declined" });
   });
 
-  it("makes a post-dispatch browser failure indeterminate and terminal on replay", async () => {
+  it("recovers an aibrain_browser dynamic tool request failure without replaying dispatch", async () => {
     const { userRoot, approvalStore } = await fixture();
     const callStore = new BrowserToolCallStore({ userRoot });
-    const execute = vi.fn(async () => { throw new Error("connection dropped after dispatch"); });
+    const execute = vi.fn(async (_input: ExecutedBrowserCommand) => {
+      throw new Error("aibrain_browser dynamic tool request failed");
+    });
     const emitted: ApprovalItem[] = [];
-    const input = request("click", { selector: "button[type=submit]" });
+    const input = request("scroll", { deltaX: 0, deltaY: 600 }, { callId: "runtime-failed-scroll" });
     const ctx = context(approvalStore, execute, emitted, {
       callStore,
-      emitApproval: async (item) => {
-        emitted.push(item);
-        if (item.status === "pending") {
-          await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, item), "accept");
-        }
-      },
     });
     const first = await handleBrowserDynamicToolCall(input, ctx);
     const replay = await handleBrowserDynamicToolCall(input, ctx);
     expect(first).toEqual(replay);
     expect(first).toMatchObject({ success: false });
     expect(first.contentItems[0]).toMatchObject({ text: expect.stringContaining("indeterminate") });
+    expect(emitted).toEqual([]);
     expect(execute).toHaveBeenCalledOnce();
+    expect(execute.mock.calls[0]?.[0].signal).toBe(ctx.signal);
     const audit = await callStore.readAudit();
     expect(audit.map(({ payload }) => payload.status)).toEqual([
-      "reserved", "approval_requested", "approval_resolved", "executing", "indeterminate",
+      "reserved", "executing", "indeterminate",
     ]);
     expect(audit.at(-1)?.payload.success).toBe(false);
   });
@@ -476,7 +479,10 @@ describe("closed browser dynamic tools", () => {
       },
     });
     const first = handleBrowserDynamicToolCall(input, ctx);
-    await vi.waitFor(() => expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1));
+    await vi.waitFor(
+      () => expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1),
+      STORAGE_WAIT_OPTIONS,
+    );
     const second = handleBrowserDynamicToolCall(input, ctx);
     await new Promise<void>((resolve) => setTimeout(resolve, 25));
     expect(emitted.filter((item) => item.status === "pending")).toHaveLength(1);
@@ -520,7 +526,10 @@ describe("closed browser dynamic tools", () => {
         }
       },
     }));
-    await vi.waitFor(() => expect(emitted.some((item) => item.status === "pending")).toBe(true));
+    await vi.waitFor(
+      () => expect(emitted.some((item) => item.status === "pending")).toBe(true),
+      STORAGE_WAIT_OPTIONS,
+    );
     const approval = emitted.find((item) => item.status === "pending") as ApprovalItem;
     expect(approval.detail).not.toContain("never-log-this");
     await approvalStore.resolve(approvalLocatorFromItem(INSTALLATION_ID, USER_ID, approval), "accept");

@@ -8,6 +8,7 @@ import { FileAutomationStore } from "../src/automations/store";
 import { runAutomationSweep } from "../src/automations/runner";
 import { executeScheduledTurn } from "../src/automations/executor";
 import { writeAutomationWorkerStatus } from "../src/automations/worker-status";
+import { drainAutomaticMemoryJobs } from "../src/memory/automatic-extraction";
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i;
 
@@ -30,7 +31,11 @@ async function enabledUsers(usersRoot: string) {
 }
 
 async function sweep(workerId: string, installation: Readonly<InstallationConfig>, concurrency: number, timeoutMs: number) {
-  const outputs = await Promise.all((await enabledUsers(installation.paths.usersRoot)).map(async (user) => {
+  const users = await enabledUsers(installation.paths.usersRoot);
+  const memory = await drainAutomaticMemoryJobs(installation, {
+    userIds: users.flatMap((user) => user ? [user.userId] : []),
+  });
+  const outputs = await Promise.all(users.map(async (user) => {
     if (!user) return [];
     const session: AuthSession = {
       provider: "local",
@@ -59,15 +64,22 @@ async function sweep(workerId: string, installation: Readonly<InstallationConfig
       }),
     });
   }));
-  return { installation, output: outputs.flat() };
+  return { installation, output: outputs.flat(), memory };
 }
 
 async function main() {
   const once = process.argv.includes("--once");
   const allowed = new Set(["--once", "--interval-ms", "--concurrency", "--timeout-ms"]);
+  const valued = new Set(["--interval-ms", "--concurrency", "--timeout-ms"]);
   for (let index = 2; index < process.argv.length; index += 1) {
-    if (!allowed.has(process.argv[index])) throw new Error(`Argumento desconocido: ${process.argv[index]}`);
-    if (process.argv[index] === "--interval-ms") index += 1;
+    const current = process.argv[index];
+    if (!allowed.has(current)) throw new Error(`Argumento desconocido: ${current}`);
+    if (valued.has(current)) {
+      if (!process.argv[index + 1] || process.argv[index + 1].startsWith("--")) {
+        throw new Error(`${current} requiere un valor.`);
+      }
+      index += 1;
+    }
   }
   const intervalMs = positiveInteger("--interval-ms", 30_000);
   const concurrency = positiveInteger("--concurrency", 2);
@@ -84,9 +96,19 @@ async function main() {
   const heartbeatTimer = setInterval(() => void heartbeat().catch(() => undefined), Math.min(intervalMs, 10_000));
   heartbeatTimer.unref?.();
   do {
-    const { output } = await sweep(workerId, installation, concurrency, timeoutMs);
+    const { output, memory } = await sweep(workerId, installation, concurrency, timeoutMs);
     await heartbeat();
-    process.stdout.write(`${JSON.stringify({ operation: "automations", workerId, processed: output.length, results: output })}\n`);
+    process.stdout.write(`${JSON.stringify({
+      operation: "automations",
+      workerId,
+      processed: output.length,
+      results: output,
+      memoryJobs: {
+        processed: memory.length,
+        completed: memory.filter(({ status }) => status === "completed").length,
+        pending: memory.filter(({ status }) => status === "pending").length,
+      },
+    })}\n`);
     if (once) break;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   } while (true);

@@ -410,6 +410,24 @@ describe("BrowserRuntimeRegistry", () => {
     await registry.close();
   });
 
+  it("forces a fresh private process even when a stalled runtime still reports healthy", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    const initial = await registry.start(USER_A);
+    const other = await registry.start(USER_B);
+
+    const recovered = await registry.restart(USER_A);
+
+    expect(factory.runtimes).toHaveLength(3);
+    expect(factory.runtimes[0]?.stopped).toBe(true);
+    expect(factory.runtimes[1]?.stopped).toBe(false);
+    expect(recovered.browserSessionId).not.toBe(initial.browserSessionId);
+    expect(registry.get(USER_B)?.browserSessionId).toBe(other.browserSessionId);
+    expect(recovered.roots.profile).toBe(initial.roots.profile);
+    await registry.close();
+  });
+
   it("keeps runtimes exclusive per user and recovers durable state after process restart", async () => {
     const { store } = await fixture();
     const firstFactory = new FakeBrowserFactory();

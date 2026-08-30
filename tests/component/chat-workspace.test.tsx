@@ -142,6 +142,39 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
+  it("renders the final answer as rich Markdown once and outside collapsed work activity", () => {
+    const message: ChatMessage = {
+      ...assistantMessage(),
+      content: "## Informe final\n\n- Evidencia verificada\n- Próximo paso",
+      durationMs: 3_000,
+      approvals: [],
+      activity: [{
+        id: "commentary-1",
+        kind: "reasoning",
+        label: "Actualización de trabajo",
+        detail: "He comprobado la fuente autorizada.",
+        status: "complete",
+      }],
+    };
+    renderWorkspace({
+      id: "thread-1",
+      projectId: project.id,
+      title: "Informe",
+      status: "active",
+      pinned: false,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-28T00:00:03.000Z",
+      messages: [message],
+    });
+
+    const activityTrigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+    expect(activityTrigger).toHaveAttribute("aria-expanded", "false");
+    expect(activityTrigger).toHaveTextContent("Ha trabajado durante 0m 3s");
+    expect(screen.getAllByRole("heading", { name: "Informe final" })).toHaveLength(1);
+    expect(screen.getByText("Evidencia verificada").closest("li")).toBeInTheDocument();
+    expect(screen.getByText("He comprobado la fuente autorizada.")).not.toBeVisible();
+  });
+
   it("adopts a draft typed before hydration instead of resetting it", () => {
     const onPromptChange = vi.fn();
     const { finishHydration } = renderWorkspace(null, project, {
@@ -163,14 +196,16 @@ describe("chat workspace simplificado", () => {
     renderWorkspace(null, project, {
       connectorMentions: [
         { id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true },
+        { id: "outlook", label: "Outlook", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false },
         { id: "executive-crm", label: "CRM Ejecutivo", kind: "connector", status: "requires_login", statusCode: "CONNECTOR_LOGIN_REQUIRED", canRead: false, requiresApprovalForWrites: false },
       ],
       onPromptChange,
       onConnectorMentionIdsChange,
     });
     const composer = screen.getByLabelText("Mensaje");
-    fireEvent.change(composer, { target: { value: "Busca @gm" } });
+    fireEvent.change(composer, { target: { value: "Busca @" } });
     expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Gmail");
+    expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Outlook");
     expect(screen.queryByText("CRM Ejecutivo")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: /Gmail/ }));
     expect(onConnectorMentionIdsChange).toHaveBeenCalledWith(["gmail"]);
@@ -201,24 +236,27 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByText("David Liria", { exact: true })).not.toBeInTheDocument();
   });
 
-  it("keeps the add menu limited to files, folders and authorized connectors", () => {
+  it("keeps the add menu limited to files and authorized connectors", () => {
     renderWorkspace(null, project, {
       runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true },
       connectorMentions: [
         { id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true },
+        { id: "outlook", label: "Outlook", kind: "connector", status: "requires_login", statusCode: "OUTLOOK_LOGIN_REQUIRED", canRead: false, requiresApprovalForWrites: false },
       ],
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
     expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
-    expect(screen.getByRole("menuitem", { name: "Añadir carpeta" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Añadir carpeta" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Conectores" })).toBeInTheDocument();
-    for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen"]) {
+    for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen", "Desactivar búsqueda web"]) {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Conectores" }));
-    expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Gmail");
+    expect(screen.getByRole("listbox", { name: "Catálogo de conectores" })).toHaveTextContent("Gmail");
+    expect(screen.getByRole("listbox", { name: "Catálogo de conectores" })).toHaveTextContent("Outlook");
+    expect(screen.getByRole("option", { name: /Outlook/ })).toBeDisabled();
   });
 
   it("submits with Enter while preserving composition and multiline input", () => {
@@ -238,7 +276,7 @@ describe("chat workspace simplificado", () => {
     renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: "Experiencia" }));
     expect(screen.getByRole("menuitemradio", { name: /Rápido/ })).toBeInTheDocument();
-    expect(screen.getByRole("menuitemradio", { name: /Smart/ })).toBeInTheDocument();
+    expect(screen.getByRole("menuitemradio", { name: /Inteligente/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Experto/ })).toBeInTheDocument();
     expect(screen.getByRole("menu", { name: "Experiencia" })).not.toHaveTextContent(/GPT|Terra|Sol/i);
     expect(screen.queryByRole("button", { name: "Aprobar permisos automáticamente" })).not.toBeInTheDocument();

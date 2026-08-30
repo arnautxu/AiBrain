@@ -166,6 +166,7 @@ describe("authenticated browser runtime routes", () => {
       userId: USER_A,
       threadId: THREAD_A,
       token: "payload.signature",
+      signal: expect.any(AbortSignal),
     }));
 
     const input = await inputRoute.POST(request(
@@ -179,6 +180,7 @@ describe("authenticated browser runtime routes", () => {
       token: "payload.signature",
       threadId: THREAD_A,
       command: { threadId: THREAD_A, action: "navigate", url: "https://example.test/path" },
+      signal: expect.any(AbortSignal),
     }));
 
     const foreign = await inputRoute.POST(request(
@@ -202,6 +204,11 @@ describe("authenticated browser runtime routes", () => {
       canGoBack: true,
       canGoForward: false,
     });
+    expect(browser.navigation).toHaveBeenCalledWith(expect.objectContaining({
+      userId: USER_A,
+      threadId: THREAD_A,
+      signal: expect.any(AbortSignal),
+    }));
 
     const streamed = await streamRoute.GET(request(
       `/api/runtime/browser/viewer/stream?threadId=${THREAD_A}`,

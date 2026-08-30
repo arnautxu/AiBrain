@@ -22,6 +22,7 @@ import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gateway-runtime";
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
+import { operationalLogger } from "@/operations/server-logger";
 
 const CATALOG_FRESH_TTL_MS = 5 * 60_000;
 const CATALOG_STALE_TTL_MS = 30 * 60_000;
@@ -76,7 +77,15 @@ export class WorkerAppServerClient {
     readonly handle: WorkerRuntimeHandle,
     private readonly maintenance: MaintenanceCoordinator | null = null,
   ) {
-    this.router = new AppServerRpcRouter(handle.transport);
+    this.router = new AppServerRpcRouter(handle.transport, {
+      onRequestMetric: (metric) => operationalLogger.info("codex.app_server_request", {
+        metricSchemaVersion: 1,
+        installationId: handle.installationId,
+        userId: handle.userId,
+        ...metric,
+        observedAt: new Date().toISOString(),
+      }),
+    });
   }
 
   async initialize() {
@@ -354,6 +363,14 @@ export async function workerAppServerForUser(
   try {
     handle = await state.registry.start(userId, activityLease);
   } catch {
+    operationalLogger.warn("codex.worker_recovery", {
+      metricSchemaVersion: 1,
+      installationId: state.config.installationId,
+      userId,
+      phase: "worker_start",
+      outcome: "retrying_once",
+      observedAt: new Date().toISOString(),
+    });
     // A failed gateway connection has already been stopped by the registry.
     // One clean retry recovers transient process and socket startup races.
     handle = await state.registry.start(userId, activityLease);
@@ -367,6 +384,14 @@ export async function workerAppServerForUser(
   try {
     await client.initialize();
   } catch {
+    operationalLogger.warn("codex.worker_recovery", {
+      metricSchemaVersion: 1,
+      installationId: state.config.installationId,
+      userId,
+      phase: "app_server_initialize",
+      outcome: "restarting_once",
+      observedAt: new Date().toISOString(),
+    });
     await client.close().catch(() => undefined);
     state.clients.delete(userId);
     await state.registry.stop(userId).catch(() => undefined);
@@ -377,6 +402,14 @@ export async function workerAppServerForUser(
       await client.initialize();
     } catch (retryError) {
       state.clients.delete(userId);
+      operationalLogger.error("codex.worker_recovery", {
+        metricSchemaVersion: 1,
+        installationId: state.config.installationId,
+        userId,
+        phase: "app_server_initialize",
+        outcome: "unavailable",
+        observedAt: new Date().toISOString(),
+      });
       throw retryError;
     }
   }

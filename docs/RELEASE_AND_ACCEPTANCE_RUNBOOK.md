@@ -118,6 +118,12 @@ The deployment workflow in
 accepts only a successful push CI on current `main` and archives the tested SHA
 through the restricted gateway.
 
+Workflow concurrency is intentionally asymmetric. Backend CI ignores changes
+limited to documentation. Publish uses the `publish-ghcr-main` group and may
+cancel a superseded image build when a newer `main` revision arrives. Deploy
+uses the `deploy-arnall-main` group with cancellation disabled: releases queue
+and the transactional host operation is never interrupted halfway through.
+
 ## 6. Immutable deployment readback
 
 The deploy job must log `ARNALL_DEPLOY_OK revision=<candidate-full-sha>`. Retain

@@ -129,7 +129,10 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: /Abrir menú de cuenta/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Ayuda" }));
 
-    expect(screen.getByRole("note")).toHaveTextContent("archivos, carpetas o elegir conectores autorizados");
+    const menu = screen.getByRole("menu", { name: "Cuenta y preferencias" });
+    expect(screen.getByRole("note")).toHaveTextContent("archivos o elegir conectores autorizados");
+    expect(within(menu).queryByText("Tema rápido")).not.toBeInTheDocument();
+    expect(within(menu).queryByText("Acme")).not.toBeInTheDocument();
   });
 
   it("nests every project chat below its project and keeps standalone chats separate", () => {

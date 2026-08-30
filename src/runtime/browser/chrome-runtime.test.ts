@@ -467,6 +467,12 @@ describe("ChromeCdpRuntime private pipe", () => {
     });
     await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
     await runtime.agentScroll(THREAD_A, 0, 250);
+    expect(client.commands).toContainEqual(expect.objectContaining({
+      method: "Runtime.evaluate",
+      params: expect.objectContaining({
+        expression: "window.scrollBy({ left: 0, top: 250, behavior: \"instant\" })",
+      }),
+    }));
     await runtime.agentClick(THREAD_A, "button[type=submit]");
     expect(client.commands).toContainEqual(expect.objectContaining({
       method: "DOM.scrollIntoViewIfNeeded",

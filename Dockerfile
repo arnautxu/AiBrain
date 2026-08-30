@@ -58,6 +58,7 @@ ENV NODE_ENV=production \
     AIBRAIN_PDFTOTEXT_BIN=/usr/local/bin/aibrain-pdftotext \
     AIBRAIN_QPDF_BIN=/usr/local/bin/aibrain-qpdf \
     AIBRAIN_CODEX_EXPECTED_VERSION=0.149.1 \
+    AIBRAIN_INTERNAL_AGENT_CONTEXT_ROOT=/usr/local/share/aibrain/internal-agent-context \
     HOME=/var/lib/aibrain/data/app-home \
     XDG_CACHE_HOME=/var/lib/aibrain/data/server/xdg/cache \
     XDG_CONFIG_HOME=/var/lib/aibrain/data/server/xdg/config \
@@ -126,6 +127,7 @@ WORKDIR /app
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
+COPY --from=builder --chown=root:root /app/config/internal-agent-context /usr/local/share/aibrain/internal-agent-context
 COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automation-worker.mjs
 # The scheduler is an explicit server-conditioned ESM bundle. Unlike the app,
 # it does not depend on Next's standalone file tracer, tsx, source mounts, or a
@@ -181,7 +183,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-document-maintenance \
   && chmod 0444 /usr/local/share/aibrain/healthcheck.mjs /usr/local/share/aibrain/automation-worker-healthcheck.mjs \
   && chmod 0555 /usr/local/share/aibrain/configure-egress.mjs \
-  && chmod -R a-w /app /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
+  && chmod -R a-w /app /usr/local/share/aibrain/internal-agent-context /usr/local/bin/codex-real /usr/local/lib/node_modules/@openai/codex
 
 ARG AIBRAIN_REVISION=development
 LABEL org.opencontainers.image.title="AiBrain Company Brain" \

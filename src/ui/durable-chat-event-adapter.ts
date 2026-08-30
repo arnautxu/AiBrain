@@ -152,7 +152,9 @@ export class DurableChatEventAdapter {
     this.eventSequences.set(event.eventId, event.sequence);
     this.cursorValue = { eventId: event.eventId, sequence: event.sequence };
     this.replayRequestedFor = null;
-    if (event.payload.type === "done" || event.payload.type === "error") this.terminal = true;
+    if (event.payload.type === "done" || event.payload.type === "stopped" || event.payload.type === "error") {
+      this.terminal = true;
+    }
     return { kind: "applied", cursor: { ...this.cursorValue } };
   }
 

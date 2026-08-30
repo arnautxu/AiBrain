@@ -166,6 +166,66 @@ describe("FileAutomationStore", () => {
     expect((await store.list())[0].state).toBe("completed");
   });
 
+  it("prevents a fenced worker from appending a stale failure after its successor succeeds", async () => {
+    const usersRoot = await root();
+    let clock = Date.parse("2026-08-28T09:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now: () => clock, leaseMs: 100 });
+    await store.create(input("2026-08-28T09:00:00.000Z"));
+    let started!: () => void;
+    const executing = new Promise<void>((resolve) => { started = resolve; });
+    const staleSweep = runAutomationSweep({
+      store,
+      ownerId: "worker-stale",
+      now: () => clock,
+      leaseRenewalMs: 1_000,
+      execute: async (_claim, _threadId, _prepared, signal) => {
+        started();
+        await new Promise<void>((_resolve, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+        return { threadId: projectId };
+      },
+    });
+    await executing;
+    clock += 101;
+    const [successor] = await store.claimDue("worker-successor");
+    const startedAt = new Date(clock).toISOString();
+    await store.appendRun({
+      schemaVersion: 1,
+      runKey: successor.runKey,
+      taskId: successor.task.id,
+      installationId: successor.task.installationId,
+      userId: successor.task.userId,
+      scheduledFor: successor.scheduledFor,
+      status: "running",
+      attempt: 2,
+      startedAt,
+      finishedAt: null,
+      threadId: projectId,
+      error: null,
+    });
+    await store.appendRun({
+      schemaVersion: 1,
+      runKey: successor.runKey,
+      taskId: successor.task.id,
+      installationId: successor.task.installationId,
+      userId: successor.task.userId,
+      scheduledFor: successor.scheduledFor,
+      status: "succeeded",
+      attempt: 2,
+      startedAt,
+      finishedAt: startedAt,
+      threadId: projectId,
+      error: null,
+    });
+    await store.settle(successor, { status: "succeeded" });
+    await staleSweep;
+
+    const history = await store.listRuns(successor.task.id);
+    expect(history.at(-1)).toMatchObject({ status: "succeeded", attempt: 2 });
+    expect(history.filter((run) => run.status === "failed")).toEqual([]);
+  });
+
   it("runs independent claims concurrently but never duplicates their run key", async () => {
     const usersRoot = await root();
     const clock = Date.parse("2026-08-28T09:00:00.000Z");

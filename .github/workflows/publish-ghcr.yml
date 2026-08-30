@@ -14,8 +14,8 @@ permissions:
   packages: write
 
 concurrency:
-  group: publish-ghcr-${{ github.event.workflow_run.head_sha }}
-  cancel-in-progress: false
+  group: publish-ghcr-main
+  cancel-in-progress: true
 
 jobs:
   publish:

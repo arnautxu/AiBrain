@@ -2,10 +2,15 @@ name: Backend CI
 
 on:
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   push:
     branches:
       - main
-      - codex/aibrain-backend-definitivo
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
 
 permissions:
   contents: read

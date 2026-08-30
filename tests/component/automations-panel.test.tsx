@@ -84,8 +84,12 @@ describe("AutomationsPanel audience", () => {
       });
     }));
 
-    render(<AutomationsPanel open projects={[project]} onClose={vi.fn()} fullPage />);
+    render(<AutomationsPanel open projects={[project]} />);
+    expect(screen.getByRole("main", { name: "Automatizaciones" })).toBeInTheDocument();
+    expect(screen.queryByText("Centro de tareas")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Servicio de automatizaciones|Se ejecutan mientras/i)).not.toBeInTheDocument();
     expect(await screen.findByText("Destinatarios: Grupo: Operaciones")).toBeInTheDocument();
+    expect(screen.queryByText("Centro de tareas")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Editar Informe compartido" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
@@ -107,5 +111,31 @@ describe("AutomationsPanel audience", () => {
         audience: { membershipPolicy: "current", userIds: [ownerId, memberId], groupIds: [groupId] },
       },
     });
+  });
+
+  it("keeps the empty action centered and labels the standalone project as Sin proyecto", async () => {
+    const standaloneProject = { ...project, name: "Conversaciones", slug: "aibrain-standalone-chats" };
+    const standaloneTask = { ...viewerTask, projectId: standaloneProject.id, projectName: "Conversaciones" };
+    let tasks: AutomationTaskView[] = [standaloneTask];
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      tasks,
+      worker: null,
+      audienceDirectory: {
+        membershipPolicy: "current",
+        currentUserId: ownerId,
+        users: [{ id: ownerId, name: "Owner" }],
+        groups: [{ id: groupId, name: "Operaciones" }],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    const view = render(<AutomationsPanel open projects={[standaloneProject]} />);
+    expect(await screen.findByText(/Sin proyecto ·/)).toBeInTheDocument();
+    view.unmount();
+
+    tasks = [];
+    render(<AutomationsPanel open projects={[standaloneProject]} />);
+    const emptyAction = await screen.findByRole("button", { name: "Nueva" });
+    expect(emptyAction).toHaveClass("mx-auto");
+    expect(emptyAction.parentElement).toHaveClass("workspace-empty-state");
   });
 });

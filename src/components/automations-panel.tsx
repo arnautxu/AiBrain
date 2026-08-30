@@ -3,25 +3,20 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   CalendarBlank,
-  CheckCircle,
   Clock,
-  ClockCounterClockwise,
   Pause,
   PencilSimple,
   Play,
   Plus,
   SpinnerGap,
   Trash,
-  WarningCircle,
 } from "@phosphor-icons/react";
 import type { AutomationAudienceDirectory, AutomationRun, AutomationSchedule, AutomationTask, AutomationTaskView } from "@/automations/contracts";
 import { AUTOMATION_TIME_ZONES } from "@/automations/contracts";
 import { describeSchedule, localMinuteToInstant, localParts } from "@/automations/schedule";
 import type { WorkbenchProject } from "@/workbench/types";
-import { useModalFocus } from "@/ui/use-modal-focus";
 import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
 
-type WorkerInfo = { heartbeatAt: string; online: boolean } | null;
 type ScheduleKind = AutomationSchedule["kind"];
 const weekdays = ["D", "L", "M", "X", "J", "V", "S"];
 
@@ -57,19 +52,14 @@ function audienceLabel(task: AutomationTask, directory: AutomationAudienceDirect
   return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} y ${labels.length - 2} más` : labels.join(", ");
 }
 
-export function AutomationsPanel({ open, projects, onClose, fullPage = false, onOpenTaskCenter, onOpenThread }: {
+export function AutomationsPanel({ open, projects, onOpenThread }: {
   open: boolean;
   projects: WorkbenchProject[];
-  onClose: () => void;
-  fullPage?: boolean;
-  onOpenTaskCenter?: () => void;
   onOpenThread?: (threadId: string) => void;
 }) {
-  const panelRef = useModalFocus(open && !fullPage, onClose);
   const availableProjects = useMemo(() => projects.filter((project) => project.status === "active"), [projects]);
   const [tasks, setTasks] = useState<AutomationTaskView[]>([]);
   const [audienceDirectory, setAudienceDirectory] = useState<AutomationAudienceDirectory>(emptyDirectory);
-  const [worker, setWorker] = useState<WorkerInfo>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,6 +81,13 @@ export function AutomationsPanel({ open, projects, onClose, fullPage = false, on
   const projectLabel = (project: WorkbenchProject | undefined) =>
     project?.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project?.name ?? "Sin proyecto";
 
+  const taskProjectLabel = (task: AutomationTask) => {
+    const project = projects.find((candidate) => candidate.id === task.projectId);
+    return project?.slug === STANDALONE_PROJECT_SLUG || task.projectName.trim().toLocaleLowerCase("es") === "conversaciones"
+      ? "Sin proyecto"
+      : task.projectName;
+  };
+
   const refresh = async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
@@ -100,7 +97,6 @@ export function AutomationsPanel({ open, projects, onClose, fullPage = false, on
       if (!response.ok) throw new Error(body.error || "No se han podido cargar las automatizaciones.");
       setTasks(Array.isArray(body.tasks) ? body.tasks : []);
       setAudienceDirectory(body.audienceDirectory ?? emptyDirectory);
-      setWorker(body.worker ?? null);
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "No se han podido cargar las automatizaciones.");
     } finally {
@@ -236,24 +232,17 @@ export function AutomationsPanel({ open, projects, onClose, fullPage = false, on
   };
 
   if (!open) return null;
-  return <div className={fullPage ? "automations-page relative min-w-0 flex-1 bg-[var(--surface)]" : "workspace-overlay fixed inset-0 z-[76] flex justify-end"}>
-    {!fullPage ? <button className="absolute inset-0" aria-label="Cerrar automatizaciones" onClick={onClose} /> : null}
-    <section ref={panelRef} tabIndex={fullPage ? undefined : -1} role={fullPage ? "region" : "dialog"} aria-modal={fullPage ? undefined : "true"} aria-labelledby="automations-title" className={`workspace-panel panel-enter relative flex h-full w-full flex-col bg-[var(--surface-raised)] ${fullPage ? "automations-page-panel" : "max-w-[580px] border-l border-[var(--border)] shadow-[var(--shadow-lg)]"}`}>
+  return <main aria-labelledby="automations-title" className="automations-page automations-page-panel workspace-panel relative flex min-w-0 flex-1 flex-col bg-[var(--surface-raised)]">
       <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-5">
         <CalendarBlank size={19} />
         <div className="min-w-0 flex-1"><h2 id="automations-title" className="workspace-panel-title text-[var(--text)]">Automatizaciones</h2></div>
-        {onOpenTaskCenter ? <button type="button" onClick={onOpenTaskCenter} className="inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><ClockCounterClockwise size={14} />Centro de tareas</button> : null}
         {tasks.length ? <button type="button" disabled={!availableProjects.length} onClick={() => openForm(null)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button> : null}
       </header>
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className={`flex items-start gap-2.5 rounded-[16px] border px-3.5 py-3 ${worker?.online ? "border-[var(--border)] bg-[var(--surface)]" : "border-[var(--warning)] bg-[var(--warning-soft)]"}`} role="status">
-          {worker?.online ? <CheckCircle size={17} weight="fill" className="mt-0.5 text-[var(--positive)]" /> : <WarningCircle size={17} weight="fill" className="mt-0.5 text-[var(--warning)]" />}
-          <div><p className="text-[11px] font-semibold text-[var(--text)]">{worker?.online ? "Servicio de automatizaciones disponible" : "Servicio de automatizaciones desconectado"}</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">{worker?.online ? `Última comprobación: ${dateLabel(worker.heartbeatAt, timeZone)}.` : "Las automatizaciones permanecerán pendientes hasta que el administrador reactive el servicio."} La ejecución depende del servidor de tu empresa.</p></div>
-        </div>
-        {error ? <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
-        {loading ? <div className="flex min-h-44 items-center justify-center gap-2 text-[11px] text-[var(--text-subtle)]"><SpinnerGap size={15} className="motion-safe:animate-spin" />Cargando automatizaciones…</div> : tasks.length ? <div className="mt-4 space-y-2.5">{tasks.map((task) => <article key={task.id} className="rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
-          <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Clock size={16} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{task.name}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${task.state === "active" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{task.state === "active" ? "Activa" : task.state === "paused" ? "En pausa" : "Completada"}</span>{task.manualRun ? <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--brain-accent-on-soft)]">Ejecución en cola</span> : null}</div><p className="mt-1 truncate text-[10px] text-[var(--text-subtle)]">{task.projectName === "Conversaciones" ? "Sin proyecto" : task.projectName} · {describeSchedule(task.schedule, task.timeZone)} · {task.timeZone}</p></div></div>
+        {error ? <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
+        {loading ? <div className="flex min-h-44 items-center justify-center gap-2 text-[11px] text-[var(--text-subtle)]"><SpinnerGap size={15} className="motion-safe:animate-spin" />Cargando automatizaciones…</div> : tasks.length ? <div className="space-y-2.5">{tasks.map((task) => <article key={task.id} className="rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
+          <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Clock size={16} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{task.name}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${task.state === "active" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{task.state === "active" ? "Activa" : task.state === "paused" ? "En pausa" : "Completada"}</span>{task.manualRun ? <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--brain-accent-on-soft)]">Ejecución en cola</span> : null}</div><p className="mt-1 truncate text-[10px] text-[var(--text-subtle)]">{taskProjectLabel(task)} · {describeSchedule(task.schedule, task.timeZone)} · {task.timeZone}</p></div></div>
           <p className="mt-3 line-clamp-2 text-[11px] leading-5 text-[var(--text-muted)]">{task.prompt}</p>
           <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">Destinatarios: {audienceLabel(task, audienceDirectory)}</p>
           <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px]"><div><dt className="text-[var(--text-subtle)]">Próxima</dt><dd className="mt-0.5 font-medium text-[var(--text)]">{dateLabel(task.nextRunAt, task.timeZone)}</dd></div><div><dt className="text-[var(--text-subtle)]">Última</dt><dd className={`mt-0.5 font-medium ${task.lastRunStatus === "failed" ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>{task.lastRunAt ? `${dateLabel(task.lastRunAt, task.timeZone)}${task.lastRunStatus === "failed" ? " · Falló" : ""}` : "Aún no ejecutada"}</dd></div></dl>
@@ -278,9 +267,8 @@ export function AutomationsPanel({ open, projects, onClose, fullPage = false, on
           {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Días</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
           {kind === "once" ? <label className="block text-[11px] font-semibold text-[var(--text)]">Fecha y hora<input type="datetime-local" value={onceAt} onChange={(event) => setOnceAt(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label> : <label className="block text-[11px] font-semibold text-[var(--text)]">Hora<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
           <label className="block text-[11px] font-semibold text-[var(--text)]">Zona horaria<select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal">{AUTOMATION_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
-          <p className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">La tarea crea una conversación en el proyecto y ejecuta este prompt. Cualquier acción sensible seguirá necesitando las aprobaciones configuradas. No envía mensajes externos por sí sola.</p>
+          <p className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.</p>
         </form>
       </div> : null}
-    </section>
-  </div>;
+  </main>;
 }

@@ -2,6 +2,10 @@
 
 Este procedimiento crea una instalación QA sin tocar servicios, redes, volúmenes, puertos, rutas o procesos de terceros presentes en el host. No autoriza DNS, cutover, datos reales, NAS real ni producción.
 
+## Nota de plataforma para administración
+
+Linux es el sistema operativo del servidor Hetzner que ejecuta AiBrain; no es el sistema del empleado ni una superficie que deba describirse en la UI. Se usa porque ofrece un runtime de servidor estable y automatizable, aislamiento de procesos y mounts mediante namespaces, permisos Unix, contenedores, healthchecks y operaciones reproducibles de backup, release y rollback. Los empleados trabajan exclusivamente en la interfaz de su instalación. Las rutas Linux, procesos, sockets, credenciales y nombres de infraestructura permanecen en documentación y herramientas de administración.
+
 En los ejemplos, sustituye `<installation>` por un slug nuevo y `<git-sha>` por el commit exacto. No reutilices nombres o rutas de otra instalación.
 
 ## 1. Preparar release y configuración
@@ -174,6 +178,8 @@ versiones Codex/Chromium, mounts y los namespaces de workers y browser. Para el
 browser crea dos empleados sintéticos efímeros: el proceso debe ver su propio
 marker, no el del hermano ni el de `publish-rw`; después elimina únicamente
 estos roots sintéticos. Cualquier fallo bloquea el servicio.
+
+El directorio server-only `/usr/local/share/aibrain/internal-agent-context` contiene la documentación interna seleccionada por `companySlug`. El proceso web la inyecta como instrucción de producto, pero el sandbox del trabajador la enmascara y no la presenta como documento empresarial ni como fuente citable. Valida que exista el Markdown de la instalación y que el preflight del sandbox no pueda listarlo.
 
 Comprueba las fronteras del servidor sin mostrar secretos:
 

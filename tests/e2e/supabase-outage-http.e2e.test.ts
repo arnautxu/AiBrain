@@ -313,6 +313,7 @@ describe("real worker HTTP session during Supabase outage", () => {
       preferences: { tone: "direct", language: "es", showActivity: true },
       options: {
         mode: "agent",
+        experience: "smart",
         model: null,
         effort: null,
         webSearch: false,
@@ -336,7 +337,10 @@ describe("real worker HTTP session during Supabase outage", () => {
       item?: { label?: string };
     });
     expect(events).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: "activity", item: expect.objectContaining({ label: "Codex connectat" }) }),
+      expect.objectContaining({
+        type: "activity",
+        item: expect.objectContaining({ id: "runtime-connect", status: "complete" }),
+      }),
       { type: "delta", value: WORKER_REPLY },
       expect.objectContaining({ type: "done", durationMs: expect.any(Number) }),
     ]));

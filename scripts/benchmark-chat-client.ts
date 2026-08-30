@@ -98,6 +98,13 @@ const burstDispatchCpuMs = performance.now() - burstStartedAt;
 const appliedBeforeBurstFrame = applied.length;
 scheduler.advance(16);
 const appliedAfterBurstFrame = applied.length;
+// Observe the paint scheduled by the coalesced burst, then a real terminal
+// paint. The resulting cadence readback measures the visible sequence rather
+// than treating first-delta latency as a proxy for the whole stream.
+scheduler.advance(16);
+dispatcher.dispatch({ type: "done" });
+scheduler.advance(16);
+const visibleStreaming = metric.readback();
 dispatcher.close();
 
 const fallbackScheduler = new ControlledBrowserScheduler();
@@ -119,6 +126,14 @@ console.log(JSON.stringify({
   responseAcceptedFeedbackWithinBudget: latestReadback?.responseAcceptedFeedbackWithinBudget ?? null,
   firstDeltaAppliedSynchronously: immediateApplied === 1,
   firstDeltaArrivalToPaintProxyMs: firstDeltaPaintedAt - firstDeltaArrivedAt,
+  visibleStreaming: {
+    paintCount: visibleStreaming.paintCount,
+    interPaintP50Ms: visibleStreaming.interPaintP50Ms,
+    interPaintP95Ms: visibleStreaming.interPaintP95Ms,
+    interPaintMaxMs: visibleStreaming.interPaintMaxMs,
+    sendIntentToTerminalPaintMs: visibleStreaming.sendIntentToTerminalPaintMs,
+    terminal: visibleStreaming.terminal,
+  },
   longSequence: {
     inputDeltaCount: 10_000,
     appliedEventsBeforeFrame: appliedBeforeBurstFrame,

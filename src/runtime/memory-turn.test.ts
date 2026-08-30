@@ -86,7 +86,7 @@ afterEach(async () => {
 });
 
 describe("turn memory binding", () => {
-  it("turns a tool-assisted chat suggestion into a pending proposal, never a saved memory", async () => {
+  it("keeps legacy memory tool calls non-blocking and delegates persistence to the background extractor", async () => {
     const propose = vi.fn(async (_context, input) => ({
       created: true,
       proposal: {
@@ -105,11 +105,11 @@ describe("turn memory binding", () => {
       runtimeThreadId: "runtime-thread-1", runtimeTurnId: "runtime-turn-1", sourceExcerpt: "Guárdalo solo si lo confirmo.",
       observedToolNames: ["aibrain_browser.read"], store: { propose } as never,
     });
-    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_A, projectId: PROJECT_ID }), expect.objectContaining({ toolNames: ["aibrain_browser.read"] }));
+    expect(propose).not.toHaveBeenCalled();
     expect(response.success).toBe(true);
     const payload = JSON.parse((response.contentItems[0] as { text: string }).text) as { persisted: boolean; status: string };
     expect(payload.persisted).toBe(false);
-    expect(payload.status).toBe("pending-user-confirmation");
+    expect(payload.status).toBe("scheduled-after-terminal-turn");
   });
 
   it("requests the exact global limits and durably binds ids plus stable snapshot hash", async () => {
@@ -122,7 +122,7 @@ describe("turn memory binding", () => {
 
     expect(buildPromptSnapshot).toHaveBeenCalledWith(
       { installationId: INSTALLATION_ID, userId: USER_A, projectId: PROJECT_ID },
-      { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS },
+      { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS, query: undefined },
     );
     expect(prepared.snapshot.memoryIds).toEqual([MEMORY_ID]);
     expect(prepared.fingerprint).toMatch(/^[0-9a-f]{64}$/);

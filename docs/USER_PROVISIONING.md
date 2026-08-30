@@ -30,6 +30,8 @@ npm run users:provision -- --input /secure/operator/users.json
 
 El seed busca `config/company-context/<companySlug>/`, crea únicamente carpetas y Markdown ausentes y nunca sustituye ni cambia el modo de un archivo de contexto existente. `users:provision` ejecuta la misma operación antes de crear usuarios, por lo que el comando separado es opcional pero útil para una instalación aún sin empleados. Si no existe un seed versionado para la empresa, se conservan las plantillas genéricas.
 
+La documentación de producto que guía al agente no forma parte de esa raíz empresarial. Vive versionada en `config/internal-agent-context/<companySlug>.md`, se empaqueta en un directorio server-only y se inyecta como instrucciones; el sandbox la oculta como archivo y el agente tiene prohibido citarla o describirla. Cada instalación debe revisar UI, capacidades, carpetas, automatizaciones, conectores, límites y respuesta de identidad antes de release.
+
 La salida de usuarios contiene solo instalación y recuentos, nunca emails, paths, tokens o contenido. Repetir exactamente el comando devuelve los usuarios como `unchanged`. Si el empleado ya consumió `password-change-required`, una repetición no lo recrea.
 
 ## Resultado por usuario

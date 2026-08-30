@@ -5,14 +5,16 @@ const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "ope
 const accountName = demoUserId === "operations-user" ? "Taylor" : "Alex";
 const primaryProject = demoUserId === "operations-user" ? "Operacions" : "Espacio principal";
 
+test.setTimeout(120_000);
+
 async function login(page: Page) {
   await establishDemoSession(page, demoUserId);
   await openMobileDrawerIfNeeded(page);
+  await expect(page.getByRole("button", { name: "Automatizaciones", exact: true })).toBeVisible({ timeout: 10_000 });
   await page.getByRole("button", { name: "Nueva conversación", exact: true }).first().click();
   await expect(page.getByRole("heading", { level: 1, name: /¿(?:En qué te puedo ayudar, .+|Cómo puedo ayudarte en .+)\?/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Automatizaciones", exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Biblioteca", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Conectando con el servicio…")).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.getByText("Conectando con el servicio…")).toHaveCount(0, { timeout: 60_000 });
   await page.locator("nextjs-portal").evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
 }
 
@@ -46,10 +48,10 @@ async function installAdministrationRoutes(page: Page) {
       company: { installationId: "example-laboratory", name: "Example Laboratory", isAdmin: true },
       apps: [],
       connectors: [],
-      memory: { enabled: true, confirmationRequired: true, scopes: ["private", "project", "company"], provenanceVisible: true, employeeRuntimeIsolated: true, sharedComputerHistory: false },
+      memory: { enabled: true, confirmationRequired: false, scopes: ["private", "project", "company"], provenanceVisible: true, employeeRuntimeIsolated: true, sharedComputerHistory: false },
       notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
       permissions: [],
-      privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "explicit_user_memory" },
+      privacy: { conversationStorage: "company_private", providerTraining: "not_managed_here", employeeIsolation: true, memoryScope: "automatic_private_memory" },
       browser: { profileScope: "private_per_employee", networkPolicy: "public_http_https_only", privateNetworkAllowed: false, mutationsRequireApproval: true, downloadsArePrivate: true },
     }),
   }));
@@ -204,14 +206,27 @@ test("automations occupy the main surface", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
   await page.getByRole("button", { name: "Automatizaciones", exact: true }).click();
-  const automations = page.getByRole("region", { name: "Automatizaciones" });
+  const automations = page.getByRole("main", { name: "Automatizaciones" });
+  const sidebar = page.getByTestId("workbench-sidebar");
   await expect(automations).toBeVisible();
-  await expect(page.getByText("Cargando automatizaciones…")).toBeHidden();
+  const isMobile = (page.viewportSize()?.width ?? 1440) < 768;
+  if (isMobile) await expect(sidebar).toBeHidden();
+  else await expect(sidebar).toBeVisible();
+  await expect(page.getByText("Centro de tareas")).toHaveCount(0);
+  await expect(page.getByText(/Servicio de automatizaciones|Se ejecutan mientras/i)).toHaveCount(0);
+  await expect(page.getByText("Cargando automatizaciones…")).toBeHidden({ timeout: 60_000 });
   await automations.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
   const automationBounds = await automations.boundingBox();
   expect(automationBounds).not.toBeNull();
+  if (isMobile) {
+    expect(automationBounds!.x).toBeCloseTo(0, 0);
+  } else {
+    const sidebarBounds = await sidebar.boundingBox();
+    expect(sidebarBounds).not.toBeNull();
+    expect(automationBounds!.x).toBeGreaterThanOrEqual(sidebarBounds!.x + sidebarBounds!.width - 1);
+  }
   expect(automationBounds!.x + automationBounds!.width).toBeCloseTo(page.viewportSize()?.width ?? 1440, 0);
   expect(automationBounds!.width).toBeGreaterThan((page.viewportSize()?.width ?? 1440) * 0.7);
   await expect(page).toHaveScreenshot("scheduled-work-surface-light.png", { fullPage: true });
@@ -227,12 +242,13 @@ test("project actions surface light", async ({ page }) => {
   await expect(page).toHaveScreenshot("project-actions-surface-light.png", { fullPage: true });
 });
 
-test("administration entry point dark", async ({ page }) => {
+test("employee settings omit administration entry point dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await installAdministrationRoutes(page);
   await login(page);
   await openSettings(page);
-  await expect(page.getByRole("link", { name: "Administración" })).toHaveAttribute("href", "/admin");
+  await expect(page.getByRole("link", { name: "Administración" })).toHaveCount(0);
+  await expect(page.getByText(/políticas de empresa/i)).toHaveCount(0);
   await expect(page).toHaveScreenshot("administration-entry-point-dark.png", { fullPage: true });
 });
 

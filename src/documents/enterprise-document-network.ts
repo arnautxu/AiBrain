@@ -1,20 +1,25 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, readFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { ResolvedPermissions } from "@/permissions";
 import { atomicWriteFile } from "@/storage";
+import { readRegularFileWithin } from "@/security/safe-file";
 
 const USER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const MAX_DEPTH = 12;
 const MAX_ENTRIES = 10_000;
 const MAX_INDEXED_BYTES = 512 * 1024;
 const MAX_QUERY_LENGTH = 200;
+const MAX_READ_BYTES = 512 * 1024;
+const SENSITIVE_FILE_NAME = /(?:^|[._-])(?:\.env|secret|secrets|credential|credentials|token|tokens|password|passwd|private[-_.]?key|docker\.sock)(?:$|[._-])/iu;
+const CREDENTIAL_SHAPED_CONTENT = /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*|\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*["']?[A-Za-z0-9._~+/-]{16,}/iu;
 
-export type EnterpriseDocumentScope = "company" | "project" | "private";
+export type EnterpriseDocumentScope = "company" | "department" | "project" | "private";
 
 export type EnterpriseDocumentRoot = Readonly<{
   scope: EnterpriseDocumentScope;
+  scopeId: string | null;
   path: string;
   readOnly: boolean;
 }>;
@@ -24,8 +29,15 @@ export type EnterpriseDocumentSearchResult = Readonly<{
   path: string;
   size: number;
   sha256: string;
-  provenance: Readonly<{ installationId: string; projectId: string | null; userId: string | null }>;
+  provenance: Readonly<{
+    installationId: string;
+    departmentId: string | null;
+    projectId: string | null;
+    userId: string | null;
+  }>;
 }>;
+
+export type EnterpriseDocumentReadResult = EnterpriseDocumentSearchResult & Readonly<{ content: string }>;
 
 export class EnterpriseDocumentNetworkError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {
@@ -58,6 +70,30 @@ function permissionAllows(
   const matches = permissions.rules.filter((rule) => rule.action === action && ruleIds.includes(rule.ruleId));
   if (matches.some((rule) => rule.effect === "deny")) return false;
   return matches.some((rule) => rule.effect === "allow");
+}
+
+function safeRelativePath(value: string) {
+  if (!value || value.length > 1_024 || path.posix.isAbsolute(value) || value.includes("\\") || path.posix.normalize(value) !== value || /\p{C}/u.test(value)) {
+    throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_PATH_INVALID", "Document path is invalid.");
+  }
+  const segments = value.split("/");
+  if (segments.some((segment) => !segment || segment === "." || segment === ".." || segment.startsWith(".") || SENSITIVE_FILE_NAME.test(segment))) {
+    throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SENSITIVE_PATH", "Document path is not available to the assistant.");
+  }
+  return segments.join(path.sep);
+}
+
+function decodeAuthorizedText(value: Buffer, label: string) {
+  let content: string;
+  try {
+    content = new TextDecoder("utf-8", { fatal: true }).decode(value);
+  } catch (error) {
+    throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_TEXT_INVALID", `${label} is not valid UTF-8 text.`, { cause: error });
+  }
+  if (/\p{C}/u.test(content.replace(/[\t\n\r]/gu, "")) || CREDENTIAL_SHAPED_CONTENT.test(content)) {
+    throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SECRET_REJECTED", "Credential-shaped content is not available to the assistant.");
+  }
+  return content;
 }
 
 async function secureDirectory(root: string, target: string) {
@@ -98,6 +134,7 @@ export function enterpriseDocumentNetworkRoot(config: Readonly<InstallationConfi
 
 export class EnterpriseDocumentNetwork {
   readonly root: string;
+  private readonly authorizedRoots = new WeakSet<EnterpriseDocumentRoot>();
 
   constructor(readonly config: Readonly<InstallationConfig>) {
     this.root = enterpriseDocumentNetworkRoot(config);
@@ -105,6 +142,10 @@ export class EnterpriseDocumentNetwork {
 
   companyRoot() {
     return path.join(this.root, "company", "shared");
+  }
+
+  departmentRoot(departmentId: string) {
+    return path.join(this.root, "departments", assertId(departmentId, "departmentId"), "shared");
   }
 
   projectRoot(projectId: string) {
@@ -115,13 +156,20 @@ export class EnterpriseDocumentNetwork {
     return path.join(this.root, "users", assertId(userId, "userId"), "private");
   }
 
-  async provision(input: { userId: string; projectId: string }) {
+  async provision(input: { userId: string; projectId: string; departmentIds?: readonly string[] }) {
     assertId(input.userId, "userId");
     assertId(input.projectId, "projectId");
+    const departmentIds = [...new Set(input.departmentIds ?? [])].map((id) => assertId(id, "departmentId"));
     for (const [scope, directory, provenance] of [
-      ["company", this.companyRoot(), { installationId: this.config.installationId, projectId: null, userId: null }],
-      ["project", this.projectRoot(input.projectId), { installationId: this.config.installationId, projectId: input.projectId, userId: null }],
-      ["private", this.privateRoot(input.userId), { installationId: this.config.installationId, projectId: null, userId: input.userId }],
+      ["company", this.companyRoot(), { installationId: this.config.installationId, departmentId: null, projectId: null, userId: null }],
+      ...departmentIds.map((departmentId) => ["department", this.departmentRoot(departmentId), {
+        installationId: this.config.installationId,
+        departmentId,
+        projectId: null,
+        userId: null,
+      }] as const),
+      ["project", this.projectRoot(input.projectId), { installationId: this.config.installationId, departmentId: null, projectId: input.projectId, userId: null }],
+      ["private", this.privateRoot(input.userId), { installationId: this.config.installationId, departmentId: null, projectId: null, userId: input.userId }],
     ] as const) {
       await secureDirectory(this.root, directory);
       await atomicWriteFile(path.join(directory, ".aibrain-document-scope.json"), `${JSON.stringify({
@@ -132,28 +180,94 @@ export class EnterpriseDocumentNetwork {
     }
   }
 
-  async rootsForTurn(input: { userId: string; projectId: string; permissions: ResolvedPermissions }) {
+  async rootsForTurn(input: {
+    userId: string;
+    projectId: string;
+    departmentIds?: readonly string[];
+    permissions: ResolvedPermissions;
+  }) {
     assertId(input.userId, "userId");
     assertId(input.projectId, "projectId");
     if (input.permissions.installationId !== this.config.installationId ||
         input.permissions.userId !== input.userId || input.permissions.projectId !== input.projectId) {
       throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_PERMISSION_BINDING", "Document network permissions do not belong to this turn.");
     }
-    await this.provision(input);
+    const departmentIds = [...new Set(input.departmentIds ?? [])].map((id) => assertId(id, "departmentId"));
+    await this.provision({ ...input, departmentIds });
     const roots: EnterpriseDocumentRoot[] = [];
-    for (const [scope, directory] of [
-      ["company", this.companyRoot()],
-      ["project", this.projectRoot(input.projectId)],
-      ["private", this.privateRoot(input.userId)],
+    for (const [scope, scopeId, directory] of [
+      ["company", null, this.companyRoot()],
+      ...departmentIds.map((departmentId) => ["department", departmentId, this.departmentRoot(departmentId)] as const),
+      ["project", input.projectId, this.projectRoot(input.projectId)],
+      ["private", input.userId, this.privateRoot(input.userId)],
     ] as const) {
       if (!permissionAllows(input.permissions, scope, "read")) continue;
-      roots.push(Object.freeze({
+      const root = Object.freeze({
         scope,
+        scopeId,
         path: directory,
         readOnly: !permissionAllows(input.permissions, scope, "write"),
-      }));
+      });
+      this.authorizedRoots.add(root);
+      roots.push(root);
     }
     return Object.freeze(roots);
+  }
+
+  private async validateAuthorizedRoot(root: EnterpriseDocumentRoot) {
+    if (!this.authorizedRoots.has(root)) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_ROOT_NOT_AUTHORIZED", "Document root was not authorized for this turn.");
+    }
+    const [networkMetadata, rootMetadata] = await Promise.all([lstat(this.root), lstat(root.path)]);
+    if (!networkMetadata.isDirectory() || networkMetadata.isSymbolicLink() || !rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SYMLINK_REJECTED", "Document root must remain a real directory.");
+    }
+    const [canonicalNetwork, canonicalRoot] = await Promise.all([realpath(this.root), realpath(root.path)]);
+    if (!inside(canonicalNetwork, canonicalRoot) || canonicalNetwork === canonicalRoot) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_PATH_ESCAPE", "Document root escapes its installation network.");
+    }
+    return canonicalRoot;
+  }
+
+  private provenance(root: EnterpriseDocumentRoot) {
+    return Object.freeze({
+      installationId: this.config.installationId,
+      departmentId: root.scope === "department" ? root.scopeId : null,
+      projectId: root.scope === "project" ? root.scopeId : null,
+      userId: root.scope === "private" ? root.scopeId : null,
+    });
+  }
+
+  async read(input: { roots: readonly EnterpriseDocumentRoot[]; scope: EnterpriseDocumentScope; scopeId?: string | null; path: string }) {
+    const relativePath = safeRelativePath(input.path);
+    const root = input.roots.find((candidate) => candidate.scope === input.scope && (
+      input.scope !== "department" || candidate.scopeId === input.scopeId
+    ));
+    if (!root) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SCOPE_DENIED", "Document scope is not authorized for this turn.");
+    }
+    const canonicalRoot = await this.validateAuthorizedRoot(root);
+    const candidate = path.resolve(canonicalRoot, relativePath);
+    if (!inside(canonicalRoot, candidate) || candidate === canonicalRoot) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_PATH_ESCAPE", "Document path escapes its authorized scope.");
+    }
+    const metadata = await lstat(candidate);
+    if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_READ_BYTES) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_FILE_UNAVAILABLE", "Document is not a bounded regular file.");
+    }
+    const canonicalFile = await realpath(candidate);
+    if (!inside(canonicalRoot, canonicalFile) || canonicalFile === canonicalRoot) {
+      throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_PATH_ESCAPE", "Document resolves outside its authorized scope.");
+    }
+    const contents = await readRegularFileWithin(canonicalRoot, relativePath, MAX_READ_BYTES);
+    return Object.freeze({
+      scope: root.scope,
+      path: input.path,
+      size: contents.length,
+      sha256: createHash("sha256").update(contents).digest("hex"),
+      provenance: this.provenance(root),
+      content: decodeAuthorizedText(contents, input.path),
+    }) satisfies EnterpriseDocumentReadResult;
   }
 
   async search(input: { roots: readonly EnterpriseDocumentRoot[]; query: string; limit?: number }) {
@@ -167,12 +281,12 @@ export class EnterpriseDocumentNetwork {
     }
     const results: EnterpriseDocumentSearchResult[] = [];
     for (const root of input.roots) {
-      const canonicalRoot = await realpath(root.path);
+      const canonicalRoot = await this.validateAuthorizedRoot(root);
       const visit = async (directory: string, depth: number): Promise<void> => {
         if (depth > MAX_DEPTH || results.length >= limit) return;
         const entries = await readdir(directory, { withFileTypes: true });
         for (const entry of entries) {
-          if (results.length >= limit || entry.name.startsWith(".")) continue;
+          if (results.length >= limit || entry.name.startsWith(".") || SENSITIVE_FILE_NAME.test(entry.name)) continue;
           const candidate = path.join(directory, entry.name);
           const metadata = await lstat(candidate);
           if (metadata.isSymbolicLink()) throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SYMLINK_REJECTED", "Document search refuses symbolic links.");
@@ -183,18 +297,22 @@ export class EnterpriseDocumentNetwork {
           }
           if (!metadata.isFile() || metadata.size > MAX_INDEXED_BYTES) continue;
           const relative = path.relative(canonicalRoot, candidate).split(path.sep).join("/");
-          const haystack = `${relative}\n${(await readFile(candidate, "utf8").catch(() => "")).slice(0, MAX_INDEXED_BYTES)}`.toLocaleLowerCase();
+          const contents = await readRegularFileWithin(canonicalRoot, relative, MAX_INDEXED_BYTES);
+          let text: string;
+          try {
+            text = decodeAuthorizedText(contents, relative);
+          } catch (error) {
+            if (error instanceof EnterpriseDocumentNetworkError && (error.code === "DOCUMENT_NETWORK_TEXT_INVALID" || error.code === "DOCUMENT_NETWORK_SECRET_REJECTED")) continue;
+            throw error;
+          }
+          const haystack = `${relative}\n${text.slice(0, MAX_INDEXED_BYTES)}`.toLocaleLowerCase();
           if (!haystack.includes(query)) continue;
           results.push(Object.freeze({
             scope: root.scope,
             path: relative,
             size: metadata.size,
-            sha256: createHash("sha256").update(await readFile(candidate)).digest("hex"),
-            provenance: Object.freeze({
-              installationId: this.config.installationId,
-              projectId: root.scope === "project" ? path.basename(path.dirname(path.dirname(root.path))) : null,
-              userId: root.scope === "private" ? path.basename(path.dirname(path.dirname(root.path))) : null,
-            }),
+            sha256: createHash("sha256").update(contents).digest("hex"),
+            provenance: this.provenance(root),
           }));
           if (results.length > MAX_ENTRIES) throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_LIMIT", "Document network contains too many matching files.");
         }

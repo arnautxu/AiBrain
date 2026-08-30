@@ -100,6 +100,7 @@ describe("turn telemetry", () => {
       reconnectCount: 1,
       disconnectCount: 1,
       cancelRequested: true,
+      timeoutRequested: false,
     });
     expect(records).toEqual([
       expect.objectContaining({ event: "codex.turn_lifecycle", attributes: expect.objectContaining({ lifecycle: "resumed", requestElapsedMs: 0 }) }),
@@ -121,5 +122,45 @@ describe("turn telemetry", () => {
       }),
     ]);
     expect(JSON.stringify(records)).not.toMatch(/prompt|content|token|secret/iu);
+  });
+
+  it("separates tool queue/execution timing and a bounded turn timeout without payloads", () => {
+    let now = 5_000;
+    const records: Array<{ event: string; attributes: Record<string, unknown> }> = [];
+    const telemetry = new TurnTelemetry({
+      installationId: "qa-company",
+      userId: "user-1",
+      projectId: "project-1",
+      threadId: "thread-1",
+      localTurnId: "turn-1",
+      clientRequestId: "request-1",
+    }, {
+      now: () => now,
+      logger: { info: (event, attributes = {}) => records.push({ event, attributes: { ...attributes } }) },
+    });
+
+    telemetry.toolQueued("private-call-id");
+    now = 5_012;
+    const finishTool = telemetry.toolExecution("private-call-id", "aibrain_documents.create");
+    now = 5_040;
+    finishTool("completed");
+    now = 5_050;
+    telemetry.timeout();
+    const snapshot = telemetry.finish("stopped");
+
+    expect(snapshot).toMatchObject({ firstToolMs: 12, timeoutRequested: true, cancelRequested: false });
+    expect(records).toContainEqual(expect.objectContaining({
+      event: "codex.tool_phase",
+      attributes: expect.objectContaining({
+        toolKind: "aibrain_documents.create",
+        queueMs: 12,
+        executionMs: 28,
+      }),
+    }));
+    expect(records).toContainEqual(expect.objectContaining({
+      event: "codex.turn_lifecycle",
+      attributes: expect.objectContaining({ lifecycle: "timeout_requested", requestElapsedMs: 50 }),
+    }));
+    expect(JSON.stringify(records)).not.toContain("private-call-id");
   });
 });

@@ -1076,12 +1076,32 @@ Errores: `403` token expirado/inválido o permiso retirado; `404` operación; `4
 
 No hay hoy endpoints públicos para listar operaciones ni descargar/restaurar la versión anterior. Esas funciones existen en el publisher server-side, no en el contrato UI.
 
-## 13. Memoria explícita
+## 13. Memoria automática, privada y gobernada
 
-La memoria V1 no aprende automáticamente. Solo una acción explícita del
-empleado crea o revoca un registro. El backend deriva instalación, actor y
-sujeto de la sesión local; la UI nunca envía `userId`, paths ni timestamps de
-captura.
+Cada turno completado agenda la extracción después de emitir su estado terminal,
+por lo que la respuesta visible no espera a memoria. El extractor solo acepta
+frases declarativas con preferencias, hechos estables o decisiones; descarta
+secretos, credenciales, código/instrucciones inseguras y referencias efímeras.
+La escritura es idempotente por turno+tema, deduplica contenido equivalente,
+incrementa `revision` cuando el mismo tema cambia y respeta una eliminación
+previa sin recrearla automáticamente.
+
+La memoria automática se guarda bajo la raíz privada del usuario/CODEX_HOME.
+Las decisiones ligadas al proyecto conservan `projectId`; ningún recuerdo se
+promueve automáticamente al ámbito empresa. Instalación, actor y sujeto siempre
+se derivan server-side. En el turno siguiente, el snapshot combina memoria
+manual y gobernada, priorizada por relevancia respecto al mensaje actual, y la
+inyecta como datos no confiables con IDs y fingerprint auditables.
+
+`Configuración > Memoria` consume directamente los endpoints siguientes y
+muestra lista, procedencia, alcance, revisión, edición y borrado sin abrir un
+segundo panel:
+
+- `GET /api/memory/proposals?projectId={uuid}` lista propuestas heredadas y memorias gobernadas visibles para ese usuario/proyecto.
+- `PATCH /api/memory/governed/{memoryId}` corrige contenido con `expectedRevision`.
+- `DELETE /api/memory/governed/{memoryId}` crea el tombstone con `expectedRevision`.
+
+La creación manual y la revocación explícita siguen disponibles:
 
 `GET /api/memory?status=active|revoked|all&kind=recollection|decision&limit=1..100`
 devuelve `200` y `Cache-Control: private, no-store`:

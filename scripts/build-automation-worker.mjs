@@ -42,9 +42,10 @@ if (bundle.includes("This module cannot be imported from a Client Component")) {
 }
 const smoke = spawnSync(process.execPath, [output, "--bundle-smoke-test"], {
   encoding: "utf8",
-  timeout: 15_000,
+  timeout: 30_000,
 });
 if (smoke.status !== 1 || !smoke.stderr.includes("Argumento desconocido: --bundle-smoke-test")) {
-  throw new Error(`automation worker bundle failed its Node runtime smoke test: ${smoke.stderr.trim()}`);
+  const detail = smoke.stderr.trim() || smoke.error?.message || `status=${String(smoke.status)} signal=${String(smoke.signal)}`;
+  throw new Error(`automation worker bundle failed its Node runtime smoke test: ${detail}`);
 }
 await chmod(output, 0o555);

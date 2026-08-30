@@ -127,6 +127,17 @@ and only escalates signals against the exact process it launched. A lost pipe or
 child causes the owned runtime to be fenced and relaunched against the same
 private profile; it never discovers or kills a PID recovered from disk.
 
+Agent and viewer operations also have a server deadline (30 seconds by
+default, configurable from 1 to 120 seconds with
+`AIBRAIN_BROWSER_OPERATION_TIMEOUT_MS`). A timeout or cancellation does not
+call ordinary `start`, because a stalled CDP pipe can still look superficially
+healthy. It stops only that employee's owned child, rotates the private browser
+session, and starts a fresh process against the same employee profile. Safe
+reads may be attempted once after that fenced recovery. `open`, `scroll`,
+`click`, `type` and manual viewer input are never replayed after dispatch may
+have begun; their durable result remains `indeterminate` until the page is read
+again.
+
 ## Chrome/CDP boundary
 
 `ChromeCdpRuntime` uses a NUL-framed, strict-UTF-8, allowlisted CDP client over
@@ -219,6 +230,13 @@ stale-session fencing, gateway token tampering/cross-user/thread/expiry checks,
 registry runtime exclusivity, private-pipe framing and EOF recovery, bounded
 backpressure, URL recovery per thread, navigation LRU retention, binding,
 hardlink/corruption and symlink rejection.
+
+The employee panel consumes a bounded authenticated frame stream rather than a
+static screenshot. Historical browser tool and artifact cards reopen the
+active thread's viewer. The panel exposes only its title, close/fullscreen,
+URL, back/forward/reload and the remaining direct viewport; its first click,
+wheel or key action acquires scoped control internally without a separate
+"take control" step or synthetic success toast.
 
 The real two-profile test is opt-in because it launches three browser
 processes. Point it at a pinned Chrome for Testing/Chromium build:

@@ -61,12 +61,8 @@ export async function GET(request: Request) {
   }
   const config = readRuntimeConfig(session.tenant.id, projectContext.workspaceKey);
   let codex: RuntimeStatus["codex"] = config.mode === "codex" ? "unavailable" : "disabled";
-  let authMode: RuntimeStatus["authMode"] = null;
-  let planType: string | null = null;
   let processWarm = false;
-  let rateLimit: RuntimeStatus["rateLimit"] = null;
-  let usage: RuntimeStatus["usage"] = null;
-  let models: RuntimeStatus["models"] = [];
+  let imageInput = false;
   let skills: RuntimeStatus["skills"] = [];
   let webSearch = false;
   let imageGeneration = false;
@@ -88,12 +84,8 @@ export async function GET(request: Request) {
       workerWorkspace = runtimeConnection.workspace;
       const connection = runtimeConnection.connection;
       codex = connection.connected ? "connected" : "unavailable";
-      authMode = connection.authMode;
-      planType = connection.planType;
       processWarm = connection.processWarm;
-      rateLimit = connection.rateLimit;
-      usage = connection.usage;
-      models = connection.models;
+      imageInput = connection.models.some((model) => model.inputModalities.includes("image"));
       skills = connection.skills;
       // Web is a server-side invariant for every connected Codex runtime.
       // Capability discovery is optional picker metadata and must never hold
@@ -110,20 +102,20 @@ export async function GET(request: Request) {
     codex,
     isolated: config.mode === "codex",
     ready: config.mode === "codex" && codex === "connected",
-    authMode,
-    planType,
+    authMode: null,
+    planType: null,
     processWarm,
-    rateLimit,
-    usage,
+    rateLimit: null,
+    usage: null,
     workspaceName: `${projectContext.projectName} / ${path.basename(workerWorkspace)}`,
-    model: config.model,
+    model: null,
     approvalPolicy: config.approvalPolicy,
     sandbox: config.sandbox,
-    models,
+    models: [],
     skills,
     capabilities: {
       webSearch,
-      imageInput: models.some((model) => model.inputModalities.includes("image")),
+      imageInput,
       imageGeneration,
     },
     tenantId: session.tenant.id,

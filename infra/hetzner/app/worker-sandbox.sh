@@ -102,6 +102,7 @@ exec /usr/bin/bwrap \
   --proc /proc \
   --tmpfs /tmp \
   --tmpfs /run \
+  --tmpfs /usr/local/share/aibrain/internal-agent-context \
   --tmpfs "$data_root" \
   --ro-bind "$company_root" "$company_root" \
   --ro-bind "$source_root" "$source_root" \

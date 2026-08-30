@@ -9,7 +9,6 @@ import {
 import { permissionFingerprint } from "@/permissions/canonical-json";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import { FilePermissionResolutionAuditSink } from "@/runtime/permission-audit-sink";
-import { INTERNAL_AGENT_PRODUCT_CONTEXT } from "@/runtime/internal-agent-context";
 
 export type ServerTurnPermissionIdentity = {
   installationId: string;
@@ -47,6 +46,7 @@ export function buildCodexDeveloperInstructions(
   chatRequest: ChatRequest,
   permissions: ResolvedPermissions,
   assistantName = "Asistente",
+  internalAgentContext = "",
 ) {
   const toneInstruction = {
     direct: "Sigues breu i prioritza la conclusió.",
@@ -77,7 +77,7 @@ Treballa només dins del workspace configurat i utilitza les eines disponibles q
 La navegació web ordinària —obrir URLs, llegir, fer scroll, clicar controls de navegació i escriure text no sensible— no necessita aprovació. No diguis que aquestes accions necessiten permís. Demana aprovació només abans d'un efecte extern sensible, com enviar, publicar, comprar o pagar, eliminar, canviar dades o compte, o introduir credencials o dades de pagament.
 No afirmis que una acció, una font o una integració funciona si no l'has observat.
 Quan una acció necessiti aprovació, explica de forma concreta què vols fer i per què.`;
-  return `${INTERNAL_AGENT_PRODUCT_CONTEXT}\n\n${workbenchInstructions}\n\n${permissions.developerInstructions}`;
+  return `${internalAgentContext}\n\n${workbenchInstructions}\n\n${permissions.developerInstructions}`;
 }
 
 /**

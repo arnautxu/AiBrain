@@ -511,6 +511,18 @@ export function itemActivity(params: unknown, completed: boolean): ActivityItem 
     };
   }
 
+  if (item.type === "agentMessage" && item.phase === "commentary" && typeof item.text === "string") {
+    const detail = compactRuntimeText(item.text, 12_000);
+    if (!detail) return null;
+    return {
+      id: item.id,
+      kind: "reasoning",
+      label: "Actualización de trabajo",
+      detail,
+      status,
+    };
+  }
+
   if (item.type === "plan") {
     return {
       id: item.id,

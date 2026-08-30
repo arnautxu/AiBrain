@@ -387,6 +387,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
       aria-label="Navegador"
     >
       <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-2">
+        <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
         <button type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
         <button type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
         <button type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}><ArrowClockwise size={15} /></button>

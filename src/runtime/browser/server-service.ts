@@ -47,6 +47,62 @@ export class BrowserServiceError extends Error {
   }
 }
 
+const DEFAULT_BROWSER_OPERATION_TIMEOUT_MS = 30_000;
+const MIN_BROWSER_OPERATION_TIMEOUT_MS = 1_000;
+const MAX_BROWSER_OPERATION_TIMEOUT_MS = 120_000;
+
+function browserOperationTimeoutMs() {
+  const configured = Number(process.env.AIBRAIN_BROWSER_OPERATION_TIMEOUT_MS || DEFAULT_BROWSER_OPERATION_TIMEOUT_MS);
+  if (!Number.isSafeInteger(configured) || configured < MIN_BROWSER_OPERATION_TIMEOUT_MS ||
+    configured > MAX_BROWSER_OPERATION_TIMEOUT_MS) {
+    return DEFAULT_BROWSER_OPERATION_TIMEOUT_MS;
+  }
+  return configured;
+}
+
+function browserOperationFailure(code: "BROWSER_OPERATION_TIMEOUT" | "BROWSER_OPERATION_CANCELLED") {
+  return new BrowserServiceError(
+    code,
+    code === "BROWSER_OPERATION_CANCELLED"
+      ? "Browser operation was cancelled and its private session is being recovered."
+      : "Browser operation timed out and its private session is being recovered.",
+    code === "BROWSER_OPERATION_CANCELLED" ? 499 : 504,
+    true,
+  );
+}
+
+async function withBrowserOperationDeadline<Result>(
+  operation: () => Promise<Result>,
+  signal?: AbortSignal,
+) {
+  if (signal?.aborted) throw browserOperationFailure("BROWSER_OPERATION_CANCELLED");
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let removeAbort: () => void = () => undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(
+      () => reject(browserOperationFailure("BROWSER_OPERATION_TIMEOUT")),
+      browserOperationTimeoutMs(),
+    );
+    timeout.unref?.();
+    if (signal) {
+      const abort = () => reject(browserOperationFailure("BROWSER_OPERATION_CANCELLED"));
+      signal.addEventListener("abort", abort, { once: true });
+      removeAbort = () => signal.removeEventListener("abort", abort);
+    }
+  });
+  try {
+    return await Promise.race([operation(), deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+    removeAbort();
+  }
+}
+
+function isBrowserOperationDeadline(error: unknown) {
+  return error instanceof BrowserServiceError &&
+    (error.code === "BROWSER_OPERATION_TIMEOUT" || error.code === "BROWSER_OPERATION_CANCELLED");
+}
+
 type BrowserServiceState = {
   fingerprint: string;
   config: Readonly<InstallationConfig>;
@@ -317,15 +373,37 @@ async function authorizeGateway(input: {
   return state;
 }
 
+async function executeViewerOperation<Result>(input: {
+  registry: BrowserRuntimeRegistry;
+  userId: string;
+  operation: () => Promise<Result>;
+  signal?: AbortSignal;
+}) {
+  try {
+    return await withBrowserOperationDeadline(input.operation, input.signal);
+  } catch (error) {
+    if (shouldRecoverBrowserProcess(error)) {
+      await recoverBrowserProcess(input.registry, input.userId);
+    }
+    throw error;
+  }
+}
+
 export async function captureBrowserFrame(input: {
   installationId: string;
   userId: string;
   authSessionId: string;
   threadId: string;
   token: string;
+  signal?: AbortSignal;
 }) {
   const state = await authorizeGateway({ ...input, capability: "view" });
-  return state.registry.captureFrame(input.userId, input.threadId);
+  return executeViewerOperation({
+    registry: state.registry,
+    userId: input.userId,
+    signal: input.signal,
+    operation: () => state.registry.captureFrame(input.userId, input.threadId),
+  });
 }
 
 export type BrowserFrameStreamEvent = Readonly<{
@@ -375,7 +453,12 @@ export async function* streamBrowserFrames(input: {
   let lastEmissionAt = 0;
   while (!input.signal.aborted && Date.now() < deadline) {
     const captureStartedAt = Date.now();
-    const frame = await state.registry.captureFrame(input.userId, input.threadId);
+    const frame = await executeViewerOperation({
+      registry: state.registry,
+      userId: input.userId,
+      signal: input.signal,
+      operation: () => state.registry.captureFrame(input.userId, input.threadId),
+    });
     const data = Buffer.from(frame.dataBase64, "base64");
     const digest = createHash("sha256").update(data).digest("hex");
     const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
@@ -412,9 +495,15 @@ export async function browserViewerNavigationState(input: {
   authSessionId: string;
   threadId: string;
   token: string;
+  signal?: AbortSignal;
 }) {
   const state = await authorizeGateway({ ...input, capability: "view" });
-  return state.registry.viewerNavigationState(input.userId, input.threadId);
+  return executeViewerOperation({
+    registry: state.registry,
+    userId: input.userId,
+    signal: input.signal,
+    operation: () => state.registry.viewerNavigationState(input.userId, input.threadId),
+  });
 }
 
 export async function sendBrowserViewerCommand(input: {
@@ -423,30 +512,49 @@ export async function sendBrowserViewerCommand(input: {
   authSessionId: string;
   threadId: string;
   token: string;
+  signal?: AbortSignal;
   command:
     | { action: "navigate"; url: string }
     | { action: "history"; direction: BrowserViewerHistoryAction }
     | { action: "input"; command: BrowserInputCommand };
 }) {
   const state = await authorizeGateway({ ...input, capability: "control" });
+  const command = input.command;
   let navigationState: BrowserViewerNavigationState | undefined;
-  if (input.command.action === "navigate") {
-    await state.registry.navigate(input.userId, input.threadId, input.command.url);
-    navigationState = await state.registry.viewerNavigationState(input.userId, input.threadId);
-  } else if (input.command.action === "history") {
-    navigationState = await state.registry.navigateHistory(input.userId, input.threadId, input.command.direction);
+  if (command.action === "navigate") {
+    navigationState = await executeViewerOperation({
+      registry: state.registry,
+      userId: input.userId,
+      signal: input.signal,
+      operation: async () => {
+        await state.registry.navigate(input.userId, input.threadId, command.url);
+        return state.registry.viewerNavigationState(input.userId, input.threadId);
+      },
+    });
+  } else if (command.action === "history") {
+    navigationState = await executeViewerOperation({
+      registry: state.registry,
+      userId: input.userId,
+      signal: input.signal,
+      operation: () => state.registry.navigateHistory(input.userId, input.threadId, command.direction),
+    });
   } else {
-    await state.registry.dispatchInput(input.userId, input.threadId, input.command.command);
+    await executeViewerOperation({
+      registry: state.registry,
+      userId: input.userId,
+      signal: input.signal,
+      operation: () => state.registry.dispatchInput(input.userId, input.threadId, command.command),
+    });
   }
-  const action = input.command.action === "navigate"
+  const action = command.action === "navigate"
     ? "open"
-    : input.command.action === "history"
+    : command.action === "history"
       ? "open"
-      : input.command.command.event === "mouseWheel"
+      : command.command.event === "mouseWheel"
         ? "scroll"
-        : input.command.command.event === "mouseReleased"
+        : command.command.event === "mouseReleased"
           ? "click"
-          : input.command.command.event === "keyDown"
+          : command.command.event === "keyDown"
             ? "type"
             : null;
   if (action) {
@@ -494,23 +602,38 @@ function isRecoverableBrowserReadFailure(error: unknown) {
     "CDP_PIPE_READ_FAILED",
     "CDP_PIPE_WRITE_FAILED",
     "CDP_SEND_FAILED",
+    "CDP_COMMAND_TIMEOUT",
+    "CDP_EVENT_TIMEOUT",
   ].includes(error.code)) || (error instanceof ChromeRuntimeError && [
     "CHROME_NOT_RUNNING",
     "CHROME_PAGE_STATE_INVALID",
   ].includes(error.code));
 }
 
+function shouldRecoverBrowserProcess(error: unknown) {
+  return isBrowserOperationDeadline(error) || isRecoverableBrowserReadFailure(error);
+}
+
+async function recoverBrowserProcess(
+  registry: BrowserRuntimeRegistry,
+  userId: string,
+) {
+  await registry.restart(userId);
+}
+
 async function executeBrowserReadWithRecovery<Result>(
   registry: BrowserRuntimeRegistry,
   userId: string,
   operation: () => Promise<Result>,
+  signal?: AbortSignal,
 ) {
   try {
-    return await operation();
+    return await withBrowserOperationDeadline(operation, signal);
   } catch (error) {
-    if (!isRecoverableBrowserReadFailure(error)) throw error;
-    await registry.start(userId);
-    return operation();
+    if (!shouldRecoverBrowserProcess(error)) throw error;
+    await recoverBrowserProcess(registry, userId);
+    if (signal?.aborted) throw browserOperationFailure("BROWSER_OPERATION_CANCELLED");
+    return withBrowserOperationDeadline(operation, signal);
   }
 }
 
@@ -537,9 +660,18 @@ export async function prepareBrowserAgentCommand(input: {
   userId: string;
   threadId: string;
   command: BrowserMutationCommand;
+  signal?: AbortSignal;
 }): Promise<BrowserActionResourceSnapshot> {
   const registry = await agentRegistry(input);
-  return registry.prepareAgentMutation(input.userId, input.threadId, input.command);
+  try {
+    return await withBrowserOperationDeadline(
+      () => registry.prepareAgentMutation(input.userId, input.threadId, input.command),
+      input.signal,
+    );
+  } catch (error) {
+    if (shouldRecoverBrowserProcess(error)) await recoverBrowserProcess(registry, input.userId);
+    throw error;
+  }
 }
 
 /** Closed, typed browser surface for server-owned Codex dynamic tools. */
@@ -550,9 +682,11 @@ export async function executeBrowserAgentCommand(input: {
   command: BrowserAgentCommand;
   approvalEvidence?: BrowserInformedApprovalEvidence;
   expectedResource?: BrowserActionResourceSnapshot;
+  signal?: AbortSignal;
 }) {
   const registry = await agentRegistry(input);
   if (isBrowserMutation(input.command)) {
+    const command = input.command;
     if (!input.expectedResource) {
       throw new BrowserServiceError(
         "BROWSER_ACTION_TARGET_EVIDENCE_REQUIRED",
@@ -597,19 +731,31 @@ export async function executeBrowserAgentCommand(input: {
         resource: input.expectedResource,
       });
     }
-    return registry.executeAgentMutation(
-      input.userId,
-      input.threadId,
-      input.command,
-      input.expectedResource,
-      evidenceFingerprint,
-    );
+    try {
+      return await withBrowserOperationDeadline(
+        () => registry.executeAgentMutation(
+          input.userId,
+          input.threadId,
+          command,
+          input.expectedResource as BrowserActionResourceSnapshot,
+          evidenceFingerprint,
+        ),
+        input.signal,
+      );
+    } catch (error) {
+      // A mutation is never replayed after dispatch may have started.  Fencing
+      // the exact employee process makes the next action recover on a fresh
+      // session while the durable call record remains indeterminate.
+      await recoverBrowserProcess(registry, input.userId);
+      throw error;
+    }
   }
   if (input.command.action === "read") {
     return executeBrowserReadWithRecovery(
       registry,
       input.userId,
       () => registry.readPage(input.userId, input.threadId),
+      input.signal,
     );
   }
   if (input.command.action === "screenshot") {
@@ -617,6 +763,7 @@ export async function executeBrowserAgentCommand(input: {
       registry,
       input.userId,
       () => registry.agentCaptureFrame(input.userId, input.threadId),
+      input.signal,
     );
   }
   if (input.command.action === "tabs") {
@@ -624,12 +771,14 @@ export async function executeBrowserAgentCommand(input: {
       registry,
       input.userId,
       () => registry.listTabs(input.userId, input.threadId),
+      input.signal,
     );
   }
   return executeBrowserReadWithRecovery(
     registry,
     input.userId,
     () => registry.listDownloads(input.userId, input.threadId),
+    input.signal,
   );
 }
 

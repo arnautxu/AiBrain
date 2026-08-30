@@ -50,6 +50,16 @@ describe("InstallationConfig", () => {
     expect(Object.isFrozen(config.paths)).toBe(true);
   });
 
+  it("requires one exact Microsoft Entra tenant when Outlook is configured", async () => {
+    const fixture = await readFixture();
+    fixture.connectors = { outlook: { enabled: true, tenantId: "11111111-1111-4111-8111-111111111111" } };
+    expect(parseInstallationConfig(fixture).connectors?.outlook).toEqual({ enabled: true, tenantId: "11111111-1111-4111-8111-111111111111" });
+    fixture.connectors = { outlook: { enabled: true, tenantId: "common" } };
+    expect(() => parseInstallationConfig(fixture)).toThrowError(expect.objectContaining<Partial<InstallationConfigValidationError>>({
+      issues: expect.arrayContaining([expect.objectContaining({ path: "$.connectors.outlook.tenantId" })]),
+    }));
+  });
+
   it("rejects unknown fields at every configuration boundary", async () => {
     const fixture = await readFixture();
     const branding = fixture.branding as Record<string, unknown>;

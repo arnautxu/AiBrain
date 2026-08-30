@@ -43,6 +43,19 @@ async function measure(operation, count) {
   return summary(samples);
 }
 
+async function measureBusyWorkerAdmission(serialized, count) {
+  const samples = [];
+  for (let index = 0; index < count; index += 1) {
+    const outputPersistence = io(20);
+    const startedAt = performance.now();
+    if (serialized) await outputPersistence;
+    else await Promise.resolve();
+    samples.push(performance.now() - startedAt);
+    await outputPersistence;
+  }
+  return summary(samples);
+}
+
 const events = [
   { type: "activity", item: { id: "runtime", label: "Conectado", status: "complete" } },
   { type: "delta", value: "Hola" },
@@ -85,6 +98,11 @@ const report = {
     fixtureMs: { memory: 8, worker: 12, capabilityDiscovery: 7, unselectedSkillSync: 6 },
     before: await measure(legacyAdmission, iterations),
     after: await measure(optimizedAdmission, iterations),
+  },
+  sameUserBusyWorkerAdmission: {
+    fixtureOutputPersistenceMs: 20,
+    beforeSharedDirectionChain: await measureBusyWorkerAdmission(true, iterations),
+    afterIndependentDirectionLanes: await measureBusyWorkerAdmission(false, iterations),
   },
   delivery: {
     directAppServer: measureSync(directAppServerDelivery, transportIterations),
