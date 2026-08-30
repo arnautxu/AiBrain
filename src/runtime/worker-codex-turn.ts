@@ -1559,6 +1559,10 @@ export async function runWorkerCodexTurn(
             );
             errorEmitted = true;
           } else if (status.status === "completed") {
+            for (const [itemId, rawText] of pendingAgentText) {
+              pendingAgentText.delete(itemId);
+              await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed-pending:${itemId}` });
+            }
             for (const [itemId, rawText] of finalAnswerText) {
               await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
             }
