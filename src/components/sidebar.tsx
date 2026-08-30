@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Archive,
+  Bell,
   CalendarBlank,
   CaretDown,
   CaretRight,
@@ -190,10 +191,12 @@ export function Sidebar({
   desktopOpen,
   busy,
   threadActivityById,
+  taskSummary,
   onCloseMobile,
   onCloseDesktop,
   onOpenDesktop,
   onOpenCommandPalette,
+  onOpenTaskCenter,
   onOpenAutomations,
   onSelectProject,
   onSelectThread,
@@ -293,6 +296,7 @@ export function Sidebar({
           <div className="mt-2 flex flex-col items-center gap-1">
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={() => onNewThread()}><NotePencil size={18} /></button>
             <button aria-label="Buscar" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenCommandPalette}><MagnifyingGlass size={18} /></button>
+            <button aria-label={`Centro de tareas${taskSummary.unread ? `, ${taskSummary.unread} sin leer` : ""}`} title="Centro de tareas" className="relative grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenTaskCenter}><Bell size={18} />{taskSummary.unread ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 min-w-3 rounded-full bg-[var(--brain-accent)] px-1 text-center text-[8px] font-bold leading-3 text-white">{Math.min(taskSummary.unread, 99)}</span> : null}</button>
             <button aria-label="Automatizaciones" title="Automatizaciones" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenAutomations}><CalendarBlank size={18} /></button>
           </div>
           <div className="mt-auto flex flex-col items-center gap-1">
@@ -314,6 +318,12 @@ export function Sidebar({
             <SidebarMenuItem>
               <SidebarMenuButton icon={PenLine} disabled={!standaloneProject || busy} render={<button onClick={() => onNewThread()} />}>
                 Nueva conversación
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+            <SidebarMenuItem>
+              <SidebarMenuButton icon={Bell} aria-label={`Centro de tareas${taskSummary.unread ? `, ${taskSummary.unread} sin leer` : ""}`} title="Centro de tareas" render={<button onClick={onOpenTaskCenter} />}>
+                Centro de tareas
+                {taskSummary.unread ? <span aria-hidden="true" className="ml-auto min-w-5 rounded-full bg-[var(--brain-accent)] px-1.5 text-center text-[10px] font-bold leading-5 text-white">{Math.min(taskSummary.unread, 99)}</span> : null}
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
