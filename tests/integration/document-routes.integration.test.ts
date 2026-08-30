@@ -171,6 +171,96 @@ describe("authenticated document routes", () => {
     expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
   });
 
+  it("roundtrips v1 to v2, preserves readable v1, restores it and rejects a stale base", async () => {
+    const documentId = "0198b9f0-6631-7000-8000-000000000521";
+    const versionTwoId = "0198b9f0-6631-7000-8000-000000000522";
+    const staleAttemptId = "0198b9f0-6631-7000-8000-000000000523";
+    const restoreId = "0198b9f0-6631-7000-8000-000000000524";
+    const [uploadRoute, historyRoute, contentRoute, restoreRoute] = await Promise.all([
+      import("@/app/api/threads/[threadId]/documents/route"),
+      import("@/app/api/threads/[threadId]/documents/[uploadId]/route"),
+      import("@/app/api/threads/[threadId]/documents/[uploadId]/versions/[versionId]/route"),
+      import("@/app/api/threads/[threadId]/documents/[uploadId]/versions/[versionId]/restore/route"),
+    ]);
+    auth.session = session(USER_A);
+    expect((await uploadRoute.POST(
+      uploadRequest(documentId, new File(["version one"], "roundtrip.txt", { type: "text/plain" })),
+      { params: Promise.resolve({ threadId }) },
+    )).status).toBe(201);
+
+    const initial = await historyRoute.GET(new Request("http://localhost/history"), {
+      params: Promise.resolve({ threadId, uploadId: documentId }),
+    });
+    expect(initial.status).toBe(200);
+    const initialBody = await initial.json() as { document: {
+      scope: { kind: string; id: string };
+      originalVersionId: string;
+      versions: Array<{ versionId: string; etag: string; author: { userId: string; name: string }; createdAt: string; provenance: { type: string } }>;
+    } };
+    expect(initialBody.document.versions).toHaveLength(1);
+    expect(initialBody.document).toMatchObject({
+      originalVersionId: documentId,
+      scope: { kind: "project" },
+      versions: [{
+        author: { userId: USER_A, name: expect.any(String) },
+        createdAt: expect.any(String),
+        provenance: { type: "original_upload" },
+      }],
+    });
+    const v1Etag = initialBody.document.versions[0]!.etag;
+    expect(initial.headers.get("ETag")).toBe(`"${v1Etag}"`);
+
+    const missingBase = uploadRequest(
+      "0198b9f0-6631-7000-8000-000000000525",
+      new File(["missing base"], "roundtrip.txt", { type: "text/plain" }),
+    );
+    missingBase.headers.set("X-AiBrain-Document-Id", documentId);
+    expect((await uploadRoute.POST(missingBase, { params: Promise.resolve({ threadId }) })).status).toBe(428);
+
+    const v2Request = uploadRequest(versionTwoId, new File(["version two"], "roundtrip.txt", { type: "text/plain" }));
+    v2Request.headers.set("If-Match", `"${v1Etag}"`);
+    v2Request.headers.set("X-AiBrain-Document-Id", documentId);
+    const v2Response = await uploadRoute.POST(v2Request, { params: Promise.resolve({ threadId }) });
+    expect(v2Response.status).toBe(201);
+    const v2Body = await v2Response.json() as { document: { versions: Array<{ versionId: string; etag: string }> } };
+    expect(v2Body.document.versions.map((version) => version.versionId)).toEqual([documentId, versionTwoId]);
+    const v2Etag = v2Body.document.versions[1]!.etag;
+
+    const original = await contentRoute.GET(new Request("http://localhost/original"), {
+      params: Promise.resolve({ threadId, uploadId: documentId, versionId: documentId }),
+    });
+    expect(original.status).toBe(200);
+    expect(original.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await original.text()).toBe("version one");
+
+    const staleRequest = uploadRequest(staleAttemptId, new File(["stale"], "roundtrip.txt", { type: "text/plain" }));
+    staleRequest.headers.set("If-Match", `"${v1Etag}"`);
+    staleRequest.headers.set("X-AiBrain-Document-Id", documentId);
+    const conflict = await uploadRoute.POST(staleRequest, { params: Promise.resolve({ threadId }) });
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({ code: "DOCUMENT_VERSION_CONFLICT" });
+
+    const restore = await restoreRoute.POST(new Request("http://localhost/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "If-Match": `"${v2Etag}"` },
+      body: JSON.stringify({ restoreVersionId: restoreId }),
+    }), { params: Promise.resolve({ threadId, uploadId: documentId, versionId: documentId }) });
+    expect(restore.status).toBe(201);
+    const restored = await restore.json() as { document: { latestVersionId: string; versions: Array<{ provenance: { type: string } }> } };
+    expect(restored.document.latestVersionId).toBe(restoreId);
+    expect(restored.document.versions.at(-1)?.provenance.type).toBe("restore");
+
+    auth.session = session(USER_B);
+    expect((await historyRoute.GET(new Request("http://localhost/history"), {
+      params: Promise.resolve({ threadId, uploadId: documentId }),
+    })).status).toBe(404);
+
+    auth.session = { ...session(USER_A), tenant: { id: "other-tenant", name: "Other Tenant" } };
+    expect((await historyRoute.GET(new Request("http://localhost/history"), {
+      params: Promise.resolve({ threadId, uploadId: documentId }),
+    })).status).toBe(403);
+  });
+
   it("returns retry metadata before starting a conversion when shared capacity is saturated", async () => {
     const previousMaximum = process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS;
     const previousRetry = process.env.AIBRAIN_DOCUMENT_RETRY_AFTER_MS;

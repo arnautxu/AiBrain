@@ -1,0 +1,69 @@
+import { NextResponse } from "next/server";
+import { getSession } from "@/auth/session";
+import { loadInstallationConfig } from "@/config/installation";
+import { documentServicesForUser } from "@/documents/server-service";
+import { versionPreviewFile } from "@/documents/version-http";
+import { StorageError } from "@/storage";
+import { getThreadRuntimeContext } from "@/workbench/store";
+import { isUuid } from "@/workbench/types";
+
+export const runtime = "nodejs";
+
+function mediaType(fileName: string) {
+  if (fileName.endsWith(".pdf")) return "application/pdf";
+  if (fileName.endsWith(".png")) return "image/png";
+  if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) return "image/jpeg";
+  if (fileName.endsWith(".gif")) return "image/gif";
+  if (fileName.endsWith(".webp")) return "image/webp";
+  return "text/plain; charset=utf-8";
+}
+
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ threadId: string; uploadId: string; versionId: string; fileName: string }> },
+) {
+  const session = await getSession();
+  if (!session) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  const { threadId, uploadId: documentId, versionId, fileName } = await context.params;
+  if (!isUuid(threadId) || !isUuid(documentId) || !isUuid(versionId) ||
+      !/^[a-z0-9][a-z0-9._-]{0,159}$/.test(fileName)) {
+    return NextResponse.json({ error: "Vista previa no válida." }, { status: 400 });
+  }
+  try {
+    const installation = await loadInstallationConfig();
+    if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
+      return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
+    }
+    await getThreadRuntimeContext(session, threadId);
+    const services = await documentServicesForUser(installation, session.user.id);
+    const history = await services.versions.read(threadId, documentId);
+    const version = history.versions.find((candidate) => candidate.versionId === versionId);
+    if (!version || versionPreviewFile(version) !== fileName) {
+      return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
+    }
+    const staged = await services.staging.readById(threadId, version.contentUploadId);
+    if (staged.fileName !== version.fileName || staged.kind !== version.kind || staged.mediaType !== version.mediaType ||
+        staged.size !== version.size || staged.sha256 !== version.sha256) {
+      return NextResponse.json({ error: "La versión ya no coincide con su contenido inmutable." }, { status: 409 });
+    }
+    const data = await services.previews.readFile(threadId, version.contentUploadId, fileName);
+    return new Response(new Uint8Array(data), {
+      headers: {
+        "Content-Type": mediaType(fileName),
+        "Content-Disposition": `inline; filename="${fileName}"`,
+        "Content-Length": String(data.byteLength),
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'none'; img-src 'self' data:; style-src 'unsafe-inline'",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Referrer-Policy": "no-referrer",
+        "X-Frame-Options": "DENY",
+      },
+    });
+  } catch (error) {
+    if (error instanceof StorageError || (error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
+    }
+    return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
+  }
+}

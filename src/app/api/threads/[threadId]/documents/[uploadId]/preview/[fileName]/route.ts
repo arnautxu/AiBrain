@@ -35,11 +35,11 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Preview no vàlid." }, { status: 400 });
   }
   try {
-    await getThreadRuntimeContext(session, threadId);
     const installation = await loadInstallationConfig();
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
     }
+    await getThreadRuntimeContext(session, threadId);
     const services = await documentServicesForUser(installation, session.user.id);
     const data = await services.previews.readFile(threadId, uploadId, fileName);
     return new Response(new Uint8Array(data), {

@@ -122,6 +122,19 @@ function withDownload(url: string) {
   return `${url}${url.includes("?") ? "&" : "?"}download=1`;
 }
 
+function uploadPreviewUrl(threadId: string, attachment: { id: string; name: string; mimeType: string }) {
+  const supported = attachment.mimeType.startsWith("image/") || attachment.mimeType.startsWith("text/") ||
+    attachment.mimeType === "application/json" || attachment.mimeType === "application/pdf" ||
+    attachment.mimeType.startsWith("application/vnd.openxmlformats-officedocument.");
+  if (!supported) return null;
+  const previewName = attachment.mimeType.startsWith("image/")
+    ? `preview${attachment.name.slice(attachment.name.lastIndexOf(".")).toLocaleLowerCase()}`
+    : attachment.mimeType.startsWith("text/") || attachment.mimeType === "application/json"
+      ? "preview.txt"
+      : "document.pdf";
+  return `/api/threads/${encodeURIComponent(threadId)}/documents/${encodeURIComponent(attachment.id)}/preview/${encodeURIComponent(previewName)}`;
+}
+
 function artifactItem(input: {
   artifact: GeneratedArtifact;
   projectId: string;
@@ -187,8 +200,7 @@ export function buildLibraryItems(snapshot: Pick<WorkbenchSnapshot, "projects" |
         const id = `upload:${thread.id}:${attachment.id}`;
         if (items.has(id)) continue;
         const url = `/api/library/uploads/${encodeURIComponent(thread.id)}/${encodeURIComponent(attachment.id)}`;
-        const canPreview = attachment.mimeType.startsWith("image/") ||
-          attachment.mimeType === "application/pdf" || attachment.mimeType.startsWith("text/");
+        const previewUrl = uploadPreviewUrl(thread.id, attachment);
         items.set(id, {
           id,
           type: "upload",
@@ -201,7 +213,7 @@ export function buildLibraryItems(snapshot: Pick<WorkbenchSnapshot, "projects" |
           threadId: thread.id,
           threadTitle: thread.title,
           messageId: message.id,
-          previewUrl: canPreview ? `${url}?inline=1` : null,
+          previewUrl,
           downloadUrl: url,
           status: "ready",
         });

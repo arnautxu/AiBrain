@@ -66,6 +66,7 @@ function renderSidebar() {
   const onNewThread = vi.fn();
   const onOpenCommandPalette = vi.fn();
   const onOpenTaskCenter = vi.fn();
+  const onOpenLibrary = vi.fn();
   const onOpenAutomations = vi.fn();
   const operations = project("project-operations", "Operaciones");
   const product = project("project-product", "Producto");
@@ -92,7 +93,7 @@ function renderSidebar() {
       onCloseDesktop={vi.fn()}
       onOpenDesktop={vi.fn()}
       onOpenCommandPalette={onOpenCommandPalette}
-      onOpenLibrary={vi.fn()}
+      onOpenLibrary={onOpenLibrary}
       onOpenTaskCenter={onOpenTaskCenter}
       onOpenAutomations={onOpenAutomations}
       onSelectProject={vi.fn()}
@@ -105,25 +106,27 @@ function renderSidebar() {
     />,
   );
 
-  return { onNewThread, onOpenAutomations, onOpenCommandPalette, onOpenTaskCenter };
+  return { onNewThread, onOpenAutomations, onOpenCommandPalette, onOpenLibrary, onOpenTaskCenter };
 }
 
 afterEach(cleanup);
 
 describe("Sidebar", () => {
-  it("keeps search compact and exposes conversations, task notifications and automations", () => {
-    const { onOpenAutomations, onOpenCommandPalette, onOpenTaskCenter } = renderSidebar();
+  it("keeps search compact and exposes task notifications, the document library and automations", () => {
+    const { onOpenAutomations, onOpenCommandPalette, onOpenLibrary, onOpenTaskCenter } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
     expect(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Centro de tareas, 2 sin leer" }));
+    fireEvent.click(within(navigation).getByRole("button", { name: "Biblioteca" }));
     fireEvent.click(within(navigation).getByRole("button", { name: "Automatizaciones" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
     expect(onOpenTaskCenter).toHaveBeenCalledOnce();
+    expect(onOpenLibrary).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();
-    expect(within(navigation).queryByText("Biblioteca")).not.toBeInTheDocument();
+    expect(within(navigation).getAllByText("Biblioteca")).toHaveLength(2);
     expect(within(navigation).queryByText("Tareas programadas")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("⌘K")).not.toBeInTheDocument();
     expect(within(navigation).queryByText("Buscar")).not.toBeInTheDocument();

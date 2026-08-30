@@ -1,7 +1,7 @@
 "use client";
 
 import NextImage from "next/image";
-import { ArrowClockwise, CaretRight, Check, Copy, Eye, FileCode, Trash, WarningCircle } from "@phosphor-icons/react";
+import { ArrowClockwise, CaretRight, Check, Copy, DownloadSimple, Eye, FileCode, Trash, WarningCircle } from "@phosphor-icons/react";
 import { useCallback, useState } from "react";
 import type { ActivityFileChange } from "@/lib/chat-contract";
 import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
@@ -9,12 +9,14 @@ import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview"
 type WorkspaceFile = {
   path: string;
   name: string;
-  kind: "text" | "image" | "pdf";
+  kind: "text" | "image" | "pdf" | "office";
   mimeType: string;
   size: number;
   language: string | null;
   content: string | null;
   previewUrl: string | null;
+  previewMimeType: string;
+  downloadUrl: string;
 };
 
 function workspaceFile(value: unknown): WorkspaceFile | null {
@@ -24,12 +26,14 @@ function workspaceFile(value: unknown): WorkspaceFile | null {
   if (
     !("path" in file) || typeof file.path !== "string" ||
     !("name" in file) || typeof file.name !== "string" ||
-    !("kind" in file) || (file.kind !== "text" && file.kind !== "image" && file.kind !== "pdf") ||
+    !("kind" in file) || (file.kind !== "text" && file.kind !== "image" && file.kind !== "pdf" && file.kind !== "office") ||
     !("mimeType" in file) || typeof file.mimeType !== "string" ||
     !("size" in file) || typeof file.size !== "number" ||
     !("language" in file) || (file.language !== null && typeof file.language !== "string") ||
     !("content" in file) || (file.content !== null && typeof file.content !== "string") ||
-    !("previewUrl" in file) || (file.previewUrl !== null && typeof file.previewUrl !== "string")
+    !("previewUrl" in file) || (file.previewUrl !== null && typeof file.previewUrl !== "string") ||
+    !("previewMimeType" in file) || typeof file.previewMimeType !== "string" ||
+    !("downloadUrl" in file) || typeof file.downloadUrl !== "string" || !file.downloadUrl.startsWith("/api/")
   ) return null;
   return {
     path: file.path,
@@ -40,6 +44,8 @@ function workspaceFile(value: unknown): WorkspaceFile | null {
     language: file.language,
     content: file.content,
     previewUrl: file.previewUrl,
+    previewMimeType: file.previewMimeType,
+    downloadUrl: file.downloadUrl,
   };
 }
 
@@ -61,7 +67,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
   const [preview, setPreview] = useState<WorkspaceFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const handlePdfError = useCallback(() => setError("No se ha podido cargar el PDF privado."), []);
+  const handlePdfError = useCallback(() => setError("No se ha podido cargar la representación privada del documento."), []);
 
   const loadPreview = async () => {
     setLoading(true);
@@ -140,6 +146,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
                 {preview.content !== null ? (
                   <button type="button" className="flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar"}</button>
                 ) : null}
+                <a href={preview.downloadUrl} download={preview.name} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title="Descargar original para abrir o editar en escritorio"><DownloadSimple size={13} /></a>
                 <button type="button" className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Actualizar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
               </header>
               {preview.kind === "text" && preview.content !== null ? (
@@ -148,7 +155,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
                 <div className="bg-[var(--surface-muted)] p-3">
                   <NextImage unoptimized width={1280} height={960} src={preview.previewUrl} alt={`Vista previa de ${preview.name}`} className="mx-auto max-h-[420px] w-auto rounded-md border border-[var(--border)] bg-white object-contain shadow-[var(--shadow-sm)]" />
                 </div>
-              ) : preview.kind === "pdf" && preview.previewUrl ? (
+              ) : (preview.kind === "pdf" || preview.kind === "office") && preview.previewUrl && preview.previewMimeType === "application/pdf" ? (
                 <AuthenticatedPdfPreview
                   previewUrl={preview.previewUrl}
                   title={`Vista previa de ${preview.name}`}
