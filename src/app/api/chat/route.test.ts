@@ -52,7 +52,8 @@ vi.mock("@/runtime/approval-store", () => ({
 }));
 
 vi.mock("@/runtime/thread-token", () => ({
-  readThreadToken: vi.fn(() => null),
+  CURRENT_THREAD_TOOLSET_REVISION: "aibrain-tools-test",
+  readThreadTokenContext: vi.fn(() => null),
 }));
 
 vi.mock("@/workbench/store", () => ({
@@ -115,7 +116,7 @@ vi.mock("@/settings/server-service", () => ({
   })),
 }));
 
-import { POST } from "@/app/api/chat/route";
+import { POST, runtimeThreadIdForChatMessage } from "@/app/api/chat/route";
 
 function deferred() {
   let resolve!: () => void;
@@ -155,6 +156,14 @@ function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknow
 describe("chat turn transport lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("re-bootstraps only automation turns from a legacy dynamic-tool thread", () => {
+    const legacy = { threadId: "runtime-thread-legacy", toolsetRevision: null };
+    const current = { threadId: "runtime-thread-current", toolsetRevision: "aibrain-tools-test" };
+    expect(runtimeThreadIdForChatMessage(legacy, "Envíame hello dentro de 2 minutos")).toBeNull();
+    expect(runtimeThreadIdForChatMessage(legacy, "Resume la conversación")).toBe("runtime-thread-legacy");
+    expect(runtimeThreadIdForChatMessage(current, "Cada lunes prepara un resumen")).toBe("runtime-thread-current");
   });
 
   it("rejects browser-supplied provider settings", async () => {

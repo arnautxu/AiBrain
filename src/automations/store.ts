@@ -486,10 +486,18 @@ export class FileAutomationStore {
   async listRuns(taskId?: string) {
     await this.prepare();
     const entries = await this.runs.read();
-    return entries.map((entry) => entry.payload).filter((run) => {
+    const latestByAttempt = new Map<string, AutomationRun>();
+    for (const entry of entries) {
+      const run = entry.payload;
       this.assertRunOwnership(run);
-      return !taskId || run.taskId === taskId;
-    });
+      if (taskId && run.taskId !== taskId) continue;
+      // The append-only journal may contain a pre-thread running snapshot, a
+      // running snapshot with the durable result thread and the terminal
+      // outcome for one attempt.  Product history projects that lifecycle as
+      // one row, while retaining every event on disk for recovery/audit.
+      latestByAttempt.set(`${run.runKey}\0${run.attempt}`, run);
+    }
+    return [...latestByAttempt.values()];
   }
 
   async latestRun(runKey: string) {

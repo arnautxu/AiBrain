@@ -45,6 +45,7 @@ import {
   AIBRAIN_AUTOMATION_TOOL_NAMESPACE,
   automationChatDeveloperInstructions,
   handleAutomationToolCall,
+  needsAutomationChatTools,
 } from "@/automations/chat-tools";
 
 const session: AuthSession = {
@@ -71,6 +72,14 @@ beforeEach(() => {
 });
 
 describe("automation chat creation", () => {
+  it("detects scheduling turns that need a fresh dynamic-tool thread", () => {
+    expect(needsAutomationChatTools("Envíame hello dentro de 2 minutos")).toBe(true);
+    expect(needsAutomationChatTools("Cada lunes revisa @gmail y prepara un resumen")).toBe(true);
+    expect(needsAutomationChatTools("Confirmo, créala")).toBe(true);
+    expect(needsAutomationChatTools("Sí, esa conclusión es correcta")).toBe(false);
+    expect(needsAutomationChatTools("Resume la conversación anterior")).toBe(false);
+  });
+
   it("gives natural relative instructions safe current-user defaults", async () => {
     const instructions = await automationChatDeveloperInstructions(session, {
       projectId: mocks.projectId,

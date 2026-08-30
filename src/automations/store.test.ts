@@ -60,6 +60,20 @@ describe("FileAutomationStore", () => {
       .toEqual({ membershipPolicy: "current", userIds: [userA], groupIds: [] });
   });
 
+  it("persists an edited one-time date and time across a fresh store read", async () => {
+    const usersRoot = await root();
+    const now = () => Date.parse("2026-08-28T08:00:00.000Z");
+    const first = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now });
+    const created = await first.create(input("2026-08-28T09:00:00.000Z"));
+    await first.update(created.id, { schedule: { kind: "once", runAt: "2026-08-29T22:31:00.000Z" } });
+
+    const restarted = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now });
+    expect(await restarted.get(created.id)).toMatchObject({
+      schedule: { kind: "once", runAt: "2026-08-29T22:31:00.000Z" },
+      nextRunAt: "2026-08-29T22:31:00.000Z",
+    });
+  });
+
   it("deduplicates concurrent claims with a filesystem lease", async () => {
     const usersRoot = await root();
     let clock = Date.parse("2026-08-28T08:00:00.000Z");
@@ -88,7 +102,7 @@ describe("FileAutomationStore", () => {
     const [task] = await store.list();
     expect(task.lastRunStatus).toBe("failed");
     expect(task.nextRunAt).toBe("2026-08-29T08:00:00.000Z");
-    expect((await store.listRuns()).map((run) => run.status)).toEqual(["running", "failed"]);
+    expect((await store.listRuns()).map((run) => run.status)).toEqual(["failed"]);
   });
 
   it("does not execute a terminal run twice after lease recovery", async () => {
@@ -278,7 +292,7 @@ describe("FileAutomationStore", () => {
     expect(await store.list()).toEqual([]);
     const history = await store.listRuns(task.id);
     expect(history.at(-1)).toMatchObject({ status: "failed", attempt: 1, error: "La automatización fue cancelada por su propietario." });
-    expect(history.filter((run) => run.status === "running")).toHaveLength(1);
+    expect(history.filter((run) => run.status === "running")).toHaveLength(0);
   });
 
   it("fences an in-flight claim when its runtime inputs change", async () => {

@@ -36,8 +36,8 @@ export type AgentThreadRuntimeContext = ThreadRuntimeContext & {
   visibleProjects: readonly VisibleProjectReference[];
 };
 
-export function branchHistory(thread: StoredThread) {
-  if (!thread.lineage || thread.runtimeThreadToken || thread.messages.length === 0) return null;
+export function conversationHistory(thread: StoredThread) {
+  if (thread.messages.length === 0) return null;
   return thread.messages.map((message) => {
     const role = message.role === "user" ? "USER" : "ASSISTANT";
     const attachments = message.attachments.length
@@ -45,6 +45,11 @@ export function branchHistory(thread: StoredThread) {
       : "";
     return `${role}:\n${message.content}${attachments}`;
   }).join("\n\n");
+}
+
+export function branchHistory(thread: StoredThread) {
+  if (!thread.lineage || thread.runtimeThreadToken) return null;
+  return conversationHistory(thread);
 }
 
 export function publicProject(project: StoredProject): WorkbenchProject {

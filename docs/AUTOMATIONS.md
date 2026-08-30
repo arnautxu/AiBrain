@@ -18,9 +18,13 @@ La superficie principal permite crear, editar, pausar, reanudar, eliminar y ejec
 
 El chat también puede preparar una automatización mediante herramientas dinámicas internas y reconoce instrucciones naturales como «envíame hello dentro de 2 minutos», «mañana a las 9» o «cada lunes». Cuando el usuario no especifica proyecto, zona horaria o audiencia, usa el proyecto actual, `Europe/Madrid` y el usuario actual; conserva menciones `@`, archivos y referencias a skills dentro del prompt. Antes de persistirla muestra acción, horario, zona horaria, proyecto o `Sin proyecto` y audiencia. La propuesta se guarda por usuario, tenant, conversación y turno, pero no crea ninguna tarea. La creación exige una confirmación explícita en un mensaje posterior; un «sí» natural puede confirmar la última propuesta pendiente de esa conversación sin repetir su id. Propuesta y tarea usan ids durables para que un reintento tras reinicio no duplique la automatización.
 
+Las herramientas dinámicas quedan fijadas cuando se crea la conversación privada del runtime. Los tokens de conversación incluyen una revisión del toolset: si una petición de programación llega desde una conversación anterior a esta capacidad, el servidor abre de forma acotada un hilo privado nuevo para ese turno y conserva la conversación visible y su propuesta durable. Las conversaciones actuales y los mensajes normales continúan reanudándose sin reinicio.
+
 `Automatizaciones` es una vista del área principal y nunca un overlay sobre el sidebar. No contiene una X, `Centro de tareas` ni banners que infieran falsamente que el servicio está desconectado. `Nueva` queda centrado bajo el estado vacío y el proyecto técnico `Conversaciones` siempre se proyecta como `Sin proyecto`.
 
 La zona por defecto es `Europe/Madrid`, pero se guarda por tarea. En el salto de primavera, una hora inexistente se mueve al primer minuto válido posterior del mismo día. En la repetición de otoño se usa la primera aparición de la hora.
+
+El formulario de una ejecución única edita fecha y hora en controles separados y convierte exactamente ese minuto desde la zona elegida. El `PATCH` devuelve la tarea persistida; la UI nunca sustituye el valor introducido por la hora por defecto del formulario.
 
 ## Operación
 
@@ -48,7 +52,7 @@ Aceptación local controlada de dos minutos con el cliente ausente, worker en un
 npm run acceptance:automations-offline
 ```
 
-La salida válida contiene `clientSessionPresent:false`, `terminalExecutions:1`, `replayExecutions:0` y el mismo `runKey` en el receipt y el historial. Esta prueba valida reloj real, persistencia, worker separado y no repetición; no sustituye la aceptación autenticada del runtime Codex desplegado.
+La salida válida contiene `clientSessionPresent:false`, `browserRequired:false`, `chatProposalConfirmed:true`, `terminalExecutions:1`, `replayExecutions:0`, `persistedResult:"TEST-AUTO-P0-OK"` y el mismo `runKey` en el recibo y el historial. La prueba recorre propuesta y confirmación durable, espera el reloj real, ejecuta en un proceso hijo sin cliente, relee una conversación real del workbench y arranca un segundo worker para demostrar que no hay replay. El contenido se produce de forma controlada en el límite del executor: esta prueba no certifica por sí sola el modelo, web, skills, conectores, una pestaña cerrada ni el runtime Codex autenticado desplegado.
 
 En producción, `infra/hetzner/compose.yaml` arranca `automation-worker` como servicio independiente, supervisado con `restart: unless-stopped` y un healthcheck que requiere un heartbeat fresco del proceso vivo. Comparte la misma imagen, usuario, configuración, volumen de datos y credenciales Codex que la aplicación. No arranque un segundo worker manualmente como sustituto de alta disponibilidad: el lock con lease evita reclamaciones duplicadas, pero ambos procesos compartirían el mismo volumen.
 
@@ -85,6 +89,9 @@ RestartSec=5
 - El identificador de una ejecución programada deriva de tarea + instante; el de una ejecución manual deriva de tarea + id de solicitud del cliente.
 - La concesión expira si el proceso muere y se renueva mientras el turno sigue activo.
 - La conversación y los mensajes del turno usan ids deterministas. Tras una recuperación, el store y el workbench reutilizan el mismo resultado visible y rechazan duplicados ya terminales.
+- Una ejecución solo se asienta como correcta después de releer la conversación y confirmar que conserva el prompt y una respuesta terminal no vacía.
+- El journal conserva los snapshots internos `running`, pero el historial de producto proyecta un único estado actual por `runKey + attempt`; preparar el thread y terminar el mismo intento nunca crea filas duplicadas.
+- El selector muestra un único perfil canónico por email local. La autorización de resultados permanece ligada al UUID exacto persistido: un perfil recreado con el mismo email no hereda acceso. Grupos y personas se resuelven contra miembros habilitados en cada lectura.
 - Un worker que pierde su fence deja de escribir en el historial; solo el sucesor que posee la nueva lease puede registrar el resultado terminal.
 - Pausar o eliminar una tarea con una ejecución en curso no borra su fence de
   inmediato: el worker recibe la cancelación desde el estado durable, aborta

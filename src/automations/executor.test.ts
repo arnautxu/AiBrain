@@ -7,7 +7,10 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   runWorkerCodexTurn: vi.fn(),
-  finishThreadTurn: vi.fn(async () => undefined),
+  finishThreadTurn: vi.fn(),
+  getThread: vi.fn(),
+  beginThreadTurn: vi.fn(),
+  messages: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("@/runtime/worker-codex-turn", () => ({ runWorkerCodexTurn: mocks.runWorkerCodexTurn }));
@@ -37,10 +40,8 @@ vi.mock("@/workbench/store", () => ({
     visibleProjects: [],
     branchHistory: null,
   })),
-  beginThreadTurn: vi.fn(async (_session, _threadId, _userMessage, assistantMessage) => ({
-    outcome: "created",
-    assistantMessage,
-  })),
+  beginThreadTurn: mocks.beginThreadTurn,
+  getThread: mocks.getThread,
   finishThreadTurn: mocks.finishThreadTurn,
 }));
 
@@ -88,11 +89,22 @@ const task: AutomationTask = {
 };
 
 beforeEach(() => {
+  mocks.messages = [];
   mocks.runWorkerCodexTurn.mockReset();
   mocks.finishThreadTurn.mockClear();
+  mocks.getThread.mockReset();
+  mocks.getThread.mockImplementation(async () => ({ messages: mocks.messages }));
+  mocks.beginThreadTurn.mockReset();
+  mocks.beginThreadTurn.mockImplementation(async (_session, _threadId, userMessage, assistantMessage) => {
+    mocks.messages = [userMessage, assistantMessage];
+    return { outcome: "created", assistantMessage };
+  });
+  mocks.finishThreadTurn.mockImplementation(async (_session, _threadId, assistantMessage) => {
+    mocks.messages = [mocks.messages[0]!, assistantMessage];
+  });
   mocks.runWorkerCodexTurn.mockImplementation(async (...args: unknown[]) => {
     const emit = args[10] as (event: unknown) => Promise<void>;
-    await emit({ type: "content", value: "hello" });
+    await emit({ type: "content", value: "TEST-AUTO-P0-OK" });
     await emit({ type: "done" });
   });
 });
@@ -120,5 +132,49 @@ describe("scheduled automation execution", () => {
     expect(call?.[17]).toBe(session);
     expect(call?.[18]).toBe(true);
     expect(mocks.finishThreadTurn).toHaveBeenCalledOnce();
+    expect(mocks.messages).toEqual([
+      expect.objectContaining({ role: "user", content: task.prompt }),
+      expect.objectContaining({ role: "assistant", status: "complete", content: "TEST-AUTO-P0-OK" }),
+    ]);
+  });
+
+  it("does not mark an occurrence successful when the result conversation is empty", async () => {
+    mocks.runWorkerCodexTurn.mockImplementationOnce(async (...args: unknown[]) => {
+      const emit = args[10] as (event: unknown) => Promise<void>;
+      await emit({ type: "done" });
+    });
+
+    await expect(executeScheduledTurn({
+      installation,
+      session,
+      task,
+      runKey: `${task.id}:${task.nextRunAt}:empty`,
+    })).rejects.toThrow("sin un resultado visible");
+  });
+
+  it("requires prompt and terminal content to survive durable thread readback", async () => {
+    mocks.getThread.mockResolvedValueOnce({ messages: [] });
+    await expect(executeScheduledTurn({
+      installation,
+      session,
+      task,
+      runKey: `${task.id}:${task.nextRunAt}:readback`,
+    })).rejects.toThrow("no conserva el prompt y el resultado terminal");
+  });
+
+  it("rejects an empty terminal result recovered after a worker restart", async () => {
+    mocks.beginThreadTurn.mockImplementationOnce(async (_session, _threadId, userMessage, assistantMessage) => {
+      const empty = { ...assistantMessage, status: "complete" };
+      mocks.messages = [userMessage, empty];
+      return { outcome: "existing", assistantMessage: empty };
+    });
+    await expect(executeScheduledTurn({
+      installation,
+      session,
+      task,
+      runKey: `${task.id}:${task.nextRunAt}:recovered-empty`,
+      existingThreadId: "30000000-0000-4000-8000-000000000001",
+    })).rejects.toThrow("sin un resultado visible");
+    expect(mocks.runWorkerCodexTurn).not.toHaveBeenCalled();
   });
 });

@@ -13,7 +13,12 @@ import type {
   AutomationTaskPatch,
   AutomationTaskView,
 } from "@/automations/contracts";
-import { invalidAutomationAudienceTargets, resolveCurrentAutomationAudience } from "@/automations/audience-policy";
+import {
+  canonicalAutomationUsers,
+  canonicalizeAutomationAudience,
+  invalidAutomationAudienceTargets,
+  resolveCurrentAutomationAudience,
+} from "@/automations/audience-policy";
 import { AutomationStoreError, FileAutomationStore } from "@/automations/store";
 import { loadInstallationConfig } from "@/config/installation";
 import type { InstallationConfig } from "@/config/installation-schema";
@@ -82,6 +87,7 @@ function storeForOwner(workspace: AutomationWorkspaceContext, ownerUserId: strin
 export function validateAutomationAudience(
   audience: AutomationAudience,
   workspace: AutomationWorkspaceContext,
+  preferredUserId?: string,
 ) {
   const invalid = invalidAutomationAudienceTargets(audience, workspace.users, workspace.state.groups);
   if (invalid.userIds.length || invalid.groupIds.length) {
@@ -91,11 +97,7 @@ export function validateAutomationAudience(
       400,
     );
   }
-  return {
-    membershipPolicy: "current" as const,
-    userIds: [...audience.userIds],
-    groupIds: [...audience.groupIds],
-  };
+  return canonicalizeAutomationAudience(audience, workspace.users, preferredUserId);
 }
 
 export function automationTaskAccess(
@@ -127,7 +129,10 @@ export function visibleAutomationTasks(
 ) {
   return tasks.flatMap((task): AutomationTaskView[] => {
     const access = automationTaskAccess(task, principalUserId, workspace, isAdmin);
-    return access.canManage || access.canViewResults ? [{ ...task, access }] : [];
+    return access.canManage || access.canViewResults ? [{
+      ...task,
+      access,
+    }] : [];
   });
 }
 
@@ -151,7 +156,10 @@ export async function listAutomationTasks(session: AuthSession) {
   const directory: AutomationAudienceDirectory = {
     membershipPolicy: "current",
     currentUserId: context.principal.userId,
-    users: context.users.filter(({ enabled }) => enabled).map(({ userId, displayName }) => ({ id: userId, name: displayName })),
+    users: canonicalAutomationUsers(
+      context.users.filter(({ enabled }) => enabled),
+      context.principal.userId,
+    ).map(({ userId, displayName }) => ({ id: userId, name: displayName })),
     groups: context.state.groups.map(({ id, name }) => ({ id, name })),
   };
   return { tasks: tasks.toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt)), directory };
@@ -163,7 +171,7 @@ export async function createAutomationTask(session: AuthSession, input: Automati
     membershipPolicy: "current",
     userIds: [context.principal.userId],
     groupIds: [],
-  }, context);
+  }, context, context.principal.userId);
   const task = await storeForOwner(context, context.principal.userId).create({ ...input, audience }, { id: options.taskId });
   return { ...task, access: { canManage: true, canViewResults: true } } satisfies AutomationTaskView;
 }
@@ -176,7 +184,7 @@ export async function updateAutomationTask(session: AuthSession, taskId: string,
     throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
   }
   const nextPatch = patch.audience
-    ? { ...patch, audience: validateAutomationAudience(patch.audience, context) }
+    ? { ...patch, audience: validateAutomationAudience(patch.audience, context, context.principal.userId) }
     : patch;
   const task = await located.store.update(taskId, nextPatch);
   return { ...task, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;

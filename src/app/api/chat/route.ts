@@ -25,7 +25,11 @@ import {
 import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import type { ResolvedPermissions } from "@/permissions";
 import { FileApprovalStore } from "@/runtime/approval-store";
-import { readThreadToken } from "@/runtime/thread-token";
+import {
+  CURRENT_THREAD_TOOLSET_REVISION,
+  readThreadTokenContext,
+} from "@/runtime/thread-token";
+import { needsAutomationChatTools } from "@/automations/chat-tools";
 import { workbenchErrorResponse } from "@/workbench/http";
 import {
   finishThreadTurn,
@@ -69,6 +73,17 @@ const encoder = new TextEncoder();
 const PROJECTION_BATCH_DELAY_MS = 24;
 const PROJECTION_BATCH_MAX_EVENTS = 64;
 const CHAT_STREAM_KEEPALIVE_MS = 15_000;
+
+export function runtimeThreadIdForChatMessage(
+  context: { threadId: string; toolsetRevision: string | null } | null,
+  message: string,
+) {
+  if (!context) return null;
+  return context.toolsetRevision !== CURRENT_THREAD_TOOLSET_REVISION &&
+    needsAutomationChatTools(message)
+    ? null
+    : context.threadId;
+}
 
 type ChatSetupPhase =
   | "feature_policy"
@@ -389,14 +404,24 @@ export async function POST(request: Request) {
   }
 
   const config = readRuntimeConfig(session.tenant.id, context.workspaceKey);
-  const runtimeThreadId = context.runtimeThreadToken
-    ? readThreadToken(context.runtimeThreadToken, session.tenant.id, session.user.id)
+  const runtimeThreadContext = context.runtimeThreadToken
+    ? readThreadTokenContext(context.runtimeThreadToken, session.tenant.id, session.user.id)
     : null;
-  if (context.runtimeThreadToken && !runtimeThreadId) {
+  if (context.runtimeThreadToken && !runtimeThreadContext) {
     return NextResponse.json(
       { error: "La represa privada del fil ha caducat o no és vàlida." },
       { status: 409 },
     );
+  }
+  const runtimeThreadId = runtimeThreadIdForChatMessage(runtimeThreadContext, body.message);
+  const rebootstrapAutomationThread = Boolean(runtimeThreadContext && !runtimeThreadId);
+  if (rebootstrapAutomationThread) {
+    operationalLogger.info("chat.runtime_thread_toolset_upgrade", {
+      ...setupCorrelation,
+      fromRevision: runtimeThreadContext?.toolsetRevision ?? "legacy",
+      toRevision: CURRENT_THREAD_TOOLSET_REVISION,
+      reason: "automation-chat-tools-required",
+    });
   }
 
   let maintenanceActivity: MaintenanceActivityLease | null = null;
@@ -754,10 +779,17 @@ export async function POST(request: Request) {
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
-            context,
+            rebootstrapAutomationThread
+              ? { ...context, branchHistory: preparedPersistentTurn?.rebootstrapHistory ?? null }
+              : context,
             requestStartedAt,
             streamTelemetry,
             session,
+            undefined,
+            false,
+            runtimeThreadContext
+              ? runtimeThreadContext.toolsetRevision
+              : CURRENT_THREAD_TOOLSET_REVISION,
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });
