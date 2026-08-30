@@ -12,6 +12,7 @@ export type MemorySourceType =
 export type MemoryContext = {
   installationId: string;
   userId: string;
+  projectId?: string;
 };
 
 export type MemoryProvenance = {

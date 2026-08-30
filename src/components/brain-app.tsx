@@ -1944,6 +1944,7 @@ export function BrainApp({
 
       <MemoryPanel
         open={memoryOpen}
+        projectId={activeProject?.id ?? null}
         onClose={() => setMemoryOpen(false)}
       />
 

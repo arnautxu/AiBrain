@@ -458,6 +458,11 @@ describe("worker Codex turn", () => {
           expect.objectContaining({ name: "type" }),
         ]),
       }),
+      expect.objectContaining({
+        type: "namespace",
+        name: "aibrain_memory",
+        tools: expect.arrayContaining([expect.objectContaining({ name: "propose" })]),
+      }),
     ]);
     const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);

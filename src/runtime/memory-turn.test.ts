@@ -8,6 +8,7 @@ import {
   TURN_MEMORY_MAX_CHARACTERS,
   TURN_MEMORY_MAX_ITEMS,
   memorySnapshotFingerprint,
+  handleMemoryProposalToolCall,
   prepareTurnMemory,
   type MemoryTurnAuditEvent,
 } from "@/runtime/memory-turn";
@@ -85,6 +86,32 @@ afterEach(async () => {
 });
 
 describe("turn memory binding", () => {
+  it("turns a tool-assisted chat suggestion into a pending proposal, never a saved memory", async () => {
+    const propose = vi.fn(async (_context, input) => ({
+      created: true,
+      proposal: {
+        proposalId: "00000000-0000-4000-8000-000000000099",
+        content: input.content,
+        proposedScope: input.proposedScope,
+        provenance: { threadId: input.threadId, turnId: input.turnId, callId: input.callId, toolNames: input.toolNames, sourceExcerpt: input.sourceExcerpt, capturedAt: "2026-08-30T10:00:00.000Z", sourceType: "tool-assisted-chat" },
+      },
+    }));
+    const response = await handleMemoryProposalToolCall({
+      threadId: "runtime-thread-1", turnId: "runtime-turn-1", callId: "proposal-call-1", namespace: "aibrain_memory", tool: "propose",
+      arguments: { kind: "decision", content: "Recordar el proceso confirmado.", scope: "project" },
+    }, {
+      config: { installationId: INSTALLATION_ID } as never,
+      installationId: INSTALLATION_ID, userId: USER_A, projectId: PROJECT_ID, sourceThreadId: "source-thread-1",
+      runtimeThreadId: "runtime-thread-1", runtimeTurnId: "runtime-turn-1", sourceExcerpt: "Guárdalo solo si lo confirmo.",
+      observedToolNames: ["aibrain_browser.read"], store: { propose } as never,
+    });
+    expect(propose).toHaveBeenCalledWith(expect.objectContaining({ userId: USER_A, projectId: PROJECT_ID }), expect.objectContaining({ toolNames: ["aibrain_browser.read"] }));
+    expect(response.success).toBe(true);
+    const payload = JSON.parse((response.contentItems[0] as { text: string }).text) as { persisted: boolean; status: string };
+    expect(payload.persisted).toBe(false);
+    expect(payload.status).toBe("pending-user-confirmation");
+  });
+
   it("requests the exact global limits and durably binds ids plus stable snapshot hash", async () => {
     const buildPromptSnapshot = vi.fn(async () => snapshot());
     const recorded: MemoryTurnAuditEvent[] = [];
@@ -94,7 +121,7 @@ describe("turn memory binding", () => {
     }, identity());
 
     expect(buildPromptSnapshot).toHaveBeenCalledWith(
-      { installationId: INSTALLATION_ID, userId: USER_A },
+      { installationId: INSTALLATION_ID, userId: USER_A, projectId: PROJECT_ID },
       { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS },
     );
     expect(prepared.snapshot.memoryIds).toEqual([MEMORY_ID]);

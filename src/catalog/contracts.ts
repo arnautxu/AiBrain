@@ -59,9 +59,20 @@ export type CatalogPrincipal = {
   workspaceCanExecute: boolean;
 };
 
+export type SkillPackageInput = {
+  id: string;
+  label: string;
+  version: string;
+  category: "company" | "installation";
+  provenance: string;
+  files: Array<{ path: string; content: string }>;
+};
+
 export type CatalogCommand =
   | { action: "upsert-resource"; resource: CatalogResource }
-  | { action: "set-rule"; rule: CatalogRule };
+  | { action: "set-rule"; rule: CatalogRule }
+  | { action: "upsert-skill-package"; package: SkillPackageInput }
+  | { action: "revoke-skill-package"; skillId: string };
 
 function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -111,7 +122,29 @@ export function isCatalogRule(value: unknown): value is CatalogRule {
   return typeof value.subjectId === "string" && CATALOG_UUID.test(value.subjectId);
 }
 
+function boundedText(value: unknown, maximum: number) {
+  return typeof value === "string" && value.trim().length > 0 && value.length <= maximum &&
+    !/\p{C}/u.test(value.replace(/[\t\n\r]/gu, ""));
+}
+
+export function isSkillPackageInput(value: unknown): value is SkillPackageInput {
+  if (!record(value) || Object.keys(value).sort().join("\0") !== ["category", "files", "id", "label", "provenance", "version"].sort().join("\0") ||
+      !id(value.id) || !boundedText(value.label, 120) ||
+      typeof value.version !== "string" || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.-]+)?$/u.test(value.version) ||
+      (value.category !== "company" && value.category !== "installation") || !boundedText(value.provenance, 1_000) ||
+      !Array.isArray(value.files) || value.files.length < 1 || value.files.length > 24) return false;
+  const files = value.files as unknown[];
+  if (!files.every((file) => record(file) && Object.keys(file).sort().join("\0") === "content\0path" &&
+      typeof file.path === "string" && /^(?:SKILL\.md|resources\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:md|json|txt))$/u.test(file.path) &&
+      !file.path.includes("..") && boundedText(file.content, 64 * 1024))) return false;
+  const paths = files.map((file) => (file as Record<string, unknown>).path as string);
+  return paths.includes("SKILL.md") && new Set(paths).size === paths.length &&
+    files.reduce<number>((total, file) => total + new TextEncoder().encode((file as Record<string, unknown>).content as string).byteLength, 0) <= 256 * 1024;
+}
+
 export function isCatalogCommand(value: unknown): value is CatalogCommand {
   return record(value) && (value.action === "upsert-resource" && Object.keys(value).length === 2 && isCatalogResource(value.resource) ||
-    value.action === "set-rule" && Object.keys(value).length === 2 && isCatalogRule(value.rule));
+    value.action === "set-rule" && Object.keys(value).length === 2 && isCatalogRule(value.rule) ||
+    value.action === "upsert-skill-package" && Object.keys(value).length === 2 && isSkillPackageInput(value.package) ||
+    value.action === "revoke-skill-package" && Object.keys(value).length === 2 && id(value.skillId));
 }

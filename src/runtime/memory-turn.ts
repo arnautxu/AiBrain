@@ -1,7 +1,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
+import type { DynamicToolCallParams } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
+import type { DynamicToolSpec } from "../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
 import type { MemoryPromptSnapshot, MemoryService } from "@/memory";
+import { FileMemoryProposalStore, type MemoryScope } from "@/memory/proposal-store";
+import type { InstallationConfig } from "@/config/installation-schema";
 import {
   FileJournal,
   ResourceLockManager,
@@ -23,6 +28,28 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3
 const INSTALLATION_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const FINGERPRINT_PATTERN = /^[0-9a-f]{64}$/;
 const AUDIT_FILE_NAME = "turn-memory-snapshots.jsonl";
+export const AIBRAIN_MEMORY_TOOL_NAMESPACE = "aibrain_memory";
+
+export const MEMORY_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([{
+  type: "namespace",
+  name: AIBRAIN_MEMORY_TOOL_NAMESPACE,
+  description: "Propose useful durable memory for human review. This tool never saves memory: the authenticated user must inspect content, scope, and provenance and explicitly confirm or reject it in AiBrain.",
+  tools: [{
+    type: "function",
+    name: "propose",
+    description: "Create a pending memory proposal after identifying a stable fact, preference, or decision. Do not include secrets. Unknown or time-sensitive claims must remain marked as such.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        kind: { type: "string", enum: ["recollection", "decision"] },
+        content: { type: "string", minLength: 1, maxLength: 32_000 },
+        scope: { type: "string", enum: ["private", "project", "company"] },
+      },
+      required: ["kind", "content", "scope"],
+      additionalProperties: false,
+    },
+  }],
+}]);
 
 export type MemoryTurnAuditEvent = {
   schemaVersion: 1;
@@ -329,6 +356,92 @@ export class FileMemoryTurnAuditSink implements MemoryTurnAuditSink {
   }
 }
 
+function memoryToolFailure(text: string): DynamicToolCallResponse {
+  return { success: false, contentItems: [{ type: "inputText", text }] };
+}
+
+function memoryToolSuccess(value: unknown): DynamicToolCallResponse {
+  return { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(value) }] };
+}
+
+function exactKeys(value: Record<string, unknown>, expected: readonly string[]) {
+  const keys = Object.keys(value).sort();
+  return keys.join("\0") === [...expected].sort().join("\0");
+}
+
+function proposedContent(value: unknown) {
+  if (typeof value !== "string" || value.trim().length === 0 || value.length > 32_000 ||
+      /\p{C}/u.test(value.replace(/[\t\n\r]/gu, ""))) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_ARGUMENTS_INVALID", "Proposed memory content is invalid.");
+  }
+  if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/iu.test(value)) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_SECRET_REJECTED", "Credential-shaped content cannot be proposed as memory.");
+  }
+  return value.trim();
+}
+
+export async function handleMemoryProposalToolCall(
+  params: DynamicToolCallParams,
+  context: {
+    config: Readonly<InstallationConfig>;
+    installationId: string;
+    userId: string;
+    projectId: string;
+    sourceThreadId: string;
+    runtimeThreadId: string;
+    runtimeTurnId: string;
+    sourceExcerpt: string;
+    observedToolNames: readonly string[];
+    store?: FileMemoryProposalStore;
+  },
+): Promise<DynamicToolCallResponse> {
+  if (!params || typeof params !== "object" || Array.isArray(params) ||
+      !exactKeys(params as unknown as Record<string, unknown>, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"])) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_REQUEST_INVALID", "Memory proposal tool request is invalid.");
+  }
+  if (params.namespace !== AIBRAIN_MEMORY_TOOL_NAMESPACE || params.tool !== "propose") {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_TOOL_REJECTED", "Memory proposal tool is not allowed.");
+  }
+  if (params.threadId !== context.runtimeThreadId || params.turnId !== context.runtimeTurnId ||
+      typeof params.callId !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u.test(params.callId)) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_SCOPE_MISMATCH", "Memory proposal tool call does not belong to this turn.");
+  }
+  if (!params.arguments || typeof params.arguments !== "object" || Array.isArray(params.arguments) ||
+      !exactKeys(params.arguments as Record<string, unknown>, ["kind", "content", "scope"])) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_ARGUMENTS_INVALID", "Memory proposal arguments are invalid.");
+  }
+  const args = params.arguments as Record<string, unknown>;
+  if ((args.kind !== "recollection" && args.kind !== "decision") ||
+      (args.scope !== "private" && args.scope !== "project" && args.scope !== "company")) {
+    throw new MemoryTurnError("MEMORY_PROPOSAL_ARGUMENTS_INVALID", "Memory proposal kind or scope is invalid.");
+  }
+  const store = context.store ?? new FileMemoryProposalStore({ config: context.config });
+  try {
+    const result = await store.propose({ installationId: context.installationId, userId: context.userId, projectId: context.projectId }, {
+      kind: args.kind,
+      content: proposedContent(args.content),
+      proposedScope: args.scope as MemoryScope,
+      threadId: context.sourceThreadId,
+      turnId: context.runtimeTurnId,
+      callId: params.callId,
+      toolNames: [...new Set(context.observedToolNames)].slice(0, 32),
+      sourceExcerpt: context.sourceExcerpt.trim().slice(0, 4_000) || "El usuario solicitó revisar esta memoria propuesta.",
+    });
+    return memoryToolSuccess({
+      status: "pending-user-confirmation",
+      proposalId: result.proposal.proposalId,
+      content: result.proposal.content,
+      scope: result.proposal.proposedScope,
+      provenance: result.proposal.provenance,
+      persisted: false,
+      message: "La propuesta está pendiente. Solo se convertirá en memoria si el usuario la confirma explícitamente.",
+    });
+  } catch (error) {
+    if (error instanceof MemoryTurnError) throw error;
+    return memoryToolFailure(error instanceof Error ? error.message : "Memory proposal could not be prepared.");
+  }
+}
+
 export async function prepareTurnMemory(
   dependencies: WorkerTurnMemoryDependencies,
   identity: {
@@ -348,7 +461,7 @@ export async function prepareTurnMemory(
   let snapshot: MemoryPromptSnapshot;
   try {
     snapshot = validateSnapshot(await dependencies.memoryService.buildPromptSnapshot(
-      { installationId: identity.installationId, userId: identity.userId },
+      { installationId: identity.installationId, userId: identity.userId, projectId: identity.projectId },
       { maxItems: TURN_MEMORY_MAX_ITEMS, maxCharacters: TURN_MEMORY_MAX_CHARACTERS },
     ));
   } catch (error) {
