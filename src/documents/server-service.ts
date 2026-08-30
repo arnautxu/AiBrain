@@ -8,6 +8,7 @@ import { FilePublicationCapacityGate } from "@/documents/publication-capacity";
 import { DocumentPreviewService, type DocumentToolchain } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { FileDocumentStorageGate } from "@/documents/storage-gate";
+import { FileDocumentVersionStore } from "@/documents/version-store";
 import { WorkerProvisioner } from "@/runtime/workers/provisioner";
 import { ResourceLockManager } from "@/storage";
 
@@ -69,7 +70,11 @@ export async function documentServicesForUser(
     tools: toolchain,
     conversionGate,
   });
-  return { manifest, locks, staging, previews, toolchain, conversionGate, storageGate };
+  const versions = new FileDocumentVersionStore(
+    path.join(stateRoot, "document-history"),
+    locks,
+  );
+  return { manifest, locks, staging, previews, versions, toolchain, conversionGate, storageGate };
 }
 
 function publicationSecret() {

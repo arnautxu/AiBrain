@@ -91,12 +91,32 @@ describe("library and global search indexes", () => {
     expect(items.find((item) => item.type === "upload")).toMatchObject({
       name: "margen-regional.csv",
       downloadUrl: `/api/library/uploads/${threadId}/${uploadId}`,
-      previewUrl: `/api/library/uploads/${threadId}/${uploadId}?inline=1`,
+      previewUrl: `/api/threads/${threadId}/documents/${uploadId}/preview/preview.txt`,
     });
     expect(items.find((item) => item.type === "result")?.downloadUrl)
       .toBe(`/api/library/results/${threadId}/${assistantMessageId}`);
     expect(items.find((item) => item.type === "image")?.downloadUrl)
       .toBe(`/api/projects/${projectId}/artifacts/${artifactId}?download=1`);
+  });
+
+  it("routes Office uploads to their converted PDF representation", () => {
+    const officeSnapshot: WorkbenchSnapshot = {
+      ...snapshot,
+      threads: snapshot.threads.map((thread) => ({
+        ...thread,
+        messages: thread.messages.map((message) => message.id === userMessageId ? {
+          ...message,
+          attachments: [{
+            id: uploadId,
+            name: "margen-regional.xlsx",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size: 4_096,
+          }],
+        } : message),
+      })),
+    };
+    expect(buildLibraryItems(officeSnapshot).find((item) => item.type === "upload")?.previewUrl)
+      .toBe(`/api/threads/${threadId}/documents/${uploadId}/preview/document.pdf`);
   });
 
   it("finds typed, navigable results across messages, files, artifacts, activity and memory", () => {

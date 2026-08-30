@@ -4,11 +4,13 @@ const projectId = "00000000-0000-4000-8000-000000000011";
 const mocks = vi.hoisted(() => ({
   session: {
     current: {
+      provider: "local",
       tenant: { id: "qa-company", name: "QA" },
       user: { id: "00000000-0000-4000-8000-000000000001", name: "Arnau", email: "arnau@example.test" },
-    } as { tenant: { id: string; name: string }; user: { id: string; name: string; email: string } } | null,
+    } as { provider: "local"; tenant: { id: string; name: string }; user: { id: string; name: string; email: string } } | null,
   },
   readRegularFileWithin: vi.fn(),
+  prepareWorkspaceDocumentPreview: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -26,21 +28,66 @@ vi.mock("@/runtime/workers/provisioner", () => ({
 vi.mock("@/security/safe-file", () => ({
   readRegularFileWithin: mocks.readRegularFileWithin,
 }));
+vi.mock("@/documents/server-service", () => ({ documentServicesForUser: async () => ({}) }));
+vi.mock("@/documents/workspace-preview", () => ({
+  prepareWorkspaceDocumentPreview: mocks.prepareWorkspaceDocumentPreview,
+}));
 
 import { GET } from "@/app/api/projects/[projectId]/files/route";
 
-function request(filePath: string, raw = false, download = false) {
-  return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}${download ? "&download=1" : ""}`);
+function request(filePath: string, raw = false, download = false, representation = false) {
+  return new Request(`https://brain.example/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}${raw ? "&raw=1" : ""}${download ? "&download=1" : ""}${representation ? "&representation=1" : ""}`);
+}
+
+function crc32(data: Buffer) {
+  let crc = 0xffffffff;
+  for (const byte of data) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc & 1) !== 0 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function officeZip(part: string) {
+  const entries = [
+    { name: "[Content_Types].xml", data: Buffer.from("<Types/>") },
+    { name: part, data: Buffer.from("<root/>") },
+  ];
+  const locals: Buffer[] = [];
+  const centrals: Buffer[] = [];
+  let offset = 0;
+  for (const entry of entries) {
+    const name = Buffer.from(entry.name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
+    local.writeUInt32LE(crc32(entry.data), 14); local.writeUInt32LE(entry.data.length, 18);
+    local.writeUInt32LE(entry.data.length, 22); local.writeUInt16LE(name.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0x0800, 8); central.writeUInt32LE(crc32(entry.data), 16);
+    central.writeUInt32LE(entry.data.length, 20); central.writeUInt32LE(entry.data.length, 24);
+    central.writeUInt16LE(name.length, 28); central.writeUInt32LE(offset, 42);
+    locals.push(local, name, entry.data); centrals.push(central, name);
+    offset += local.length + name.length + entry.data.length;
+  }
+  const directory = Buffer.concat(centrals);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
 }
 
 describe("workspace file preview route", () => {
   beforeEach(() => {
     mocks.session.current = {
+      provider: "local",
       tenant: { id: "qa-company", name: "QA" },
       user: { id: "00000000-0000-4000-8000-000000000001", name: "Arnau", email: "arnau@example.test" },
     };
     mocks.readRegularFileWithin.mockReset();
     mocks.readRegularFileWithin.mockResolvedValue(Buffer.from("export const ready = true;"));
+    mocks.prepareWorkspaceDocumentPreview.mockReset();
+    mocks.prepareWorkspaceDocumentPreview.mockResolvedValue({ data: Buffer.from("%PDF-1.7\nconverted"), pages: 1 });
   });
 
   it("returns the current authenticated workspace file as bounded text", async () => {
@@ -57,6 +104,8 @@ describe("workspace file preview route", () => {
         language: "TypeScript",
         content: "export const ready = true;",
         previewUrl: null,
+        previewMimeType: "text/plain",
+        downloadUrl: `/api/projects/${projectId}/files?path=src%2Fexample.ts&raw=1&download=1`,
       },
     });
     expect(mocks.readRegularFileWithin).toHaveBeenCalledWith(
@@ -121,12 +170,55 @@ describe("workspace file preview route", () => {
     expect(malformed.status).toBe(415);
   });
 
+  it("validates Office files and serves a converted private PDF representation instead of binary text", async () => {
+    const docx = officeZip("word/document.xml");
+    mocks.readRegularFileWithin.mockResolvedValue(docx);
+    const metadata = await GET(request("documents/brief.docx"), { params: Promise.resolve({ projectId }) });
+    expect(metadata.status).toBe(200);
+    expect(await metadata.json()).toMatchObject({
+      file: {
+        kind: "office",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        previewMimeType: "application/pdf",
+        previewUrl: `/api/projects/${projectId}/files?path=documents%2Fbrief.docx&representation=1`,
+      },
+    });
+
+    const preview = await GET(request("documents/brief.docx", false, false, true), {
+      params: Promise.resolve({ projectId }),
+    });
+    expect(preview.status).toBe(200);
+    expect(preview.headers.get("Content-Type")).toBe("application/pdf");
+    expect(preview.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(await preview.text()).toContain("%PDF-1.7");
+    expect(mocks.prepareWorkspaceDocumentPreview).toHaveBeenCalledWith(expect.objectContaining({
+      projectId,
+      relativePath: "documents/brief.docx",
+      fileName: "brief.docx",
+    }));
+
+    mocks.readRegularFileWithin.mockResolvedValue(Buffer.from("fake office"));
+    const fake = await GET(request("documents/fake.docx"), { params: Promise.resolve({ projectId }) });
+    expect(fake.status).toBe(415);
+  });
+
   it("rejects malformed queries before reading the workspace", async () => {
     const response = await GET(
       new Request(`https://brain.example/api/projects/${projectId}/files?path=src%2Fa.ts&path=src%2Fb.ts`),
       { params: Promise.resolve({ projectId }) },
     );
     expect(response.status).toBe(400);
+    expect(mocks.readRegularFileWithin).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cross-tenant session before resolving any workspace path", async () => {
+    mocks.session.current = {
+      provider: "local",
+      tenant: { id: "other-company", name: "Other" },
+      user: { id: "00000000-0000-4000-8000-000000000001", name: "Arnau", email: "arnau@example.test" },
+    };
+    const response = await GET(request("src/example.ts"), { params: Promise.resolve({ projectId }) });
+    expect(response.status).toBe(403);
     expect(mocks.readRegularFileWithin).not.toHaveBeenCalled();
   });
 });

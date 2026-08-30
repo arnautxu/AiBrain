@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { loadInstallationConfig } from "@/config/installation";
 import { contentDisposition } from "@/library/http";
+import { documentServicesForUser } from "@/documents/server-service";
+import { UploadValidationError, validateUploadedDocument } from "@/documents/upload-validation";
+import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { getProjectRuntimeContext } from "@/workbench/store";
@@ -15,6 +18,12 @@ const MAXIMUM_TEXT_FILE_BYTES = 8_000_000;
 const MAXIMUM_BINARY_FILE_BYTES = 50 * 1024 * 1024;
 const MAXIMUM_TEXT_BYTES = 500_000;
 const PDF_SIGNATURE = Buffer.from("%PDF-");
+
+const officeMimeTypes: Record<string, string> = {
+  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+};
 
 const imageMimeTypes: Record<string, string> = {
   ".avif": "image/avif",
@@ -56,6 +65,8 @@ function previewType(filePath: string) {
   const imageMimeType = imageMimeTypes[extension];
   if (imageMimeType) return { kind: "image" as const, mimeType: imageMimeType, language: null };
   if (extension === ".pdf") return { kind: "pdf" as const, mimeType: "application/pdf", language: null };
+  const officeMimeType = officeMimeTypes[extension];
+  if (officeMimeType) return { kind: "office" as const, mimeType: officeMimeType, language: null };
   return {
     kind: "text" as const,
     mimeType: extension === ".json" ? "application/json" : "text/plain",
@@ -76,23 +87,29 @@ export async function GET(
   const filePath = url.searchParams.get("path");
   const raw = url.searchParams.get("raw") === "1";
   const download = url.searchParams.get("download") === "1";
+  const representation = url.searchParams.get("representation") === "1";
   if (
-    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download") ||
+    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download" && key !== "representation") ||
     url.searchParams.getAll("path").length !== 1 ||
     url.searchParams.getAll("raw").length > 1 ||
     url.searchParams.getAll("download").length > 1 ||
+    url.searchParams.getAll("representation").length > 1 ||
     (url.searchParams.has("raw") && url.searchParams.get("raw") !== "1") ||
     (url.searchParams.has("download") && url.searchParams.get("download") !== "1") ||
+    (url.searchParams.has("representation") && url.searchParams.get("representation") !== "1") ||
     (download && !raw) ||
+    (representation && (raw || download)) ||
     !filePath || filePath.length > 2_048 || filePath.includes("\0")
   ) {
     return NextResponse.json({ error: "Ruta no válida." }, { status: 400 });
   }
 
   try {
-    const project = await getProjectRuntimeContext(session, projectId);
     const installation = await loadInstallationConfig();
-    if (installation.installationId !== session.tenant.id) throw new Error("Installation mismatch.");
+    if (session.provider !== "local" || installation.installationId !== session.tenant.id) {
+      return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
+    }
+    const project = await getProjectRuntimeContext(session, projectId);
     const roots = deriveWorkerRoots(installation, session.user.id);
     const projectWorkspace = await resolveWorkerOwnedPath(
       roots.workspace,
@@ -108,12 +125,59 @@ export async function GET(
       preview.kind === "text" ? MAXIMUM_TEXT_FILE_BYTES : MAXIMUM_BINARY_FILE_BYTES,
     );
 
+    const encodedPath = encodeURIComponent(filePath);
+    const rawUrl = `/api/projects/${projectId}/files?path=${encodedPath}&raw=1`;
+    const downloadUrl = `${rawUrl}&download=1`;
+
+    if (representation) {
+      if (preview.kind !== "office") {
+        return NextResponse.json({ error: "Este formato no necesita una representación convertida." }, { status: 400 });
+      }
+      const services = await documentServicesForUser(installation, session.user.id);
+      const converted = await prepareWorkspaceDocumentPreview({
+        services,
+        projectId,
+        relativePath: workspaceRelativePath.split(path.sep).join("/"),
+        fileName: path.basename(filePath),
+        declaredMimeType: preview.mimeType,
+        data: contents,
+        signal: request.signal,
+      });
+      return new Response(new Uint8Array(converted.data), {
+        headers: {
+          "Cache-Control": "private, no-store",
+          "Content-Disposition": contentDisposition(`${path.basename(filePath)}.pdf`, "inline"),
+          "Content-Length": String(converted.data.byteLength),
+          "Content-Type": "application/pdf",
+          "Content-Security-Policy": "sandbox; default-src 'none'; frame-ancestors 'none'",
+          "Cross-Origin-Resource-Policy": "same-origin",
+          "Referrer-Policy": "no-referrer",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+        },
+      });
+    }
+
     if (raw) {
-      if (preview.kind === "text") {
+      if (preview.kind === "text" && !download) {
         return NextResponse.json({ error: "Este archivo se muestra como texto." }, { status: 400 });
       }
       if (preview.kind === "pdf" && !contents.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE)) {
         return NextResponse.json({ error: "El archivo no es un PDF válido." }, { status: 415 });
+      }
+      if (preview.kind === "office") {
+        try {
+          validateUploadedDocument({
+            fileName: path.basename(filePath),
+            declaredMimeType: preview.mimeType,
+            data: contents,
+          });
+        } catch (error) {
+          if (error instanceof UploadValidationError) {
+            return NextResponse.json({ error: "El archivo Office no supera la validación segura." }, { status: 415 });
+          }
+          throw error;
+        }
       }
       return new Response(contents, {
         headers: {
@@ -133,7 +197,23 @@ export async function GET(
     }
 
     if (preview.kind !== "text") {
-      const previewUrl = `/api/projects/${projectId}/files?path=${encodeURIComponent(filePath)}&raw=1`;
+      if (preview.kind === "office") {
+        try {
+          validateUploadedDocument({
+            fileName: path.basename(filePath),
+            declaredMimeType: preview.mimeType,
+            data: contents,
+          });
+        } catch (error) {
+          if (error instanceof UploadValidationError) {
+            return NextResponse.json({ error: "El archivo Office no supera la validación segura." }, { status: 415 });
+          }
+          throw error;
+        }
+      }
+      const previewUrl = preview.kind === "office"
+        ? `/api/projects/${projectId}/files?path=${encodedPath}&representation=1`
+        : rawUrl;
       return NextResponse.json({
         file: {
           path: filePath,
@@ -144,6 +224,8 @@ export async function GET(
           language: null,
           content: null,
           previewUrl,
+          previewMimeType: preview.kind === "office" ? "application/pdf" : preview.mimeType,
+          downloadUrl,
         },
       }, { headers: { "Cache-Control": "private, no-store" } });
     }
@@ -170,9 +252,14 @@ export async function GET(
         language: preview.language,
         content,
         previewUrl: null,
+        previewMimeType: "text/plain",
+        downloadUrl,
       },
     }, { headers: { "Cache-Control": "private, no-store" } });
-  } catch {
+  } catch (error) {
+    if (error instanceof UploadValidationError) {
+      return NextResponse.json({ error: "Este formato no admite una vista previa segura." }, { status: 415 });
+    }
     return NextResponse.json({ error: "No se ha podido abrir este archivo del proyecto." }, { status: 404 });
   }
 }

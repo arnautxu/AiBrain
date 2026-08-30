@@ -1,7 +1,7 @@
 "use client";
 
 import NextImage from "next/image";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowSquareOut,
@@ -13,6 +13,7 @@ import {
   ImagesSquare,
   MagnifyingGlass,
   SpinnerGap,
+  UploadSimple,
   X,
 } from "@phosphor-icons/react";
 import {
@@ -27,6 +28,7 @@ import type { WorkbenchProject, WorkbenchThread } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
 import { SafeVisualizationPreview } from "@/components/safe-visualization-preview";
 import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
+import { AuthenticatedTextPreview } from "@/components/authenticated-text-preview";
 
 type LibraryFilter = "all" | LibraryItemType;
 
@@ -75,6 +77,106 @@ function responseItems(value: unknown): LibraryItem[] | null {
   return value.items;
 }
 
+type DocumentHistoryVersion = {
+  versionId: string;
+  number: number;
+  etag: string;
+  fileName: string;
+  kind: "docx" | "xlsx" | "pptx" | "pdf" | "text" | "image";
+  mediaType: string;
+  size: number;
+  author: { userId: string; name: string };
+  createdAt: string;
+  provenance: { type: "original_upload" | "roundtrip_upload" | "restore"; sourceVersionId: string | null };
+  downloadUrl: string;
+  previewUrl: string;
+};
+
+type DocumentHistory = {
+  documentId: string;
+  threadId: string;
+  title: string;
+  scope: { kind: "private" | "project" | "company"; id: string };
+  originalVersionId: string;
+  latestVersionId: string;
+  versions: DocumentHistoryVersion[];
+};
+
+function parsedDocumentHistory(value: unknown): DocumentHistory | null {
+  if (!value || typeof value !== "object" || !("document" in value) || !value.document ||
+      typeof value.document !== "object" || Array.isArray(value.document)) return null;
+  const document = value.document as Record<string, unknown>;
+  const scope = document.scope;
+  const versions = document.versions;
+  if (typeof document.documentId !== "string" || typeof document.threadId !== "string" ||
+      typeof document.title !== "string" || typeof document.originalVersionId !== "string" ||
+      typeof document.latestVersionId !== "string" || !scope || typeof scope !== "object" || Array.isArray(scope) ||
+      !("kind" in scope) || (scope.kind !== "private" && scope.kind !== "project" && scope.kind !== "company") ||
+      !("id" in scope) || typeof scope.id !== "string" || !Array.isArray(versions) || !versions.length) return null;
+  const parsed = versions.flatMap((candidate): DocumentHistoryVersion[] => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+    const version = candidate as Record<string, unknown>;
+    const author = version.author;
+    const provenance = version.provenance;
+    if (typeof version.versionId !== "string" || !Number.isSafeInteger(version.number) ||
+        typeof version.etag !== "string" || !/^[0-9a-f]{64}$/.test(version.etag) ||
+        typeof version.fileName !== "string" ||
+        (version.kind !== "docx" && version.kind !== "xlsx" && version.kind !== "pptx" &&
+          version.kind !== "pdf" && version.kind !== "text" && version.kind !== "image") ||
+        typeof version.mediaType !== "string" || !Number.isSafeInteger(version.size) ||
+        typeof version.createdAt !== "string" || Number.isNaN(Date.parse(version.createdAt)) ||
+        typeof version.downloadUrl !== "string" || !version.downloadUrl.startsWith("/api/") ||
+        typeof version.previewUrl !== "string" || !version.previewUrl.startsWith("/api/") ||
+        !author || typeof author !== "object" || Array.isArray(author) || !("userId" in author) ||
+        typeof author.userId !== "string" || !("name" in author) || typeof author.name !== "string" ||
+        !provenance || typeof provenance !== "object" || Array.isArray(provenance) || !("type" in provenance) ||
+        (provenance.type !== "original_upload" && provenance.type !== "roundtrip_upload" && provenance.type !== "restore") ||
+        !("sourceVersionId" in provenance) || (provenance.sourceVersionId !== null && typeof provenance.sourceVersionId !== "string")) return [];
+    return [{
+      versionId: version.versionId,
+      number: version.number as number,
+      etag: version.etag,
+      fileName: version.fileName,
+      kind: version.kind,
+      mediaType: version.mediaType,
+      size: version.size as number,
+      author: { userId: author.userId, name: author.name },
+      createdAt: version.createdAt,
+      provenance: { type: provenance.type, sourceVersionId: provenance.sourceVersionId },
+      downloadUrl: version.downloadUrl,
+      previewUrl: version.previewUrl,
+    }];
+  });
+  if (parsed.length !== versions.length || parsed.at(-1)?.versionId !== document.latestVersionId) return null;
+  return {
+    documentId: document.documentId,
+    threadId: document.threadId,
+    title: document.title,
+    scope: { kind: scope.kind, id: scope.id },
+    originalVersionId: document.originalVersionId,
+    latestVersionId: document.latestVersionId,
+    versions: parsed,
+  };
+}
+
+function uploadedDocumentIds(item: LibraryItem | null) {
+  if (!item || item.type !== "upload") return null;
+  const parts = item.id.split(":");
+  return parts.length === 3 && parts[0] === "upload" ? { threadId: parts[1]!, documentId: parts[2]! } : null;
+}
+
+function scopeLabel(scope: DocumentHistory["scope"]) {
+  if (scope.kind === "company") return "Empresa";
+  if (scope.kind === "project") return "Proyecto";
+  return "Privado";
+}
+
+function provenanceLabel(type: DocumentHistoryVersion["provenance"]["type"]) {
+  if (type === "original_upload") return "Original";
+  if (type === "restore") return "Restauración";
+  return "Edición externa";
+}
+
 export function LibraryPanel({
   open,
   projects,
@@ -97,7 +199,12 @@ export function LibraryPanel({
   const [offlineFallback, setOfflineFallback] = useState(false);
   const [artifactAction, setArtifactAction] = useState<AdvancedArtifactKind | "publish" | null>(null);
   const [artifactNotice, setArtifactNotice] = useState<string | null>(null);
+  const [documentHistory, setDocumentHistory] = useState<DocumentHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [versionAction, setVersionAction] = useState<"upload" | "restore" | null>(null);
+  const [versionNotice, setVersionNotice] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const versionInputRef = useRef<HTMLInputElement>(null);
   const dialogRef = useModalFocus(open, onClose, searchRef);
 
   useEffect(() => {
@@ -137,6 +244,111 @@ export function LibraryPanel({
       (!needle || `${item.name} ${item.projectName} ${item.threadTitle}`.toLocaleLowerCase("es").includes(needle)));
   }, [filter, items, query]);
   const selected = visible.find((item) => item.id === selectedId) ?? visible[0] ?? null;
+  const selectedDocumentIds = useMemo(() => uploadedDocumentIds(selected), [selected]);
+  const activeDocumentHistory = documentHistory && selectedDocumentIds &&
+    documentHistory.documentId === selectedDocumentIds.documentId &&
+    documentHistory.threadId === selectedDocumentIds.threadId ? documentHistory : null;
+
+  const loadDocumentHistory = useCallback(async (ids: { threadId: string; documentId: string }, signal?: AbortSignal) => {
+    const response = await fetch(`/api/threads/${encodeURIComponent(ids.threadId)}/documents/${encodeURIComponent(ids.documentId)}`, {
+      cache: "no-store",
+      signal,
+    });
+    const body: unknown = await response.json().catch(() => null);
+    const parsed = parsedDocumentHistory(body);
+    if (!response.ok || !parsed) throw new Error("No se ha podido cargar el historial versionado.");
+    return parsed;
+  }, []);
+
+  useEffect(() => {
+    if (!open || !selectedDocumentIds) return;
+    const controller = new AbortController();
+    void Promise.resolve().then(() => {
+      if (!controller.signal.aborted) {
+        setDocumentHistory(null);
+        setVersionNotice(null);
+        setHistoryLoading(true);
+      }
+      return loadDocumentHistory(selectedDocumentIds, controller.signal);
+    })
+      .then((history) => {
+        if (!controller.signal.aborted) setDocumentHistory(history);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setVersionNotice("El original sigue disponible, pero no se ha podido cargar su historial.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setHistoryLoading(false);
+      });
+    return () => controller.abort();
+  }, [loadDocumentHistory, open, selectedDocumentIds]);
+
+  const replaceHistory = (value: unknown) => {
+    const parsed = parsedDocumentHistory(value);
+    if (!parsed) throw new Error("La respuesta del historial no cumple el contrato seguro.");
+    setDocumentHistory(parsed);
+    return parsed;
+  };
+
+  const uploadNewVersion = async (file: File) => {
+    if (!selectedDocumentIds || !activeDocumentHistory) return;
+    const latest = activeDocumentHistory.versions.at(-1)!;
+    setVersionAction("upload");
+    setVersionNotice(null);
+    try {
+      const form = new FormData();
+      form.set("uploadId", crypto.randomUUID());
+      form.set("file", file);
+      const response = await fetch(
+        `/api/threads/${encodeURIComponent(selectedDocumentIds.threadId)}/documents`,
+        { method: "POST", headers: { "If-Match": `"${latest.etag}"`, "X-AiBrain-Document-Id": selectedDocumentIds.documentId }, body: form },
+      );
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
+          ? body.error : "No se ha podido subir la nueva versión.";
+        throw new Error(message);
+      }
+      replaceHistory(body);
+      setVersionNotice("Nueva versión guardada sin reemplazar el original.");
+    } catch (error) {
+      setVersionNotice(error instanceof Error ? error.message : "No se ha podido subir la nueva versión.");
+      void loadDocumentHistory(selectedDocumentIds).then(setDocumentHistory).catch(() => undefined);
+    } finally {
+      setVersionAction(null);
+      if (versionInputRef.current) versionInputRef.current.value = "";
+    }
+  };
+
+  const restoreVersion = async (version: DocumentHistoryVersion) => {
+    if (!selectedDocumentIds || !activeDocumentHistory) return;
+    const latest = activeDocumentHistory.versions.at(-1)!;
+    setVersionAction("restore");
+    setVersionNotice(null);
+    try {
+      const response = await fetch(
+        `/api/threads/${encodeURIComponent(selectedDocumentIds.threadId)}/documents/${encodeURIComponent(selectedDocumentIds.documentId)}/versions/${encodeURIComponent(version.versionId)}/restore`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "If-Match": `"${latest.etag}"` },
+          body: JSON.stringify({ restoreVersionId: crypto.randomUUID() }),
+        },
+      );
+      const body: unknown = await response.json().catch(() => null);
+      if (!response.ok) {
+        const message = body && typeof body === "object" && "error" in body && typeof body.error === "string"
+          ? body.error : "No se ha podido restaurar la versión.";
+        throw new Error(message);
+      }
+      replaceHistory(body);
+      setVersionNotice(`La versión ${version.number} se ha restaurado como una versión nueva.`);
+    } catch (error) {
+      setVersionNotice(error instanceof Error ? error.message : "No se ha podido restaurar la versión.");
+      void loadDocumentHistory(selectedDocumentIds).then(setDocumentHistory).catch(() => undefined);
+    } finally {
+      setVersionAction(null);
+    }
+  };
 
   const upsertAdvancedItem = (summary: unknown) => {
     if (!isAdvancedArtifactSummary(summary)) return null;
@@ -205,8 +417,15 @@ export function LibraryPanel({
   };
 
   if (!open) return null;
-  const previewIsImage = selected?.previewUrl && selected.mimeType?.startsWith("image/");
-  const previewIsPdf = selected?.mimeType === "application/pdf";
+  const latestDocumentVersion = activeDocumentHistory?.versions.at(-1) ?? null;
+  const effectivePreviewUrl = latestDocumentVersion?.previewUrl ?? selected?.previewUrl ?? null;
+  const effectiveDownloadUrl = latestDocumentVersion?.downloadUrl ?? selected?.downloadUrl ?? null;
+  const effectiveMimeType = latestDocumentVersion?.mediaType ?? selected?.mimeType ?? null;
+  const effectiveName = latestDocumentVersion?.fileName ?? selected?.name ?? "documento";
+  const previewIsImage = effectivePreviewUrl && effectiveMimeType?.startsWith("image/");
+  const previewIsPdf = effectiveMimeType === "application/pdf" ||
+    effectiveMimeType?.startsWith("application/vnd.openxmlformats-officedocument.");
+  const previewIsText = effectiveMimeType?.startsWith("text/") || effectiveMimeType === "application/json";
 
   return (
     <div className="workspace-overlay fixed inset-0 z-[75] flex sm:p-5">
@@ -228,7 +447,7 @@ export function LibraryPanel({
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-          <div className="flex min-h-0 w-full flex-col border-b border-[var(--border-subtle)] md:w-[48%] md:border-b-0 md:border-r">
+          <div className="flex min-h-0 max-h-[44%] w-full flex-col border-b border-[var(--border-subtle)] md:max-h-none md:w-[48%] md:border-b-0 md:border-r">
             <div className="shrink-0 space-y-3 p-3 sm:p-4">
               <label className="flex h-11 items-center gap-2.5 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text-subtle)] focus-within:border-[var(--border-strong)]">
                 <MagnifyingGlass size={16} />
@@ -253,25 +472,35 @@ export function LibraryPanel({
             </div>
           </div>
 
-          <div className="scrollbar-thin hidden min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-5 md:block lg:p-8">
+          <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto bg-[var(--surface)] p-4 sm:p-5 lg:p-8">
             {selected ? <div className="mx-auto flex min-h-full max-w-xl flex-col">
               <div className="flex items-start gap-3">
                 <span className="grid size-11 shrink-0 place-items-center rounded-[14px] bg-[var(--surface-raised)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]">{icon(selected.type)}</span>
-                <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{selected.name}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{label(selected.type)} · {formatSize(selected.size) ?? "Tamaño no disponible"}</p></div>
+                <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{effectiveName}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{label(selected.type)} · {formatSize(latestDocumentVersion?.size ?? selected.size) ?? "Tamaño no disponible"}{activeDocumentHistory ? ` · v${latestDocumentVersion?.number}` : ""}</p></div>
               </div>
               <div className="mt-5 grid min-h-64 flex-1 place-items-center overflow-hidden rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && selected.previewUrl ? <NextImage unoptimized width={960} height={720} src={selected.previewUrl} alt={`Vista previa de ${selected.name}`} className="max-h-[460px] w-full object-contain" /> : previewIsPdf && selected.previewUrl ? <AuthenticatedPdfPreview previewUrl={selected.previewUrl} title={`Vista previa de ${selected.name}`} className="h-[460px] w-full bg-white" /> : selected.previewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${selected.name}`} src={selected.previewUrl} className="h-[460px] w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
+                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && effectivePreviewUrl ? <NextImage unoptimized width={960} height={720} src={effectivePreviewUrl} alt={`Vista previa de ${effectiveName}`} className="max-h-[460px] w-full object-contain" /> : previewIsPdf && effectivePreviewUrl ? <AuthenticatedPdfPreview previewUrl={effectivePreviewUrl} title={`Vista previa de ${effectiveName}`} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : previewIsText && effectivePreviewUrl ? <AuthenticatedTextPreview previewUrl={effectivePreviewUrl} title={`Texto de ${effectiveName}`} /> : effectivePreviewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${effectiveName}`} src={effectivePreviewUrl} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                {selected.downloadUrl ? <a href={selected.downloadUrl} download={selected.name} className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />Descargar</a> : null}
+                {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />Descargar original</a> : null}
+                {activeDocumentHistory ? <><input ref={versionInputRef} className="sr-only" type="file" aria-label="Seleccionar una nueva versión" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNewVersion(file); }} /><button type="button" disabled={versionAction !== null} className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => versionInputRef.current?.click()}><UploadSimple size={14} />{versionAction === "upload" ? "Subiendo…" : "Subir versión editada"}</button></> : null}
                 {selected.downloadZipUrl ? <a href={selected.downloadZipUrl} download className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowDown size={14} />Exportar ZIP</a> : null}
-                {selected.previewUrl ? <a href={selected.previewUrl} target="_blank" rel="noreferrer" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowSquareOut size={14} />Abrir</a> : null}
+                {effectivePreviewUrl ? <a href={effectivePreviewUrl} target="_blank" rel="noreferrer" className="flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowSquareOut size={14} />Abrir representación</a> : null}
                 {selected.artifactId ? <button type="button" disabled={artifactAction !== null} className="min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => void publishArtifact()}>{artifactAction === "publish" ? "Publicando…" : selected.internalSiteUrl ? "Actualizar sitio interno" : "Publicar sitio interno"}</button> : null}
                 {selected.internalSiteUrl ? <a href={selected.internalSiteUrl} target="_blank" rel="noreferrer" className="flex min-h-10 items-center gap-2 rounded-full bg-[var(--positive)] px-4 text-[12px] font-semibold text-white"><ArrowSquareOut size={14} />Ver sitio interno</a> : null}
                 <button type="button" className="min-h-10 rounded-full px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>Ver conversación</button>
               </div>
+              {selectedDocumentIds ? <section className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3" aria-label="Historial de versiones del documento">
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-[var(--text)]">Historial de versiones</p>{activeDocumentHistory ? <p className="mt-1 text-[10px] text-[var(--text-subtle)]">{scopeLabel(activeDocumentHistory.scope)} · original conservado · {activeDocumentHistory.versions.length} {activeDocumentHistory.versions.length === 1 ? "versión" : "versiones"}</p> : null}</div>{historyLoading ? <SpinnerGap size={15} className="motion-safe:animate-spin text-[var(--text-subtle)]" aria-label="Cargando historial" /> : null}</div>
+                {activeDocumentHistory ? <ol className="mt-3 space-y-2">{[...activeDocumentHistory.versions].reverse().map((version) => {
+                  const latest = version.versionId === activeDocumentHistory.latestVersionId;
+                  return <li key={version.versionId} className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2"><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-[var(--text)]">v{version.number} · {version.fileName}{latest ? " · actual" : ""}</p><p className="mt-0.5 truncate text-[9px] text-[var(--text-subtle)]">{provenanceLabel(version.provenance.type)} · {version.author.name} · {new Date(version.createdAt).toLocaleString("es")}</p></div><a href={version.downloadUrl} download={version.fileName} className="min-h-8 rounded-full px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Descargar</a>{!latest ? <button type="button" disabled={versionAction !== null} className="min-h-8 rounded-full border border-[var(--border)] px-2.5 text-[10px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void restoreVersion(version)}>Restaurar</button> : null}</li>;
+                })}</ol> : null}
+                <p className="mt-3 text-[9px] leading-4 text-[var(--text-subtle)]">Para editar en Word, Excel o PowerPoint, descarga el original, edítalo en tu aplicación y súbelo aquí. El navegador no simula guardado nativo automático.</p>
+              </section> : null}
               {selected.type === "result" ? <div className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">Crear desde esta respuesta</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">La visualización usa una tabla numérica existente. El sitio interno conserva el contenido y elimina código inseguro.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("visualization")}>{artifactAction === "visualization" ? "Creando…" : "Crear visualización"}</button><button type="button" disabled={artifactAction !== null} className="min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("internal-site")}>{artifactAction === "internal-site" ? "Creando…" : "Crear sitio interno"}</button></div></div> : null}
               {artifactNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{artifactNotice}</p> : null}
+              {versionNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{versionNotice}</p> : null}
               <p className="mt-3 truncate text-[10px] text-[var(--text-subtle)]">{selected.projectName} · {selected.threadTitle}</p>
             </div> : <div className="workspace-empty-state m-auto text-center"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><ImagesSquare size={20} /></span><p className="mt-3 font-semibold text-[var(--text)]">Selecciona un elemento</p><p className="mt-1">Aquí podrás previsualizarlo, descargarlo o volver a la conversación donde se creó.</p></div>}
           </div>
@@ -280,7 +509,7 @@ export function LibraryPanel({
         {selected ? <footer className="flex min-h-14 shrink-0 items-center gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 md:hidden">
           <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">{selected.name}</span>
           <button type="button" className="min-h-9 rounded-full px-3 text-[11px] font-medium text-[var(--text-secondary)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>Ver chat</button>
-          {selected.downloadUrl ? <a href={selected.downloadUrl} download={selected.name} className="flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)]"><ArrowDown size={13} />Descargar</a> : null}
+          {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)]"><ArrowDown size={13} />Descargar</a> : null}
         </footer> : null}
       </section>
     </div>

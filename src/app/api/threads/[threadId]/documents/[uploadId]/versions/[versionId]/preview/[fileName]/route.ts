@@ -2,16 +2,12 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
+import { versionPreviewFile } from "@/documents/version-http";
 import { StorageError } from "@/storage";
-import { workbenchErrorResponse } from "@/workbench/http";
 import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 
 export const runtime = "nodejs";
-
-type RouteContext = {
-  params: Promise<{ threadId: string; uploadId: string; fileName: string }>;
-};
 
 function mediaType(fileName: string) {
   if (fileName.endsWith(".pdf")) return "application/pdf";
@@ -22,26 +18,35 @@ function mediaType(fileName: string) {
   return "text/plain; charset=utf-8";
 }
 
-function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
-  return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
-}
-
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(
+  _request: Request,
+  context: { params: Promise<{ threadId: string; uploadId: string; versionId: string; fileName: string }> },
+) {
   const session = await getSession();
-  if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
-  const { threadId, uploadId, fileName } = await context.params;
-  if (!isUuid(threadId) || !isUuid(uploadId) ||
+  if (!session) return NextResponse.json({ error: "No autenticado." }, { status: 401 });
+  const { threadId, uploadId: documentId, versionId, fileName } = await context.params;
+  if (!isUuid(threadId) || !isUuid(documentId) || !isUuid(versionId) ||
       !/^[a-z0-9][a-z0-9._-]{0,159}$/.test(fileName)) {
-    return NextResponse.json({ error: "Preview no vàlid." }, { status: 400 });
+    return NextResponse.json({ error: "Vista previa no válida." }, { status: 400 });
   }
   try {
     const installation = await loadInstallationConfig();
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
-      return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
+      return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
     }
     await getThreadRuntimeContext(session, threadId);
     const services = await documentServicesForUser(installation, session.user.id);
-    const data = await services.previews.readFile(threadId, uploadId, fileName);
+    const history = await services.versions.read(threadId, documentId);
+    const version = history.versions.find((candidate) => candidate.versionId === versionId);
+    if (!version || versionPreviewFile(version) !== fileName) {
+      return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
+    }
+    const staged = await services.staging.readById(threadId, version.contentUploadId);
+    if (staged.fileName !== version.fileName || staged.kind !== version.kind || staged.mediaType !== version.mediaType ||
+        staged.size !== version.size || staged.sha256 !== version.sha256) {
+      return NextResponse.json({ error: "La versión ya no coincide con su contenido inmutable." }, { status: 409 });
+    }
+    const data = await services.previews.readFile(threadId, version.contentUploadId, fileName);
     return new Response(new Uint8Array(data), {
       headers: {
         "Content-Type": mediaType(fileName),
@@ -56,10 +61,9 @@ export async function GET(_request: Request, context: RouteContext) {
       },
     });
   } catch (error) {
-    if ((error instanceof StorageError && error.code === "DOCUMENT_PREVIEW_FILE_NOT_FOUND") ||
-        isNodeError(error, "ENOENT")) {
-      return NextResponse.json({ error: "Preview no trobat." }, { status: 404 });
+    if (error instanceof StorageError || (error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
+      return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
     }
-    return workbenchErrorResponse(error, "No s’ha pogut llegir el preview.");
+    return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
   }
 }

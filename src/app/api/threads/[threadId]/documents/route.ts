@@ -6,6 +6,8 @@ import { loadInstallationConfig } from "@/config/installation";
 import { parseStreamingDocumentUpload, type ParsedDocumentUpload } from "@/documents/multipart-upload";
 import { documentServicesForUser } from "@/documents/server-service";
 import { UploadValidationError, validateUploadedDocumentFile } from "@/documents/upload-validation";
+import { documentVersionJson } from "@/documents/version-http";
+import { parseIfMatch, quotedDocumentEtag } from "@/documents/version-store";
 import { StorageError } from "@/storage";
 import { workbenchErrorResponse } from "@/workbench/http";
 import { getThreadRuntimeContext } from "@/workbench/store";
@@ -22,6 +24,15 @@ function documentErrorResponse(error: unknown) {
   operationalLogger.warn("document.upload_rejected", { code });
   if (code === "UPLOAD_SIZE_INVALID") {
     return NextResponse.json({ error: "El document supera el límit de seguretat." }, { status: 413 });
+  }
+  if (code === "DOCUMENT_VERSION_TYPE_MISMATCH") {
+    return NextResponse.json({ error: "La nova versió ha de conservar el format original del document." }, { status: 400 });
+  }
+  if (code === "DOCUMENT_VERSION_CONFLICT") {
+    return NextResponse.json({
+      error: "El document ha canviat. Recarrega l’historial abans de pujar una altra versió.",
+      code: "DOCUMENT_VERSION_CONFLICT",
+    }, { status: 409 });
   }
   if (code === "STORAGE_STAGING_ID_CONFLICT" || code === "DOCUMENT_PREVIEW_CONFLICT") {
     return NextResponse.json({ error: "Aquest uploadId ja identifica un altre document." }, { status: 409 });
@@ -55,14 +66,32 @@ export async function POST(request: Request, context: RouteContext) {
   if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   const { threadId } = await context.params;
   if (!isUuid(threadId)) return NextResponse.json({ error: "Fil no vàlid." }, { status: 400 });
+  const roundtripDocumentId = request.headers.get("X-AiBrain-Document-Id");
+  if (roundtripDocumentId !== null && !isUuid(roundtripDocumentId)) {
+    return NextResponse.json({ error: "Document no vàlid." }, { status: 400 });
+  }
+  const roundtripBaseEtag = roundtripDocumentId ? parseIfMatch(request.headers.get("If-Match")) : null;
+  if (roundtripDocumentId && !roundtripBaseEtag) {
+    return NextResponse.json({ error: "Cal indicar la versió base abans de desar.", code: "DOCUMENT_VERSION_BASE_REQUIRED" }, { status: 428 });
+  }
 
   try {
-    await getThreadRuntimeContext(session, threadId);
     const installation = await loadInstallationConfig();
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
     }
+    const runtimeContext = await getThreadRuntimeContext(session, threadId);
     const services = await documentServicesForUser(installation, session.user.id);
+    if (roundtripDocumentId && roundtripBaseEtag) {
+      const current = await services.versions.read(threadId, roundtripDocumentId);
+      const currentEtag = current.versions.at(-1)!.etag;
+      if (currentEtag !== roundtripBaseEtag) {
+        return NextResponse.json({
+          error: "El document ha canviat. Recarrega l’historial abans de pujar una altra versió.",
+          code: "DOCUMENT_VERSION_CONFLICT",
+        }, { status: 409, headers: { ETag: quotedDocumentEtag(currentEtag), "Cache-Control": "private, no-store" } });
+      }
+    }
     return await services.storageGate.run(async () => {
       let parsedUpload: ParsedDocumentUpload | null = null;
       try {
@@ -90,6 +119,23 @@ export async function POST(request: Request, context: RouteContext) {
           sourcePath: parsedUpload.temporaryPath,
         });
         const preview = await services.previews.create(document, { signal: request.signal });
+        if (roundtripDocumentId && roundtripBaseEtag) {
+          return documentVersionJson(await services.versions.appendUpload({
+            threadId,
+            documentId: roundtripDocumentId,
+            versionId: uploadId,
+            baseEtag: roundtripBaseEtag,
+            document,
+            author: { userId: session.user.id, name: session.user.name },
+          }), 201);
+        }
+        await services.versions.create({
+          threadId,
+          documentId: uploadId,
+          document,
+          author: { userId: session.user.id, name: session.user.name },
+          scope: { kind: "project", id: runtimeContext.projectId },
+        });
         return NextResponse.json({
           document,
           preview: {
