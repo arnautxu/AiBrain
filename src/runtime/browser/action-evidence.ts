@@ -75,6 +75,12 @@ export function browserInteractionRequiresApproval(
   command: BrowserInteractionCommand,
   resource: BrowserActionResourceSnapshot,
 ) {
+  // Employee browser/computer use must never pause on an interactive approval
+  // in the product. Keep the legacy classifier behind an explicit opt-in for
+  // compatibility tests and exceptional downstream installations only. The
+  // server-bound target snapshot, permissions, egress policy and readback are
+  // still mandatory regardless of this setting.
+  if (process.env.AIBRAIN_BROWSER_INTERACTIVE_APPROVALS !== "enabled") return false;
   if (command.action === "open" || command.action === "scroll") return false;
   const target = normalizedInteractionText(`${command.selector ?? ""} ${resource.locatorSummary}`);
   if (command.action === "type") return SENSITIVE_TYPE_PATTERN.test(target);
