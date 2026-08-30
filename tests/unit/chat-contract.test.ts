@@ -4,6 +4,7 @@ import {
   isChatAttachment,
   isChatInputAttachment,
   isGeneratedArtifact,
+  projectChatStreamEvent,
   isTurnOptions,
   type ChatMessage,
 } from "@/lib/chat-contract";
@@ -148,5 +149,36 @@ describe("chat contract", () => {
     });
     expect(ready.artifacts).toHaveLength(1);
     expect(ready.artifacts[0]).toMatchObject({ status: "ready", pages: 2 });
+  });
+
+  it("projects transport order once and records a real terminal duration", () => {
+    const message: ChatMessage = {
+      id: "message-ordered",
+      role: "assistant",
+      content: "",
+      createdAt: "2026-08-30T10:00:00.000Z",
+      status: "streaming",
+      activity: [],
+      plan: [],
+      approvals: [],
+      diff: "",
+      attachments: [],
+      artifacts: [],
+    };
+    const started = projectChatStreamEvent({
+      type: "activity",
+      item: { id: "web-1", kind: "web", label: "Buscando", status: "running" },
+    }, { sequence: 7 });
+    const completed = projectChatStreamEvent({
+      type: "activity",
+      item: { id: "web-1", kind: "web", label: "Completado", status: "complete" },
+    }, { sequence: 9 });
+    const withStarted = applyChatStreamEvent(message, started);
+    const withCompleted = applyChatStreamEvent(withStarted, completed);
+    const terminal = projectChatStreamEvent({ type: "done" }, { terminalDurationMs: 12_345 });
+    const done = applyChatStreamEvent(withCompleted, terminal);
+
+    expect(done.activity).toEqual([expect.objectContaining({ id: "web-1", sequence: 7, status: "complete" })]);
+    expect(done).toMatchObject({ status: "complete", durationMs: 12_345 });
   });
 });

@@ -10,6 +10,14 @@ describe("MarkdownMessage", () => {
       "## Resultado",
       "- Primer punto",
       "- Segundo punto",
+      "  - Subpunto",
+      "",
+      "1. Paso uno",
+      "2. Paso dos",
+      "",
+      "- [x] Validado",
+      "",
+      "Texto con ~~contenido anterior~~ y `código inline`.",
       "",
       "| Estado | Valor |",
       "| --- | --- |",
@@ -24,6 +32,9 @@ describe("MarkdownMessage", () => {
 
     expect(screen.getByRole("heading", { name: "Resultado" })).toBeInTheDocument();
     expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("Validado").closest("li")).toHaveClass("task-list-item");
+    expect(screen.getByText("contenido anterior").tagName).toBe("DEL");
+    expect(screen.getByText("código inline").tagName).toBe("CODE");
     expect(screen.getByRole("link", { name: "Referencia" })).toHaveAttribute("target", "_blank");
     expect(screen.getByRole("button", { name: "Copiar bloque de código" })).toBeInTheDocument();
     expect(screen.getByText("const ready = true;")).toBeInTheDocument();

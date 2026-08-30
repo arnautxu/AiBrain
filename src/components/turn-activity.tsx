@@ -24,9 +24,14 @@ import type {
 import { ManagedAppActionControl } from "@/components/managed-app-action-control";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
-import { ToolResultList } from "@/components/tool-result-list";
+import { ToolResultCard } from "@/components/tool-result-list";
 import { AgentStatusOrb } from "@/components/agent-status-orb";
 import { WorkspaceFilePreview } from "@/components/workspace-file-preview";
+import {
+  buildTurnTimeline,
+  formatWorkDuration,
+  turnDurationMs,
+} from "@/ui/turn-timeline";
 import {
   ThinkingStep,
   ThinkingSteps,
@@ -183,9 +188,12 @@ export function isRelevantProcessActivity(item: ActivityItem) {
   return !LIFECYCLE_ACTIVITY_IDS.has(item.id);
 }
 
-export function hasRelevantWorkProcess(message: Pick<ChatMessage, "activity" | "plan">) {
+export function hasRelevantWorkProcess(
+  message: Pick<ChatMessage, "activity" | "plan"> & Partial<Pick<ChatMessage, "toolResults">>,
+) {
   return message.plan.some((step) => step.status !== "pending") ||
-    message.activity.some((item) => item.status !== "pending" && isRelevantProcessActivity(item));
+    message.activity.some((item) => item.status !== "pending" && isRelevantProcessActivity(item)) ||
+    Boolean(message.toolResults?.length);
 }
 
 export function currentActivityLabel(relevantActivity: ActivityItem[]) {
@@ -276,25 +284,29 @@ export function TurnActivity({
   } | null>(null);
   const executionOpen = manualDisclosure?.status === message.status
     ? manualDisclosure.open
-    : false;
+    : streaming;
 
   const visiblePlan = message.plan.filter((step) => step.status !== "pending");
   const visibleActivity = message.activity.filter((item) =>
     item.status !== "pending" && isRelevantProcessActivity(item));
-  const hasWorkProcess = visiblePlan.length > 0 || visibleActivity.length > 0;
+  const timeline = buildTurnTimeline(visibleActivity, message.toolResults ?? []);
+  const hasWorkProcess = visiblePlan.length > 0 || timeline.length > 0;
   const hasDetails = hasWorkProcess || message.approvals.length > 0 ||
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
+  const duration = turnDurationMs(message);
   const executionLabel = message.status === "streaming"
     ? currentActivityLabel(visibleActivity)
-    : message.status === "stopped"
-      ? "Pensamiento interrumpido"
-      : message.status === "error"
-        ? "Trabajo interrumpido"
-        : "Trabajo completado";
+    : duration !== null
+      ? `Ha trabajado durante ${formatWorkDuration(duration)}`
+      : message.status === "stopped"
+        ? "Pensamiento interrumpido"
+        : message.status === "error"
+          ? "Trabajo interrumpido"
+          : "Trabajo completado";
 
   const activeActivity = [...visibleActivity].reverse().find((item) => item.status === "running" || item.status === "waiting");
-  const visibleStepCount = visiblePlan.length + visibleActivity.length;
+  const visibleStepCount = visiblePlan.length + timeline.length;
 
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
@@ -336,35 +348,51 @@ export function TurnActivity({
               />
             ))}
 
-            {visibleActivity.map((item, index) => {
-              const presentation = activityPresentation(item);
-              const stepIndex = visiblePlan.length + index;
-              return (
-                <ThinkingStep
-                  key={item.id}
-                  indicator={<ActivityIcon item={item} />}
-                  label={presentation.title}
-                  description={presentation.detail}
-                  status={item.status === "running" || item.status === "waiting" ? "active" : "complete"}
-                  delay={Math.min(stepIndex * 0.035, 0.18)}
-                  isLast={stepIndex === visibleStepCount - 1}
-                >
-                {projectId && item.kind === "file" && item.files?.length ? (
-                  <div className="mt-2">
-                    {item.files.map((file) => (
-                      <WorkspaceFilePreview key={`${file.change}:${file.path}`} projectId={projectId} file={file} />
-                    ))}
+            <div role="list" aria-label="Actividad del trabajo">
+              {timeline.map((entry, index) => {
+                const stepIndex = visiblePlan.length + index;
+                if (entry.type === "tool") {
+                  return (
+                    <div
+                      key={entry.key}
+                      role="listitem"
+                      data-timeline-key={entry.key}
+                      className="ml-7 py-1"
+                    >
+                      <ToolResultCard result={entry.item} onOpenBrowser={onOpenBrowser} />
+                    </div>
+                  );
+                }
+                const item = entry.item;
+                const presentation = activityPresentation(item);
+                return (
+                  <div key={entry.key} role="listitem" data-timeline-key={entry.key}>
+                    <ThinkingStep
+                      indicator={<ActivityIcon item={item} />}
+                      label={presentation.title}
+                      description={presentation.detail}
+                      status={item.status === "running" || item.status === "waiting" ? "active" : "complete"}
+                      delay={Math.min(stepIndex * 0.035, 0.18)}
+                      isLast={stepIndex === visibleStepCount - 1}
+                    >
+                      {projectId && item.kind === "file" && item.files?.length ? (
+                        <div className="mt-2">
+                          {item.files.map((file) => (
+                            <WorkspaceFilePreview key={`${file.change}:${file.path}`} projectId={projectId} file={file} />
+                          ))}
+                        </div>
+                      ) : null}
+                      {item.output ? (
+                        <details className="mt-2">
+                          <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
+                          <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
+                        </details>
+                      ) : null}
+                    </ThinkingStep>
                   </div>
-                ) : null}
-                {item.output ? (
-                  <details className="mt-2">
-                    <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
-                    <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{item.output}</pre>
-                  </details>
-                ) : null}
-                </ThinkingStep>
-              );
-            })}
+                );
+              })}
+            </div>
           </ThinkingStepsContent>
         </ThinkingSteps>
       ) : null}
@@ -372,8 +400,6 @@ export function TurnActivity({
       {message.approvals.map((approval) => (
         <ApprovalCard key={approval.id} approval={approval} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
-
-      <ToolResultList results={message.toolResults ?? []} onOpenBrowser={onOpenBrowser} />
 
       {managedAppAction ? <ManagedAppActionControl
         enabled={managedAppAction.enabled}

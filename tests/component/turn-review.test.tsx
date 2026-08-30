@@ -72,12 +72,11 @@ describe("turn activity and Review", () => {
       message={liveMessage}
       onResolveApproval={vi.fn()}
     />);
-    let trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+    let trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
 
-    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveTextContent("Preparando cambios en src/components/turn-activity.tsx");
     expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
-    fireEvent.click(trigger);
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
     expect(screen.queryByText("Contexto preparado")).not.toBeInTheDocument();
     expect(screen.queryByText(/Primer text 30508 ms/)).not.toBeInTheDocument();
@@ -118,7 +117,7 @@ describe("turn activity and Review", () => {
 
     trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
-    expect(trigger).toHaveTextContent("Trabajo completado");
+    expect(trigger).toHaveTextContent("Ha trabajado durante 0m 46s");
     expect(trigger.querySelector(".thinking-steps-shimmer")).not.toBeInTheDocument();
     expect(screen.getByText("Identificando el alcance exacto")).not.toBeVisible();
     fireEvent.click(trigger);
@@ -195,7 +194,6 @@ describe("turn activity and Review", () => {
       onResolveApproval={vi.fn()}
     />);
 
-    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
     fireEvent.click(screen.getByRole("button", { name: /src\/example\.ts/ }));
     await waitFor(() => {
       expect(screen.getByText("export const ready = true;")).toBeVisible();
@@ -222,8 +220,12 @@ describe("turn activity and Review", () => {
     />);
 
     expect(screen.queryByRole("button", { name: "Durante esta tarea" })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText("Acción conectada"));
-    expect(screen.getByText("indeterminate")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+    const toolTitle = screen.getByText("Acción conectada");
+    const toolCard = toolTitle.closest("details");
+    fireEvent.click(toolTitle);
+    expect(toolCard).toHaveAttribute("open");
+    expect(screen.getByText("indeterminate")).toBeInTheDocument();
   });
 
   it("renders an inspectable file diff and activity tabs", () => {
