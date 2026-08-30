@@ -23,7 +23,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByRole("button", { name: "Nueva conversación" }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: primaryProject, exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Automatizaciones" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Biblioteca" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Biblioteca" })).toBeVisible();
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });

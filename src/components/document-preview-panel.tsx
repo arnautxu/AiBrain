@@ -21,6 +21,7 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
   const [loaded, setLoaded] = useState(artifact.kind === "text");
   const [failed, setFailed] = useState(!artifact.previewUrl);
   const [reload, setReload] = useState(0);
+  const previewKind = artifact.kind === "pdf" ? "PDF" : "documento";
   const handleLoad = useCallback(() => setLoaded(true), []);
   const handleError = useCallback(() => setFailed(true), []);
 
@@ -45,7 +46,7 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--surface-muted)] p-2 md:p-3">
         {!loaded && !failed ? (
-          <div className="absolute inset-2 z-10 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-5 md:inset-3" role="status" aria-label="Cargando vista previa del documento">
+          <div className="absolute inset-2 z-10 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-5 md:inset-3" role="status" aria-label={`Cargando vista previa del ${previewKind}`}>
             <div className="mx-auto h-full max-w-[520px] animate-pulse rounded-md bg-white p-10 shadow-[var(--shadow-sm)]">
               <div className="h-5 w-2/3 rounded bg-[var(--surface-muted)]" />
               <div className="mt-8 space-y-3"><div className="h-3 rounded bg-[var(--surface-muted)]" /><div className="h-3 rounded bg-[var(--surface-muted)]" /><div className="h-3 w-5/6 rounded bg-[var(--surface-muted)]" /></div>
@@ -54,7 +55,7 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
         ) : null}
         {failed ? (
           <div className="grid h-full place-items-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-8 text-center" role="alert">
-            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el documento</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">Puedes volver a intentarlo o descargar el archivo original.</p><button type="button" className="mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
+            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el {previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">Puedes volver a intentarlo o descargar el archivo original.</p><button type="button" className="mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
           </div>
         ) : artifact.previewUrl && artifact.kind === "text" ? (
           <AuthenticatedTextPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} title={`Documento ${artifact.name}`} />

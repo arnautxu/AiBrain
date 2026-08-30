@@ -46,8 +46,8 @@ describe("DocumentPreviewPanel", () => {
   it("does not leave an unavailable PDF in an endless loading state", () => {
     render(<DocumentPreviewPanel artifact={{ ...artifact, previewUrl: null }} onClose={vi.fn()} />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido mostrar el documento");
-    expect(screen.queryByRole("status", { name: "Cargando vista previa del documento" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido mostrar el PDF");
+    expect(screen.queryByRole("status", { name: "Cargando vista previa del PDF" })).not.toBeInTheDocument();
   });
 
   it("renders a text document as escaped authenticated text instead of an iframe", async () => {

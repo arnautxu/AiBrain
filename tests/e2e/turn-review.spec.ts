@@ -48,6 +48,8 @@ test("plan, command, diff and approval decisions consume the typed turn contract
         language: "TypeScript",
         content: "export const resultado = 'listo';",
         previewUrl: null,
+        previewMimeType: "text/plain",
+        downloadUrl: `/api/projects/00000000-0000-4000-8000-000000000011/files?path=${encodeURIComponent(url.searchParams.get("path") ?? "")}&download=1`,
       } }),
     });
   });
