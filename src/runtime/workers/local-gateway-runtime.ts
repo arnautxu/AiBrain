@@ -44,6 +44,17 @@ const DEFAULT_RETAINED_COMPLETED_REQUESTS = 4_096;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
+const RUNTIME_INSTANCE_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/u;
+
+export function workerTransportAuditRoot(
+  transportAudit: string,
+  runtimeInstanceId = process.env.AIBRAIN_RUNTIME_INSTANCE?.trim() || "app",
+) {
+  if (!RUNTIME_INSTANCE_ID.test(runtimeInstanceId)) {
+    throw new Error("Worker runtime instance id is invalid.");
+  }
+  return path.join(transportAudit, "runtime-instances", runtimeInstanceId);
+}
 
 export function workerEgressEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
@@ -801,6 +812,7 @@ export type LocalGatewayWorkerRuntimeFactoryOptions = {
   now?: () => number;
   maxRetainedCompletedRequests?: number;
   maxRetainedDeliveredEvents?: number;
+  runtimeInstanceId?: string;
 };
 
 class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
@@ -814,8 +826,20 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
 
   async start() {
     if (this.gateway) return;
+    // The web app and the detached automation worker deliberately run
+    // independent Codex App Server processes.  Their replay/ledger journals
+    // must therefore be durable per service role, never shared: otherwise one
+    // process can replay the other's responses and leave both RPC routers
+    // waiting forever.  The stable role keeps restart recovery intact.
+    const isolatedContext = {
+      ...this.context,
+      transportAudit: workerTransportAuditRoot(
+        this.context.transportAudit,
+        this.options.runtimeInstanceId,
+      ),
+    };
     const gateway = new PrivateWorkerGateway({
-      context: this.context,
+      context: isolatedContext,
       processFactory: this.options.processFactory,
       now: this.options.now,
       maxRetainedCompletedRequests: this.options.maxRetainedCompletedRequests,
@@ -824,10 +848,10 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
     await gateway.start();
     if (!gateway.endpoint) throw new Error("Worker gateway endpoint is unavailable.");
     const clientLocks = new ResourceLockManager({
-      rootDirectory: path.join(this.context.transportAudit, "client-locks"),
+      rootDirectory: path.join(isolatedContext.transportAudit, "client-locks"),
     });
     const journal = new FileTransportEventJournal({
-      filePath: path.join(this.context.transportAudit, "client-events.jsonl"),
+      filePath: path.join(isolatedContext.transportAudit, "client-events.jsonl"),
       lockManager: clientLocks,
       maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,
     });

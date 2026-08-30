@@ -143,6 +143,8 @@ requireMatch(compose, /backup-replicator:[\s\S]*?networks:\s*\n\s*- aibrain-egre
 forbidMatch(compose.match(/  backup-replicator:[\s\S]*?(?=\n  egress-gateway:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "backup replicator publishes a host port");
 requireMatch(compose, /aibrain-egress:[\s\S]{0,180}name: "\$\{AIBRAIN_EGRESS_NETWORK_NAME:\?/u, "egress network name is not required per installation");
 requireMatch(compose, /AIBRAIN_EGRESS_PROXY_URL: http:\/\/egress-gateway:8080/u, "app lacks the private gateway endpoint");
+requireMatch(compose, /app:[\s\S]*?AIBRAIN_RUNTIME_INSTANCE: app/u, "app lacks an isolated durable runtime transport role");
+requireMatch(compose, /automation-worker:[\s\S]*?AIBRAIN_RUNTIME_INSTANCE: automation-worker/u, "automation worker lacks an isolated durable runtime transport role");
 requireMatch(compose, /egress-gateway:[\s\S]*?expose:\s*\n\s*- "8080"/u, "egress gateway is not exposed only inside Compose");
 forbidMatch(compose.match(/  egress-gateway:[\s\S]*?(?=\n  ingress-gateway:|\nnetworks:)/u)?.[0] ?? "", /^\s*ports\s*:/mu, "egress gateway publishes a host port");
 requireMatch(compose, /ingress-gateway:[\s\S]*?127\.0\.0\.1:\$\{AIBRAIN_HTTP_PORT:[\s\S]*?aibrain-internal[\s\S]*?aibrain-ingress/u, "ingress gateway does not bridge loopback to the private app network");

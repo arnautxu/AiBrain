@@ -22,6 +22,7 @@ services:
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
       AIBRAIN_EGRESS_PROXY_URL: http://egress-gateway:8080
+      AIBRAIN_RUNTIME_INSTANCE: app
       AIBRAIN_AUTOMATION_WORKER_ENABLED: "${AIBRAIN_AUTOMATION_WORKER_ENABLED:-true}"
     labels:
       com.graphikai.aibrain.product: aibrain
@@ -123,6 +124,7 @@ services:
       NODE_ENV: production
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
       AIBRAIN_EGRESS_PROXY_URL: http://egress-gateway:8080
+      AIBRAIN_RUNTIME_INSTANCE: automation-worker
     labels:
       com.graphikai.aibrain.product: aibrain
       com.graphikai.aibrain.component: automation-worker
