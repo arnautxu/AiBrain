@@ -13,7 +13,7 @@ function userId(index: number) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 }
 
-async function fixture() {
+async function fixture(companyContextSeedRoot?: string) {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-user-provisioning-"));
   roots.push(root);
   const config = parseInstallationConfig({
@@ -37,7 +37,7 @@ async function fixture() {
       backupsRoot: path.join(root, "data", "backups"),
     },
   });
-  return { root, config, provisioner: new UserProvisioner(config) };
+  return { root, config, provisioner: new UserProvisioner(config, { companyContextSeedRoot }) };
 }
 
 async function mode(filePath: string) {
@@ -124,7 +124,45 @@ describe("UserProvisioner", () => {
     expect(await readFile(path.join(config.paths.usersRoot, input.userId, "user.json"), "utf8"))
       .toContain("employee@example.test");
     expect(await readFile(companyContext, "utf8")).toContain("Explicit tenant content");
-    expect(await mode(companyContext)).toBe(0o400);
+    expect(await mode(companyContext)).toBe(0o600);
+  });
+
+  it("seeds the Arnall context network once and leaves edited files byte-for-byte untouched", async () => {
+    const seedRoot = path.join(process.cwd(), "config", "company-context", "arnall");
+    const { config, provisioner } = await fixture(seedRoot);
+    await provisioner.ensureInstallationPolicy();
+
+    for (const relativePath of [
+      "company/COMPANY.md",
+      "organization/TEAM.md",
+      "organization/DEPARTMENTS.md",
+      "preferences/PREFERENCES.md",
+      "work/CURRENT_WORK.md",
+      "processes/PROCESSES.md",
+      "objectives/OBJECTIVES.md",
+      "brand/BRAND.md",
+      "tools/TOOLS_AND_CONNECTORS.md",
+      "automations/AUTOMATIONS.md",
+      "support/GRAPHIKAI_SUPPORT.md",
+      "provenance/SOURCES.md",
+      "pending/OPEN_QUESTIONS.md",
+    ]) {
+      expect(await readFile(path.join(config.paths.companyContextRoot, relativePath), "utf8"))
+        .toEqual(await readFile(path.join(seedRoot, relativePath), "utf8"));
+    }
+
+    const edited = path.join(config.paths.companyContextRoot, "tools", "TOOLS_AND_CONNECTORS.md");
+    const custom = "# Approved production edit\n\nKeep this exact content.\n";
+    await chmod(edited, 0o600);
+    await writeFile(edited, custom);
+    const before = await lstat(edited);
+
+    await provisioner.ensureInstallationPolicy();
+
+    const after = await lstat(edited);
+    expect(await readFile(edited, "utf8")).toBe(custom);
+    expect(after.mode & 0o777).toBe(before.mode & 0o777);
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it("fails closed for identity drift and symlink substitution", async () => {

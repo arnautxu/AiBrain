@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
+import { chmod, lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { localUserSchema, type LocalUser } from "@/auth/local-user-store";
@@ -38,6 +38,19 @@ export type ProvisionedUser = {
   created: boolean;
   workerId: string;
 };
+
+export type UserProvisionerOptions = {
+  companyContextSeedRoot?: string;
+};
+
+type CompanyContextSeed = {
+  directories: string[];
+  files: Array<{ relativePath: string; contents: string }>;
+};
+
+const MAX_CONTEXT_SEED_FILES = 128;
+const MAX_CONTEXT_SEED_FILE_BYTES = 256 * 1024;
+const MAX_CONTEXT_SEED_BYTES = 2 * 1024 * 1024;
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
@@ -248,6 +261,48 @@ async function createFileOnce(filePath: string, contents: string, mode: number) 
   return true;
 }
 
+async function loadCompanyContextSeed(seedRoot: string): Promise<CompanyContextSeed> {
+  const root = path.resolve(seedRoot);
+  const rootMetadata = await lstat(root);
+  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+    throw new UserProvisioningError("COMPANY_CONTEXT_SEED_UNSAFE", "Company-context seed root must be a real directory.");
+  }
+  const canonicalRoot = await realpath(root);
+  const directories: string[] = [];
+  const files: CompanyContextSeed["files"] = [];
+  let totalBytes = 0;
+
+  const visit = async (directory: string, relativeDirectory: string): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      const relativePath = relativeDirectory ? path.join(relativeDirectory, entry.name) : entry.name;
+      const sourcePath = path.join(directory, entry.name);
+      const metadata = await lstat(sourcePath);
+      if (metadata.isSymbolicLink() || !inside(canonicalRoot, await realpath(sourcePath))) {
+        throw new UserProvisioningError("COMPANY_CONTEXT_SEED_UNSAFE", "Company-context seed contains a path outside its root.");
+      }
+      if (metadata.isDirectory()) {
+        directories.push(relativePath);
+        await visit(sourcePath, relativePath);
+        continue;
+      }
+      if (!metadata.isFile() || path.extname(entry.name) !== ".md" || metadata.size > MAX_CONTEXT_SEED_FILE_BYTES) {
+        throw new UserProvisioningError("COMPANY_CONTEXT_SEED_UNSAFE", "Company-context seed must contain only bounded Markdown files.");
+      }
+      totalBytes += metadata.size;
+      if (files.length >= MAX_CONTEXT_SEED_FILES || totalBytes > MAX_CONTEXT_SEED_BYTES) {
+        throw new UserProvisioningError("COMPANY_CONTEXT_SEED_TOO_LARGE", "Company-context seed exceeds its bounded size.");
+      }
+      const contents = await readRegularFileWithin(root, relativePath, MAX_CONTEXT_SEED_FILE_BYTES);
+      files.push({ relativePath, contents: contents.toString("utf8") });
+    }
+  };
+
+  await visit(root, "");
+  return { directories, files };
+}
+
 function sameUser(left: LocalUser, right: LocalUser) {
   return left.schemaVersion === right.schemaVersion
     && left.userId === right.userId
@@ -261,7 +316,10 @@ export class UserProvisioner {
   private readonly lockManager: ResourceLockManager;
   private readonly workerProvisioner: WorkerProvisioner;
 
-  constructor(readonly config: Readonly<InstallationConfig>) {
+  constructor(
+    readonly config: Readonly<InstallationConfig>,
+    private readonly options: Readonly<UserProvisionerOptions> = {},
+  ) {
     this.lockManager = new ResourceLockManager({
       rootDirectory: path.join(config.paths.dataRoot, "locks", "user-provisioning"),
     });
@@ -272,6 +330,22 @@ export class UserProvisioner {
     return this.lockManager.withLock(`installation-policy:${this.config.installationId}`, async () => {
       await ensurePrivateDirectory(this.config.paths.dataRoot);
       await ensureDescendantTree(this.config.paths.dataRoot, this.config.paths.companyContextRoot);
+      if (this.options.companyContextSeedRoot) {
+        const seed = await loadCompanyContextSeed(this.options.companyContextSeedRoot);
+        for (const relativeDirectory of seed.directories) {
+          await ensureDescendantTree(
+            this.config.paths.companyContextRoot,
+            path.join(this.config.paths.companyContextRoot, relativeDirectory),
+          );
+        }
+        for (const file of seed.files) {
+          await createFileOnce(
+            path.join(this.config.paths.companyContextRoot, file.relativePath),
+            file.contents,
+            0o400,
+          );
+        }
+      }
       const knowledgeRoot = path.join(this.config.paths.companyContextRoot, "knowledge");
       await ensurePrivateDirectory(knowledgeRoot);
       for (const directory of ["departments", "procedures", "glossary", "sources"]) {
@@ -280,7 +354,6 @@ export class UserProvisioner {
       for (const [fileName, contents] of companyContextTemplates(this.config)) {
         const contextPath = path.join(this.config.paths.companyContextRoot, fileName);
         await createFileOnce(contextPath, contents, 0o400);
-        await chmod(contextPath, 0o400);
       }
       const policyPath = path.join(this.config.paths.companyContextRoot, "PERMISSIONS.md");
       const expected = installationPolicy(this.config);

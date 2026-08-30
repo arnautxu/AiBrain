@@ -2,6 +2,7 @@ import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { loadInstallationConfig } from "../src/config/installation";
 import { UserProvisioner, type UserProvisioningInput } from "../src/users";
+import { versionedCompanyContextSeedRoot } from "./seed-company-context";
 
 function usage(): never {
   throw new Error(
@@ -69,7 +70,8 @@ async function main() {
     throw new Error("Provisioning input repeats a userId.");
   }
   const installation = await loadInstallationConfig();
-  const provisioner = new UserProvisioner(installation);
+  const companyContextSeedRoot = await versionedCompanyContextSeedRoot(installation);
+  const provisioner = new UserProvisioner(installation, { companyContextSeedRoot });
   let created = 0;
   for (const user of users) {
     const result = await provisioner.provision(user);

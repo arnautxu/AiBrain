@@ -1,18 +1,8 @@
-# Arnall test organization
+# Organization index
 
-The initial employees requested for the Arnall acceptance test are:
+See:
 
-- Sergi
-- Carles
-- Roger
-- David
-- Arnau
+- `organization/TEAM.md` for the initial named users and the limits of known roles.
+- `organization/DEPARTMENTS.md` for the department inventory, which is currently unknown.
 
-## Publicly verified roles
-
-- Carles Arnall is publicly identified as manager/owner of Carnisseries Arnall.
-- Sergi Arnall is publicly associated with Carnisseries Arnall in local business and social-responsibility sources.
-
-No exact role has been supplied or verified for Roger, David or Arnau. Do not invent titles, reporting lines, personal data or responsibilities. Ask the authenticated employee only when that detail is necessary for the work.
-
-Every employee must use an independent AiBrain identity and private runtime even during this shared-subscription QA phase.
+Do not infer reporting lines, access rights or responsibilities from a person's name or public association with Arnall.
