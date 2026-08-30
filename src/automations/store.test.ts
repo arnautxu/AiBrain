@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +43,21 @@ describe("FileAutomationStore", () => {
     expect(await first.list()).toHaveLength(1);
     expect(await second.list()).toEqual([]);
     expect(await second.listRuns()).toEqual([]);
+  });
+
+  it("migrates legacy tasks to an explicit owner-only audience without changing their ids", async () => {
+    const usersRoot = await root();
+    const now = () => Date.parse("2026-08-28T08:00:00.000Z");
+    const store = new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now });
+    const created = await store.create(input("2026-08-28T09:00:00.000Z"));
+    const legacy = JSON.parse(await readFile(store.tasksPath, "utf8")) as { tasks: Array<Record<string, unknown>> };
+    delete legacy.tasks[0]?.audience;
+    await writeFile(store.tasksPath, `${JSON.stringify(legacy, null, 2)}\n`, { mode: 0o600 });
+
+    const [migrated] = await new FileAutomationStore({ installationId: "tenant-one", userId: userA, usersRoot, now }).list();
+    expect(migrated).toMatchObject({ id: created.id, audience: { membershipPolicy: "current", userIds: [userA], groupIds: [] } });
+    expect(JSON.parse(await readFile(store.tasksPath, "utf8")).tasks[0].audience)
+      .toEqual({ membershipPolicy: "current", userIds: [userA], groupIds: [] });
   });
 
   it("deduplicates concurrent claims with a filesystem lease", async () => {

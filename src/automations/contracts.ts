@@ -8,6 +8,13 @@ export type AutomationTimeZone = string;
 export type AutomationState = "active" | "paused" | "completed";
 export type AutomationRunStatus = "running" | "succeeded" | "failed";
 
+export type AutomationAudience = {
+  /** Group membership is resolved on every authorized read and delivery. */
+  membershipPolicy: "current";
+  userIds: string[];
+  groupIds: string[];
+};
+
 export type AutomationSchedule =
   | { kind: "once"; runAt: string }
   | { kind: "daily"; hour: number; minute: number }
@@ -26,7 +33,9 @@ export type AutomationTask = {
   schemaVersion: 1;
   id: string;
   installationId: string;
+  /** The creator owns lifecycle changes but is not implicitly a recipient. */
   userId: string;
+  audience: AutomationAudience;
   name: string;
   prompt: string;
   projectId: string;
@@ -72,6 +81,8 @@ export type AutomationTaskInput = {
   projectName: string;
   timeZone: string;
   schedule: AutomationSchedule;
+  /** Omitted only by legacy clients; the server defaults it to the owner. */
+  audience?: AutomationAudience;
 };
 
 export type AutomationTaskPatch = Partial<AutomationTaskInput> & {
@@ -82,6 +93,22 @@ export type AutomationSnapshot = {
   schemaVersion: 1;
   tasks: AutomationTask[];
 };
+
+export type AutomationTaskView = AutomationTask & {
+  access: {
+    canManage: boolean;
+    canViewResults: boolean;
+  };
+};
+
+export type AutomationAudienceDirectory = {
+  membershipPolicy: "current";
+  currentUserId: string;
+  users: Array<{ id: string; name: string }>;
+  groups: Array<{ id: string; name: string }>;
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -114,6 +141,17 @@ export function isAutomationSchedule(value: unknown): value is AutomationSchedul
     value.weekdays.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
 }
 
+export function isAutomationAudience(value: unknown): value is AutomationAudience {
+  if (!isRecord(value) || Object.keys(value).length !== 3 || value.membershipPolicy !== "current" ||
+    !Array.isArray(value.userIds) || !Array.isArray(value.groupIds) ||
+    value.userIds.length > 200 || value.groupIds.length > 200 ||
+    value.userIds.length + value.groupIds.length === 0 ||
+    !value.userIds.every((id) => typeof id === "string" && UUID.test(id)) ||
+    !value.groupIds.every((id) => typeof id === "string" && UUID.test(id))) return false;
+  return new Set(value.userIds).size === value.userIds.length &&
+    new Set(value.groupIds).size === value.groupIds.length;
+}
+
 export function parseAutomationInput(value: unknown): AutomationTaskInput | null {
   if (!isRecord(value)) return null;
   const name = typeof value.name === "string" ? value.name.trim() : "";
@@ -122,13 +160,22 @@ export function parseAutomationInput(value: unknown): AutomationTaskInput | null
   const projectName = typeof value.projectName === "string" ? value.projectName.trim() : "";
   if (!name || name.length > 100 || !prompt || prompt.length > 20_000 ||
     !/^[0-9a-f-]{36}$/i.test(projectId) || !projectName || projectName.length > 100 ||
-    !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule)) return null;
-  return { name, prompt, projectId, projectName, timeZone: value.timeZone, schedule: value.schedule };
+    !isValidTimeZone(value.timeZone) || !isAutomationSchedule(value.schedule) ||
+    ("audience" in value && !isAutomationAudience(value.audience))) return null;
+  return {
+    name,
+    prompt,
+    projectId,
+    projectName,
+    timeZone: value.timeZone,
+    schedule: value.schedule,
+    ...(isAutomationAudience(value.audience) ? { audience: value.audience } : {}),
+  };
 }
 
 export function parseAutomationPatch(value: unknown): AutomationTaskPatch | null {
   if (!isRecord(value)) return null;
-  const allowed = new Set(["name", "prompt", "projectId", "projectName", "timeZone", "schedule", "state"]);
+  const allowed = new Set(["name", "prompt", "projectId", "projectName", "timeZone", "schedule", "state", "audience"]);
   if (Object.keys(value).length === 0 || Object.keys(value).some((key) => !allowed.has(key))) return null;
   const patch: AutomationTaskPatch = {};
   if ("name" in value) {
@@ -154,6 +201,10 @@ export function parseAutomationPatch(value: unknown): AutomationTaskPatch | null
   if ("schedule" in value) {
     if (!isAutomationSchedule(value.schedule)) return null;
     patch.schedule = value.schedule;
+  }
+  if ("audience" in value) {
+    if (!isAutomationAudience(value.audience)) return null;
+    patch.audience = value.audience;
   }
   if ("state" in value) {
     if (value.state !== "active" && value.state !== "paused") return null;
