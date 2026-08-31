@@ -3,7 +3,7 @@ import path from "node:path";
 import type { AuthSession } from "@/auth/types";
 import type { ChatStreamEvent } from "@/lib/chat-contract";
 import type { RuntimeStatus } from "@/lib/runtime-status";
-import type { WorkbenchSnapshot } from "@/workbench/types";
+import type { WorkbenchProject, WorkbenchSnapshot } from "@/workbench/types";
 import { describe, expect, it } from "vitest";
 import { assertUiContract, uiContract, uiContractErrors } from "../helpers/ui-contract";
 
@@ -83,6 +83,27 @@ describe("versioned AiBrain UI/backend contract", () => {
       projects: [],
       threads: [],
     } satisfies WorkbenchSnapshot;
+    const viewerProject = {
+      id: "10000000-0000-4000-8000-000000000001",
+      name: "Proyecto compartido",
+      slug: "proyecto-compartido",
+      status: "active",
+      pinned: false,
+      instructions: "",
+      sources: [],
+      memory: { enabled: true, notes: "", updatedAt: null },
+      sharing: { visibility: "shared", members: [] },
+      workspace: {
+        id: "20000000-0000-4000-8000-000000000001",
+        label: "Proyecto compartido",
+        hostType: "managed",
+        status: "ready",
+        isPrimary: true,
+      },
+      access: { role: "viewer", canEdit: false, canManage: false },
+      createdAt: "2026-08-28T10:00:00.000Z",
+      updatedAt: "2026-08-28T10:00:00.000Z",
+    } satisfies WorkbenchProject;
     const runtime = {
       tenantId: "installation-1",
       projectId: null,
@@ -111,6 +132,7 @@ describe("versioned AiBrain UI/backend contract", () => {
 
     assertUiContract("AuthSessionResponse", { session });
     assertUiContract("WorkbenchResponse", { workbench });
+    assertUiContract("WorkbenchProject", viewerProject);
     assertUiContract("RuntimeStatus", runtime);
     for (const event of events) assertUiContract("ChatStreamEvent", event);
   });
@@ -124,6 +146,11 @@ describe("versioned AiBrain UI/backend contract", () => {
     })).not.toBeNull();
     expect(uiContractErrors("WorkbenchResponse", {
       workbench: { persistence: "supabase", projects: [], threads: [] },
+    })).not.toBeNull();
+    expect(uiContractErrors("ProjectAccess", {
+      role: "viewer",
+      canEdit: true,
+      canManage: false,
     })).not.toBeNull();
   });
 });

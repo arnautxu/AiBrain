@@ -21,6 +21,7 @@ import { BrowserSessionStore } from "@/runtime/browser/state-store";
 import type {
   BrowserGatewayCapability,
   BrowserInputCommand,
+  BrowserPointerTrailPoint,
   BrowserViewerHistoryAction,
   BrowserViewerNavigationState,
 } from "@/runtime/browser/types";
@@ -434,6 +435,7 @@ export type BrowserFrameStreamEvent = Readonly<{
   capturedAt: string;
   captureDurationMs: number;
   mediaType: "image/png" | null;
+  pointerTrail: readonly BrowserPointerTrailPoint[];
   data: Uint8Array;
 }>;
 
@@ -480,6 +482,7 @@ export async function* streamBrowserFrames(input: {
   const deadline = Date.now() + maximumDurationMs;
   let sequence = 0;
   let lastDigest: string | null = null;
+  let lastPointerSignature: string | null = null;
   let lastEmissionAt = 0;
   try {
     while (!streamController.signal.aborted && Date.now() < deadline) {
@@ -494,10 +497,13 @@ export async function* streamBrowserFrames(input: {
       if (streamController.signal.aborted) break;
       const data = Buffer.from(frame.dataBase64, "base64");
       const digest = createHash("sha256").update(data).digest("hex");
+      const pointerTrail = frame.pointerTrail ?? Object.freeze([]);
+      const pointerSignature = JSON.stringify(pointerTrail);
       const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
-      if (digest !== lastDigest) {
+      if (digest !== lastDigest || pointerSignature !== lastPointerSignature) {
         sequence += 1;
         lastDigest = digest;
+        lastPointerSignature = pointerSignature;
         lastEmissionAt = Date.now();
         yield Object.freeze({
           kind: "frame" as const,
@@ -505,6 +511,7 @@ export async function* streamBrowserFrames(input: {
           capturedAt: frame.capturedAt,
           captureDurationMs,
           mediaType: frame.mediaType,
+          pointerTrail,
           data: new Uint8Array(data),
         });
       } else if (Date.now() - lastEmissionAt >= heartbeatIntervalMs) {
@@ -515,6 +522,7 @@ export async function* streamBrowserFrames(input: {
           capturedAt: new Date().toISOString(),
           captureDurationMs,
           mediaType: null,
+          pointerTrail,
           data: new Uint8Array(0),
         });
       }

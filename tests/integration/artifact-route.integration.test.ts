@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -9,6 +10,8 @@ const USER_B = "0198b9f0-6631-7000-8000-000000000402";
 const PROJECT_ID = "0198b9f0-6631-7000-8000-000000000411";
 const ARTIFACT_ID = "0198b9f0-6631-7000-8000-000000000421";
 const state = vi.hoisted(() => ({ session: null as AuthSession | null, root: "" }));
+const artifactBytes = Buffer.from("private-image");
+const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({ getSession: vi.fn(async () => state.session) }));
@@ -19,6 +22,24 @@ vi.mock("@/workbench/store", () => ({
   getProjectRuntimeContext: vi.fn(async (session: AuthSession, projectId: string) => {
     if (session.user.id !== USER_A || projectId !== PROJECT_ID) throw new Error("Not found.");
     return { projectId };
+  }),
+}));
+vi.mock("@/library/server-resource-access", () => ({
+  LibraryResourceForbiddenError: class LibraryResourceForbiddenError extends Error {},
+  resolveProjectLibraryResource: vi.fn(async (active: AuthSession, input: { projectId: string; resourceId: string }) => {
+    if (active.user.id !== USER_A || input.projectId !== PROJECT_ID || input.resourceId !== ARTIFACT_ID) throw new Error("Not found.");
+    return {
+      installation: { installationId: "artifact-route-qa" },
+      access: { project: { id: PROJECT_ID } },
+      location: {
+        storageOwnerId: USER_A,
+        relativePath: `.aibrain/artifacts/${ARTIFACT_ID}.png`,
+        mediaType: "image/png",
+        fileName: `imatge-${ARTIFACT_ID.slice(0, 8)}.png`,
+        size: artifactBytes.length,
+        sha256: artifactSha256,
+      },
+    };
   }),
 }));
 vi.mock("@/runtime/workers/provisioner", () => ({
@@ -52,7 +73,7 @@ describe("private generated artifact route", () => {
       "artifacts",
     );
     await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
-    await writeFile(path.join(artifactRoot, `${ARTIFACT_ID}.png`), Buffer.from("private-image"), { mode: 0o600 });
+    await writeFile(path.join(artifactRoot, `${ARTIFACT_ID}.png`), artifactBytes, { mode: 0o600 });
   });
 
   afterAll(async () => {

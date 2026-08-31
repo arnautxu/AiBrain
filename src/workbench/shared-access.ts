@@ -11,12 +11,29 @@ import {
   type SharedAccessProvenance,
   type SharedAccessRole as IndexedSharedAccessRole,
 } from "@/workbench/shared-access-index";
-import type { WorkbenchProject, WorkbenchSnapshot, WorkbenchThread } from "@/workbench/types";
+import type {
+  WorkbenchProject,
+  WorkbenchProjectAccess,
+  WorkbenchSnapshot,
+  WorkbenchThread,
+} from "@/workbench/types";
 import { listAutomationThreadAccess, resolveAutomationThreadAccess } from "@/automations/thread-access";
 import { FileAutomationAudienceStore } from "@/automations/audience-store";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export type SharedAccessRole = "owner" | IndexedSharedAccessRole;
+
+function projectAccess(role: SharedAccessRole): WorkbenchProjectAccess {
+  return {
+    role,
+    canEdit: role !== "viewer",
+    canManage: role === "owner",
+  };
+}
+
+function projectWithAccess(project: WorkbenchProject, role: SharedAccessRole): WorkbenchProject {
+  return { ...project, access: projectAccess(role) };
+}
 
 async function installationForSession(session: AuthSession) {
   if (session.provider !== "local") throw new WorkbenchPersistenceError("La compartición requiere una cuenta local.");
@@ -76,14 +93,17 @@ async function loadSharedWorkbenchFromContext(
   const visibleAutomationThread = (threadId: string) =>
     !deliveredThreadIds.has(threadId) || authorizedAutomationThreadIds.has(threadId);
   const grants = await index.listProjectsForPrincipal(principal);
-  const projects = [...own.projects];
+  const projects = own.projects.map((project) => projectWithAccess(project, "owner"));
   const threads = own.threads.filter(({ id }) => visibleAutomationThread(id));
   const byOwner = Map.groupBy(grants, (grant) => grant.ownerUserId);
   const sharedSnapshots = await Promise.all([...byOwner].map(async ([ownerUserId, ownerGrants]) => {
     const snapshot = await store.load(ownerUserId);
     const sharedIds = new Set(ownerGrants.map((grant) => grant.projectId));
+    const roles = new Map(ownerGrants.map((grant) => [grant.projectId, grant.role]));
     return {
-      projects: snapshot.projects.filter((project) => sharedIds.has(project.id)),
+      projects: snapshot.projects
+        .filter((project) => sharedIds.has(project.id))
+        .map((project) => projectWithAccess(project, roles.get(project.id) ?? "viewer")),
       threads: snapshot.threads.filter((thread) => sharedIds.has(thread.projectId) && visibleAutomationThread(thread.id)),
     };
   }));

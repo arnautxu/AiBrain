@@ -32,6 +32,7 @@ function systemPrefersDark() {
 function applyTheme(preference: ThemePreference) {
   const resolved = resolveTheme(preference, systemPrefersDark());
   document.documentElement.dataset.theme = resolved;
+  document.documentElement.classList.toggle("dark", resolved === "dark");
   document.documentElement.style.colorScheme = resolved;
   return resolved;
 }

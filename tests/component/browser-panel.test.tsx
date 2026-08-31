@@ -62,6 +62,7 @@ beforeEach(() => {
       metadata: {
         version: 1, kind: "frame", sequence: 1,
         capturedAt: new Date().toISOString(), captureDurationMs: 20, mediaType: "image/png",
+        pointerTrail: [{ id: "agent-click-1", x: 25, y: 40 }],
       },
       data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     });
@@ -89,6 +90,9 @@ describe("BrowserPanel", () => {
     expect(screen.queryByText("Tomar control")).not.toBeInTheDocument();
     expect(screen.queryByText("Detener")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByAltText("Vista actual del navegador privado")).toBeInTheDocument());
+    const trail = document.querySelector('[data-slot="computer-use-trail"]');
+    expect(trail).toBeInTheDocument();
+    expect(trail?.querySelector("svg")).toHaveStyle({ left: "25%", top: "40%" });
   });
 
   it("takes control on the first click, never replays it, and closes without stopping the session", async () => {
@@ -102,6 +106,7 @@ describe("BrowserPanel", () => {
       toJSON: () => ({}),
     });
     fireEvent.click(image, { clientX: 360, clientY: 225 });
+    expect(document.querySelector('[data-slot="computer-use-trail"] svg')).toHaveStyle({ left: "50%", top: "50%" });
     await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover"));
     await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
     expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual(["mousePressed", "mouseReleased"]);

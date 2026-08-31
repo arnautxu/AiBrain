@@ -15,6 +15,7 @@ vi.mock("server-only", () => ({}));
 const ownerId = "00000000-0000-4000-8000-000000000011";
 const memberId = "00000000-0000-4000-8000-000000000012";
 const outsiderId = "00000000-0000-4000-8000-000000000014";
+const editorId = "00000000-0000-4000-8000-000000000015";
 let root = "";
 let previousConfig: string | undefined;
 
@@ -56,6 +57,7 @@ describe("shared project visibility", () => {
     await provisioner.provision({ userId: ownerId, email: "owner@example.com", displayName: "Owner" });
     await provisioner.provision({ userId: memberId, email: "member@example.com", displayName: "Member" });
     await provisioner.provision({ userId: outsiderId, email: "outsider@example.com", displayName: "Outsider" });
+    await provisioner.provision({ userId: editorId, email: "editor@example.com", displayName: "Editor" });
     const ownerSession: AuthSession = {
       provider: "local",
       user: { id: ownerId, name: "Owner", email: "owner@example.com" },
@@ -74,6 +76,12 @@ describe("shared project visibility", () => {
       tenant: { id: "shared-qa", name: "Shared QA" },
       expiresAt: "2026-08-29T00:00:00.000Z",
     };
+    const editorSession: AuthSession = {
+      provider: "local",
+      user: { id: editorId, name: "Editor", email: "editor@example.com" },
+      tenant: { id: "shared-qa", name: "Shared QA" },
+      expiresAt: "2026-08-29T00:00:00.000Z",
+    };
     const project = await createProject(ownerSession, "Plan compartido");
     await updateProject(ownerSession, project.id, {
       sharing: {
@@ -83,6 +91,13 @@ describe("shared project visibility", () => {
           email: "member@example.com",
           name: "Member",
           role: "viewer",
+          status: "active",
+          addedAt: "2026-08-28T10:00:00.000Z",
+        }, {
+          id: "00000000-0000-4000-8000-000000000016",
+          email: "editor@example.com",
+          name: "Editor",
+          role: "editor",
           status: "active",
           addedAt: "2026-08-28T10:00:00.000Z",
         }],
@@ -112,8 +127,17 @@ describe("shared project visibility", () => {
     expect(threadAccess.provenance).toMatchObject({ source: "shared-access-index" });
 
     const snapshot = await loadSharedWorkbench(memberSession);
-    expect(snapshot.projects.some((item) => item.id === project.id)).toBe(true);
+    expect(snapshot.projects.find((item) => item.id === project.id)?.access)
+      .toEqual({ role: "viewer", canEdit: false, canManage: false });
     expect(snapshot.threads.some((item) => item.projectId === project.id)).toBe(true);
+
+    const editorSnapshot = await loadSharedWorkbench(editorSession);
+    expect(editorSnapshot.projects.find((item) => item.id === project.id)?.access)
+      .toEqual({ role: "editor", canEdit: true, canManage: false });
+
+    const ownerSnapshot = await loadSharedWorkbench(ownerSession);
+    expect(ownerSnapshot.projects.find((item) => item.id === project.id)?.access)
+      .toEqual({ role: "owner", canEdit: true, canManage: true });
 
     const index = new FileSharedAccessIndex({
       dataRoot: installation.paths.dataRoot,

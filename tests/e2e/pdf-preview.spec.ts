@@ -118,7 +118,7 @@ test("a mobile PDF preview recovers from a private-route failure without leaving
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
 
-  const panel = page.getByRole("complementary", { name: "Vista previa de movil.pdf" });
+  const panel = page.getByRole("dialog", { name: "Vista previa de movil.pdf" });
   await expect(panel).toBeVisible();
   await expect(panel.getByRole("alert")).toContainText("No se ha podido mostrar el PDF");
   await expect(panel.getByRole("status", { name: "Cargando vista previa del PDF" })).toHaveCount(0);

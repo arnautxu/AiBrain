@@ -478,6 +478,10 @@ describe("ChromeCdpRuntime private pipe", () => {
       method: "DOM.scrollIntoViewIfNeeded",
       params: { nodeId: 2 },
     }));
+    const clickedFrame = await runtime.captureFrame(THREAD_A);
+    expect(clickedFrame.pointerTrail).toHaveLength(1);
+    expect(clickedFrame.pointerTrail?.[0]?.x).toBeCloseTo((50 / 1_440) * 100);
+    expect(clickedFrame.pointerTrail?.[0]?.y).toBeCloseTo((10 / 900) * 100);
     await runtime.agentType(THREAD_A, "input[name=email]", "person@example.test", true);
     await expect(runtime.listTabs(THREAD_A)).resolves.toEqual([
       expect.objectContaining({ id: THREAD_A, url: "https://agent.example.test/path", active: true }),
@@ -504,6 +508,7 @@ describe("ChromeCdpRuntime private pipe", () => {
       .rejects.toMatchObject({ code: "BROWSER_NETWORK_PRIVATE_DESTINATION" });
     await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://a.example.test/path");
     await expect(runtime.currentUrl(THREAD_B)).resolves.toBe("https://b.example.test/path");
+    await expect(runtime.captureFrame(THREAD_A)).resolves.toMatchObject({ pointerTrail: [] });
 
     client.emitEvent("Fetch.requestPaused", {
       requestId: "allowed-a",

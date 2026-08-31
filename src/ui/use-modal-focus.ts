@@ -11,9 +11,33 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
+function isHiddenFromFocus(element: HTMLElement, container: HTMLElement) {
+  let current: HTMLElement | null = element;
+  while (current && container.contains(current)) {
+    if (
+      current.hidden ||
+      current.hasAttribute("inert") ||
+      current.getAttribute("aria-hidden") === "true"
+    ) {
+      return true;
+    }
+    const style = window.getComputedStyle(current);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse" ||
+      style.contentVisibility === "hidden"
+    ) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
+}
+
 function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
-    .filter((element) => !element.hidden && element.getAttribute("aria-hidden") !== "true");
+    .filter((element) => !element.matches(":disabled") && !isHiddenFromFocus(element, container));
 }
 
 export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
@@ -36,7 +60,11 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
     const frame = requestAnimationFrame(() => {
       const container = containerRef.current;
       if (!container) return;
-      (initialFocus?.current ?? focusableElements(container)[0] ?? container).focus();
+      const requestedInitialFocus = initialFocus?.current;
+      const target = requestedInitialFocus && container.contains(requestedInitialFocus) && !isHiddenFromFocus(requestedInitialFocus, container)
+        ? requestedInitialFocus
+        : focusableElements(container)[0] ?? container;
+      target.focus();
     });
     const onKeyDown = (event: KeyboardEvent) => {
       const container = containerRef.current;
@@ -57,7 +85,10 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
       }
       const first = focusable[0];
       const last = focusable.at(-1);
-      if (event.shiftKey && document.activeElement === first) {
+      if (!container.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first)?.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last?.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -70,7 +101,7 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
       cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = previousOverflow;
-      if (previous?.isConnected) previous.focus();
+      if (previous?.isConnected && !isHiddenFromFocus(previous, document.body)) previous.focus();
     };
   }, [initialFocus, open]);
 

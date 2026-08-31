@@ -14,9 +14,11 @@ export const THEME_BOOTSTRAP_SCRIPT = `(() => {
       ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
       : preference;
     document.documentElement.dataset.theme = resolved;
+    document.documentElement.classList.toggle("dark", resolved === "dark");
     document.documentElement.style.colorScheme = resolved;
   } catch {
     document.documentElement.dataset.theme = "light";
+    document.documentElement.classList.remove("dark");
   }
 })();`;
 

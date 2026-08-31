@@ -4,8 +4,9 @@ import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
 import { documentVersionJson } from "@/documents/version-http";
 import { StorageError } from "@/storage";
-import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import { libraryResourceErrorResponse } from "@/library/http";
+import { resolveThreadLibraryResource } from "@/library/server-resource-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,10 +26,16 @@ export async function GET(
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
     }
-    await getThreadRuntimeContext(session, threadId);
-    const services = await documentServicesForUser(installation, session.user.id);
+    const resource = await resolveThreadLibraryResource(session, {
+      kind: "upload",
+      resourceId: uploadId,
+      threadId,
+    });
+    const services = await documentServicesForUser(installation, resource.location.storageOwnerId);
     return documentVersionJson(await services.versions.read(threadId, uploadId));
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Documento no encontrado.");
+    if (resourceError) return resourceError;
     if (error instanceof StorageError || (error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
       return NextResponse.json({ error: "Documento no encontrado." }, { status: 404 });
     }

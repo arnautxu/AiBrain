@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { advancedArtifactErrorResponse } from "@/artifacts/http";
 import { ARTIFACT_PREVIEW_CSP, renderArtifactHtml } from "@/artifacts/rendering";
-import { advancedArtifactStoreForSession } from "@/artifacts/server-service";
+import { getAdvancedArtifactForSession } from "@/artifacts/server-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,8 +24,7 @@ export async function GET(
   }
   try {
     const { artifactId } = await context.params;
-    const store = await advancedArtifactStoreForSession(session);
-    const { snapshot } = await store.get(session.user.id, artifactId, version);
+    const { snapshot } = await getAdvancedArtifactForSession(session, artifactId, version);
     return new NextResponse(renderArtifactHtml(snapshot), {
       headers: {
         "Cache-Control": "private, no-store",

@@ -16,10 +16,12 @@ export function DocumentPublicationCard({
   draft,
   onFreeze,
   onDecide,
+  readOnly = false,
 }: {
   draft: DocumentPublicationDraft;
   onFreeze: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecide: (draftId: string, action: "confirm" | "decline") => Promise<void>;
+  readOnly?: boolean;
 }) {
   const [target, setTarget] = useState(draft.targetRelativePath);
   const busy = draft.phase === "freezing" || draft.phase === "deciding";
@@ -36,11 +38,11 @@ export function DocumentPublicationCard({
 
       {draft.phase === "ready" || draft.phase === "error" ? (
         <div className="border-t border-[var(--border-subtle)] px-3 py-2.5">
-          <label className="block text-[9px] font-medium text-[var(--text-muted)]">Destino oficial
+          {readOnly ? <><p className="text-[9px] font-medium text-[var(--text-muted)]">Destino oficial</p><p className="mt-1.5 break-words text-[10px] text-[var(--text)]">{target}</p></> : <label className="block text-[9px] font-medium text-[var(--text-muted)]">Destino oficial
             <input aria-label={`Destino de ${draft.fileName}`} value={target} onChange={(event) => setTarget(event.target.value)} className="mt-1.5 h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2.5 text-[10px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)]" />
-          </label>
+          </label>}
           {draft.error ? <p className="mt-2 flex items-start gap-1.5 text-[9px] leading-4 text-[var(--danger)]" role="alert"><WarningCircle size={11} className="mt-0.5 shrink-0" />{draft.error}</p> : null}
-          <div className="mt-2 flex justify-end"><button type="button" disabled={!isSafePublicationTarget(target) || busy} className="min-h-8 rounded-md bg-[var(--text)] px-3 text-[9px] font-semibold text-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void onFreeze(draft.id, target)}>Preparar publicación</button></div>
+          {readOnly ? <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]" role="status">Solo un editor del proyecto puede preparar esta publicación.</p> : <div className="mt-2 flex justify-end"><button type="button" disabled={!isSafePublicationTarget(target) || busy} className="min-h-8 rounded-md bg-[var(--text)] px-3 text-[9px] font-semibold text-[var(--surface)] disabled:cursor-not-allowed disabled:opacity-40" onClick={() => void onFreeze(draft.id, target)}>Preparar publicación</button></div>}
         </div>
       ) : null}
 
@@ -51,7 +53,7 @@ export function DocumentPublicationCard({
           <p className="text-[9px] leading-4 text-[var(--text-muted)]">{draft.operation.original.exists ? "Sustituirá el original y conservará una versión recuperable." : "Creará un documento oficial nuevo."}</p>
           <p className="mt-1 truncate text-[9px] font-medium text-[var(--text)]">{draft.operation.targetRelativePath}</p>
           {draft.error ? <p className="mt-2 flex items-start gap-1.5 text-[9px] leading-4 text-[var(--danger)]" role="alert"><WarningCircle size={11} className="mt-0.5 shrink-0" />{draft.error}</p> : null}
-          <div className="mt-2 flex justify-end gap-1.5"><button type="button" className="min-h-8 rounded-md px-3 text-[9px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => void onDecide(draft.id, "decline")}>Rechazar</button><button type="button" className="min-h-8 rounded-md bg-[var(--brain-accent-strong)] px-3 text-[9px] font-semibold text-white" onClick={() => void onDecide(draft.id, "confirm")}>Publicar</button></div>
+          {readOnly ? <p className="mt-2 text-[9px] leading-4 text-[var(--text-muted)]" role="status">Esperando la decisión de un editor del proyecto.</p> : <div className="mt-2 flex justify-end gap-1.5"><button type="button" className="touch-target min-h-8 rounded-md px-3 text-[9px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => void onDecide(draft.id, "decline")}>Rechazar</button><button type="button" className="touch-target min-h-8 rounded-md bg-[var(--brain-accent-strong)] px-3 text-[9px] font-semibold text-[var(--brain-contrast)]" onClick={() => void onDecide(draft.id, "confirm")}>Publicar</button></div>}
         </div>
       ) : null}
 

@@ -7,10 +7,10 @@ import { useTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 
 afterEach(cleanup);
 
-function TaskCenterShortcutHarness() {
+function TaskCenterShortcutHarness({ enabled = true }: { enabled?: boolean }) {
   const [open, setOpen] = useState(false);
-  useTaskCenterShortcut(() => setOpen((current) => !current));
-  return <div role="status">{open ? "Centro de tareas abierto" : "Centro de tareas cerrado"}</div>;
+  useTaskCenterShortcut(() => setOpen((current) => !current), enabled);
+  return <><textarea aria-label="Editor" /><div role="status">{open ? "Centro de tareas abierto" : "Centro de tareas cerrado"}</div></>;
 }
 
 describe("useTaskCenterShortcut", () => {
@@ -21,6 +21,20 @@ describe("useTaskCenterShortcut", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Centro de tareas abierto");
 
     fireEvent.keyDown(window, { ctrlKey: true, altKey: true, code: "KeyU" });
+    expect(screen.getByRole("status")).toHaveTextContent("Centro de tareas cerrado");
+  });
+
+  it("does not toggle while another modal surface owns focus", () => {
+    render(<TaskCenterShortcutHarness enabled={false} />);
+    fireEvent.keyDown(window, { metaKey: true, altKey: true, code: "KeyU" });
+    expect(screen.getByRole("status")).toHaveTextContent("Centro de tareas cerrado");
+  });
+
+  it("does not steal the shortcut from an editable control", () => {
+    render(<TaskCenterShortcutHarness />);
+    const editor = screen.getByRole("textbox", { name: "Editor" });
+    editor.focus();
+    fireEvent.keyDown(editor, { metaKey: true, altKey: true, code: "KeyU" });
     expect(screen.getByRole("status")).toHaveTextContent("Centro de tareas cerrado");
   });
 });

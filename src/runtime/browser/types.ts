@@ -80,6 +80,12 @@ export type BrowserRuntimeHealth = {
   detail?: string;
 };
 
+export type BrowserPointerTrailPoint = Readonly<{
+  id: string;
+  x: number;
+  y: number;
+}>;
+
 export interface ManagedBrowserRuntime {
   start(): Promise<void>;
   health(): Promise<BrowserRuntimeHealth>;
@@ -93,6 +99,7 @@ export type BrowserFrame = Readonly<{
   mediaType: "image/png";
   dataBase64: string;
   capturedAt: string;
+  pointerTrail?: readonly BrowserPointerTrailPoint[];
 }>;
 
 export type BrowserViewerNavigationState = Readonly<{

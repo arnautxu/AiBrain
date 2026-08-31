@@ -24,6 +24,12 @@ export type LibraryItem = {
   downloadZipUrl?: string | null;
   internalSiteUrl?: string | null;
   latestVersion?: number | null;
+  capabilities?: {
+    preview: boolean;
+    download: boolean;
+    history: boolean;
+    mutate: boolean;
+  };
 };
 
 export type SearchResultType =
@@ -75,7 +81,11 @@ export function isLibraryItem(value: unknown): value is LibraryItem {
     (!("artifactId" in value) || value.artifactId === null || (typeof value.artifactId === "string" && /^[0-9a-f-]{36}$/i.test(value.artifactId))) &&
     (!("downloadZipUrl" in value) || value.downloadZipUrl === null || (typeof value.downloadZipUrl === "string" && value.downloadZipUrl.startsWith("/api/artifacts/"))) &&
     (!("internalSiteUrl" in value) || value.internalSiteUrl === null || (typeof value.internalSiteUrl === "string" && value.internalSiteUrl.startsWith("/api/artifacts/"))) &&
-    (!("latestVersion" in value) || value.latestVersion === null || (Number.isSafeInteger(value.latestVersion) && (value.latestVersion as number) >= 1));
+    (!("latestVersion" in value) || value.latestVersion === null || (Number.isSafeInteger(value.latestVersion) && (value.latestVersion as number) >= 1)) &&
+    (!("capabilities" in value) || (record(value.capabilities) &&
+      Object.keys(value.capabilities).length === 4 && typeof value.capabilities.preview === "boolean" &&
+      typeof value.capabilities.download === "boolean" && typeof value.capabilities.history === "boolean" &&
+      typeof value.capabilities.mutate === "boolean"));
 }
 
 export function advancedArtifactLibraryItem(

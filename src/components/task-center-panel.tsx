@@ -113,12 +113,12 @@ export function TaskCenterPanel({
   return (
     <div className="workspace-overlay fixed inset-0 z-[76] flex justify-end">
       <button aria-label="Cerrar centro de tareas" className="absolute inset-0" onClick={onClose} />
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Centro de tareas" className="workspace-panel panel-enter relative flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
-        <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 sm:px-5">
+      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Centro de tareas" className="workspace-panel panel-enter relative flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-popover)]">
+        <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 pt-[env(safe-area-inset-top)] sm:px-5 sm:pt-0">
           <span className="grid size-9 shrink-0 place-items-center rounded-[13px] bg-[var(--accent-soft)] text-[var(--brain-accent-on-soft)]"><ClockCounterClockwise size={18} /></span>
           <div className="min-w-0 flex-1"><h2 className="workspace-panel-title text-[var(--text)]">Tareas</h2><p className="workspace-panel-subtitle mt-0.5">Sigue el trabajo de todas tus conversaciones.</p></div>
-          <button type="button" aria-label="Preferencias de notificaciones" aria-pressed={settingsOpen} className={`grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] ${settingsOpen ? "bg-[var(--surface-selected)]" : ""}`} onClick={() => setSettingsOpen((value) => !value)}><GearSix size={18} /></button>
-          <button type="button" aria-label="Cerrar centro de tareas" className="grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={18} /></button>
+          <button type="button" aria-label="Preferencias de notificaciones" aria-pressed={settingsOpen} className={`touch-target grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] ${settingsOpen ? "bg-[var(--surface-selected)]" : ""}`} onClick={() => setSettingsOpen((value) => !value)}><GearSix size={18} /></button>
+          <button type="button" aria-label="Cerrar centro de tareas" className="touch-target grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={18} /></button>
         </header>
 
         {settingsOpen ? (
@@ -137,10 +137,10 @@ export function TaskCenterPanel({
           <div className="scrollbar-thin flex min-w-0 flex-1 gap-1 overflow-x-auto" aria-label="Filtros de tareas">
             {filters.map((option) => {
               const count = option.id === "all" ? tasks.length : tasks.filter((task) => task.status === option.id).length;
-              return <button key={option.id} type="button" aria-pressed={filter === option.id} className={`min-h-8 shrink-0 rounded-full px-3 text-[11px] font-medium transition ${filter === option.id ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setFilter(option.id)}>{option.label}{count ? ` · ${count}` : ""}</button>;
+              return <button key={option.id} type="button" aria-pressed={filter === option.id} className={`touch-target min-h-8 shrink-0 rounded-full px-3 text-[11px] font-medium transition ${filter === option.id ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setFilter(option.id)}>{option.label}{count ? ` · ${count}` : ""}</button>;
             })}
           </div>
-          {unread ? <button type="button" disabled={busy} className="flex min-h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-[var(--brain-accent-on-soft)] hover:bg-[var(--accent-soft)] disabled:opacity-50" onClick={onMarkAllRead}><Check size={13} />Leer todo</button> : null}
+          {unread ? <button type="button" disabled={busy} className="touch-target flex min-h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[10px] font-semibold text-[var(--brain-accent-on-soft)] hover:bg-[var(--accent-soft)] disabled:opacity-50" onClick={onMarkAllRead}><Check size={13} />Leer todo</button> : null}
         </div>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2 sm:p-3" aria-live="polite">
@@ -156,8 +156,8 @@ export function TaskCenterPanel({
                 </div>
               </div>
               <div className="mt-2 flex justify-end gap-1">
-                {task.unread ? <button type="button" disabled={busy} className="min-h-8 rounded-full px-3 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] disabled:opacity-50" onClick={() => onMarkRead(task.id)}>Marcar como leída</button> : null}
-                <button type="button" className="flex min-h-8 items-center gap-1.5 rounded-full bg-[var(--surface-raised)] px-3 text-[10px] font-semibold text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={() => onOpenConversation(task)}><ChatCircleDots size={13} />Abrir conversación</button>
+                {task.unread ? <button type="button" disabled={busy} className="touch-target min-h-8 rounded-full px-3 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-raised)] disabled:opacity-50" onClick={() => onMarkRead(task.id)}>Marcar como leída</button> : null}
+                <button type="button" className="touch-target flex min-h-8 items-center gap-1.5 rounded-full bg-[var(--surface-raised)] px-3 text-[10px] font-semibold text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={() => onOpenConversation(task)}><ChatCircleDots size={13} />Abrir conversación</button>
               </div>
             </article>
           )) : (

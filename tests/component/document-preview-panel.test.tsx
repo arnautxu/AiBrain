@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import type { DocumentArtifact } from "@/lib/chat-contract";
@@ -26,6 +27,16 @@ const artifact: DocumentArtifact = {
   targetLabel: null,
   error: null,
 };
+
+function MobilePreviewHarness() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>Abrir documento</button>
+      {open ? <DocumentPreviewPanel artifact={artifact} onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
 
 describe("DocumentPreviewPanel", () => {
   it("previews the private PDF blob and keeps download and close actions available", async () => {
@@ -65,5 +76,30 @@ describe("DocumentPreviewPanel", () => {
     expect(await screen.findByLabelText("Documento notes.txt")).toHaveTextContent("<script>unsafe()</script>");
     expect(screen.queryByTitle("Documento notes.txt")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Descargar notes.txt" })).toBeInTheDocument();
+  });
+
+  it("behaves as a focus-managed modal on mobile and restores its opener", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.7\\n%%EOF", {
+      headers: { "Content-Length": "14", "Content-Type": "application/pdf" },
+    })));
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:https://brain.example/document"), revokeObjectURL: vi.fn() });
+    render(<MobilePreviewHarness />);
+
+    const opener = screen.getByRole("button", { name: "Abrir documento" });
+    opener.focus();
+    fireEvent.click(opener);
+
+    const dialog = await screen.findByRole("dialog", { name: "Vista previa de informe-precios.pdf" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cerrar vista previa" })).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Vista previa de informe-precios.pdf" })).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
   });
 });

@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { describe, expect, it } from "vitest";
 import { TextDialog } from "@/components/workbench-dialogs";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 function DialogHarness() {
   const [open, setOpen] = useState(false);
@@ -20,6 +21,22 @@ function DialogHarness() {
         onSubmit={() => setOpen(false)}
       />
     </>
+  );
+}
+
+function HiddenControlsHarness() {
+  const firstRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useModalFocus<HTMLDivElement>(true, () => undefined, firstRef);
+  return (
+    <div ref={dialogRef} role="dialog" aria-label="Prueba de foco" tabIndex={-1}>
+      <button ref={firstRef} type="button">Primero</button>
+      <button type="button">Último</button>
+      <div hidden><button type="button">Oculto por atributo</button></div>
+      <div inert><button type="button">Oculto por inert</button></div>
+      <div aria-hidden="true"><button type="button">Oculto para accesibilidad</button></div>
+      <div style={{ display: "none" }}><button type="button">Oculto por display</button></div>
+      <div style={{ visibility: "hidden" }}><button type="button">Oculto por visibilidad</button></div>
+    </div>
   );
 }
 
@@ -41,5 +58,18 @@ describe("modal focus", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(opener).toHaveFocus();
+  });
+
+  it("traps focus in both directions and excludes hidden ancestor subtrees", async () => {
+    render(<HiddenControlsHarness />);
+    const first = screen.getByRole("button", { name: "Primero" });
+    const last = screen.getByRole("button", { name: "Último" });
+    await waitFor(() => expect(first).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(last).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(first).toHaveFocus();
   });
 });

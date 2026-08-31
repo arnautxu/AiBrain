@@ -4,8 +4,9 @@ import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
 import { StorageError } from "@/storage";
 import { workbenchErrorResponse } from "@/workbench/http";
-import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import { libraryResourceErrorResponse } from "@/library/http";
+import { resolveThreadLibraryResource } from "@/library/server-resource-access";
 
 export const runtime = "nodejs";
 
@@ -39,8 +40,18 @@ export async function GET(_request: Request, context: RouteContext) {
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
     }
-    await getThreadRuntimeContext(session, threadId);
-    const services = await documentServicesForUser(installation, session.user.id);
+    const resource = await resolveThreadLibraryResource(session, {
+      kind: "upload",
+      resourceId: uploadId,
+      threadId,
+    });
+    const services = await documentServicesForUser(installation, resource.location.storageOwnerId);
+    const staged = await services.staging.readById(threadId, uploadId);
+    if (staged.fileName !== resource.location.fileName || staged.mediaType !== resource.location.mediaType ||
+        staged.size !== resource.location.size || staged.sha256 !== resource.location.sha256 ||
+        staged.relativePath !== resource.location.relativePath) {
+      return NextResponse.json({ error: "El preview ya no coincide con su registro." }, { status: 409 });
+    }
     const data = await services.previews.readFile(threadId, uploadId, fileName);
     return new Response(new Uint8Array(data), {
       headers: {
@@ -56,6 +67,8 @@ export async function GET(_request: Request, context: RouteContext) {
       },
     });
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Preview no trobat.");
+    if (resourceError) return resourceError;
     if ((error instanceof StorageError && error.code === "DOCUMENT_PREVIEW_FILE_NOT_FOUND") ||
         isNodeError(error, "ENOENT")) {
       return NextResponse.json({ error: "Preview no trobat." }, { status: 404 });
