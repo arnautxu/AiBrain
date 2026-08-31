@@ -301,12 +301,17 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const encoder = new TextEncoder();
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
-            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "Primer fragmento sintético." })}\n`)), 80);
-            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "\n\nSegundo fragmento que debe respetar la lectura." })}\n`)), 480);
-            window.setTimeout(() => {
+            const state = window as Window & { __finishSyntheticChatStream?: () => void };
+            let finished = false;
+            state.__finishSyntheticChatStream = () => {
+              if (finished) return;
+              finished = true;
               controller.enqueue(encoder.encode(`${JSON.stringify({ type: "done" })}\n`));
               controller.close();
-            }, 760);
+              delete state.__finishSyntheticChatStream;
+            };
+            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "Primer fragmento sintético." })}\n`)), 80);
+            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "\n\nSegundo fragmento que debe respetar la lectura." })}\n`)), 480);
           },
         });
         return Promise.resolve(new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson; charset=utf-8" } }));
@@ -355,7 +360,16 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await expect(page.getByText("Segundo fragmento que debe respetar la lectura.", { exact: false })).toBeVisible();
     expect(await scroller.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
 
+    await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
     await page.getByRole("button", { name: "Volver al final" }).click();
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
+
+    await page.evaluate(() => {
+      const finish = (window as Window & { __finishSyntheticChatStream?: () => void }).__finishSyntheticChatStream;
+      if (!finish) throw new Error("synthetic chat stream is not active");
+      finish();
+    });
+    await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeVisible();
     await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
   });
 }
