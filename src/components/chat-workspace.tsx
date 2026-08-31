@@ -593,9 +593,10 @@ export function ChatWorkspace({
       const scroller = scrollRef.current;
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
     };
-    // Let the resulting scroll event hide the control. Removing its mobile
-    // layout row first lets Chromium restore the detached scroll anchor after
-    // React commits, undoing an otherwise successful scrollTop assignment.
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    // Let the resulting scroll event hide the control after the container has
+    // reached the end; the chat owns its scroll position instead of relying on
+    // Chromium's layout anchoring while streamed content is still changing.
     scrollToLatest();
     requestAnimationFrame(() => {
       scrollToLatest();
