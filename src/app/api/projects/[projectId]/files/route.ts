@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { loadInstallationConfig } from "@/config/installation";
-import { contentDisposition } from "@/library/http";
+import { contentDisposition, libraryResourceErrorResponse } from "@/library/http";
+import { resolveProjectLibraryResource } from "@/library/server-resource-access";
 import { DocumentConversionBackpressureError } from "@/documents/conversion-gate";
 import { documentServicesForUser } from "@/documents/server-service";
 import { UploadValidationError, validateUploadedDocument } from "@/documents/upload-validation";
@@ -96,17 +98,20 @@ export async function GET(
   const raw = url.searchParams.get("raw") === "1";
   const download = url.searchParams.get("download") === "1";
   const representation = url.searchParams.get("representation") === "1";
+  const resourceId = url.searchParams.get("resourceId");
   if (
-    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download" && key !== "representation") ||
+    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download" && key !== "representation" && key !== "resourceId") ||
     url.searchParams.getAll("path").length !== 1 ||
     url.searchParams.getAll("raw").length > 1 ||
     url.searchParams.getAll("download").length > 1 ||
     url.searchParams.getAll("representation").length > 1 ||
+    url.searchParams.getAll("resourceId").length > 1 ||
     (url.searchParams.has("raw") && url.searchParams.get("raw") !== "1") ||
     (url.searchParams.has("download") && url.searchParams.get("download") !== "1") ||
     (url.searchParams.has("representation") && url.searchParams.get("representation") !== "1") ||
     (download && !raw) ||
     (representation && (raw || download)) ||
+    (resourceId !== null && !isUuid(resourceId)) ||
     !filePath || filePath.length > 2_048 || filePath.includes("\0")
   ) {
     return privateJson({ error: "Ruta no válida." }, 400);
@@ -117,24 +122,43 @@ export async function GET(
     if (session.provider !== "local" || installation.installationId !== session.tenant.id) {
       return privateJson({ error: "La sesión no pertenece a esta instalación." }, 403);
     }
-    const project = await getProjectRuntimeContext(session, projectId);
-    const roots = deriveWorkerRoots(installation, session.user.id);
+    const indexedResource = resourceId
+      ? await resolveProjectLibraryResource(session, { kind: "workspace-file", resourceId, projectId })
+      : null;
+    const runtimeProjectId = indexedResource
+      ? indexedResource.access.project.id
+      : (await getProjectRuntimeContext(session, projectId)).projectId;
+    const roots = deriveWorkerRoots(installation, indexedResource?.location.storageOwnerId ?? session.user.id);
     const projectWorkspace = await resolveWorkerOwnedPath(
       roots.workspace,
-      path.posix.join("projects", project.projectId),
+      path.posix.join("projects", runtimeProjectId),
     );
     const workspaceRelativePath = path.isAbsolute(filePath)
       ? path.relative(projectWorkspace, filePath)
       : filePath;
     const preview = previewType(filePath);
+    const normalizedRelativePath = path.normalize(workspaceRelativePath).split(path.sep).join("/");
+    if (indexedResource && (
+      indexedResource.location.relativePath !== normalizedRelativePath ||
+      indexedResource.location.mediaType !== preview.mimeType
+    )) {
+      return privateJson({ error: "Archivo no encontrado." }, 404);
+    }
     const contents = await readRegularFileWithin(
       projectWorkspace,
       workspaceRelativePath,
       preview.kind === "text" ? MAXIMUM_TEXT_FILE_BYTES : MAXIMUM_BINARY_FILE_BYTES,
     );
+    if (indexedResource && (
+      contents.byteLength !== indexedResource.location.size ||
+      createHash("sha256").update(contents).digest("hex") !== indexedResource.location.sha256
+    )) {
+      return privateJson({ error: "El archivo ya no coincide con su registro." }, 409);
+    }
 
     const encodedPath = encodeURIComponent(filePath);
-    const rawUrl = `/api/projects/${projectId}/files?path=${encodedPath}&raw=1`;
+    const resourceSuffix = resourceId ? `&resourceId=${resourceId}` : "";
+    const rawUrl = `/api/projects/${projectId}/files?path=${encodedPath}&raw=1${resourceSuffix}`;
     const downloadUrl = `${rawUrl}&download=1`;
 
     if (representation) {
@@ -220,7 +244,7 @@ export async function GET(
         }
       }
       const previewUrl = preview.kind === "office"
-        ? `/api/projects/${projectId}/files?path=${encodedPath}&representation=1`
+        ? `/api/projects/${projectId}/files?path=${encodedPath}&representation=1${resourceSuffix}`
         : rawUrl;
       return privateJson({
         file: {
@@ -265,6 +289,8 @@ export async function GET(
       },
     }, 200);
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Archivo no encontrado.");
+    if (resourceError) return resourceError;
     if (error instanceof UploadValidationError) {
       return privateJson({ error: "Este formato no admite una vista previa segura." }, 415);
     }

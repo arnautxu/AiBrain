@@ -50,7 +50,9 @@ type TurnActivityProps = {
   projectId?: string;
   compact?: boolean;
   showDiff?: boolean;
+  readOnly?: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
+  onOpenReview?: () => void;
   onOpenBrowser?: () => void;
   managedAppAction?: {
     enabled: boolean;
@@ -221,10 +223,12 @@ function ApprovalCard({
   approval,
   onResolve,
   connectorApproval = false,
+  readOnly = false,
 }: {
   approval: ApprovalItem;
   onResolve: (decision: ApprovalDecision) => void;
   connectorApproval?: boolean;
+  readOnly?: boolean;
 }) {
   const pending = approval.status === "pending";
   const result = {
@@ -259,7 +263,11 @@ function ApprovalCard({
         </div>
       </div>
 
-      {pending ? (
+      {pending && readOnly ? (
+        <div className="border-t border-[var(--border-subtle)] px-3.5 py-2 text-[9px] font-medium text-[var(--text-secondary)]">
+          Esperando la decisión de un editor del proyecto
+        </div>
+      ) : pending ? (
         <div className="flex flex-wrap justify-end gap-1.5 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2">
           <button type="button" className="min-h-9 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
           {approval.kind === "command" && !connectorApproval ? (
@@ -279,7 +287,9 @@ export function TurnActivity({
   projectId,
   compact = false,
   showDiff = true,
+  readOnly = false,
   onResolveApproval,
+  onOpenReview,
   onOpenBrowser,
   managedAppAction = null,
   managedAppApprovalKeys = [],
@@ -420,7 +430,7 @@ export function TurnActivity({
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
+        <ApprovalCard key={approval.id} approval={approval} readOnly={readOnly} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       {managedAppAction ? <ManagedAppActionControl
@@ -430,7 +440,12 @@ export function TurnActivity({
         onPrepared={managedAppAction.onPrepared}
       /> : null}
 
-      {message.diff && showDiff ? (
+      {message.diff && showDiff ? onOpenReview ? (
+        <button type="button" aria-label="Abrir cambios y resultados" onClick={onOpenReview} className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-left text-[var(--text)]">
+          <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
+          <div><p className="text-[10px] font-semibold">Abrir cambios y resultados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Incluidos en este turno</p></div>
+        </button>
+      ) : (
         <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
           <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
           <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Incluidos en este turno</p></div>

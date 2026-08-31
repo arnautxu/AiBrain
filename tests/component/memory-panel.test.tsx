@@ -60,7 +60,7 @@ describe("MemoryPanel states and governed editor", () => {
     vi.mocked(listExplicitMemories).mockRejectedValueOnce(new Error("Memoria temporalmente no disponible.")).mockResolvedValueOnce([]);
     vi.mocked(listMemoryGovernance).mockResolvedValue(governanceEmpty);
 
-    render(<MemoryPanel open projectId={projectId} onClose={vi.fn()} />);
+    render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={vi.fn()} />);
     expect(screen.getByText("Cargando memoria…")).toBeInTheDocument();
     expect(screen.queryByText("Aún no hay memorias guardadas")).not.toBeInTheDocument();
 
@@ -76,7 +76,7 @@ describe("MemoryPanel states and governed editor", () => {
     vi.mocked(listExplicitMemories).mockResolvedValue([]);
     vi.mocked(listMemoryGovernance).mockResolvedValue({ ...governanceEmpty, memories: [governedMemory] });
 
-    render(<MemoryPanel open projectId={projectId} onClose={vi.fn()} />);
+    render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={vi.fn()} />);
     const edit = await screen.findByRole("button", { name: "Editar" });
     fireEvent.click(edit);
 
@@ -93,10 +93,10 @@ describe("MemoryPanel states and governed editor", () => {
       .mockResolvedValueOnce({ ...governanceEmpty, memories: [governedMemory] })
       .mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
 
-    const view = render(<MemoryPanel open projectId={projectId} onClose={vi.fn()} />);
+    const view = render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={vi.fn()} />);
     expect(await screen.findByText(governedMemory.content)).toBeInTheDocument();
 
-    view.rerender(<MemoryPanel open projectId={secondProjectId} onClose={vi.fn()} />);
+    view.rerender(<MemoryPanel open projectId={secondProjectId} productName="AiBrain" onClose={vi.fn()} />);
     expect(screen.queryByText(governedMemory.content)).not.toBeInTheDocument();
     expect(screen.getByText("Actualizando memoria…")).toBeInTheDocument();
 

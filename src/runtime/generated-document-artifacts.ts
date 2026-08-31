@@ -72,6 +72,23 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
   projectWorkspace: string,
   projectId: string,
   turnId: string,
+  registration?: {
+    threadId: string;
+    storageOwnerId: string;
+    register: (input: {
+      kind: "workspace-file";
+      resourceId: string;
+      projectId: string;
+      threadId: string;
+      messageId: string;
+      storageOwnerId: string;
+      relativePath: string;
+      fileName: string;
+      mediaType: string;
+      size: number;
+      sha256: string;
+    }) => Promise<unknown>;
+  },
 ): Promise<DocumentArtifact[]> {
   if (!isRecord(value)) return [];
   const pages = pageCount(value);
@@ -95,17 +112,35 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
       });
       const encodedPath = encodeURIComponent(relativePath.split(path.sep).join("/"));
       const fileRoute = `/api/projects/${projectId}/files?path=${encodedPath}`;
+      const artifactId = generatedDocumentArtifactId(turnId, relativePath);
+      if (registration) {
+        await registration.register({
+          kind: "workspace-file",
+          resourceId: artifactId,
+          projectId,
+          threadId: registration.threadId,
+          messageId: turnId,
+          storageOwnerId: registration.storageOwnerId,
+          relativePath: relativePath.split(path.sep).join("/"),
+          fileName: path.basename(relativePath),
+          mediaType: format.mimeType,
+          size: contents.length,
+          sha256: createHash("sha256").update(contents).digest("hex"),
+        });
+      }
       artifacts.push({
-        id: generatedDocumentArtifactId(turnId, relativePath),
+        id: artifactId,
         type: "document",
         name: path.basename(relativePath),
-        url: `${fileRoute}&raw=1&download=1`,
+        url: `${fileRoute}&raw=1&download=1&resourceId=${artifactId}`,
         kind: format.kind,
         mimeType: format.mimeType,
         size: contents.length,
         status: "ready",
         pages: format.kind === "pdf" ? pages : null,
-        previewUrl: format.kind === "pdf" ? `${fileRoute}&raw=1` : `${fileRoute}&representation=1`,
+        previewUrl: format.kind === "pdf"
+          ? `${fileRoute}&raw=1&resourceId=${artifactId}`
+          : `${fileRoute}&representation=1&resourceId=${artifactId}`,
         publicationStatus: null,
         publicationError: null,
         targetLabel: null,
