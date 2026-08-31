@@ -40,13 +40,14 @@ import {
 import type { PublicInstallationBranding } from "@/config/installation-branding";
 import {
   STANDALONE_PROJECT_SLUG,
+  workbenchProjectAccess,
   type WorkbenchProject,
   type WorkbenchThread,
 } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
 import type { ThreadActivity } from "@/workbench/thread-activity";
 
-export type ProjectMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
+export type ProjectMenuAction = "settings" | "rename" | "pin" | "unpin" | "archive" | "restore";
 export type ThreadMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
 
 type SidebarProps = {
@@ -153,9 +154,11 @@ function MenuButton({ icon, label, danger = false, onClick }: {
   );
 }
 
-function ItemActions({ kind, item, onAction, onClose }: {
+function ItemActions({ kind, item, canEdit = true, canManage = true, onAction, onClose }: {
   kind: "project" | "thread";
   item: WorkbenchProject | WorkbenchThread;
+  canEdit?: boolean;
+  canManage?: boolean;
   onAction: (action: ProjectMenuAction | ThreadMenuAction) => void;
   onClose: () => void;
 }) {
@@ -180,12 +183,13 @@ function ItemActions({ kind, item, onAction, onClose }: {
     <div ref={menuRef} role="menu" aria-label={`Acciones de ${itemLabel}`} className="menu-enter absolute right-1 top-8 z-50 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
       {item.status === "active" ? (
         <>
-          <MenuButton icon={<NotePencil size={14} />} label="Renombrar" onClick={() => onAction("rename")} />
-          <MenuButton icon={<PushPin size={14} />} label={item.pinned ? "Desfijar" : "Fijar"} onClick={() => onAction(item.pinned ? "unpin" : "pin")} />
-          <MenuButton danger icon={<Archive size={14} />} label="Archivar" onClick={() => onAction("archive")} />
+          {kind === "project" ? <MenuButton icon={<GearSix size={14} />} label="Ajustes del proyecto" onClick={() => onAction("settings")} /> : null}
+          {canEdit ? <MenuButton icon={<NotePencil size={14} />} label="Renombrar" onClick={() => onAction("rename")} /> : null}
+          {canManage ? <MenuButton icon={<PushPin size={14} />} label={item.pinned ? "Desfijar" : "Fijar"} onClick={() => onAction(item.pinned ? "unpin" : "pin")} /> : null}
+          {canManage ? <MenuButton danger icon={<Archive size={14} />} label="Archivar" onClick={() => onAction("archive")} /> : null}
         </>
       ) : (
-        <MenuButton icon={kind === "project" ? <FolderOpen size={14} /> : <ChatCircleDots size={14} />} label="Restaurar" onClick={() => onAction("restore")} />
+        canManage ? <MenuButton icon={kind === "project" ? <FolderOpen size={14} /> : <ChatCircleDots size={14} />} label="Restaurar" onClick={() => onAction("restore")} /> : null
       )}
     </div>
   );
@@ -216,6 +220,7 @@ export function Sidebar({
   onOpenCustomization,
 }: SidebarProps) {
   const router = useRouter();
+  const profileButtonRef = useRef<HTMLButtonElement>(null);
   const [projectMenuId, setProjectMenuId] = useState<string | null>(null);
   const [threadMenuId, setThreadMenuId] = useState<string | null>(null);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -251,6 +256,9 @@ export function Sidebar({
 
   useEffect(() => {
     if (!profileMenuOpen) return;
+    const focusFrame = requestAnimationFrame(() => {
+      profileMenuRef.current?.querySelector<HTMLElement>("[role='menuitem']")?.focus();
+    });
     const closeProfileMenu = (event: PointerEvent) => {
       if (profileMenuRef.current?.contains(event.target as Node)) return;
       setProfileMenuOpen(false);
@@ -259,11 +267,13 @@ export function Sidebar({
       if (event.key === "Escape") {
         setProfileMenuOpen(false);
         setHelpOpen(false);
+        requestAnimationFrame(() => profileButtonRef.current?.focus());
       }
     };
     document.addEventListener("pointerdown", closeProfileMenu);
     document.addEventListener("keydown", closeProfileMenuOnEscape);
     return () => {
+      cancelAnimationFrame(focusFrame);
       document.removeEventListener("pointerdown", closeProfileMenu);
       document.removeEventListener("keydown", closeProfileMenuOnEscape);
     };
@@ -365,6 +375,7 @@ export function Sidebar({
               {activeProjects.length === 0 ? (
                 <SidebarMenuItem><button className="w-full rounded-lg border border-dashed border-[var(--border)] px-3 py-3 text-left text-[12px] leading-5 text-[var(--text-subtle)]" onClick={onNewProject}>Crea tu primer proyecto</button></SidebarMenuItem>
               ) : activeProjects.map((project) => {
+                const access = workbenchProjectAccess(project);
                 const active = project.id === activeProjectId;
                 const menuOpen = projectMenuId === project.id;
                 const projectThreadsOpen = !collapsedProjectIds.includes(project.id);
@@ -381,9 +392,9 @@ export function Sidebar({
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
                     </SidebarMenuButton>
                     <button aria-label={projectThreadsOpen ? `Contraer ${project.name}` : `Expandir ${project.name}`} aria-expanded={projectThreadsOpen} className="pointer-events-none absolute right-[5.5rem] top-0 z-20 grid h-11 w-7 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:pointer-events-auto group-hover/project:opacity-100 group-focus-within/project:pointer-events-auto group-focus-within/project:opacity-100" onClick={() => setCollapsedProjectIds((current) => projectThreadsOpen ? [...current, project.id] : current.filter((id) => id !== project.id))}>{projectThreadsOpen ? <CaretDown size={13} /> : <CaretRight size={13} />}</button>
-                    <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="absolute right-[2.75rem] top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={14} /></button>
+                    {access.canEdit ? <button disabled={busy} aria-label={`Nueva conversación en ${project.name}`} className="absolute right-[2.75rem] top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 transition hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 disabled:opacity-40" onClick={() => onNewThread(project.id)}><Plus size={14} /></button> : null}
                     <button aria-label={`Acciones de ${project.name}`} aria-expanded={menuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/project:opacity-100 focus:opacity-100 ${contextMenuOpen && !menuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setThreadMenuId(null); setProjectMenuId(menuOpen ? null : project.id); }}><DotsThree size={15} weight="bold" /></button>
-                    {menuOpen ? <ItemActions kind="project" item={project} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
+                    {menuOpen ? <ItemActions kind="project" item={project} canEdit={access.canEdit} canManage={access.canManage} onClose={closeMenus} onAction={(action) => { closeMenus(); onProjectAction(project, action as ProjectMenuAction); }} /> : null}
                     {projectThreadsOpen ? <div aria-label={`Chats de ${project.name}`} className="mt-0.5">
                       <div className="space-y-0.5">
                         {activeProjectThreads.length === 0 ? <p data-testid="sidebar-project-thread" className="px-2 py-1 text-[11px] leading-5 text-[var(--text-subtle)]">Aún no hay conversaciones.</p> : activeProjectThreads.map((thread) => {
@@ -396,8 +407,8 @@ export function Sidebar({
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
                               </button>
-                              <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !threadMenuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button>
-                              {threadMenuOpen ? <ItemActions kind="thread" item={thread} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
+                              {access.canEdit ? <button aria-label={`Acciones de ${thread.title}`} aria-expanded={threadMenuOpen} className={`sidebar-item-action absolute right-0 top-0 z-20 grid size-11 place-items-center text-[var(--text-subtle)] opacity-0 hover:text-[var(--text)] group-hover/thread:opacity-100 focus:opacity-100 ${contextMenuOpen && !threadMenuOpen ? "context-menu-suppressed" : ""}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(threadMenuOpen ? null : thread.id); }}><DotsThree size={13} weight="bold" /></button> : null}
+                              {threadMenuOpen ? <ItemActions kind="thread" item={thread} canEdit={access.canEdit} canManage={access.canEdit} onClose={closeMenus} onAction={(action) => { closeMenus(); onThreadAction(thread, action as ThreadMenuAction); }} /> : null}
                             </div>
                           );
                         })}
@@ -420,7 +431,7 @@ export function Sidebar({
               <button role="menuitem" className="flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={16} />Cerrar sesión</button>
             </div>
           ) : null}
-          <button aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-expanded={profileMenuOpen} className={`flex w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); if (profileMenuOpen) setHelpOpen(false); setProfileMenuOpen((open) => !open); }}>
+          <button ref={profileButtonRef} aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-expanded={profileMenuOpen} className={`flex w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); if (profileMenuOpen) setHelpOpen(false); setProfileMenuOpen((open) => !open); }}>
             <UserAvatar name={session.user.name} avatarUrl={session.user.avatarUrl ?? null} className="size-5" />
             <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
           </button>

@@ -91,6 +91,7 @@ type ChatWorkspaceProps = {
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   onPreviewDocument: (artifact: DocumentArtifact) => void;
   onOpenBrowser: () => void;
+  readOnly?: boolean;
 };
 
 type ComposerPickerOption = {
@@ -134,7 +135,7 @@ function ComposerPicker({
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`composer-picker-button ${open ? "composer-picker-button-active" : ""}`}
+        className={`composer-picker-button !min-h-11 ${open ? "composer-picker-button-active" : ""}`}
         disabled={disabled}
         onClick={() => onOpenChange(!open)}
       >
@@ -216,6 +217,7 @@ function AssistantMessage({
   managedAppApprovalKeys,
   onPreviewDocument,
   onOpenBrowser,
+  readOnly = false,
 }: {
   message: ChatMessage;
   assistantName: string;
@@ -233,6 +235,7 @@ function AssistantMessage({
   managedAppApprovalKeys: readonly string[];
   onPreviewDocument: (artifact: DocumentArtifact) => void;
   onOpenBrowser: () => void;
+  readOnly?: boolean;
 }) {
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message) ?? "Enviando solicitud";
@@ -241,7 +244,7 @@ function AssistantMessage({
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} projectId={projectId} onResolveApproval={onResolveApproval} onOpenBrowser={onOpenBrowser} managedAppAction={managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -281,7 +284,7 @@ function AssistantMessage({
       ) : null}
 
       {publications.map((draft) => (
-        <DocumentPublicationCard key={draft.id} draft={draft} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
+        <DocumentPublicationCard key={draft.id} draft={draft} readOnly={readOnly} onFreeze={onFreezePublication} onDecide={onDecidePublication} />
       ))}
 
       {message.status === "complete" && publicContent ? <ResultActions content={publicContent} /> : null}
@@ -289,13 +292,13 @@ function AssistantMessage({
   );
 }
 
-function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (content: string) => void }) {
+function UserMessage({ message, onEdit, readOnly = false }: { message: ChatMessage; onEdit: (content: string) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.content);
   return (
     <article className="message-enter group flex justify-end">
-      <div className="max-w-[86%] md:max-w-[70%]">
-      <div className="rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[14px] leading-[23px] text-[var(--user-message-text)]">
+      <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
+      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[14px] leading-[23px] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -308,7 +311,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
         {editing ? (
           <div>
             <label className="sr-only" htmlFor={`edit-${message.id}`}>Editar mensaje</label>
-            <textarea id={`edit-${message.id}`} autoFocus value={value} maxLength={32_000} rows={Math.min(8, Math.max(2, value.split("\n").length))} className="w-full min-w-64 resize-y bg-transparent outline-none" onChange={(event) => setValue(event.target.value)} />
+            <textarea id={`edit-${message.id}`} autoFocus value={value} maxLength={32_000} rows={Math.min(8, Math.max(2, value.split("\n").length))} className="w-full min-w-0 resize-y bg-transparent outline-none [overflow-wrap:anywhere]" onChange={(event) => setValue(event.target.value)} />
             <div className="mt-2 flex justify-end gap-2 text-[12px]">
               <button type="button" className="rounded-full px-3 py-1.5 hover:bg-black/5" onClick={() => { setValue(message.content); setEditing(false); }}>Cancelar</button>
               <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--send-button)] px-3 py-1.5 font-semibold text-[var(--send-button-text)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
@@ -316,7 +319,7 @@ function UserMessage({ message, onEdit }: { message: ChatMessage; onEdit: (conte
           </div>
         ) : <div>{message.content}</div>}
       </div>
-      {!editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label="Editar mensaje y crear una rama" title="Editar mensaje" onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
+      {!readOnly && !editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label="Editar mensaje y crear una rama" title="Editar mensaje" onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
       </div>
     </article>
   );
@@ -367,6 +370,7 @@ export function ChatWorkspace({
   onManagedAppPrepared,
   onPreviewDocument,
   onOpenBrowser,
+  readOnly = false,
 }: ChatWorkspaceProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -388,7 +392,7 @@ export function ChatWorkspace({
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
   useLayoutEffect(() => {
-    if (!shouldStickToBottomRef.current && !sending) return;
+    if (!shouldStickToBottomRef.current) return;
     const scroller = scrollRef.current;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [sending, thread?.messages]);
@@ -586,7 +590,9 @@ export function ChatWorkspace({
   const jumpToBottom = () => {
     shouldStickToBottomRef.current = true;
     setShowJumpToBottom(false);
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
   };
 
   return (
@@ -599,7 +605,7 @@ export function ChatWorkspace({
           <div data-testid="project-breadcrumb" className="flex min-w-0 items-center gap-1.5 px-1 py-1 text-left">
             {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : null}
             {!standaloneConversation ? <span className="hidden max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name}</span> : null}
-            {thread ? <span className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</span> : null}
+            {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
           </div>
         </div>
       </header>
@@ -615,7 +621,7 @@ export function ChatWorkspace({
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
               {thread?.messages.map((message) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
-                  {message.role === "user" ? <UserMessage message={message} onEdit={(content) => onEditMessage(message, content)} /> : (
+                  {message.role === "user" ? <UserMessage message={message} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
                       assistantName={assistantName}
@@ -628,7 +634,8 @@ export function ChatWorkspace({
                       managedAppApprovalKeys={managedAppApprovalKeys}
                       onPreviewDocument={onPreviewDocument}
                       onOpenBrowser={onOpenBrowser}
-                      managedAppAction={managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
+                      readOnly={readOnly}
+                      managedAppAction={!readOnly && managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
                         enabled: true,
                         threadId: thread.id,
                         onPrepared: onManagedAppPrepared,
@@ -643,7 +650,11 @@ export function ChatWorkspace({
         ) : <section className={`chat-empty-state mx-auto min-h-full w-full ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía" />}
       </div>
 
-      <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
+      {readOnly ? (
+        <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-center text-[11px] font-medium text-[var(--text-muted)]" role="status">
+          Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.
+        </div>
+      ) : <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button type="button" className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]" onClick={jumpToBottom}><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
           {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
@@ -731,7 +742,7 @@ export function ChatWorkspace({
             </div> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
-                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-8 !place-items-center !rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
+                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 {!hasMessages ? (
                   <ComposerPicker
                     ariaLabel="Destino de la conversación"
@@ -777,7 +788,7 @@ export function ChatWorkspace({
                 <button
                   aria-label={sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
                   aria-busy={stopping || undefined}
-                  className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:size-8 sm:rounded-full"
+                  className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
                   disabled={sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
                   onClick={() => {
                     if (sending) {
@@ -804,7 +815,7 @@ export function ChatWorkspace({
             ))}
           </div> : null}
         </div>
-      </div>
+      </div>}
     </main>
   );
 }

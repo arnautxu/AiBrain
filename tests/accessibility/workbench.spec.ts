@@ -28,7 +28,7 @@ test("the authenticated employee shell has no critical or serious axe violations
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Configuración", exact: true }).click();
+  await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Configuración", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Configuración" })).toBeVisible();
   await page.waitForTimeout(300);
   await assertNoBlockingViolations();

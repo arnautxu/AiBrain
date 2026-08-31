@@ -11,6 +11,7 @@ import { DetailsPanel } from "@/components/details-panel";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { AutomationsPanel } from "@/components/automations-panel";
+import { TaskCenterPanel } from "@/components/task-center-panel";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -83,6 +84,7 @@ import {
 import {
   isWorkbenchSnapshot,
   STANDALONE_PROJECT_SLUG,
+  workbenchProjectAccess,
   type BranchThreadInput,
   type UpdateProjectInput,
   type UpdateThreadInput,
@@ -576,6 +578,10 @@ export function BrainApp({
     preferences: DEFAULT_TASK_NOTIFICATION_PREFERENCES,
     continuity: "worker_required",
   });
+  const [taskCenterOpen, setTaskCenterOpen] = useState(false);
+  const [taskCenterRequested, setTaskCenterRequested] = useState(false);
+  const [taskCenterBusy, setTaskCenterBusy] = useState(false);
+  const taskCenterGateRef = useRef(createTaskCenterResponseGate());
   const [automationsOpen, setAutomationsOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
@@ -890,21 +896,42 @@ export function BrainApp({
       );
       notification.onclick = () => {
         window.focus();
-        switchComposerSelection({ projectId: newest.projectId, threadId: newest.threadId });
-        setActiveProjectId(newest.projectId);
-        setActiveThreadId(newest.threadId);
-        setSelectedMessageId(null);
+        setTaskCenterRequested(true);
         notification.close();
       };
     }
-  }, [branding.productName, switchComposerSelection]);
+  }, [branding.productName]);
 
   const refreshTaskCenter = useCallback(async (notify = true) => {
+    const requestGeneration = taskCenterGateRef.current.beginPoll();
+    if (requestGeneration === null) return null;
     const response = await fetch("/api/task-center", { cache: "no-store" });
     const value: unknown = await response.json().catch(() => null);
     if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido actualizar el centro de tareas.");
+    if (!taskCenterGateRef.current.isCurrent(requestGeneration)) return value;
     applyTaskCenterPayload(value, notify);
     return value;
+  }, [applyTaskCenterPayload]);
+
+  const mutateTaskCenter = useCallback(async (body: unknown) => {
+    const requestGeneration = taskCenterGateRef.current.beginMutation();
+    setTaskCenterBusy(true);
+    try {
+      const response = await fetch("/api/task-center", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const value: unknown = await response.json().catch(() => null);
+      if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido guardar el centro de tareas.");
+      if (!taskCenterGateRef.current.isCurrent(requestGeneration)) return;
+      applyTaskCenterPayload(value, false);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.");
+    } finally {
+      taskCenterGateRef.current.finishMutation();
+      setTaskCenterBusy(false);
+    }
   }, [applyTaskCenterPayload]);
 
   useEffect(() => {
@@ -1772,6 +1799,11 @@ export function BrainApp({
   }, [initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog]);
 
   const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction) => {
+    if (action === "settings") {
+      selectProject(project.id);
+      setProjectOpen(true);
+      return;
+    }
     if (action === "archive" && threads.some((thread) =>
       thread.projectId === project.id &&
       (threadActivityById[thread.id]?.state === "running" ||
@@ -1783,7 +1815,7 @@ export function BrainApp({
     else if (action === "archive") setConfirmDialog({ kind: "archive-project", project });
     else if (action === "restore") void persistProjectPatch(project, { status: "active" });
     else void persistProjectPatch(project, { pinned: action === "pin" });
-  }, [persistProjectPatch, threadActivityById, threads]);
+  }, [persistProjectPatch, selectProject, threadActivityById, threads]);
 
   const handleThreadAction = useCallback((thread: WorkbenchThread, action: ThreadMenuAction) => {
     const workState = threadActivityById[thread.id]?.state;
@@ -1855,10 +1887,18 @@ export function BrainApp({
   const browserSetting = settingsSnapshot?.apps.find((app) => app.id === "managed-browser") ?? null;
   const browserEnabled = browserDeclared &&
     (browserSetting ? browserSetting.effectiveEnabled === true : browserMonitorStatus?.available === true);
+  const blockingSurfaceOpen = customizationOpen || projectOpen || commandPaletteOpen ||
+    taskCenterOpen || Boolean(textDialog) || Boolean(confirmDialog) || Boolean(previewDocument);
+
+  useEffect(() => {
+    if (!taskCenterRequested || blockingSurfaceOpen) return;
+    setTaskCenterRequested(false);
+    setTaskCenterOpen(true);
+  }, [blockingSurfaceOpen, taskCenterRequested]);
 
   useEffect(() => {
     if (!browserDeclared || !activeBrowserDemandKey || !activeThreadId ||
-        autoOpenedBrowserDemandRef.current === activeBrowserDemandKey) return;
+        blockingSurfaceOpen || autoOpenedBrowserDemandRef.current === activeBrowserDemandKey) return;
     const controller = new AbortController();
     let interval: number | null = null;
     const refresh = () => {
@@ -1881,7 +1921,7 @@ export function BrainApp({
       controller.abort();
       if (interval !== null) window.clearInterval(interval);
     };
-  }, [activeBrowserDemandKey, activeThreadId, browserDeclared]);
+  }, [activeBrowserDemandKey, activeThreadId, blockingSurfaceOpen, browserDeclared]);
 
   const toggleSidebar = useCallback(() => {
     if (window.matchMedia("(min-width: 768px)").matches) {
@@ -1905,9 +1945,18 @@ export function BrainApp({
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.metaKey || event.ctrlKey;
       const key = event.key.toLocaleLowerCase("ca");
+      const target = event.target as HTMLElement | null;
+      const editing = target?.matches("input, textarea, [contenteditable='true']") ?? false;
       if (modifier && key === "k") {
         event.preventDefault();
-        setCommandPaletteOpen((current) => !current);
+        if (commandPaletteOpen) setCommandPaletteOpen(false);
+        else if (!blockingSurfaceOpen && !editing) setCommandPaletteOpen(true);
+        return;
+      }
+      if (modifier && event.altKey && key === "u") {
+        event.preventDefault();
+        if (taskCenterOpen) setTaskCenterOpen(false);
+        else if (!blockingSurfaceOpen && !editing) setTaskCenterOpen(true);
         return;
       }
       if (modifier && key === "n") {
@@ -1922,6 +1971,7 @@ export function BrainApp({
       }
       if (event.key !== "Escape") return;
       if (commandPaletteOpen) setCommandPaletteOpen(false);
+      else if (taskCenterOpen) setTaskCenterOpen(false);
       else if (customizationOpen) setCustomizationOpen(false);
       else if (automationsOpen) setAutomationsOpen(false);
       else if (textDialog && !actionBusy) setTextDialog(null);
@@ -1937,6 +1987,7 @@ export function BrainApp({
     activeProject,
     activeSideWindow,
     commandPaletteOpen,
+    blockingSurfaceOpen,
     confirmDialog,
     customizationOpen,
     automationsOpen,
@@ -1944,6 +1995,7 @@ export function BrainApp({
     previewDocument,
     startNewThread,
     textDialog,
+    taskCenterOpen,
   ]);
 
   const textDialogCopy = textDialog?.kind === "create-project"
@@ -2041,6 +2093,7 @@ export function BrainApp({
           setPreviewDocument(null);
           setActiveSideWindow("browser");
         }}
+        readOnly={!workbenchProjectAccess(activeProject).canEdit}
       />}
 
       {previewDocument ? (
@@ -2068,6 +2121,32 @@ export function BrainApp({
         />
       ) : null}
 
+      <TaskCenterPanel
+        open={taskCenterOpen}
+        tasks={taskCenterItems}
+        preferences={taskCenterPayload.preferences}
+        notificationPermission={typeof Notification === "undefined" ? "unsupported" : Notification.permission}
+        busy={taskCenterBusy}
+        onClose={() => setTaskCenterOpen(false)}
+        onOpenConversation={(task) => {
+          setTaskCenterOpen(false);
+          switchComposerSelection({ projectId: task.projectId, threadId: task.threadId });
+          setActiveProjectId(task.projectId);
+          setActiveThreadId(task.threadId);
+          setSelectedMessageId(null);
+          if (task.unread) void mutateTaskCenter({ action: "mark_read", taskIds: [task.id] });
+        }}
+        onMarkRead={(taskId) => void mutateTaskCenter({ action: "mark_read", taskIds: [taskId] })}
+        onMarkAllRead={() => void mutateTaskCenter({ action: "mark_read", taskIds: taskCenterItems.filter((task) => task.unread).map((task) => task.id) })}
+        onPreferencesChange={(nextPreferences) => void mutateTaskCenter({ action: "preferences", preferences: nextPreferences })}
+        onRequestDesktopNotifications={() => {
+          if (typeof Notification === "undefined") return;
+          void Notification.requestPermission().then((permission) => {
+            if (permission === "granted") void mutateTaskCenter({ action: "preferences", preferences: { ...taskCenterPayload.preferences, desktop: true } });
+          });
+        }}
+      />
+
       <CustomizationPanel
         key={customizationInitialTab}
         productName={branding.productName}
@@ -2085,7 +2164,7 @@ export function BrainApp({
       />
 
       <ProjectPanel
-        key={`${activeProject?.id ?? "none"}:${activeProject?.updatedAt ?? "none"}`}
+        key={activeProject?.id ?? "none"}
         project={activeProject && activeProject.slug !== STANDALONE_PROJECT_SLUG ? activeProject : null}
         open={projectOpen}
         onClose={() => setProjectOpen(false)}

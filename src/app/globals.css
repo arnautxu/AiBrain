@@ -1308,9 +1308,22 @@ button:disabled {
     min-height: 2.75rem;
   }
 
-  .composer-tool {
+  .composer-controls .composer-tool {
     min-width: 2.75rem;
-    height: 2.75rem;
+    width: 2.75rem !important;
+    height: 2.75rem !important;
+  }
+
+  .composer-controls .composer-picker-button,
+  .composer-controls .composer-submit,
+  .result-action {
+    min-width: 2.75rem;
+    min-height: 2.75rem;
+  }
+
+  .composer-controls .composer-submit {
+    width: 2.75rem !important;
+    height: 2.75rem !important;
   }
 
   .sidebar-touch-row {

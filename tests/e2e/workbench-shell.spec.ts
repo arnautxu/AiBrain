@@ -81,11 +81,11 @@ test("the employee shell exposes work, not implementation details", async ({ pag
 
   const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
   await accountButton.click();
-  const accountDialog = page.getByRole("dialog", { name: "Cuenta y preferencias" });
-  await expect(accountDialog).toBeVisible();
-  await expect(accountDialog.getByRole("button", { name: "Configuración" })).toBeFocused();
+  const accountMenu = page.getByRole("menu", { name: "Cuenta y preferencias" });
+  await expect(accountMenu).toBeVisible();
+  await expect(accountMenu.getByRole("menuitem", { name: "Configuración" })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(accountDialog).toBeHidden();
+  await expect(accountMenu).toBeHidden();
   await expect(accountButton).toBeFocused();
 
   await page.keyboard.press("Meta+K");
