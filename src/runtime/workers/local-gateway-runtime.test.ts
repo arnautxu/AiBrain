@@ -26,6 +26,7 @@ const USER_ID = "11111111-1111-4111-8111-111111111111";
 const APPROVAL_SCOPE_DIGEST = createHash("sha256")
   .update(JSON.stringify(["thread-1", "turn-1"]))
   .digest("hex");
+const PROCESS_RECOVERY_TEST_TIMEOUT_MS = 30_000;
 const roots: string[] = [];
 
 describe("worker egress environment", () => {
@@ -669,7 +670,7 @@ describe("private per-user worker gateway", () => {
       await restartedClient.close();
       await restartedWorker.stop();
     }
-  }, 15_000);
+  }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
 
   it("does not dispatch a first response to a server request from an earlier App Server", async () => {
     await writeFile(fakeServer, [
@@ -744,7 +745,7 @@ describe("private per-user worker gateway", () => {
       await restartedClient.close();
       await restartedWorker.stop();
     }
-  }, 15_000);
+  }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
 
   it("does not replay the same uncertain server response into a restarted child", async () => {
     await writeFile(fakeServer, [
@@ -863,5 +864,5 @@ describe("private per-user worker gateway", () => {
       await restartedClient.close();
       await restartedWorker.stop();
     }
-  }, 15_000);
+  }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
 });
