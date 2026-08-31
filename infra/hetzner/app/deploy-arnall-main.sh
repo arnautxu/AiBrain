@@ -11,6 +11,8 @@ readonly ACTIVE_ENV="${CONFIG_DIR}/compose.env"
 readonly AUTOMATION_WORKER_ENABLED="true"
 readonly ACTIVE_CONFIG="${CONFIG_DIR}/installation.json"
 readonly STATE_FILE="${CONFIG_DIR}/release-state.json"
+readonly EGRESS_ENV="${CONFIG_DIR}/egress.env"
+readonly ALERTS_ENV="${CONFIG_DIR}/alerts.env"
 readonly GHCR_APP_REPOSITORY="ghcr.io/arnautxu/aibrain"
 readonly GHCR_EGRESS_REPOSITORY="ghcr.io/arnautxu/aibrain-egress"
 readback_staging=""
@@ -35,6 +37,36 @@ require_root_owned_directory() {
   [[ -d "$directory" && ! -L "$directory" ]] || fail "missing controlled directory: ${directory}"
   [[ "$(stat -c '%u' "$directory")" == "0" ]] || fail "directory is not root-owned: ${directory}"
   (( (8#$(stat -c '%a' "$directory") & 8#077) == 0 )) || fail "directory is accessible by non-root users: ${directory}"
+}
+
+read_unique_env_value() {
+  local file="$1" key="$2" count value
+  count="$(awk -F= -v key="$key" '$1 == key { count += 1 } END { print count + 0 }' "$file")"
+  [[ "$count" == "1" ]] || fail "${key} must occur exactly once in its controlled env file"
+  value="$(awk -F= -v key="$key" '$1 == key { print substr($0, length(key) + 2); exit }' "$file")"
+  [[ -n "$value" ]] || fail "${key} is required in its controlled env file"
+  printf '%s' "$value"
+}
+
+validate_release_secret_contract() {
+  local health_token alert_health_token channel_token key
+  grep -qx "AIBRAIN_EGRESS_ENV_FILE=${EGRESS_ENV}" "$ACTIVE_ENV" \
+    || fail "active env targets an unexpected egress policy file"
+  grep -qx "AIBRAIN_ALERTS_ENV_FILE=${ALERTS_ENV}" "$ACTIVE_ENV" \
+    || fail "active env targets an unexpected alerts policy file"
+  require_root_owned_file "$EGRESS_ENV"
+  require_root_owned_file "$ALERTS_ENV"
+  health_token="$(read_unique_env_value "$EGRESS_ENV" AIBRAIN_EGRESS_HEALTH_TOKEN)"
+  alert_health_token="$(read_unique_env_value "$ALERTS_ENV" AIBRAIN_ALERT_EGRESS_HEALTH_TOKEN)"
+  [[ "$health_token" =~ ^[A-Za-z0-9_-]{32,256}$ ]] \
+    || fail "AIBRAIN_EGRESS_HEALTH_TOKEN must be a strong channel token"
+  [[ "$alert_health_token" == "$health_token" ]] \
+    || fail "alert dispatcher health token does not match the egress health token"
+  for key in AIBRAIN_EGRESS_BROWSER_TOKEN AIBRAIN_EGRESS_WORKER_TOKEN AIBRAIN_EGRESS_SERVER_TOKEN; do
+    channel_token="$(read_unique_env_value "$EGRESS_ENV" "$key")"
+    [[ "$channel_token" != "$health_token" ]] \
+      || fail "AIBRAIN_EGRESS_HEALTH_TOKEN must be distinct from every egress channel token"
+  done
 }
 
 require_release_readback_runtime() {
@@ -296,6 +328,7 @@ deploy_ghcr_release() {
   require_root_owned_file "${OPS_ROOT}/collect-release-readbacks.mjs"
   grep -qx "AIBRAIN_INSTALLATION_ID=${INSTALLATION_ID}" "$ACTIVE_ENV" || fail "active env belongs to another installation"
   grep -qx "AIBRAIN_COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT}" "$ACTIVE_ENV" || fail "active env targets another Compose project"
+  validate_release_secret_contract
   require_release_readback_runtime
   require_noninteractive_browser_policy "$compose_file"
 
