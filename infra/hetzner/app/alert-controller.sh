@@ -22,5 +22,8 @@ while :; do
   printf '%s\n' "$status" > /tmp/.aibrain-alert-controller-status.pending
   chmod 0600 /tmp/.aibrain-alert-controller-status.pending
   mv /tmp/.aibrain-alert-controller-status.pending /tmp/aibrain-alert-controller-status.json
+  date +%s > /tmp/.aibrain-alert-controller-heartbeat.pending
+  chmod 0600 /tmp/.aibrain-alert-controller-heartbeat.pending
+  mv /tmp/.aibrain-alert-controller-heartbeat.pending /tmp/aibrain-alert-controller-heartbeat
   sleep "$interval"
 done

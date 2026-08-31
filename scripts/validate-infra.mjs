@@ -278,6 +278,7 @@ requireMatch(backupOrchestrator, /\/usr\/bin\/flock/u, "backup orchestrator lack
 requireMatch(backupOrchestrator, /\/usr\/bin\/lockf/u, "backup orchestrator lacks macOS OS advisory locking");
 requireMatch(backupRecoveryUnit, /After=docker\.service[\s\S]*orchestrate-backup\.mjs recover[\s\S]*NoNewPrivileges=true/u, "systemd does not recover interrupted backups after Docker startup");
 requireMatch(alertController, /aibrain-alert-controller-status\.pending[\s\S]*mv[\s\S]*aibrain-alert-controller-status\.json/u, "alert controller does not publish status atomically");
+requireMatch(alertController, /aibrain-alert-controller-heartbeat\.pending[\s\S]*mv[\s\S]*aibrain-alert-controller-heartbeat/u, "alert controller does not preserve the legacy atomic heartbeat during host Compose upgrades");
 requireMatch(alertControllerHealthcheck, /AIBRAIN_ALERT_PENDING_WARN_AGE_MS[\s\S]*delivery: "degraded"/u, "alert dispatcher health does not expose degraded delivery separately from controller liveness");
 requireMatch(egressGateway, /healthToken[\s\S]*timingSafeEqual[\s\S]*AIBRAIN_EGRESS_HEALTH_TOKEN/u, "egress health is not authenticated with its dedicated secret");
 requireMatch(alertsEnv, /AIBRAIN_ALERT_MAX_ATTEMPTS/u, "alert environment lacks bounded delivery");
