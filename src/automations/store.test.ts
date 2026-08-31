@@ -248,6 +248,8 @@ describe("FileAutomationStore", () => {
     await store.create({ ...input("2026-08-28T09:00:00.000Z"), name: "Segundo" });
     let running = 0;
     let maximum = 0;
+    let releaseBoth!: () => void;
+    const bothStarted = new Promise<void>((resolve) => { releaseBoth = resolve; });
     await runAutomationSweep({
       store,
       ownerId: "worker-one",
@@ -256,7 +258,8 @@ describe("FileAutomationStore", () => {
       execute: async () => {
         running += 1;
         maximum = Math.max(maximum, running);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        if (running === 2) releaseBoth();
+        await bothStarted;
         running -= 1;
         return { threadId: projectId };
       },
