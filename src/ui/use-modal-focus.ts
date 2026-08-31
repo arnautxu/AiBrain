@@ -42,6 +42,7 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
       const container = containerRef.current;
       if (!container) return;
       if (event.key === "Escape") {
+        if (event.target instanceof Element && event.target.closest('[role="menu"]')) return;
         event.preventDefault();
         event.stopPropagation();
         onCloseRef.current();
