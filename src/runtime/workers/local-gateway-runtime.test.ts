@@ -384,9 +384,14 @@ describe("private per-user worker gateway", () => {
       'import { createInterface } from "node:readline";',
       'const lines = createInterface({ input: process.stdin });',
       'const write = (value) => process.stdout.write(`${JSON.stringify(value)}\\n`);',
+      'const pending = [];',
       'lines.on("line", (line) => {',
       '  const request = JSON.parse(line);',
-      '  if (request.id !== undefined) setTimeout(() => write({ id: request.id, result: { acceptedMethod: request.method } }), 200);',
+      '  if (request.id === "initialize-request-1") { pending.push(request); return; }',
+      '  if (request.id === "release-request") {',
+      '    for (const held of pending) write({ id: held.id, result: { acceptedMethod: held.method } });',
+      '    write({ id: request.id, result: { acceptedMethod: request.method } });',
+      '  }',
       '});',
     ].join("\n"), { mode: 0o600 });
     const worker = gateway();
@@ -400,20 +405,33 @@ describe("private per-user worker gateway", () => {
 
       await retryingClient.connect();
       await retryingClient.send(initializeRequest());
-      const received = await nextEvent(retryingClient);
-      expect(received.value).toMatchObject({
+      await retryingClient.send(initializeRequest("release-request"));
+      const originalResponse = await nextEvent(retryingClient);
+      const releaseResponse = await nextEvent(retryingClient);
+      expect(originalResponse.value).toMatchObject({
         sequence: 1,
         message: {
           kind: "rpc-response",
           rpc: { id: "initialize-request-1", result: { acceptedMethod: "initialize" } },
         },
       });
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      expect(releaseResponse.value).toMatchObject({
+        sequence: 2,
+        message: {
+          kind: "rpc-response",
+          rpc: { id: "release-request", result: { acceptedMethod: "initialize" } },
+        },
+      });
       const durableEvents = (await readFile(
         path.join(context.transportAudit, "gateway-events.jsonl"),
         "utf8",
-      )).trim().split("\n");
-      expect(durableEvents).toHaveLength(1);
+      )).trim().split("\n").map((line) => JSON.parse(line) as {
+        payload: { message: { kind: string; rpc: { id?: string } } };
+      });
+      expect(durableEvents.filter((entry) =>
+        entry.payload.message.kind === "rpc-response"
+        && entry.payload.message.rpc.id === "initialize-request-1"
+      )).toHaveLength(1);
     } finally {
       await firstClient.close();
       await retryingClient.close();
@@ -822,7 +840,14 @@ describe("private per-user worker gateway", () => {
     try {
       await restartedClient.connect();
       await expect(restartedClient.send(approvalResponse(responseId))).resolves.toBeUndefined();
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await restartedClient.send(initializeRequest("initialize-after-stale-response"));
+      const next = await nextEvent(restartedClient);
+      expect(next.value).toMatchObject({
+        message: {
+          kind: "rpc-response",
+          rpc: { id: "initialize-after-stale-response", result: {} },
+        },
+      });
       const durableEvents = (await readFile(
         path.join(context.transportAudit, "gateway-events.jsonl"),
         "utf8",

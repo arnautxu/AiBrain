@@ -171,6 +171,9 @@ describe("authenticated document routes", () => {
     expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
   });
 
+  // This is a real filesystem route roundtrip with seven serialized durable
+  // operations. Keep its deadline local to this test so runner I/O contention
+  // cannot leave an operation writing after suite cleanup.
   it("roundtrips v1 to v2, preserves readable v1, restores it and rejects a stale base", async () => {
     const documentId = "0198b9f0-6631-7000-8000-000000000521";
     const versionTwoId = "0198b9f0-6631-7000-8000-000000000522";
@@ -259,7 +262,7 @@ describe("authenticated document routes", () => {
     expect((await historyRoute.GET(new Request("http://localhost/history"), {
       params: Promise.resolve({ threadId, uploadId: documentId }),
     })).status).toBe(403);
-  });
+  }, 15_000);
 
   it("returns retry metadata before starting a conversion when shared capacity is saturated", async () => {
     const previousMaximum = process.env.AIBRAIN_DOCUMENT_MAX_CONVERSIONS;
