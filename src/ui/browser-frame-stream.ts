@@ -14,6 +14,7 @@ export type BrowserFrameStreamMetadata = Readonly<{
   capturedAt: string;
   captureDurationMs: number;
   mediaType: "image/png" | null;
+  pointerTrail: readonly Readonly<{ id: string; x: number; y: number }>[];
 }>;
 
 export type BrowserFrameStreamRecord = Readonly<{
@@ -25,23 +26,41 @@ function exactRecord(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort();
-  const expected = ["captureDurationMs", "capturedAt", "kind", "mediaType", "sequence", "version"];
+  const expected = ["captureDurationMs", "capturedAt", "kind", "mediaType", "pointerTrail", "sequence", "version"];
   return keys.length === expected.length && keys.every((key, index) => key === expected[index]) ? record : null;
+}
+
+function parsePointerTrail(value: unknown) {
+  if (!Array.isArray(value) || value.length > 3) return null;
+  const points: Array<Readonly<{ id: string; x: number; y: number }>> = [];
+  for (const valuePoint of value) {
+    if (!valuePoint || typeof valuePoint !== "object" || Array.isArray(valuePoint)) return null;
+    const point = valuePoint as Record<string, unknown>;
+    const keys = Object.keys(point).sort();
+    if (keys.join(",") !== "id,x,y" || typeof point.id !== "string" ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(point.id) ||
+      typeof point.x !== "number" || !Number.isFinite(point.x) || point.x < 0 || point.x > 100 ||
+      typeof point.y !== "number" || !Number.isFinite(point.y) || point.y < 0 || point.y > 100) return null;
+    points.push(Object.freeze({ id: point.id, x: point.x, y: point.y }));
+  }
+  return Object.freeze(points);
 }
 
 function parseMetadata(value: unknown, dataLength: number): BrowserFrameStreamMetadata {
   const record = exactRecord(value);
+  const pointerTrail = parsePointerTrail(record?.pointerTrail);
   if (!record || record.version !== 1 ||
     (record.kind !== "frame" && record.kind !== "heartbeat") ||
     !Number.isSafeInteger(record.sequence) || Number(record.sequence) < 0 ||
     typeof record.capturedAt !== "string" || !Number.isFinite(Date.parse(record.capturedAt)) ||
     typeof record.captureDurationMs !== "number" || !Number.isFinite(record.captureDurationMs) ||
     record.captureDurationMs < 0 || record.captureDurationMs > 60_000 ||
+    !pointerTrail ||
     !((record.kind === "frame" && record.mediaType === "image/png" && dataLength >= PNG_SIGNATURE.length) ||
       (record.kind === "heartbeat" && record.mediaType === null && dataLength === 0))) {
     throw new Error("El stream del navegador no cumple el contrato seguro.");
   }
-  return record as BrowserFrameStreamMetadata;
+  return Object.freeze({ ...record, pointerTrail }) as BrowserFrameStreamMetadata;
 }
 
 function isPng(data: Uint8Array) {
@@ -49,6 +68,7 @@ function isPng(data: Uint8Array) {
 }
 
 export function encodeBrowserFrameStreamRecord(record: BrowserFrameStreamRecord) {
+  parseMetadata(record.metadata, record.data.byteLength);
   const metadata = encoder.encode(JSON.stringify(record.metadata));
   if (metadata.byteLength > MAX_METADATA_BYTES || record.data.byteLength > MAX_FRAME_BYTES ||
     (record.metadata.kind === "frame" && !isPng(record.data)) ||

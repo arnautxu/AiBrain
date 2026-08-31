@@ -81,15 +81,17 @@ test("the employee shell exposes work, not implementation details", async ({ pag
 
   const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
   await accountButton.click();
-  const accountMenu = page.getByRole("menu", { name: "Cuenta y preferencias" });
-  await expect(accountMenu).toBeVisible();
+  const accountDialog = page.getByRole("dialog", { name: "Cuenta y preferencias" });
+  await expect(accountDialog).toBeVisible();
+  await expect(accountDialog.getByRole("button", { name: "Configuración" })).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(accountMenu).toBeHidden();
+  await expect(accountDialog).toBeHidden();
+  await expect(accountButton).toBeFocused();
 
   await page.keyboard.press("Meta+K");
   const search = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeVisible();
-  await search.getByRole("textbox").fill(primaryProject);
+  await search.getByRole("combobox").fill(primaryProject);
   await expect(search.getByRole("option", { name: `${primaryProject} Proyecto`, exact: true })).toBeVisible({ timeout: 15_000 });
   await page.keyboard.press("Escape");
   await expect(search).toBeHidden();
@@ -111,6 +113,30 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect.poll(sidebarWidth).toBe(260);
   await expect(page.getByRole("button", { name: "Ocultar barra lateral" })).toBeFocused();
   expect(pageErrors).toEqual([]);
+});
+
+test("project settings owns focus and restores the project action trigger", async ({ page }) => {
+  await login(page);
+  const project = page.getByRole("button", { name: primaryProject, exact: true });
+  await project.hover();
+  const projectActions = page.getByRole("button", { name: `Acciones de ${primaryProject}` });
+  await projectActions.click();
+  await page.getByRole("menuitem", { name: "Ajustes del proyecto" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Configurar proyecto" });
+  const close = dialog.getByRole("button", { name: "Cerrar" });
+  const save = dialog.getByRole("button", { name: "Guardar cambios" });
+  await expect(close).toBeFocused();
+
+  await save.focus();
+  await page.keyboard.press("Tab");
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(save).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(projectActions).toBeFocused();
 });
 
 test("the mobile drawer opens and the composer remains available", async ({ page }) => {

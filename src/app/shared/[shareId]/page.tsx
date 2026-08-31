@@ -39,7 +39,7 @@ export default async function SharedConversationPage({
         <div className="space-y-8">
           {share.messages.map((message) => message.role === "user" ? (
             <article key={message.id} className="flex justify-end">
-              <div className="max-w-[86%] rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)] md:max-w-[70%]">{message.content}</div>
+              <div className="min-w-0 max-w-[86%] whitespace-pre-wrap rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[16px] leading-6 text-[var(--user-message-text)] [overflow-wrap:anywhere] md:max-w-[70%]">{message.content}</div>
             </article>
           ) : (
             <article key={message.id} className="max-w-[76ch] text-[16px] leading-7">

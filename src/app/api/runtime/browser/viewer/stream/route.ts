@@ -62,6 +62,7 @@ export async function GET(request: Request) {
               capturedAt: next.value.capturedAt,
               captureDurationMs: next.value.captureDurationMs,
               mediaType: next.value.mediaType,
+              pointerTrail: next.value.pointerTrail ?? [],
             },
             data: next.value.data,
           }));

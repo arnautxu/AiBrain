@@ -197,13 +197,13 @@ export function VoiceDictationControl({
           <span className="hidden items-center gap-1 text-[10px] font-medium text-[var(--danger)] sm:flex" role="status">
             <span className="size-1.5 animate-pulse rounded-full bg-[var(--danger)] motion-reduce:animate-none" />Escuchando
           </span>
-          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!size-8 sm:!rounded-full" aria-label="Terminar dictado" title="Terminar dictado" onClick={stop}><Stop size={12} weight="fill" /></button>
-          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!size-8 sm:!rounded-full" aria-label="Cancelar dictado" title="Cancelar y descartar dictado" onClick={cancel}><X size={14} /></button>
+          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!rounded-full" aria-label="Terminar dictado" title="Terminar dictado" onClick={stop}><Stop size={12} weight="fill" /></button>
+          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full" aria-label="Cancelar dictado" title="Cancelar y descartar dictado" onClick={cancel}><X size={14} /></button>
         </div>
       ) : (
         <button
           type="button"
-          className={`composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!size-8 sm:!rounded-full ${state === "error" ? "text-[var(--danger)]" : ""}`}
+          className={`composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${state === "error" ? "text-[var(--danger)]" : ""}`}
           aria-label={state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
           title={state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
           aria-haspopup="dialog"

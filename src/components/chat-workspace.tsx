@@ -21,6 +21,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { MarkdownMessage } from "@/components/markdown-message";
+import { StreamingResponse } from "@/components/agents/streaming-response";
 import { ThinkingOrb } from "thinking-orbs";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
@@ -249,9 +250,15 @@ function AssistantMessage({
           <span className="activity-shimmer">{liveStatus}…</span>
         </div>
       ) : publicContent ? (
-        <div className="mt-4 max-w-[76ch] text-[14px] leading-[23px] text-[var(--text)]" aria-live={message.status === "streaming" ? "polite" : undefined} aria-atomic="false">
+        <StreamingResponse
+          status={message.status === "streaming" ? "streaming" : message.status === "error" ? "error" : "complete"}
+          announce={message.status === "streaming"}
+          showActions={false}
+          className="mt-4 max-w-[76ch]"
+          contentClassName="text-[14px] leading-[23px] text-[var(--text)]"
+        >
           <MarkdownMessage streaming={message.status === "streaming"}>{publicContent}</MarkdownMessage>
-        </div>
+        </StreamingResponse>
       ) : null}
 
       <TurnSourceChips sources={message.sources ?? []} />

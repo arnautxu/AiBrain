@@ -3,7 +3,7 @@ import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
 import { isCreateAdvancedArtifactInput } from "@/artifacts/contracts";
 import { advancedArtifactErrorResponse } from "@/artifacts/http";
-import { advancedArtifactStoreForSession, createAdvancedArtifact } from "@/artifacts/server-service";
+import { createAdvancedArtifact, listAdvancedArtifactsForSession } from "@/artifacts/server-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,8 +12,7 @@ export async function GET() {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   try {
-    const store = await advancedArtifactStoreForSession(session);
-    return NextResponse.json({ items: await store.list(session.user.id) }, {
+    return NextResponse.json({ items: await listAdvancedArtifactsForSession(session) }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {

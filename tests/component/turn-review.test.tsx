@@ -158,6 +158,26 @@ describe("turn activity and Review", () => {
     expect(onResolve).toHaveBeenCalledWith(message.approvals[0], "accept");
   });
 
+  it("keeps activity and Review inspectable in read-only mode without approval mutations", () => {
+    const onResolve = vi.fn();
+    const onOpenReview = vi.fn();
+    render(<TurnActivity
+      message={message}
+      readOnly
+      onResolveApproval={onResolve}
+      onOpenReview={onOpenReview}
+    />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+    expect(screen.getByText("Comprobar estado")).toBeInTheDocument();
+    expect(screen.getByText("Esperando la decisión de un editor del proyecto")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rechazar" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir cambios y resultados" }));
+    expect(onOpenReview).toHaveBeenCalledOnce();
+    expect(onResolve).not.toHaveBeenCalled();
+  });
+
   it("opens the real edited file inside the activity", async () => {
     const fetchPreview = vi.fn(async () => new Response(JSON.stringify({
       file: {
@@ -237,5 +257,16 @@ describe("turn activity and Review", () => {
     expect(screen.getAllByText("−1").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: /Actividad/ }));
     expect(screen.getByText("Comprobar estado")).toBeInTheDocument();
+  });
+
+  it("keeps the read-only inspector auditable without approval decisions", () => {
+    const onResolve = vi.fn();
+    render(<DetailsPanel message={message} open readOnly onClose={vi.fn()} onResolveApproval={onResolve} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Actividad/ }));
+    expect(screen.getByText("Esperando la decisión de un editor del proyecto")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permitir" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Rechazar" })).not.toBeInTheDocument();
+    expect(onResolve).not.toHaveBeenCalled();
   });
 });

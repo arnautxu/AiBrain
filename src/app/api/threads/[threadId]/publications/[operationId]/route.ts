@@ -10,6 +10,9 @@ import { StorageError } from "@/storage";
 import { workbenchErrorResponse } from "@/workbench/http";
 import { getThread, getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import { libraryResourceErrorResponse } from "@/library/http";
+import { assertLibraryResourceWritable } from "@/library/server-resource-access";
+import { resolveThreadAccess } from "@/workbench/shared-access";
 
 export const runtime = "nodejs";
 type RouteContext = { params: Promise<{ threadId: string; operationId: string }> };
@@ -33,6 +36,7 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   try {
+    assertLibraryResourceWritable(await resolveThreadAccess(session, threadId));
     const [threadContext, thread, installation] = await Promise.all([
       getThreadRuntimeContext(session, threadId),
       getThread(session, threadId),
@@ -70,6 +74,8 @@ export async function POST(request: Request, context: RouteContext) {
       : await publisher.decline(input);
     return NextResponse.json({ operation, permissionFingerprint });
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Publicación no encontrada.");
+    if (resourceError) return resourceError;
     if (error instanceof StorageError) return publicationDecisionError(error);
     return workbenchErrorResponse(error, "No s’ha pogut verificar la decisió de publicació.");
   }

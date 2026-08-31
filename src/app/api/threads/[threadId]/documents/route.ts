@@ -10,8 +10,14 @@ import { documentVersionJson } from "@/documents/version-http";
 import { parseIfMatch, quotedDocumentEtag } from "@/documents/version-store";
 import { StorageError } from "@/storage";
 import { workbenchErrorResponse } from "@/workbench/http";
-import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import {
+  assertLibraryResourceWritable,
+  resolveThreadLibraryResource,
+  resourceLocationIndexForInstallation,
+} from "@/library/server-resource-access";
+import { libraryResourceErrorResponse } from "@/library/http";
+import { resolveThreadAccess } from "@/workbench/shared-access";
 
 export const runtime = "nodejs";
 
@@ -80,8 +86,18 @@ export async function POST(request: Request, context: RouteContext) {
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
     }
-    const runtimeContext = await getThreadRuntimeContext(session, threadId);
-    const services = await documentServicesForUser(installation, session.user.id);
+    const existingResource = roundtripDocumentId
+      ? await resolveThreadLibraryResource(session, {
+          kind: "upload",
+          resourceId: roundtripDocumentId,
+          threadId,
+        })
+      : null;
+    const threadAccess = existingResource?.access ?? await resolveThreadAccess(session, threadId);
+    assertLibraryResourceWritable(threadAccess);
+    const runtimeContext = { projectId: threadAccess.project.id };
+    const storageOwnerId = existingResource?.location.storageOwnerId ?? session.user.id;
+    const services = await documentServicesForUser(installation, storageOwnerId);
     if (roundtripDocumentId && roundtripBaseEtag) {
       const current = await services.versions.read(threadId, roundtripDocumentId);
       const currentEtag = current.versions.at(-1)!.etag;
@@ -136,6 +152,19 @@ export async function POST(request: Request, context: RouteContext) {
           author: { userId: session.user.id, name: session.user.name },
           scope: { kind: "project", id: runtimeContext.projectId },
         });
+        await resourceLocationIndexForInstallation(installation).register({
+          kind: "upload",
+          resourceId: uploadId,
+          projectId: runtimeContext.projectId,
+          threadId,
+          messageId: null,
+          storageOwnerId,
+          relativePath: document.relativePath,
+          fileName: document.fileName,
+          mediaType: document.mediaType,
+          size: document.size,
+          sha256: document.sha256,
+        });
         return NextResponse.json({
           document,
           preview: {
@@ -152,6 +181,8 @@ export async function POST(request: Request, context: RouteContext) {
     }, { signal: request.signal });
   } catch (error) {
     if (!(error instanceof UploadValidationError) && !(error instanceof StorageError)) {
+      const resourceError = libraryResourceErrorResponse(error, "Documento no encontrado.");
+      if (resourceError) return resourceError;
       return workbenchErrorResponse(error, "No s’ha pogut verificar el fil del document.");
     }
     return documentErrorResponse(error);

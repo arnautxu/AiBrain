@@ -289,3 +289,73 @@ test("a long recovered conversation keeps the reader in control of scroll", asyn
     element.scrollHeight - element.scrollTop - element.clientHeight,
   )).toBeLessThan(100);
 });
+
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`active streaming preserves a detached reader at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.addInitScript(() => {
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
+        if (!url.includes("/api/chat") || init?.method !== "POST") return nativeFetch(input, init);
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "Primer fragmento sintético." })}\n`)), 80);
+            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "\n\nSegundo fragmento que debe respetar la lectura." })}\n`)), 480);
+            window.setTimeout(() => {
+              controller.enqueue(encoder.encode(`${JSON.stringify({ type: "done" })}\n`));
+              controller.close();
+            }, 760);
+          },
+        });
+        return Promise.resolve(new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson; charset=utf-8" } }));
+      }) as typeof window.fetch;
+    });
+    await login(page);
+    await page.evaluate(() => {
+      const previewKey = Object.keys(localStorage).find((key) => key.endsWith(".workbench.preview.v1"));
+      if (!previewKey) throw new Error("preview key missing");
+      const snapshot = JSON.parse(localStorage.getItem(previewKey) ?? "null");
+      const project = snapshot.projects[0];
+      const now = new Date().toISOString();
+      const threadId = crypto.randomUUID();
+      snapshot.threads.unshift({
+        id: threadId,
+        projectId: project.id,
+        title: "Streaming largo sintético",
+        status: "active",
+        pinned: false,
+        createdAt: now,
+        updatedAt: now,
+        messages: Array.from({ length: 40 }, (_, index) => ({
+          id: crypto.randomUUID(),
+          role: index % 2 === 0 ? "user" : "assistant",
+          content: `${index % 2 === 0 ? "Pregunta" : "Respuesta"} ${index + 1}: contenido sintético suficiente para crear desplazamiento vertical estable.`,
+          createdAt: new Date(Date.now() + index).toISOString(),
+          status: "complete",
+          activity: [], plan: [], approvals: [], diff: "", attachments: [], artifacts: [],
+        })),
+      });
+      localStorage.setItem(previewKey, JSON.stringify(snapshot));
+      const prefix = previewKey.slice(0, -"workbench.preview.v1".length);
+      localStorage.setItem(`${prefix}selection.v1`, JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: threadId } }));
+    });
+    await page.reload();
+
+    await page.getByRole("textbox", { name: "Mensaje" }).fill("Continúa sin mover mi lectura.");
+    await page.getByRole("button", { name: "Enviar mensaje" }).click();
+    await expect(page.getByText("Primer fragmento sintético.", { exact: false })).toBeVisible();
+    const scroller = page.locator(".workbench-main > .scrollbar-thin");
+    await scroller.evaluate((element) => {
+      element.scrollTop = 0;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(page.getByRole("button", { name: "Volver al final" })).toBeVisible();
+    await expect(page.getByText("Segundo fragmento que debe respetar la lectura.", { exact: false })).toBeVisible();
+    expect(await scroller.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);
+
+    await page.getByRole("button", { name: "Volver al final" }).click();
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
+  });
+}

@@ -19,7 +19,7 @@ import {
   updateDemoThread,
   updateDemoMessageActivity,
 } from "@/workbench/demo-store";
-import { WorkbenchConflictError, WorkbenchPersistenceError, WorkbenchValidationError } from "@/workbench/errors";
+import { WorkbenchConflictError, WorkbenchNotFoundError, WorkbenchPersistenceError, WorkbenchValidationError } from "@/workbench/errors";
 import {
   assertFilesystemWorkbenchId,
   FileWorkbenchStore,
@@ -143,8 +143,28 @@ export async function listProjects(session: AuthSession, query: WorkbenchListQue
 }
 
 export async function getProject(session: AuthSession, projectId: string) {
+  if (mode(session) === "filesystem") {
+    assertFilesystemWorkbenchId(projectId);
+    const access = await resolveProjectAccess(session, projectId);
+    return access.store.getProject(access.ownerUserId, projectId);
+  }
+  assertWorkbenchId(projectId);
+  const snapshot = await loadDemoWorkbench(
+    session,
+    isBrowserPreviewWorkbench() ? "browser-preview" : "filesystem-demo",
+  );
+  const project = snapshot.projects.find((candidate) => candidate.id === projectId);
+  if (!project) throw new WorkbenchNotFoundError("Proyecto no encontrado.");
+  return project;
+}
+
+export async function getWritableProject(session: AuthSession, projectId: string) {
+  if (mode(session) !== "filesystem") return getProject(session, projectId);
   assertFilesystemWorkbenchId(projectId);
   const access = await resolveProjectAccess(session, projectId);
+  if (access.role === "viewer") {
+    throw new WorkbenchConflictError("No tienes permisos para crear trabajo en este proyecto compartido.");
+  }
   return access.store.getProject(access.ownerUserId, projectId);
 }
 

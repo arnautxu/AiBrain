@@ -5,8 +5,12 @@ import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
 import { documentVersionJson } from "@/documents/version-http";
 import { parseIfMatch, quotedDocumentEtag } from "@/documents/version-store";
+import { libraryResourceErrorResponse } from "@/library/http";
+import {
+  assertLibraryResourceWritable,
+  resolveThreadLibraryResource,
+} from "@/library/server-resource-access";
 import { StorageError } from "@/storage";
-import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 
 export const runtime = "nodejs";
@@ -69,8 +73,13 @@ export async function POST(
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
     }
-    await getThreadRuntimeContext(session, threadId);
-    const services = await documentServicesForUser(installation, session.user.id);
+    const resource = await resolveThreadLibraryResource(session, {
+      kind: "upload",
+      resourceId: documentId,
+      threadId,
+    });
+    assertLibraryResourceWritable(resource.access);
+    const services = await documentServicesForUser(installation, resource.location.storageOwnerId);
     const current = await services.versions.read(threadId, documentId);
     const currentEtag = current.versions.at(-1)!.etag;
     if (currentEtag !== baseEtag) {
@@ -89,6 +98,8 @@ export async function POST(
     });
     return documentVersionJson(updated, 201);
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Versión no encontrada.");
+    if (resourceError) return resourceError;
     if (error instanceof StorageError && error.code === "DOCUMENT_VERSION_CONFLICT") {
       return NextResponse.json({ error: "El documento ha cambiado. Recarga el historial antes de restaurar.", code: error.code }, { status: 409 });
     }

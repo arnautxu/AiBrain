@@ -24,6 +24,12 @@ vi.mock("@/workbench/store", () => ({
     return { projectId };
   },
 }));
+vi.mock("@/workbench/shared-access", () => ({
+  resolveProjectAccess: async () => ({
+    role: "owner",
+    project: { id: projectId },
+  }),
+}));
 vi.mock("@/runtime/workers/provisioner", () => ({
   deriveWorkerRoots: () => ({ workspace: "/private/workspaces" }),
   resolveWorkerOwnedPath: async () => "/private/workspaces/projects/00000000-0000-4000-8000-000000000011",

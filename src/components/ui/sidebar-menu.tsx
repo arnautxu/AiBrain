@@ -22,7 +22,7 @@ import {
   type Ref,
   type RefObject,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/springs";
@@ -136,6 +136,7 @@ interface MenuScope {
 }
 
 function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
+  const reduceMotion = useReducedMotion() ?? false;
   const {
     activeIndex,
     setActiveIndex,
@@ -439,9 +440,14 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
               height: rect.height,
               opacity: 1,
             }}
-            exit={{ opacity: 0, transition: spring.moderate.exit }}
+            exit={{
+              opacity: 0,
+              transition: reduceMotion ? { duration: 0 } : spring.moderate.exit,
+            }}
             transition={
-              rowChanged
+              reduceMotion
+                ? { duration: 0 }
+                : rowChanged
                 ? { ...spring.moderate, opacity: { duration: 0.08 } }
                 : { duration: 0 }
             }
@@ -455,13 +461,17 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
           <motion.div
             key={sessionRef.current}
             className={`absolute ${shape.bg} bg-hover pointer-events-none`}
-            initial={{
-              opacity: 0,
-              top: hoverAnchorRect?.top ?? hoverRect.top,
-              left: hoverAnchorRect?.left ?? hoverRect.left,
-              width: hoverAnchorRect?.width ?? hoverRect.width,
-              height: hoverAnchorRect?.height ?? hoverRect.height,
-            }}
+            initial={
+              reduceMotion
+                ? false
+                : {
+                    opacity: 0,
+                    top: hoverAnchorRect?.top ?? hoverRect.top,
+                    left: hoverAnchorRect?.left ?? hoverRect.left,
+                    width: hoverAnchorRect?.width ?? hoverRect.width,
+                    height: hoverAnchorRect?.height ?? hoverRect.height,
+                  }
+            }
             animate={{
               opacity: 1,
               top: hoverRect.top,
@@ -469,9 +479,14 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
               width: hoverRect.width,
               height: hoverRect.height,
             }}
-            exit={{ opacity: 0, transition: spring.fast.exit }}
+            exit={{
+              opacity: 0,
+              transition: reduceMotion ? { duration: 0 } : spring.fast.exit,
+            }}
             transition={
-              hoverRowChanged
+              reduceMotion
+                ? { duration: 0 }
+                : hoverRowChanged
                 ? { ...spring.fast, opacity: { duration: 0.08 } }
                 : { duration: 0 }
             }
@@ -491,9 +506,14 @@ function useMenuScope(containerRef: RefObject<HTMLElement | null>): MenuScope {
               width: focusRect.width + 4,
               height: focusRect.height + 4,
             }}
-            exit={{ opacity: 0, transition: spring.fast.exit }}
+            exit={{
+              opacity: 0,
+              transition: reduceMotion ? { duration: 0 } : spring.fast.exit,
+            }}
             transition={
-              focusRowChanged
+              reduceMotion
+                ? { duration: 0 }
+                : focusRowChanged
                 ? { ...spring.fast, opacity: { duration: 0.08 } }
                 : { duration: 0 }
             }
@@ -1242,6 +1262,7 @@ export interface SidebarMenuSubProps extends HTMLAttributes<HTMLUListElement> {
 const SidebarMenuSub = forwardRef<HTMLUListElement, SidebarMenuSubProps>(
   ({ className, open = true, children, ...props }, ref) => {
     const containerRef = useRef<HTMLUListElement>(null);
+    const reduceMotion = useReducedMotion() ?? false;
     // The sub-menu is NOT its own highlight scope: its rows register with the
     // surrounding SidebarMenu, so one hover background glides from a parent
     // row into its children. Toggling flips the rows' visibility in place
@@ -1296,7 +1317,9 @@ const SidebarMenuSub = forwardRef<HTMLUListElement, SidebarMenuSubProps>(
         // togglingRef note above. Springing on a re-measure stacks a second
         // spring on a nested sub's own collapse.
         transition={
-          togglingRef.current
+          reduceMotion
+            ? { duration: 0 }
+            : togglingRef.current
             ? open
               ? spring.moderate
               : spring.moderate.exit

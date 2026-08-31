@@ -16,6 +16,7 @@ import type {
   BrowserFrame,
   BrowserInputCommand,
   BrowserPageSnapshot,
+  BrowserPointerTrailPoint,
   BrowserRuntimeContext,
   BrowserRuntimeFactory,
   BrowserRuntimeHealth,
@@ -39,6 +40,9 @@ const MAX_SCREENSHOT_BYTES = 20 * 1024 * 1024;
 // viewer traffic while a request-heavy page is resolving its subresources.
 const MAX_INTERCEPTED_REQUESTS = 24;
 const MAX_QUEUED_BROWSER_OPERATIONS = 64;
+const BROWSER_VIEWPORT_WIDTH = 1_440;
+const BROWSER_VIEWPORT_HEIGHT = 900;
+const MAX_POINTER_TRAIL_POINTS = 3;
 const MAX_QUARANTINE_ENTRIES = 1_024;
 const THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -284,7 +288,7 @@ export function buildChromeArguments(context: BrowserRuntimeContext, egressProxy
     "--mute-audio",
     "--password-store=basic",
     "--use-mock-keychain",
-    "--window-size=1440,900",
+    `--window-size=${BROWSER_VIEWPORT_WIDTH},${BROWSER_VIEWPORT_HEIGHT}`,
   ];
   if (proxyUrl) {
     args.push(
@@ -435,6 +439,8 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private browserClient: CdpClientLike | null = null;
   private readonly threadPages = new Map<string, ThreadPage>();
   private readonly threadPagePromises = new Map<string, Promise<ThreadPage>>();
+  private readonly pointerTrails = new Map<string, readonly BrowserPointerTrailPoint[]>();
+  private pointerSequence = 0;
   private readonly downloadOwners = new Map<string, ThreadPage>();
   private readonly downloadFinalizations = new Set<Promise<void>>();
   private readonly navigationWrites = new Set<Promise<void>>();
@@ -465,6 +471,21 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private operationTail: Promise<void> = Promise.resolve();
   private activeOperations = 0;
   private queuedOperations = 0;
+
+  private recordPointer(threadId: string, x: number, y: number) {
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    this.pointerSequence += 1;
+    const point = Object.freeze({
+      id: `${this.now()}-${this.pointerSequence}`,
+      x: Math.max(0, Math.min(100, (x / BROWSER_VIEWPORT_WIDTH) * 100)),
+      y: Math.max(0, Math.min(100, (y / BROWSER_VIEWPORT_HEIGHT) * 100)),
+    });
+    const current = this.pointerTrails.get(threadId) ?? [];
+    this.pointerTrails.set(
+      threadId,
+      Object.freeze([...current, point].slice(-MAX_POINTER_TRAIL_POINTS)),
+    );
+  }
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
     validateRuntimeContext(context);
@@ -592,6 +613,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       mediaType: "image/png",
       dataBase64: result.data,
       capturedAt: new Date(this.now()).toISOString(),
+      pointerTrail: this.pointerTrails.get(threadId) ?? Object.freeze([]),
     });
   }
 
@@ -621,6 +643,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       const browser = this.requireBrowser();
       if (action === "reload") {
         await browser.send("Page.reload", { ignoreCache: false }, { sessionId: page.sessionId });
+        this.pointerTrails.delete(threadId);
       } else {
         const history = await this.navigationHistory(page);
         const targetIndex = history.currentIndex + (action === "back" ? -1 : 1);
@@ -630,6 +653,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         await this.networkPolicy.assertAllowed(destination);
         this.assertHumanControl();
         await browser.send("Page.navigateToHistoryEntry", { entryId: target.id }, { sessionId: page.sessionId });
+        this.pointerTrails.delete(threadId);
       }
       await this.waitForReadablePage(page, () => this.assertHumanControl());
       const current = await this.navigationStateForPage(page);
@@ -661,7 +685,10 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
-    if (!result.isDownload && navigatedPage) await this.persistNavigation(navigatedPage, destination);
+    if (!result.isDownload && navigatedPage) {
+      this.pointerTrails.delete(threadId);
+      await this.persistNavigation(navigatedPage, destination);
+    }
   }
 
   private async navigationHistory(page: ThreadPage) {
@@ -716,6 +743,9 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
           deltaX: command.deltaX ?? 0,
           deltaY: command.deltaY ?? 0,
         }, { sessionId: page.sessionId });
+        if (command.event === "mouseReleased" && command.button === "left") {
+          this.recordPointer(threadId, command.x, command.y);
+        }
         return;
       }
       await browser.send("Input.dispatchKeyEvent", {
@@ -879,6 +909,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       await browser.send("Input.dispatchMouseEvent", {
         type: "mouseReleased", x, y, button: "left", clickCount: 1,
       }, { sessionId: page.sessionId });
+      this.recordPointer(threadId, x, y);
     });
   }
 
@@ -1122,6 +1153,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(response.errorText));
       }
       if (!response.isDownload) {
+        this.pointerTrails.delete(page.threadId);
         await this.waitForReadablePage(page, () => this.assertAgentControl());
         await this.persistNavigation(page, destination);
       }
@@ -1157,6 +1189,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       await browser.send("Input.dispatchMouseEvent", {
         type: "mouseReleased", x, y, button: "left", clickCount: 1,
       }, { sessionId: page.sessionId });
+      this.recordPointer(page.threadId, x, y);
       return;
     }
     const text = command.text ?? "";
@@ -1407,6 +1440,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     if (current && !current.closed && this.browserClient?.isOpen) return current;
     if (current) {
       this.threadPages.delete(threadId);
+      this.pointerTrails.delete(threadId);
       await this.closeThreadPage(current);
     }
     const pending = this.threadPagePromises.get(threadId);
@@ -1440,6 +1474,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         if (!isRecoverableThreadSessionError(error)) throw error;
         if (this.threadPages.get(threadId) === page) {
           this.threadPages.delete(threadId);
+          this.pointerTrails.delete(threadId);
           await this.closeThreadPage(page);
         }
         const replacement = await this.requireThreadPage(threadId);
@@ -1723,6 +1758,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     if (!page) return;
     page.closed = true;
     if (this.threadPages.get(page.threadId) === page) this.threadPages.delete(page.threadId);
+    this.pointerTrails.delete(page.threadId);
     page.fetchUnsubscribe?.();
     page.fetchUnsubscribe = null;
     page.authUnsubscribe?.();
@@ -2096,6 +2132,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     const activeDownloadGuids = pages.flatMap((page) => [...page.downloads.keys()]);
     this.threadPages.clear();
     this.threadPagePromises.clear();
+    this.pointerTrails.clear();
     this.downloadOwners.clear();
     this.detachedUnsubscribe?.();
     this.detachedUnsubscribe = null;

@@ -116,7 +116,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
       <button
         type="button"
         aria-expanded={open}
-        className="flex min-h-10 w-full min-w-0 items-center gap-2 px-2.5 text-left text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
+        className="touch-target flex min-h-10 w-full min-w-0 items-center gap-2 px-2.5 text-left text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"
         onClick={toggle}
       >
         <FileCode size={14} className="shrink-0" />
@@ -134,7 +134,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
             <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-[var(--danger)]" role="alert">
               <WarningCircle size={14} className="shrink-0" />
               <span className="min-w-0 flex-1">{error}</span>
-              <button type="button" className="grid size-7 shrink-0 place-items-center rounded-md hover:bg-[var(--danger-soft)]" aria-label={`Reintentar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
+              <button type="button" className="touch-target grid size-7 shrink-0 place-items-center rounded-md hover:bg-[var(--danger-soft)]" aria-label={`Reintentar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
             </div>
           ) : preview ? (
             <>
@@ -144,10 +144,10 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
                 <span>{Math.max(1, Math.ceil(preview.size / 1024))} KB</span>
                 <span className="flex-1" />
                 {preview.content !== null ? (
-                  <button type="button" className="flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar"}</button>
+                  <button type="button" className="touch-target flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar"}</button>
                 ) : null}
-                <a href={preview.downloadUrl} download={preview.name} className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title="Descargar original para abrir o editar en escritorio"><DownloadSimple size={13} /></a>
-                <button type="button" className="grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Actualizar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
+                <a href={preview.downloadUrl} download={preview.name} className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title="Descargar original para abrir o editar en escritorio"><DownloadSimple size={13} /></a>
+                <button type="button" className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Actualizar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
               </header>
               {preview.kind === "text" && preview.content !== null ? (
                 <pre tabIndex={0} className="scrollbar-thin max-h-[420px] overflow-auto whitespace-pre p-4 font-mono text-[12px] leading-5 text-[var(--text)]"><code>{preview.content}</code></pre>

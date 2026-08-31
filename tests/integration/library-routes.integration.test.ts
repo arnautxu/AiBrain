@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
 import type { WorkbenchThread } from "@/workbench/types";
@@ -9,6 +10,8 @@ const threadId = "0198b9f0-6631-7000-8000-000000000204";
 const uploadId = "0198b9f0-6631-7000-8000-000000000205";
 const messageId = "0198b9f0-6631-7000-8000-000000000206";
 const auth = vi.hoisted(() => ({ session: null as AuthSession | null }));
+const privateBytes = Buffer.from("contenido privado");
+const privateSha256 = createHash("sha256").update(privateBytes).digest("hex");
 
 function session(userId: string): AuthSession {
   return {
@@ -35,7 +38,7 @@ const thread: WorkbenchThread = {
       createdAt: "2026-08-28T08:00:00.000Z",
       status: "complete",
       activity: [], plan: [], approvals: [], diff: "", artifacts: [],
-      attachments: [{ id: uploadId, name: "dirección.txt", mimeType: "text/plain", size: 15 }],
+      attachments: [{ id: uploadId, name: "dirección.txt", mimeType: "text/plain", size: privateBytes.length }],
     },
     {
       id: messageId,
@@ -59,6 +62,24 @@ vi.mock("@/workbench/store", () => ({
     return thread;
   }),
 }));
+vi.mock("@/library/server-resource-access", () => ({
+  LibraryResourceForbiddenError: class LibraryResourceForbiddenError extends Error {},
+  resolveThreadLibraryResource: vi.fn(async (active: AuthSession, input: { threadId: string; resourceId: string }) => {
+    if (active.user.id !== userA || input.threadId !== threadId || input.resourceId !== uploadId) throw new Error("Not found");
+    return {
+      installation: { installationId: "library-routes" },
+      access: { thread },
+      location: {
+        storageOwnerId: userA,
+        fileName: "dirección.txt",
+        mediaType: "text/plain",
+        size: privateBytes.length,
+        sha256: privateSha256,
+        relativePath: `threads/${threadId}/uploads/${uploadId}/dirección.txt`,
+      },
+    };
+  }),
+}));
 vi.mock("@/documents/server-service", () => ({
   documentServicesForUser: vi.fn(async () => ({
     staging: {
@@ -67,7 +88,8 @@ vi.mock("@/documents/server-service", () => ({
         document: {
           fileName: "dirección.txt",
           mediaType: "text/plain",
-          size: 15,
+          size: privateBytes.length,
+          sha256: privateSha256,
           relativePath: `threads/${threadId}/uploads/${uploadId}/dirección.txt`,
         },
       })),
@@ -75,7 +97,7 @@ vi.mock("@/documents/server-service", () => ({
   })),
 }));
 vi.mock("@/security/safe-file", () => ({
-  readRegularFileWithin: vi.fn(async () => Buffer.from("contenido privado")),
+  readRegularFileWithin: vi.fn(async () => privateBytes),
 }));
 
 describe("private library downloads", () => {

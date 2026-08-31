@@ -1,11 +1,11 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
-import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
-import { contentDisposition } from "@/library/http";
+import { contentDisposition, libraryResourceErrorResponse } from "@/library/http";
+import { resolveThreadLibraryResource } from "@/library/server-resource-access";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { StorageError } from "@/storage";
-import { getThread } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
 
 export const runtime = "nodejs";
@@ -26,21 +26,24 @@ export async function GET(
     return NextResponse.json({ error: "Consulta no válida." }, { status: 400 });
   }
   try {
-    if (session.provider !== "local") {
-      return NextResponse.json({ error: "La descarga requiere el runtime privado." }, { status: 403 });
-    }
-    const thread = await getThread(session, threadId);
+    const resource = await resolveThreadLibraryResource(session, {
+      kind: "upload",
+      resourceId: uploadId,
+      threadId,
+    });
+    const thread = resource.access.thread;
     const attachment = thread.messages.flatMap((message) => message.attachments)
       .find((candidate) => candidate.id === uploadId);
     if (!attachment) return NextResponse.json({ error: "Archivo no encontrado." }, { status: 404 });
-    const installation = await loadInstallationConfig();
-    if (installation.installationId !== session.tenant.id) {
-      return NextResponse.json({ error: "La sessió no pertany a aquesta instal·lació." }, { status: 403 });
-    }
-    const services = await documentServicesForUser(installation, session.user.id);
+    const services = await documentServicesForUser(resource.installation, resource.location.storageOwnerId);
     const resolved = await services.staging.resolveContentById(threadId, uploadId);
     if (resolved.document.fileName !== attachment.name || resolved.document.mediaType !== attachment.mimeType ||
-        resolved.document.size !== attachment.size) {
+        resolved.document.size !== attachment.size ||
+        resolved.document.fileName !== resource.location.fileName ||
+        resolved.document.mediaType !== resource.location.mediaType ||
+        resolved.document.size !== resource.location.size ||
+        resolved.document.sha256 !== resource.location.sha256 ||
+        resolved.document.relativePath !== resource.location.relativePath) {
       return NextResponse.json({ error: "El archivo ya no coincide con su registro." }, { status: 409 });
     }
     const contents = await readRegularFileWithin(
@@ -48,6 +51,10 @@ export async function GET(
       resolved.document.relativePath,
       50 * 1024 * 1024,
     );
+    if (contents.byteLength !== resource.location.size ||
+        createHash("sha256").update(contents).digest("hex") !== resource.location.sha256) {
+      return NextResponse.json({ error: "El archivo ya no coincide con su registro." }, { status: 409 });
+    }
     const inline = params.get("inline") === "1";
     return new Response(new Uint8Array(contents), {
       headers: {
@@ -62,6 +69,8 @@ export async function GET(
       },
     });
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Archivo no encontrado.");
+    if (resourceError) return resourceError;
     if (error instanceof StorageError) {
       return NextResponse.json({ error: "Archivo no encontrado." }, { status: 404 });
     }

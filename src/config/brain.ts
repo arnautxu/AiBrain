@@ -173,16 +173,95 @@ export const accentTokens: Record<
   violet: { solid: "#7656d8", soft: "#f0ebff", contrast: "#ffffff" },
 };
 
-export function customAccentTokens(color: string) {
-  if (!/^#[0-9a-f]{6}$/u.test(color)) return null;
-  const channels = [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16) / 255);
-  const luminance = channels
+type Rgb = readonly [number, number, number];
+
+function hexToRgb(color: string): Rgb {
+  return [
+    Number.parseInt(color.slice(1, 3), 16),
+    Number.parseInt(color.slice(3, 5), 16),
+    Number.parseInt(color.slice(5, 7), 16),
+  ];
+}
+
+function rgbToHex(channels: Rgb) {
+  return `#${channels.map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function relativeLuminance(channels: Rgb) {
+  return channels
+    .map((channel) => channel / 255)
     .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4)
     .reduce((total, channel, index) => total + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
+}
+
+function contrastRatio(foreground: Rgb, background: Rgb) {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
+function mixRgb(from: Rgb, to: Rgb, amount: number): Rgb {
+  return [
+    from[0] + (to[0] - from[0]) * amount,
+    from[1] + (to[1] - from[1]) * amount,
+    from[2] + (to[2] - from[2]) * amount,
+  ];
+}
+
+function ensureContrast(color: Rgb, backgrounds: readonly Rgb[], target: Rgb, minimum = 4.65) {
+  const meetsMinimum = (candidate: Rgb) => backgrounds.every((background) => contrastRatio(candidate, background) >= minimum);
+  if (meetsMinimum(color)) return rgbToHex(color);
+  let low = 0;
+  let high = 1;
+  for (let iteration = 0; iteration < 16; iteration += 1) {
+    const amount = (low + high) / 2;
+    if (meetsMinimum(mixRgb(color, target, amount))) high = amount;
+    else low = amount;
+  }
+  return rgbToHex(mixRgb(color, target, high));
+}
+
+function readableText(background: Rgb) {
+  const light = hexToRgb("#ffffff");
+  const dark = hexToRgb("#111827");
+  const lightRatio = contrastRatio(light, background);
+  const darkRatio = contrastRatio(dark, background);
+  if (lightRatio >= 4.5 && lightRatio >= darkRatio) return "#ffffff";
+  if (darkRatio >= 4.5) return "#111827";
+  return "#000000";
+}
+
+export function customAccentTokens(color: string) {
+  const normalized = color.toLocaleLowerCase("en-US");
+  if (!/^#[0-9a-f]{6}$/u.test(normalized)) return null;
+  const channels = hexToRgb(normalized);
+  const lightSurfaces = ["#ffffff", "#f9f9f9", "#fcfcfc", "#f4f4f4", "#ececec", "#e7e7e7", "#f1f1f1"].map(hexToRgb);
+  const darkSurfaces = ["#000000", "#202020", "#2a2a2a", "#303030", "#353535", "#2f2f2f"].map(hexToRgb);
+  const onLight = ensureContrast(channels, lightSurfaces, hexToRgb("#000000"));
+  const onDark = ensureContrast(channels, darkSurfaces, hexToRgb("#ffffff"));
+  const onLightRgb = hexToRgb(onLight);
+  const onDarkRgb = hexToRgb(onDark);
+  const lightSoftSurfaces = [
+    ...lightSurfaces.map((surface) => mixRgb(surface, onLightRgb, 0.12)),
+    mixRgb(hexToRgb("#ffffff"), onLightRgb, 0.1),
+  ];
+  const darkSoftSurfaces = [
+    ...darkSurfaces.map((surface) => mixRgb(surface, onDarkRgb, 0.12)),
+    mixRgb(hexToRgb("#000000"), onDarkRgb, 0.26),
+  ];
+  const onLightSoft = ensureContrast(onLightRgb, lightSoftSurfaces, hexToRgb("#000000"));
+  const onDarkSoft = ensureContrast(onDarkRgb, darkSoftSurfaces, hexToRgb("#ffffff"));
   return Object.freeze({
-    solid: color,
-    soft: `color-mix(in srgb, ${color} 12%, white)`,
-    contrast: luminance > 0.42 ? "#111827" : "#ffffff",
+    solid: normalized,
+    soft: `color-mix(in srgb, ${normalized} 12%, white)`,
+    contrast: readableText(channels),
+    onLight,
+    onDark,
+    onLightSoft,
+    onDarkSoft,
+    onLightContrast: readableText(onLightRgb),
+    onDarkContrast: readableText(onDarkRgb),
   });
 }
 

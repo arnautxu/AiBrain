@@ -34,6 +34,12 @@ test("turn activity and approval", async ({ page }) => {
   await expect(page).toHaveScreenshot("turn-approval.png", { fullPage: true });
 });
 
+test("Review diff", async ({ page }) => {
+  await openSyntheticTurn(page);
+  await page.getByRole("button", { name: "Abrir cambios y resultados" }).click();
+  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
+  await expect(page).toHaveScreenshot("review-diff.png", { fullPage: true });
+});
 test("turn activity and approval dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await openSyntheticTurn(page);
@@ -41,4 +47,12 @@ test("turn activity and approval dark", async ({ page }) => {
   await approval.scrollIntoViewIfNeeded();
   await expect(approval).toBeVisible();
   await expect(page).toHaveScreenshot("turn-approval-dark.png", { fullPage: true });
+});
+
+test("Review diff dark", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await openSyntheticTurn(page);
+  await page.getByRole("button", { name: "Abrir cambios y resultados" }).click();
+  await expect(page.getByRole("heading", { name: "Cambios y resultados del turno" })).toBeVisible();
+  await expect(page).toHaveScreenshot("review-diff-dark.png", { fullPage: true });
 });

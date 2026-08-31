@@ -13,7 +13,7 @@ import {
   type ReactNode,
   type HTMLAttributes,
 } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Collapsible } from "@base-ui/react/collapsible";
 
 // SSR-safe layout effect (client components still server-render in Next).
@@ -55,6 +55,7 @@ const TriggerRow = forwardRef<HTMLButtonElement, TriggerRowProps>(
     const ChevronRight = useIcon("chevron-right");
     const shape = useShape();
     const sizeClasses = useSize();
+    const reduceMotion = useReducedMotion() ?? false;
     const [isHovered, setIsHovered] = useState(false);
     const highlighted = open || isHovered;
 
@@ -68,10 +69,13 @@ const TriggerRow = forwardRef<HTMLButtonElement, TriggerRowProps>(
           {isHovered && (
             <motion.div
               className={`absolute inset-0 ${shape.bg} bg-hover pointer-events-none`}
-              initial={{ opacity: 0 }}
+              initial={reduceMotion ? false : { opacity: 0 }}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0, transition: spring.fast.exit }}
-              transition={{ duration: 0.08 }}
+              exit={{
+                opacity: 0,
+                transition: reduceMotion ? { duration: 0 } : spring.fast.exit,
+              }}
+              transition={reduceMotion ? { duration: 0 } : { duration: 0.08 }}
             />
           )}
         </AnimatePresence>
@@ -116,7 +120,7 @@ const TriggerRow = forwardRef<HTMLButtonElement, TriggerRowProps>(
           <motion.span
             className="shrink-0 inline-flex items-center justify-center"
             animate={{ rotate: open ? 90 : 0 }}
-            transition={spring.fast}
+            transition={reduceMotion ? { duration: 0 } : spring.fast}
           >
             {createElement(ChevronRight, {
               size: sizeClasses.icon,
@@ -152,6 +156,7 @@ interface CollapsePanelProps {
  */
 function CollapsePanel({ open, children }: CollapsePanelProps) {
   const compactStep = useSize().variant === "compact";
+  const reduceMotion = useReducedMotion() ?? false;
   // The open height is animated to a self-measured LAYOUT pixel value, not
   // `height: "auto"`: framer resolves an "auto" target by measuring the
   // element's *visual* (transformed) size, so under a scaled ancestor
@@ -216,14 +221,16 @@ function CollapsePanel({ open, children }: CollapsePanelProps) {
           hidden?: boolean;
         };
         return (
-          <div {...restPanel} hidden={!open && exitComplete}>
+          <div {...restPanel} hidden={!open && (reduceMotion || exitComplete)}>
             <motion.div
               className="overflow-hidden"
-              initial={{ height: open ? "auto" : 0 }}
+              initial={reduceMotion ? false : { height: open ? "auto" : 0 }}
               animate={{ height: open ? contentHeight ?? 0 : 0 }}
               // bounce: 0 — pure height looks better without overshoot.
               transition={
-                needsSnap.current
+                reduceMotion
+                  ? { duration: 0 }
+                  : needsSnap.current
                   ? { duration: 0 }
                   : { ...spring.moderate, bounce: 0 }
               }
@@ -393,6 +400,7 @@ function ThinkingStep({
     const Icon = useIcon(icon);
     const shape = useShape();
     const sizeClasses = useSize();
+    const reduceMotion = useReducedMotion() ?? false;
     const [stepRef, stepHeight] = useStepHeight();
 
     if (status === "pending") return null;
@@ -403,17 +411,21 @@ function ThinkingStep({
       /* Outer: animates height to create space smoothly */
       <motion.div
         className={cn("relative z-10 overflow-hidden", className)}
-        initial={{ height: 0 }}
+        initial={reduceMotion ? false : { height: 0 }}
         animate={{ height: stepHeight ?? 0 }}
-        transition={spring.slow}
+        transition={reduceMotion ? { duration: 0 } : spring.slow}
       >
         {/* Inner: fades content in after space starts opening — and is the
             element measured for the height above. */}
         <motion.div
           ref={stepRef}
-          initial={{ opacity: 0 }}
+          initial={reduceMotion ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.24, delay, ease: "easeOut" }}
+          transition={
+            reduceMotion
+              ? { duration: 0 }
+              : { duration: 0.24, delay, ease: "easeOut" }
+          }
         >
           {/* Content row — this is the proximity hover target */}
           <div className={cn("flex gap-2.5 px-2 py-1.5", shape.item)}>
@@ -544,15 +556,24 @@ interface ThinkingStepSourceProps {
 }
 
 function ThinkingStepSource({ color = "gray", delay = 0, children, className }: ThinkingStepSourceProps) {
+  const reduceMotion = useReducedMotion() ?? false;
   return (
     <motion.span
-      initial={{ opacity: 0, scale: 0.85, filter: "blur(4px)" }}
+      initial={
+        reduceMotion
+          ? false
+          : { opacity: 0, scale: 0.85, filter: "blur(4px)" }
+      }
       animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
-      transition={{
-        ...spring.moderate,
-        delay,
-        filter: { duration: 0.12, delay },
-      }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : {
+              ...spring.moderate,
+              delay,
+              filter: { duration: 0.12, delay },
+            }
+      }
     >
       <Badge variant="solid" size="sm" color={color} className={className}>
         {children}
@@ -574,17 +595,22 @@ interface ThinkingStepImageProps {
 
 function ThinkingStepImage({ src, alt = "", caption, delay = 0, className }: ThinkingStepImageProps) {
   const shape = useShape();
+  const reduceMotion = useReducedMotion() ?? false;
   // The caption role of the type scale — see /docs/sizes.
   const compact = useSize().variant === "compact";
   return (
     <motion.div
       className={cn("mt-1.5", className)}
-      initial={{ opacity: 0, filter: "blur(4px)" }}
+      initial={reduceMotion ? false : { opacity: 0, filter: "blur(4px)" }}
       animate={{ opacity: 1, filter: "blur(0px)" }}
-      transition={{
-        opacity: { duration: 0.2, delay, ease: "easeOut" },
-        filter: { duration: 0.15, delay },
-      }}
+      transition={
+        reduceMotion
+          ? { duration: 0 }
+          : {
+              opacity: { duration: 0.2, delay, ease: "easeOut" },
+              filter: { duration: 0.15, delay },
+            }
+      }
     >
       {/* The registry component accepts arbitrary image sources that cannot be predeclared to Next Image. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}

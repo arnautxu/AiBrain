@@ -4,8 +4,9 @@ import { loadInstallationConfig } from "@/config/installation";
 import { documentServicesForUser } from "@/documents/server-service";
 import { versionPreviewFile } from "@/documents/version-http";
 import { StorageError } from "@/storage";
-import { getThreadRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
+import { libraryResourceErrorResponse } from "@/library/http";
+import { resolveThreadLibraryResource } from "@/library/server-resource-access";
 
 export const runtime = "nodejs";
 
@@ -34,8 +35,12 @@ export async function GET(
     if (session.provider !== "local" || session.tenant.id !== installation.installationId) {
       return NextResponse.json({ error: "La sesión no pertenece a esta instalación." }, { status: 403 });
     }
-    await getThreadRuntimeContext(session, threadId);
-    const services = await documentServicesForUser(installation, session.user.id);
+    const resource = await resolveThreadLibraryResource(session, {
+      kind: "upload",
+      resourceId: documentId,
+      threadId,
+    });
+    const services = await documentServicesForUser(installation, resource.location.storageOwnerId);
     const history = await services.versions.read(threadId, documentId);
     const version = history.versions.find((candidate) => candidate.versionId === versionId);
     if (!version || versionPreviewFile(version) !== fileName) {
@@ -61,6 +66,8 @@ export async function GET(
       },
     });
   } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Vista previa no encontrada.");
+    if (resourceError) return resourceError;
     if (error instanceof StorageError || (error && typeof error === "object" && "code" in error && error.code === "ENOENT")) {
       return NextResponse.json({ error: "Vista previa no encontrada." }, { status: 404 });
     }

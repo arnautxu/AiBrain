@@ -20,6 +20,7 @@ function frame(sequence = 1): BrowserFrameStreamRecord {
       capturedAt: "2026-08-30T10:00:00.000Z",
       captureDurationMs: 32,
       mediaType: "image/png",
+      pointerTrail: [{ id: "click-1", x: 25, y: 40 }],
     },
     data: png,
   };
@@ -34,6 +35,7 @@ function heartbeat(sequence = 1): BrowserFrameStreamRecord {
       capturedAt: "2026-08-30T10:00:02.500Z",
       captureDurationMs: 24,
       mediaType: null,
+      pointerTrail: [],
     },
     data: new Uint8Array(0),
   };
@@ -57,6 +59,7 @@ describe("browser frame stream protocol", () => {
       ["frame", 1], ["heartbeat", 1], ["frame", 2],
     ]);
     expect(records[0]?.data).toEqual(png);
+    expect(records[0]?.metadata.pointerTrail).toEqual([{ id: "click-1", x: 25, y: 40 }]);
   });
 
   it("consumes a streaming HTTP response and rejects incomplete EOFs", async () => {
@@ -80,6 +83,10 @@ describe("browser frame stream protocol", () => {
   it("rejects non-PNG payloads and oversized or malformed metadata", () => {
     expect(() => encodeBrowserFrameStreamRecord({ ...frame(), data: new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]) }))
       .toThrow(/invalid/i);
+    expect(() => encodeBrowserFrameStreamRecord({
+      ...frame(),
+      metadata: { ...frame().metadata, pointerTrail: [{ id: "outside", x: 101, y: 50 }] },
+    })).toThrow(/contrato seguro/i);
     const invalid = encodeBrowserFrameStreamRecord(frame());
     invalid[8] = 0xff;
     expect(() => new BrowserFrameStreamDecoder().push(invalid)).toThrow(/metadatos/i);

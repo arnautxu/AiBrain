@@ -1,12 +1,12 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { readRegularFileWithin } from "@/security/safe-file";
-import { getProjectRuntimeContext } from "@/workbench/store";
 import { isUuid } from "@/workbench/types";
-import { loadInstallationConfig } from "@/config/installation";
 import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
-import { contentDisposition } from "@/library/http";
+import { contentDisposition, libraryResourceErrorResponse } from "@/library/http";
+import { resolveProjectLibraryResource } from "@/library/server-resource-access";
 
 export const runtime = "nodejs";
 
@@ -27,17 +27,26 @@ export async function GET(
     return NextResponse.json({ error: "Consulta no vàlida." }, { status: 400 });
   }
   try {
-    const project = await getProjectRuntimeContext(session, projectId);
-    const installation = await loadInstallationConfig();
-    if (installation.installationId !== session.tenant.id) throw new Error("Installation mismatch.");
-    const roots = deriveWorkerRoots(installation, session.user.id);
+    const resource = await resolveProjectLibraryResource(session, {
+      kind: "generated-image",
+      resourceId: artifactId,
+      projectId,
+    });
+    const roots = deriveWorkerRoots(resource.installation, resource.location.storageOwnerId);
     const projectWorkspace = await resolveWorkerOwnedPath(
       roots.workspace,
-      path.posix.join("projects", project.projectId),
+      path.posix.join("projects", resource.access.project.id),
     );
-    const artifactRoot = path.join(projectWorkspace, ".aibrain", "artifacts");
-    const contents = await readRegularFileWithin(artifactRoot, `${artifactId}.png`, 20_000_000);
-    const fileName = `imatge-${artifactId.slice(0, 8)}.png`;
+    const expectedPath = `.aibrain/artifacts/${artifactId}.png`;
+    if (resource.location.relativePath !== expectedPath || resource.location.mediaType !== "image/png") {
+      return NextResponse.json({ error: "Artefacte no trobat." }, { status: 404 });
+    }
+    const contents = await readRegularFileWithin(projectWorkspace, expectedPath, 20_000_000);
+    if (contents.byteLength !== resource.location.size ||
+        createHash("sha256").update(contents).digest("hex") !== resource.location.sha256) {
+      return NextResponse.json({ error: "El artefacto ya no coincide con su registro." }, { status: 409 });
+    }
+    const fileName = resource.location.fileName;
     return new Response(contents, {
       headers: {
         "Content-Type": "image/png",
@@ -49,7 +58,9 @@ export async function GET(
         "X-Content-Type-Options": "nosniff",
       },
     });
-  } catch {
+  } catch (error) {
+    const resourceError = libraryResourceErrorResponse(error, "Artefacte no trobat.");
+    if (resourceError) return resourceError;
     return NextResponse.json({ error: "Artefacte no trobat." }, { status: 404 });
   }
 }

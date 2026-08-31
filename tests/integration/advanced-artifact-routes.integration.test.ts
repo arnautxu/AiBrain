@@ -58,15 +58,13 @@ const summary: AdvancedArtifactSummary = {
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({ getSession: vi.fn(async () => state.session) }));
 vi.mock("@/artifacts/server-service", () => ({
-  advancedArtifactStoreForSession: vi.fn(async () => ({
-    get: vi.fn(async (userId: string, requestedId: string) => {
-      if (userId !== userA || requestedId !== artifactId) {
-        const { AdvancedArtifactNotFoundError } = await import("@/artifacts/store");
-        throw new AdvancedArtifactNotFoundError("Artefacto no encontrado.");
-      }
-      return { summary, snapshot };
-    }),
-  })),
+  getAdvancedArtifactForSession: vi.fn(async (active: AuthSession, requestedId: string) => {
+    if (active.user.id !== userA || requestedId !== artifactId) {
+      const { AdvancedArtifactNotFoundError } = await import("@/artifacts/store");
+      throw new AdvancedArtifactNotFoundError("Artefacto no encontrado.");
+    }
+    return { summary, snapshot };
+  }),
 }));
 
 describe("advanced artifact preview route", () => {

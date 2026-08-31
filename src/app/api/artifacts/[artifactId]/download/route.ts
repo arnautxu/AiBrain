@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { advancedArtifactErrorResponse } from "@/artifacts/http";
 import { renderArtifactHtml } from "@/artifacts/rendering";
-import { advancedArtifactStoreForSession } from "@/artifacts/server-service";
+import { getAdvancedArtifactForSession } from "@/artifacts/server-service";
 import { contentDisposition } from "@/library/http";
 
 export const runtime = "nodejs";
@@ -33,8 +33,7 @@ export async function GET(
   }
   try {
     const { artifactId } = await context.params;
-    const store = await advancedArtifactStoreForSession(session);
-    const { summary, snapshot } = await store.get(session.user.id, artifactId, version);
+    const { summary, snapshot } = await getAdvancedArtifactForSession(session, artifactId, version);
     const html = renderArtifactHtml(snapshot);
     const name = exportName(summary.title);
     if (format === "html") {

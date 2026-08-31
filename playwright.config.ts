@@ -50,7 +50,13 @@ export default defineConfig({
     {
       name: "accessibility",
       testMatch: ["**/accessibility/**/*.spec.ts"],
+      testIgnore: ["**/accessibility/mobile-overlays.spec.ts"],
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "accessibility-mobile",
+      testMatch: ["**/accessibility/mobile-overlays.spec.ts"],
+      use: { ...devices["iPhone 13"], viewport: { width: 390, height: 844 } },
     },
     {
       name: "visual-matrix",

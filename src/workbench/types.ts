@@ -55,6 +55,30 @@ export type ProjectSharing = {
   members: ProjectMember[];
 };
 
+/**
+ * Server-issued capabilities for the principal viewing a project. Persisted
+ * owner snapshots and demo fixtures may omit this projection; consumers must
+ * treat an omitted value as the legacy owner-compatible state, never derive a
+ * shared role from customer-controlled member metadata in the browser.
+ */
+export type WorkbenchProjectAccess = {
+  role: ProjectMemberRole;
+  canEdit: boolean;
+  canManage: boolean;
+};
+
+export const OWNER_PROJECT_ACCESS: Readonly<WorkbenchProjectAccess> = {
+  role: "owner",
+  canEdit: true,
+  canManage: true,
+};
+
+export function workbenchProjectAccess(
+  project: Pick<WorkbenchProject, "access"> | null | undefined,
+): Readonly<WorkbenchProjectAccess> {
+  return project?.access ?? OWNER_PROJECT_ACCESS;
+}
+
 export type WorkbenchProject = {
   id: string;
   name: string;
@@ -65,6 +89,8 @@ export type WorkbenchProject = {
   sources: ProjectSource[];
   memory: ProjectMemory;
   sharing: ProjectSharing;
+  /** Present on server-authorized shared-workbench projections. */
+  access?: WorkbenchProjectAccess;
   workspace: WorkbenchWorkspace;
   createdAt: string;
   updatedAt: string;
@@ -203,6 +229,13 @@ function isProjectSharing(value: unknown): value is ProjectSharing {
     new Set(value.members.map((member) => member.email.toLocaleLowerCase())).size === value.members.length;
 }
 
+function isWorkbenchProjectAccess(value: unknown): value is WorkbenchProjectAccess {
+  if (!isRecord(value) || Object.keys(value).length !== 3) return false;
+  return (value.role === "owner" && value.canEdit === true && value.canManage === true) ||
+    (value.role === "editor" && value.canEdit === true && value.canManage === false) ||
+    (value.role === "viewer" && value.canEdit === false && value.canManage === false);
+}
+
 export function isProjectName(value: unknown): value is string {
   return typeof value === "string" && value.length <= 80 && value.trim().length > 0;
 }
@@ -231,6 +264,7 @@ export function isWorkbenchProject(value: unknown): value is WorkbenchProject {
     Array.isArray(value.sources) && value.sources.length <= 100 && value.sources.every(isProjectSource) &&
     isProjectMemory(value.memory) &&
     isProjectSharing(value.sharing) &&
+    (value.access === undefined || isWorkbenchProjectAccess(value.access)) &&
     isWorkbenchWorkspace(value.workspace) &&
     isIsoDate(value.createdAt) &&
     isIsoDate(value.updatedAt);

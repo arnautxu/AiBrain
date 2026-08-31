@@ -351,6 +351,40 @@
         "members": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/ProjectMember" } }
       }
     },
+    "ProjectAccess": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "canEdit", "canManage"],
+          "properties": {
+            "role": { "const": "owner" },
+            "canEdit": { "const": true },
+            "canManage": { "const": true }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "canEdit", "canManage"],
+          "properties": {
+            "role": { "const": "editor" },
+            "canEdit": { "const": true },
+            "canManage": { "const": false }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["role", "canEdit", "canManage"],
+          "properties": {
+            "role": { "const": "viewer" },
+            "canEdit": { "const": false },
+            "canManage": { "const": false }
+          }
+        }
+      ]
+    },
     "WorkbenchProject": {
       "type": "object",
       "additionalProperties": false,
@@ -365,6 +399,7 @@
         "sources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/ProjectSource" } },
         "memory": { "$ref": "#/$defs/ProjectMemory" },
         "sharing": { "$ref": "#/$defs/ProjectSharing" },
+        "access": { "$ref": "#/$defs/ProjectAccess" },
         "workspace": { "$ref": "#/$defs/WorkbenchWorkspace" },
         "createdAt": { "$ref": "#/$defs/IsoDate" },
         "updatedAt": { "$ref": "#/$defs/IsoDate" }

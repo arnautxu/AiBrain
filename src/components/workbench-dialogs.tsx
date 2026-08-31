@@ -109,7 +109,7 @@ export function ConfirmDialog({
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button className="min-h-10 rounded-full px-4 text-[13px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}>Cancelar</button>
-          <button disabled={busy} className="min-h-10 rounded-full bg-[var(--danger)] px-5 text-[13px] font-semibold text-white transition active:scale-[.98] disabled:opacity-40" onClick={onConfirm}>{busy ? "Archivando…" : confirmLabel}</button>
+          <button disabled={busy} className="min-h-10 rounded-full bg-[var(--danger)] px-5 text-[13px] font-semibold text-[var(--danger-contrast)] transition active:scale-[.98] disabled:opacity-40" onClick={onConfirm}>{busy ? "Archivando…" : confirmLabel}</button>
         </div>
       </div>
     </div>

@@ -323,6 +323,7 @@ describe("chat workspace simplificado", () => {
 
     renderWorkspace(thread, project, { sending: true });
 
+    expect(screen.getByText("Texto parcial").closest("[data-state='streaming']")).toHaveAttribute("aria-busy", "true");
     expect(scrollIntoView).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
   });
 

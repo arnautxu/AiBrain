@@ -65,4 +65,17 @@ describe("DocumentPublicationCard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Publicar" }));
     expect(onDecide).toHaveBeenCalledWith(draft.id, "confirm");
   });
+
+  it("shows publication details without mutation controls in read-only mode", () => {
+    const onFreeze = vi.fn(async () => undefined);
+    const onDecide = vi.fn(async () => undefined);
+    render(<DocumentPublicationCard draft={draft} readOnly onFreeze={onFreeze} onDecide={onDecide} />);
+
+    expect(screen.getByText("knowledge/notes.md")).toBeInTheDocument();
+    expect(screen.getByText("Solo un editor del proyecto puede preparar esta publicación.")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "Destino de notes.md" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Preparar publicación" })).not.toBeInTheDocument();
+    expect(onFreeze).not.toHaveBeenCalled();
+    expect(onDecide).not.toHaveBeenCalled();
+  });
 });

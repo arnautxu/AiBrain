@@ -27,7 +27,7 @@ test("a delayed high-frequency stream stays interactive, ordered and duplicate-f
 
   const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
   await accountButton.click();
-  await page.getByRole("menuitem", { name: "Configuración" }).click();
+  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Configuración" }).click();
   await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByRole("dialog", { name: /Configuración de/ })).toBeHidden();

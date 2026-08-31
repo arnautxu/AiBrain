@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { advancedArtifactErrorResponse } from "@/artifacts/http";
 import { ARTIFACT_PREVIEW_CSP } from "@/artifacts/rendering";
-import { advancedArtifactStoreForSession } from "@/artifacts/server-service";
+import { readPublishedAdvancedArtifactForSession } from "@/artifacts/server-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +17,7 @@ export async function GET(
   const version = Number(rawVersion);
   if (!Number.isSafeInteger(version) || version < 1) return NextResponse.json({ error: "Versión no válida." }, { status: 400 });
   try {
-    const store = await advancedArtifactStoreForSession(session);
-    const { html } = await store.readPublished(session.user.id, artifactId, version);
+    const { html } = await readPublishedAdvancedArtifactForSession(session, artifactId, version);
     return new NextResponse(html, { headers: {
       "Cache-Control": "private, no-store",
       "Content-Security-Policy": ARTIFACT_PREVIEW_CSP,

@@ -25,6 +25,10 @@ import {
   type BrowserViewerToken,
 } from "@/ui/browser-ui-adapter";
 import { consumeBrowserFrameStream } from "@/ui/browser-frame-stream";
+import {
+  ComputerUseTrail,
+  type ComputerStep,
+} from "@/components/assistant-ui/elements/computer-use";
 
 type ViewerMetrics = Readonly<{ fps: number; latencyMs: number; captureMs: number }>;
 
@@ -65,6 +69,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [metrics, setMetrics] = useState<ViewerMetrics | null>(null);
   const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const [pointerTrail, setPointerTrail] = useState<ComputerStep[]>([]);
   const imageRef = useRef<HTMLImageElement>(null);
   const frameUrlRef = useRef<string | null>(null);
   const viewerTokenRef = useRef<BrowserViewerToken | null>(null);
@@ -190,6 +195,11 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
             reconnectAttempt = 0;
             setConnection("live");
             setError(null);
+            setPointerTrail((record.metadata.pointerTrail ?? []).map((point) => ({
+              ...point,
+              action: "click",
+              target: "Interacción en el navegador",
+            })));
             const now = performance.now();
             frameTimesRef.current = [...frameTimesRef.current.filter((value) => now - value <= 2_000), now].slice(-30);
             const first = frameTimesRef.current[0] ?? now;
@@ -271,7 +281,16 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const bounds = image.getBoundingClientRect();
     const x = Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width);
     const y = Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height);
-    setPointer({ x: (event.clientX - bounds.left) / bounds.width, y: (event.clientY - bounds.top) / bounds.height });
+    const relativeX = (event.clientX - bounds.left) / bounds.width;
+    const relativeY = (event.clientY - bounds.top) / bounds.height;
+    setPointer({ x: relativeX, y: relativeY });
+    setPointerTrail((current) => [...current, {
+      id: `human-${Date.now()}`,
+      action: "click",
+      target: "Clic manual",
+      x: relativeX * 100,
+      y: relativeY * 100,
+    }].slice(-3));
     const token = await ensureControl().catch(() => null);
     if (!token) return;
     try {
@@ -372,6 +391,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     }
     setFullscreen(false);
     setPointer(null);
+    setPointerTrail([]);
     onClose();
   };
 
@@ -413,7 +433,13 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
               onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)}
               onPaste={(event) => void pasteFrame(event)}
               className="max-h-full max-w-full bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]" />
-            {humanControl && pointer ? <span aria-hidden="true" className="pointer-events-none absolute size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-[var(--brain-accent)] shadow" style={{ left: `${pointer.x * 100}%`, top: `${pointer.y * 100}%` }} /> : null}
+            {pointerTrail.length > 0 || (humanControl && pointer) ? (
+              <ComputerUseTrail
+                steps={pointerTrail}
+                activeIndex={pointerTrail.length - 1}
+                cursor={humanControl && pointer ? { x: pointer.x * 100, y: pointer.y * 100 } : null}
+              />
+            ) : null}
           </div>
         ) : (
           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>

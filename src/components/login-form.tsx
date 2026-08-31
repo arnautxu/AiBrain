@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import {
   ArrowRight,
   EnvelopeSimple,
@@ -10,7 +10,17 @@ import {
 import { useRouter } from "next/navigation";
 import type { AuthMode, DemoAccount } from "@/auth/types";
 import { BrandMark, Button, TextField, ThemeToggle } from "@/components/ui/primitives";
+import { customAccentTokens } from "@/config/brain";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
+
+type LoginStyle = CSSProperties & {
+  "--brain-accent-light": string;
+  "--brain-accent-dark": string;
+  "--brain-accent-on-soft-light": string;
+  "--brain-accent-on-soft-dark": string;
+  "--brain-contrast-light": string;
+  "--brain-contrast-dark": string;
+};
 
 export function LoginForm({
   accounts,
@@ -32,6 +42,17 @@ export function LoginForm({
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [sent, setSent] = useState(false);
+  const style = useMemo<LoginStyle>(() => {
+    const accent = customAccentTokens(branding.accentColor) ?? customAccentTokens("#315ee7")!;
+    return {
+      "--brain-accent-light": accent.onLight,
+      "--brain-accent-dark": accent.onDark,
+      "--brain-accent-on-soft-light": accent.onLightSoft,
+      "--brain-accent-on-soft-dark": accent.onDarkSoft,
+      "--brain-contrast-light": accent.onLightContrast,
+      "--brain-contrast-dark": accent.onDarkContrast,
+    };
+  }, [branding.accentColor]);
 
   async function loginDemo(userId: string) {
     setLoading(userId);
@@ -128,9 +149,9 @@ export function LoginForm({
       router.refresh();
     } catch (currentError) {
       const message = currentError instanceof Error ? currentError.message : "Error desconocido.";
-      if (message === "El canvi de contrasenya ha caducat.") {
+      if (message === "El canvi de contrasenya ha caducat." || message === "El cambio de contraseña ha caducado.") {
         returnToLogin();
-        setError("El canvi de contrasenya ha caducat. Torna a iniciar sessió per continuar.");
+        setError("El cambio de contraseña ha caducado. Vuelve a iniciar sesión para continuar.");
       } else {
         setError(message);
       }
@@ -164,7 +185,7 @@ export function LoginForm({
   const isSupabase = mode === "supabase";
 
   return (
-    <main className="relative flex min-h-[100dvh] bg-[var(--canvas)] px-5 py-20 text-[var(--text)] sm:px-8">
+    <main style={style} className="auth-brand-surface relative flex min-h-[100dvh] bg-[var(--canvas)] px-5 py-20 text-[var(--text)] sm:px-8">
       <header className="absolute inset-x-5 top-5 flex items-center justify-between sm:inset-x-8 sm:top-7">
         <BrandMark branding={branding} />
         <ThemeToggle />
@@ -271,27 +292,35 @@ export function LoginForm({
 
           {isSupabase && passwordChangeRequired ? (
             <form className="space-y-3" onSubmit={(event) => void changeInitialPassword(event)}>
-              <TextField
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={12}
-                maxLength={128}
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                placeholder="Contraseña nueva"
-              />
-              <TextField
-                type="password"
-                autoComplete="new-password"
-                required
-                minLength={12}
-                maxLength={128}
-                value={confirmation}
-                onChange={(event) => setConfirmation(event.target.value)}
-                placeholder="Repite la contraseña"
-              />
-              <p className="text-[11px] leading-5 text-[var(--text-muted)]">Entre 12 y 128 caracteres, con al menos una letra y un número.</p>
+              <label className="block" htmlFor="initial-password">
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Contraseña nueva</span>
+                <TextField
+                  id="initial-password"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  aria-describedby="initial-password-requirements"
+                />
+              </label>
+              <label className="block" htmlFor="initial-password-confirmation">
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Repite la contraseña</span>
+                <TextField
+                  id="initial-password-confirmation"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  minLength={12}
+                  maxLength={128}
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  aria-describedby="initial-password-requirements"
+                />
+              </label>
+              <p id="initial-password-requirements" className="text-[11px] leading-5 text-[var(--text-muted)]">Entre 12 y 128 caracteres, con al menos una letra y un número.</p>
               <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
                 {loading ? "Actualizando…" : "Actualizar y entrar"}
               </Button>
