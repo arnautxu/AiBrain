@@ -85,7 +85,7 @@ test("document preview, publication state and isolated browser viewer consume ar
   await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
   await expect(page.locator(`iframe[src="/api/browser/sessions/${browserId}/viewer"]`)).toHaveCount(0);
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Cerrar sesión" }).click();
+  await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Cerrar sesión" }).click();
   await expect(page).toHaveURL(/\/login/);
   await expect(page.locator("iframe")).toHaveCount(0);
 });

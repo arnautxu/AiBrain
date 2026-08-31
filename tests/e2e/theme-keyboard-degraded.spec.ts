@@ -124,7 +124,7 @@ test("keyboard dialogs trap focus, close with Escape and restore their opener", 
 test("global shortcuts never stack modal surfaces or hijack an editor", async ({ page }) => {
   await login(page);
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Configuración" }).click();
+  await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Configuración" }).click();
   const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
   await expect(preferences).toBeVisible();
 
@@ -221,7 +221,7 @@ test("Browser auto-open waits for the blocking surface to close", async ({ page 
   await expect.poll(() => page.evaluate(() => typeof (window as typeof window & { __emitBrowserDemand?: unknown }).__emitBrowserDemand)).toBe("function");
 
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Configuración" }).click();
+  await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Configuración" }).click();
   const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
   await expect(preferences).toBeVisible();
   await page.evaluate(() => (window as typeof window & { __emitBrowserDemand: () => void }).__emitBrowserDemand());
@@ -432,7 +432,7 @@ test("desktop notification clicks never stack Task Center over a blocking surfac
   await expect.poll(() => page.evaluate(() => Boolean((window as typeof window & { __rewroteWorkbenchPersistence?: boolean }).__rewroteWorkbenchPersistence))).toBe(true);
   await expect(page.getByTestId("composer")).toBeVisible();
   await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
-  await page.getByRole("dialog", { name: "Cuenta y preferencias" }).getByRole("button", { name: "Configuración" }).click();
+  await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Configuración" }).click();
   const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
   await expect(preferences).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));

@@ -403,6 +403,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 
   return (
     <aside
+      data-side-window="browser"
       className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
       aria-label="Navegador"
     >
