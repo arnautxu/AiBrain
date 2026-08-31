@@ -165,6 +165,14 @@ type StreamRecoveryNotice = {
   attempt: number;
 };
 
+type QueuedChatTurn = {
+  id: string;
+  projectId: string;
+  threadId: string;
+  runtimeContent: string;
+  displayContent: string;
+};
+
 type StoredSelection = {
   activeProjectId: string | null;
   threadByProject: Record<string, string>;
@@ -220,6 +228,7 @@ function managedAppOutcomeResult(approvalId: string, outcome: ManagedAppActionOu
 }
 
 const MAX_CLIENT_TURN_READBACKS = 24;
+const MAX_QUEUED_MESSAGES_PER_THREAD = 8;
 
 function retainClientTurnReadback(
   current: Record<string, ClientTurnPerformanceReadback>,
@@ -593,6 +602,8 @@ export function BrainApp({
   const [notice, setNotice] = useState<string | null>(null);
   const [streamRecoveryNotice, setStreamRecoveryNotice] = useState<StreamRecoveryNotice | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
+  const [queuedTurns, setQueuedTurns] = useState<QueuedChatTurn[]>([]);
+  const [dispatchingQueuedTurnId, setDispatchingQueuedTurnId] = useState<string | null>(null);
   const [managedAppAvailable, setManagedAppAvailable] = useState(false);
   const [managedAppActions, setManagedAppActions] = useState<ManagedAppActionRegistry>({});
   const [clientTurnReadbacks, setClientTurnReadbacks] = useState<Record<string, ClientTurnPerformanceReadback>>({});
@@ -838,6 +849,9 @@ export function BrainApp({
     ? runningThreadIds.has(activeThread.id) || activeThread.messages.some((message) =>
         message.role === "assistant" && message.status === "streaming")
     : startingDraftKeys.has(composerDraftKey(activeProjectId, null));
+  const activeQueuedMessages = useMemo(() => queuedTurns
+    .filter((item) => item.projectId === activeProjectId && item.threadId === activeThreadId)
+    .map((item) => ({ id: item.id, text: item.displayContent })), [activeProjectId, activeThreadId, queuedTurns]);
   const selectedMessage = useMemo(
     () => activeThread?.messages.find((message) => message.id === selectedMessageId) ??
       activeThread?.messages.findLast((message) => message.role === "assistant") ?? null,
@@ -1448,6 +1462,7 @@ export function BrainApp({
         setAttachments([]);
         setDocuments([]);
         setSelectedConnectorMentionIds([]);
+        setImageGeneration(false);
       }
 
       controller = new AbortController();
@@ -1531,6 +1546,59 @@ export function BrainApp({
     }
     return succeeded;
   }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
+
+  const submitComposerMessage = useCallback((messageOverride?: string, displayMessageOverride?: string) => {
+    if (!sending) {
+      void sendMessage(messageOverride, displayMessageOverride);
+      return;
+    }
+
+    const displayContent = (displayMessageOverride ?? messageOverride ?? promptRef.current).trim();
+    const promptContent = (messageOverride ?? promptRef.current).trim();
+    const runtimeContent = (messageOverride ?? (pendingRuntimeContext
+      ? `${promptContent}\n\n${pendingRuntimeContext}`
+      : promptContent)).trim();
+    if (!displayContent || !runtimeContent || !activeProject || !activeThread || activeThread.status !== "active") return;
+    if (queuedTurns.filter((item) => item.threadId === activeThread.id).length >= MAX_QUEUED_MESSAGES_PER_THREAD) {
+      setNotice(`La cola admite hasta ${MAX_QUEUED_MESSAGES_PER_THREAD} mensajes por conversación.`);
+      return;
+    }
+
+    setQueuedTurns((current) => [...current, {
+      id: crypto.randomUUID(),
+      projectId: activeProject.id,
+      threadId: activeThread.id,
+      runtimeContent,
+      displayContent,
+    }]);
+    updateComposerPrompt("");
+    setPendingRuntimeContext(null);
+  }, [activeProject, activeThread, pendingRuntimeContext, queuedTurns, sendMessage, sending, updateComposerPrompt]);
+
+  useEffect(() => {
+    if (sending || actionBusy || documentUploading || dispatchingQueuedTurnId || !activeProject || !activeThread) return;
+    const next = queuedTurns.find((item) =>
+      item.projectId === activeProject.id && item.threadId === activeThread.id);
+    if (!next) return;
+
+    setDispatchingQueuedTurnId(next.id);
+    setQueuedTurns((current) => current.filter((item) => item.id !== next.id));
+    void sendMessage(next.runtimeContent, next.displayContent)
+      .then((completed) => {
+        if (!completed) setNotice("No se ha podido enviar el siguiente mensaje de la cola.");
+      })
+      .finally(() => setDispatchingQueuedTurnId(null));
+  }, [actionBusy, activeProject, activeThread, dispatchingQueuedTurnId, documentUploading, queuedTurns, sendMessage, sending]);
+
+  useEffect(() => {
+    const activeThreadIds = new Set(threads
+      .filter((thread) => thread.status === "active")
+      .map((thread) => thread.id));
+    setQueuedTurns((current) => {
+      const retained = current.filter((item) => activeThreadIds.has(item.threadId));
+      return retained.length === current.length ? current : retained;
+    });
+  }, [threads]);
 
   const branchConversation = useCallback(async (
     message: ChatMessage,
@@ -2050,6 +2118,7 @@ export function BrainApp({
         hydrated={hydrated}
         prompt={prompt}
         composerExperience={composerExperience}
+        imageGeneration={imageGeneration}
         connectorMentions={connectorMentions}
         selectedConnectorMentionIds={selectedConnectorMentionIds}
         attachments={attachments}
@@ -2058,6 +2127,7 @@ export function BrainApp({
         documentUploading={documentUploading}
         sending={sending}
         stopping={activeThread ? stoppingThreadIds.has(activeThread.id) : false}
+        queuedMessages={activeQueuedMessages}
         runtimeStatus={effectiveRuntimeStatus}
         networkOnline={networkOnline}
         streamRecovery={streamRecoveryNotice?.threadId === activeThreadId
@@ -2066,6 +2136,7 @@ export function BrainApp({
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={updateComposerPrompt}
         onComposerExperienceChange={setComposerExperience}
+        onImageGenerationChange={setImageGeneration}
         onDestinationChange={startNewThread}
         onConnectorMentionIdsChange={setSelectedConnectorMentionIds}
         onAttachmentsChange={setAttachments}
@@ -2074,8 +2145,9 @@ export function BrainApp({
         onFreezePublication={freezePublication}
         onDecidePublication={decidePublication}
         onComposerNotice={setNotice}
-        onSend={sendMessage}
+        onSend={submitComposerMessage}
         onStop={() => void stopActiveTurn()}
+        onCancelQueuedMessage={(id) => setQueuedTurns((current) => current.filter((item) => item.id !== id))}
         sidebarOpen={desktopSidebarOpen || mobileSidebarOpen}
         onToggleSidebar={toggleSidebar}
         onResolveApproval={resolveApproval}

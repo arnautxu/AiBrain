@@ -68,6 +68,10 @@ export function ComputerUse({
   url,
   steps,
   activeIndex,
+  cursor,
+  showChrome = true,
+  showStatus = true,
+  viewportClassName,
   children,
   className,
   ...props
@@ -75,6 +79,10 @@ export function ComputerUse({
   url: string;
   steps: readonly ComputerStep[];
   activeIndex: number;
+  cursor?: ComputerCursorPosition | null;
+  showChrome?: boolean;
+  showStatus?: boolean;
+  viewportClassName?: string;
   children: React.ReactNode;
 }) {
   const index = indexIn(steps, activeIndex);
@@ -91,7 +99,7 @@ export function ComputerUse({
 
       {...props}
     >
-      <div className="flex items-center gap-2 px-3 py-2">
+      {showChrome ? <div className="flex items-center gap-2 px-3 py-2">
         <span className="flex shrink-0 gap-1">
           {["bg-red-500/50", "bg-amber-500/50", "bg-emerald-500/50"].map(
             (tint) => (
@@ -112,14 +120,18 @@ export function ComputerUse({
         >
           {url}
         </span>
-      </div>
+      </div> : null}
 
-      <div className="border-foreground/[0.07] relative min-h-[8.5rem] overflow-hidden border-t">
+      <div className={cn(
+        "border-foreground/[0.07] relative min-h-[8.5rem] overflow-hidden",
+        showChrome && "border-t",
+        viewportClassName,
+      )}>
         {children}
-        <ComputerUseTrail steps={steps} activeIndex={activeIndex} />
+        <ComputerUseTrail steps={steps} activeIndex={activeIndex} cursor={cursor} />
       </div>
 
-      {active && (
+      {showStatus && active && (
         <div className="border-foreground/[0.07] flex items-center gap-2 border-t px-3.5 py-2">
           <span className={cn(mono, "text-foreground/55 shrink-0")}>
             {active.action}

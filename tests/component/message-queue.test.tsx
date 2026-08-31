@@ -15,6 +15,7 @@ describe("message queue", () => {
         running="Analitza el document"
         queued={[{ id: "queued-1", text: "Prepara el resum" }]}
         onCancel={onCancel}
+        language="en"
       />,
     );
 

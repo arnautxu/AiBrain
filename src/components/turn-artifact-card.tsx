@@ -10,11 +10,11 @@ import {
   FilePpt,
   FileText,
   FileXls,
-  ImagesSquare,
   SpinnerGap,
   WarningCircle,
 } from "@phosphor-icons/react";
 import type { BrowserArtifact, DocumentArtifact, GeneratedArtifact } from "@/lib/chat-contract";
+import { ImageGeneration } from "@/components/assistant-ui/elements/image-generation";
 
 const publicationCopy: Record<NonNullable<DocumentArtifact["publicationStatus"]>, string> = {
   awaiting_confirmation: "Pendiente de confirmación segura",
@@ -103,10 +103,13 @@ export function TurnArtifactCard({ artifact, onPreviewDocument, onOpenBrowser }:
       </article>
     );
   }
-  return (
-    <figure className="overflow-hidden rounded-[calc(var(--brain-radius)+2px)] border border-[var(--border)] bg-[var(--surface-muted)]">
-      <a href={artifact.url} target="_blank" rel="noreferrer"><NextImage unoptimized width={720} height={720} src={artifact.url} alt={artifact.prompt ?? artifact.name} className="aspect-square w-full object-cover" /></a>
-      <figcaption className="flex items-center gap-2 px-3 py-2 text-[9px] text-[var(--text-muted)]"><ImagesSquare size={12} /><span className="min-w-0 flex-1 truncate">{artifact.prompt ?? artifact.name}</span><a href={artifact.url} download={artifact.name} className="font-medium text-[var(--text)] hover:underline">Descargar</a></figcaption>
-    </figure>
-  );
+  return <ImageGeneration
+    prompt={artifact.prompt ?? artifact.name}
+    generating={false}
+    src={artifact.url}
+    alt={artifact.prompt ?? artifact.name}
+    downloadUrl={artifact.url}
+    downloadName={artifact.name}
+    className="w-full max-w-[420px]"
+  />;
 }

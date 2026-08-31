@@ -68,6 +68,21 @@ describe("TurnArtifactCard", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido publicar.");
   });
 
+  it("renders a generated image through the image generation component", () => {
+    render(<TurnArtifactCard artifact={{
+      id: "018f5f68-4a6e-7abc-8def-0123456789ad",
+      type: "image",
+      name: "diagrama.png",
+      url: "/api/projects/project/artifacts/image",
+      prompt: "Un diagrama verificable",
+    }} />);
+
+    expect(document.querySelector("[data-slot='image-generation']")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Un diagrama verificable" })).toHaveAttribute("src", "/api/projects/project/artifacts/image");
+    expect(screen.getByRole("link", { name: "Descargar diagrama.png" })).toHaveAttribute("href", "/api/projects/project/artifacts/image");
+    expect(screen.queryByRole("button", { name: "Volver a generar la imagen" })).not.toBeInTheDocument();
+  });
+
   it("links only to the supplied isolated browser viewer route", () => {
     const browser: BrowserArtifact = {
       id: "018f5f68-4a6e-7abc-8def-0123456789af",

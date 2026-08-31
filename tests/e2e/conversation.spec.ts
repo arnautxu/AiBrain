@@ -69,6 +69,98 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   await expect(page.getByText("Respuesta detenida.")).toBeVisible();
 });
 
+test("messages written during a turn queue and dispatch exactly once in order", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  let releaseFirstResponse: () => void = () => undefined;
+  const firstResponseGate = new Promise<void>((resolve) => { releaseFirstResponse = resolve; });
+  const receivedMessages: string[] = [];
+
+  await page.route("**/api/chat", async (route) => {
+    const request = JSON.parse(route.request().postData() ?? "{}") as { message?: string };
+    receivedMessages.push(request.message ?? "");
+    const requestNumber = receivedMessages.length;
+    if (requestNumber === 1) await firstResponseGate;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: [
+        JSON.stringify({ type: "delta", value: `Respuesta sintética ${requestNumber}.` }),
+        JSON.stringify({ type: "done" }),
+        "",
+      ].join("\n"),
+    });
+  });
+
+  await login(page);
+  const textarea = page.getByRole("textbox", { name: "Mensaje" });
+  await textarea.fill("Primer mensaje en curso");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
+
+  await textarea.fill("Segundo mensaje en cola");
+  await page.getByRole("button", { name: "Añadir mensaje a la cola" }).click();
+  const queue = page.locator("[data-slot='message-queue']");
+  await expect(queue.getByText("Segundo mensaje en cola", { exact: true })).toBeVisible();
+  expect(receivedMessages).toEqual(["Primer mensaje en curso"]);
+
+  releaseFirstResponse();
+  await expect.poll(() => receivedMessages).toEqual([
+    "Primer mensaje en curso",
+    "Segundo mensaje en cola",
+  ]);
+  await expect(page.locator("article.flex.justify-end").filter({ hasText: "Segundo mensaje en cola" })).toBeVisible();
+  await expect(page.getByText("Respuesta sintética 2.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});
+
+test("governed image generation is selectable and reaches the runtime request", async ({ page }) => {
+  let requestedImageGeneration: boolean | null = null;
+  await page.route("**/api/runtime/status**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      tenantId: "example-lab-dev",
+      projectId: "018f5f68-4a6e-7abc-8def-0123456789ab",
+      projectName: "Trabajo interno",
+      mode: "codex",
+      codex: "connected",
+      isolated: true,
+      ready: true,
+      authMode: "chatgpt",
+      planType: "team",
+      processWarm: true,
+      rateLimit: null,
+      usage: null,
+      workspaceName: "workspace",
+      model: "gpt-5.6",
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      models: [],
+      skills: [],
+      capabilities: { webSearch: true, imageInput: true, imageGeneration: true },
+    }),
+  }));
+  await page.route("**/api/chat", async (route) => {
+    const request = JSON.parse(route.request().postData() ?? "{}") as { options?: { imageGeneration?: boolean } };
+    requestedImageGeneration = request.options?.imageGeneration ?? null;
+    await route.fulfill({
+      status: 200,
+      headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+      body: `${JSON.stringify({ type: "done" })}\n`,
+    });
+  });
+
+  await login(page);
+  await page.getByRole("button", { name: "Añadir al mensaje" }).click();
+  await page.getByRole("menuitemcheckbox", { name: "Crear imagen" }).click();
+  await expect(page.getByLabel("Generación de imágenes activada")).toBeVisible();
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Genera una imagen de prueba");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect.poll(() => requestedImageGeneration).toBe(true);
+  await expect(page.getByLabel("Generación de imágenes activada")).toHaveCount(0);
+});
+
 test("the mobile composer keeps every control below its growing text area", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
