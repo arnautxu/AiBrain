@@ -11,6 +11,7 @@ import {
   FolderOpen,
   File as FileIcon,
   Image as ImageIcon,
+  ImagesSquare,
   Paperclip,
   Plus,
   PencilSimple,
@@ -22,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { StreamingResponse } from "@/components/agents/streaming-response";
+import { MessageQueue, type QueuedMessage } from "@/components/assistant-ui/elements/message-queue";
 import { ThinkingOrb } from "thinking-orbs";
 import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
@@ -54,6 +56,7 @@ type ChatWorkspaceProps = {
   hydrated: boolean;
   prompt: string;
   composerExperience: ComposerExperience;
+  imageGeneration: boolean;
   connectorMentions: ConnectorMention[];
   selectedConnectorMentionIds: string[];
   attachments: ChatInputAttachment[];
@@ -62,12 +65,14 @@ type ChatWorkspaceProps = {
   documentUploading: boolean;
   sending: boolean;
   stopping: boolean;
+  queuedMessages: readonly QueuedMessage[];
   runtimeStatus: RuntimeStatus;
   networkOnline: boolean;
   streamRecovery: { attempt: number } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
   onComposerExperienceChange: (value: ComposerExperience) => void;
+  onImageGenerationChange: (value: boolean) => void;
   onDestinationChange: (projectId: string) => void;
   onConnectorMentionIdsChange: (value: string[]) => void;
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
@@ -78,6 +83,7 @@ type ChatWorkspaceProps = {
   onComposerNotice: (message: string) => void;
   onSend: (message?: string, displayMessage?: string) => void;
   onStop: () => void;
+  onCancelQueuedMessage: (id: string) => void;
   sidebarOpen: boolean;
   onToggleSidebar: () => void;
   onResolveApproval: (
@@ -337,6 +343,7 @@ export function ChatWorkspace({
   hydrated,
   prompt,
   composerExperience,
+  imageGeneration,
   connectorMentions,
   selectedConnectorMentionIds,
   attachments,
@@ -345,12 +352,14 @@ export function ChatWorkspace({
   documentUploading,
   sending,
   stopping,
+  queuedMessages,
   runtimeStatus,
   networkOnline,
   streamRecovery,
   onRetryRuntime,
   onPromptChange,
   onComposerExperienceChange,
+  onImageGenerationChange,
   onDestinationChange,
   onConnectorMentionIdsChange,
   onAttachmentsChange,
@@ -361,6 +370,7 @@ export function ChatWorkspace({
   onComposerNotice,
   onSend,
   onStop,
+  onCancelQueuedMessage,
   sidebarOpen,
   onToggleSidebar,
   onResolveApproval,
@@ -465,6 +475,7 @@ export function ChatWorkspace({
   const hasMessages = Boolean(thread?.messages.length);
   const composerEngaged = Boolean(prompt.trim() || attachments.length || documents.length || selectedConnectorMentionIds.length);
   const canAttachImages = manifest.composer.images && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageInput);
+  const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const canAttachDocuments = runtimeStatus.mode === "codex";
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
   const destinationOptions = useMemo(() => projects
@@ -493,6 +504,8 @@ export function ChatWorkspace({
       (mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery)))
     .slice(0, 8), [connectorMentions, mentionQuery]);
   const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
+  const runningMessage = thread?.messages.findLast((message) => message.role === "user")?.content ?? "Respuesta en curso";
+  const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
 
   const openAuthorizedConnectors = () => {
     if (connectorMentions.length === 0) {
@@ -688,13 +701,22 @@ export function ChatWorkspace({
         ><ArrowDown size={13} />Volver al final</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
           {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
+          {sending && hasMessages ? <MessageQueue
+            running={runningMessage}
+            queued={queuedMessages}
+            onCancel={onCancelQueuedMessage}
+            onStop={queueingMessage ? onStop : undefined}
+            stopping={stopping}
+            language={manifest.identity.language}
+            className="mb-2 max-w-none"
+          /> : null}
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !selectedMentions.length ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !selectedMentions.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
             onFocusCapture={() => setComposerFocused(true)}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false);
@@ -708,6 +730,7 @@ export function ChatWorkspace({
             {composerMenuOpen ? (
               <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
+                {canGenerateImages ? <button role="menuitemcheckbox" aria-checked={imageGeneration} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
                 <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Conectores</button>
               </div>
             ) : null}
@@ -733,6 +756,9 @@ export function ChatWorkspace({
             {selectedMentions.length ? <div className="flex flex-wrap gap-1.5 px-2 pt-1" aria-label="Conectores seleccionados">
               {selectedMentions.map((mention) => <span key={mention.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><At size={11} />{mention.label}<button type="button" aria-label={`Quitar ${mention.label}`} className="rounded-full hover:bg-[var(--surface-raised)]" onClick={() => onConnectorMentionIdsChange(selectedConnectorMentionIds.filter((id) => id !== mention.id))}><X size={10} /></button></span>)}
             </div> : null}
+            {imageGeneration ? <div className="flex px-2 pt-1" aria-label="Generación de imágenes activada">
+              <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
+            </div> : null}
             <div
               ref={composerMeasurementRef}
               aria-hidden="true"
@@ -757,7 +783,7 @@ export function ChatWorkspace({
                 }
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
-                  if (!sending && !documentUploading && prompt.trim() && runtimeReady) {
+                  if (!documentUploading && prompt.trim() && runtimeReady) {
                     shouldStickToBottomRef.current = true;
                     onSend();
                   }
@@ -816,21 +842,22 @@ export function ChatWorkspace({
                   onNotice={onComposerNotice}
                 />
                 <button
-                  aria-label={sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
-                  aria-busy={stopping || undefined}
+                  aria-label={queueingMessage ? "Añadir mensaje a la cola" : sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
+                  aria-busy={(!queueingMessage && stopping) || undefined}
                   className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
-                  disabled={sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
+                  disabled={queueingMessage ? !project || !runtimeReady || documentUploading : sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
                   onClick={() => {
                     if (sending) {
-                      onStop();
+                      if (queueingMessage) onSend();
+                      else onStop();
                       return;
                     }
                     shouldStickToBottomRef.current = true;
                     onSend();
                   }}
                 >
-                  <span key={sending ? "stop" : "send"} className="composer-submit-icon" aria-hidden="true">
-                    {sending ? <Stop size={11} weight="fill" /> : <ArrowUp size={13} weight="bold" />}
+                  <span key={queueingMessage ? "queue" : sending ? "stop" : "send"} className="composer-submit-icon" aria-hidden="true">
+                    {queueingMessage ? <ArrowUp size={13} weight="bold" /> : sending ? <Stop size={11} weight="fill" /> : <ArrowUp size={13} weight="bold" />}
                   </span>
                 </button>
               </div>

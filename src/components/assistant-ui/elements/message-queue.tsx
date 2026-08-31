@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { ArrowUpIcon, XIcon } from "lucide-react";
+import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { field, ghostButton, mono, paper } from "@/lib/surfaces";
 
@@ -10,23 +10,56 @@ export interface QueuedMessage {
   text: string;
 }
 
+const queueCopy = {
+  ca: {
+    running: "en curs",
+    queued: "a la cua",
+    sendsNext: "s’envien en acabar",
+    remove: (text: string) => `Treu \"${text}\" de la cua`,
+    stop: "Atura la resposta",
+  },
+  es: {
+    running: "en curso",
+    queued: "en cola",
+    sendsNext: "se envían al terminar",
+    remove: (text: string) => `Quitar \"${text}\" de la cola`,
+    stop: "Detener respuesta",
+  },
+  en: {
+    running: "running",
+    queued: "queued",
+    sendsNext: "sends when this finishes",
+    remove: (text: string) => `Remove \"${text}\" from the queue`,
+    stop: "Stop response",
+  },
+} as const;
+
 export function MessageQueue({
   running,
   queued,
   onCancel,
+  onStop,
+  stopping = false,
+  language = "es",
   className,
   ...props
 }: Omit<
   ComponentProps<"div">,
-  "children" | "running" | "queued" | "onCancel"
+  "children" | "running" | "queued" | "onCancel" | "onStop"
 > & {
   running: string;
   queued: readonly QueuedMessage[];
   onCancel?: (id: string) => void;
+  onStop?: () => void;
+  stopping?: boolean;
+  language?: keyof typeof queueCopy;
 }) {
+  const copy = queueCopy[language];
+
   return (
     <div
       data-slot="message-queue"
+      aria-live="polite"
       className={cn("flex w-full max-w-sm flex-col gap-2", className)}
 
       {...props}
@@ -39,16 +72,28 @@ export function MessageQueue({
         <span className="text-foreground/90 min-w-0 flex-1 truncate text-[13.5px]">
           {running}
         </span>
-        <span className={cn(mono, "text-foreground/35 shrink-0")}>running</span>
+        <span className={cn(mono, "text-foreground/35 shrink-0")}>{copy.running}</span>
+        {onStop ? (
+          <button
+            type="button"
+            aria-label={stopping ? `${copy.stop}…` : copy.stop}
+            aria-busy={stopping || undefined}
+            disabled={stopping}
+            onClick={onStop}
+            className={cn(ghostButton, "touch-target size-7 shrink-0 disabled:opacity-40")}
+          >
+            <SquareIcon className="size-3 fill-current" />
+          </button>
+        ) : null}
       </div>
 
       {queued.length > 0 && (
         <div className="flex items-baseline justify-between px-1">
           <span className={cn(mono, "text-foreground/35")}>
-            {queued.length} queued
+            {queued.length} {copy.queued}
           </span>
           <span className={cn(mono, "text-foreground/35")}>
-            sends when this finishes
+            {copy.sendsNext}
           </span>
         </div>
       )}
@@ -76,9 +121,9 @@ export function MessageQueue({
             <ArrowUpIcon className="text-foreground/25 size-3 shrink-0" />
             <button
               type="button"
-              aria-label={`Remove "${message.text}" from the queue`}
+              aria-label={copy.remove(message.text)}
               onClick={() => onCancel?.(message.id)}
-              className={cn(ghostButton, "size-6 shrink-0")}
+              className={cn(ghostButton, "touch-target size-7 shrink-0")}
             >
               <XIcon className="size-3.5" />
             </button>

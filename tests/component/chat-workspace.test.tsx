@@ -93,6 +93,7 @@ function renderWorkspace(
     hydrated={hydrated}
     prompt={prompt}
     composerExperience="smart"
+    imageGeneration={false}
     connectorMentions={[]}
     selectedConnectorMentionIds={[]}
     attachments={[]}
@@ -101,6 +102,7 @@ function renderWorkspace(
     documentUploading={false}
     sending={false}
     stopping={false}
+    queuedMessages={[]}
     runtimeStatus={{ ...initialRuntimeStatus, mode: "demo", codex: "disabled", ready: true }}
     networkOnline
     streamRecovery={null}
@@ -110,6 +112,7 @@ function renderWorkspace(
       onPromptChange(value);
     }}
     onComposerExperienceChange={vi.fn()}
+    onImageGenerationChange={vi.fn()}
     onDestinationChange={vi.fn()}
     onConnectorMentionIdsChange={vi.fn()}
     onAttachmentsChange={vi.fn()}
@@ -120,6 +123,7 @@ function renderWorkspace(
     onComposerNotice={vi.fn()}
     onSend={vi.fn()}
     onStop={vi.fn()}
+    onCancelQueuedMessage={vi.fn()}
     sidebarOpen
     onToggleSidebar={vi.fn()}
     onResolveApproval={vi.fn(async () => undefined)}
@@ -285,6 +289,59 @@ describe("chat workspace simplificado", () => {
 
     fireEvent.keyDown(prompt, { key: "Enter" });
     expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("enables governed image generation from the composer and exposes its active state", () => {
+    const onImageGenerationChange = vi.fn();
+    renderWorkspace(null, project, {
+      runtimeStatus: {
+        ...initialRuntimeStatus,
+        mode: "codex",
+        codex: "connected",
+        ready: true,
+        capabilities: { ...initialRuntimeStatus.capabilities, imageGeneration: true },
+      },
+      onImageGenerationChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Crear imagen" }));
+    expect(onImageGenerationChange).toHaveBeenCalledWith(true);
+  });
+
+  it("queues the next message while keeping stop and cancellation available", () => {
+    const onSend = vi.fn();
+    const onStop = vi.fn();
+    const onCancelQueuedMessage = vi.fn();
+    const thread: WorkbenchThread = {
+      id: "thread-queue",
+      projectId: project.id,
+      title: "Cola",
+      status: "active",
+      pinned: false,
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-28T00:00:01.000Z",
+      messages: [
+        { ...assistantMessage(), id: "user-running", role: "user", content: "Analiza el documento", approvals: [] },
+        { ...assistantMessage(), id: "assistant-running", status: "streaming", content: "Trabajando", approvals: [] },
+      ],
+    };
+    renderWorkspace(thread, project, {
+      prompt: "Prepara el resumen",
+      sending: true,
+      queuedMessages: [{ id: "queued-1", text: "Compara las conclusiones" }],
+      onSend,
+      onStop,
+      onCancelQueuedMessage,
+    });
+
+    expect(screen.getAllByText("Analiza el documento")).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Añadir mensaje a la cola" }));
+    expect(onSend).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Detener respuesta" }));
+    expect(onStop).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: 'Quitar "Compara las conclusiones" de la cola' }));
+    expect(onCancelQueuedMessage).toHaveBeenCalledWith("queued-1");
   });
 
   it("offers only the three named work experiences and no permission control", () => {

@@ -90,6 +90,7 @@ describe("BrowserPanel", () => {
     expect(screen.queryByText("Tomar control")).not.toBeInTheDocument();
     expect(screen.queryByText("Detener")).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByAltText("Vista actual del navegador privado")).toBeInTheDocument());
+    expect(document.querySelector('[data-slot="computer-use"]')).toBeInTheDocument();
     const trail = document.querySelector('[data-slot="computer-use-trail"]');
     expect(trail).toBeInTheDocument();
     expect(trail?.querySelector("svg")).toHaveStyle({ left: "25%", top: "40%" });

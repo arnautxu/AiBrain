@@ -26,7 +26,7 @@ import {
 } from "@/ui/browser-ui-adapter";
 import { consumeBrowserFrameStream } from "@/ui/browser-frame-stream";
 import {
-  ComputerUseTrail,
+  ComputerUse,
   type ComputerStep,
 } from "@/components/assistant-ui/elements/computer-use";
 
@@ -428,20 +428,22 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9e9e7]">
         {frameUrl ? (
-          <div className="relative inline-flex max-h-full max-w-full">
+          <ComputerUse
+            url={navigation.url}
+            steps={pointerTrail}
+            activeIndex={pointerTrail.length - 1}
+            cursor={humanControl && pointer ? { x: pointer.x * 100, y: pointer.y * 100 } : null}
+            showChrome={false}
+            showStatus={false}
+            className="inline-flex max-h-full w-auto max-w-full rounded-none border-0 bg-transparent dark:bg-transparent"
+            viewportClassName="inline-flex min-h-0 max-h-full max-w-full border-0"
+          >
             <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
               onClick={(event) => void clickFrame(event)} onPointerMove={moveFrame}
               onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)}
               onPaste={(event) => void pasteFrame(event)}
               className="max-h-full max-w-full bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]" />
-            {pointerTrail.length > 0 || (humanControl && pointer) ? (
-              <ComputerUseTrail
-                steps={pointerTrail}
-                activeIndex={pointerTrail.length - 1}
-                cursor={humanControl && pointer ? { x: pointer.x * 100, y: pointer.y * 100 } : null}
-              />
-            ) : null}
-          </div>
+          </ComputerUse>
         ) : (
           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>
         )}
