@@ -33,6 +33,7 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
   const [governed, setGoverned] = useState<GovernedMemoryRecord[]>([]);
   const [allowCompanyScope, setAllowCompanyScope] = useState(false);
+  const [loadedProjectId, setLoadedProjectId] = useState<string | null | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,8 +44,13 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
 
   const activeMemories = useMemo(() => memories.filter((memory) => memory.status === "active"), [memories]);
   const revokedMemories = useMemo(() => memories.filter((memory) => memory.status === "revoked"), [memories]);
+  const projectDataIsCurrent = loadedProjectId === projectId;
+  const visibleProposals = projectDataIsCurrent ? proposals : [];
+  const visibleGoverned = projectDataIsCurrent ? governed : [];
+  const updatingProject = loadedProjectId !== undefined && !projectDataIsCurrent;
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
+    const requestedProjectId = projectId;
     setLoading(true);
     setError(null);
     try {
@@ -59,7 +65,10 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "No se ha podido cargar la memoria.");
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted) {
+        setLoadedProjectId(requestedProjectId);
+        setLoading(false);
+      }
     }
   }, [projectId]);
 
@@ -127,9 +136,11 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
             {productName} extrae en segundo plano preferencias, hechos estables y decisiones útiles al terminar cada turno. Filtra secretos y datos efímeros; puedes corregir o eliminar cualquier recuerdo.
           </p>
 
-          {proposals.some((proposal) => proposal.status === "pending") ? <section className="mt-6"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Propuestas pendientes</h3><span className="text-[10px] text-[var(--text-subtle)]">No guardadas</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">Revisa contenido, alcance y procedencia. Rechazar nunca crea una memoria.</p><div className="mt-3 space-y-3">{proposals.filter((proposal) => proposal.status === "pending").map((proposal) => <ProposalCard key={proposal.proposalId} proposal={proposal} allowCompanyScope={allowCompanyScope} disabled={saving || !projectId} onConfirm={(content, scope) => void runGovernance(() => confirmMemoryProposal({ proposalId: proposal.proposalId, projectId: projectId!, content, scope }))} onReject={() => void runGovernance(() => rejectMemoryProposal(proposal.proposalId, projectId!))} />)}</div></section> : null}
+          {updatingProject ? <p className="mt-3 text-[11px] text-[var(--text-muted)]">Actualizando memoria…</p> : null}
 
-          {governed.some((memory) => memory.status === "active") ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Memoria automática y gobernada</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{governed.filter((memory) => memory.status === "active").length}</span></div><div className="mt-3 space-y-2">{governed.filter((memory) => memory.status === "active").map((memory) => <GovernedCard key={memory.memoryId} memory={memory} disabled={saving || !projectId} onUpdate={(content) => void runGovernance(() => updateGovernedMemory(memory, projectId!, content))} onDelete={() => void runGovernance(() => deleteGovernedMemory(memory, projectId!))} />)}</div></section> : null}
+          {visibleProposals.some((proposal) => proposal.status === "pending") ? <section className="mt-6"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Propuestas pendientes</h3><span className="text-[10px] text-[var(--text-subtle)]">No guardadas</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">Revisa contenido, alcance y procedencia. Rechazar nunca crea una memoria.</p><div className="mt-3 space-y-3">{visibleProposals.filter((proposal) => proposal.status === "pending").map((proposal) => <ProposalCard key={proposal.proposalId} proposal={proposal} allowCompanyScope={allowCompanyScope} disabled={saving || !projectId} onConfirm={(content, scope) => void runGovernance(() => confirmMemoryProposal({ proposalId: proposal.proposalId, projectId: projectId!, content, scope }))} onReject={() => void runGovernance(() => rejectMemoryProposal(proposal.proposalId, projectId!))} />)}</div></section> : null}
+
+          {visibleGoverned.some((memory) => memory.status === "active") ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Memoria automática y gobernada</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{visibleGoverned.filter((memory) => memory.status === "active").length}</span></div><div className="mt-3 space-y-2">{visibleGoverned.filter((memory) => memory.status === "active").map((memory) => <GovernedCard key={memory.memoryId} memory={memory} disabled={saving || !projectId} onUpdate={(content) => void runGovernance(() => updateGovernedMemory(memory, projectId!, content))} onDelete={() => void runGovernance(() => deleteGovernedMemory(memory, projectId!))} />)}</div></section> : null}
 
           <section className="mt-6">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Añadir memoria</h3>
@@ -143,11 +154,11 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
             </div>
           </section>
 
-          {error ? <p role="alert" className="mt-4 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
+          {error ? <div role="alert" className="mt-4 flex items-center justify-between gap-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><span>{error}</span><button type="button" disabled={loading} onClick={() => void refresh()} className="shrink-0 rounded-md px-2 py-1 font-semibold hover:bg-[var(--surface-hover)] disabled:opacity-40">Reintentar</button></div> : null}
 
           <section className="mt-7">
             <div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Activas</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{activeMemories.length}</span></div>
-            {loading ? <p className="mt-3 text-[11px] text-[var(--text-muted)]">Cargando memoria…</p> : activeMemories.length ? <div className="mt-3 space-y-2">{activeMemories.map((memory) => <MemoryCard key={memory.memoryId} memory={memory} onRevoke={() => { setRevokeTarget(memory); setRevokeReason(""); }} />)}</div> : <EmptyState />}
+            {loading || loadedProjectId === undefined ? <p className="mt-3 text-[11px] text-[var(--text-muted)]">Cargando memoria…</p> : error ? null : activeMemories.length ? <div className="mt-3 space-y-2">{activeMemories.map((memory) => <MemoryCard key={memory.memoryId} memory={memory} onRevoke={() => { setRevokeTarget(memory); setRevokeReason(""); }} />)}</div> : <EmptyState />}
           </section>
 
           {revokedMemories.length ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Revocadas</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{revokedMemories.length}</span></div><div className="mt-3 space-y-2 opacity-70">{revokedMemories.map((memory) => <MemoryCard key={memory.memoryId} memory={memory} />)}</div></section> : null}
@@ -167,7 +178,8 @@ function ProposalCard({ proposal, allowCompanyScope, disabled, onConfirm, onReje
 
 function GovernedCard({ memory, disabled, onUpdate, onDelete }: { memory: GovernedMemoryRecord; disabled: boolean; onUpdate: (content: string) => void; onDelete: () => void }) {
   const [editing, setEditing] = useState(false); const [content, setContent] = useState(memory.content);
-  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3"><div className="flex items-start gap-2"><span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold">{scopeLabel(memory.scope)}</span>{editing ? <textarea value={content} rows={3} maxLength={32_000} onChange={(event) => setContent(event.target.value)} className="min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-2 py-1.5 text-[12px]" /> : <p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5">{memory.content}</p>}</div><p className="mt-2 text-[9px] text-[var(--text-subtle)]">Revisión {memory.revision} · {memory.provenance.sourceType === "background-conversation" ? "extraída automáticamente" : "guardada desde conversación"}</p><div className="mt-2 flex justify-end gap-2">{editing ? <><button type="button" onClick={() => { setEditing(false); setContent(memory.content); }} className="px-2 py-1 text-[10px]">Cancelar</button><button type="button" disabled={disabled || !content.trim()} onClick={() => { onUpdate(content); setEditing(false); }} className="px-2 py-1 text-[10px] font-semibold text-[var(--brain-accent)]">Guardar edición</button></> : <><button type="button" disabled={disabled} onClick={() => setEditing(true)} className="px-2 py-1 text-[10px]">Editar</button><button type="button" disabled={disabled} onClick={onDelete} className="px-2 py-1 text-[10px] text-[var(--danger)]">Eliminar</button></>}</div></article>;
+  const textareaId = `governed-memory-${memory.memoryId}`;
+  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3"><div className="flex items-start gap-2"><span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold">{scopeLabel(memory.scope)}</span>{editing ? <div className="min-w-0 flex-1"><label htmlFor={textareaId} className="mb-1 block text-[10px] font-medium text-[var(--text-muted)]">Contenido de la memoria</label><textarea id={textareaId} value={content} rows={3} maxLength={32_000} onChange={(event) => setContent(event.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-2 py-1.5 text-[12px]" /></div> : <p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5">{memory.content}</p>}</div><p className="mt-2 text-[9px] text-[var(--text-subtle)]">Revisión {memory.revision} · {memory.provenance.sourceType === "background-conversation" ? "extraída automáticamente" : "guardada desde conversación"}</p><div className="mt-2 flex justify-end gap-2">{editing ? <><button type="button" onClick={() => { setEditing(false); setContent(memory.content); }} className="px-2 py-1 text-[10px]">Cancelar</button><button type="button" disabled={disabled || !content.trim()} onClick={() => { onUpdate(content); setEditing(false); }} className="px-2 py-1 text-[10px] font-semibold text-[var(--brain-accent)]">Guardar edición</button></> : <><button type="button" disabled={disabled} onClick={() => setEditing(true)} className="px-2 py-1 text-[10px]">Editar</button><button type="button" disabled={disabled} onClick={onDelete} className="px-2 py-1 text-[10px] text-[var(--danger)]">Eliminar</button></>}</div></article>;
 }
 
 function EmptyState() {

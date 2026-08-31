@@ -108,6 +108,33 @@ import {
   type TaskCenterPayload,
 } from "@/task-center/contracts";
 
+export function createTaskCenterResponseGate() {
+  let generation = 0;
+  let activeMutations = 0;
+  return {
+    beginPoll() {
+      if (activeMutations > 0) return null;
+      generation += 1;
+      return generation;
+    },
+    beginMutation() {
+      activeMutations += 1;
+      generation += 1;
+      return generation;
+    },
+    finishMutation() {
+      activeMutations = Math.max(0, activeMutations - 1);
+      return activeMutations;
+    },
+    hasMutation() {
+      return activeMutations > 0;
+    },
+    isCurrent(candidate: number) {
+      return candidate === generation;
+    },
+  };
+}
+
 type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
 
 type BrainStyle = CSSProperties & {
