@@ -388,7 +388,7 @@ export function ChatWorkspace({
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  const [jumpToBottomRequest, setJumpToBottomRequest] = useState(0);
+  const [jumpToBottomPending, setJumpToBottomPending] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -399,16 +399,19 @@ export function ChatWorkspace({
   }, [sending, thread?.messages]);
 
   useLayoutEffect(() => {
-    if (jumpToBottomRequest === 0) return;
+    if (!jumpToBottomPending) return;
     const scrollToLatest = () => {
       const scroller = scrollRef.current;
       if (scroller) scroller.scrollTop = scroller.scrollHeight;
     };
     bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
     scrollToLatest();
-    const frame = requestAnimationFrame(scrollToLatest);
+    const frame = requestAnimationFrame(() => {
+      scrollToLatest();
+      if (!sending) requestAnimationFrame(() => setJumpToBottomPending(false));
+    });
     return () => cancelAnimationFrame(frame);
-  }, [jumpToBottomRequest]);
+  }, [jumpToBottomPending, sending, thread?.messages]);
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
@@ -596,15 +599,21 @@ export function ChatWorkspace({
     const element = scrollRef.current;
     if (!element) return;
     const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
+    if (jumpToBottomPending) {
+      shouldStickToBottomRef.current = true;
+      setShowJumpToBottom(false);
+      return;
+    }
     shouldStickToBottomRef.current = atBottom;
     setShowJumpToBottom(!atBottom);
   };
 
   const jumpToBottom = () => {
     shouldStickToBottomRef.current = true;
-    // Run after React commits the click-triggered update. Chromium on Linux can
-    // otherwise restore the detached position at the end of the same event.
-    setJumpToBottomRequest((request) => request + 1);
+    setShowJumpToBottom(false);
+    // Keep following through the terminal stream update. Chromium on Linux can
+    // otherwise restore the detached position when the final delta commits.
+    setJumpToBottomPending(true);
   };
 
   return (
