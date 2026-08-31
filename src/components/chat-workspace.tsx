@@ -388,6 +388,7 @@ export function ChatWorkspace({
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [jumpToBottomRequest, setJumpToBottomRequest] = useState(0);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
@@ -396,6 +397,18 @@ export function ChatWorkspace({
     const scroller = scrollRef.current;
     if (scroller) scroller.scrollTop = scroller.scrollHeight;
   }, [sending, thread?.messages]);
+
+  useLayoutEffect(() => {
+    if (jumpToBottomRequest === 0) return;
+    const scrollToLatest = () => {
+      const scroller = scrollRef.current;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    };
+    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+    scrollToLatest();
+    const frame = requestAnimationFrame(scrollToLatest);
+    return () => cancelAnimationFrame(frame);
+  }, [jumpToBottomRequest]);
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
@@ -589,18 +602,9 @@ export function ChatWorkspace({
 
   const jumpToBottom = () => {
     shouldStickToBottomRef.current = true;
-    const scrollToLatest = () => {
-      const scroller = scrollRef.current;
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    };
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    // Let the resulting scroll event hide the control after the container has
-    // reached the end; the chat owns its scroll position instead of relying on
-    // Chromium's layout anchoring while streamed content is still changing.
-    scrollToLatest();
-    requestAnimationFrame(() => {
-      scrollToLatest();
-    });
+    // Run after React commits the click-triggered update. Chromium on Linux can
+    // otherwise restore the detached position at the end of the same event.
+    setJumpToBottomRequest((request) => request + 1);
   };
 
   return (

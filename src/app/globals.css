@@ -1318,8 +1318,8 @@ button:disabled {
   .composer-controls .composer-picker-button,
   .composer-controls .composer-submit,
   .result-action {
-    min-width: 2.75rem;
-    min-height: 2.75rem;
+    min-width: 2.8125rem;
+    min-height: 2.8125rem;
   }
 
   .composer-controls .composer-submit {
