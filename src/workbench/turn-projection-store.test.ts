@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 import type { ChatMessage } from "@/lib/chat-contract";
 import type { AppServerEvent } from "@/runtime/transport";
+import { ResourceLockManager } from "@/storage";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { FileTurnProjectionStore } from "@/workbench/turn-projection-store";
 
@@ -171,5 +172,46 @@ describe("turn projection store", () => {
     const replay = await projections.applyTransportEvents(thread.id, assistantId, batch);
     expect(replay.applied).toEqual([false, false, false, false]);
     expect(replay.projection.message.content).toBe("Uno dos tres.");
+  });
+
+  it("does not hold the global workbench lock while a turn projection is contended", async () => {
+    const workbench = new FileWorkbenchStore({ installationId, usersRoot });
+    const project = await workbench.createProject(userId, "Concurrent");
+    const thread = await workbench.createThread(userId, project.id, "Blocked projection");
+    const assistantId = "00000000-0000-4000-8000-000000000032";
+    await workbench.beginThreadTurn(
+      userId,
+      thread.id,
+      userMessage("00000000-0000-4000-8000-000000000031"),
+      assistant(assistantId),
+    );
+
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    await projections.initialize(thread.id, assistant(assistantId));
+    const locks = new ResourceLockManager({
+      rootDirectory: path.join(usersRoot, userId, "state", ".locks"),
+    });
+    const lease = await locks.acquire(
+      `turn-projection:${installationId}:${userId}:${thread.id}:${assistantId}`,
+    );
+
+    try {
+      const concurrentOperations = Promise.all([
+        workbench.getThread(userId, thread.id),
+        workbench.createProject(userId, "Independent"),
+      ]);
+      await expect(Promise.race([
+        concurrentOperations,
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error("projection contention blocked the workbench")),
+          1_000,
+        )),
+      ])).resolves.toEqual([
+        expect.objectContaining({ id: thread.id }),
+        expect.objectContaining({ name: "Independent" }),
+      ]);
+    } finally {
+      await lease.release();
+    }
   });
 });
