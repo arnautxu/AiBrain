@@ -399,37 +399,36 @@ export function ChatWorkspace({
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const [jumpToBottomPending, setJumpToBottomPending] = useState(false);
+  const scrollToEnd = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (scroller) scroller.scrollTop = Number.MAX_SAFE_INTEGER;
+  }, []);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
   useLayoutEffect(() => {
     if (!shouldStickToBottomRef.current) return;
-    const scroller = scrollRef.current;
-    if (scroller) scroller.scrollTop = scroller.scrollHeight;
-  }, [sending, thread?.messages]);
+    scrollToEnd();
+  }, [scrollToEnd, sending, thread?.messages]);
 
   useLayoutEffect(() => {
     if (!jumpToBottomPending) return;
-    const scrollToLatest = () => {
-      const scroller = scrollRef.current;
-      if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    };
     bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    scrollToLatest();
+    scrollToEnd();
     const frame = requestAnimationFrame(() => {
-      scrollToLatest();
+      scrollToEnd();
       if (!sending) requestAnimationFrame(() => setJumpToBottomPending(false));
     });
     return () => cancelAnimationFrame(frame);
-  }, [jumpToBottomPending, sending, thread?.messages]);
+  }, [jumpToBottomPending, scrollToEnd, sending, thread?.messages]);
 
   useEffect(() => {
     shouldStickToBottomRef.current = true;
     const frame = requestAnimationFrame(() => setShowJumpToBottom(false));
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    scrollToEnd();
     bottomRef.current?.scrollIntoView({ block: "end" });
     return () => cancelAnimationFrame(frame);
-  }, [thread?.id]);
+  }, [scrollToEnd, thread?.id]);
 
   useEffect(() => {
     if (!hydrated || thread?.messages.length) return;

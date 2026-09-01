@@ -341,9 +341,14 @@ describe("real worker HTTP session during Supabase outage", () => {
         type: "activity",
         item: expect.objectContaining({ id: "runtime-connect", status: "complete" }),
       }),
-      { type: "content", value: WORKER_REPLY },
       expect.objectContaining({ type: "done", durationMs: expect.any(Number) }),
     ]));
+    expect(events.some((event) => event.type === "delta")).toBe(true);
+    expect(events.reduce((content, event) => {
+      if (event.type === "content") return event.value ?? content;
+      if (event.type === "delta") return content + (event.value ?? "");
+      return content;
+    }, "")).toBe(WORKER_REPLY);
 
     const persisted = await http(`/api/threads/${threadId}`);
     expect(persisted.status).toBe(200);

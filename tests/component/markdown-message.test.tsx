@@ -2,7 +2,7 @@
 
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { MarkdownMessage } from "@/components/markdown-message";
+import { MarkdownMessage, splitStreamingMarkdown } from "@/components/markdown-message";
 
 describe("MarkdownMessage", () => {
   it("renders GFM tables, links, lists and labelled code blocks", () => {
@@ -53,5 +53,26 @@ describe("MarkdownMessage", () => {
 
     rerender(<MarkdownMessage>{longAnswer}</MarkdownMessage>);
     expect(container.querySelector(".t-stream-caret")).not.toBeInTheDocument();
+  });
+
+  it("freezes completed Markdown blocks but keeps fenced code together", () => {
+    expect(splitStreamingMarkdown([
+      "Primer párrafo.",
+      "",
+      "Segundo párrafo.",
+      "",
+      "```ts",
+      "const first = true;",
+      "",
+      "const second = true;",
+      "```",
+      "",
+      "Final en curso",
+    ].join("\n"))).toEqual([
+      "Primer párrafo.",
+      "Segundo párrafo.",
+      "```ts\nconst first = true;\n\nconst second = true;\n```",
+      "Final en curso",
+    ]);
   });
 });
