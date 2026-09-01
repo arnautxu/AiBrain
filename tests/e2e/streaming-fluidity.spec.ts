@@ -4,7 +4,13 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 
 test("a long paced answer keeps rendering fluidly while Markdown grows", async ({ page }) => {
   const chromium = await page.context().newCDPSession(page);
-  await chromium.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  const controlledPerformanceRun = !process.env.CI;
+  await chromium.send("Emulation.setCPUThrottlingRate", {
+    // Shared CI runners have no stable hardware budget. Keep the behavioral
+    // regression there, and reserve absolute frame timing for the controlled
+    // local performance run documented in PERFORMANCE_BUDGETS.md.
+    rate: controlledPerformanceRun ? 4 : 1,
+  });
   const paragraph = "La resposta ha d'arribar de manera contínua, mantenint el xat interactiu i sense salts visibles mentre el contingut creix. ";
   const fragments = Array.from({ length: 72 }, (_, index) =>
     index % 6 === 0 ? `\n\n### Bloc ${index / 6 + 1}\n\n${paragraph}` : paragraph,
@@ -151,7 +157,10 @@ test("a long paced answer keeps rendering fluidly while Markdown grows", async (
   console.log(`streaming-fluidity ${JSON.stringify(metrics)}`);
 
   expect(metrics.frameCount).toBeGreaterThan(100);
-  expect(metrics.frameGapP95Ms).toBeLessThan(50);
-  expect(metrics.slowFrameRatio).toBeLessThan(0.05);
-  expect(metrics.longTaskTotalMs).toBeLessThan(500);
+  expect(metrics.mutationCount).toBeGreaterThan(100);
+  if (controlledPerformanceRun) {
+    expect(metrics.frameGapP95Ms).toBeLessThan(50);
+    expect(metrics.slowFrameRatio).toBeLessThan(0.05);
+    expect(metrics.longTaskTotalMs).toBeLessThan(500);
+  }
 });
