@@ -602,9 +602,12 @@ export async function runWorkerCodexTurn(
       assistantName,
     );
     if (!publicValue || publishedFinalAnswerText.get(itemId) === publicValue) return;
+    const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
     publishedFinalAnswerText.set(itemId, publicValue);
     telemetry.delta();
-    await emit({ type: "content", value: publicValue }, projection);
+    await emit(publicValue.startsWith(previousValue)
+      ? { type: "delta", value: publicValue.slice(previousValue.length) }
+      : { type: "content", value: publicValue }, projection);
   };
   const reconcileFinalText = async (
     itemId: string,
@@ -617,9 +620,12 @@ export async function runWorkerCodexTurn(
     );
     finalAnswerText.set(itemId, value.slice(0, 128_000));
     if (publicValue && publishedFinalAnswerText.get(itemId) !== publicValue) {
+      const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
       publishedFinalAnswerText.set(itemId, publicValue);
       telemetry.delta();
-      await emit({ type: "content", value: publicValue }, projection);
+      await emit(publicValue.startsWith(previousValue)
+        ? { type: "delta", value: publicValue.slice(previousValue.length) }
+        : { type: "content", value: publicValue }, projection);
     }
   };
 
