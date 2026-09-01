@@ -20,6 +20,8 @@ describe("chat event frame dispatcher", () => {
     expect(events).toHaveBeenLastCalledWith({ type: "delta", value: "Hola" });
     expect(scheduler.request).toHaveBeenCalledTimes(1);
     (scheduledFrame as (() => void) | null)?.();
+    expect(events).toHaveBeenCalledOnce();
+    (scheduledFrame as (() => void) | null)?.();
     expect(events).toHaveBeenLastCalledWith({ type: "delta", value: " mundo" });
     expect(scheduler.clearTimeout).toHaveBeenCalled();
 
@@ -47,6 +49,33 @@ describe("chat event frame dispatcher", () => {
     expect(events).toHaveBeenCalledOnce();
     (fallback as (() => void) | null)?.();
     expect(events).toHaveBeenCalledTimes(2);
-    expect(events.mock.calls[1]?.[0]).toEqual({ type: "delta", value: "x".repeat(10_000) });
+    expect(events.mock.calls[1]?.[0]).toEqual({ type: "delta", value: "x".repeat(625) });
+    (fallback as (() => void) | null)?.();
+    expect(events.mock.calls[2]?.[0]).toEqual({ type: "delta", value: "x".repeat(625) });
+    dispatcher.close();
+    expect(events.mock.calls[3]?.[0]).toEqual({ type: "delta", value: "x".repeat(8_750) });
+  });
+
+  it("reveals a large runtime chunk progressively and flushes it before terminal state", () => {
+    let scheduledFrame: (() => void) | null = null;
+    const events = vi.fn();
+    const dispatcher = createChatEventFrameDispatcher(events, {
+      request: vi.fn((callback) => { scheduledFrame = callback; return 1; }),
+      cancel: vi.fn(),
+    });
+
+    dispatcher.dispatch({ type: "delta", value: "abcdefghijklmnopqrstuvwxyz012345" });
+    expect(events).toHaveBeenLastCalledWith({ type: "delta", value: "ab" });
+    (scheduledFrame as (() => void) | null)?.();
+    (scheduledFrame as (() => void) | null)?.();
+    expect(events).toHaveBeenLastCalledWith({ type: "delta", value: "cd" });
+
+    dispatcher.dispatch({ type: "done" });
+    expect(events.mock.calls.map(([event]) => event)).toEqual([
+      { type: "delta", value: "ab" },
+      { type: "delta", value: "cd" },
+      { type: "delta", value: "efghijklmnopqrstuvwxyz012345" },
+      { type: "done" },
+    ]);
   });
 });

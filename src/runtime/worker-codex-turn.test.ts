@@ -368,8 +368,8 @@ describe("worker Codex turn", () => {
     expect(artifacts).toHaveLength(4);
     expect(new Set(artifacts.map((event) => (event.item as { id: string }).id))).toHaveProperty("size", 4);
     expect(artifacts.map((event) => (event.item as { kind: string }).kind)).toEqual(["pdf", "docx", "pptx", "xlsx"]);
-    const finalContent = events.filter((event) => event.type === "content").at(-1);
-    expect(finalContent).toEqual({ type: "content", value: "Listo: ./documents/hello-world.pdf" });
+    const finalContent = events.filter((event) => event.type === "delta").at(-1);
+    expect(finalContent).toEqual({ type: "delta", value: "Listo: ./documents/hello-world.pdf" });
     expect(JSON.stringify(events)).not.toContain(userRoot);
     expect(events).toContainEqual({ type: "done" });
     expect(calls).toEqual(["thread/start", "turn/start"]);
@@ -767,7 +767,10 @@ describe("worker Codex turn", () => {
       .toBeLessThan(instructions.indexOf("BEGIN AIBRAIN EXPLICIT MEMORY JSON DATA"));
     expect(boundTurn).toBe("runtime-turn-1");
     expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
-    expect(events).toContainEqual({ type: "content", value: "Resultado identificador interno." });
+    expect(events.filter((event) => event.type === "delta")).toEqual([
+      { type: "delta", value: "Resultado " },
+      { type: "delta", value: "identificador interno." },
+    ]);
     expect(events).not.toContainEqual({ type: "delta", value: "Voy a comprobar la fuente autorizada." });
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
@@ -816,11 +819,7 @@ describe("worker Codex turn", () => {
       type: "activity",
       item: expect.objectContaining({ kind: "reasoning", detail: "Resum final verificat" }),
     }));
-    expect(events.filter((event) => event.type === "delta")).toEqual([]);
-    expect(events.filter((event) => event.type === "content")).toEqual([
-      { type: "content", value: "Resultado " },
-      { type: "content", value: "Resultado identificador interno." },
-    ]);
+    expect(events.filter((event) => event.type === "content")).toEqual([]);
     expect(JSON.stringify(events)).not.toMatch(/private reasoning must not be exposed|\*\*|Codex|AiBrain|\/var\/lib|company-qa|fc71a2c4/iu);
     expect(mocked.maintenanceReleases).toBe(1);
   });
