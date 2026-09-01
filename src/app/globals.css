@@ -822,8 +822,13 @@ button:disabled {
 .markdown-body ol,
 .markdown-body blockquote,
 .markdown-body .markdown-table-wrap,
-.markdown-body .markdown-code {
+.markdown-body .markdown-code,
+.markdown-body .markdown-stream-tail {
   margin: 0.8rem 0;
+}
+
+.markdown-stream-tail {
+  white-space: pre-wrap;
 }
 
 .markdown-body h1,
