@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "connectionId": "company-windows",
+  "mode": "read-only-export",
+  "remoteServer": {
+    "allowedOperations": [
+      "inventory",
+      "read",
+      "copy-to-aibrain"
+    ],
+    "deniedOperations": [
+      "create",
+      "write",
+      "append",
+      "overwrite",
+      "delete",
+      "move",
+      "rename",
+      "change-permissions",
+      "execute-arbitrary-command"
+    ]
+  },
+  "aibrainServer": {
+    "copyDestinationRoot": "/var/lib/aibrain/rdp-imports/company",
+    "overwriteExisting": false,
+    "requireSha256": true,
+    "recordSourcePath": true,
+    "preserveRemoteSource": true
+  }
+}

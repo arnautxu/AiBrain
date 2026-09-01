@@ -38,6 +38,14 @@ The deploy workflow must resolve the successful `Backend CI` push run through Gi
 | Release operations | Immutable GHCR promotion, transactional deploy, bounded cleanup and private readback collectors are implemented | CI, Publish, Deploy and live gates must pass for the same future candidate; rollback-and-return remains a separate exercise |
 | Company context | A source-backed, unknown-aware Arnall seed is versioned; nested documents enter the bounded turn snapshot; a server-only per-installation product brief governs identity and capabilities; company/department/project/private files use turn-bound tools | Approved internal Arnall facts, preferences, processes, objectives, brand pack, tools and support ownership; current memberships and external file mounts |
 
+The Hetzner operator host also has a separately verified RDP path to the Arnall
+Terminal Server and Database Server. That path is governed by the host-only
+`read-only-export` policy documented in
+[WINDOWS_RDP_CONNECTION.md](WINDOWS_RDP_CONNECTION.md): inventory, read and
+copy-out are allowed; remote create/write/overwrite/delete/move/rename and
+arbitrary commands are denied. This is operator connectivity, not an employee
+product connector or a live file-copy acceptance claim.
+
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
 ## Evidence language

@@ -101,6 +101,7 @@ npm run test:browser:real
 - [Backup and restore](docs/BACKUP_RESTORE.md)
 - [Dedicated-server operation](docs/PRODUCTION.md)
 - [Isolated Hetzner QA runbook](docs/HETZNER_MIGRATION.md)
+- [Hetzner to Windows RDP connection](docs/WINDOWS_RDP_CONNECTION.md)
 
 The repository does not authorize DNS changes, production cutover, real client
 data, real NAS writes, destructive Supabase actions, subscription purchases or

@@ -49,6 +49,8 @@ const backupOrchestrator = read("scripts/orchestrate-backup.mjs");
 const backupRecoveryUnit = read("infra/hetzner/systemd/aibrain-backup-recovery@.service");
 const journaldRetention = read("infra/hetzner/systemd/journald-disk-retention.conf");
 const backupControllerEnv = read("infra/hetzner/backup-controller.env.example");
+const rdpVerifier = read("infra/hetzner/verify-rdp-connections.sh");
+const rdpPolicy = JSON.parse(read("infra/hetzner/rdp-policy.example.json"));
 const installation = JSON.parse(read("infra/hetzner/installation.qa.example.json"));
 const chromeRuntime = read("src/runtime/browser/chrome-runtime.ts");
 const browserEgressProxy = read("src/runtime/browser/egress-proxy.ts");
@@ -372,6 +374,19 @@ for (const key of [
   "AIBRAIN_EGRESS_SUPABASE_ORIGIN",
 ]) requireMatch(egressEnv, new RegExp(`^${key}=`, "mu"), `egress env example is missing ${key}`);
 forbidMatch(compose, /^\s*(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)\s*:/mu, "Compose broadly injects proxy credentials instead of channel-specific runtime wiring");
+requireMatch(rdpVerifier, /\/usr\/bin\/xfreerdp3/u, "RDP verifier does not pin the FreeRDP binary");
+requireMatch(rdpVerifier, /\/args-from:file:/u, "RDP verifier exposes credentials through normal process arguments");
+requireMatch(rdpVerifier, /\+auth-only/u, "RDP verifier can open an unrestricted desktop session");
+requireMatch(rdpVerifier, /cert:fingerprint:sha256/u, "RDP verifier does not pin the Windows certificate fingerprint");
+requireMatch(rdpVerifier, /RDP policy does not enforce read-only export/u, "RDP verifier does not fail closed on the read-only export policy");
+requireMatch(rdpVerifier, /\^\/var\/lib\/aibrain\/rdp-imports\//u, "RDP verifier does not constrain copy-out to the dedicated import root");
+forbidMatch(rdpVerifier, /\/cert:ignore|rm -rf|execute-arbitrary-command[^\n]*allowed/u, "RDP verifier contains an unsafe certificate or mutation bypass");
+if (rdpPolicy.mode !== "read-only-export"
+  || rdpPolicy.aibrainServer?.overwriteExisting !== false
+  || rdpPolicy.aibrainServer?.requireSha256 !== true
+  || rdpPolicy.aibrainServer?.preserveRemoteSource !== true) {
+  failures.push("RDP policy example does not preserve the remote source and reject overwrites");
+}
 
 const expectedPaths = {
   dataRoot: "/var/lib/aibrain/data",
@@ -392,9 +407,10 @@ for (const script of [
   "infra/hetzner/app/browser-sandbox.sh",
   "infra/hetzner/app/soffice-safe.sh",
   "infra/hetzner/app/backup.sh",
+  "infra/hetzner/verify-rdp-connections.sh",
 ]) {
   try {
-    execFileSync(script.endsWith("soffice-safe.sh") ? "bash" : "sh", ["-n", relative(script)], { stdio: "pipe" });
+    execFileSync(script.endsWith("soffice-safe.sh") || script.endsWith("verify-rdp-connections.sh") ? "bash" : "sh", ["-n", relative(script)], { stdio: "pipe" });
   } catch {
     failures.push(`${script} does not pass sh -n`);
   }
