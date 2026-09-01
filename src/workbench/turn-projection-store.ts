@@ -308,11 +308,11 @@ export class FileTurnProjectionStore {
 
   async read(threadId: string, assistantMessageId: string) {
     const identity = await this.prepare(threadId, assistantMessageId);
-    return this.locks.withLock(identity.lockKey, async () => {
-      const projection = await this.readUnlocked(identity.filePath);
-      if (projection) this.assertBinding(projection, threadId, assistantMessageId);
-      return projection;
-    });
+    // Projection writes use atomic replacement, so readers always observe a
+    // complete snapshot without joining the writer's per-turn lock queue.
+    const projection = await this.readUnlocked(identity.filePath);
+    if (projection) this.assertBinding(projection, threadId, assistantMessageId);
+    return projection;
   }
 
   async applyTransportEvent(

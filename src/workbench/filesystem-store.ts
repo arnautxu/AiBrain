@@ -640,7 +640,7 @@ export class FileWorkbenchStore {
     }
   }
 
-  private async readUnlocked(userId: string, statePath: string) {
+  private async readCanonicalUnlocked(userId: string, statePath: string) {
     const metadata = await this.assertStateFileSafe(statePath);
     let state: WorkbenchState | null = metadata ? cachedState(statePath, metadata) : null;
     if (!state) {
@@ -657,22 +657,35 @@ export class FileWorkbenchStore {
     if (state.installationId !== this.installationId || state.userId !== userId) {
       throw new WorkbenchPersistenceError("L’estat del workbench no pertany a aquesta instal·lació i usuari.");
     }
+    return state;
+  }
+
+  private async overlayTurnProjections(userId: string, state: WorkbenchState) {
     const projections = new FileTurnProjectionStore({
       installationId: this.installationId,
       userId,
       usersRoot: this.usersRoot,
     });
+    const targets: Array<{ thread: StoredThread; index: number; messageId: string }> = [];
     for (const thread of state.threads) {
       for (let index = 0; index < thread.messages.length; index += 1) {
         const message = thread.messages[index];
         if (message.role !== "assistant" || message.status !== "streaming") continue;
-        const projection = await projections.read(thread.id, message.id);
-        if (!projection) continue;
-        thread.messages[index] = projection.message;
-        if (projection.runtimeThreadToken) thread.runtimeThreadToken = projection.runtimeThreadToken;
-        if (projection.updatedAt > thread.updatedAt) thread.updatedAt = projection.updatedAt;
+        targets.push({ thread, index, messageId: message.id });
       }
     }
+    const concurrency = Math.min(8, targets.length);
+    await Promise.all(Array.from({ length: concurrency }, async (_, workerIndex) => {
+      for (let targetIndex = workerIndex; targetIndex < targets.length; targetIndex += concurrency) {
+        const target = targets[targetIndex];
+        if (!target) continue;
+        const projection = await projections.read(target.thread.id, target.messageId);
+        if (!projection) continue;
+        target.thread.messages[target.index] = projection.message;
+        if (projection.runtimeThreadToken) target.thread.runtimeThreadToken = projection.runtimeThreadToken;
+        if (projection.updatedAt > target.thread.updatedAt) target.thread.updatedAt = projection.updatedAt;
+      }
+    }));
     return state;
   }
 
@@ -688,10 +701,13 @@ export class FileWorkbenchStore {
 
   private async read(userId: string) {
     const paths = await this.prepare(userId);
-    return this.lockManager(paths.lockRoot).withLock(
+    // Keep projection I/O outside the per-user workbench lock. A contended
+    // active turn must not block unrelated reads or durable mutations.
+    const state = await this.lockManager(paths.lockRoot).withLock(
       `workbench:${this.installationId}:${userId}`,
-      () => this.readUnlocked(userId, paths.statePath),
+      async () => structuredClone(await this.readCanonicalUnlocked(userId, paths.statePath)),
     );
+    return this.overlayTurnProjections(userId, state);
   }
 
   private async mutate<Result>(
@@ -702,7 +718,7 @@ export class FileWorkbenchStore {
     return this.lockManager(paths.lockRoot).withLock(
       `workbench:${this.installationId}:${userId}`,
       async () => {
-        const state = await this.readUnlocked(userId, paths.statePath);
+        const state = await this.readCanonicalUnlocked(userId, paths.statePath);
         const result = await operation(state);
         state.revision += 1;
         await this.writeUnlocked(paths.statePath, state);
