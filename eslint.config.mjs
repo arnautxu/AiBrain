@@ -14,6 +14,8 @@ export default defineConfig([
     "test-results/**",
     "next-env.d.ts",
     "runtime/**",
+    // Immutable upstream skill snapshot; project integration is linted normally.
+    "skills/impeccable/**",
     // Vendored by the Fluid Functionalism shadcn registry. Keep project code
     // linted without rewriting the upstream component's ref choreography.
     "src/components/ui/sidebar*.tsx",

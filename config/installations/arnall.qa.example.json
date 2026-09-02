@@ -31,7 +31,8 @@
       { "id": "governed-automations", "label": "Automatizaciones gobernadas" },
       { "id": "graphikai-business-work", "label": "Trabajo empresarial GraphikAI" },
       { "id": "company-context-work", "label": "Trabajo con contexto de empresa" },
-      { "id": "arnall-company-brief", "label": "Contexto confirmado de Arnall" }
+      { "id": "arnall-company-brief", "label": "Contexto confirmado de Arnall" },
+      { "id": "impeccable", "label": "Impeccable · Diseño y UX" }
     ]
   }
 }

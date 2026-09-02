@@ -1,3 +1,4 @@
+import { managedSkillsForInstallation } from "@/catalog/managed-skills";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { GMAIL_CATALOG_RESOURCE } from "@/connectors/gmail-contracts";
 import { OUTLOOK_CATALOG_RESOURCE } from "@/connectors/outlook-contracts";
@@ -7,7 +8,7 @@ export async function ensureInstallationCatalog(
   store: FileCatalogStore,
   installation: Readonly<InstallationConfig>,
 ) {
-  await store.ensureManagedSkills(installation.catalog?.graphikAIManagedSkills ?? []);
+  await store.ensureManagedSkills(managedSkillsForInstallation(installation));
   return store.ensureManagedResources(
     [
       ...(installation.connectors?.gmail?.enabled ? [GMAIL_CATALOG_RESOURCE] : []),

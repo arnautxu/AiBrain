@@ -30,3 +30,39 @@ Cada proveedor usa un callback, secreto de aplicación, clave de cifrado y direc
 `config/installations/arnall.qa.example.json` incluye una skill base de GraphikAI. Para habilitar un recurso adicional, un administrador debe crear primero el recurso y después reglas `allow` explícitas. Para una acción MCP sensible, declara el servidor, la lista de lectura y `sensitiveWriteTools`; configura el adaptador gestionado con aprobación durable y readback correlacionado antes de conceder `write`.
 
 No uses este fixture como credencial ni lo completes con secretos. La evidencia de una acción real sigue exigiendo OAuth, binding personal/compartido correcto, aprobación, una única ejecución, readback del provider y auditoría correlacionada.
+
+## Diseño de Arnall: Impeccable obligatorio
+
+Las instalaciones con `companySlug: arnall` incorporan `impeccable` como skill
+GraphikAI base, también con configuraciones existentes que todavía no la enumeran.
+El valor procede de la configuración del servidor, nunca del texto de un chat.
+La sincronización usa el catálogo efectivo: una denegación por usuario, grupo o
+rol sigue prevaleciendo y retira la copia privada de ese usuario.
+
+Cada turno incluye una instrucción de aplicación obligatoria para trabajo de
+diseño, revisión visual o refinamiento, también cuando otra skill esté seleccionada.
+El modelo decide la relevancia a partir de toda la conversación y las referencias,
+sin depender de palabras clave ni de que el empleado seleccione una skill.
+La regla enlaza el `SKILL.md` privado con versión y digest y exige leerlo y aplicar
+el playbook correspondiente antes de actuar. Se conserva al reanudar una
+conversación y mediante el contexto de aplicación de los turnos en memoria.
+Si la skill está denegada o no disponible, debe explicar el bloqueo de diseño;
+no puede instalarla ni sustituirla silenciosamente. El trabajo ajeno al diseño
+no activa sus guías.
+
+`skills/impeccable` contiene una copia completa, con normalización de espacios, de la skill
+instalada Impeccable 4.1.1 (153 archivos), más el manifiesto de AiBrain.
+Los paquetes del repositorio admiten hasta 256 archivos, 512 KiB por archivo y
+4 MiB en total, con rutas acotadas de recursos, referencias, scripts y agentes.
+Las cargas administrativas mantienen el límite de 24 archivos de texto,
+64 KiB por archivo y 256 KiB por paquete; no admiten scripts. Copiar un script
+no lo ejecuta ni autoriza herramientas, proveedores, costes o publicaciones.
+Las capacidades opcionales de Impeccable siguen sujetas al runtime disponible.
+El tracing standalone existente incluye el paquete completo en la imagen.
+
+Validación local: catálogo base idempotente, copia íntegra en dos hogares
+privados, denegación y revocación individual, separación entre empresas,
+límites de cargas administrativas y contexto de nuevos turnos/reanudaciones.
+La aplicación en Arnall requiere publicar y desplegar el candidato por el flujo
+protegido, y después comprobar una petición real de diseño y una continuación
+con lectura observable de Impeccable. Esos gates live son independientes.

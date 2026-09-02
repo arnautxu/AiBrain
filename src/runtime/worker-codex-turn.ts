@@ -1,3 +1,4 @@
+import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -847,6 +848,7 @@ export async function runWorkerCodexTurn(
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
     synchronizedSkills.developerInstructions,
+    designSkillDeveloperInstructions(runtime.config, synchronizedSkills.result),
     connectorMentionDeveloperInstructions(selectedConnectorMentions),
     ...(automationSession ? [await automationChatDeveloperInstructions(automationSession, {
       projectId: chatRequest.projectId,
