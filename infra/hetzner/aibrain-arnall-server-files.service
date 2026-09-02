@@ -23,7 +23,9 @@ ProtectSystem=strict
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Bubblewrap uses NETLINK_ROUTE to initialize loopback inside its isolated
+# network namespace. The extractor still has no external network interface.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=/var/lib/aibrain/rdp-imports/arnall
 ReadWritePaths=/var/lib/docker/volumes/aibrain-company-qa-data/_data/locks/server-files
 
