@@ -181,7 +181,9 @@ def extract_sandboxed(source, suffix):
         args = ["/usr/bin/bwrap", "--unshare-all", "--die-with-parent", "--new-session", "--cap-drop", "ALL",
                 "--uid", "65534", "--gid", "65534", "--clearenv", "--setenv", "PATH", "/usr/bin",
                 "--setenv", "LANG", "C.UTF-8", "--ro-bind", "/usr", "/usr", "--ro-bind", "/lib", "/lib",
-                "--ro-bind", "/lib64", "/lib64", "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+                # The parsers need no process filesystem. An empty /proc also
+                # works inside systemd's protected mount namespace.
+                "--ro-bind", "/lib64", "/lib64", "--dir", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
                 "--perms", "0444", "--ro-bind-data", str(input_file.fileno()), "/input",
                 "--perms", "0444", "--ro-bind-data", str(script.fileno()), "/extractor.py",
                 "--chdir", "/tmp", "/usr/bin/python3", "/extractor.py", "--format", suffix]

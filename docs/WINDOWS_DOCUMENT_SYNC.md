@@ -124,10 +124,46 @@ systemd arguments or customer document scopes.
   its first scheduled run at 08:45:25 UTC. This verifies timer installation
   and RDP reconnection, not recovery from a physical host reboot.
 
-Complete six-document synchronization remains blocked until Windows drive
-redirection is persistently allowed. Do not call a calendar configuration or
-the one-document chat read a complete synchronization acceptance. Host or
-Windows reboots have not been performed as part of this test.
+At this stage complete six-document synchronization was blocked by Windows
+drive redirection. The calendar configuration and one-document chat read did
+not establish complete synchronization acceptance. The later retest below
+records the resolved gates. Host or Windows reboots have not been performed
+as part of this test.
 
 No application image, public route or provider credential changed. The
 protected app release remains separate from this operator-managed import.
+
+### Successful retest at 08:49 UTC
+
+A fresh run at 08:45 UTC could inventory both approved folders and copy a
+new DOCX with a matching SHA-256. Windows drive redirection no longer denied
+the transfer. The next stage exposed a service-specific extraction failure:
+`bwrap: Can't mount proc on /newroot/proc: Operation not permitted`.
+
+The extractor now provides an empty `/proc` directory instead of mounting
+procfs. Its parsers do not require process information. Network isolation,
+unprivileged execution, dropped capabilities, read-only inputs and all
+systemd protections remain enabled. Real DOCX and PDF extraction then passed
+in a transient service with the same protection settings (2690 and 3033
+text bytes respectively). Eighteen local Python tests also passed.
+
+The full sync started at 08:47:32 UTC and completed at 08:49:17 UTC:
+
+- Six documents inventoried, including the two documents in `Old`.
+- Five new copies and one reused verified copy; all six cached originals
+  matched their SHA-256 and all six had extracted text.
+- One company-wide snapshot published atomically; no unreadable documents.
+- Status `ready`, zero consecutive failures, timer still active with the
+  next scheduled run at 09:00:10 UTC.
+- The existing authenticated Arnall chat performed new document searches
+  and reads, reported six documents, complete synchronization and both
+  folders, and returned the actual agreement title from the newly copied
+  DOCX. The completed response took 33 seconds.
+- Installed `rdp-sync.py` SHA-256:
+  `6a17bb90450a1fb504c5846da8638eda77404ff413723150e4fe0c41893b2909`.
+- Private acceptance record: `acceptance-20260902-0849.json` in the sync
+  state directory, separate from the earlier failed-run acceptance record.
+
+This establishes successful current transfer and complete synchronization;
+it does not prove the Windows policy survives a future domain-policy refresh
+or a server reboot.
