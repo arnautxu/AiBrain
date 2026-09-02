@@ -21,6 +21,8 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
+import { useStickToBottom } from "use-stick-to-bottom";
+import { DaySeparator } from "@/components/assistant-ui/elements/day-separator";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { StreamingResponse } from "@/components/agents/streaming-response";
 import { MessageQueue, type QueuedMessage } from "@/components/assistant-ui/elements/message-queue";
@@ -382,53 +384,30 @@ export function ChatWorkspace({
   onOpenBrowser,
   readOnly = false,
 }: ChatWorkspaceProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { scrollRef, contentRef, scrollToBottom, isAtBottom } = useStickToBottom({
+    initial: "instant",
+    resize: "instant",
+  });
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const composerDraftAdoptedRef = useRef(false);
   const composerShellRef = useRef<HTMLDivElement>(null);
   const composerMeasurementRef = useRef<HTMLDivElement>(null);
-  const shouldStickToBottomRef = useRef(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  const [jumpToBottomPending, setJumpToBottomPending] = useState(false);
-  const scrollToEnd = useCallback(() => {
-    const scroller = scrollRef.current;
-    if (scroller) scroller.scrollTop = Number.MAX_SAFE_INTEGER;
-  }, []);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
-  useLayoutEffect(() => {
-    if (!shouldStickToBottomRef.current) return;
-    scrollToEnd();
-  }, [scrollToEnd, sending, thread?.messages]);
-
-  useLayoutEffect(() => {
-    if (!jumpToBottomPending) return;
-    bottomRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-    scrollToEnd();
-    const frame = requestAnimationFrame(() => {
-      scrollToEnd();
-      if (!sending) requestAnimationFrame(() => setJumpToBottomPending(false));
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [jumpToBottomPending, scrollToEnd, sending, thread?.messages]);
-
   useEffect(() => {
-    shouldStickToBottomRef.current = true;
-    const frame = requestAnimationFrame(() => setShowJumpToBottom(false));
-    scrollToEnd();
-    bottomRef.current?.scrollIntoView({ block: "end" });
-    return () => cancelAnimationFrame(frame);
-  }, [scrollToEnd, thread?.id]);
+    // New/recovered threads start at their latest message. Resize observation
+    // follows later deltas only until the reader intentionally scrolls away.
+    void scrollToBottom({ animation: "instant" });
+  }, [scrollToBottom, thread?.id]);
 
   useEffect(() => {
     if (!hydrated || thread?.messages.length) return;
@@ -607,25 +586,8 @@ export function ChatWorkspace({
     if (documentFiles.length) await onAddDocuments(documentFiles);
   };
 
-  const updateScrollState = () => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 96;
-    if (jumpToBottomPending) {
-      shouldStickToBottomRef.current = true;
-      setShowJumpToBottom(false);
-      return;
-    }
-    shouldStickToBottomRef.current = atBottom;
-    setShowJumpToBottom(!atBottom);
-  };
-
   const jumpToBottom = () => {
-    shouldStickToBottomRef.current = true;
-    setShowJumpToBottom(false);
-    // Keep following through the terminal stream update. Chromium on Linux can
-    // otherwise restore the detached position when the final delta commits.
-    setJumpToBottomPending(true);
+    void scrollToBottom({ animation: "instant" });
   };
 
   return (
@@ -643,17 +605,18 @@ export function ChatWorkspace({
         </div>
       </header>
 
-      <div ref={scrollRef} className="mobile-chat-scroll scrollbar-thin min-h-0 flex-1 overflow-y-auto" onScroll={updateScrollState}>
+      <div ref={scrollRef} className="mobile-chat-scroll scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         {!hydrated ? (
           <div className="mx-auto max-w-3xl px-6 py-14">
             <div className="mb-8 h-7 w-48 rounded-md bg-[var(--surface-muted)] motion-safe:animate-pulse" />
             <div className="space-y-4"><div className="h-20 rounded-xl bg-[var(--surface-muted)] motion-safe:animate-pulse" /><div className="h-14 rounded-xl bg-[var(--surface-hover)] motion-safe:animate-pulse" /></div>
           </div>
         ) : hasMessages ? (
-          <div className="mobile-chat-content mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
+          <div ref={contentRef} className="mobile-chat-content mx-auto w-full max-w-[768px] px-5 py-3 md:px-8">
             <div className={preferences.density === "compact" ? "space-y-6" : "space-y-8"}>
-              {thread?.messages.map((message) => (
+              {thread?.messages.map((message, index) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
+                  <DaySeparator date={message.createdAt} previousDate={thread.messages[index - 1]?.createdAt} />
                   {message.role === "user" ? <UserMessage message={message} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
@@ -678,7 +641,7 @@ export function ChatWorkspace({
                 </div>
               ))}
             </div>
-            <div ref={bottomRef} className="h-8" />
+            <div className="h-8" aria-hidden="true" />
           </div>
         ) : <section className={`chat-empty-state mx-auto min-h-full w-full ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía" />}
       </div>
@@ -688,7 +651,7 @@ export function ChatWorkspace({
           Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.
         </div>
       ) : <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
-        {showJumpToBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button
+        {hasMessages && !isAtBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button
           type="button"
           className="flex min-h-10 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[11px] font-medium text-[var(--text)] shadow-[var(--shadow-sm)]"
           onPointerDown={(event) => {
@@ -783,7 +746,7 @@ export function ChatWorkspace({
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
                   if (!documentUploading && prompt.trim() && runtimeReady) {
-                    shouldStickToBottomRef.current = true;
+                    jumpToBottom();
                     onSend();
                   }
                 }
@@ -851,7 +814,7 @@ export function ChatWorkspace({
                       else onStop();
                       return;
                     }
-                    shouldStickToBottomRef.current = true;
+                    jumpToBottom();
                     onSend();
                   }}
                 >

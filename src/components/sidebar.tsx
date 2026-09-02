@@ -9,6 +9,7 @@ import {
   ChatCircleDots,
   CheckCircle,
   DotsThree,
+  Folder,
   FolderOpen,
   GearSix,
   MagnifyingGlass,
@@ -23,12 +24,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import {
-  CalendarDays,
-  Folder as FluidFolder,
-  FolderOpen as FluidFolderOpen,
-  PenLine,
-} from "lucide-react";
+import styles from "./sidebar.module.css";
 import type { AuthSession } from "@/auth/types";
 import { BrandMark } from "@/components/ui/primitives";
 import { UserAvatar } from "@/components/user-avatar";
@@ -301,7 +297,7 @@ export function Sidebar({
         data-testid="workbench-sidebar"
         data-desktop-state={desktopOpen ? "expanded" : "collapsed"}
         data-context-menu-open={contextMenuOpen ? "true" : "false"}
-        className={`fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
+        className={`${styles.panel} fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
         <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <button ref={railOpenButtonRef} aria-label="Mostrar barra lateral" className="grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { onOpenDesktop(); requestAnimationFrame(() => desktopCloseButtonRef.current?.focus()); }}><SidebarSimple size={19} /></button>
@@ -325,14 +321,14 @@ export function Sidebar({
         </div>
 
         <nav aria-label="Navegación principal" className="px-3 pb-2">
-          <SidebarMenu className="gap-0">
+          <SidebarMenu className="gap-1">
             <SidebarMenuItem>
-              <SidebarMenuButton icon={PenLine} disabled={!standaloneProject || busy} render={<button onClick={() => onNewThread()} />}>
+              <SidebarMenuButton icon={NotePencil} className={styles.newConversation} disabled={!standaloneProject || busy} render={<button onClick={() => onNewThread()} />}>
                 Nueva conversación
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
-              <SidebarMenuButton icon={CalendarDays} aria-label="Automatizaciones" title="Gestionar automatizaciones" render={<button onClick={onOpenAutomations} />}>
+              <SidebarMenuButton icon={CalendarBlank} aria-label="Automatizaciones" title="Gestionar automatizaciones" render={<button onClick={onOpenAutomations} />}>
                 Automatizaciones
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -353,7 +349,7 @@ export function Sidebar({
                 const menuOpen = threadMenuId === thread.id;
                 return (
                   <SidebarMenuItem key={thread.id} className={`group/thread ${menuOpen ? "z-40" : ""}`}>
-                    <SidebarMenuButton isActive={active} className="sidebar-touch-row" render={<button onClick={() => selectThread(thread.id)} />}>
+                    <SidebarMenuButton isActive={active} className={`sidebar-touch-row ${styles.threadRow}`} render={<button onClick={() => selectThread(thread.id)} />}>
                       {thread.title}
                       <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                       {thread.pinned ? <PushPin size={10} weight="fill" /> : threadActivityById[thread.id]?.state === "idle" ? <span className="text-[11px] text-[var(--text-subtle)] opacity-0 group-hover/thread:opacity-100">{relativeDate(thread.updatedAt)}</span> : null}
@@ -386,7 +382,7 @@ export function Sidebar({
                   .filter((activity): activity is ThreadActivity => Boolean(activity));
                 return (
                   <SidebarMenuItem key={project.id} className={`group/project ${menuOpen ? "z-40" : ""}`}>
-                    <SidebarMenuButton icon={active ? FluidFolderOpen : FluidFolder} isActive={active} className="sidebar-touch-row pr-2 group-hover/project:pr-[8.25rem] group-focus-within/project:pr-[8.25rem]" render={<button data-testid="sidebar-project-row" onClick={() => selectProject(project.id)} />}>
+                    <SidebarMenuButton icon={active ? FolderOpen : Folder} isActive={active} className={`sidebar-touch-row ${styles.projectRow} pr-2 group-hover/project:pr-[8.25rem] group-focus-within/project:pr-[8.25rem]`} render={<button data-testid="sidebar-project-row" onClick={() => selectProject(project.id)} />}>
                       {project.name}
                       <ProjectActivitySignal activities={projectActivities} />
                       {project.pinned ? <PushPin size={11} weight="fill" className="text-[var(--text-subtle)]" /> : null}
@@ -402,7 +398,7 @@ export function Sidebar({
                           const threadMenuOpen = threadMenuId === thread.id;
                           return (
                             <div key={thread.id} className={`relative group/thread ${threadMenuOpen ? "z-40" : ""}`}>
-                              <button data-testid="sidebar-project-thread" aria-current={threadActive ? "page" : undefined} className={`sidebar-touch-row flex w-full items-center rounded-lg px-2 py-1.5 pr-11 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
+                              <button data-testid="sidebar-project-thread" aria-current={threadActive ? "page" : undefined} className={`${styles.threadRow} sidebar-touch-row flex w-full items-center rounded-lg px-2 py-1.5 pr-11 text-left transition ${threadActive ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`} onClick={() => selectThread(thread.id)}>
                                 <span className="min-w-0 flex-1 truncate text-[12px] font-normal">{thread.title}</span>
                                 <ThreadActivitySignal activity={threadActivityById[thread.id]} />
                                 {thread.pinned ? <PushPin size={10} weight="fill" /> : null}
@@ -421,7 +417,7 @@ export function Sidebar({
           </section>
         </div>
 
-        <div ref={profileMenuRef} className="relative shrink-0 p-2">
+        <div ref={profileMenuRef} className={`${styles.account} relative shrink-0 p-2`}>
           {profileMenuOpen ? (
             <div role="menu" aria-label="Cuenta y preferencias" className="menu-enter absolute inset-x-2 bottom-[calc(100%-2px)] z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]">
               <p className="truncate px-3 py-2.5 text-[12px] font-semibold text-[var(--text)]" role="presentation">{session.user.name}</p>

@@ -9,7 +9,6 @@ import {
   Globe,
   ListChecks,
   Robot,
-  ShieldCheck,
   SpinnerGap,
   TerminalWindow,
   Wrench,
@@ -24,6 +23,8 @@ import type {
 import { ManagedAppActionControl } from "@/components/managed-app-action-control";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
+import { PermissionGrant } from "@/components/assistant-ui/elements/permission-grant";
+import { ToolTimeline } from "@/components/assistant-ui/elements/tool-timeline";
 import { ToolResultCard } from "@/components/tool-result-list";
 import { AgentStatusOrb } from "@/components/agent-status-orb";
 import { WorkspaceFilePreview } from "@/components/workspace-file-preview";
@@ -40,9 +41,6 @@ import {
 } from "@/ui/public-activity";
 import {
   ThinkingStep,
-  ThinkingSteps,
-  ThinkingStepsContent,
-  ThinkingStepsHeader,
 } from "@/components/ui/thinking-steps";
 
 type TurnActivityProps = {
@@ -219,69 +217,6 @@ export function currentTurnStatusLabel(message: Pick<ChatMessage, "activity">) {
   return message.activity.length ? currentActivityLabel(message.activity) : null;
 }
 
-function ApprovalCard({
-  approval,
-  onResolve,
-  connectorApproval = false,
-  readOnly = false,
-}: {
-  approval: ApprovalItem;
-  onResolve: (decision: ApprovalDecision) => void;
-  connectorApproval?: boolean;
-  readOnly?: boolean;
-}) {
-  const pending = approval.status === "pending";
-  const result = {
-    accepted: "Permitido una vez",
-    accepted_session: "Permitido durante esta tarea",
-    declined: "Acción rechazada",
-    pending: "Esperando tu decisión",
-  }[approval.status];
-  const title = publicActivityText(approval.title, 240) ?? "Acción pendiente";
-  const explanation = approval.kind === "file"
-    ? "El asistente ha preparado cambios en el proyecto. Solo se aplicarán si los autorizas."
-    : approval.kind === "browser"
-      ? "La siguiente acción del navegador necesita tu permiso antes de continuar."
-      : "Este comando necesita tu permiso. Puedes permitirlo una vez, durante esta tarea o rechazarlo.";
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-raised)]" role="group" aria-label={`Aprobación: ${title}`}>
-      <div className="flex items-start gap-3 px-3 py-2.5">
-        <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text)]">
-          <ShieldCheck size={15} />
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold text-[var(--text)]">{title}</p>
-          <p className="mt-1 text-[10px] leading-4 text-[var(--text)]">{explanation}</p>
-          <details className="mt-2">
-            <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver por qué necesita permiso</summary>
-            <div className="mt-2 rounded-lg bg-[var(--surface-muted)] px-3 py-2 text-[9px] leading-4 text-[var(--text)]">
-              <p>{publicActivityText(approval.detail, 1_000) ?? "Esta acción necesita confirmación."}</p>
-              {approval.command ? <p className="mt-2 text-[9px] font-medium text-[var(--text-secondary)]">{publicCommandTitle(approval.command)}</p> : null}
-            </div>
-          </details>
-        </div>
-      </div>
-
-      {pending && readOnly ? (
-        <div className="border-t border-[var(--border-subtle)] px-3.5 py-2 text-[9px] font-medium text-[var(--text-secondary)]">
-          Esperando la decisión de un editor del proyecto
-        </div>
-      ) : pending ? (
-        <div className="flex flex-wrap justify-end gap-1.5 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2.5 py-2">
-          <button type="button" className="min-h-9 rounded-lg px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("decline")}>Rechazar</button>
-          {approval.kind === "command" && !connectorApproval ? (
-            <button type="button" className="min-h-9 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-[10px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => onResolve("acceptForSession")}>Durante esta tarea</button>
-          ) : null}
-          <button type="button" className="min-h-9 rounded-lg bg-[var(--brain-accent-strong)] px-2.5 py-1.5 text-[10px] font-semibold text-white" onClick={() => onResolve("accept")}>Permitir</button>
-        </div>
-      ) : (
-        <div className="border-t border-[var(--border-subtle)] px-3.5 py-2 text-[9px] font-medium text-[var(--text)]" role="status">{result}</div>
-      )}
-    </div>
-  );
-}
-
 export function TurnActivity({
   message,
   projectId,
@@ -343,30 +278,16 @@ export function TurnActivity({
   return (
     <div className={compact ? "space-y-4" : "mt-4 space-y-3"}>
       {hasWorkProcess ? (
-        <ThinkingSteps
-          data-testid="turn-thinking-steps"
-          size="compact"
+        <ToolTimeline
           open={executionOpen}
-          onOpenChange={(open) => setManualDisclosure({
-            status: message.status,
-            open,
-          })}
-          className="w-full"
+          onOpenChange={(open) => setManualDisclosure({ status: message.status, open })}
+          streaming={streaming}
+          label={executionLabel}
+          complete={message.status === "complete"}
+          indicator={streaming
+            ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} />
+            : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
         >
-          <ThinkingStepsHeader
-            aria-label={`${executionOpen ? "Ocultar" : "Mostrar"} el proceso de trabajo`}
-            aria-live="polite"
-            indicator={message.status === "streaming"
-              ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} />
-              : message.status === "stopped" || message.status === "error"
-                ? <X size={14} />
-                : <Check size={14} />}
-            labelClassName={message.status === "streaming" ? "thinking-steps-shimmer" : "text-[var(--text-secondary)]"}
-            className={message.status === "complete" ? "codex-thinking-summary-complete max-w-full" : "max-w-full"}
-          >
-            {executionLabel}
-          </ThinkingStepsHeader>
-          <ThinkingStepsContent className="pt-1">
             {visiblePlan.map((step, index) => (
               <ThinkingStep
                 key={`${step.step}-${index}`}
@@ -425,12 +346,11 @@ export function TurnActivity({
                 );
               })}
             </div>
-          </ThinkingStepsContent>
-        </ThinkingSteps>
+        </ToolTimeline>
       ) : null}
 
       {message.approvals.map((approval) => (
-        <ApprovalCard key={approval.id} approval={approval} readOnly={readOnly} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
+        <PermissionGrant key={approval.id} approval={approval} readOnly={readOnly} connectorApproval={managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))} onResolve={(decision) => onResolveApproval(approval, decision)} />
       ))}
 
       {managedAppAction ? <ManagedAppActionControl
