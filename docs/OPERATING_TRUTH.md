@@ -43,8 +43,21 @@ Terminal Server and Database Server. That path is governed by the host-only
 `read-only-export` policy documented in
 [WINDOWS_RDP_CONNECTION.md](WINDOWS_RDP_CONNECTION.md): inventory, read and
 copy-out are allowed; remote create/write/overwrite/delete/move/rename and
-arbitrary commands are denied. This is operator connectivity, not an employee
-product connector or a live file-copy acceptance claim.
+arbitrary commands are denied. This is operator connectivity and bounded
+copy-out; employees read scoped, imported text through the existing document
+tools and never receive the RDP credentials or a Windows session.
+
+The 2026-09-02 operator tool and scheduled importer are documented in
+[WINDOWS_DOCUMENT_SYNC.md](WINDOWS_DOCUMENT_SYNC.md). One PDF copy at 08:16
+UTC matched Windows/Hetzner SHA-256 and 223219 bytes. A subsequent Windows
+policy regression at 08:28 UTC disabled redirection again (effective
+DriveMapping=1). The importer preserves that boundary and verified copies.
+The user authorized the company-wide audience. One already verified PDF is
+available through the existing scoped document tools, and an authenticated
+live chat read its actual contents and reported the incomplete sync correctly.
+Full synchronization of all six discovered documents remains blocked by the
+Windows policy. No Windows policy or customer source file was modified by
+the tool; Windows read-only ACL verification remains a separate gate.
 
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 

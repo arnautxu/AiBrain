@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "target": "ts",
+  "inventoryRoots": ["Y:\\Approved folder"],
+  "readRoots": ["Y:\\Approved folder"],
+  "maxFileBytes": 16777216,
+  "maxEntries": 250
+}
