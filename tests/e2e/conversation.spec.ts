@@ -382,10 +382,31 @@ test("a long recovered conversation keeps the reader in control of scroll", asyn
   )).toBeLessThan(100);
 });
 
-for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
-  test(`active streaming preserves a detached reader at ${viewport.width}x${viewport.height}`, async ({ page }) => {
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }])
+for (const detachDuringResize of [false, true]) {
+  test(`active streaming preserves a detached reader at ${viewport.width}x${viewport.height}${detachDuringResize ? " during resize" : ""}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await page.addInitScript(() => {
+      const state = window as Window & {
+        __finishSyntheticChatStream?: () => void;
+        __appendSyntheticChatStream?: () => void;
+        __detachOnNextChatResize?: boolean;
+      };
+      const NativeResizeObserver = window.ResizeObserver;
+      window.ResizeObserver = class extends NativeResizeObserver {
+        constructor(callback: ResizeObserverCallback) {
+          super((entries, observer) => {
+            callback(entries, observer);
+            if (!state.__detachOnNextChatResize || !entries.some((entry) => entry.target.classList.contains("mobile-chat-content"))) return;
+            state.__detachOnNextChatResize = false;
+            // Put the reader's scroll between real resize delivery and the
+            // hook's deferred follow frame: the formerly flaky CI ordering.
+            const scroller = document.querySelector(".workbench-main > .scrollbar-thin")!;
+            scroller.scrollTop = 0;
+            scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+          });
+        }
+      };
       const nativeFetch = window.fetch.bind(window);
       window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input instanceof Request ? input.url : input.toString();
@@ -393,7 +414,6 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         const encoder = new TextEncoder();
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
-            const state = window as Window & { __finishSyntheticChatStream?: () => void };
             let finished = false;
             state.__finishSyntheticChatStream = () => {
               if (finished) return;
@@ -403,7 +423,10 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
               delete state.__finishSyntheticChatStream;
             };
             window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "Primer fragmento sintético." })}\n`)), 80);
-            window.setTimeout(() => controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "\n\nSegundo fragmento que debe respetar la lectura." })}\n`)), 480);
+            state.__appendSyntheticChatStream = () => {
+              controller.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "\n\nSegundo fragmento que debe respetar la lectura." })}\n`));
+              delete state.__appendSyntheticChatStream;
+            };
           },
         });
         return Promise.resolve(new Response(stream, { status: 200, headers: { "Content-Type": "application/x-ndjson; charset=utf-8" } }));
@@ -444,10 +467,17 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
     await expect(page.getByText("Primer fragmento sintético.", { exact: false })).toBeVisible();
     const scroller = page.locator(".workbench-main > .scrollbar-thin");
-    await scroller.evaluate((element) => {
-      element.scrollTop = 0;
-      element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
+    await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
+    await scroller.evaluate((element, duringResize) => {
+      const state = window as Window & { __appendSyntheticChatStream?: () => void; __detachOnNextChatResize?: boolean };
+      if (duringResize) state.__detachOnNextChatResize = true;
+      else {
+        element.scrollTop = 0;
+        element.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+      if (!state.__appendSyntheticChatStream) throw new Error("synthetic stream append missing");
+      state.__appendSyntheticChatStream();
+    }, detachDuringResize);
     await expect(page.getByRole("button", { name: "Volver al final" })).toBeVisible();
     await expect(page.getByText("Segundo fragmento que debe respetar la lectura.", { exact: false })).toBeVisible();
     expect(await scroller.evaluate((element) => element.scrollTop)).toBeLessThanOrEqual(1);

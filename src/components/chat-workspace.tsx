@@ -384,7 +384,7 @@ export function ChatWorkspace({
   onOpenBrowser,
   readOnly = false,
 }: ChatWorkspaceProps) {
-  const { scrollRef, contentRef, scrollToBottom, isAtBottom } = useStickToBottom({
+  const { scrollRef, contentRef, scrollToBottom, stopScroll, isAtBottom } = useStickToBottom({
     initial: "instant",
     resize: "instant",
   });
@@ -403,7 +403,7 @@ export function ChatWorkspace({
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // New/recovered threads start at their latest message. Resize observation
     // follows later deltas only until the reader intentionally scrolls away.
     void scrollToBottom({ animation: "instant" });
@@ -605,7 +605,18 @@ export function ChatWorkspace({
         </div>
       </header>
 
-      <div ref={scrollRef} className="mobile-chat-scroll scrollbar-thin min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="mobile-chat-scroll scrollbar-thin min-h-0 flex-1 overflow-y-auto"
+        onScrollCapture={(event) => {
+          if (event.target !== event.currentTarget) return;
+          const element = event.currentTarget;
+          // The hook defers escape detection and ignores it during a resize.
+          // With instant following, a scroll away from the bottom is a reader
+          // escape: stop synchronously before a queued resize frame can win.
+          if (element.scrollHeight - element.scrollTop - element.clientHeight >= 96) stopScroll();
+        }}
+      >
         {!hydrated ? (
           <div className="mx-auto max-w-3xl px-6 py-14">
             <div className="mb-8 h-7 w-48 rounded-md bg-[var(--surface-muted)] motion-safe:animate-pulse" />

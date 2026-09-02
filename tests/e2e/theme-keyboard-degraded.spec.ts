@@ -97,13 +97,18 @@ test("system theme follows the OS and reduced motion removes decorative animatio
   });
   await page.reload();
   const scroller = page.locator(".workbench-main > .scrollbar-thin");
+  // Wait for the recovered thread, not just the shell left during hydration.
+  await expect(page.getByText("Mensaje 40:", { exact: false })).toBeVisible();
+  await expect.poll(() => scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
   await scroller.evaluate((element) => {
     element.scrollTop = 0;
     element.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await page.getByRole("button", { name: "Volver al final" }).click();
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
-  expect(await page.evaluate(() => (window as typeof window & { __reducedScrollBehaviors: string[] }).__reducedScrollBehaviors.at(-1))).toBe("auto");
+  // Instant following may assign scrollTop instead of calling scrollIntoView.
+  // Assert visible arrival within two paints, not an obsolete API call.
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  expect(await page.evaluate(() => (window as typeof window & { __reducedScrollBehaviors: string[] }).__reducedScrollBehaviors)).not.toContain("smooth");
   expect(await scroller.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight)).toBeLessThan(96);
 });
 
