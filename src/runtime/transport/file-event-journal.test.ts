@@ -82,6 +82,20 @@ describe("file transport event journal", () => {
     expect(await restarted.readUndelivered(10)).toEqual([]);
   });
 
+  it("reconciles a validated resume cursor across a compacted acknowledgement gap", async () => {
+    const journal = await createCompactJournal(2);
+    for (let sequence = 1; sequence <= 6; sequence += 1) {
+      await journal.append(event(sequence));
+    }
+    await journal.markDelivered(event(1));
+    await journal.reconcileDeliveryCursor("event-6", 6);
+
+    expect(await journal.loadDeliveryCursor()).toMatchObject({ eventId: "event-6", sequence: 6 });
+    expect(await journal.readEvents()).toEqual([event(5), event(6)]);
+    expect(await journal.readUndelivered(10)).toEqual([]);
+    await expect(journal.reconcileDeliveryCursor("event-5", 5)).rejects.toThrow("behind");
+  });
+
   it("bounds delivered event history without losing sequence or restart recovery", async () => {
     const journal = await createCompactJournal(2);
     for (let sequence = 1; sequence <= 5; sequence += 1) {
