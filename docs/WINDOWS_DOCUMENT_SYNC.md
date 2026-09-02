@@ -268,11 +268,14 @@ their handlers/projections complete. Notifications and tools retain thread/turn
 ownership checks. Empty document search results explicitly describe their
 limited coverage, including when `synchronization` reports `current`.
 
-This correction does not expand Windows read roots or publication audiences.
-Reading and publishing `Y:\PRESSUPOSTOS` requires an explicit authorized scope
-change, including its intended audience. Application CI, publication, deployment
-and authenticated resume acceptance are separate gates; these incident notes do
-not establish that the candidate correction is live.
+The transport correction alone does not expand Windows read roots or publication
+audiences. The user subsequently authorized access across the server rather
+than selected folders. That extension uses a separate on-demand read-only broker
+and preserves the already approved company reader audience; see
+[WINDOWS_SERVER_FILES.md](WINDOWS_SERVER_FILES.md). The scheduled mirror keeps
+its original source roots. Application CI, publication, deployment and
+authenticated resume acceptance are separate gates; these incident notes do
+not establish that either candidate correction is live.
 
 Local candidate validation: 99 tests passed across transport, gateway, turn
 execution, durable projection, company documents, multi-user acceptance and

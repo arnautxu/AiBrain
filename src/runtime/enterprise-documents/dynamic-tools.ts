@@ -7,6 +7,7 @@ import {
   type EnterpriseDocumentScope,
 } from "@/documents/enterprise-document-network";
 import type { OnDemandDocumentSync } from "@/documents/on-demand-sync";
+import { isServerDirectoryQuery, isServerFilePath, type ServerDocumentFiles } from "@/documents/server-files";
 
 export const AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE = "aibrain_company_files";
 
@@ -17,7 +18,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files by name or UTF-8 text in configured copies only, not a complete inventory of the source server or drive. Refreshes those copies on demand before returning results. Even a current refresh does not prove a missing file or folder is absent from the source. Use this before read when the exact relative path is unknown.",
+    description: "Find authorized business files in local text and, when connected, by name on the Windows server. To browse live drives use query server:/; to list a folder use server:/Y/PRESSUPOSTOS or a Windows drive path. Follow nextQuery for more entries. Recursive name searches are bounded: inspect server.limited and warnings. Use the returned server-connection/... path with read; no Windows writes are available.",
     inputSchema: {
       type: "object",
       properties: {
@@ -30,7 +31,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   }, {
     type: "function",
     name: "read",
-    description: "Read one authorized UTF-8 business file using the scope, optional department id and relative path returned by search. Refreshes configured copies first; report any synchronization warning instead of claiming a stale copy is current.",
+    description: "Read an authorized business file using the scope and path returned by search. Paths starting server- read fresh Windows files through the read-only connection; follow nextPath for more text and compare hashes across parts. Other paths read scoped UTF-8 copies refreshed first. Report unavailable formats, source failures and synchronization warnings accurately.",
     inputSchema: {
       type: "object",
       properties: {
@@ -50,6 +51,7 @@ type Context = Readonly<{
   runtimeThreadId: string;
   runtimeTurnId: string;
   sync?: OnDemandDocumentSync;
+  serverFiles?: ServerDocumentFiles;
 }>;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -84,9 +86,17 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         query: params.arguments.query,
         ...(typeof params.arguments.limit === "number" ? { limit: params.arguments.limit } : {}),
       };
+      if (isServerDirectoryQuery(input.query)) {
+        const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
+        return response({ results: server?.results ?? [], server: server ?? { available: false },
+          warning: server?.warning ?? (server ? undefined : "El acceso directo al servidor no está disponible para este turno.") });
+      }
       // Validate query and issued roots before any host effect. Then search the
       // new atomic snapshot, including files that were missing from the copy.
       let results = await context.network.search(input);
+      const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
+      if (server) return response({ results: [...results, ...(server.results ?? [])], server,
+        warning: "Los resultados locales son copias. Los resultados del servidor reflejan la consulta indicada; revisa limited, truncated y nextQuery antes de afirmar que una búsqueda es completa." });
       const synchronization = await context.sync?.refresh(context.roots) ?? [];
       if (synchronization.length) results = await context.network.search(input);
       return response({ results, synchronization,
@@ -109,6 +119,10 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         scopeId: params.arguments.scopeId as string | null | undefined,
         path: params.arguments.path,
       };
+      if (isServerFilePath(input.path)) {
+        const result = await context.serverFiles?.read(context.roots, input);
+        return response(result ?? { available: false, warning: "El acceso directo al servidor no está disponible para este turno." });
+      }
       await context.network.validateSyncRead(input);
       const synchronization = await context.sync?.refresh(context.roots, input) ?? [];
       try {

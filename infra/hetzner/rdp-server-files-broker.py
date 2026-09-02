@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Installation-bound Unix broker for read-only Windows file queries."""
+import argparse
+import importlib.util
+import json
+import os
+from pathlib import Path
+import signal
+import socket
+import socketserver
+import stat
+import struct
+import subprocess
+import sys
+import threading
+import uuid
+
+spec = importlib.util.spec_from_file_location("server_files", Path(__file__).with_name("rdp-server-files.py"))
+files = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(files)
+sync = files.sync
+
+
+def validate_request(value, manifest):
+    try:
+        if not isinstance(value, dict) or set(value) != {"schemaVersion", "operation", "requestId", "installationId", "connectionId", "input"}:
+            return False
+        if type(value["schemaVersion"]) is not int or value["schemaVersion"] != 1 or value["installationId"] != manifest["installationId"] or value["connectionId"] != manifest["connectionId"]:
+            return False
+        if str(uuid.UUID(value["requestId"])) != value["requestId"] or not isinstance(value["input"], dict):
+            return False
+        args = value["input"]
+        if value["operation"] == "search" and set(args) == {"query", "limit"}:
+            request = files.query_request(args["query"], args["limit"])
+            if request.get("source"):
+                files.rdp.select_root(request["source"], manifest["sourceRoots"])
+            return True
+        if value["operation"] == "read" and set(args) == {"path"}:
+            source, _ = files.source_path(manifest["connectionId"], args["path"])
+            files.rdp.select_root(source, manifest["sourceRoots"])
+            return True
+        return False
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def execute(manifest, value):
+    sync.require(validate_request(value, manifest), "INVALID_SERVER_FILE_REQUEST")
+    # Revalidate publication ownership before every operation, not just startup.
+    for audience in manifest["publications"]:
+        sync.scope_directory(manifest, audience)
+    try:
+        if value["operation"] == "search":
+            return files.search(manifest, **value["input"])
+        return files.read(manifest, **value["input"])
+    except Exception as error:
+        code = str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
+        if code not in {"SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
+            code = "SERVER_FILES_UNAVAILABLE"
+        return {"available": False, "error": code, "warning": "No se ha podido consultar esta ubicación. No demuestra que no exista; no se ha modificado el servidor."}
+
+
+class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+    request_queue_size = 8
+
+    def __init__(self, address, manifest, manifest_path):
+        self.manifest, self.manifest_path = manifest, manifest_path
+        self.slot = threading.BoundedSemaphore(1)
+        super().__init__(str(address), Handler)
+
+    def verify_request(self, request, _):
+        _, uid, _ = struct.unpack("3i", request.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+        return uid == self.manifest["appUid"]
+
+    def run(self, value):
+        child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--manifest", self.manifest_path, "--execute"],
+                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
+        try:
+            output, _ = child.communicate(json.dumps(value).encode(), timeout=210)
+            if child.returncode or len(output) > 256 * 1024:
+                raise ValueError("SERVER_FILES_UNAVAILABLE")
+            return json.loads(output)
+        except subprocess.TimeoutExpired:
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait()
+            return {"available": False, "error": "SERVER_FILES_TIMEOUT"}
+
+
+class Handler(socketserver.StreamRequestHandler):
+    def handle(self):
+        acquired = False
+        try:
+            self.connection.settimeout(5)
+            line = self.rfile.readline(2049)
+            if len(line) > 2048 or not line.endswith(b"\n"):
+                return
+            value = json.loads(line)
+            if not validate_request(value, self.server.manifest):
+                return
+            acquired = self.server.slot.acquire(blocking=False)
+            self.connection.settimeout(220)
+            result = self.server.run(value) if acquired else {"available": False, "error": "SERVER_FILES_BUSY", "warning": "El servidor está atendiendo otra consulta. Vuelve a intentarlo en unos segundos."}
+            result.update(requestId=value["requestId"], installationId=value["installationId"], connectionId=value["connectionId"])
+            self.wfile.write((json.dumps(result, ensure_ascii=False) + "\n").encode())
+            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"]}), flush=True)
+        except (ValueError, OSError):
+            pass
+        finally:
+            if acquired:
+                self.server.slot.release()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--manifest", required=True)
+    parser.add_argument("--execute", action="store_true")
+    args = parser.parse_args()
+    sync.require(os.geteuid() == 0, "HOST_OPERATOR_REQUIRED")
+    os.umask(0o077)
+    manifest = sync.load_manifest(args.manifest)
+    # This endpoint exposes the company's server account only to its existing
+    # company reader scope. It never converts a private/department grant.
+    sync.require(manifest["publications"] == [{"scope": "company", "scopeId": None}], "COMPANY_READER_SCOPE_REQUIRED")
+    if args.execute:
+        value = json.loads(sys.stdin.buffer.read(2049))
+        print(json.dumps(execute(manifest, value), ensure_ascii=False))
+        return
+    directory = Path(manifest["dataRootHost"]) / "locks" / "server-files"
+    directory.mkdir(mode=0o750, exist_ok=True)
+    sync.secure_dir(directory)
+    os.chown(directory, 0, manifest["appGid"])
+    descriptor = directory / (manifest["connectionId"] + ".json")
+    sync.atomic_json(descriptor, {"schemaVersion": 1, "connectionId": manifest["connectionId"],
+                                "installationId": manifest["installationId"], "scope": "company", "mode": "read-only"})
+    os.chown(descriptor, 0, manifest["appGid"])
+    os.chmod(descriptor, 0o440)
+    address = directory / (manifest["connectionId"] + ".sock")
+    if address.exists() or address.is_symlink():
+        info = address.lstat()
+        sync.require(stat.S_ISSOCK(info.st_mode) and info.st_uid == 0, "UNSAFE_BROKER_SOCKET")
+        with socket.socket(socket.AF_UNIX) as probe:
+            try:
+                probe.connect(str(address))
+            except ConnectionRefusedError:
+                address.unlink()
+            else:
+                raise ValueError("BROKER_ALREADY_RUNNING")
+    with Server(address, manifest, str(Path(args.manifest).resolve())) as server:
+        os.chown(address, 0, manifest["appGid"])
+        os.chmod(address, 0o660)
+        server.serve_forever(poll_interval=0.5)
+
+
+if __name__ == "__main__":
+    main()

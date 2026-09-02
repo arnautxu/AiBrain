@@ -1,0 +1,139 @@
+# Read-only access across the Windows server
+
+The 2026-09-02 scope correction authorizes access across the server, not a
+selected folder allowlist. The connection uses the installation's Windows
+account and its existing OS permissions. The configured source authorization
+covers all drive letters; live discovery returns the local and mapped drives
+actually present in that Windows session. Redirected `tsclient` drives,
+reparse traversal, credentials and remote writes remain excluded.
+
+This is a separate on-demand path from the small scheduled document mirror.
+It does not recursively copy the whole server or expand that mirror's timer.
+It supports browsing directories, bounded recursive filename search and fresh
+text reads of supported documents. The account's accessible server filesystem
+is not equivalent to SQL access to the database or arbitrary Windows commands.
+
+## Employee tools and existing conversations
+
+The existing `aibrain_company_files.search/read` tool schema is reused, so
+resumed conversations do not need a new App Server toolset:
+
+- `search({query: "server:/"})` discovers server drives.
+- `search({query: "server:/Y/"})` lists the shared drive.
+- `search({query: "server:/Y/PRESSUPOSTOS"})` lists a specific directory.
+- `nextQuery` continues large directory listings. Offset pages can change if
+  the source folder is edited concurrently; they are not a frozen inventory.
+- A plain term searches local text plus live server filenames. Server search
+  is bounded by time, directories and entries; `limited`/`truncated` prevents
+  interpreting empty results as absence from the entire server. Navigate to
+  a specific folder to inspect it completely.
+- `read({scope: "company", path: <returned server-connection/... path>})`
+  copies and verifies that file on demand, extracts text in a networkless
+  unprivileged process and returns source path, modification time and SHA-256.
+  `nextPath` selects another bounded text part. Compare hashes between parts;
+  stop and reread if the source changed.
+
+Each read is fresh. The current extractor supports PDF, DOCX, XLSX and UTF-8
+TXT/CSV/MD/JSON, up to the existing 16 MiB source and extraction limits. Other
+formats can be listed, but an unsupported/scanned/unreadable file must be
+reported accurately. Original files remain private in the host import area.
+There is no remote write, rename, delete, permission change or shell tool.
+
+## Trust and process boundaries
+
+`ServerDocumentFiles` verifies server-issued company roots and a root-owned,
+read-only descriptor under `<dataRoot>/locks/server-files` before connecting to
+the Unix socket. A denied company scope never contacts the host. The host
+validates the installation, connection, operation and data fields, authenticates
+the app UID through `SO_PEERCRED`, revalidates the company scope marker and
+selects only operator-configured endpoints and credentials.
+
+Paths and queries are encoded JSON data in a fixed PowerShell program. Each
+operation is kept within the Windows console command limit. Drive
+redirection back to the host, reparse points, traversal, alternate streams and
+credential-shaped content are rejected. No caller can provide code, credentials,
+a host destination or a different account. Per-call processes have a deadline;
+only one operation runs at a time and a busy response is explicit.
+
+The broker reads files for existing company readers, the audience already
+used by the installation's document connection. The Windows account is shared
+at installation scope; this does not impersonate each employee's individual
+Windows ACLs. AiBrain's company permission and tenant boundaries remain in force.
+
+## Operator installation
+
+Keep the candidate toolset together under `/usr/local/lib/aibrain/server-files/`:
+
+- `rdp-server-files.py`, `rdp-server-files-broker.py`;
+- `rdp-access.py`, `rdp-sync.py`, `rdp-extract.py` from the same reviewed revision.
+
+Use a separate private `server-access.json` cloned from the current access
+manifest. Set `inventoryRoots` and `readRoots` to the 26 drive roots `A:\` through
+`Z:\`, preserving target, byte/entry limits and all existing read-only policy.
+Use `server-files.json`, cloned from the sync manifest, with only its
+`accessManifest` pointing to the new private manifest. Keep its approved company
+audience, installation, source endpoint, app UID/GID and host data paths.
+Do not change the scheduled sync's original access manifest.
+
+Both manifests are root-owned regular mode-0600 files. The service and socket
+are installed only after reviewing the actual manifests and existing state.
+Create `<dataRootHost>/locks/server-files` as root with the app group, mode 0750,
+then install `aibrain-arnall-server-files.service`. The service uses strict
+filesystem protection; writable paths are only its socket directory, private
+temporary space and the existing import destination. It has no Docker socket
+or TCP API. It may contact only the existing pinned RDP destination through the
+fixed operator program. The source account still needs no Windows write access.
+
+The descriptor/socket are below the backup-excluded locks directory. The
+scheduled mirror, previous verified imports and existing application release
+remain available independently. Rollback disables the new service and restores
+the previous application revision; it does not delete customer source files or
+verified copies.
+
+## Acceptance gates
+
+1. Local source, path/permission/response-binding, pagination and cancellation
+   tests; existing RDP policy and sync regression tests.
+2. Real drive discovery and a directory outside the old folder allowlist, with
+   source metadata readback. One supported file must be copied with matching
+   Windows/host SHA-256 and extracted under the service's restrictions.
+3. Host socket request from the configured app UID; a different UID is denied.
+4. Separate Backend CI, GHCR publication and application deployment for the
+   candidate SHA.
+5. Authenticated existing-chat resume, live folder listing and supported file
+   read. Source permissions, rejected writes and unavailable formats remain
+   explicit. Host-only acceptance does not establish application acceptance.
+
+## Candidate evidence, 2026-09-02
+
+The private host candidate used separate all-drive manifests; the installed
+application still served `fb5d3d56d84f6102b5e3207217e6a8d412ba8bde`. The existing
+sync manifest and service were not changed, and no permanent server-files socket
+or service was enabled during these probes.
+
+- 10:06:50 UTC: live discovery returned `C:\` and `Y:\`.
+- 10:07:38 UTC: `Y:\PRESSUPOSTOS` returned all five year directories, `2019`,
+  `2022`, `2023`, `2024`, `2025`, without truncation.
+- 10:08:30 UTC: the `2025` directory returned one subdirectory and one PDF,
+  without truncation.
+- 10:14:29 UTC: a fresh read of that PDF verified 86,682 bytes against Windows
+  SHA-256 `d9c9f2d77e299766b54cf32faf1b40e6bb9ef9fc26ef505a85016c97d3e812bf`
+  and extracted 1,405 characters in one part. Copy and networkless extraction
+  ran under a transient root service with the candidate's filesystem, device,
+  home, privilege, memory and task restrictions.
+- 10:15:04 UTC: a live recursive name query found `Y:\PRESSUPOSTOS` and six
+  other matching directories. It correctly returned `limited=true` and
+  `truncated=true`; this was not a complete server inventory.
+- The actual Linux Unix-socket server accepted UID 10001 and rejected a
+  different UID. This used an ephemeral socket and controlled handler response
+  to isolate peer authentication; it did not expose a production socket or
+  query Windows. The document read above separately exercised the real source.
+
+Local validation passed: 1,102 application tests (nine skipped), 33 Python RDP
+tests, full lint, TypeScript checks, production build, automation-worker build,
+generated Codex contracts and static infrastructure validation. No customer
+document content or connection credentials are recorded in this repository.
+
+Backend CI, GHCR publication, application deployment and authenticated chat
+acceptance are still pending for this candidate, including resuming the
+conversation from the incident. The host results above do not close those gates.
