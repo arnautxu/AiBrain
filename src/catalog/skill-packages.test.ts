@@ -4,7 +4,12 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { CatalogPrincipal, CatalogState } from "@/catalog/contracts";
-import { FileCompanySkillPackageStore, synchronizeEffectiveSkills } from "@/catalog/skill-packages";
+import { FileCompanySkillPackageStore, synchronizeEffectiveSkills, readVersionedSkillPackage } from "@/catalog/skill-packages";
+
+import { ensureInstallationCatalog } from "@/catalog/baseline";
+import { FileCatalogStore } from "@/catalog/store";
+import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
+import { managedSkillsForInstallation } from "@/catalog/managed-skills";
 
 const USER_A = "00000000-0000-4000-8000-000000000001";
 const USER_B = "00000000-0000-4000-8000-000000000002";
@@ -40,6 +45,57 @@ describe("managed skill packages", () => {
     expect(first.skills[0].path).not.toBe(second.skills[0].path);
     expect(await readFile(path.join(config.paths.usersRoot, USER_A, "runtime", "codex-home", "skills", "arnall-company-brief", "SKILL.md"), "utf8")).toContain("Never invent stock");
     expect((await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot })).unchanged).toHaveLength(2);
+  });
+
+  it("adds full Impeccable to existing Arnall configs, isolates copies and honors a user denial", async () => {
+    const { config, principal, packagesRoot } = await fixture();
+    const store = new FileCatalogStore(config.installationId, config.paths.dataRoot);
+    const state = await ensureInstallationCatalog(store, config);
+    expect(state.resources.filter(({ id }) => id === "impeccable")).toHaveLength(1);
+    expect((await ensureInstallationCatalog(store, config)).revision).toBe(state.revision);
+    const first = await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot });
+    const second = await synchronizeEffectiveSkills({ config, userId: USER_B, state, principal: principal(USER_B), packagesRoot });
+    const a = first.skills.find(({ id }) => id === "impeccable")!;
+    const b = second.skills.find(({ id }) => id === "impeccable")!;
+    expect(a.version).toBe("4.1.1");
+    expect(a.path).not.toBe(b.path);
+    expect(a.digest).toBe(b.digest);
+    const pkg = await readVersionedSkillPackage(packagesRoot, "impeccable");
+    for (const file of pkg.manifest.files) {
+      expect(await readFile(path.join(a.path, file), "utf8")).toBe(pkg.files[file]);
+    }
+    const instructions = designSkillDeveloperInstructions(config, first);
+    expect(instructions).toContain(path.join(a.path, "SKILL.md"));
+    expect(instructions).toContain("MUST use the impeccable skill");
+    expect(instructions).toContain("full conversation");
+    expect(instructions).toContain("A different selected skill complements");
+    expect(instructions).not.toContain(b.path);
+    state.rules.push({ id: "deny-design-a", scope: "user", subjectId: USER_A, resourceId: "impeccable", effect: "deny", operations: ["read"] });
+    state.revision += 1;
+    const denied = await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot });
+    expect(denied.revoked).toContain("impeccable");
+    await expect(readFile(path.join(a.path, "SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(designSkillDeveloperInstructions(config, denied)).toContain("required skill is unavailable");
+    expect(designSkillDeveloperInstructions(config, denied)).not.toContain(a.path);
+    expect(await readFile(path.join(b.path, "SKILL.md"), "utf8")).toContain("name: impeccable");
+    const other = { ...config, companySlug: "another-company" };
+    expect(managedSkillsForInstallation(other).some(({ id }) => id === "impeccable")).toBe(false);
+    expect(designSkillDeveloperInstructions(other, second)).toBe("");
+    expect(managedSkillsForInstallation({ ...config, catalog: { graphikAIManagedSkills: [{ id: "impeccable", label: "Impeccable" }] } })).toHaveLength(1);
+  });
+
+  it("still rejects executable and oversized administrative skill uploads", async () => {
+    const { config } = await fixture();
+    const store = new FileCompanySkillPackageStore(config.installationId, config.paths.dataRoot);
+    const input = {
+      id: "company-design", label: "Design", version: "1.0.0", category: "company" as const, provenance: "Company upload",
+      files: [
+        { path: "SKILL.md", content: "---\nname: company-design\ndescription: Design guidance.\n---\n" },
+        { path: "scripts/context.mjs", content: "export const test = true;" },
+      ],
+    };
+    await expect(store.upsert(USER_A, input)).rejects.toThrow();
+    await expect(store.upsert(USER_A, { ...input, files: [input.files[0], { path: "resources/large.md", content: "x".repeat(65 * 1024) }] })).rejects.toThrow();
   });
 
   it("adds, updates and revokes a group skill idempotently as membership changes", async () => {

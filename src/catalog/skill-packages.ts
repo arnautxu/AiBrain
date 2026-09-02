@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { chmod, lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import { managedSkillsForInstallation } from "@/catalog/managed-skills";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { CatalogState, SkillPackageInput } from "@/catalog/contracts";
 import { visibleCatalogResources } from "@/catalog/resolver";
@@ -28,6 +29,12 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[a-z0-9.-]+)?$/u;
 const DIGEST = /^[0-9a-f]{64}$/u;
 const SAFE_FILE = /^(?:SKILL\.md|resources\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:md|json|txt))$/u;
+// Executable bundles are accepted only from the versioned repository, never
+// from an administrative upload. Keep company-package limits unchanged.
+const VERSIONED_SAFE_FILE = /^(?:SKILL\.md|(?:resources|reference|scripts|agents)\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:md|json|txt|mjs|js|toml|yaml))$/u;
+const VERSIONED_MAX_FILES = 256;
+const VERSIONED_MAX_FILE_BYTES = 512 * 1024;
+const VERSIONED_MAX_PACKAGE_BYTES = 4 * 1024 * 1024;
 const MAX_FILES = 24;
 const MAX_FILE_BYTES = 64 * 1024;
 const MAX_PACKAGE_BYTES = 256 * 1024;
@@ -93,19 +100,19 @@ function boundedText(value: unknown, context: ValidationContext, maximum: number
   return text;
 }
 
-function safeRelativeFile(value: unknown, context: ValidationContext) {
+function safeRelativeFile(value: unknown, context: ValidationContext, versioned = false) {
   const candidate = expectString(value, context, { minLength: 1, maxLength: 180 });
-  if (!SAFE_FILE.test(candidate) || path.posix.normalize(candidate) !== candidate || candidate.includes("..")) {
+  if (!(versioned ? VERSIONED_SAFE_FILE : SAFE_FILE).test(candidate) || path.posix.normalize(candidate) !== candidate || candidate.includes("..")) {
     context.fail("expected a bounded SKILL.md or resources file path");
   }
   return candidate;
 }
 
-function parseManifest(value: unknown, context: ValidationContext): SkillPackageManifest {
+function parseManifest(value: unknown, context: ValidationContext, versioned = false): SkillPackageManifest {
   if (!isRecord(value) || Object.keys(value).sort().join("\0") !== ["category", "files", "id", "label", "provenance", "schemaVersion", "version"].sort().join("\0")) {
     context.fail("expected an exact skill package manifest");
   }
-  const files = expectArray(value.files, context.at("files"), safeRelativeFile, { maxLength: MAX_FILES });
+  const files = expectArray(value.files, context.at("files"), (file, fileContext) => safeRelativeFile(file, fileContext, versioned), { maxLength: versioned ? VERSIONED_MAX_FILES : MAX_FILES });
   if (!files.includes("SKILL.md") || new Set(files).size !== files.length) context.at("files").fail("must include unique SKILL.md paths");
   return {
     schemaVersion: expectLiteral(value.schemaVersion, 1, context.at("schemaVersion")),
@@ -142,7 +149,7 @@ function validatedPackage(value: unknown, source: SkillPackage["source"]): Skill
     throw new SkillPackageError("SKILL_PACKAGE_INVALID", "Skill package is malformed.");
   }
   const context = new ValidationContext("SkillPackage", "SkillPackage");
-  const manifest = parseManifest(value.manifest, context.at("manifest"));
+  const manifest = parseManifest(value.manifest, context.at("manifest"), source === "versioned");
   const actualFiles = Object.keys(value.files).sort();
   if (actualFiles.join("\0") !== [...manifest.files].sort().join("\0")) {
     throw new SkillPackageError("SKILL_PACKAGE_INVALID", "Skill package files do not match the manifest.");
@@ -151,14 +158,14 @@ function validatedPackage(value: unknown, source: SkillPackage["source"]): Skill
   const files: Record<string, string> = {};
   for (const fileName of manifest.files) {
     const content = value.files[fileName];
-    if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > MAX_FILE_BYTES || /\0/u.test(content)) {
+    if (typeof content !== "string" || Buffer.byteLength(content, "utf8") > (source === "versioned" ? VERSIONED_MAX_FILE_BYTES : MAX_FILE_BYTES) || /\0/u.test(content)) {
       throw new SkillPackageError("SKILL_PACKAGE_INVALID", `Skill file ${fileName} is invalid or too large.`);
     }
     rejectSecretMaterial(content);
     total += Buffer.byteLength(content, "utf8");
     files[fileName] = content;
   }
-  if (total > MAX_PACKAGE_BYTES) throw new SkillPackageError("SKILL_PACKAGE_INVALID", "Skill package is too large.");
+  if (total > (source === "versioned" ? VERSIONED_MAX_PACKAGE_BYTES : MAX_PACKAGE_BYTES)) throw new SkillPackageError("SKILL_PACKAGE_INVALID", "Skill package is too large.");
   const frontmatterName = files["SKILL.md"]?.match(/^---\r?\n[\s\S]*?^name:\s*([a-z][a-z0-9-]*)\s*$[\s\S]*?^description:\s*\S[\s\S]*?^---\s*$/mu)?.[1];
   if (frontmatterName !== manifest.id) throw new SkillPackageError("SKILL_PACKAGE_INVALID", "SKILL.md frontmatter name must match the package id and include a description.");
   const digest = canonicalDigest(manifest, files);
@@ -244,14 +251,14 @@ export async function readVersionedSkillPackage(packagesRoot: string, skillId: s
     throw new SkillPackageError("SKILL_PACKAGE_PATH_UNSAFE", "Versioned skill root is unsafe.");
   }
   const rawManifest: unknown = JSON.parse(await regularFile(path.join(packageRoot, "skill.json"), 32 * 1024));
-  const manifest = parseManifest(rawManifest, new ValidationContext("SkillPackageManifest", path.join(packageRoot, "skill.json")));
+  const manifest = parseManifest(rawManifest, new ValidationContext("SkillPackageManifest", path.join(packageRoot, "skill.json")), true);
   if (manifest.id !== skillId) throw new SkillPackageError("SKILL_PACKAGE_ID_MISMATCH", "Versioned skill directory and manifest differ.");
   const files: Record<string, string> = {};
   for (const fileName of manifest.files) {
     const target = path.join(packageRoot, ...fileName.split("/"));
     const metadata = await lstat(target);
     if (!metadata.isFile() || metadata.isSymbolicLink() || !inside(await realpath(packageRoot), await realpath(target))) throw new SkillPackageError("SKILL_PACKAGE_PATH_UNSAFE", "Versioned skill file is unsafe.");
-    files[fileName] = await regularFile(target, MAX_FILE_BYTES);
+    files[fileName] = await regularFile(target, VERSIONED_MAX_FILE_BYTES);
   }
   return validatedPackage({ manifest, files }, "versioned");
 }
@@ -391,7 +398,7 @@ async function synchronizeEffectiveSkillsUnlocked(options: {
   const packagesRoot = options.packagesRoot ?? path.join(process.cwd(), "skills");
   const companyStore = new FileCompanySkillPackageStore(config.installationId, config.paths.dataRoot, options.now);
   const companyState = await companyStore.read();
-  const managedIds = new Set((config.catalog?.graphikAIManagedSkills ?? []).map(({ id }) => id));
+  const managedIds = new Set(managedSkillsForInstallation(config).map(({ id }) => id));
   const packages = new Map<string, SkillPackage>();
   for (const resource of visibleCatalogResources(state, principal, "skill")) {
     let pkg: SkillPackage | undefined;

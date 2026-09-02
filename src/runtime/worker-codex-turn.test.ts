@@ -597,7 +597,7 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId, paths: installationPaths },
+      config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
       handle: {
         roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") },
       },
@@ -752,6 +752,8 @@ describe("worker Codex turn", () => {
     ]);
     const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
+    expect(instructions).toContain("Arnall: mandatory design skill");
+    expect(instructions).toContain("required skill is unavailable");
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
@@ -1404,7 +1406,7 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId, paths: installationPaths },
+      config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
       handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
       client,
       workerWasWarm: true,
@@ -1445,6 +1447,8 @@ describe("worker Codex turn", () => {
         },
       },
     });
+    expect(JSON.stringify(calls[0]?.params)).toContain("Arnall: mandatory design skill");
+    expect(JSON.stringify(calls[0]?.params)).toContain("required skill is unavailable");
     expect(events).not.toContainEqual(expect.objectContaining({
       type: "activity",
       item: expect.objectContaining({ id: "runtime-thread" }),
