@@ -13,6 +13,7 @@ import {
   readVersionedSkillPackage,
 } from "@/catalog/skill-packages";
 import { ensureInstallationCatalog } from "@/catalog/baseline";
+import { managedSkillsForInstallation } from "@/catalog/managed-skills";
 
 export class CatalogAdminError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) { super(message); this.name = "CatalogAdminError"; }
@@ -34,7 +35,7 @@ export async function catalogSnapshot(session: AuthSession) {
   const [companyPackages, packageAudit, managedPackages] = await Promise.all([
     packageStore.read(),
     packageStore.auditLog(100),
-    Promise.all((installation.catalog?.graphikAIManagedSkills ?? []).map(async ({ id }) => {
+    Promise.all(managedSkillsForInstallation(installation).map(async ({ id }) => {
       const skill = await readVersionedSkillPackage(`${process.cwd()}/skills`, id);
       return { ...skill.manifest, digest: skill.digest, source: skill.source };
     })),
