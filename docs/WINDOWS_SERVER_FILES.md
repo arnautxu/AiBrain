@@ -86,6 +86,9 @@ filesystem protection; writable paths are only its socket directory, private
 temporary space and the existing import destination. It has no Docker socket
 or TCP API. It may contact only the existing pinned RDP destination through the
 fixed operator program. The source account still needs no Windows write access.
+`AF_NETLINK` is required for Bubblewrap to create loopback in the extractor's
+new network namespace; without it, `--unshare-all` fails before parsing the
+document. This does not give the extractor an external network interface.
 
 The descriptor/socket are below the backup-excluded locks directory. The
 scheduled mirror, previous verified imports and existing application release
@@ -148,3 +151,10 @@ failure before contacting the host. A regression reproduced this exact call;
 the correction caps positive page sizes at 50 while retaining scope checks,
 host limits and pagination. Its application release and live acceptance must
 be verified separately from the successful host connection.
+
+The installed service's first real PDF read copied and verified the source but
+failed extraction: its address-family filter omitted `AF_NETLINK`, causing
+`bwrap: loopback: Failed to create NETLINK_ROUTE socket`. The earlier transient
+copy probe had not included that filter. An exact protected extraction probe
+reproduced the error; allowing `AF_NETLINK` restored extraction while keeping
+`--unshare-all`, the unprivileged extractor and all filesystem restrictions.

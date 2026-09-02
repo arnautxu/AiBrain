@@ -133,6 +133,7 @@ class ServerFileTests(unittest.TestCase):
         unit = (INFRA / 'aibrain-arnall-server-files.service').read_text()
         self.assertIn('ProtectSystem=strict', unit)
         self.assertIn('KillMode=control-group', unit)
+        self.assertIn('RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK', unit)
         self.assertNotIn('docker.sock', unit)
         self.assertNotIn('credentials.env', unit)
         self.assertNotIn('enterprise-documents', unit)
