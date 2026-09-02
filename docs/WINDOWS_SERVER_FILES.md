@@ -23,6 +23,9 @@ resumed conversations do not need a new App Server toolset:
 - `search({query: "server:/Y/PRESSUPOSTOS"})` lists a specific directory.
 - `nextQuery` continues large directory listings. Offset pages can change if
   the source folder is edited concurrently; they are not a frozen inventory.
+- Positive runtime page sizes above 50 are capped before either backend is
+  contacted. Invalid parameter types or non-positive sizes return a parameter
+  error, not a claim that the employee lacks source access.
 - A plain term searches local text plus live server filenames. Server search
   is bounded by time, directories and entries; `limited`/`truncated` prevents
   interpreting empty results as absence from the entire server. Navigate to
@@ -137,3 +140,11 @@ document content or connection credentials are recorded in this repository.
 Backend CI, GHCR publication, application deployment and authenticated chat
 acceptance are still pending for this candidate, including resuming the
 conversation from the incident. The host results above do not close those gates.
+
+After deployment of `6d5fe79`, authenticated chat at 10:34–10:35 UTC revealed
+that the runtime requested `limit: 100` in all three search calls despite the
+schema's maximum of 50. The old argument guard returned its generic permission
+failure before contacting the host. A regression reproduced this exact call;
+the correction caps positive page sizes at 50 while retaining scope checks,
+host limits and pagination. Its application release and live acceptance must
+be verified separately from the successful host connection.

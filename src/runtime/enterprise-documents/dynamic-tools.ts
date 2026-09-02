@@ -78,13 +78,15 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
     if (params.tool === "search") {
       const keys = Object.keys(params.arguments);
       if (keys.some((key) => key !== "query" && key !== "limit") || typeof params.arguments.query !== "string" ||
-          (params.arguments.limit !== undefined && (!Number.isSafeInteger(params.arguments.limit) || Number(params.arguments.limit) < 1 || Number(params.arguments.limit) > 50))) {
-        return failure();
+          (params.arguments.limit !== undefined && (!Number.isSafeInteger(params.arguments.limit) || Number(params.arguments.limit) < 1))) {
+        return { success: false, contentItems: [{ type: "inputText", text: "Parámetros de búsqueda no válidos. Usa query como texto y limit como entero positivo, con un máximo de 50 resultados por página. Corrige los parámetros y vuelve a consultar; este error no indica falta de permisos sobre la carpeta." }] };
       }
       const input = {
         roots: context.roots,
         query: params.arguments.query,
-        ...(typeof params.arguments.limit === "number" ? { limit: params.arguments.limit } : {}),
+        // Runtime calls may exceed the advertised page size. Cap work before
+        // either backend; a larger requested page is not a scope violation.
+        ...(typeof params.arguments.limit === "number" ? { limit: Math.min(params.arguments.limit, 50) } : {}),
       };
       if (isServerDirectoryQuery(input.query)) {
         const server = await context.serverFiles?.search(context.roots, input.query, input.limit);

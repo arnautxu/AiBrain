@@ -60,6 +60,21 @@ async function fixture(allow = true, reply?: (request: Record<string, unknown>) 
 }
 
 describe("server document file access", () => {
+  it("caps oversized positive page sizes from the runtime before contacting the server", async () => {
+    const f = await fixture();
+    const response = await f.tool("search", { query: "server:/Y/PRESSUPOSTOS", limit: 100 });
+    expect(response.success).toBe(true);
+    expect(f.requests[0]).toMatchObject({ operation: "search", input: { query: "server:/Y/PRESSUPOSTOS", limit: 50 } });
+    await f.tool("search", { query: "PRESSUPOSTOS", limit: 100 });
+    expect(f.requests[1]).toMatchObject({ operation: "search", input: { query: "PRESSUPOSTOS", limit: 50 } });
+    for (const limit of [0, -1, 1.5, "100"]) {
+      const invalid = await f.tool("search", { query: "server:/", limit });
+      expect(invalid.success).toBe(false);
+      expect(JSON.stringify(invalid)).toContain("Parámetros de búsqueda no válidos");
+    }
+    expect(f.requests).toHaveLength(2);
+  });
+
   it("browses folders outside the old import using the existing chat tool schema", async () => {
     const f = await fixture(true, () => ({ available: true, checkedAt: new Date().toISOString(), results: [
       { scope: "company", path: "server-arnall/Y/PRESSUPOSTOS/Oferta.pdf", kind: "file", size: 42 },
