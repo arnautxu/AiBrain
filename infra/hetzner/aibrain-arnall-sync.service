@@ -2,7 +2,7 @@
 Description=Arnall Windows document synchronization to Hetzner
 Wants=network-online.target
 After=network-online.target docker.service
-StartLimitIntervalSec=3600
+StartLimitIntervalSec=60
 StartLimitBurst=6
 
 [Service]

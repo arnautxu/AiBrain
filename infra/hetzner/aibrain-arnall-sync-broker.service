@@ -1,0 +1,30 @@
+[Unit]
+Description=Bounded on-demand document synchronization for Arnall
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/rdp-sync-broker.py --manifest /etc/aibrain/company-qa/rdp/sync.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=10
+KillMode=control-group
+MemoryMax=128M
+TasksMax=32
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/lib/docker/volumes/aibrain-company-qa-data/_data/locks/document-sync
+
+[Install]
+WantedBy=multi-user.target

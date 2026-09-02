@@ -167,3 +167,78 @@ The full sync started at 08:47:32 UTC and completed at 08:49:17 UTC:
 This establishes successful current transfer and complete synchronization;
 it does not prove the Windows policy survives a future domain-policy refresh
 or a server reboot.
+
+## On-demand synchronization from chat
+
+The company-file `search` and `read` handlers refresh configured imports
+before returning imported text. Search validates the query and server-issued
+roots first, waits for the refresh, then searches the new snapshot, so a file
+missing from the previous copy can be found. Read validates the scope and
+relative path before any request and refreshes only its imported connection.
+No new dynamic tool is required, so existing conversations retain this behavior
+after the application release.
+
+The server-side `OnDemandDocumentSync` client reads root-owned connection
+descriptors under `<dataRoot>/locks/document-sync`. It accepts only descriptors for
+the current installation and scopes authorized by that turn. It sends a
+bounded refresh request over a Unix socket, with installation, connection and
+request identifiers. No Windows path, source text, user prompt, credentials or
+command enters that protocol. Employee sandboxes have no mount of this host
+control directory. The socket and generated descriptor live below the existing
+`locks` exclusion for ephemeral runtime state, so they never enter customer
+backups or restore snapshots.
+
+`rdp-sync-broker.py` runs separately on the host. It accepts only the configured
+application UID through Linux peer credentials and can start only
+`aibrain-arnall-sync.service`. Source roots and publication scopes still come
+from the operator's private manifest. The broker grants no new source access,
+accepts no caller-selected paths and has no TCP listener. The existing shared
+data volume carries the socket; no Docker socket or additional port is exposed.
+
+Concurrent requests join one running operation, including a timer-triggered
+sync. A successful check may be reused for thirty seconds. A failed check has
+a fifteen-second retry cooldown. The client also coalesces overlapping calls
+within a turn and expires completed checks after thirty seconds. The broker
+uses the sync service's start limit of six starts per minute; an hourly limit
+would incorrectly stop normal on-demand usage after a few successful checks.
+The broker waits up to 175 seconds; the client bounds its own wait at 185 seconds and
+honors turn cancellation. A long sync continues independently and reports
+`pending`, never a false successful update. Missing files outside the approved
+source roots are never fetched automatically.
+
+Tool results carry `synchronization` status and a check timestamp. A blocked,
+failed or unavailable source preserves the last verified copy and returns an
+explicit stale-data warning. Missing results during such a failure do not
+prove that the source file is absent. The runtime instructions require the
+assistant to communicate these limits.
+
+Install alongside the existing sync tools, using the root-owned approved
+manifest and application UID/GID already configured:
+
+```sh
+sudo install -d -o root -g 10001 -m 0750 /var/lib/docker/volumes/aibrain-company-qa-data/_data/locks/document-sync
+sudo install -m 0750 infra/hetzner/rdp-sync-broker.py /usr/local/lib/aibrain/rdp-sync-broker.py
+sudo install -m 0644 infra/hetzner/aibrain-arnall-sync.service /etc/systemd/system/aibrain-arnall-sync.service
+sudo install -m 0644 infra/hetzner/aibrain-arnall-sync-broker.service /etc/systemd/system/aibrain-arnall-sync-broker.service
+sudo systemd-analyze verify /etc/systemd/system/aibrain-arnall-sync-broker.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now aibrain-arnall-sync-broker.service
+```
+
+The broker publishes its scope descriptor at startup. Restart it after an
+authorized publication-scope change. Disable it with `systemctl disable --now
+aibrain-arnall-sync-broker.service` if rollback is needed; the timer and verified
+copies remain available. An application rollback ignores the new descriptor.
+The host service installation, application CI/publication/deployment and an
+authenticated chat that triggers a new sync are separate acceptance gates.
+
+Pre-release validation on 2026-09-02: 1,092 application tests passed (nine
+environment-gated tests skipped), 22 Python tests passed, and typecheck, lint,
+contracts, infrastructure validation, production build and automation-worker
+build passed. A real request from app UID 10001 completed a source refresh;
+a different Unix peer UID was rejected. Three simultaneous container requests
+shared one refresh completed at 09:04:20 UTC in about thirty seconds, with
+matching request identifiers and six readable documents. The private host
+record is `on-demand-host-acceptance-20260902.json` in the sync state directory.
+These host checks do not by themselves establish authenticated chat acceptance
+of the new application release.

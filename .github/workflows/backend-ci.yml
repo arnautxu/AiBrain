@@ -47,6 +47,8 @@ jobs:
         run: npm run lint
       - name: Unit, integration and contract tests
         run: npm test
+      - name: Windows import and on-demand broker boundaries
+        run: python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
       - name: Build and smoke-test automation worker
         run: npm run build:automation-worker
       - name: Production build

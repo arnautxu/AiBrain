@@ -6,6 +6,7 @@ import {
   type EnterpriseDocumentRoot,
   type EnterpriseDocumentScope,
 } from "@/documents/enterprise-document-network";
+import type { OnDemandDocumentSync } from "@/documents/on-demand-sync";
 
 export const AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE = "aibrain_company_files";
 
@@ -16,7 +17,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files by name or UTF-8 text. Use this before read when the exact relative path is unknown.",
+    description: "Find authorized business files by name or UTF-8 text. Refreshes configured source copies on demand before returning results. Inspect synchronization warnings; an unavailable source does not prove a file is absent. Use this before read when the exact relative path is unknown.",
     inputSchema: {
       type: "object",
       properties: {
@@ -29,7 +30,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   }, {
     type: "function",
     name: "read",
-    description: "Read one authorized UTF-8 business file using the scope, optional department id and relative path returned by search.",
+    description: "Read one authorized UTF-8 business file using the scope, optional department id and relative path returned by search. Refreshes configured copies first; report any synchronization warning instead of claiming a stale copy is current.",
     inputSchema: {
       type: "object",
       properties: {
@@ -48,6 +49,7 @@ type Context = Readonly<{
   roots: readonly EnterpriseDocumentRoot[];
   runtimeThreadId: string;
   runtimeTurnId: string;
+  sync?: OnDemandDocumentSync;
 }>;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -77,12 +79,17 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
           (params.arguments.limit !== undefined && (!Number.isSafeInteger(params.arguments.limit) || Number(params.arguments.limit) < 1 || Number(params.arguments.limit) > 50))) {
         return failure();
       }
-      const results = await context.network.search({
+      const input = {
         roots: context.roots,
         query: params.arguments.query,
         ...(typeof params.arguments.limit === "number" ? { limit: params.arguments.limit } : {}),
-      });
-      return response({ results });
+      };
+      // Validate query and issued roots before any host effect. Then search the
+      // new atomic snapshot, including files that were missing from the copy.
+      let results = await context.network.search(input);
+      const synchronization = await context.sync?.refresh(context.roots) ?? [];
+      if (synchronization.length) results = await context.network.search(input);
+      return response({ results, synchronization });
     }
     if (params.tool === "read") {
       const keys = Object.keys(params.arguments);
@@ -92,12 +99,22 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
           !(params.arguments.scopeId === undefined || params.arguments.scopeId === null || typeof params.arguments.scopeId === "string")) {
         return failure();
       }
-      return response(await context.network.read({
+      const input = {
         roots: context.roots,
         scope: params.arguments.scope as EnterpriseDocumentScope,
         scopeId: params.arguments.scopeId as string | null | undefined,
         path: params.arguments.path,
-      }));
+      };
+      await context.network.validateSyncRead(input);
+      const synchronization = await context.sync?.refresh(context.roots, input) ?? [];
+      try {
+        return response({ ...await context.network.read(input), synchronization });
+      } catch (error) {
+        if (synchronization.some((item) => item.state !== "current")) {
+          return response({ available: false, synchronization, warning: "No se pudo actualizar ni leer la copia solicitada. No afirmes que el archivo no existe en la fuente." });
+        }
+        throw error;
+      }
     }
     return failure();
   } catch {
