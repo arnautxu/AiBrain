@@ -1406,7 +1406,10 @@ export async function runWorkerCodexTurn(
                   itemId,
                   observed,
                   method === "item/completed" ? "complete" : "running",
-                  { envelope, key: `commentary:${method}:${itemId}` },
+                  {
+                    envelope,
+                    key: `commentary:${method === "item/completed" ? "completed" : "started"}:${itemId}`,
+                  },
                 );
               }
             } else {

@@ -605,6 +605,7 @@ describe("worker Codex turn", () => {
     };
 
     const events: Array<Record<string, unknown>> = [];
+    const projectionKeys: string[] = [];
     const request = chatRequest();
     request.message = "Quin és l'horari d'avui de la botiga Arnall de Palamós? Cerca'l a la web oficial.";
     // Legacy client input cannot weaken the server-owned reviewer selection.
@@ -662,7 +663,10 @@ describe("worker Codex turn", () => {
         }],
       }],
       new AbortController().signal,
-      async (event) => { events.push(event); },
+      async (event, projection) => {
+        events.push(event);
+        if (projection) projectionKeys.push(projection.key);
+      },
       undefined,
       "AiBrain",
       projectGuidance(),
@@ -780,6 +784,8 @@ describe("worker Codex turn", () => {
         detail: expect.stringContaining("Voy a comprobar la fuente autorizada."),
       }),
     }));
+    expect(projectionKeys).toContain("commentary:completed:commentary-1");
+    expect(projectionKeys.every((key) => /^[A-Za-z0-9][A-Za-z0-9._:-]{0,511}$/u.test(key))).toBe(true);
     expect(events).toContainEqual({
       type: "activity",
       item: {
