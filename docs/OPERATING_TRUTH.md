@@ -71,6 +71,15 @@ check for thirty seconds. Failures retain verified copies with explicit stale
 status. See the document-sync runbook for installation and separate host,
 application-release and authenticated chat acceptance gates.
 
+The 2026-09-02 resumed-chat incident exposed a local RPC routing deadlock:
+a previous turn's usage notification waited for the new turn binding while
+blocking the `turn/start` response that supplied it. The candidate correction
+routes responses by request ID independently of ordered thread events, retaining
+contiguous durable acknowledgements and explicit turn ownership. It also makes
+empty company-file searches disclose their limited coverage even after a
+successful refresh. See the document-sync runbook for the observed source
+boundary and incident evidence; production acceptance remains separate.
+
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
 ## Evidence language

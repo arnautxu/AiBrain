@@ -61,6 +61,20 @@ async function fixture(allow = true, reply?: (request: Record<string, unknown>) 
 }
 
 describe("on-demand company document synchronization", () => {
+  it.each(["current", "failed"])("explains limited search coverage when an absent copy has sync state %s", async (state) => {
+    const f = await fixture(true, async () => ({ state, checkedAt: new Date().toISOString(), documents: 6 }));
+    const response = await f.tool("search", { query: "pressupostos" });
+    expect(response.success).toBe(true);
+    const item = response.contentItems[0];
+    if (item.type !== "inputText") throw new Error("Expected text tool result");
+    const payload = JSON.parse(item.text);
+    expect(payload.results).toEqual([]);
+    expect(payload.synchronization[0].state).toBe(state);
+    expect(payload.warning).toContain("no es un inventario completo");
+    expect(payload.warning).toContain("fuera de las carpetas configuradas");
+    expect(f.requests()).toBe(1);
+  });
+
   it("waits for a missing source copy before returning search results, then shares the check with read", async () => {
     let destination = "";
     const f = await fixture(true, async () => {

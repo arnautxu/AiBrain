@@ -318,6 +318,32 @@ describe("AppServerRpcRouter", () => {
     await router.close();
   });
 
+  it("projects a duplicated response once while its first projection is still pending", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const project = vi.fn(async () => gate);
+    const result = router.request({ method: "thread/read", id: "duplicated-read", params: {
+      threadId: "thread-a", includeTurns: true,
+    } }, 1_000, project);
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    const message = { kind: "rpc-response" as const, rpc: {
+      id: "duplicated-read", result: { thread: { id: "thread-a", turns: [] } },
+    } };
+    transport.queue.push(event(1, message));
+    await vi.waitFor(() => expect(project).toHaveBeenCalledOnce());
+    transport.queue.push(event(2, message));
+    await vi.waitFor(() => expect(transport.queue.pending).toBe(0));
+    expect(project).toHaveBeenCalledOnce();
+    expect(transport.acknowledged).toHaveLength(0);
+    release();
+    await expect(result).resolves.toEqual(message.rpc.result);
+    await vi.waitFor(() => expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual([1, 2]));
+    expect(project).toHaveBeenCalledOnce();
+    await router.close();
+  });
+
   it("routes notifications and server approvals only to their bound thread and turn", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
@@ -531,11 +557,20 @@ describe("AppServerRpcRouter", () => {
     await vi.waitFor(() => expect(transport.queue.pending).toBe(0));
     expect(transport.acknowledged).toHaveLength(0);
 
-    expect(() => registration.bindRuntimeTurn("turn-current")).not.toThrow();
-    await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1]));
+    // The binding comes from the RPC response, which arrives after the old
+    // turn's usage event on a real resumed conversation.
+    const started = router.request({
+      method: "turn/start", id: "start-current", params: { threadId: "thread-resumed", input: [] },
+    }, 1_000, () => registration.bindRuntimeTurn("turn-current"));
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    transport.queue.push(event(2, {
+      kind: "rpc-response", rpc: { id: "start-current", result: { turn: { id: "turn-current" } } },
+    }));
+    await expect(started).resolves.toEqual({ turn: { id: "turn-current" } });
+    await vi.waitFor(() => expect(transport.acknowledged.map((item) => item.sequence)).toEqual([1, 2]));
     expect(notification).not.toHaveBeenCalled();
 
-    transport.queue.push(event(2, {
+    transport.queue.push(event(3, {
       kind: "rpc-notification",
       rpc: {
         method: "item/agentMessage/delta",
@@ -549,6 +584,35 @@ describe("AppServerRpcRouter", () => {
     }));
     await vi.waitFor(() => expect(notification).toHaveBeenCalledOnce());
     registration.dispose();
+    await router.close();
+  });
+
+  it("lets a same-thread recovery read complete while a tool handler waits for it", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    await router.start();
+    const handler = vi.fn(async () => {
+      await router.request({ method: "thread/read", id: "recover-tool", params: {
+        threadId: "thread-a", includeTurns: true,
+      } }, 1_000);
+      return { success: true };
+    });
+    router.registerTurn("thread-a", "local-a", {
+      onNotification: vi.fn(), onServerRequest: handler, onFailure: vi.fn(),
+    }).bindRuntimeTurn("turn-a");
+    transport.queue.push(event(1, { kind: "rpc-request", rpc: {
+      method: "item/tool/call", id: "tool-a", params: {
+        threadId: "thread-a", turnId: "turn-a", callId: "tool-a",
+        namespace: "aibrain_company_files", tool: "search", arguments: { query: "test" },
+      },
+    } }));
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    transport.queue.push(event(2, { kind: "rpc-response", rpc: {
+      id: "recover-tool", result: { thread: { id: "thread-a", turns: [] } },
+    } }));
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(2));
+    expect(transport.sent[1]).toMatchObject({ kind: "rpc-response", rpc: { id: "tool-a", result: { success: true } } });
+    await vi.waitFor(() => expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual([1, 2]));
     await router.close();
   });
 

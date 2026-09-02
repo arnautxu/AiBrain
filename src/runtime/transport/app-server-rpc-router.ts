@@ -14,7 +14,6 @@ import type {
 type PendingRequest = {
   method: ClientRequest["method"];
   requestId: string | number;
-  threadId: string | null;
   startedAt: number;
   acceptedAt: number | null;
   activeTurnsAtStart: number;
@@ -107,18 +106,6 @@ function eventScope(rpc: ServerNotification | ServerRequest) {
     turnId = params.turn.id;
   }
   return { threadId: params.threadId, turnId };
-}
-
-function requestThreadId(rpc: ClientRequest) {
-  const params = isRecord(rpc.params) ? rpc.params as unknown as Record<string, unknown> : null;
-  return params && typeof params.threadId === "string"
-    ? params.threadId
-    : null;
-}
-
-function responseThreadId(response: JsonRpcSuccess | JsonRpcFailure) {
-  if (!("result" in response) || !isRecord(response.result) || !isRecord(response.result.thread)) return null;
-  return typeof response.result.thread.id === "string" ? response.result.thread.id : null;
 }
 
 function serverResponseClientRequestId(event: AppServerEvent, request: ServerRequest) {
@@ -318,7 +305,6 @@ export class AppServerRpcRouter {
     const pending: PendingRequest = {
       method: rpc.method,
       requestId: rpc.id,
-      threadId: requestThreadId(rpc),
       startedAt,
       acceptedAt: null,
       activeTurnsAtStart,
@@ -407,10 +393,14 @@ export class AppServerRpcRouter {
 
   private scopeKey(event: AppServerEvent) {
     if (event.message.kind === "rpc-response") {
-      const response = event.message.rpc;
-      const threadId = this.pending.get(response.id)?.threadId ??
-        this.timedOut.get(response.id)?.pending.threadId ?? responseThreadId(response);
-      return threadId ? `thread:${threadId}` : null;
+      // A post-resume notification can wait for the runtime turn identity
+      // supplied by turn/start. Putting that response behind the notification
+      // deadlocks both. Recovery/interrupt RPCs must also remain reachable
+      // while a same-thread handler is awaiting them. Serialize duplicates
+      // per request, independently of ordered thread notifications/tools;
+      // durable ACKs still advance only through contiguous completed events.
+      const id = event.message.rpc.id;
+      return `response:${typeof id}:${id}`;
     }
     const scope = eventScope(event.message.rpc);
     return scope ? `thread:${scope.threadId}` : null;
