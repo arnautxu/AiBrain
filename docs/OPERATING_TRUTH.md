@@ -52,12 +52,17 @@ The 2026-09-02 operator tool and scheduled importer are documented in
 UTC matched Windows/Hetzner SHA-256 and 223219 bytes. A subsequent Windows
 policy regression at 08:28 UTC disabled redirection again (effective
 DriveMapping=1). The importer preserves that boundary and verified copies.
-The user authorized the company-wide audience. One already verified PDF is
-available through the existing scoped document tools, and an authenticated
-live chat read its actual contents and reported the incomplete sync correctly.
-Full synchronization of all six discovered documents remains blocked by the
-Windows policy. No Windows policy or customer source file was modified by
-the tool; Windows read-only ACL verification remains a separate gate.
+The user authorized the company-wide audience. At 08:49 UTC a fresh service
+run completed all six documents: five new verified transfers and one reused
+verified PDF, with no unreadable documents. The complete text snapshot is
+published through the existing scoped document tools. An authenticated chat
+then read the updated status and a newly copied DOCX, confirming six readable
+documents, both folders and the document's actual agreement title.
+The service extractor uses an empty `/proc`, because mounting a process
+filesystem failed inside the protected systemd namespace. PDF and DOCX
+extraction passed under the same service restrictions after this correction.
+No Windows policy or customer source file was modified by the tool;
+Windows read-only ACL verification remains a separate gate.
 
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
