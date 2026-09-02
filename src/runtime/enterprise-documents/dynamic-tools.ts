@@ -17,7 +17,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files by name or UTF-8 text. Refreshes configured source copies on demand before returning results. Inspect synchronization warnings; an unavailable source does not prove a file is absent. Use this before read when the exact relative path is unknown.",
+    description: "Find authorized business files by name or UTF-8 text in configured copies only, not a complete inventory of the source server or drive. Refreshes those copies on demand before returning results. Even a current refresh does not prove a missing file or folder is absent from the source. Use this before read when the exact relative path is unknown.",
     inputSchema: {
       type: "object",
       properties: {
@@ -89,7 +89,11 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
       let results = await context.network.search(input);
       const synchronization = await context.sync?.refresh(context.roots) ?? [];
       if (synchronization.length) results = await context.network.search(input);
-      return response({ results, synchronization });
+      return response({ results, synchronization,
+        ...(results.length === 0 ? {
+          warning: "No se han encontrado coincidencias en las copias y ámbitos autorizados. Esta búsqueda no es un inventario completo del servidor ni de sus unidades. Incluso con synchronization=current, no demuestra que el archivo o carpeta no exista en la fuente; puede estar fuera de las carpetas configuradas, no sincronizado o no ser legible. Explica este límite y solicita revisar la carpeta configurada sin ampliar el acceso por tu cuenta.",
+        } : {}),
+      });
     }
     if (params.tool === "read") {
       const keys = Object.keys(params.arguments);

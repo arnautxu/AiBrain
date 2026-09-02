@@ -242,3 +242,42 @@ matching request identifiers and six readable documents. The private host
 record is `on-demand-host-acceptance-20260902.json` in the sync state directory.
 These host checks do not by themselves establish authenticated chat acceptance
 of the new application release.
+
+## Resumed-chat incident and source coverage, 2026-09-02
+
+Read-only inspection of the installation serving `fb5d3d56d84f6102b5e3207217e6a8d412ba8bde`
+found two separate issues:
+
+- The private access manifest permits operator inventory of `Y:\`, but document
+  reading is restricted to `Y:\MATADERO FRIGORIFICO AVINYO`. The retained root
+  inventory receipt from 06:46 UTC lists a directory named `PRESSUPOSTOS`.
+  It is outside the configured read roots. A ready six-document synchronization
+  therefore cannot answer a request to list `Y:\PRESSUPOSTOS`.
+- The 09:37 UTC follow-up completed in App Server, but was never projected into
+  the chat. Journal event 3474 was the prior turn's `thread/tokenUsage/updated`;
+  event 3477 contained the new `turn/start` response at 09:37:03.399 UTC;
+  event 3571 recorded `turn/completed` at 09:37:20.481 UTC. The app instead
+  reported a 60-second start timeout and a recovery-read timeout. A local
+  regression reproducing this event order failed before the routing fix.
+
+RPC responses now have independent per-request routing queues, so a notification
+waiting for explicit turn binding cannot block the response supplying that
+binding, and a handler can await a same-thread recovery read. Duplicate responses
+remain serialized; durable acknowledgements still advance in sequence only after
+their handlers/projections complete. Notifications and tools retain thread/turn
+ownership checks. Empty document search results explicitly describe their
+limited coverage, including when `synchronization` reports `current`.
+
+This correction does not expand Windows read roots or publication audiences.
+Reading and publishing `Y:\PRESSUPOSTOS` requires an explicit authorized scope
+change, including its intended audience. Application CI, publication, deployment
+and authenticated resume acceptance are separate gates; these incident notes do
+not establish that the candidate correction is live.
+
+Local candidate validation: 99 tests passed across transport, gateway, turn
+execution, durable projection, company documents, multi-user acceptance and
+HTTP contracts. Typecheck, lint of changed TypeScript files, the production
+build, generated Codex contracts and static infrastructure validation passed.
+The two deadlock regression cases failed on the original router and passed
+with the correction. No production state or source policy was changed during
+this investigation.
