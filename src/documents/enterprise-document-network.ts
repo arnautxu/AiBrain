@@ -238,6 +238,18 @@ export class EnterpriseDocumentNetwork {
     });
   }
 
+  async validateSyncRoots(roots: readonly EnterpriseDocumentRoot[]) {
+    for (const root of roots) await this.validateAuthorizedRoot(root);
+  }
+
+  async validateSyncRead(input: { roots: readonly EnterpriseDocumentRoot[]; scope: EnterpriseDocumentScope; scopeId?: string | null; path: string }) {
+    safeRelativePath(input.path);
+    const root = input.roots.find((candidate) => candidate.scope === input.scope &&
+      (input.scope !== "department" || candidate.scopeId === input.scopeId));
+    if (!root) throw new EnterpriseDocumentNetworkError("DOCUMENT_NETWORK_SCOPE_DENIED", "Document scope is not authorized for this turn.");
+    await this.validateAuthorizedRoot(root);
+  }
+
   async read(input: { roots: readonly EnterpriseDocumentRoot[]; scope: EnterpriseDocumentScope; scopeId?: string | null; path: string }) {
     const relativePath = safeRelativePath(input.path);
     const root = input.roots.find((candidate) => candidate.scope === input.scope && (

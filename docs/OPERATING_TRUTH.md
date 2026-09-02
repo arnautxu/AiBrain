@@ -64,6 +64,13 @@ extraction passed under the same service restrictions after this correction.
 No Windows policy or customer source file was modified by the tool;
 Windows read-only ACL verification remains a separate gate.
 
+On-demand document refresh is implemented through the same scoped search/read
+tools and a host-only Unix broker. Requests are bound to the installation and
+authorized turn roots, coalesced across callers, and may reuse a successful
+check for thirty seconds. Failures retain verified copies with explicit stale
+status. See the document-sync runbook for installation and separate host,
+application-release and authenticated chat acceptance gates.
+
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
 ## Evidence language

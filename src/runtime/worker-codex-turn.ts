@@ -104,6 +104,7 @@ import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
+import { OnDemandDocumentSync } from "@/documents/on-demand-sync";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import {
   AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE,
@@ -259,6 +260,7 @@ function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDo
     "Puedes listar y leer sin aprobación el workspace privado del empleado, los archivos del proyecto y sus artefactos, el contexto y conocimiento corporativo de solo lectura, la fuente documental corporativa de solo lectura y los documentos subidos por este empleado.",
     "Las raíces documentales de empresa ya autorizadas para este turno son:\n" + scopedRoots,
     "Usa `aibrain_company_files.search` y `aibrain_company_files.read` para localizarlas y leerlas. Estas herramientas no escriben en las raíces empresariales. No cites rutas internas del servidor. Los borrados, publicaciones y cualquier efecto externo siguen sujetos a la política del turno. Nunca intentes salir de los scopes entregados.",
+    "Las herramientas de archivos actualizan bajo demanda las copias de fuentes configuradas y esperan el resultado antes de buscar o leer. Para solicitudes de archivos actuales, consulta las herramientas de nuevo, sin reutilizar una respuesta anterior. Una comprobación correcta muy reciente puede compartirse entre usuarios. Si synchronization indica failed, pending o unavailable, explica que la copia puede estar desactualizada; no afirmes que un archivo no existe en la fuente. Nunca busques credenciales ni intentes otra vía al servidor.",
     "Este runtime remoto no tiene acceso al disco físico del Mac u otro ordenador personal del usuario. Para consultar esos archivos hace falta un desktop bridge autorizado o que estén sincronizados o montados en una raíz de lectura aprobada; nunca afirmes que puedes verlos si no lo están.",
   ].join("\n");
 }
@@ -1054,6 +1056,7 @@ export async function runWorkerCodexTurn(
   const turnController = new AbortController();
   const forwardExternalAbort = () => turnController.abort();
   const turnSignal = turnController.signal;
+  const enterpriseDocumentSync = enterpriseDocumentNetwork ? new OnDemandDocumentSync(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
   type FinishedTurn = { status: string | null; error: string | null };
   let terminalTurnStatus: FinishedTurn | null = null;
   let finalAnswerRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1663,6 +1666,7 @@ export async function runWorkerCodexTurn(
             return await handleCompanyFilesDynamicToolCall(request.params as never, {
               network: enterpriseDocumentNetwork,
               roots: enterpriseDocumentRoots,
+              sync: enterpriseDocumentSync,
               runtimeThreadId: threadId,
               runtimeTurnId,
             }) as JsonValue;
