@@ -80,6 +80,16 @@ empty company-file searches disclose their limited coverage even after a
 successful refresh. See the document-sync runbook for the observed source
 boundary and incident evidence; production acceptance remains separate.
 
+The user's subsequent source-scope correction authorizes read access across
+the server, not just selected folders. The candidate adds live drive discovery,
+directory browsing, bounded filename search and fresh document reads through
+the same company-file tools. It uses the connected Windows account's existing
+permissions and the already authorized company reader audience, with no source
+writes. It is independent of the small scheduled mirror. See
+[WINDOWS_SERVER_FILES.md](WINDOWS_SERVER_FILES.md) for the separate host broker,
+all-drive source configuration, supported formats, readback evidence and the
+remaining release/application acceptance gates.
+
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
 ## Evidence language

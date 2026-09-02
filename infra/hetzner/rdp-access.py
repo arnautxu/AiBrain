@@ -129,6 +129,7 @@ def build_command(operation, source, root, nonce, access):
     script = ("$ErrorActionPreference='Stop';$r=@{};try{"
               "$d=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + data + "'))|ConvertFrom-Json;"
               "$p=[IO.Path]::GetFullPath($d.path);$b=[IO.Path]::GetFullPath($d.root).TrimEnd('\\');"
+              "$v=Get-PSDrive -Name $p.Substring(0,1);if($v.DisplayRoot-like '\\\\tsclient\\*'){throw 'Redirected drive rejected'};"
               "if($p-ne$b-and!$p.StartsWith($b+'\\',[StringComparison]::OrdinalIgnoreCase)){throw 'Path rejected'};"
               "$c=$p;while($c){$i=Get-Item -Force -LiteralPath $c;"
               "if($i.Attributes-band[IO.FileAttributes]::ReparsePoint){throw 'Reparse point rejected'};"
