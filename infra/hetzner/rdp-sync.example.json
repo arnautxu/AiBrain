@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "connectionId": "arnall",
+  "installationId": "company-qa",
+  "connectionConfig": "/etc/aibrain/company-qa/rdp/endpoints.env",
+  "accessManifest": "/etc/aibrain/company-qa/rdp/access.json",
+  "stateRoot": "/var/lib/aibrain/rdp-sync/arnall",
+  "dataRootHost": "/var/lib/docker/volumes/aibrain-company-qa-data/_data",
+  "publications": [],
+  "appUid": 10001,
+  "appGid": 10001,
+  "maxFiles": 250,
+  "maxTotalBytes": 67108864,
+  "maxDepth": 6
+}
