@@ -78,6 +78,7 @@
     "tailwind-merge": "^3.6.0",
     "thinking-orbs": "^0.3.1",
     "tw-shimmer": "^0.4.12",
+    "use-stick-to-bottom": "^1.1.6",
     "ws": "8.21.3"
   },
   "devDependencies": {

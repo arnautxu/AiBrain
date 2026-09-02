@@ -1,6 +1,8 @@
 "use client";
 
 import { BookOpenText, CalendarBlank, CaretDown, File, Globe, LinkSimple } from "@phosphor-icons/react";
+import { WebSearch } from "@/components/assistant-ui/elements/web-search";
+import { DocumentReference } from "@/components/assistant-ui/elements/document-reference";
 import type { TurnSource } from "@/lib/chat-contract";
 
 function sourceLabel(source: TurnSource) {
@@ -26,6 +28,8 @@ export function TurnSourceChips({ sources }: { sources: readonly TurnSource[] })
         </summary>
         <ol className="mt-1 grid gap-0.5" aria-label="Lista de fuentes de la respuesta">
           {sources.map((source, index) => {
+            if (source.kind === "web") return <li key={source.id}><WebSearch results={[{ id: source.id, title: source.title, domain: source.domain, url: source.url, citationIndex: index + 1 }]} /></li>;
+            if (source.kind === "file") return <li key={source.id}><DocumentReference title={source.title} url={source.url} snippet={source.snippet} citationIndex={index + 1} /></li>;
             const content = (
               <>
                 <span className="grid size-6 shrink-0 place-items-center rounded-full bg-[var(--surface-muted)] text-[var(--text-secondary)]">{sourceIcon(source, 13)}</span>

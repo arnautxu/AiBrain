@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { useState } from "react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 vi.mock("thinking-orbs", () => ({ ThinkingOrb: () => null }));
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { baseBrainManifest, type BrainPreferences } from "@/config/brain";
@@ -141,7 +141,16 @@ function renderWorkspace(
 
 afterEach(cleanup);
 
+afterAll(() => vi.unstubAllGlobals());
+
 beforeAll(() => {
+  // jsdom has no layout observer. Actual scroll following is verified in
+  // conversation.spec.ts with Chromium; keep the hook active in these tests.
+  vi.stubGlobal("ResizeObserver", class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
   Object.defineProperty(Element.prototype, "scrollIntoView", { value: vi.fn(), configurable: true });
 });
 
