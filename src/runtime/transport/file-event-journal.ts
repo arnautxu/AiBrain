@@ -144,33 +144,40 @@ export class FileTransportEventJournal implements TransportEventJournal {
 
   async markDelivered(event: AppServerEvent) {
     const validated = appServerEventSchema.parse(event);
+    return this.markDeliveredIdentity(validated.eventId, validated.sequence);
+  }
+
+  async markDeliveredIdentity(eventId: string, sequence: number) {
+    if (!eventId || !Number.isSafeInteger(sequence) || sequence < 1) {
+      throw new TransportProtocolError("Transport delivery identity is invalid.");
+    }
     await this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
       const cursor = await this.loadDeliveryCursor();
-      if (cursor?.eventId === validated.eventId && cursor.sequence === validated.sequence) return;
+      if (cursor?.eventId === eventId && cursor.sequence === sequence) return;
       const expected = (cursor?.sequence ?? 0) + 1;
-      if (validated.sequence !== expected) {
+      if (sequence !== expected) {
         throw new TransportProtocolError(
-          `Transport delivery expected sequence ${expected}, received ${validated.sequence}.`,
+          `Transport delivery expected sequence ${expected}, received ${sequence}.`,
         );
       }
-      const verifiedEventId = this.verifiedEvents.get(validated.sequence);
+      const verifiedEventId = this.verifiedEvents.get(sequence);
       const persisted = verifiedEventId === undefined
-        ? (await this.readEvents(validated.sequence - 1, 1))[0]
-        : validated;
-      if (!persisted || persisted.eventId !== validated.eventId || persisted.sequence !== validated.sequence ||
-          (verifiedEventId !== undefined && verifiedEventId !== validated.eventId)) {
+        ? (await this.readEvents(sequence - 1, 1))[0]
+        : null;
+      if ((verifiedEventId === undefined && (!persisted || persisted.eventId !== eventId || persisted.sequence !== sequence)) ||
+          (verifiedEventId !== undefined && verifiedEventId !== eventId)) {
         throw new TransportProtocolError("Cannot acknowledge an event absent from the durable journal.");
       }
       await atomicWriteJson(this.deliveryCursorPath, {
         schemaVersion: 1,
-        eventId: validated.eventId,
-        sequence: validated.sequence,
+        eventId,
+        sequence,
       }, deliveryCursorSchema, { mode: 0o600 });
-      this.verifiedEvents.delete(validated.sequence);
-      const compactionBoundary = validated.sequence % this.maxRetainedDeliveredEvents === 0
-        || validated.sequence === this.maxRetainedDeliveredEvents * 2 + 1;
+      this.verifiedEvents.delete(sequence);
+      const compactionBoundary = sequence % this.maxRetainedDeliveredEvents === 0
+        || sequence === this.maxRetainedDeliveredEvents * 2 + 1;
       if (!compactionBoundary) return;
-      const retainAfter = Math.max(0, validated.sequence - this.maxRetainedDeliveredEvents);
+      const retainAfter = Math.max(0, sequence - this.maxRetainedDeliveredEvents);
       await this.journal.compact((entries) => {
         if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
         const retained = entries
@@ -183,6 +190,51 @@ export class FileTransportEventJournal implements TransportEventJournal {
           return undefined;
         }
         return retained;
+      });
+    });
+  }
+
+  /**
+   * Reconcile the gateway delivery cursor with a client resume cursor that was
+   * already validated against this durable journal. Event acknowledgements are
+   * cumulative: after a reconnect the client may have compacted intermediate
+   * events, so requiring one ACK for every historical sequence can leave the
+   * gateway cursor permanently behind.
+   */
+  async reconcileDeliveryCursor(eventId: string, sequence: number) {
+    if (!eventId || !Number.isSafeInteger(sequence) || sequence < 1) {
+      throw new TransportProtocolError("Transport delivery identity is invalid.");
+    }
+    await this.lockManager.withLock(`transport-delivery:${this.deliveryCursorPath}`, async () => {
+      const cursor = await this.loadDeliveryCursor();
+      if (cursor && sequence < cursor.sequence) {
+        throw new TransportProtocolError("Transport resume cursor is behind the delivery cursor.");
+      }
+      if (cursor?.eventId === eventId && cursor.sequence === sequence) return;
+      if (cursor?.sequence === sequence) {
+        throw new TransportProtocolError("Transport resume cursor conflicts with the delivery cursor.");
+      }
+      const persisted = (await this.readEvents(sequence - 1, 1))[0];
+      if (!persisted || persisted.eventId !== eventId || persisted.sequence !== sequence) {
+        throw new TransportProtocolError("Cannot reconcile an event absent from the durable journal.");
+      }
+      await atomicWriteJson(this.deliveryCursorPath, {
+        schemaVersion: 1,
+        eventId,
+        sequence,
+      }, deliveryCursorSchema, { mode: 0o600 });
+      for (const verifiedSequence of this.verifiedEvents.keys()) {
+        if (verifiedSequence <= sequence) this.verifiedEvents.delete(verifiedSequence);
+      }
+      const retainAfter = Math.max(0, sequence - this.maxRetainedDeliveredEvents);
+      await this.journal.compact((entries) => {
+        if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
+        const retained = entries
+          .map((entry) => entry.payload)
+          .filter((event) => event.sequence > retainAfter);
+        return entries.length - retained.length >= this.maxRetainedDeliveredEvents
+          ? retained
+          : undefined;
       });
     });
   }

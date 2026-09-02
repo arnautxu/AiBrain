@@ -325,6 +325,7 @@ export class PrivateWorkerGateway {
   // thread/start, thread/read and turn/interrupt for every chat of the user.
   private appServerOutputChain = Promise.resolve();
   private clientFrameChain = Promise.resolve();
+  private eventAcknowledgementChain = Promise.resolve();
   private eventRecordChain = Promise.resolve();
   private readonly inFlightRequests = new Set<string>();
   private readonly pendingResponseConfirmations = new Map<string, string>();
@@ -477,6 +478,7 @@ export class PrivateWorkerGateway {
     await Promise.all([
       this.appServerOutputChain.catch(() => undefined),
       this.clientFrameChain.catch(() => undefined),
+      this.eventAcknowledgementChain.catch(() => undefined),
       this.eventRecordChain.catch(() => undefined),
     ]);
     this.endpoint = null;
@@ -510,6 +512,13 @@ export class PrivateWorkerGateway {
             await this.resume(socket, value.afterEventId, value.afterSequence);
             return;
           }
+          if (value.type === "event-ack") {
+            const acknowledgement = this.eventAcknowledgementChain
+              .then(() => this.handleClientFrame(socket, value));
+            this.eventAcknowledgementChain = acknowledgement.catch(() => undefined);
+            void acknowledgement.catch(() => socket.close(1002, "Protocol error"));
+            return;
+          }
           await this.handleClientFrame(socket, value);
         })
         .catch(() => socket.close(1002, "Protocol error"));
@@ -538,6 +547,7 @@ export class PrivateWorkerGateway {
         throw new Error("Replay cursor is not present in the worker journal.");
       }
       sequence = afterSequence as number;
+      await this.events.reconcileDeliveryCursor(afterEventId, sequence);
     }
     if (cursor && sequence > cursor.sequence) throw new Error("Replay cursor is ahead of the worker journal.");
     this.send(socket, {
@@ -570,12 +580,7 @@ export class PrivateWorkerGateway {
       if (typeof value.eventId !== "string" || !Number.isSafeInteger(value.sequence)) {
         throw new Error("Event acknowledgement is invalid.");
       }
-      const acknowledged = (await this.events.readEvents((value.sequence as number) - 1, 1))[0];
-      if (!acknowledged || acknowledged.sequence !== value.sequence ||
-          acknowledged.eventId !== value.eventId) {
-        throw new Error("Event acknowledgement does not match the durable gateway journal.");
-      }
-      await this.events.markDelivered(acknowledged);
+      await this.events.markDeliveredIdentity(value.eventId, value.sequence as number);
       return;
     }
     if (value.type !== "request") throw new Error("Unsupported client frame.");

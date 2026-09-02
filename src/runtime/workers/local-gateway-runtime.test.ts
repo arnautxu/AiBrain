@@ -336,6 +336,40 @@ describe("private per-user worker gateway", () => {
     }
   });
 
+  it("admits a new chat while an earlier event acknowledgement is still being persisted", async () => {
+    const worker = gateway();
+    await worker.start();
+    const client = transport(worker);
+    const gatewayEventsPath = path.join(context.transportAudit, "gateway-events.jsonl");
+    const deliveryLocks = new ResourceLockManager({
+      rootDirectory: path.join(context.transportAudit, "gateway-locks"),
+    });
+    const lease = await deliveryLocks.acquire(
+      `transport-delivery:${gatewayEventsPath}.delivery.json`,
+    );
+    try {
+      await client.connect();
+      await client.send(initializeRequest("ack-blocked-chat"));
+      const first = await nextEvent(client);
+      expect(first.value).toMatchObject({
+        message: { kind: "rpc-response", rpc: { id: "ack-blocked-chat" } },
+      });
+
+      const newChat = client.send(initializeRequest("chat-after-blocked-ack"));
+      await expect(Promise.race([
+        newChat,
+        new Promise((_, reject) => setTimeout(
+          () => reject(new Error("event acknowledgement blocked new chat admission")),
+          1_000,
+        )),
+      ])).resolves.toBeUndefined();
+    } finally {
+      await lease.release();
+      await client.close();
+      await worker.stop();
+    }
+  }, PROCESS_RECOVERY_TEST_TIMEOUT_MS);
+
   it("rejects unauthenticated WebSockets before protocol negotiation", async () => {
     const worker = gateway();
     await worker.start();
