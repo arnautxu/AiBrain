@@ -383,6 +383,17 @@ def extract(source, suffix, ocr_languages="spa+cat+eng", run=command):
             encoding="utf-32"
         elif raw.startswith((b"\xff\xfe",b"\xfe\xff")):
             encoding="utf-16"
+        elif suffix!='.json' and len(raw)>=4 and len(raw)%2==0:
+            # Some Windows CSV exports omit the BOM. Accept only the narrow,
+            # unambiguous zero-high-byte layout (U+0001..U+00FF), not arbitrary
+            # binary data guessed to be Unicode. Other layouts remain rejected.
+            low,high=raw[::2],raw[1::2]
+            if high.count(0)==len(high) and 0 not in low:
+                encoding='utf-16-le'
+            elif low.count(0)==len(low) and 0 not in high:
+                encoding='utf-16-be'
+            if encoding.startswith('utf-16-'):
+                warnings.append({'code':'ASSUMED_'+encoding.upper().replace('-','_')+'_WITHOUT_BOM_ENCODING'})
         try:
             text=raw.decode(encoding)
         except UnicodeError:

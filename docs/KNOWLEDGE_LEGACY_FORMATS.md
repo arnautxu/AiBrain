@@ -6,6 +6,13 @@ installation acceptance requirements. Original Windows files and permissions rem
 
 ## HTML exports with XLS filenames
 
+Reader revision `located-v7` also accepts Windows text/CSV exports without a BOM
+when every high byte is zero and no low byte is zero, in either byte order. This
+narrow U+0001..U+00FF layout is decoded losslessly as UTF-16 and carries an explicit
+assumed-encoding warning. Binary/control-character and credential guards still
+run after decoding. Wider or ambiguous BOM-less Unicode layouts are not guessed;
+JSON keeps its existing encoding policy. CSV rows and cell delimiters are retained.
+
 Reader revision `located-v6` recognizes an explicit HTML signature in `.xls`
 exports before invoking the BIFF reader. It extracts inert text in document order
 with `html:block:N` locators. Scripts, style, metadata and fallback content are
