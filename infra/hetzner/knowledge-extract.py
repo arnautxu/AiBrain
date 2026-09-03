@@ -135,6 +135,60 @@ class RtfHtml(HTMLParser):
         if self.cell is not None:self.cell.append(data)
 
 
+class SpreadsheetHtml(HTMLParser):
+    """Read HTML exports named .xls as inert, located text.
+
+    Legacy exports may contain malformed/nested layout tables. Do not invent
+    spreadsheet coordinates or numeric types from their visual arrangement.
+    """
+    boundaries = {'p','div','br','table','tr','td','th','li','h1','h2','h3','h4','h5','h6'}
+    ignored = {'head','script','style','template','noscript','noframes'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts=[];self.blocks=[];self.suppressed=[];self.size=0;self.nodes=0
+        self.dependencies=False
+
+    def flush(self):
+        text=checked_text(''.join(self.parts)).strip();self.parts=[]
+        if text:self.blocks.append(text)
+        require(len(self.blocks)<=100000,'CELL_LIMIT')
+
+    def handle_starttag(self,tag,attrs):
+        self.nodes+=1;require(self.nodes<=300000,'CELL_LIMIT')
+        if tag in {'frame','iframe','object','embed'}:self.dependencies=True
+        if self.suppressed:
+            if tag in self.ignored:self.suppressed.append(tag)
+            return
+        if tag in self.ignored:self.flush();self.suppressed.append(tag);return
+        if tag in self.boundaries:self.flush()
+
+    def handle_endtag(self,tag):
+        if self.suppressed:
+            if tag==self.suppressed[-1]:self.suppressed.pop()
+            return
+        if tag in self.boundaries:self.flush()
+
+    def handle_data(self,data):
+        if self.suppressed:return
+        self.size+=len(data.encode());require(self.size<=MAX_TEXT,'TEXT_TOO_LARGE')
+        self.parts.append(data)
+
+
+def html_spreadsheet(source):
+    raw=source.read_bytes()
+    if not re.match(br'\s*(?:\xef\xbb\xbf)?\s*(?:<!doctype\s+html\b|<html\b|<table\b)',raw,re.I):
+        return None
+    warnings=[{'code':'HTML_XLS_TEXT_ONLY_TABLE_STRUCTURE_AND_NUMERIC_TYPES_UNVERIFIED'}]
+    try:text=raw.decode('utf-8-sig')
+    except UnicodeError:
+        text=raw.decode('cp1252');warnings.append({'code':'ASSUMED_WINDOWS_1252_ENCODING'})
+    parser=SpreadsheetHtml();parser.feed(text);parser.close();parser.flush()
+    require(parser.blocks,'HTML_EXTERNAL_DEPENDENCIES_UNAVAILABLE' if parser.dependencies else 'EMPTY_TEXT')
+    if parser.dependencies:warnings.append({'code':'HTML_EXTERNAL_DEPENDENCIES_NOT_FETCHED'})
+    return parser.blocks,warnings
+
+
 def extract(source, suffix, ocr_languages="spa+cat+eng", run=command):
     require(suffix in FORMATS and source.stat().st_size <= base.MAX_INPUT,"FORMAT_OR_SIZE_REJECTED")
     require(re.fullmatch(r"[a-z]{3}(?:\+[a-z]{3}){0,3}",ocr_languages),"INVALID_OCR_LANGUAGES")
@@ -150,7 +204,12 @@ def extract(source, suffix, ocr_languages="spa+cat+eng", run=command):
             text_bytes += len(content.encode())
         require(text_bytes <= MAX_TEXT,"TEXT_TOO_LARGE")
 
-    if suffix in IMAGE_FORMATS:
+    html = html_spreadsheet(source) if suffix == '.xls' else None
+    if html is not None:
+        blocks,html_warnings=html
+        for number,text in enumerate(blocks,1):append(f'html:block:{number}',text)
+        warnings.extend(html_warnings)
+    elif suffix in IMAGE_FORMATS:
         image_dimensions(source,suffix)
         with tempfile.TemporaryDirectory(prefix='knowledge-image-') as temporary:
             output=Path(temporary)/'ocr'
