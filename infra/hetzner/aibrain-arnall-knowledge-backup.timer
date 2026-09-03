@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily verified local Arnall knowledge backup
+
+[Timer]
+OnCalendar=*-*-* 03:15:00 UTC
+RandomizedDelaySec=900
+Persistent=true
+Unit=aibrain-arnall-knowledge-backup.service
+
+[Install]
+WantedBy=timers.target

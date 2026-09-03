@@ -1,0 +1,28 @@
+[Unit]
+Description=Verified local Arnall knowledge backup and bounded retention
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-backup-maintain.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --bindings /etc/aibrain/company-qa/rdp/knowledge-bindings.json --backups /var/lib/aibrain/knowledge-backups/company-qa --keep 7 --min-age-seconds 604800 --max-bytes 8589934592
+TimeoutStartSec=1200
+TimeoutStopSec=15
+KillMode=control-group
+Nice=15
+CPUQuota=25%
+MemoryMax=512M
+TasksMax=32
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+# SQLite read transactions may need existing WAL/shared-memory sidecars.
+ReadWritePaths=/var/lib/aibrain/knowledge /var/lib/aibrain/knowledge-backups/company-qa

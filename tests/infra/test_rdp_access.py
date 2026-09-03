@@ -16,6 +16,27 @@ spec.loader.exec_module(rdp)
 
 
 class RdpAccessTests(unittest.TestCase):
+    def test_xls_export_uses_same_root_guard_and_other_formats_stay_denied(self):
+        access={'inventoryRoots':[r'Y:\Approved'],'readRoots':[r'Y:\Approved'],
+            'target':'ts','maxEntries':20,'maxFileBytes':1024}
+        cases=[(r'Y:\Approved\Example.XLS',True),(r'Y:\Other\Example.xls',False),
+            (r'Y:\Approved\Example.exe',False),(r'Y:\Approved\Example.doc',True),
+            (r'Y:\Approved\Example.rtf',True),(r'Y:\Approved\Example.xlsm',False),
+            (r'Y:\Approved\Example.BMP',True),(r'Y:\Other\Example.bmp',False),
+            (r'Y:\Approved\Example.png',True),(r'Y:\Approved\Example.jpeg',True),
+            (r'Y:\Approved\Example.tiff',False)]
+        for source,allowed in cases:
+            with self.subTest(source=source),tempfile.TemporaryDirectory() as folder:
+                session=MagicMock()
+                session.__enter__.side_effect=RuntimeError('FICTIONAL_CONNECTION_BOUNDARY')
+                with patch.object(rdp.os,'geteuid',return_value=0),patch.object(rdp.os,'umask'),\
+                     patch.object(rdp,'load_config',return_value=({}, {},access,Path(folder))),\
+                     patch.object(rdp,'RdpSession',return_value=session) as connection,\
+                     patch.object(rdp.signal,'signal'),patch.object(rdp.signal,'alarm'),\
+                     patch.object(rdp.sys,'argv',['rdp-access','copy','--path',source,'--config','fake','--access','fake']):
+                    with self.assertRaises(RuntimeError if allowed else ValueError):rdp.main()
+                    self.assertEqual(connection.call_count,1 if allowed else 0)
+
     def test_traversal_streams_unc_and_sensitive_paths_are_rejected(self):
         for value in [
             r"Y:\Approved\..\Other\x.txt", r"Y:\Approved\x.txt:stream",
