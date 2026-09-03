@@ -129,6 +129,7 @@ Instal·lació del candidat revisat:
 
     sudo install -d -m 0750 /usr/local/lib/aibrain
     sudo install -m 0750 infra/hetzner/rdp-access.py /usr/local/lib/aibrain/rdp-access.py
+    sudo install -m 0750 infra/hetzner/rdp-frame.py /usr/local/lib/aibrain/rdp-frame.py
     sudo install -m 0600 infra/hetzner/rdp-access.example.json \
       /etc/aibrain/<installation>/rdp/access.json
 
@@ -235,3 +236,10 @@ lectura del compte Windows encara requereixen verificació independent.
 Prova local de les fronteres:
 
     python3 -m unittest discover -s tests/infra -p 'test_rdp_access.py' -v
+
+El candidat inclou `rdp-frame.py` al costat de `rdp-access.py`. Aquest helper
+comprova que la pantalla local Xvfb no sigui negra abans d’enviar tecles a Windows;
+només retorna un booleà i no guarda captures. Cal instal·lar tots dos fitxers junts.
+La sessió també usa un HOME temporal privat per al client natiu; no canvia el HOME
+de l’operador ni relaxa ProtectHome. Aquestes garanties no substitueixen la
+comprovació del nonce i de la resposta de cada operació.

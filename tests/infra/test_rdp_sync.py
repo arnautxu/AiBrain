@@ -24,6 +24,16 @@ extract = module("rdp_extract", "rdp-extract.py")
 
 
 class SyncTests(unittest.TestCase):
+    def test_busy_operator_does_not_consume_document_retry_attempts(self):
+        from unittest.mock import MagicMock
+        child=MagicMock()
+        child.communicate.return_value=(b"",b"AIBRAIN_RDP_ACCESS_FAILED: [Errno 11] Resource temporarily unavailable")
+        child.returncode=1
+        with patch.object(sync.subprocess,"Popen",return_value=child) as start:
+            with self.assertRaises(BlockingIOError):
+                sync.rdp_call({"connectionConfig":"/private/config","accessManifest":"/private/access"},"copy",r"Y:\Approved\file.pdf")
+            self.assertEqual(start.call_count,1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -81,6 +91,34 @@ class SyncTests(unittest.TestCase):
             sync.sync(self.manifest, lambda *_: {"truncated": True, "entries": []}, self.extractor)
         self.assertEqual((self.state / "snapshot.json").read_bytes(), old)
         self.assertEqual(len(self.copies), 2)
+
+    def test_source_contention_preserves_snapshot_and_does_not_count_as_failure(self):
+        previous=sync.sync(self.manifest,self.call,self.extractor)
+        snapshot=(self.state/'snapshot.json').read_bytes()
+        cache=(self.state/'cache.json').read_bytes()
+        def busy(*args):raise BlockingIOError('RDP_OPERATOR_BUSY')
+        with patch.object(sync,'refresh_public_status') as publication:
+            result=sync.sync(self.manifest,busy,self.extractor)
+        self.assertEqual(result['state'],'deferred')
+        self.assertEqual(result['error'],'RDP_OPERATOR_BUSY')
+        self.assertEqual(result['lastSuccess'],previous['lastSuccess'])
+        self.assertEqual(result['consecutiveFailures'],previous['consecutiveFailures'])
+        self.assertEqual((self.state/'snapshot.json').read_bytes(),snapshot)
+        self.assertEqual((self.state/'cache.json').read_bytes(),cache)
+        publication.assert_not_called()
+
+    def test_contention_after_one_copy_retains_resumable_cache_without_partial_publication(self):
+        def call(manifest,operation,source):
+            if operation=='copy' and source.endswith('second.txt'):raise BlockingIOError('RDP_OPERATOR_BUSY')
+            return self.call(manifest,operation,source)
+        result=sync.sync(self.manifest,call,self.extractor)
+        self.assertEqual(result['state'],'deferred')
+        self.assertNotIn('lastSuccess',result)
+        self.assertFalse((self.state/'snapshot.json').exists())
+        self.assertEqual(len(json.loads((self.state/'cache.json').read_text())),1)
+        result=sync.sync(self.manifest,self.call,self.extractor)
+        self.assertEqual(result['reused'],1)
+        self.assertEqual(result['copied'],1)
 
     def test_unchanged_run_does_not_copy_again(self):
         sync.sync(self.manifest, self.call, self.extractor)

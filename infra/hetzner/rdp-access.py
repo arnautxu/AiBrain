@@ -29,7 +29,7 @@ CONFIG_KEYS = {"AIBRAIN_RDP_HOST", "AIBRAIN_RDP_CREDENTIAL_FILE", "AIBRAIN_RDP_P
 CREDENTIAL_KEYS = {"AIBRAIN_RDP_USERNAME", "AIBRAIN_RDP_DOMAIN", "AIBRAIN_RDP_PASSWORD"}
 SENSITIVE = re.compile(r"(^|[._ -])(secrets?|credentials?|passwords?|passwd|tokens?|private.?key)([._ -]|$)", re.I)
 DEVICE_NAME = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$", re.I)
-COPY_EXTENSIONS = {".txt", ".csv", ".json", ".md", ".pdf", ".xlsx", ".docx", ".png", ".jpg", ".jpeg"}
+COPY_EXTENSIONS = {".txt", ".csv", ".json", ".md", ".pdf", ".xlsx", ".xls", ".doc", ".rtf", ".docx", ".png", ".jpg", ".jpeg", ".bmp"}
 
 
 def require(condition, message):
@@ -204,10 +204,34 @@ class RdpSession:
         # FreeRDP 3.30 emits press/release with a fixed 10 ms per character.
         time.sleep(len(raw) * 0.010 + 0.5)
 
+    def wait_for_desktop(self, timeout=60):
+        # The keyboard pipe and X window can exist while the remote frame is
+        # still black. Never send Run/paste keys into that unready session.
+        deadline, ready = time.monotonic() + timeout, 0
+        while time.monotonic() < deadline:
+            require(self.rdp.poll() is None, "RDP_CONNECTION_LOST")
+            result = self.run([sys.executable, str(Path(__file__).with_name("rdp-frame.py"))], timeout=5)
+            try:
+                frame = json.loads(result.stdout) if result.returncode == 0 else {}
+            except (ValueError, UnicodeError):
+                frame = {}
+            ready = ready + 1 if isinstance(frame, dict) and frame.get("visible") is True else 0
+            if ready >= 3:
+                return
+            time.sleep(0.5)
+        raise ValueError("RDP_DESKTOP_NOT_READY")
+
     def __enter__(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aibrain-rdp-access-")
         self.work = Path(self.temp.name)
         self.env = dict(os.environ)
+        # Native FreeRDP requires an accessible HOME even with explicit credentials
+        # and a pinned certificate. ProtectHome hides the operator home in systemd.
+        # Bind only this child environment to the existing private temporary root.
+        self.env.update(HOME=str(self.work), XDG_CONFIG_HOME=str(self.work / "config"),
+                        XDG_CACHE_HOME=str(self.work / "cache"))
+        for name in ("config", "cache"):
+            (self.work / name).mkdir(mode=0o700)
         self.pipe = self.work / "keyboard.pipe"
         auth = self.work / "Xauthority"
         auth.touch(mode=0o600)
@@ -249,6 +273,7 @@ class RdpSession:
             windows = self.run(["xdotool", "search", "--onlyvisible", "--pid", str(rdp.pid)], check=True).stdout.splitlines()
             require(windows, "RDP window unavailable")
             self.run(["xdotool", "windowfocus", windows[-1].decode()], check=True)
+            self.wait_for_desktop()
             self.key("Escape")
             self.key("Escape")
             self.key("super+r")

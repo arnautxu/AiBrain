@@ -8,6 +8,7 @@ import {
 } from "@/documents/enterprise-document-network";
 import type { OnDemandDocumentSync } from "@/documents/on-demand-sync";
 import { isServerDirectoryQuery, isServerFilePath, type ServerDocumentFiles } from "@/documents/server-files";
+import { isKnowledgeFilePath, type KnowledgeCalculation, type KnowledgeDocumentFiles } from "@/documents/knowledge-files";
 
 export const AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE = "aibrain_company_files";
 
@@ -18,7 +19,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files in local text and, when connected, by name on the Windows server. To browse live drives use query server:/; to list a folder use server:/Y/PRESSUPOSTOS or a Windows drive path. Follow nextQuery for more entries. Recursive name searches are bounded: inspect server.limited and warnings. Use the returned server-connection/... path with read; no Windows writes are available.",
+    description: "Find authorized business files in the indexed knowledge library and local text. Indexed results carry source versions, observation dates and locators; read their knowledge- paths with the returned scope and scopeId. To browse live drives use query server:/; to list a folder use server:/Y/PRESSUPOSTOS or a Windows drive path. Follow nextQuery for more entries. Recursive name searches are bounded: inspect server.limited and warnings. No Windows writes are available.",
     inputSchema: {
       type: "object",
       properties: {
@@ -31,7 +32,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   }, {
     type: "function",
     name: "read",
-    description: "Read an authorized business file using the scope and path returned by search. Paths starting server- read fresh Windows files through the read-only connection; follow nextPath for more text and compare hashes across parts. Other paths read scoped UTF-8 copies refreshed first. Report unavailable formats, source failures and synchronization warnings accurately.",
+    description: "Read an authorized business file using the scope, scopeId and path returned by search. Paths starting knowledge- read version-bound indexed copies with page/paragraph/cell locators; these are not fresh source checks. Follow tables[].path to inspect preserved source tables and nextPath for additional text or table entries. Paths starting server- read fresh Windows files through the read-only connection. Other paths read scoped UTF-8 copies refreshed first. Report unavailable formats, source failures, previewTruncated and synchronization warnings accurately.",
     inputSchema: {
       type: "object",
       properties: {
@@ -40,6 +41,28 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
         path: { type: "string", minLength: 1, maxLength: 1024 },
       },
       required: ["scope", "path"],
+      additionalProperties: false,
+    },
+  }, {
+    type: "function",
+    name: "calculate",
+    description: "Calculate a decimal sum, count, minimum, maximum or mean from an indexed source table after inspecting it with read. Use the returned scope, scopeId, knowledge path and table index. Explicitly select at most 500 unique XLSX cell addresses, or 1-based CSV/DOCX row numbers and a column. Exclude headers and totals deliberately. Set the numeric locale: es uses decimal comma, en uses decimal point and comma grouping, canonical has no grouping. Non-numeric selections fail. Saved formulas are not recalculated. Explain the selection, source version, units and coverage; this never infers business meaning or writes source files.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["company", "department", "project", "private"] },
+        scopeId: { type: ["string", "null"], maxLength: 36 },
+        path: { type: "string", minLength: 1, maxLength: 1024 },
+        tableIndex: { type: "integer", minimum: 0, maximum: 9999 },
+        selection: { type: "object", properties: {
+          cells: { type: "array", items: { type: "string", maxLength: 16 }, minItems: 1, maxItems: 500 },
+          rows: { type: "array", items: { type: "integer", minimum: 1, maximum: 1000000 }, minItems: 1, maxItems: 500 },
+          column: { type: "integer", minimum: 1, maximum: 10000 },
+        }, additionalProperties: false },
+        operation: { type: "string", enum: ["sum", "count", "min", "max", "mean"] },
+        locale: { type: "string", enum: ["canonical", "es", "en"] },
+      },
+      required: ["scope", "path", "tableIndex", "selection", "operation", "locale"],
       additionalProperties: false,
     },
   }],
@@ -52,6 +75,7 @@ type Context = Readonly<{
   runtimeTurnId: string;
   sync?: OnDemandDocumentSync;
   serverFiles?: ServerDocumentFiles;
+  knowledgeFiles?: KnowledgeDocumentFiles;
 }>;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -97,6 +121,12 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
       // new atomic snapshot, including files that were missing from the copy.
       let results = await context.network.search(input);
       const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
+      const knowledge = await context.knowledgeFiles?.search(context.roots, input.query, input.limit);
+      if (server?.available) return response({ results: [...results, ...(server.results ?? []), ...(knowledge?.available ? knowledge.results ?? [] : [])], server,
+        ...(knowledge?.available ? { knowledge } : {}),
+        warning: server.warning ?? "Resultados del mapa del servidor y de copias autorizadas; revisa cobertura y fechas antes de afirmar que el origen está actualizado." });
+      if (knowledge?.available) return response({ results: [...results, ...(knowledge.results ?? [])], knowledge,
+        warning: "Resultados de copias indexadas autorizadas, con cobertura parcial y fechas de observación. La búsqueda del servidor no está disponible; un resultado vacío no demuestra ausencia en el origen." });
       if (server) return response({ results: [...results, ...(server.results ?? [])], server,
         warning: "Los resultados locales son copias. Los resultados del servidor reflejan la consulta indicada; revisa limited, truncated y nextQuery antes de afirmar que una búsqueda es completa." });
       const synchronization = await context.sync?.refresh(context.roots) ?? [];
@@ -121,6 +151,10 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         scopeId: params.arguments.scopeId as string | null | undefined,
         path: params.arguments.path,
       };
+      if (isKnowledgeFilePath(input.path)) {
+        return response(await context.knowledgeFiles?.read(context.roots, input) ??
+          { available: false, warning: "El índice no está disponible para este turno." });
+      }
       if (isServerFilePath(input.path)) {
         const result = await context.serverFiles?.read(context.roots, input);
         return response(result ?? { available: false, warning: "El acceso directo al servidor no está disponible para este turno." });
@@ -135,6 +169,27 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         }
         throw error;
       }
+    }
+    if (params.tool === "calculate") {
+      const args = params.arguments;
+      if (Object.keys(args).some((key) => !["scope", "scopeId", "path", "tableIndex", "selection", "operation", "locale"].includes(key)) ||
+        !["company", "department", "project", "private"].includes(String(args.scope)) || typeof args.path !== "string" ||
+        !isKnowledgeFilePath(args.path) || args.path.length > 1024 ||
+        !(args.scopeId === undefined || args.scopeId === null || typeof args.scopeId === "string") ||
+        !Number.isInteger(args.tableIndex) || Number(args.tableIndex) < 0 || Number(args.tableIndex) > 9999 ||
+        !["sum", "count", "min", "max", "mean"].includes(String(args.operation)) ||
+        !["canonical", "es", "en"].includes(String(args.locale)) || !record(args.selection)) return failure();
+      const selection = args.selection;
+      const cells = Object.keys(selection).length === 1 && Array.isArray(selection.cells) &&
+        selection.cells.length > 0 && selection.cells.length <= 500 &&
+        selection.cells.every((cell) => typeof cell === "string" && /^[A-Z]{1,3}[1-9][0-9]{0,6}$/.test(cell));
+      const rows = Object.keys(selection).length === 2 && Array.isArray(selection.rows) &&
+        selection.rows.length > 0 && selection.rows.length <= 500 &&
+        selection.rows.every((row) => typeof row === "number" && Number.isInteger(row) && row >= 1 && row <= 1000000) &&
+        Number.isInteger(selection.column) && Number(selection.column) >= 1 && Number(selection.column) <= 10000;
+      if (!cells && !rows) return failure();
+      return response(await context.knowledgeFiles?.calculate(context.roots, args as unknown as KnowledgeCalculation) ??
+        { available: false, warning: "El cálculo necesita una tabla indexada autorizada disponible." });
     }
     return failure();
   } catch {

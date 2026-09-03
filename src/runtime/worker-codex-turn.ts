@@ -107,6 +107,7 @@ import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-d
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
 import { OnDemandDocumentSync } from "@/documents/on-demand-sync";
 import { ServerDocumentFiles } from "@/documents/server-files";
+import { KnowledgeDocumentFiles } from "@/documents/knowledge-files";
 import { workspacePolicyForIdentity } from "@/admin/policy-service";
 import {
   AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE,
@@ -1063,6 +1064,7 @@ export async function runWorkerCodexTurn(
   const turnSignal = turnController.signal;
   const enterpriseDocumentSync = enterpriseDocumentNetwork ? new OnDemandDocumentSync(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
   const serverDocumentFiles = enterpriseDocumentNetwork ? new ServerDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
+  const knowledgeDocumentFiles = enterpriseDocumentNetwork ? new KnowledgeDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
   type FinishedTurn = { status: string | null; error: string | null };
   let terminalTurnStatus: FinishedTurn | null = null;
   let finalAnswerRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1674,6 +1676,7 @@ export async function runWorkerCodexTurn(
               roots: enterpriseDocumentRoots,
               sync: enterpriseDocumentSync,
               serverFiles: serverDocumentFiles,
+              knowledgeFiles: knowledgeDocumentFiles,
               runtimeThreadId: threadId,
               runtimeTurnId,
             }) as JsonValue;
