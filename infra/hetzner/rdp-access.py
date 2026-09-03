@@ -189,7 +189,6 @@ class RdpSession:
 
     def key(self, key):
         self.run(["xdotool", "key", "--clearmodifiers", key], check=True)
-        time.sleep(0.2)
 
     def type_text(self, text):
         raw = text.encode("ascii")
@@ -202,8 +201,8 @@ class RdpSession:
                     offset += os.write(fd, raw[offset:])
         finally:
             os.close(fd)
-        # Allow queued keyboard events to reach the remote console before Return.
-        time.sleep(len(raw) * 0.030 + 1.5)
+        # FreeRDP 3.30 emits press/release with a fixed 10 ms per character.
+        time.sleep(len(raw) * 0.010 + 0.5)
 
     def wait_for_desktop(self, timeout=60):
         # The keyboard pipe and X window can exist while the remote frame is
@@ -221,26 +220,6 @@ class RdpSession:
                 return
             time.sleep(0.5)
         raise ValueError("RDP_DESKTOP_NOT_READY")
-
-    def open_console(self, timeout=30):
-        # A rendered desktop does not prove cmd has finished opening. Launch
-        # the existing console with a fixed in-memory clipboard acknowledgement
-        # and wait for its unique marker before pasting any source command.
-        marker = 'aibrain-ready-' + secrets.token_hex(16)
-        self.key("super+r")
-        time.sleep(0.7)
-        self.key("ctrl+a")
-        self.type_text('cmd /d /q /k powershell.exe -nop -noninteractive -command set-clipboard ' + marker)
-        self.key("Return")
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
-            require(self.rdp.poll() is None, "RDP_CONNECTION_LOST")
-            clipboard = self.run(["xclip", "-selection", "clipboard", "-o"], timeout=5)
-            if clipboard.returncode == 0 and clipboard.stdout.strip() == marker.encode('ascii'):
-                self.console_open = True
-                return
-            time.sleep(0.5)
-        raise ValueError("RDP_CONSOLE_NOT_READY")
 
     def __enter__(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aibrain-rdp-access-")
@@ -297,7 +276,13 @@ class RdpSession:
             self.wait_for_desktop()
             self.key("Escape")
             self.key("Escape")
-            self.open_console()
+            self.key("super+r")
+            time.sleep(0.7)
+            self.key("ctrl+a")
+            self.type_text("cmd /d")
+            self.key("Return")
+            time.sleep(1.5)
+            self.console_open = True
             return self
         except BaseException:
             self.__exit__(*sys.exc_info())
