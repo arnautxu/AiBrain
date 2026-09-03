@@ -66,6 +66,8 @@ interactive request waits at most55 seconds for the catalogue lock, then uses th
 same nonblocking Windows source lock. Busy and path-specific rejection remain
 distinct error states. A killed request's marker expires within200 seconds;
 normal cleanup clears it. Completed mapped inventories remain local and fast.
+Scheduled map projection takes the same catalogue lock and defers if it is held,
+so a background snapshot cannot overwrite a newer on-demand projection.
 
 The map binds installation, connection, publication scope and both source-root
 policies. The broker still verifies app UID, request identity, company reader

@@ -86,7 +86,7 @@ def execute(manifest, path, offset=0):
     result = mapping.folder_inventory(manifest, path, offset, files)
     if result is None:
         return {'available': False, 'error': 'FOLDER_NOT_MAPPED',
-                'warning': 'Localiza primero la carpeta con search, navegando desde su padre observado. No inventes una carpeta a partir del año solicitado.'}
+                'warning': 'Esta carpeta aún no figura en el mapa. Ejecuta inventory sobre su carpeta padre ya observada para registrar las subcarpetas y vuelve a consultar. No inventes una carpeta a partir del año solicitado.'}
     if result['enumerationComplete'] or not result['directories'].get('pending'):
         return result
     target = mapping.map_root(manifest)
