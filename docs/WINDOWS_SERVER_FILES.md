@@ -70,6 +70,10 @@ The bounded parser accepts up to one million scanned cells, including empty
 styled cells. The real S’Agaró workbook contains 351,692 cells across 43 sheets;
 its host-side sandbox extraction passed after correcting the initial 100,000-cell
 ceiling. Archive/XML, output size, memory and CPU limits remain enforced.
+The grid reserves 95% of its data budget for visible sheets when a workbook also
+has hidden sheets, shared across those visible sheets. Hidden templates therefore
+cannot consume the entire preview. The viewer opens the first populated visible
+sheet by default; workbook tab order and the hidden-sheet labels are retained.
 Read failure never creates an artifact; preview failure preserves successful text
 reading and reports a preview warning. Existing conversations receive the updated
 runtime instructions without a new tool schema or manual re-upload.
