@@ -69,16 +69,6 @@ returns only a boolean; it saves no screenshot or OCR text. This prevents input
 during a black frame, but does not prove arbitrary desktop/modal readiness.
 Failure closes the session without sending those keys and preserves retry bounds.
 
-Console startup also requires a unique clipboard acknowledgement before a source
-command is pasted. The launcher uses a fixed, simple PowerShell Set-Clipboard
-command and a random hexadecimal marker; clipboard text is never executed as
-code. Keyboard events have settling time before subsequent keys, and typed input
-is given a conservative drain interval. The readiness wait is bounded at thirty
-seconds inside the existing operation deadline. This creates no Windows source
-file or configuration writes. A readiness timeout closes the session and cannot
-confirm document access. Validate actual copies, not just a listing handshake,
-before installing this transport change.
-
 ## Bounded listing session reuse
 
 The inventory reuses one RDP connection for at most three consecutive fixed

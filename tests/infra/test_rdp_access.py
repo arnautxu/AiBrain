@@ -16,31 +16,6 @@ spec.loader.exec_module(rdp)
 
 
 class RdpAccessTests(unittest.TestCase):
-    def test_console_waits_for_its_unique_acknowledgement_before_accepting_commands(self):
-        session=rdp.RdpSession({}, {}, 'ts', Path('/unused'))
-        session.rdp=MagicMock();session.rdp.poll.return_value=None
-        marker=b'aibrain-ready-'+b'a'*32;clock=[0]
-        results=[MagicMock(returncode=0,stdout=b'previous clipboard'),MagicMock(returncode=0,stdout=marker+b'\r\n')]
-        with patch.object(session,'run',side_effect=results) as read,patch.object(session,'key') as key,\
-             patch.object(session,'type_text') as typed,patch.object(rdp.secrets,'token_hex',return_value='a'*32),\
-             patch.object(rdp.time,'monotonic',side_effect=lambda:clock[0]),\
-             patch.object(rdp.time,'sleep',side_effect=lambda n:clock.__setitem__(0,clock[0]+n)):
-            session.open_console()
-        self.assertTrue(session.console_open)
-        self.assertEqual(read.call_count,2)
-        self.assertIn('powershell.exe -nop -noninteractive -command set-clipboard ',typed.call_args.args[0])
-        self.assertNotIn('ctrl+v',[call.args[0] for call in key.call_args_list])
-
-    def test_unconfirmed_console_never_becomes_ready(self):
-        session=rdp.RdpSession({}, {}, 'ts', Path('/unused'))
-        session.rdp=MagicMock();session.rdp.poll.return_value=None;clock=[0]
-        with patch.object(session,'run',return_value=MagicMock(returncode=0,stdout=b'stale')),\
-             patch.object(session,'key'),patch.object(session,'type_text'),\
-             patch.object(rdp.time,'monotonic',side_effect=lambda:clock[0]),\
-             patch.object(rdp.time,'sleep',side_effect=lambda n:clock.__setitem__(0,clock[0]+n)):
-            with self.assertRaisesRegex(ValueError,'RDP_CONSOLE_NOT_READY'):session.open_console(timeout=2)
-        self.assertFalse(session.console_open)
-
     def test_desktop_gate_requires_three_consecutive_nonblank_frames(self):
         session = rdp.RdpSession({}, {}, 'ts', Path('/unused'))
         session.rdp = MagicMock(); session.rdp.poll.return_value = None
