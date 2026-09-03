@@ -208,6 +208,13 @@ class RdpSession:
         self.temp = tempfile.TemporaryDirectory(prefix="aibrain-rdp-access-")
         self.work = Path(self.temp.name)
         self.env = dict(os.environ)
+        # Native FreeRDP requires an accessible HOME even with explicit credentials
+        # and a pinned certificate. ProtectHome hides the operator home in systemd.
+        # Bind only this child environment to the existing private temporary root.
+        self.env.update(HOME=str(self.work), XDG_CONFIG_HOME=str(self.work / "config"),
+                        XDG_CACHE_HOME=str(self.work / "cache"))
+        for name in ("config", "cache"):
+            (self.work / name).mkdir(mode=0o700)
         self.pipe = self.work / "keyboard.pipe"
         auth = self.work / "Xauthority"
         auth.touch(mode=0o600)

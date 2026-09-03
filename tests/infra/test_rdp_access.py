@@ -16,6 +16,27 @@ spec.loader.exec_module(rdp)
 
 
 class RdpAccessTests(unittest.TestCase):
+    def test_native_client_home_is_private_ephemeral_and_parent_env_is_unchanged(self):
+        parent = dict(rdp.os.environ)
+        homes = []
+        for _ in range(2):
+            session = rdp.RdpSession({}, {}, 'ts', Path('/unused'))
+            def stop_before_native_execution(*args, **kwargs):
+                home = Path(session.env['HOME'])
+                homes.append(home)
+                self.assertEqual(home, session.work)
+                self.assertEqual(home.stat().st_mode & 0o777, 0o700)
+                for key, name in [('XDG_CONFIG_HOME', 'config'), ('XDG_CACHE_HOME', 'cache')]:
+                    self.assertEqual(Path(session.env[key]), home / name)
+                    self.assertEqual((home / name).stat().st_mode & 0o777, 0o700)
+                raise RuntimeError('FICTIONAL_NATIVE_BOUNDARY')
+            with patch.object(session, 'run', side_effect=stop_before_native_execution):
+                with self.assertRaisesRegex(RuntimeError, 'FICTIONAL_NATIVE_BOUNDARY'):
+                    session.__enter__()
+            self.assertFalse(homes[-1].exists())
+            self.assertEqual(dict(rdp.os.environ), parent)
+        self.assertNotEqual(homes[0], homes[1])
+
     def test_xls_export_uses_same_root_guard_and_other_formats_stay_denied(self):
         access={'inventoryRoots':[r'Y:\Approved'],'readRoots':[r'Y:\Approved'],
             'target':'ts','maxEntries':20,'maxFileBytes':1024}
