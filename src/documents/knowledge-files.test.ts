@@ -72,14 +72,17 @@ describe("indexed knowledge transport", () => {
     expect(await g.files.search(g.roots, "contract")).toMatchObject({ available: false });
   });
 
-  it("uses the index without waiting for a live RDP filename scan", async () => {
+  it("keeps metadata map matches when the content index is also available", async () => {
     const f = await fixture();
-    const serverSearch = vi.fn();
+    const serverSearch = vi.fn().mockResolvedValue({ available: true, lookupMode: "metadata-map", sourceChecked: false,
+      results: [{ scope: "company", path: "server-arnall/Y/contract-unparsed.pdf" }], warning: "Partial metadata map." });
     const result = await handleCompanyFilesDynamicToolCall({ namespace: "aibrain_company_files", tool: "search", threadId: "thread", turnId: "turn", callId: "call", arguments: { query: "contract" } } as never,
       { network: f.network, roots: f.roots, knowledgeFiles: f.files, serverFiles: { search: serverSearch }, runtimeThreadId: "thread", runtimeTurnId: "turn" } as never);
     expect(result.success).toBe(true);
     expect(JSON.stringify(result)).toContain("knowledge-arnall");
-    expect(serverSearch).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).toContain("server-arnall/Y/contract-unparsed.pdf");
+    expect(JSON.stringify(result)).toContain("Partial metadata map.");
+    expect(serverSearch).toHaveBeenCalledOnce();
   });
 
   it("reads table references and binds calculations to the authorized turn and source", async () => {
