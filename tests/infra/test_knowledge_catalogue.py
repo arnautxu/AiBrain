@@ -26,6 +26,15 @@ def entry(source, directory=False, size=20, modified=TIME):
 
 
 class CatalogueTests(unittest.TestCase):
+    def test_spreading_pages_discovers_other_roots_before_draining_priority_folder(self):
+        scan = self.store.start_scan(['C:\\','Y:\\'])
+        self.store.record_page(scan,'Y:\\',0,[entry('Y:\\large.pdf')],1)
+        self.assertEqual(self.store.next_directory(scan,['Y:\\'])['source'],'Y:\\')
+        self.assertEqual(self.store.next_directory(scan,['Y:\\'],spread_pages=True)['source'],'C:\\')
+        self.store.close()
+        self.store = catalogue.Catalogue(self.root,'arnall','operator')
+        self.assertEqual(self.store.next_directory(scan,['Y:\\'],spread_pages=True)['source'],'C:\\')
+
     def test_rescan_waits_for_finished_scan_and_interval(self):
         at=dt.datetime(2026,9,3,tzinfo=dt.timezone.utc)
         scan={"state":"observed","finished":"2026-09-02T00:00:00Z"}

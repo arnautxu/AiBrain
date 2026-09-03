@@ -195,12 +195,17 @@ class Catalogue:
                                 [(scan, key, root) for key, root in zip(keys, roots)])
         return scan
 
-    def next_directory(self, scan, priority_roots=None, deferred_keys=None):
+    def next_directory(self, scan, priority_roots=None, deferred_keys=None, spread_pages=False):
         require(priority_roots is None or isinstance(priority_roots,list) and len(priority_roots)<=32,"INVALID_PRIORITY_ROOTS")
         require(deferred_keys is None or isinstance(deferred_keys,set) and len(deferred_keys)<=1000,"INVALID_DEFERRED_DIRECTORIES")
         priorities=[source_key(root).rstrip("\\") for root in priority_roots or []]
         clauses=["(source_key=? OR instr(source_key,?||'\\')=1 OR instr(?,rtrim(source_key,'\\')||'\\')=1)" for _ in priorities]
         order="CASE WHEN "+" OR ".join(clauses)+" THEN 0 ELSE 1 END," if clauses else ""
+        require(type(spread_pages) is bool,"INVALID_PAGE_ORDER")
+        if spread_pages:
+            # Discover unvisited folders before draining another large folder.
+            # Offset is durable, so this ordering survives service restarts.
+            order="offset,"+order
         values=[scan]+[value for priority in priorities for value in [priority]*3]
         # LIMIT stays bounded and avoids a growing SQL parameter list. At most
         # len(deferred_keys) leading rows can be excluded from this batch.

@@ -93,7 +93,7 @@ def process_page(store, manifest, scan, row, run=files.browse):
                       limited=bool(result.get("denied") or withheld), transport_count=len(result["entries"]))
 
 
-def run_batch(store, manifest, scan, max_pages=10, seconds=300, run=files.browse, pause_seconds=0, priority_roots=None):
+def run_batch(store, manifest, scan, max_pages=10, seconds=300, run=files.browse, pause_seconds=0, priority_roots=None, spread_pages=False):
     require(type(max_pages) is int and 1 <= max_pages <= 1000 and 1 <= seconds <= 3600, "INVALID_BATCH_LIMIT")
     started, attempted, deferred = time.monotonic(), 0, set()
     while attempted < max_pages and time.monotonic() - started < seconds:
@@ -101,9 +101,9 @@ def run_batch(store, manifest, scan, max_pages=10, seconds=300, run=files.browse
             time.sleep(min(pause_seconds,5))
         if time.monotonic() - started >= seconds:
             break
-        row = store.next_directory(scan,priority_roots,deferred)
+        row = store.next_directory(scan,priority_roots,deferred,spread_pages)
         if row is None:
-            if store.next_directory(scan,priority_roots) is not None:
+            if store.next_directory(scan,priority_roots,spread_pages=spread_pages) is not None:
                 return {**store.coverage(scan),"paused":"SOURCE_RETRY_PENDING"}
             return store.finish_scan(scan)
         attempted += 1
@@ -137,6 +137,7 @@ def main():
     parser.add_argument("--new-scan",action="store_true")
     parser.add_argument("--rescan-after",type=int,default=0,help="Start a new traversal this many seconds after a finished scan; 0 disables automatic rescanning")
     parser.add_argument("--priority-manifest",help="Existing bounded mirror whose business folders should be inventoried first")
+    parser.add_argument("--spread-pages",action="store_true",help="Prefer less-visited directories before finishing large directory listings")
     args = parser.parse_args()
     require(os.geteuid() == 0, "HOST_OPERATOR_REQUIRED")
     os.umask(0o077)
@@ -182,7 +183,7 @@ def main():
             for source in priority:
                 files.rdp.select_root(source,manifest["sourceRoots"])
         with listings.ListingSession(manifest) as browse:
-            result = run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority,run=browse)
+            result = run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority,run=browse,spread_pages=args.spread_pages)
         result["transportMetrics"] = {key: round(value, 3) for key, value in browse.metrics.items()}
         print(json.dumps(result))
     finally:

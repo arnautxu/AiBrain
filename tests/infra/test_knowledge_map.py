@@ -69,6 +69,21 @@ class MapTests(unittest.TestCase):
         self.assertIsNone(second['nextQuery'])
         self.assertIsNone(self.search('server:/Y/NotMapped'))
         self.assertEqual(len(self.search('server:/')['results']), 1)
+        context = self.search('Ofertes')['results'][0]['folderContext']
+        self.assertEqual(context['businessPurpose'], 'unconfirmed')
+        self.assertEqual(context['observedFileTypes'], {'.pdf': 1, '.exe': 1})
+        self.assertTrue(context['partial'])
+
+    def test_guides_include_second_drive_when_first_drive_has_many_folders(self):
+        with sqlite3.connect(self.target/'catalogue.sqlite3') as db:
+            for n in range(140):
+                source = 'C:\\System'+str(n)
+                db.execute('INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?,?)',(source.lower(),source,'c:',source[3:],'directory','',0,None,'2026-09-02T00:00:00Z','pending',source.lower()))
+            meta = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
+        mapping.write_guides(self.target,meta)
+        guide=(self.target/'README.md').read_text()
+        self.assertIn('Y:',guide)
+        self.assertIn('Ofertes',guide)
 
     def test_policy_change_cannot_reuse_old_map_or_reveal_denied_rows(self):
         self.access['readRoots'] = ['Y:\\Ofertes']
