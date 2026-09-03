@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { stopOwnedWorkerProcess } from "./owned-process";
 import { createServer, type Server as HttpServer } from "node:http";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
@@ -315,6 +316,8 @@ export class PrivateWorkerGateway {
   private sockets: WebSocketServer | null = null;
   private activeSocket: WebSocket | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
+  private readonly ownsProcessGroup: boolean;
+  private stopPromise: Promise<void> | null = null;
   private lines: Interface | null = null;
   private stopping = false;
   private state: WorkerControllerHealth["state"] = "stopped";
@@ -349,6 +352,9 @@ export class PrivateWorkerGateway {
       this.now,
       options.maxRetainedCompletedRequests ?? DEFAULT_RETAINED_COMPLETED_REQUESTS,
     );
+    // Injected factories retain direct-child semantics: never assume that an
+    // arbitrary child PID is a process group owned by this gateway.
+    this.ownsProcessGroup = !options.processFactory && process.platform !== "win32";
     this.processFactory = options.processFactory ?? ((context) => spawn(/* turbopackIgnore: true */
       process.env.CODEX_BIN?.trim() || "codex",
       ["app-server", "--stdio"],
@@ -368,6 +374,7 @@ export class PrivateWorkerGateway {
           ...context.environment,
         },
         stdio: ["pipe", "pipe", "pipe"],
+        detached: this.ownsProcessGroup,
       },
     ));
   }
@@ -441,12 +448,20 @@ export class PrivateWorkerGateway {
   }
 
   async stop() {
-    if (this.state === "stopped" || this.state === "stopping") return;
+    if (this.stopPromise) return this.stopPromise;
+    if (this.state === "stopped") return;
+    this.stopPromise = this.stopOnce().finally(() => { this.stopPromise = null; });
+    return this.stopPromise;
+  }
+
+  private async stopOnce() {
     this.stopping = true;
     this.state = "stopping";
-    this.activeSocket?.close(1001, "Worker stopping");
+    this.activeSocket?.terminate();
     this.activeSocket = null;
-    for (const client of this.sockets?.clients ?? []) client.close(1001, "Worker stopping");
+    // The durable cursor owns replay. Do not wait for a disconnected client
+    // to finish a WebSocket close handshake before stopping our process.
+    for (const client of this.sockets?.clients ?? []) client.terminate();
     await new Promise<void>((resolve) => {
       if (!this.sockets) return resolve();
       this.sockets.close(() => resolve());
@@ -460,21 +475,8 @@ export class PrivateWorkerGateway {
     this.lines?.close();
     this.lines = null;
     const child = this.child;
+    if (child) await stopOwnedWorkerProcess(child, this.ownsProcessGroup);
     this.child = null;
-    if (child && child.exitCode === null && child.signalCode === null) {
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 5_000);
-        timeout.unref?.();
-        child.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-        child.kill("SIGTERM");
-      });
-    }
     await Promise.all([
       this.appServerOutputChain.catch(() => undefined),
       this.clientFrameChain.catch(() => undefined),
@@ -913,6 +915,7 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
       maxRetainedCompletedRequests: this.options.maxRetainedCompletedRequests,
       maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,
     });
+    this.gateway = gateway;
     await gateway.start();
     if (!gateway.endpoint) throw new Error("Worker gateway endpoint is unavailable.");
     const clientLocks = new ResourceLockManager({
@@ -936,7 +939,6 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
       },
       journal,
     }));
-    this.gateway = gateway;
   }
 
   async health() {
@@ -949,8 +951,8 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
 
   async stop() {
     const gateway = this.gateway;
-    this.gateway = null;
     if (gateway) await gateway.stop();
+    if (this.gateway === gateway) this.gateway = null;
   }
 }
 

@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { createHash } from "node:crypto";
+import { loadInstallationConfig } from "@/config/installation";
+import { FileLocalUserStore } from "@/auth/local-user-store";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({
@@ -16,6 +19,7 @@ import {
   registerWorkerTurnCancellation,
   requestPendingWorkerTurnCancellation,
   WorkerAppServerClient,
+  workerAppServerForUser,
 } from "@/runtime/worker-runtime-service";
 import type { WorkerRuntimeHandle, WorkerRoots } from "@/runtime/workers/types";
 
@@ -145,6 +149,81 @@ function handle(transport: AppServerTransport): WorkerRuntimeHandle {
 }
 
 describe("worker App Server client", () => {
+  it.each([false, true])("coalesces concurrent failed initialization and cleans a failed retry (%s)", async (retryFails) => {
+    const config = await loadInstallationConfig();
+    const fingerprint = createHash("sha256").update(JSON.stringify({
+      schemaVersion: config.schemaVersion,
+      installationId: config.installationId,
+      usersRoot: config.paths.usersRoot,
+      companyContextRoot: config.paths.companyContextRoot,
+      sourceReadRoot: config.paths.sourceReadRoot,
+      publishWriteRoot: config.paths.publishWriteRoot,
+    })).digest("hex");
+    const globals = globalThis as typeof globalThis & { __aibrainWorkerRuntimeService?: unknown };
+    const previous = globals.__aibrainWorkerRuntimeService;
+    const first = handle(new FakeTransport());
+    const second = handle(new FakeTransport());
+    const registry = {
+      get: vi.fn(() => first),
+      start: vi.fn().mockResolvedValueOnce(first).mockResolvedValue(second),
+      stop: vi.fn().mockResolvedValue(true),
+    };
+    const clients = new Map();
+    const admissions = new Map();
+    globals.__aibrainWorkerRuntimeService = {
+      fingerprint, config, registry, clients, clientAdmissions: admissions,
+      maintenance: new MaintenanceCoordinator(), activeTurnCancellations: new Map(),
+    };
+    const userRead = vi.spyOn(FileLocalUserStore.prototype, "read").mockResolvedValue(
+      { enabled: true } as Awaited<ReturnType<FileLocalUserStore["read"]>>,
+    );
+    let failInitial!: (error: Error) => void;
+    const initial = new Promise<void>((_resolve, reject) => { failInitial = reject; });
+    const initialize = vi.spyOn(WorkerAppServerClient.prototype, "initialize")
+      .mockImplementationOnce(() => initial);
+    if (retryFails) initialize.mockRejectedValue(new Error("fixture retry failed"));
+    else initialize.mockResolvedValue(undefined);
+    const close = vi.spyOn(WorkerAppServerClient.prototype, "close").mockResolvedValue(undefined);
+    try {
+      const pending = Promise.allSettled([
+        workerAppServerForUser(first.userId), workerAppServerForUser(first.userId),
+        workerAppServerForUser(first.userId),
+      ]);
+      await vi.waitFor(() => expect(userRead).toHaveBeenCalledTimes(3));
+      failInitial(new Error("fixture initialization failed"));
+      const results = await pending;
+      expect(initialize).toHaveBeenCalledTimes(2);
+      expect(registry.start).toHaveBeenCalledTimes(2);
+      expect(registry.stop).toHaveBeenCalledTimes(retryFails ? 2 : 1);
+      expect(close).toHaveBeenCalledTimes(retryFails ? 2 : 1);
+      expect(results.map(({ status }) => status)).toEqual(Array(3).fill(retryFails ? "rejected" : "fulfilled"));
+      if (!retryFails) {
+        const values = results.filter((result) => result.status === "fulfilled").map((result) => result.value.client);
+        expect(new Set(values).size).toBe(1);
+      }
+      expect(clients.size).toBe(retryFails ? 0 : 1);
+      expect(admissions.size).toBe(0);
+    } finally {
+      globals.__aibrainWorkerRuntimeService = previous;
+      userRead.mockRestore(); initialize.mockRestore(); close.mockRestore();
+    }
+  });
+
+  it("admits another same-user request while optional metadata is still blocked", async () => {
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport));
+    const release = transport.block("model/list");
+    const catalog = client.connection("/private/workspace/project-one");
+    try {
+      await vi.waitFor(() => expect(transport.sent.some((item) => item.kind === "rpc-request" && item.rpc.method === "model/list")).toBe(true));
+      await expect(client.request("thread/start", { config: { web_search: "live" } }, "other-chat:start", 500))
+        .resolves.toMatchObject({ thread: { id: "runtime-thread-1" } });
+      await expect(client.connectionSummary()).resolves.toMatchObject({ connected: true });
+    } finally {
+      release(); await catalog; await client.close();
+    }
+  });
+
   it("carries an immediate stop intent into the worker once its App Server thread is registered", () => {
     const runtimeGlobals = globalThis as typeof globalThis & {
       __aibrainWorkerRuntimeService?: unknown;
