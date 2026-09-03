@@ -19,7 +19,7 @@ permissions; it does not change user policies or mount Windows into a worker.
 | --- | --- |
 | Private sync manifest | `/etc/aibrain/company-qa/rdp/sync.json` |
 | Connection and source restrictions | Existing `endpoints.env`, `credentials.env`, `policy.json`, `access.json` in the same private directory |
-| Operator programs | `/usr/local/lib/aibrain/rdp-access.py`, `rdp-sync.py`, `rdp-extract.py` |
+| Operator programs | `/usr/local/lib/aibrain/rdp-access.py`, `rdp-frame.py`, `rdp-sync.py`, `rdp-extract.py` |
 | Private verified originals, cache, state and prior snapshots | `/var/lib/aibrain/rdp-sync/arnall` |
 | Per-operation transfer receipts | `/var/lib/aibrain/rdp-imports/arnall` |
 | Scheduling | `aibrain-arnall-sync.timer` and `aibrain-arnall-sync.service` |

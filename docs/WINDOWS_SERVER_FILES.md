@@ -68,7 +68,7 @@ Windows ACLs. AiBrain's company permission and tenant boundaries remain in force
 Keep the candidate toolset together under `/usr/local/lib/aibrain/server-files/`:
 
 - `rdp-server-files.py`, `rdp-server-files-broker.py`;
-- `rdp-access.py`, `rdp-sync.py`, `rdp-extract.py` from the same reviewed revision.
+- `rdp-access.py`, `rdp-frame.py`, `rdp-sync.py`, `rdp-extract.py` from the same reviewed revision.
 
 Use a separate private `server-access.json` cloned from the current access
 manifest. Set `inventoryRoots` and `readRoots` to the 26 drive roots `A:\` through
