@@ -69,13 +69,6 @@ returns only a boolean; it saves no screenshot or OCR text. This prevents input
 during a black frame, but does not prove arbitrary desktop/modal readiness.
 Failure closes the session without sending those keys and preserves retry bounds.
 
-After opening the console, a fixed `echo`/clipboard acknowledgement with a new
-random marker proves that cmd has actually started. The client waits up to thirty
-seconds for that marker before pasting a source command. An older clipboard value
-cannot acknowledge a new console. This replaces the former fixed 1.5-second
-console delay; it uses no Windows file/configuration writes. The existing overall
-operation deadline still bounds startup plus copy time.
-
 ## Bounded listing session reuse
 
 The inventory reuses one RDP connection for at most three consecutive fixed
