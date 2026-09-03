@@ -3,6 +3,7 @@
 import argparse
 import collections
 import datetime as dt
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -358,9 +359,21 @@ def main():
     manifest = files.sync.load_manifest(args.manifest)
     binding, allowed = policy(manifest, files)
     target = map_root(manifest)
-    result = build(target.parent / 'operator', target, manifest, binding, allowed)
-    require(policy(manifest, files)[0] == binding, 'MAP_POLICY_CHANGED')
-    print(json.dumps({k: result[k] for k in ('generatedAt','entries','directories','scanState','snapshot')}))
+    operator = target.parent / 'operator'
+    lock = operator / 'inventory.lock'
+    private(lock)
+    fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({'state': 'deferred', 'reason': 'CATALOGUE_BUSY'}))
+            return
+        result = build(operator, target, manifest, binding, allowed)
+        require(policy(manifest, files)[0] == binding, 'MAP_POLICY_CHANGED')
+        print(json.dumps({k: result[k] for k in ('generatedAt','entries','directories','scanState','snapshot')}))
+    finally:
+        os.close(fd)
 
 
 if __name__ == '__main__':
