@@ -221,6 +221,26 @@ class RdpSession:
             time.sleep(0.5)
         raise ValueError("RDP_DESKTOP_NOT_READY")
 
+    def open_console(self, timeout=30):
+        # A rendered desktop does not prove cmd has finished opening. Launch
+        # the existing console with a fixed in-memory clipboard acknowledgement
+        # and wait for its unique marker before pasting any source command.
+        marker = 'aibrain-ready-' + secrets.token_hex(16)
+        self.key("super+r")
+        time.sleep(0.7)
+        self.key("ctrl+a")
+        self.type_text('cmd /d /q /k "echo ' + marker + '|%SystemRoot%\\System32\\clip.exe"')
+        self.key("Return")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            require(self.rdp.poll() is None, "RDP_CONNECTION_LOST")
+            clipboard = self.run(["xclip", "-selection", "clipboard", "-o"], timeout=5)
+            if clipboard.returncode == 0 and clipboard.stdout.strip() == marker.encode('ascii'):
+                self.console_open = True
+                return
+            time.sleep(0.5)
+        raise ValueError("RDP_CONSOLE_NOT_READY")
+
     def __enter__(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aibrain-rdp-access-")
         self.work = Path(self.temp.name)
@@ -276,13 +296,7 @@ class RdpSession:
             self.wait_for_desktop()
             self.key("Escape")
             self.key("Escape")
-            self.key("super+r")
-            time.sleep(0.7)
-            self.key("ctrl+a")
-            self.type_text("cmd /d")
-            self.key("Return")
-            time.sleep(1.5)
-            self.console_open = True
+            self.open_console()
             return self
         except BaseException:
             self.__exit__(*sys.exc_info())
