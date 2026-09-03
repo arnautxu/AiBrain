@@ -74,6 +74,10 @@ The grid reserves 95% of its data budget for visible sheets when a workbook also
 has hidden sheets, shared across those visible sheets. Hidden templates therefore
 cannot consume the entire preview. The viewer opens the first populated visible
 sheet by default; workbook tab order and the hidden-sheet labels are retained.
+The strict workbench persistence schema also permits the validated optional
+`previewFormat` marker. A restart/readback regression covers finishing a real
+stored turn with this artifact and rejects unknown marker values without losing
+the last valid conversation state.
 Read failure never creates an artifact; preview failure preserves successful text
 reading and reports a preview warning. Existing conversations receive the updated
 runtime instructions without a new tool schema or manual re-upload.
