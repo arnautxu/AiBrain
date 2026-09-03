@@ -212,7 +212,7 @@ function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
     return hasExactKeys(value, [
       "id", "type", "name", "url", "kind", "mimeType", "size", "status", "pages",
       "previewUrl", "publicationStatus", "publicationError", "targetLabel", "error",
-    ]);
+    ], ["previewFormat"]);
   }
   return hasExactKeys(value, [
     "id", "type", "name", "status", "control", "viewerUrl", "captureUrl", "downloadUrl", "error",

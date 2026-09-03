@@ -213,6 +213,29 @@ describe("FileWorkbenchStore", () => {
     });
   });
 
+  it("finishes and reloads turns with an authenticated spreadsheet preview", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Spreadsheet project");
+    const thread = await store.createThread(USER_A, project.id, "Schedule preview");
+    const userMessage = message("user", "complete");
+    const assistantMessage = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage);
+    const finished: ChatMessage = { ...assistantMessage, status: "complete", artifacts: [{
+      id: randomUUID(), type: "document", name: "Schedule.xlsm", kind: "text", mimeType: "application/json",
+      url: `/api/projects/${project.id}/files?path=document-previews%2Fschedule.json&raw=1&download=1`,
+      previewUrl: `/api/projects/${project.id}/files?path=document-previews%2Fschedule.json&raw=1&download=1`,
+      previewFormat: "spreadsheet", size: 1000, status: "ready", pages: null,
+      publicationStatus: null, publicationError: null, targetLabel: null, error: null,
+    }] };
+    await store.finishThreadTurn(USER_A, thread.id, finished, null);
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.getThread(USER_A, thread.id)).messages.at(-1)).toEqual(finished);
+    const invalid = structuredClone(finished);
+    Object.assign(invalid.artifacts[0], { previewFormat: "unsafe-format" });
+    await expect(store.finishThreadTurn(USER_A, thread.id, invalid, null)).rejects.toThrow();
+    expect((await restarted.getThread(USER_A, thread.id)).messages.at(-1)).toEqual(finished);
+  });
+
   it("creates durable conversation branches with exact lineage and complete prior context", async () => {
     const { usersRoot, store } = await fixture();
     const project = await store.createProject(USER_A, "Branch project");
