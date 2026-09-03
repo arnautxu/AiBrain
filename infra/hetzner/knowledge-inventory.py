@@ -93,10 +93,24 @@ def process_page(store, manifest, scan, row, run=files.browse):
                       limited=bool(result.get("denied") or withheld), transport_count=len(result["entries"]))
 
 
-def run_batch(store, manifest, scan, max_pages=10, seconds=300, run=files.browse, pause_seconds=0, priority_roots=None, spread_pages=False):
+def demand_pending(root):
+    marker = Path(root) / 'interactive-until'
+    try:
+        info = marker.lstat()
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid() and info.st_nlink == 1
+                and not info.st_mode & 0o077 and info.st_size < 64, 'UNSAFE_DEMAND_MARKER')
+        until = float(marker.read_text())
+        return 0 < until - time.time() <= 210
+    except FileNotFoundError:
+        return False
+
+
+def run_batch(store, manifest, scan, max_pages=10, seconds=300, run=files.browse, pause_seconds=0, priority_roots=None, spread_pages=False, should_yield=lambda: False):
     require(type(max_pages) is int and 1 <= max_pages <= 1000 and 1 <= seconds <= 3600, "INVALID_BATCH_LIMIT")
     started, attempted, deferred = time.monotonic(), 0, set()
     while attempted < max_pages and time.monotonic() - started < seconds:
+        if should_yield():
+            return {**store.coverage(scan), 'paused': 'INTERACTIVE_REQUEST'}
         if attempted and pause_seconds:
             time.sleep(min(pause_seconds,5))
         if time.monotonic() - started >= seconds:
@@ -183,7 +197,7 @@ def main():
             for source in priority:
                 files.rdp.select_root(source,manifest["sourceRoots"])
         with listings.ListingSession(manifest) as browse:
-            result = run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority,run=browse,spread_pages=args.spread_pages)
+            result = run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority,run=browse,spread_pages=args.spread_pages,should_yield=lambda: demand_pending(root))
         result["transportMetrics"] = {key: round(value, 3) for key, value in browse.metrics.items()}
         print(json.dumps(result))
     finally:

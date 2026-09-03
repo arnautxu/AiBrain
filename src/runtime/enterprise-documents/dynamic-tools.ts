@@ -19,7 +19,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files in the indexed knowledge library and local text. Indexed results carry source versions, observation dates and locators; read their knowledge- paths with the returned scope and scopeId. To browse live drives use query server:/; to list a folder use server:/Y/PRESSUPOSTOS or a Windows drive path. Follow nextQuery for more entries. Recursive name searches are bounded: inspect server.limited and warnings. No Windows writes are available.",
+    description: "Find authorized business files in the metadata map, indexed library and local text. To discover drives use server:/, then navigate observed folders. Never invent a year folder: inspect the parent. Names may use Catalan (pressupostos) or Spanish (presupuestos); use observed names and try their equivalents. Known complete folders use the map; unscanned folders use live listing. Follow nextQuery for further pages. To count or classify a folder tree use inventory with its returned server- path; search result counts are not totals. Read knowledge- paths with returned scope/scopeId for indexed source versions. No Windows writes are available.",
     inputSchema: {
       type: "object",
       properties: {
@@ -27,6 +27,20 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
         limit: { type: "integer", minimum: 1, maximum: 50 },
       },
       required: ["query"],
+      additionalProperties: false,
+    },
+  }, {
+    type: "function",
+    name: "inventory",
+    description: "Count and list files throughout an observed server folder and its subfolders. Use the company scope and server- directory path returned by search. Totals cover the whole known subtree, independent of the 50-file result page; pass nextOffset to see remaining files. If enumerationComplete=false with pending directories, this call prioritizes bounded live metadata discovery. Repeat the same path at offset 0 while discovery.state=CONTINUE; BUSY means retry later, other failures need explanation. Do not add totals from successive calls. Classify using filenames, then read relevant documents to verify type, issuer, date and quote identifier. fileCount counts files, not unique quotes: exclude catalogs/images/annexes, group confirmed versions/copies, distinguish issued from received quotes. Folder or modification year does not prove document year. Explain count criteria and scope; do not claim a company-wide total from one folder, or zero from partial coverage.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        scope: { type: "string", enum: ["company"] },
+        path: { type: "string", minLength: 1, maxLength: 1024 },
+        offset: { type: "integer", minimum: 0, maximum: 500000 },
+      },
+      required: ["scope", "path"],
       additionalProperties: false,
     },
   }, {
@@ -112,6 +126,15 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         // either backend; a larger requested page is not a scope violation.
         ...(typeof params.arguments.limit === "number" ? { limit: Math.min(params.arguments.limit, 50) } : {}),
       };
+      // Older App Server threads retain their original dynamic-tool schema.
+      // Route this bounded query through the same inventory authorization.
+      if (input.query.startsWith("inventory:")) {
+        if (input.query.length > 200) return failure();
+        const [path, query, extra] = input.query.slice(10).split("?");
+        if (extra !== undefined || !isServerFilePath(path) || (query !== undefined && !/^offset=[0-9]{1,6}$/.test(query))) return failure();
+        return response(await context.serverFiles?.inventory(context.roots, { scope: "company", path,
+          offset: query === undefined ? 0 : Number(query.slice(7)) }) ?? { available: false });
+      }
       if (isServerDirectoryQuery(input.query)) {
         const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
         return response({ results: server?.results ?? [], server: server ?? { available: false },
@@ -136,6 +159,14 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
           warning: "No se han encontrado coincidencias en las copias y ámbitos autorizados. Esta búsqueda no es un inventario completo del servidor ni de sus unidades. Incluso con synchronization=current, no demuestra que el archivo o carpeta no exista en la fuente; puede estar fuera de las carpetas configuradas, no sincronizado o no ser legible. Explica este límite y solicita revisar la carpeta configurada sin ampliar el acceso por tu cuenta.",
         } : {}),
       });
+    }
+    if (params.tool === "inventory") {
+      const args = params.arguments;
+      if (Object.keys(args).some((key) => !["scope", "path", "offset"].includes(key)) ||
+        args.scope !== "company" || typeof args.path !== "string" || !isServerFilePath(args.path) ||
+        (args.offset !== undefined && (!Number.isSafeInteger(args.offset) || Number(args.offset) < 0 || Number(args.offset) > 500000))) return failure();
+      return response(await context.serverFiles?.inventory(context.roots, { scope: "company", path: args.path, offset: args.offset as number | undefined }) ??
+        { available: false, warning: "El inventario del servidor no está disponible para este turno." });
     }
     if (params.tool === "read") {
       const keys = Object.keys(params.arguments);

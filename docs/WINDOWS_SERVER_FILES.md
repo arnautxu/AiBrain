@@ -20,8 +20,10 @@ freshness, partial coverage, policy checks and separate installation acceptance.
 
 ## Employee tools and existing conversations
 
-The existing `aibrain_company_files.search/read` tool schema is reused, so
-resumed conversations do not need a new App Server toolset:
+The existing `aibrain_company_files.search/read` tools remain compatible with
+resumed conversations. New conversations also expose `inventory`; older threads
+reach that same operation through `search` with `inventory:<server-path>`, without
+resetting history. See the metadata-map runbook for coverage and continuation.
 
 - `search({query: "server:/"})` discovers server drives.
 - `search({query: "server:/Y/"})` lists the shared drive.
@@ -88,7 +90,8 @@ are installed only after reviewing the actual manifests and existing state.
 Create `<dataRootHost>/locks/server-files` as root with the app group, mode 0750,
 then install `aibrain-arnall-server-files.service`. The service uses strict
 filesystem protection; writable paths are only its socket directory, private
-temporary space and the existing import destination. It has no Docker socket
+temporary space, the existing import destination, and the metadata inventory's
+installation-scoped operator and server-map directories. It has no Docker socket
 or TCP API. It may contact only the existing pinned RDP destination through the
 fixed operator program. The source account still needs no Windows write access.
 `AF_NETLINK` is required for Bubblewrap to create loopback in the extractor's

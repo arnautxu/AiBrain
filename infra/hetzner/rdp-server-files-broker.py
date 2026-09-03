@@ -24,6 +24,13 @@ server_map = importlib.util.module_from_spec(map_spec)
 map_spec.loader.exec_module(server_map)
 
 
+def folder_module():
+    spec = importlib.util.spec_from_file_location('folder_inventory', Path(__file__).with_name('knowledge-folder-inventory.py'))
+    folder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(folder)
+    return folder
+
+
 def validate_request(value, manifest):
     try:
         if not isinstance(value, dict) or set(value) != {"schemaVersion", "operation", "requestId", "installationId", "connectionId", "input"}:
@@ -38,6 +45,10 @@ def validate_request(value, manifest):
             if request.get("source"):
                 files.rdp.select_root(request["source"], manifest["sourceRoots"])
             return True
+        if value["operation"] == "inventory" and set(args) == {"path", "offset"}:
+            source, _ = files.source_path(manifest["connectionId"], args["path"])
+            files.rdp.select_root(source, manifest["sourceRoots"])
+            return '?' not in args['path'] and type(args['offset']) is int and 0 <= args['offset'] <= 500_000
         if value["operation"] == "read" and set(args) == {"path"}:
             source, _ = files.source_path(manifest["connectionId"], args["path"])
             files.rdp.select_root(source, manifest["sourceRoots"])
@@ -53,17 +64,24 @@ def execute(manifest, value):
     for audience in manifest["publications"]:
         sync.scope_directory(manifest, audience)
     try:
+        if value['operation'] == 'inventory':
+            # Lazy import keeps older installations' search/read independent.
+            return folder_module().execute(manifest, **value['input'])
         if value["operation"] == "search":
             cached = server_map.cached_search(manifest, files=files, **value["input"])
             if cached is not None:
                 return cached
-            return files.search(manifest, **value["input"])
-        return files.read(manifest, **value["input"])
+            with folder_module().interactive_access(manifest):
+                return files.search(manifest, **value["input"])
+        with folder_module().interactive_access(manifest):
+            return files.read(manifest, **value["input"])
     except Exception as error:
-        code = str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
-        if code not in {"SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
+        code = 'SERVER_FILES_BUSY' if isinstance(error, BlockingIOError) else str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
+        if code not in {"SERVER_FILES_BUSY", "WINDOWS_PATH_UNAVAILABLE", "SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
             code = "SERVER_FILES_UNAVAILABLE"
-        return {"available": False, "error": code, "warning": "No se ha podido consultar esta ubicación. No demuestra que no exista; no se ha modificado el servidor."}
+        warnings = {'SERVER_FILES_BUSY': 'La conexión está ocupada. Reintenta la consulta concreta; no significa que la carpeta no exista.',
+                    'WINDOWS_PATH_UNAVAILABLE': 'Windows no ha permitido consultar esta ruta concreta. No acredita una caída del servidor ni ausencia global. Comprueba las carpetas observadas en el padre.'}
+        return {"available": False, "error": code, "warning": warnings.get(code, "No se ha podido consultar esta ubicación. No demuestra que no exista; no se ha modificado el servidor.")}
 
 
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
