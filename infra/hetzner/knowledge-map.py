@@ -3,6 +3,7 @@
 import argparse
 import collections
 import datetime as dt
+import fcntl
 import hashlib
 import importlib.util
 import json
@@ -144,7 +145,7 @@ def build(operator, target, manifest, binding, allowed):
             out.execute('INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?,?)',
                         (d['source_key'], d['source'], ntpath.dirname(d['source_key'].rstrip('\\')).rstrip('\\'),
                          ntpath.basename(d['source'].rstrip('\\')) or d['source'], 'directory', '', 0, None,
-                         scan['started'], d['state'], normalized(d['source'])))
+                         scan['started'], 'incomplete' if any(b.startswith(d['source_key'].rstrip('\\') + '\\') for b in blocked) else d['state'], normalized(d['source'])))
         observed = source.execute('SELECT max(last_seen) FROM documents').fetchone()[0] or scan['started']
         coverage = dict(collections.Counter(d['state'] for d in visible_dirs))
         meta = {'schemaVersion': 1, 'installationId': manifest['installationId'], 'connectionId': manifest['connectionId'],
@@ -241,7 +242,8 @@ def cached_search(manifest, query, limit, files, root=None):
             source, _ = files.rdp.select_root(request['source'], manifest['sourceRoots'])
             require(allowed(source), 'MAP_SCOPE_DENIED')
             key = ntpath.normcase(source)
-            if not db.execute("SELECT 1 FROM entries WHERE source_key=? AND kind='directory'", (key,)).fetchone():
+            directory = db.execute("SELECT status FROM entries WHERE source_key=? AND kind='directory'", (key,)).fetchone()
+            if not directory or directory['status'] != 'complete':
                 return None
             where = 'parent=? AND source_key!=?'
             args = [key.rstrip('\\'), key]
@@ -292,6 +294,59 @@ def folder_context(db, row, allowed):
             'childDirectories': [c['name'] for c in visible if c['kind']=='directory'][:6]}
 
 
+def folder_inventory(manifest, path, offset, files, root=None):
+    """Count the entire known subtree; only the returned file list is paginated."""
+    source, part = files.source_path(manifest['connectionId'], path)
+    require(part == 1 and '?' not in path and type(offset) is int and 0 <= offset <= 500_000, 'INVALID_INVENTORY_REQUEST')
+    binding, allowed = policy(manifest, files)
+    require(allowed(source), 'MAP_SCOPE_DENIED')
+    target = Path(root) if root is not None else map_root(manifest)
+    if not target.exists():
+        return None
+    db = readonly(target / 'catalogue.sqlite3')
+    try:
+        meta = json.loads(db.execute('SELECT value FROM metadata').fetchone()[0])
+        require(meta['schemaVersion'] == 1 and meta['installationId'] == manifest['installationId']
+                and meta['connectionId'] == manifest['connectionId'], 'MAP_IDENTITY_MISMATCH')
+        if meta['policyHash'] != binding:
+            return None
+        key = ntpath.normcase(source)
+        directory = db.execute("SELECT * FROM entries WHERE source_key=? AND kind='directory'", (key,)).fetchone()
+        if not directory:
+            return None
+        prefix = key.rstrip('\\') + '\\'
+        directories, types, folders = collections.Counter(), collections.Counter(), collections.Counter()
+        count, results = 0, []
+        for r in db.execute('SELECT * FROM entries WHERE source_key=? OR instr(source_key,?)=1 ORDER BY source_key', (key, prefix)):
+            if not allowed(r['source']):
+                continue
+            if r['kind'] == 'directory':
+                directories[r['status']] += 1
+                continue
+            types[r['suffix'] or '(none)'] += 1
+            folders[ntpath.relpath(ntpath.dirname(r['source']), source)] += 1
+            if offset <= count < offset + 50:
+                results.append({'scope': 'company', 'path': files.virtual_path(manifest['connectionId'], r['source']),
+                                'name': r['name'], 'kind': 'file', 'size': r['bytes'], 'modifiedAt': r['modified'],
+                                'observedAt': r['observed']})
+            count += 1
+        complete = all(state == 'complete' for state in directories)
+        return {'available': True, 'checkedAt': now(), 'scope': 'company', 'path': path,
+                'lookupMode': 'metadata-inventory', 'sourceChecked': False, 'mapGeneratedAt': meta['generatedAt'],
+                'latestFileObservationAt': meta['latestFileObservationAt'], 'snapshot': False,
+                'enumerationComplete': complete, 'directories': dict(directories), 'fileCount': count,
+                'businessRecordCount': None, 'countBasis': 'observed-files-in-folder-tree',
+                'fileTypes': dict(types.most_common(50)), 'fileTypesLimited': len(types) > 50,
+                'folders': dict(folders.most_common(50)), 'foldersLimited': len(folders) > 50,
+                'results': results, 'nextOffset': offset + 50 if offset + 50 < count else None,
+                'warning': 'Recuento de archivos observados en esta carpeta y sus subcarpetas, no de presupuestos únicos. '
+                'Comprueba contenido, emisor, fecha e identificador para clasificar documentos y distinguir versiones, anexos y copias. '
+                'El año de la carpeta o de modificación no acredita el año del presupuesto. '
+                'Recorrido ' + ('completado' if complete else 'parcial') + '; no es una instantánea ni una comprobación actual de cada archivo.'}
+    finally:
+        db.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', required=True)
@@ -304,9 +359,21 @@ def main():
     manifest = files.sync.load_manifest(args.manifest)
     binding, allowed = policy(manifest, files)
     target = map_root(manifest)
-    result = build(target.parent / 'operator', target, manifest, binding, allowed)
-    require(policy(manifest, files)[0] == binding, 'MAP_POLICY_CHANGED')
-    print(json.dumps({k: result[k] for k in ('generatedAt','entries','directories','scanState','snapshot')}))
+    operator = target.parent / 'operator'
+    lock = operator / 'inventory.lock'
+    private(lock)
+    fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({'state': 'deferred', 'reason': 'CATALOGUE_BUSY'}))
+            return
+        result = build(operator, target, manifest, binding, allowed)
+        require(policy(manifest, files)[0] == binding, 'MAP_POLICY_CHANGED')
+        print(json.dumps({k: result[k] for k in ('generatedAt','entries','directories','scanState','snapshot')}))
+    finally:
+        os.close(fd)
 
 
 if __name__ == '__main__':

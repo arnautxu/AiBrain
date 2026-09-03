@@ -119,6 +119,91 @@ class MapTests(unittest.TestCase):
         self.assertEqual(self.search("' OR 1=1 --")['results'], [])
         self.assertEqual(self.search('%')['results'], [])
 
+    def test_pending_folder_uses_live_listing_instead_of_empty_cache(self):
+        self.store.db.execute("UPDATE directories SET state='pending' WHERE source_key='y:\\ofertes'")
+        self.store.db.commit()
+        self.build()
+        self.assertIsNone(self.search('server:/Y/Ofertes'))
+
+    def test_inventory_counts_whole_subtree_not_just_page_and_preserves_unknowns(self):
+        self.store.db.execute("UPDATE directories SET state='pending',offset=0 WHERE source_key='y:\\ofertes'")
+        self.store.db.commit()
+        entries = [self.entry('Y:\\Ofertes\\file'+str(n)+'.pdf') for n in range(49)] + [self.entry('Y:\\Ofertes\\Child', True)]
+        self.store.record_page(self.scan, 'Y:\\Ofertes', 0, entries, 50)
+        self.store.record_page(self.scan, 'Y:\\Ofertes', 50, [self.entry('Y:\\Ofertes\\last.jpg')], None)
+        self.build()
+        result = mapping.folder_inventory(self.manifest, 'server-fictional/Y/Ofertes', 0, files, self.target)
+        self.assertEqual(result['fileCount'], 52)  # includes two earlier observations
+        self.assertEqual(len(result['results']), 50)
+        self.assertEqual(result['nextOffset'], 50)
+        self.assertFalse(result['enumerationComplete'])
+        self.assertIsNone(result['businessRecordCount'])
+        self.store.record_page(self.scan, 'Y:\\Ofertes\\Child', 0, [self.entry('Y:\\Ofertes\\Child\\nested.pdf')], None)
+        self.build()
+        second = mapping.folder_inventory(self.manifest, 'server-fictional/Y/Ofertes', 50, files, self.target)
+        self.assertEqual(second['fileCount'], 53)
+        self.assertEqual(len(second['results']), 3)
+        self.assertTrue(second['enumerationComplete'])
+        self.assertFalse(second['sourceChecked'])
+        self.assertFalse(second['snapshot'])
+        self.assertEqual(second['fileTypes']['.pdf'], 51)
+
+    def test_inventory_known_empty_unknown_and_denied_are_distinct(self):
+        self.store.db.execute('INSERT INTO directories(scan,source_key,source) VALUES(?,?,?)', (self.scan, 'y:\\empty', 'Y:\\Empty'))
+        self.store.db.commit()
+        self.store.record_page(self.scan, 'Y:\\Empty', 0, [], None)
+        self.build()
+        empty = mapping.folder_inventory(self.manifest, 'server-fictional/Y/Empty', 0, files, self.target)
+        self.assertEqual(empty['fileCount'], 0)
+        self.assertTrue(empty['enumerationComplete'])
+        self.assertIsNone(mapping.folder_inventory(self.manifest, 'server-fictional/Y/Missing', 0, files, self.target))
+        with self.assertRaises(ValueError):
+            mapping.folder_inventory(self.manifest, 'server-fictional/Y/Ofertes?part=1', 0, files, self.target)
+        self.store.db.execute("UPDATE directories SET reason='SOURCE_ACCESS_DENIED',state='incomplete' WHERE source_key='y:\\secret'")
+        self.store.db.commit()
+        self.build()
+        root = mapping.folder_inventory(self.manifest, 'server-fictional/Y/', 0, files, self.target)
+        self.assertFalse(root['enumerationComplete'])
+        self.assertEqual(root['fileCount'], 2)
+        with self.assertRaises(ValueError):
+            mapping.folder_inventory(self.manifest, 'server-fictional/Y/Secret', 0, files, self.target)
+        self.access['readRoots'] = ['Y:\\Secret']
+        with self.assertRaises(ValueError):
+            mapping.folder_inventory(self.manifest, 'server-fictional/Y/Ofertes', 0, files, self.target)
+
+    def test_demand_fill_resumes_only_target_and_never_content(self):
+        demand = load('test_folder_demand', 'knowledge-folder-inventory.py')
+        self.store.db.execute("UPDATE directories SET state='pending',offset=0")
+        self.store.db.commit()
+        requests = []
+        def run(_, request):
+            requests.append(request)
+            offset = request['offset']
+            return {'ok': True, 'entries': [self.entry('Y:\\Ofertes\\item'+str(n)+'.txt') for n in range(offset, offset+50)],
+                    'truncated': True, 'nextOffset': offset+50}
+        result = demand.fill(self.store, self.manifest, self.scan, 'Y:\\Ofertes', run)
+        self.assertEqual(result, {'pagesRead': 2, 'state': 'CONTINUE'})
+        self.assertEqual([r['offset'] for r in requests], [0, 50])
+        self.assertTrue(all(r['source'] == 'Y:\\Ofertes' and r['mode'] == 'list' for r in requests))
+        self.assertEqual(demand.next_directory(self.store, self.scan, 'Y:\\Ofertes')['offset'], 100)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM chunks').fetchone()[0], 0)
+        busy = demand.fill(self.store, self.manifest, self.scan, 'Y:\\Ofertes', lambda *_: (_ for _ in ()).throw(BlockingIOError()))
+        self.assertEqual(busy, {'pagesRead': 0, 'state': 'SOURCE_BUSY'})
+        self.assertEqual(demand.next_directory(self.store, self.scan, 'Y:\\Ofertes')['attempts'], 0)
+        self.assertIsNone(demand.next_directory(self.store, self.scan, 'Y:\\Oferte'))
+
+    def test_background_yields_between_pages_and_expired_marker_is_ignored(self):
+        demand = load('test_folder_yield', 'knowledge-folder-inventory.py')
+        import time
+        marker = self.root / 'operator' / 'interactive-until'
+        mapping.atomic_text(marker, str(time.time()+100))
+        self.assertTrue(demand.inventory.demand_pending(marker.parent))
+        result = demand.inventory.run_batch(self.store, self.manifest, self.scan,
+                    run=lambda *_: self.fail('Background did not yield'), should_yield=lambda: True)
+        self.assertEqual(result['paused'], 'INTERACTIVE_REQUEST')
+        mapping.atomic_text(marker, '0')
+        self.assertFalse(demand.inventory.demand_pending(marker.parent))
+
     def test_schedule_has_only_metadata_source_operations(self):
         unit = (INFRA / 'aibrain-arnall-knowledge-inventory.service').read_text()
         self.assertIn('knowledge-inventory.py', unit)

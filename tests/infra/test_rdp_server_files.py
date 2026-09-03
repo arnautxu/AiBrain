@@ -121,6 +121,23 @@ class ServerFileTests(unittest.TestCase):
                         dict(valid, operation='write'), dict(valid, command='whoami'),
                         dict(valid, input={'query': 'server:/Y/../secret', 'limit': 50})]:
             self.assertFalse(broker.validate_request(changed, self.manifest))
+        count = dict(valid, operation='inventory', input={'path': 'server-arnall/Y/Offers', 'offset': 0})
+        self.assertTrue(broker.validate_request(count, self.manifest))
+        for args in [{'path': 'server-other/Y/Offers', 'offset': 0}, {'path': 'server-arnall/Y/Offers', 'offset': True},
+                     {'path': 'server-arnall/Y/Offers?part=1', 'offset': 0}, {'path': 'server-arnall/Y/Offers', 'offset': -1}]:
+            self.assertFalse(broker.validate_request(dict(count, input=args), self.manifest))
+
+    def test_source_busy_and_specific_path_rejection_are_not_server_outages(self):
+        value = {'schemaVersion': 1, 'operation': 'read', 'requestId': '00000000-0000-4000-8000-000000000001',
+                 'installationId': 'test', 'connectionId': 'arnall', 'input': {'path': 'server-arnall/Y/file.pdf'}}
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        for error, code in [(BlockingIOError(), 'SERVER_FILES_BUSY'), (ValueError('WINDOWS_PATH_UNAVAILABLE'), 'WINDOWS_PATH_UNAVAILABLE')]:
+            with patch.object(broker.sync, 'scope_directory'), patch.object(broker.files, 'read', side_effect=error), \
+                 patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _: nullcontext())):
+                result = broker.execute(self.manifest, value)
+                self.assertFalse(result['available'])
+                self.assertEqual(result['error'], code)
 
     def test_scope_revalidation_precedes_every_file_operation(self):
         value = {'schemaVersion': 1, 'operation': 'read', 'requestId': '00000000-0000-4000-8000-000000000001',
