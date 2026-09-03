@@ -19,7 +19,12 @@ fields in every nonempty row. It retains trailing empty fields and decimal comma
 and records both inferred-separator and uneven-row warnings. Ambiguous detection
 keeps an explicit warning. Reparse affected verified copies without refreshing
 their source-check timestamps; a structured-extraction correction is not a new
-source observation.
+source observation. For a document that is already indexed at the same verified
+hash and source version, a later `unavailable` transport check does not prevent
+correcting its existing structured extraction. Preserve that entire later check,
+including its outcome and original verification time, in the same transaction.
+This exception cannot admit new content or revive a withdrawn document; missing,
+denied, changed and oversized source results still prevent reuse.
 
 Reader revision `located-v6` recognizes an explicit HTML signature in `.xls`
 exports before invoking the BIFF reader. It extracts inert text in document order
