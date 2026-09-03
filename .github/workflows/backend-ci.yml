@@ -49,6 +49,11 @@ jobs:
         run: npm test
       - name: Windows import and on-demand broker boundaries
         run: python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
+      - name: Company knowledge and legacy spreadsheet boundaries
+        run: |
+          python3 -m venv "$RUNNER_TEMP/knowledge-tests"
+          "$RUNNER_TEMP/knowledge-tests/bin/python" -m pip install --require-hashes --only-binary=:all: -r infra/hetzner/knowledge-test-requirements.txt
+          "$RUNNER_TEMP/knowledge-tests/bin/python" -m unittest discover -s tests/infra -p 'test_knowledge*.py' -q
       - name: Build and smoke-test automation worker
         run: npm run build:automation-worker
       - name: Production build
@@ -102,13 +107,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libreoffice-calc libreoffice-impress libreoffice-writer \
-            poppler-utils python3-pip qpdf
+            poppler-utils python3-pip qpdf catdoc unrtf
           python3 -m pip install --break-system-packages --no-cache-dir \
             python-pptx==1.0.2
       - name: Install locked dependencies
         run: npm ci
       - name: Run real document matrix
         run: npm run test:documents:real
+      - name: Read legacy DOC and RTF fixtures without privileges
+        run: python3 -m unittest discover -s tests/infra -p 'test_knowledge_word.py' -q
 
   containers:
     name: Clean immutable container builds

@@ -1,0 +1,29 @@
+[Unit]
+Description=Private resumable Arnall server metadata map
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-inventory.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --priority-manifest /etc/aibrain/company-qa/rdp/sync.json --rescan-after 86400 --max-pages 12 --seconds 240 --spread-pages
+ExecStartPost=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-map.py --manifest /etc/aibrain/company-qa/rdp/server-files.json
+TimeoutStartSec=1200
+TimeoutStopSec=15
+KillMode=control-group
+Nice=10
+CPUQuota=50%
+MemoryMax=1G
+TasksMax=128
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+ReadWritePaths=/var/lib/aibrain/knowledge /var/lib/aibrain/rdp-imports/arnall

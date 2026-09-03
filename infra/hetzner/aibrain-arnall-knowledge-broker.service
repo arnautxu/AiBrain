@@ -1,0 +1,30 @@
+[Unit]
+Description=Scoped indexed knowledge retrieval for Arnall
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-broker.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --bindings /etc/aibrain/company-qa/rdp/knowledge-bindings.json
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=10
+KillMode=control-group
+MemoryMax=512M
+CPUQuota=50%
+TasksMax=64
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+ReadWritePaths=/var/lib/docker/volumes/aibrain-company-qa-data/_data/locks/knowledge
+
+[Install]
+WantedBy=multi-user.target

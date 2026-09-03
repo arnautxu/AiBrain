@@ -1,5 +1,16 @@
 # Windows document synchronization
 
+## Shared source contention
+
+The scheduled mirror and the knowledge index use the same exclusive source
+lock. A busy lock returns `RDP_OPERATOR_BUSY` immediately, without consuming
+transport retries. The mirror records a deferred attempt and exits successfully
+so systemd does not start a failure/restart loop against another active reader.
+The prior snapshot, verified cache, failure count and last-success time remain;
+the deferred attempt does not establish current source freshness. A partial
+copy cache can resume on the next request, but is not published as a complete
+inventory. Genuine transport/policy failures keep their existing failure paths.
+
 ## Scope and ownership
 
 The host operator runs `infra/hetzner/rdp-sync.py` using the existing pinned
@@ -19,7 +30,7 @@ permissions; it does not change user policies or mount Windows into a worker.
 | --- | --- |
 | Private sync manifest | `/etc/aibrain/company-qa/rdp/sync.json` |
 | Connection and source restrictions | Existing `endpoints.env`, `credentials.env`, `policy.json`, `access.json` in the same private directory |
-| Operator programs | `/usr/local/lib/aibrain/rdp-access.py`, `rdp-sync.py`, `rdp-extract.py` |
+| Operator programs | `/usr/local/lib/aibrain/rdp-access.py`, `rdp-frame.py`, `rdp-sync.py`, `rdp-extract.py` |
 | Private verified originals, cache, state and prior snapshots | `/var/lib/aibrain/rdp-sync/arnall` |
 | Per-operation transfer receipts | `/var/lib/aibrain/rdp-imports/arnall` |
 | Scheduling | `aibrain-arnall-sync.timer` and `aibrain-arnall-sync.service` |

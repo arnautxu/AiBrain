@@ -71,7 +71,7 @@ def command(request, access, nonce):
     script = "$ErrorActionPreference='Stop';try{$d=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('" + encoded + "'))|ConvertFrom-Json;"
     script += r"""
 function Safe($p){$p=[IO.Path]::GetFullPath($p);$ok=$false;foreach($b in $d.roots){$b=$b.TrimEnd('\');if($p-eq$b-or$p.StartsWith($b+'\',[StringComparison]::OrdinalIgnoreCase)){$ok=$true}};if(!$ok){throw 'Scope'};$drive=Get-PSDrive -Name $p.Substring(0,1);if($drive.DisplayRoot-like '\\tsclient\*'){throw 'Redirected'};$c=$p;while($c){$i=Get-Item -Force -LiteralPath $c;if($i.Attributes-band[IO.FileAttributes]::ReparsePoint){throw 'Reparse'};$c=[IO.Path]::GetDirectoryName($c)};return $p}
-function Entry($i){@{source=$i.FullName;name=$i.Name;directory=$i.PSIsContainer;bytes=$(if($i.PSIsContainer){0}else{$i.Length});modifiedUtc=$i.LastWriteTimeUtc.ToString('o')}}
+function Entry($i){@{source=$i.FullName;name=$i.Name;directory=$i.PSIsContainer;reparse=[bool]($i.Attributes-band[IO.FileAttributes]::ReparsePoint);bytes=$(if($i.PSIsContainer){0}else{$i.Length});modifiedUtc=$i.LastWriteTimeUtc.ToString('o')}}
 $dr=@(Get-PSDrive -PSProvider FileSystem|Where-Object{$_.Name-match '^[A-Za-z]$'-and$_.DisplayRoot-notlike '\\tsclient\*'});$out=@();$partial=$false;$denied=0;$next=$null;
 """
     if request["mode"] == "drives":
@@ -115,6 +115,7 @@ def search(manifest, query, limit, run=browse):
     entries, filtered = [], 0
     for item in result["entries"]:
         try:
+            rdp.require(not item.get("reparse"), "REPARSE_ENTRY_EXCLUDED")
             source, _ = rdp.select_root(item["source"], manifest["sourceRoots"])
             if request["mode"] == "list":
                 rdp.require(ntpath.normcase(ntpath.dirname(source)) == ntpath.normcase(request["source"].rstrip("\\"))

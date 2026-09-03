@@ -13,6 +13,11 @@ It supports browsing directories, bounded recursive filename search and fresh
 text reads of supported documents. The account's accessible server filesystem
 is not equivalent to SQL access to the database or arbitrary Windows commands.
 
+The metadata-map extension now makes indexed folder/file metadata the first
+lookup path. Background traversal lists directories without extracting all file
+contents. See [SERVER_METADATA_MAP.md](SERVER_METADATA_MAP.md) for cached-result
+freshness, partial coverage, policy checks and separate installation acceptance.
+
 ## Employee tools and existing conversations
 
 The existing `aibrain_company_files.search/read` tool schema is reused, so
@@ -68,7 +73,7 @@ Windows ACLs. AiBrain's company permission and tenant boundaries remain in force
 Keep the candidate toolset together under `/usr/local/lib/aibrain/server-files/`:
 
 - `rdp-server-files.py`, `rdp-server-files-broker.py`;
-- `rdp-access.py`, `rdp-sync.py`, `rdp-extract.py` from the same reviewed revision.
+- `rdp-access.py`, `rdp-frame.py`, `rdp-sync.py`, `rdp-extract.py` from the same reviewed revision.
 
 Use a separate private `server-access.json` cloned from the current access
 manifest. Set `inventoryRoots` and `readRoots` to the 26 drive roots `A:\` through

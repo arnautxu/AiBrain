@@ -1,0 +1,11 @@
+[Unit]
+Description=Resume Arnall knowledge inventory in bounded batches
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+RandomizedDelaySec=20
+Unit=aibrain-arnall-knowledge-inventory.service
+
+[Install]
+WantedBy=timers.target

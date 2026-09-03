@@ -15,6 +15,7 @@ import {
   updateGovernedMemory,
 } from "@/ui/memory-ui-adapter";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { KnowledgeReviewPanel } from "@/components/knowledge-review-panel";
 
 function memoryDate(value: string) {
   const date = new Date(value);
@@ -137,6 +138,7 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
           </p>
 
           {updatingProject ? <p className="mt-3 text-[11px] text-[var(--text-muted)]">Actualizando memoria…</p> : null}
+          {projectDataIsCurrent && allowCompanyScope && projectId ? <KnowledgeReviewPanel key={projectId} projectId={projectId} /> : null}
 
           {visibleProposals.some((proposal) => proposal.status === "pending") ? <section className="mt-6"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Propuestas pendientes</h3><span className="text-[10px] text-[var(--text-subtle)]">No guardadas</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">Revisa contenido, alcance y procedencia. Rechazar nunca crea una memoria.</p><div className="mt-3 space-y-3">{visibleProposals.filter((proposal) => proposal.status === "pending").map((proposal) => <ProposalCard key={proposal.proposalId} proposal={proposal} allowCompanyScope={allowCompanyScope} disabled={saving || !projectId} onConfirm={(content, scope) => void runGovernance(() => confirmMemoryProposal({ proposalId: proposal.proposalId, projectId: projectId!, content, scope }))} onReject={() => void runGovernance(() => rejectMemoryProposal(proposal.proposalId, projectId!))} />)}</div></section> : null}
 

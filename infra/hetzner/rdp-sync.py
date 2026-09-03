@@ -130,6 +130,8 @@ def rdp_call(manifest, operation, source, attempts=3):
                         "RDP_RECEIPT_MISMATCH")
                 return result
         # A policy prohibition or source boundary must never be retried as an alternate channel.
+        if b"AIBRAIN_RDP_ACCESS_FAILED: [Errno 11]" in error:
+            raise BlockingIOError("RDP_OPERATOR_BUSY")
         if b"RDP_DRIVE_REDIRECTION_DISABLED" in error:
             raise ValueError("RDP_DRIVE_REDIRECTION_DISABLED")
         if attempt + 1 < attempts:
@@ -403,6 +405,13 @@ def sync(manifest, call=rdp_call, extract=extract_sandboxed):
                   "lastSuccess": checked_at, "consecutiveFailures": 0, "documents": len(files), "copied": copied, "reused": reused,
                   "unreadable": len(skipped) + sum(not f["extracted"] for f in files.values()), "publishedScopes": published,
                   "publicationSignature": signature}
+        atomic_json(status_path, status)
+        return status
+    except BlockingIOError:
+        # Source contention must not trigger Restart=on-failure loops. Retain
+        # the last success/cache/publication, without calling the copy fresh.
+        status = {**previous_status, "state": "deferred", "lastAttempt": status["lastAttempt"],
+                  "error": "RDP_OPERATOR_BUSY"}
         atomic_json(status_path, status)
         return status
     except Exception as error:

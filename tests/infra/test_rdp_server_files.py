@@ -66,6 +66,7 @@ class ServerFileTests(unittest.TestCase):
         def run(*_):
             return {'ok': True, 'entries': [
                 {'source': 'Y:\\Other\\file.txt', 'directory': False, 'bytes': 1},
+                {'source': 'Y:\\PRESSUPOSTOS\\junction', 'directory': True, 'bytes': 0, 'reparse': True},
                 {'source': 'Y:\\PRESSUPOSTOS\\passwords.txt', 'directory': False, 'bytes': 1}],
                 'truncated': False, 'recordedAt': 'now'}
         result = files.search(self.manifest, 'server:/Y/PRESSUPOSTOS', 50, run)
