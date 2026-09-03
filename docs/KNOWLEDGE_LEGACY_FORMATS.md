@@ -4,6 +4,29 @@ This is the legacy-format extension of the private knowledge catalogue. Refer to
 [COMPANY_KNOWLEDGE_SYSTEM.md](COMPANY_KNOWLEDGE_SYSTEM.md) for the architecture and
 installation acceptance requirements. Original Windows files and permissions remain unchanged.
 
+## HTML exports with XLS filenames
+
+Reader revision `located-v6` recognizes an explicit HTML signature in `.xls`
+exports before invoking the BIFF reader. It extracts inert text in document order
+with `html:block:N` locators. Scripts, style, metadata and fallback content are
+ignored; links, frames and embedded objects are never fetched or executed.
+Text from malformed or nested layout tables is searchable, but no spreadsheet
+coordinates, numeric types or calculation-ready tables are inferred. Warnings
+make that limitation explicit. Frame-only workbooks fail with
+`HTML_EXTERNAL_DEPENDENCIES_UNAVAILABLE`; their linked sheets require separately
+authorized inventory and ingestion.
+
+Parser recovery may use existing root-owned verified copies only when source,
+size, modification version and SHA-256 still match the catalogue and current
+read policy. Preserve the original receipt verification time when reindexing;
+local parsing is not a fresh Windows check. Do not revive withdrawn/denied rows
+or reuse a copy after a later negative source check. Publication retains its
+ordinary scope and freshness gates.
+
+Before opening a source session, ingestion keeps zero-byte files and Office
+`~$` lock records as metadata-only entries with explicit reasons. It does not
+delete them. The normal inventory can admit a changed file version again.
+
 ## XLS contract
 
 `knowledge-extract.py` reads BIFF XLS with xlrd 2.0.2 inside the existing

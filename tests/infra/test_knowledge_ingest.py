@@ -47,6 +47,20 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(os.stat(original).st_mode&0o777,0o600)
         self.assertEqual(self.store.search("Contrato")[0]["sha256"],self.digest)
 
+    def test_empty_and_office_lock_metadata_do_not_open_remote_sessions(self):
+        with self.store.write():
+            self.store.db.execute("UPDATE documents SET bytes=0")
+        with patch.object(ingest.files.sync,'rdp_call',side_effect=AssertionError('unexpected copy')) as remote:
+            result=ingest.batch(self.store,self.root,self.manifest,copy=remote)
+        self.assertEqual(result['processed'],0)
+        self.assertEqual(tuple(self.store.db.execute('SELECT state,reason FROM documents').fetchone()),('unsupported','EMPTY_FILE'))
+        with self.store.write():
+            self.store.db.execute("UPDATE documents SET state='pending',bytes=165,name='~$report.xlsx',suffix='.xlsx'")
+        result=ingest.batch(self.store,self.root,self.manifest,copy=lambda *a,**k:self.fail('unexpected copy'))
+        self.assertEqual(result['processed'],0)
+        self.assertEqual(tuple(self.store.db.execute('SELECT state,reason FROM documents').fetchone()),('unsupported','OFFICE_LOCK_FILE'))
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM documents').fetchone()[0],1)
+
     def test_changed_source_and_corrupt_transfer_never_index(self):
         def changed(*_,**__):
             return {**self.copy(),"modifiedUtc":"2026-09-03T12:00:00Z"}

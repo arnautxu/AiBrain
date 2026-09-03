@@ -24,7 +24,7 @@ def module(name,filename):
 inventory = module("knowledge_inventory","knowledge-inventory.py")
 catalogue, files = inventory.catalogue, inventory.files
 require = catalogue.require
-EXTRACTOR_REVISION = "located-v5"
+EXTRACTOR_REVISION = "located-v6"
 RETRY_DELAYS = (300, 1800)  # Three total attempts per observed source version.
 RETRYABLE_FAILURES = frozenset({"COPY_UNAVAILABLE", "SOURCE_CHANGED_DURING_COPY"})
 # Fixed codes only: parser messages may contain document text or local paths.
@@ -41,6 +41,7 @@ EXTRACTION_FAILURES = frozenset({
     "XLS_INVALID_NUMBER", "XLS_INVALID_CELL_TYPE",
     "RTF_TABLE_STRUCTURE", "RTF_SIGNATURE_REQUIRED",
     "IMAGE_SIGNATURE_REQUIRED", "OCR_PIXEL_LIMIT",
+    "HTML_EXTERNAL_DEPENDENCIES_UNAVAILABLE",
 })
 
 
@@ -219,6 +220,12 @@ def batch(store,root,manifest,max_files=5,max_bytes=64*1024*1024,quota_bytes=10*
     require(type(quota_bytes) is int and 256*1024*1024 <= quota_bytes <= 1024**4,"INVALID_QUOTA")
     require(formats is None or isinstance(formats,list) and 0 < len(formats) <= len(catalogue.FORMATS) and all(f in catalogue.FORMATS for f in formats),"INVALID_FORMAT_FILTER")
     require(type(seconds) is int and 1 <= seconds <= 480,"INVALID_TIME_LIMIT")
+    # Keep metadata discoverable, but do not open a Windows session for an
+    # empty file or an Office lock record. Changed source versions are admitted
+    # again by the ordinary inventory fingerprint reconciliation.
+    with store.write():
+        store.db.execute("UPDATE documents SET state='unsupported',reason='EMPTY_FILE' WHERE state='pending' AND bytes=0")
+        store.db.execute("UPDATE documents SET state='unsupported',reason='OFFICE_LOCK_FILE' WHERE state='pending' AND substr(name,1,2)='~$' AND suffix IN ('.xls','.xlsx','.doc','.docx')")
     # Include the existing shared transfer cache in the admission budget. No
     # imported originals from another workflow are deleted to reclaim capacity.
     used = sum(p.stat().st_size for directory in [root,Path(manifest["importsRoot"])]
