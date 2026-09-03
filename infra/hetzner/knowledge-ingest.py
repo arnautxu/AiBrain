@@ -24,7 +24,7 @@ def module(name,filename):
 inventory = module("knowledge_inventory","knowledge-inventory.py")
 catalogue, files = inventory.catalogue, inventory.files
 require = catalogue.require
-EXTRACTOR_REVISION = "located-v6"
+EXTRACTOR_REVISION = "located-v7"
 RETRY_DELAYS = (300, 1800)  # Three total attempts per observed source version.
 RETRYABLE_FAILURES = frozenset({"COPY_UNAVAILABLE", "SOURCE_CHANGED_DURING_COPY"})
 # Fixed codes only: parser messages may contain document text or local paths.

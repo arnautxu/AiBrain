@@ -25,6 +25,24 @@ class KnowledgeExtractionTests(unittest.TestCase):
         result=extractor.extract(self.source,".csv")
         self.assertEqual(result["tables"][0]["rows"][1],["Ejemplo","12,50"])
 
+    def test_bomless_utf16_csv_preserves_cells_and_declares_encoding(self):
+        for encoding in ('utf-16-le','utf-16-be'):
+            with self.subTest(encoding=encoding):
+                self.source.write_bytes('Artículo;Importe\nEjemplo;12,50\n'.encode(encoding))
+                result=extractor.extract(self.source,'.csv')
+                self.assertEqual(result['tables'][0]['rows'],[['Artículo','Importe'],['Ejemplo','12,50']])
+                self.assertEqual(result['segments'][1]['locator'],'row:2')
+                self.assertIn({'code':'ASSUMED_'+encoding.upper().replace('-','_')+'_WITHOUT_BOM_ENCODING'},result['warnings'])
+
+    def test_bomless_unicode_does_not_relax_binary_or_secret_guards(self):
+        for raw in (b'\x00\x00A\x00',b'\x01\x00A\x00',b'A\x00B'):
+            self.source.write_bytes(raw)
+            with self.assertRaisesRegex(ValueError,'BINARY_CONTENT'):
+                extractor.extract(self.source,'.csv')
+        self.source.write_bytes('password=abcdefghijklmnopqrstuvwx\n'.encode('utf-16-le'))
+        with self.assertRaisesRegex(ValueError,'CREDENTIAL_SHAPED_CONTENT'):
+            extractor.extract(self.source,'.txt')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.source = Path(self.temp.name) / "input"
