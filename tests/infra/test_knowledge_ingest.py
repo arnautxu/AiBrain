@@ -173,6 +173,25 @@ class IngestTests(unittest.TestCase):
         self.assertEqual(calls,["Y:\\report-0.txt"])
         self.assertEqual(self.store.document("Y:\\report.txt")["state"],"pending")
 
+    def test_document_preference_reserves_other_formats_and_keeps_discovery_order(self):
+        scan=self.store.start_scan(['Y:\\'])
+        entries=[{'source':f'Y:\\file-{i}{suffix}','directory':False,'bytes':15,'modifiedUtc':self.document['modified']}
+                 for suffix in ('.pdf','.txt') for i in range(12)]
+        self.store.record_page(scan,'Y:\\',0,entries,None);self.store.finish_scan(scan)
+        calls=[]
+        def copy(manifest,operation,source,**kwargs):calls.append(source);return self.copy()
+        result=ingest.batch(self.store,self.root,self.manifest,max_files=10,prefer_documents=True,copy=copy,extract=self.extract)
+        self.assertEqual(result['processed'],10)
+        self.assertEqual([p for p in calls if p.endswith('.pdf')],[f'Y:\\file-{i}.pdf' for i in range(8)])
+        self.assertEqual([p for p in calls if p.endswith('.txt')],['Y:\\report.txt','Y:\\file-0.txt'])
+        self.assertEqual(calls[1],'Y:\\report.txt')
+        self.assertEqual(len(set(calls)),10)
+
+    def test_document_preference_fills_slots_when_preferred_queue_is_empty(self):
+        self.more_documents(9)
+        result=ingest.batch(self.store,self.root,self.manifest,max_files=10,prefer_documents=True,copy=self.copy,extract=self.extract)
+        self.assertEqual(result['processed'],10)
+
     def test_old_file_larger_than_custom_batch_budget_does_not_block_fitting_file(self):
         scan=self.store.start_scan(["Y:\\"])
         self.store.record_page(scan,"Y:\\",0,[{"source":"Y:\\small.txt","directory":False,
