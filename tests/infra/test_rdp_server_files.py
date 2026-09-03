@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 import string
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -138,6 +139,38 @@ class ServerFileTests(unittest.TestCase):
                 result = broker.execute(self.manifest, value)
                 self.assertFalse(result['available'])
                 self.assertEqual(result['error'], code)
+
+    def test_metadata_queries_run_while_windows_read_remains_serialized(self):
+        server = object.__new__(broker.Server)
+        server.slot = threading.BoundedSemaphore(1)
+        server.lookup_slots = threading.BoundedSemaphore(2)
+        entered, release = threading.Event(), threading.Event()
+        def run(value, cached_only=False):
+            if cached_only:
+                return {'available': True, 'lookupMode': 'metadata-map'}
+            entered.set()
+            if not release.wait(2):
+                raise RuntimeError('Test did not release source')
+            return {'available': True}
+        server.run = run
+        worker = threading.Thread(target=lambda: server.dispatch({'operation': 'read'}))
+        worker.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertTrue(server.dispatch({'operation': 'search'})['available'])
+            self.assertTrue(server.dispatch({'operation': 'inventory'})['available'])
+            self.assertEqual(server.dispatch({'operation': 'read'})['error'], 'SERVER_FILES_BUSY')
+        finally:
+            release.set();worker.join(3)
+        self.assertFalse(worker.is_alive())
+
+    def test_cached_only_miss_never_contacts_windows(self):
+        value = {'schemaVersion': 1, 'operation': 'search', 'requestId': '00000000-0000-4000-8000-000000000001',
+                 'installationId': 'test', 'connectionId': 'arnall', 'input': {'query': 'server:/Y/Unknown', 'limit': 50}}
+        with patch.object(broker.sync, 'scope_directory'), patch.object(broker.server_map, 'cached_search', return_value=None), \
+             patch.object(broker.files, 'search') as live:
+            self.assertIsNone(broker.execute(self.manifest, value, cached_only=True))
+            live.assert_not_called()
 
     def test_scope_revalidation_precedes_every_file_operation(self):
         value = {'schemaVersion': 1, 'operation': 'read', 'requestId': '00000000-0000-4000-8000-000000000001',

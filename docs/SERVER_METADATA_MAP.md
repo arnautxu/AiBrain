@@ -35,9 +35,11 @@ the first200 known direct children. No whole-map prompt injection is introduced.
 ## Lookup and permissions
 
 The server-files broker's existing search operation consults the map first.
-Absent maps, changed policy bindings and unmapped or uncompleted explicit directories use the
+Absent maps, changed policy bindings and unmapped or pending explicit directories use the
 existing live listing path. Empty name searches in a partial map remain explicitly
 inconclusive; they do not silently launch another all-server recursive crawl.
+Partially accessible directories with known children remain browsable in the map
+with incomplete coverage; one excluded child does not force a fresh root listing.
 The read operation retains the existing fresh copy, hash verification and sandboxed
 extraction. No cached filename result itself establishes current Windows access.
 
@@ -68,6 +70,11 @@ distinct error states. A killed request's marker expires within200 seconds;
 normal cleanup clears it. Completed mapped inventories remain local and fast.
 Scheduled map projection takes the same catalogue lock and defers if it is held,
 so a background snapshot cannot overwrite a newer on-demand projection.
+The broker reserves two bounded child slots for metadata-only lookups, independent
+of its one Windows-operation slot. Those children have a20-second deadline and
+cannot fall through to source access. A long document read therefore cannot make
+cached folder searches or completed inventories report that Windows is busy.
+Uncached requests still use the single source slot and the existing shared locks.
 
 The map binds installation, connection, publication scope and both source-root
 policies. The broker still verifies app UID, request identity, company reader
