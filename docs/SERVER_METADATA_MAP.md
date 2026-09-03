@@ -5,6 +5,13 @@ extensions and modification observations. It does not copy or parse each file.
 The existing operator catalogue and traversal cursors are reused. Unsupported
 content formats can still be located by filename. Windows remains read-only.
 
+The metadata schedule uses `--spread-pages`: smaller durable directory offsets
+come first, then explicit business-root priority and discovery order. Unvisited
+folders therefore advance before another large folder is drained. This ordering
+resumes across batches/restarts without resetting a cursor or retry budget.
+Listing receipts include the observed reparse attribute, so excluded junctions
+are not accidentally queued as ordinary directories and retried as unavailable.
+
 `knowledge-map.py` projects a consistent read transaction into a separate private
 `server-map/catalogue.sqlite3`, atomically replaced after integrity checking. The
 projection contains metadata only, not document chunks or extracted text. Parent
@@ -12,12 +19,18 @@ indexes support directory pagination; literal case/accent-normalized name/path
 terms support local search. No model or external provider is needed.
 
 Root-owned `server-map/README.md` and at most128 short `folders/*.md` guides cover
-the first directory levels, known direct-child counts, extensions and traversal
+the first directory levels, balanced between observed drives, known direct-child counts, extensions and traversal
 status. Folder business purposes remain explicitly unconfirmed. These dated,
 generated guides do not confer permissions and are not a second search authority.
 Older unreferenced guides may remain historical artifacts; only the current
 README identifies the current projection's guides. No guide is automatically
 inserted into an employee's prompt or published company-wide.
+
+Directory search results carry a bounded `folderContext` from the same map:
+observed child kinds, common extensions and up to6 child-directory names, filtered
+by current source policy. These are observed structural descriptions; business
+purpose remains unconfirmed. The counts are explicitly partial and limited to
+the first200 known direct children. No whole-map prompt injection is introduced.
 
 ## Lookup and permissions
 

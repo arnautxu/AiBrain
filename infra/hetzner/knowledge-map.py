@@ -188,17 +188,32 @@ def write_guides(target, meta):
                  'Directorios: ' + json.dumps(meta['directories']), '']
         # Root and two levels below it, at most128 short guides. Full paths remain
         # searchable in SQLite; these summaries are not the catalogue itself.
-        folders = [dict(r) for r in db.execute("SELECT * FROM entries WHERE kind='directory' ORDER BY source_key")
-                   if r['source'].rstrip('\\').count('\\') <= 2][:128]
+        by_drive = collections.defaultdict(list)
+        for r in db.execute("SELECT * FROM entries WHERE kind='directory' ORDER BY source_key"):
+            if r['source'].rstrip('\\').count('\\') <= 2:
+                by_drive[r['source'][0].upper()].append(dict(r))
+        for rows in by_drive.values():
+            rows.sort(key=lambda r: (r['source'].rstrip('\\').count('\\'), r['source_key']))
+        folders = []
+        # A large system drive cannot crowd all business-drive guides out.
+        while by_drive and len(folders) < 128:
+            for drive in sorted(list(by_drive)):
+                folders.append(by_drive[drive].pop(0))
+                if not by_drive[drive]:
+                    del by_drive[drive]
+                if len(folders) == 128:
+                    break
         for row in folders:
             key = row['source_key'].rstrip('\\')
             counts = dict(db.execute('SELECT kind,count(*) FROM entries WHERE parent=? AND source_key!=? GROUP BY kind', (key,row['source_key'])))
             suffixes = dict(db.execute("SELECT suffix,count(*) FROM entries WHERE parent=? AND kind='file' GROUP BY suffix ORDER BY count(*) DESC LIMIT 10", (key,)))
+            children = [r[0] for r in db.execute("SELECT name FROM entries WHERE parent=? AND source_key!=? AND kind='directory' ORDER BY name LIMIT 12", (key,row['source_key']))]
             filename = hashlib.sha256(row['source_key'].encode()).hexdigest()[:24] + '.md'
             content = '\n'.join(['# ' + markdown(row['source']), '', 'Generado: ' + meta['generatedAt'],
                 'Estado del recorrido: ' + row['status'], 'Finalidad: pendiente de confirmar.',
                 'Observaciones directas conocidas: ' + json.dumps(counts),
                 'Extensiones observadas: ' + markdown(json.dumps(suffixes)),
+                'Subcarpetas conocidas (hasta12): ' + ', '.join(markdown(name) for name in children),
                 'No contiene el texto de los documentos ni acredita permisos nuevos.', ''])
             atomic_text(directory / filename, content)
             lines.append('- [' + markdown(row['source']) + '](folders/' + filename + ') — ' + row['status'])
@@ -244,9 +259,12 @@ def cached_search(manifest, query, limit, files, root=None):
         for row in rows[:limit]:
             if not allowed(row['source']):
                 continue
-            entries.append({'path': files.virtual_path(manifest['connectionId'], row['source']), 'source': row['source'],
+            entry = {'path': files.virtual_path(manifest['connectionId'], row['source']), 'source': row['source'],
                             'kind': row['kind'], 'size': row['bytes'], 'modifiedAt': row['modified'], 'scope': 'company',
-                            'observedAt': row['observed'], 'observationPrecision': 'scan' if row['kind']=='directory' else 'entry'})
+                            'observedAt': row['observed'], 'observationPrecision': 'scan' if row['kind']=='directory' else 'entry'}
+            if row['kind'] == 'directory':
+                entry['folderContext'] = folder_context(db, row, allowed)
+            entries.append(entry)
         next_query = None
         if more and request['mode'] == 'list':
             next_query = 'server:/' + files.virtual_path(manifest['connectionId'], request['source']).split('/', 1)[1] + '?offset=' + str(request['offset'] + limit)
@@ -260,6 +278,18 @@ def cached_search(manifest, query, limit, files, root=None):
                 '. Las fechas de observación acompañan a cada resultado. Cobertura parcial: un resultado vacío no demuestra ausencia. Comprueba el origen al abrir el archivo.'}
     finally:
         db.close()
+
+
+def folder_context(db, row, allowed):
+    """Return bounded, policy-filtered observed structure, never invented purpose."""
+    key = row['source_key'].rstrip('\\')
+    children = db.execute('SELECT source,name,kind,suffix FROM entries WHERE parent=? AND source_key!=? ORDER BY kind,source_key LIMIT 201', (key,row['source_key'])).fetchall()
+    visible = [c for c in children[:200] if allowed(c['source'])]
+    return {'status': row['status'], 'businessPurpose': 'unconfirmed', 'partial': True,
+            'sampleLimited': len(children)>200,
+            'observedChildKinds': dict(collections.Counter(c['kind'] for c in visible)),
+            'observedFileTypes': dict(collections.Counter(c['suffix'] for c in visible if c['kind']=='file').most_common(10)),
+            'childDirectories': [c['name'] for c in visible if c['kind']=='directory'][:6]}
 
 
 def main():

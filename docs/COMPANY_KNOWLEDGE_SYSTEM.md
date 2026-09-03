@@ -43,6 +43,8 @@ stop conditions. Source contention yields without bypassing the shared lock.
 
 The supplied schedule admits at most12 directory pages over240 seconds, then
 rebuilds the local metadata search projection and bounded Markdown folder guides.
+It spreads pages across less-visited directories before draining a large one;
+business-root priority remains the tie-breaker at equal offsets.
 It does not invoke ingestion, per-document hash reconciliation or content
 publication. The small existing document mirror and on-demand reads are separate.
 Each admitted source operation retains its separate timeout. Existing cursors,
