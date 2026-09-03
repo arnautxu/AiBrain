@@ -65,3 +65,14 @@ do not automatically resume the superseded bulk-ingestion schedule. Existing app
 image, verified content, small mirror and user data stay intact. Application source
 changes still require their separate CI, publication, deploy and authenticated
 acceptance gates.
+
+## Personal memory
+
+Reuse each provisioned user's existing private `PROFILE.md`, `PREFERENCES.md`,
+memory journal and governed records. `knowledge-memory-layout.py --manifest ...`
+adds only a non-overwriting `memory/README.md` to enabled, identity-checked users.
+The fixed guide explains the actual stores, sources, revisions and project scopes.
+It neither copies user facts elsewhere nor creates a second memory authority.
+Existing user notes, decisions, project boundaries and application retrieval stay
+intact. Detailed Markdown exports of individual memory records are not enabled by
+this guide and would need deletion/revision synchronization before activation.

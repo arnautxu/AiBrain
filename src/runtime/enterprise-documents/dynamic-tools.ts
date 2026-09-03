@@ -120,10 +120,13 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
       // Validate query and issued roots before any host effect. Then search the
       // new atomic snapshot, including files that were missing from the copy.
       let results = await context.network.search(input);
-      const knowledge = await context.knowledgeFiles?.search(context.roots, input.query, input.limit);
-      if (knowledge?.available) return response({ results: [...results, ...(knowledge.results ?? [])], knowledge,
-        warning: "Resultados de copias indexadas autorizadas, con cobertura parcial y fechas de observación. Usa server:/ para consultar una ubicación en directo cuando necesites comprobar el original." });
       const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
+      const knowledge = await context.knowledgeFiles?.search(context.roots, input.query, input.limit);
+      if (server?.available) return response({ results: [...results, ...(server.results ?? []), ...(knowledge?.available ? knowledge.results ?? [] : [])], server,
+        ...(knowledge?.available ? { knowledge } : {}),
+        warning: server.warning ?? "Resultados del mapa del servidor y de copias autorizadas; revisa cobertura y fechas antes de afirmar que el origen está actualizado." });
+      if (knowledge?.available) return response({ results: [...results, ...(knowledge.results ?? [])], knowledge,
+        warning: "Resultados de copias indexadas autorizadas, con cobertura parcial y fechas de observación. La búsqueda del servidor no está disponible; un resultado vacío no demuestra ausencia en el origen." });
       if (server) return response({ results: [...results, ...(server.results ?? [])], server,
         warning: "Los resultados locales son copias. Los resultados del servidor reflejan la consulta indicada; revisa limited, truncated y nextQuery antes de afirmar que una búsqueda es completa." });
       const synchronization = await context.sync?.refresh(context.roots) ?? [];
