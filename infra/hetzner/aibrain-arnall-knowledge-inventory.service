@@ -1,5 +1,5 @@
 [Unit]
-Description=Private resumable Arnall knowledge catalogue
+Description=Private resumable Arnall server metadata map
 Wants=network-online.target
 After=network-online.target
 
@@ -8,10 +8,8 @@ Type=oneshot
 User=root
 Group=root
 UMask=0077
-ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-ingest.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --priority-manifest /etc/aibrain/company-qa/rdp/sync.json --max-files 10 --seconds 240 --prefer-documents
-ExecStartPost=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-inventory.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --priority-manifest /etc/aibrain/company-qa/rdp/sync.json --rescan-after 86400 --max-pages 3 --seconds 60
-ExecStartPost=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-reconcile.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --bindings /etc/aibrain/company-qa/rdp/knowledge-bindings.json --max-files 2
-ExecStartPost=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-publish.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --bindings /etc/aibrain/company-qa/rdp/knowledge-bindings.json
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-inventory.py --manifest /etc/aibrain/company-qa/rdp/server-files.json --priority-manifest /etc/aibrain/company-qa/rdp/sync.json --rescan-after 86400 --max-pages 12 --seconds 240
+ExecStartPost=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-map.py --manifest /etc/aibrain/company-qa/rdp/server-files.json
 TimeoutStartSec=1200
 TimeoutStopSec=15
 KillMode=control-group

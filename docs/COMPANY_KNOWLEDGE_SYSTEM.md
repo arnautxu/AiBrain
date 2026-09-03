@@ -1,7 +1,8 @@
 # Company knowledge system
 
-The company library adds a durable private inventory, verified source copies,
-located extraction, scoped search, source-backed knowledge and human review.
+The company library starts with a durable private map of server folders and file
+metadata. Content is read on demand; bulk extraction is not the scheduled default.
+Existing verified copies, located extraction, scoped search and human review remain.
 Windows source paths and permissions remain unchanged. The implementation is a
 foundation for company memory; full corpus coverage and semantic quality require
 installation-specific acceptance, not just a successful build.
@@ -40,12 +41,15 @@ interruption. A path-local failure defers that directory until another invocatio
 while allowing other folders to proceed. Transport or policy failures retain their
 stop conditions. Source contention yields without bypassing the shared lock.
 
-The supplied schedule processes already discovered files before opening more
-directories. It admits ingestion for 240 seconds, then at most three inventory
-pages over sixty seconds, followed by the existing source checks and publication.
-Each admitted source/parser operation retains its separate timeout.
+The supplied schedule admits at most12 directory pages over240 seconds, then
+rebuilds the local metadata search projection and bounded Markdown folder guides.
+It does not invoke ingestion, per-document hash reconciliation or content
+publication. The small existing document mirror and on-demand reads are separate.
+Each admitted source operation retains its separate timeout. Existing cursors,
+verified originals and extracted content remain; a discovered changed version
+still invalidates its dependent content through the catalogue's ordinary rules.
 
-With `--prefer-documents`, ingestion reserves four of five queue slots for PDF,
+For an explicitly requested bulk job only, `--prefer-documents` reserves four of five queue slots for PDF,
 Office, CSV and RTF. The first other-format slot is second in the batch, so text
 and image processing still advances. Empty queues yield their unused slots.
 Both groups preserve approved business-root priority, then stable discovery order.
@@ -92,6 +96,7 @@ caller, then resume the timer even if the bounded pilot fails.
 
 ## Runbooks
 
+- [Metadata map and on-demand lookup](SERVER_METADATA_MAP.md)
 - [Legacy document extraction](KNOWLEDGE_LEGACY_FORMATS.md)
 - [Raster OCR](KNOWLEDGE_IMAGES.md)
 - [Source-backed summaries and execution policy](KNOWLEDGE_SUMMARIES.md)
