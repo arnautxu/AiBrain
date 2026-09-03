@@ -43,6 +43,13 @@ class KnowledgeExtractionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'CREDENTIAL_SHAPED_CONTENT'):
             extractor.extract(self.source,'.txt')
 
+    def test_ragged_semicolon_export_does_not_split_decimal_commas(self):
+        self.source.write_bytes('Article;Import;Nota\nExemple;12,50;Text;\n'.encode('utf-16-le'))
+        result=extractor.extract(self.source,'.csv')
+        self.assertEqual(result['tables'][0]['rows'],[['Article','Import','Nota'],['Exemple','12,50','Text','']])
+        self.assertIn({'code':'CSV_DELIMITER_INFERRED_FROM_ROWS','delimiter':';'},result['warnings'])
+        self.assertIn({'code':'CSV_RAGGED_ROWS'},result['warnings'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.source = Path(self.temp.name) / "input"

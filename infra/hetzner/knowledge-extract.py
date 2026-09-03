@@ -405,10 +405,27 @@ def extract(source, suffix, ocr_languages="spa+cat+eng", run=command):
         if suffix == ".csv":
             try:
                 dialect=csv.Sniffer().sniff(text[:8192],delimiters=",;\t|")
+                rows=list(csv.reader(io.StringIO(text),dialect))
             except csv.Error:
-                dialect=csv.excel
-            rows = list(csv.reader(io.StringIO(text),dialect))
+                # Sniffer rejects common exports with a trailing field absent
+                # from the header. Prefer a uniquely evidenced separator over
+                # splitting decimal commas into invented columns.
+                candidates=[]
+                for delimiter in ',;\t|':
+                    sample=list(csv.reader(io.StringIO(text),delimiter=delimiter))
+                    nonempty=[row for row in sample if row]
+                    if len(nonempty)>=2 and all(len(row)>1 for row in nonempty):
+                        require(len(sample)<=100000 and sum(map(len,sample))<=100000,'CELL_LIMIT')
+                        candidates.append((delimiter,sample))
+                if len(candidates)==1:
+                    delimiter,rows=candidates[0]
+                    warnings.append({'code':'CSV_DELIMITER_INFERRED_FROM_ROWS','delimiter':delimiter})
+                else:
+                    rows=list(csv.reader(io.StringIO(text),csv.excel))
+                    warnings.append({'code':'CSV_DELIMITER_NOT_CONFIRMED'})
             require(len(rows) <= 100000 and sum(len(row) for row in rows) <= 100000,"CELL_LIMIT")
+            if len({len(row) for row in rows if row})>1:
+                warnings.append({'code':'CSV_RAGGED_ROWS'})
             tables.append({"locator":"csv","rows":rows})
             for number,row in enumerate(rows,1):
                 append(f"row:{number}"," | ".join(row))

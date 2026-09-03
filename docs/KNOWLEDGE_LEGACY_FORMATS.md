@@ -13,6 +13,14 @@ assumed-encoding warning. Binary/control-character and credential guards still
 run after decoding. Wider or ambiguous BOM-less Unicode layouts are not guessed;
 JSON keeps its existing encoding policy. CSV rows and cell delimiters are retained.
 
+Revision `located-v8` also handles ragged CSV exports when the standard detector
+fails: a separator is selected only when exactly one candidate creates multiple
+fields in every nonempty row. It retains trailing empty fields and decimal commas,
+and records both inferred-separator and uneven-row warnings. Ambiguous detection
+keeps an explicit warning. Reparse affected verified copies without refreshing
+their source-check timestamps; a structured-extraction correction is not a new
+source observation.
+
 Reader revision `located-v6` recognizes an explicit HTML signature in `.xls`
 exports before invoking the BIFF reader. It extracts inert text in document order
 with `html:block:N` locators. Scripts, style, metadata and fallback content are
