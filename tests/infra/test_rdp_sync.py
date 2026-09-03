@@ -92,6 +92,34 @@ class SyncTests(unittest.TestCase):
         self.assertEqual((self.state / "snapshot.json").read_bytes(), old)
         self.assertEqual(len(self.copies), 2)
 
+    def test_source_contention_preserves_snapshot_and_does_not_count_as_failure(self):
+        previous=sync.sync(self.manifest,self.call,self.extractor)
+        snapshot=(self.state/'snapshot.json').read_bytes()
+        cache=(self.state/'cache.json').read_bytes()
+        def busy(*args):raise BlockingIOError('RDP_OPERATOR_BUSY')
+        with patch.object(sync,'refresh_public_status') as publication:
+            result=sync.sync(self.manifest,busy,self.extractor)
+        self.assertEqual(result['state'],'deferred')
+        self.assertEqual(result['error'],'RDP_OPERATOR_BUSY')
+        self.assertEqual(result['lastSuccess'],previous['lastSuccess'])
+        self.assertEqual(result['consecutiveFailures'],previous['consecutiveFailures'])
+        self.assertEqual((self.state/'snapshot.json').read_bytes(),snapshot)
+        self.assertEqual((self.state/'cache.json').read_bytes(),cache)
+        publication.assert_not_called()
+
+    def test_contention_after_one_copy_retains_resumable_cache_without_partial_publication(self):
+        def call(manifest,operation,source):
+            if operation=='copy' and source.endswith('second.txt'):raise BlockingIOError('RDP_OPERATOR_BUSY')
+            return self.call(manifest,operation,source)
+        result=sync.sync(self.manifest,call,self.extractor)
+        self.assertEqual(result['state'],'deferred')
+        self.assertNotIn('lastSuccess',result)
+        self.assertFalse((self.state/'snapshot.json').exists())
+        self.assertEqual(len(json.loads((self.state/'cache.json').read_text())),1)
+        result=sync.sync(self.manifest,self.call,self.extractor)
+        self.assertEqual(result['reused'],1)
+        self.assertEqual(result['copied'],1)
+
     def test_unchanged_run_does_not_copy_again(self):
         sync.sync(self.manifest, self.call, self.extractor)
         result = sync.sync(self.manifest, self.call, self.extractor)

@@ -407,6 +407,13 @@ def sync(manifest, call=rdp_call, extract=extract_sandboxed):
                   "publicationSignature": signature}
         atomic_json(status_path, status)
         return status
+    except BlockingIOError:
+        # Source contention must not trigger Restart=on-failure loops. Retain
+        # the last success/cache/publication, without calling the copy fresh.
+        status = {**previous_status, "state": "deferred", "lastAttempt": status["lastAttempt"],
+                  "error": "RDP_OPERATOR_BUSY"}
+        atomic_json(status_path, status)
+        return status
     except Exception as error:
         status.update(state="failed", error=str(error) if isinstance(error, ValueError) else type(error).__name__,
                       consecutiveFailures=previous_status.get("consecutiveFailures", 0) + 1)
