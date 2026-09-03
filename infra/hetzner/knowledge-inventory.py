@@ -21,6 +21,7 @@ def module(name, filename):
 
 catalogue = module("knowledge_catalogue", "knowledge-catalogue.py")
 files = module("knowledge_server_files", "rdp-server-files.py")
+listings = module("knowledge_listing_session", "knowledge-listing-session.py")
 require = catalogue.require
 
 
@@ -179,7 +180,10 @@ def main():
         if priority:
             for source in priority:
                 files.rdp.select_root(source,manifest["sourceRoots"])
-        print(json.dumps(run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority)))
+        with listings.ListingSession(manifest) as browse:
+            result = run_batch(store,manifest,scan,args.max_pages,args.seconds,pause_seconds=2,priority_roots=priority,run=browse)
+        result["transportMetrics"] = {key: round(value, 3) for key, value in browse.metrics.items()}
+        print(json.dumps(result))
     finally:
         os.close(fd)
         store.close()

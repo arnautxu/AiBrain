@@ -45,6 +45,27 @@ New small arrivals cannot repeatedly displace older records in the same group.
 Byte/time/storage limits and retry cooldowns still determine admission. Per-source
 and per-parser failures use fixed codes; raw exception text is not an audit field.
 
+## Bounded listing session reuse
+
+The inventory reuses one RDP connection for at most three consecutive fixed
+listing requests and admits no further request after twenty seconds in that
+session. The current request retains its 45-second timeout; startup and cleanup
+are additional bounded work. The existing nonblocking source lock remains held
+until rotation or batch exit, so other callers receive the existing busy signal.
+Every request reloads endpoint, credential and source policy; changes require a
+new session, and changes during startup or execution discard the request/result.
+Each page has a distinct nonce and private receipt. Transport uncertainty closes
+the session without an automatic retry. Confirmed path-local failures retain the
+existing per-directory retry cap. Copy/export and employee brokers are unchanged.
+
+The inventory emits only aggregate session/request counts and startup/execution
+seconds. These metrics measure listing overhead, not full ingestion throughput.
+Before enabling the candidate, compare three authorized listings with three
+separate sessions under the same host restrictions; do not print source paths or
+entries. Pause the inventory timer, wait for its actual invocation to finish,
+preserve previous code, install both knowledge-listing-session.py and its inventory
+caller, then resume the timer even if the bounded pilot fails.
+
 ## Runbooks
 
 - [Legacy document extraction](KNOWLEDGE_LEGACY_FORMATS.md)
