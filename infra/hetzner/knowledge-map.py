@@ -243,7 +243,9 @@ def cached_search(manifest, query, limit, files, root=None):
             require(allowed(source), 'MAP_SCOPE_DENIED')
             key = ntpath.normcase(source)
             directory = db.execute("SELECT status FROM entries WHERE source_key=? AND kind='directory'", (key,)).fetchone()
-            if not directory or directory['status'] != 'complete':
+            if not directory or directory['status'] == 'pending':
+                return None
+            if directory['status'] != 'complete' and not db.execute('SELECT 1 FROM entries WHERE parent=? AND source_key!=? LIMIT 1', (key.rstrip('\\'), key)).fetchone():
                 return None
             where = 'parent=? AND source_key!=?'
             args = [key.rstrip('\\'), key]

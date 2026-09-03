@@ -125,6 +125,13 @@ class MapTests(unittest.TestCase):
         self.build()
         self.assertIsNone(self.search('server:/Y/Ofertes'))
 
+    def test_partial_directory_with_known_children_remains_browsable(self):
+        self.store.db.execute("UPDATE directories SET state='incomplete' WHERE source_key='y:\\ofertes'")
+        self.store.db.commit()
+        self.build()
+        self.assertEqual(len(self.search('server:/Y/Ofertes')['results']), 2)
+        self.assertTrue(self.search('server:/Y/Ofertes')['limited'])
+
     def test_inventory_counts_whole_subtree_not_just_page_and_preserves_unknowns(self):
         self.store.db.execute("UPDATE directories SET state='pending',offset=0 WHERE source_key='y:\\ofertes'")
         self.store.db.commit()
