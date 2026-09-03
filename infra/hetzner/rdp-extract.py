@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Bounded text extraction; invoked in a networkless, unprivileged sandbox."""
 import argparse
+import datetime as dt
 import json
+import math
 from pathlib import Path
 import re
 import resource
@@ -13,7 +15,7 @@ import zipfile
 MAX_INPUT = 16 * 1024 * 1024
 MAX_TEXT = 2 * 1024 * 1024
 MAX_XML = 24 * 1024 * 1024
-FORMATS = {".pdf", ".docx", ".xlsx", ".txt", ".csv", ".md", ".json"}
+FORMATS = {".pdf", ".docx", ".xlsx", ".xlsm", ".txt", ".csv", ".md", ".json"}
 SECRET = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}\b|\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*|\b(?:api[_-]?key|client[_-]?secret|access[_-]?token|password)\s*[:=]\s*[\"']?[A-Za-z0-9._~+/-]{16,}", re.I)
 
 
@@ -26,11 +28,104 @@ def xml(archive, name):
     item = archive.getinfo(name)
     require(item.file_size <= MAX_XML, "XML_TOO_LARGE")
     data = archive.read(item)
+    require(b"\x00" not in data, "XML_ENCODING_REJECTED")
     require(b"<!DOCTYPE" not in data.upper() and b"<!ENTITY" not in data.upper(), "XML_ENTITY_REJECTED")
     return ET.fromstring(data)
 
 
-def extract(source, suffix):
+def spreadsheet(archive):
+    """XML values only: no VBA, external links or formula evaluation."""
+    ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    relns = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+    workbook = xml(archive, "xl/workbook.xml")
+    targets = {}
+    for rel in xml(archive, "xl/_rels/workbook.xml.rels"):
+        target = rel.get("Target", "")
+        if target.startswith("/xl/"):
+            target = target[4:]
+        if rel.get("TargetMode") != "External" and re.fullmatch(r"worksheets/[A-Za-z0-9_.-]+\.xml", target):
+            targets[rel.get("Id")] = "xl/" + target
+    strings = []
+    if "xl/sharedStrings.xml" in archive.namelist():
+        strings = ["".join(n.text or "" for n in item.iter(ns + "t"))
+                   for item in xml(archive, "xl/sharedStrings.xml").iter(ns + "si")]
+    formats = {14: "mm-dd-yy", 20: "h:mm", 21: "h:mm:ss", 22: "m/d/yy h:mm", 46: "[h]:mm:ss"}
+    styles = []
+    if "xl/styles.xml" in archive.namelist():
+        style = xml(archive, "xl/styles.xml")
+        formats.update({int(n.get("numFmtId")): n.get("formatCode", "") for n in style.iter(ns + "numFmt")})
+        xfs = style.find(ns + "cellXfs")
+        styles = [int(n.get("numFmtId", "0")) for n in xfs] if xfs is not None else []
+    properties = workbook.find(ns + "workbookPr")
+    date1904 = properties is not None and properties.get("date1904") in {"1", "true"}
+    sheets = list(workbook.iter(ns + "sheet"))
+    require(0 < len(sheets) <= 100, "SHEET_LIMIT")
+    preview = {"schemaVersion": 1, "kind": "spreadsheet", "sheets": [], "truncated": False}
+    budget = sum(len(sheet.get("name", "").encode("utf-8")) + 100 for sheet in sheets)
+    count, text_bytes = 0, 0
+    lines = ["Valores guardados; macros desactivadas, fórmulas no recalculadas. Formatos no reconocidos: valor original."]
+    for sheet in sheets:
+        name = sheet.get("name", "")
+        require(0 < len(name) <= 100, "INVALID_SHEET_NAME")
+        target = targets.get(sheet.get(relns + "id"))
+        require(target is not None, "INVALID_SHEET_TARGET")
+        view = {"name": name, "hidden": sheet.get("state", "visible") != "visible", "cells": []}
+        preview["sheets"].append(view)
+        lines.append("\nHoja: " + name + (" (oculta)" if view["hidden"] else ""))
+        seen = set()
+        for cell in xml(archive, target).iter(ns + "c"):
+            count += 1
+            require(count <= 100000, "CELL_LIMIT")
+            address = cell.get("r", "")
+            require(re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", address) and address not in seen, "INVALID_CELL_ADDRESS")
+            seen.add(address)
+            value = cell.findtext(ns + "v", "")
+            if cell.get("t") == "s":
+                require(value.isdigit() and int(value) < len(strings), "INVALID_SHARED_STRING")
+                value = strings[int(value)]
+            elif cell.get("t") == "inlineStr":
+                value = "".join(n.text or "" for n in cell.iter(ns + "t"))
+            elif cell.get("t") == "b":
+                value = "TRUE" if value == "1" else "FALSE"
+            elif value and cell.get("t", "n") == "n":
+                index = int(cell.get("s", "0"))
+                code = formats.get(styles[index], "").lower() if 0 <= index < len(styles) else ""
+                # Small explicit display subset; unknown formats retain original values.
+                if code in {"h:mm", "hh:mm", "h:mm:ss", "hh:mm:ss", "[h]:mm:ss", "mm-dd-yy", "m/d/yy h:mm"}:
+                    number = float(value)
+                    require(math.isfinite(number) and 0 <= number < 2958466, "INVALID_DATE_VALUE")
+                    seconds = round(number * 86400)
+                    if code in {"mm-dd-yy", "m/d/yy h:mm"}:
+                        if not date1904 and int(number) == 60:
+                            value = "1900-02-29"
+                            if code == "m/d/yy h:mm":
+                                value += f" {seconds // 3600 % 24:02d}:{seconds // 60 % 60:02d}"
+                        else:
+                            epoch = dt.datetime(1904, 1, 1) if date1904 else dt.datetime(1899, 12, 31)
+                            date = epoch + dt.timedelta(seconds=seconds - (86400 if not date1904 and number >= 60 else 0))
+                            value = date.strftime("%Y-%m-%d" if code == "mm-dd-yy" else "%Y-%m-%d %H:%M")
+                    else:
+                        hours = seconds // 3600 if code.startswith("[h]") else seconds // 3600 % 24
+                        value = f"{hours:02d}:{seconds // 60 % 60:02d}" + (f":{seconds % 60:02d}" if "ss" in code else "")
+            if cell.find(ns + "f") is not None and not value:
+                value = "[Fórmula sin valor guardado]"
+            if not value:
+                continue
+            line = f"{address}: {value}"
+            text_bytes += len(line.encode("utf-8")) + 1
+            require(text_bytes <= MAX_TEXT, "TEXT_TOO_LARGE")
+            lines.append(line)
+            entry = {"address": address, "value": value}
+            size = len(json.dumps(entry, ensure_ascii=False).encode("utf-8"))
+            if budget + size <= 60000 and len(view["cells"]) < 2000:
+                view["cells"].append(entry)
+                budget += size
+            else:
+                preview["truncated"] = True
+    return "\n".join(lines), preview
+
+
+def extract(source, suffix, preview_result=None):
     require(suffix in FORMATS and source.stat().st_size <= MAX_INPUT, "FORMAT_OR_SIZE_REJECTED")
     if suffix == ".pdf":
         # A regular temporary output makes RLIMIT_FSIZE effective for Poppler.
@@ -40,7 +135,7 @@ def extract(source, suffix):
                        check=True, timeout=25)
         require(output.stat().st_size <= MAX_TEXT, "TEXT_TOO_LARGE")
         text = output.read_text(encoding="utf-8")
-    elif suffix in {".docx", ".xlsx"}:
+    elif suffix in {".docx", ".xlsx", ".xlsm"}:
         with zipfile.ZipFile(source) as archive:
             infos = archive.infolist()
             require(len(infos) <= 5000 and sum(i.file_size for i in infos) <= 64 * 1024 * 1024,
@@ -54,31 +149,9 @@ def extract(source, suffix):
                                          "\n" if n.tag in {ns + "br", ns + "cr"} else ""
                                          for n in p.iter()) for p in root.iter(ns + "p"))
             else:
-                ns = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
-                strings = []
-                if "xl/sharedStrings.xml" in archive.namelist():
-                    strings = ["".join(n.text or "" for n in item.iter(ns + "t"))
-                               for item in xml(archive, "xl/sharedStrings.xml").iter(ns + "si")]
-                sheets = sorted(n for n in archive.namelist() if re.fullmatch(r"xl/worksheets/sheet[0-9]+\.xml", n))
-                require(0 < len(sheets) <= 100, "SHEET_LIMIT")
-                lines = ["Full de calcul: valors desats; les formules no s'han recalculat."]
-                cells = 0
-                for name in sheets:
-                    lines.append("\n" + name.rsplit("/", 1)[-1])
-                    for row in xml(archive, name).iter(ns + "row"):
-                        values = []
-                        for cell in row.findall(ns + "c"):
-                            cells += 1
-                            require(cells <= 100000, "CELL_LIMIT")
-                            value = cell.findtext(ns + "v", "")
-                            if cell.get("t") == "s":
-                                require(value.isdigit() and int(value) < len(strings), "INVALID_SHARED_STRING")
-                                value = strings[int(value)]
-                            elif cell.get("t") == "inlineStr":
-                                value = "".join(n.text or "" for n in cell.iter(ns + "t"))
-                            values.append(f"{cell.get('r', '?')}: {value}")
-                        lines.append(" | ".join(values))
-                text = "\n".join(lines)
+                text, preview = spreadsheet(archive)
+                if preview_result is not None:
+                    preview_result.update(preview)
     else:
         raw = source.read_bytes()
         require(len(raw) <= MAX_TEXT, "TEXT_TOO_LARGE")
@@ -99,7 +172,10 @@ def main():
     resource.setrlimit(resource.RLIMIT_FSIZE, (MAX_TEXT + 1,) * 2)
     resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     try:
-        result = {"ok": True, "text": extract(Path("/input"), args.format)}
+        preview = {}
+        result = {"ok": True, "text": extract(Path("/input"), args.format, preview)}
+        if preview:
+            result["preview"] = preview
     except Exception as error:
         result = {"ok": False, "reason": str(error) if isinstance(error, ValueError) else type(error).__name__}
     print(json.dumps(result, ensure_ascii=False))

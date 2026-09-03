@@ -152,10 +152,12 @@ def read(manifest, path, call=sync.rdp_call, extract=sync.extract_sandboxed):
                 and hashlib.sha256(original.read_bytes()).hexdigest() == digest, "INVALID_SERVER_COPY")
     result = extract(original, ntpath.splitext(source)[1].lower())
     rdp.require(result.get("ok") is True and isinstance(result.get("text"), str), "SERVER_TEXT_UNAVAILABLE")
-    chunks = list(sync.text_chunks(result["text"]))
+    # Leave room for a bounded grid and JSON escaping within the 256 KiB socket frame.
+    chunks = list(sync.text_chunks(result["text"], 60 * 1024 if result.get("preview") else sync.CHUNK_BYTES))
     rdp.require(0 < page <= len(chunks), "SERVER_PART_UNAVAILABLE")
     base = virtual_path(manifest["connectionId"], source)
     return {"available": True, "scope": "company", "path": path, "source": source,
             "size": receipt["bytes"], "sha256": receipt["sha256"], "checkedAt": receipt["recordedAt"],
             "modifiedAt": receipt["modifiedUtc"], "content": chunks[page-1], "part": page, "parts": len(chunks),
-            "nextPath": base + "?part=" + str(page+1) if page < len(chunks) else None}
+            "nextPath": base + "?part=" + str(page+1) if page < len(chunks) else None,
+            **({"preview": result["preview"]} if page == 1 and isinstance(result.get("preview"), dict) else {})}

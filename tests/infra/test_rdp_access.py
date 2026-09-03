@@ -69,7 +69,8 @@ class RdpAccessTests(unittest.TestCase):
             'target':'ts','maxEntries':20,'maxFileBytes':1024}
         cases=[(r'Y:\Approved\Example.XLS',True),(r'Y:\Other\Example.xls',False),
             (r'Y:\Approved\Example.exe',False),(r'Y:\Approved\Example.doc',True),
-            (r'Y:\Approved\Example.rtf',True),(r'Y:\Approved\Example.xlsm',False),
+            (r'Y:\Approved\Example.rtf',True),(r'Y:\Approved\Example.xlsm',True),
+            (r'Y:\Other\Example.xlsm',False),
             (r'Y:\Approved\Example.BMP',True),(r'Y:\Other\Example.bmp',False),
             (r'Y:\Approved\Example.png',True),(r'Y:\Approved\Example.jpeg',True),
             (r'Y:\Approved\Example.tiff',False)]

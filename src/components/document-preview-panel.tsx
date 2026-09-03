@@ -5,6 +5,7 @@ import { ArrowClockwise, DownloadSimple, FileDoc, FilePdf, FilePpt, FileText, Fi
 import type { DocumentArtifact } from "@/lib/chat-contract";
 import { AuthenticatedPdfPreview } from "@/components/authenticated-pdf-preview";
 import { AuthenticatedTextPreview } from "@/components/authenticated-text-preview";
+import { AuthenticatedSpreadsheetPreview } from "@/components/authenticated-spreadsheet-preview";
 import { useModalFocus } from "@/ui/use-modal-focus";
 
 function documentIcon(kind: DocumentArtifact["kind"]) {
@@ -55,12 +56,12 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
       className="document-preview-panel fixed inset-0 z-50 flex min-w-0 flex-col bg-[var(--surface)] xl:static xl:z-auto xl:w-[min(48vw,720px)] xl:shrink-0 xl:border-l xl:border-[var(--border)]"
     >
       <header className="flex min-h-[52px] shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-3.5 pt-[env(safe-area-inset-top)] xl:h-[52px] xl:pt-0">
-        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{documentIcon(artifact.kind)}</span>
+        <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{documentIcon(artifact.previewFormat === "spreadsheet" ? "xlsx" : artifact.kind)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13px] font-semibold text-[var(--text)]">{artifact.name}</h2>
-          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{artifact.kind.toUpperCase()} · representación segura · {Math.max(1, Math.ceil(artifact.size / 1024))} KB{artifact.pages ? ` · ${artifact.pages} ${artifact.pages === 1 ? "página" : "páginas"}` : ""}</p>
+          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? "Excel · vista de datos" : artifact.kind.toUpperCase()} · representación segura · {Math.max(1, Math.ceil(artifact.size / 1024))} KB{artifact.pages ? ` · ${artifact.pages} ${artifact.pages === 1 ? "página" : "páginas"}` : ""}</p>
         </div>
-        <a href={artifact.url} download={artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={`Descargar ${artifact.name}`} title="Descargar"><DownloadSimple size={17} /></a>
+        <a href={artifact.url} download={artifact.previewFormat === "spreadsheet" ? `${artifact.name}.preview.json` : artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={artifact.previewFormat === "spreadsheet" ? "Descargar datos de la vista previa" : `Descargar ${artifact.name}`} title="Descargar"><DownloadSimple size={17} /></a>
         <button ref={closeButtonRef} type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label="Cerrar vista previa" onClick={onClose}><X size={17} /></button>
       </header>
 
@@ -77,6 +78,8 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
           <div className="grid h-full place-items-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-8 text-center" role="alert">
             <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el {previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">Puedes volver a intentarlo o descargar el archivo original.</p><button type="button" className="touch-target mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
           </div>
+        ) : artifact.previewUrl && artifact.previewFormat === "spreadsheet" ? (
+          <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} />
         ) : artifact.previewUrl && artifact.kind === "text" ? (
           <AuthenticatedTextPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} title={`Documento ${artifact.name}`} />
         ) : artifact.previewUrl ? (

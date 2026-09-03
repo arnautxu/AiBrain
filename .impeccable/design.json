@@ -1,52 +1,326 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-26T08:21:00Z",
+  "generatedAt": "2026-09-03T11:06:49.650Z",
   "title": "Design System: AiBrain",
   "extensions": {
     "colorMeta": {
-      "graphite": { "role": "primary", "displayName": "Grafit operatiu", "tonalRamp": ["color-mix(in oklch, #171717 70%, black)", "#171717", "color-mix(in oklch, #171717 82%, white)", "color-mix(in oklch, #171717 65%, white)", "color-mix(in oklch, #171717 48%, white)", "color-mix(in oklch, #171717 30%, white)", "color-mix(in oklch, #171717 15%, white)", "color-mix(in oklch, #171717 5%, white)"] },
-      "graphite-soft": { "role": "primary", "displayName": "Grafit suau", "tonalRamp": ["color-mix(in oklch, #ecebea 25%, black)", "color-mix(in oklch, #ecebea 45%, black)", "color-mix(in oklch, #ecebea 65%, black)", "color-mix(in oklch, #ecebea 82%, black)", "#ecebea", "color-mix(in oklch, #ecebea 80%, white)", "color-mix(in oklch, #ecebea 55%, white)", "color-mix(in oklch, #ecebea 25%, white)"] },
-      "white": { "role": "neutral", "displayName": "Blanc", "tonalRamp": ["#262626", "#4c4c4c", "#737373", "#999999", "#bfbfbf", "#d9d9d9", "#eeeeee", "#ffffff"] },
-      "canvas": { "role": "neutral", "displayName": "Paper de fons", "tonalRamp": ["color-mix(in oklch, #f1f3ef 22%, black)", "color-mix(in oklch, #f1f3ef 42%, black)", "color-mix(in oklch, #f1f3ef 62%, black)", "color-mix(in oklch, #f1f3ef 80%, black)", "#f1f3ef", "color-mix(in oklch, #f1f3ef 75%, white)", "color-mix(in oklch, #f1f3ef 48%, white)", "color-mix(in oklch, #f1f3ef 20%, white)"] },
-      "work-surface": { "role": "neutral", "displayName": "Superfície de treball", "tonalRamp": ["color-mix(in oklch, #fbfbfa 22%, black)", "color-mix(in oklch, #fbfbfa 42%, black)", "color-mix(in oklch, #fbfbfa 62%, black)", "color-mix(in oklch, #fbfbfa 80%, black)", "color-mix(in oklch, #fbfbfa 92%, black)", "#fbfbfa", "color-mix(in oklch, #fbfbfa 65%, white)", "color-mix(in oklch, #fbfbfa 25%, white)"] },
-      "sidebar-surface": { "role": "neutral", "displayName": "Superfície lateral", "tonalRamp": ["color-mix(in oklch, #efefec 22%, black)", "color-mix(in oklch, #efefec 42%, black)", "color-mix(in oklch, #efefec 62%, black)", "color-mix(in oklch, #efefec 80%, black)", "#efefec", "color-mix(in oklch, #efefec 75%, white)", "color-mix(in oklch, #efefec 48%, white)", "color-mix(in oklch, #efefec 20%, white)"] },
-      "ink": { "role": "neutral", "displayName": "Tinta", "tonalRamp": ["color-mix(in oklch, #292725 70%, black)", "#292725", "color-mix(in oklch, #292725 82%, white)", "color-mix(in oklch, #292725 65%, white)", "color-mix(in oklch, #292725 48%, white)", "color-mix(in oklch, #292725 30%, white)", "color-mix(in oklch, #292725 15%, white)", "color-mix(in oklch, #292725 5%, white)"] },
-      "text-muted": { "role": "neutral", "displayName": "Text secundari", "tonalRamp": ["color-mix(in oklch, #77736d 55%, black)", "color-mix(in oklch, #77736d 75%, black)", "#77736d", "color-mix(in oklch, #77736d 82%, white)", "color-mix(in oklch, #77736d 62%, white)", "color-mix(in oklch, #77736d 42%, white)", "color-mix(in oklch, #77736d 22%, white)", "color-mix(in oklch, #77736d 8%, white)"] },
-      "border": { "role": "neutral", "displayName": "Vora càlida", "tonalRamp": ["color-mix(in oklch, #d8d6d1 28%, black)", "color-mix(in oklch, #d8d6d1 48%, black)", "color-mix(in oklch, #d8d6d1 68%, black)", "color-mix(in oklch, #d8d6d1 84%, black)", "#d8d6d1", "color-mix(in oklch, #d8d6d1 72%, white)", "color-mix(in oklch, #d8d6d1 44%, white)", "color-mix(in oklch, #d8d6d1 18%, white)"] },
-      "success": { "role": "tertiary", "displayName": "Verd d'èxit", "tonalRamp": ["color-mix(in oklch, #4f8a5d 62%, black)", "color-mix(in oklch, #4f8a5d 82%, black)", "#4f8a5d", "color-mix(in oklch, #4f8a5d 82%, white)", "color-mix(in oklch, #4f8a5d 62%, white)", "color-mix(in oklch, #4f8a5d 42%, white)", "color-mix(in oklch, #4f8a5d 22%, white)", "color-mix(in oklch, #4f8a5d 8%, white)"] },
-      "warning": { "role": "tertiary", "displayName": "Ambre d'espera", "tonalRamp": ["color-mix(in oklch, #d4a64c 62%, black)", "color-mix(in oklch, #d4a64c 82%, black)", "#d4a64c", "color-mix(in oklch, #d4a64c 82%, white)", "color-mix(in oklch, #d4a64c 62%, white)", "color-mix(in oklch, #d4a64c 42%, white)", "color-mix(in oklch, #d4a64c 22%, white)", "color-mix(in oklch, #d4a64c 8%, white)"] },
-      "error": { "role": "tertiary", "displayName": "Terracota d'error", "tonalRamp": ["color-mix(in oklch, #9d4f3a 62%, black)", "color-mix(in oklch, #9d4f3a 82%, black)", "#9d4f3a", "color-mix(in oklch, #9d4f3a 82%, white)", "color-mix(in oklch, #9d4f3a 62%, white)", "color-mix(in oklch, #9d4f3a 42%, white)", "color-mix(in oklch, #9d4f3a 22%, white)", "color-mix(in oklch, #9d4f3a 8%, white)"] },
-      "blue": { "role": "secondary", "displayName": "Blau operatiu", "tonalRamp": ["color-mix(in oklch, #315ee7 62%, black)", "color-mix(in oklch, #315ee7 82%, black)", "#315ee7", "color-mix(in oklch, #315ee7 82%, white)", "color-mix(in oklch, #315ee7 62%, white)", "color-mix(in oklch, #315ee7 42%, white)", "color-mix(in oklch, #315ee7 22%, white)", "color-mix(in oklch, #315ee7 8%, white)"] },
-      "blue-soft": { "role": "secondary", "displayName": "Blau operatiu suau", "tonalRamp": ["color-mix(in oklch, #e9efff 24%, black)", "color-mix(in oklch, #e9efff 44%, black)", "color-mix(in oklch, #e9efff 64%, black)", "color-mix(in oklch, #e9efff 82%, black)", "#e9efff", "color-mix(in oklch, #e9efff 75%, white)", "color-mix(in oklch, #e9efff 48%, white)", "color-mix(in oklch, #e9efff 20%, white)"] },
-      "violet": { "role": "secondary", "displayName": "Violeta operatiu", "tonalRamp": ["color-mix(in oklch, #7656d8 62%, black)", "color-mix(in oklch, #7656d8 82%, black)", "#7656d8", "color-mix(in oklch, #7656d8 82%, white)", "color-mix(in oklch, #7656d8 62%, white)", "color-mix(in oklch, #7656d8 42%, white)", "color-mix(in oklch, #7656d8 22%, white)", "color-mix(in oklch, #7656d8 8%, white)"] },
-      "violet-soft": { "role": "secondary", "displayName": "Violeta operatiu suau", "tonalRamp": ["color-mix(in oklch, #f0ebff 24%, black)", "color-mix(in oklch, #f0ebff 44%, black)", "color-mix(in oklch, #f0ebff 64%, black)", "color-mix(in oklch, #f0ebff 82%, black)", "#f0ebff", "color-mix(in oklch, #f0ebff 75%, white)", "color-mix(in oklch, #f0ebff 48%, white)", "color-mix(in oklch, #f0ebff 20%, white)"] }
+      "graphite": {
+        "role": "primary",
+        "displayName": "Grafit operatiu",
+        "tonalRamp": [
+          "color-mix(in oklch, #171717 70%, black)",
+          "#171717",
+          "color-mix(in oklch, #171717 82%, white)",
+          "color-mix(in oklch, #171717 65%, white)",
+          "color-mix(in oklch, #171717 48%, white)",
+          "color-mix(in oklch, #171717 30%, white)",
+          "color-mix(in oklch, #171717 15%, white)",
+          "color-mix(in oklch, #171717 5%, white)"
+        ]
+      },
+      "graphite-soft": {
+        "role": "primary",
+        "displayName": "Grafit suau",
+        "tonalRamp": [
+          "color-mix(in oklch, #ecebea 25%, black)",
+          "color-mix(in oklch, #ecebea 45%, black)",
+          "color-mix(in oklch, #ecebea 65%, black)",
+          "color-mix(in oklch, #ecebea 82%, black)",
+          "#ecebea",
+          "color-mix(in oklch, #ecebea 80%, white)",
+          "color-mix(in oklch, #ecebea 55%, white)",
+          "color-mix(in oklch, #ecebea 25%, white)"
+        ]
+      },
+      "white": {
+        "role": "neutral",
+        "displayName": "Blanc",
+        "tonalRamp": [
+          "#262626",
+          "#4c4c4c",
+          "#737373",
+          "#999999",
+          "#bfbfbf",
+          "#d9d9d9",
+          "#eeeeee",
+          "#ffffff"
+        ]
+      },
+      "canvas": {
+        "role": "neutral",
+        "displayName": "Paper de fons",
+        "tonalRamp": [
+          "color-mix(in oklch, #f1f3ef 22%, black)",
+          "color-mix(in oklch, #f1f3ef 42%, black)",
+          "color-mix(in oklch, #f1f3ef 62%, black)",
+          "color-mix(in oklch, #f1f3ef 80%, black)",
+          "#f1f3ef",
+          "color-mix(in oklch, #f1f3ef 75%, white)",
+          "color-mix(in oklch, #f1f3ef 48%, white)",
+          "color-mix(in oklch, #f1f3ef 20%, white)"
+        ]
+      },
+      "work-surface": {
+        "role": "neutral",
+        "displayName": "Superfície de treball",
+        "tonalRamp": [
+          "color-mix(in oklch, #fbfbfa 22%, black)",
+          "color-mix(in oklch, #fbfbfa 42%, black)",
+          "color-mix(in oklch, #fbfbfa 62%, black)",
+          "color-mix(in oklch, #fbfbfa 80%, black)",
+          "color-mix(in oklch, #fbfbfa 92%, black)",
+          "#fbfbfa",
+          "color-mix(in oklch, #fbfbfa 65%, white)",
+          "color-mix(in oklch, #fbfbfa 25%, white)"
+        ]
+      },
+      "sidebar-surface": {
+        "role": "neutral",
+        "displayName": "Superfície lateral",
+        "tonalRamp": [
+          "color-mix(in oklch, #efefec 22%, black)",
+          "color-mix(in oklch, #efefec 42%, black)",
+          "color-mix(in oklch, #efefec 62%, black)",
+          "color-mix(in oklch, #efefec 80%, black)",
+          "#efefec",
+          "color-mix(in oklch, #efefec 75%, white)",
+          "color-mix(in oklch, #efefec 48%, white)",
+          "color-mix(in oklch, #efefec 20%, white)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Tinta",
+        "tonalRamp": [
+          "color-mix(in oklch, #292725 70%, black)",
+          "#292725",
+          "color-mix(in oklch, #292725 82%, white)",
+          "color-mix(in oklch, #292725 65%, white)",
+          "color-mix(in oklch, #292725 48%, white)",
+          "color-mix(in oklch, #292725 30%, white)",
+          "color-mix(in oklch, #292725 15%, white)",
+          "color-mix(in oklch, #292725 5%, white)"
+        ]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Text secundari",
+        "tonalRamp": [
+          "color-mix(in oklch, #77736d 55%, black)",
+          "color-mix(in oklch, #77736d 75%, black)",
+          "#77736d",
+          "color-mix(in oklch, #77736d 82%, white)",
+          "color-mix(in oklch, #77736d 62%, white)",
+          "color-mix(in oklch, #77736d 42%, white)",
+          "color-mix(in oklch, #77736d 22%, white)",
+          "color-mix(in oklch, #77736d 8%, white)"
+        ]
+      },
+      "border": {
+        "role": "neutral",
+        "displayName": "Vora càlida",
+        "tonalRamp": [
+          "color-mix(in oklch, #d8d6d1 28%, black)",
+          "color-mix(in oklch, #d8d6d1 48%, black)",
+          "color-mix(in oklch, #d8d6d1 68%, black)",
+          "color-mix(in oklch, #d8d6d1 84%, black)",
+          "#d8d6d1",
+          "color-mix(in oklch, #d8d6d1 72%, white)",
+          "color-mix(in oklch, #d8d6d1 44%, white)",
+          "color-mix(in oklch, #d8d6d1 18%, white)"
+        ]
+      },
+      "success": {
+        "role": "tertiary",
+        "displayName": "Verd d'èxit",
+        "tonalRamp": [
+          "color-mix(in oklch, #4f8a5d 62%, black)",
+          "color-mix(in oklch, #4f8a5d 82%, black)",
+          "#4f8a5d",
+          "color-mix(in oklch, #4f8a5d 82%, white)",
+          "color-mix(in oklch, #4f8a5d 62%, white)",
+          "color-mix(in oklch, #4f8a5d 42%, white)",
+          "color-mix(in oklch, #4f8a5d 22%, white)",
+          "color-mix(in oklch, #4f8a5d 8%, white)"
+        ]
+      },
+      "warning": {
+        "role": "tertiary",
+        "displayName": "Ambre d'espera",
+        "tonalRamp": [
+          "color-mix(in oklch, #d4a64c 62%, black)",
+          "color-mix(in oklch, #d4a64c 82%, black)",
+          "#d4a64c",
+          "color-mix(in oklch, #d4a64c 82%, white)",
+          "color-mix(in oklch, #d4a64c 62%, white)",
+          "color-mix(in oklch, #d4a64c 42%, white)",
+          "color-mix(in oklch, #d4a64c 22%, white)",
+          "color-mix(in oklch, #d4a64c 8%, white)"
+        ]
+      },
+      "error": {
+        "role": "tertiary",
+        "displayName": "Terracota d'error",
+        "tonalRamp": [
+          "color-mix(in oklch, #9d4f3a 62%, black)",
+          "color-mix(in oklch, #9d4f3a 82%, black)",
+          "#9d4f3a",
+          "color-mix(in oklch, #9d4f3a 82%, white)",
+          "color-mix(in oklch, #9d4f3a 62%, white)",
+          "color-mix(in oklch, #9d4f3a 42%, white)",
+          "color-mix(in oklch, #9d4f3a 22%, white)",
+          "color-mix(in oklch, #9d4f3a 8%, white)"
+        ]
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Blau operatiu",
+        "tonalRamp": [
+          "color-mix(in oklch, #315ee7 62%, black)",
+          "color-mix(in oklch, #315ee7 82%, black)",
+          "#315ee7",
+          "color-mix(in oklch, #315ee7 82%, white)",
+          "color-mix(in oklch, #315ee7 62%, white)",
+          "color-mix(in oklch, #315ee7 42%, white)",
+          "color-mix(in oklch, #315ee7 22%, white)",
+          "color-mix(in oklch, #315ee7 8%, white)"
+        ]
+      },
+      "blue-soft": {
+        "role": "secondary",
+        "displayName": "Blau operatiu suau",
+        "tonalRamp": [
+          "color-mix(in oklch, #e9efff 24%, black)",
+          "color-mix(in oklch, #e9efff 44%, black)",
+          "color-mix(in oklch, #e9efff 64%, black)",
+          "color-mix(in oklch, #e9efff 82%, black)",
+          "#e9efff",
+          "color-mix(in oklch, #e9efff 75%, white)",
+          "color-mix(in oklch, #e9efff 48%, white)",
+          "color-mix(in oklch, #e9efff 20%, white)"
+        ]
+      },
+      "violet": {
+        "role": "secondary",
+        "displayName": "Violeta operatiu",
+        "tonalRamp": [
+          "color-mix(in oklch, #7656d8 62%, black)",
+          "color-mix(in oklch, #7656d8 82%, black)",
+          "#7656d8",
+          "color-mix(in oklch, #7656d8 82%, white)",
+          "color-mix(in oklch, #7656d8 62%, white)",
+          "color-mix(in oklch, #7656d8 42%, white)",
+          "color-mix(in oklch, #7656d8 22%, white)",
+          "color-mix(in oklch, #7656d8 8%, white)"
+        ]
+      },
+      "violet-soft": {
+        "role": "secondary",
+        "displayName": "Violeta operatiu suau",
+        "tonalRamp": [
+          "color-mix(in oklch, #f0ebff 24%, black)",
+          "color-mix(in oklch, #f0ebff 44%, black)",
+          "color-mix(in oklch, #f0ebff 64%, black)",
+          "color-mix(in oklch, #f0ebff 82%, black)",
+          "#f0ebff",
+          "color-mix(in oklch, #f0ebff 75%, white)",
+          "color-mix(in oklch, #f0ebff 48%, white)",
+          "color-mix(in oklch, #f0ebff 20%, white)"
+        ]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Pregunta principal", "purpose": "La intenció que obre un flux guiat." },
-      "headline": { "displayName": "Capçalera de pas", "purpose": "Passos d'onboarding i formularis d'acció." },
-      "title": { "displayName": "Títol funcional", "purpose": "Accions, seccions i contingut prioritari." },
-      "body": { "displayName": "Cos", "purpose": "Explicacions, conversa i resultat llegible." },
-      "label": { "displayName": "Etiqueta compacta", "purpose": "Navegació, metadades i controls." },
-      "mono": { "displayName": "Detall tècnic", "purpose": "Ordres, paths, runtime i diffs oberts per l'usuari." }
+      "display": {
+        "displayName": "Pregunta principal",
+        "purpose": "La intenció que obre un flux guiat."
+      },
+      "headline": {
+        "displayName": "Capçalera de pas",
+        "purpose": "Passos d'onboarding i formularis d'acció."
+      },
+      "title": {
+        "displayName": "Títol funcional",
+        "purpose": "Accions, seccions i contingut prioritari."
+      },
+      "body": {
+        "displayName": "Cos",
+        "purpose": "Explicacions, conversa i resultat llegible."
+      },
+      "label": {
+        "displayName": "Etiqueta compacta",
+        "purpose": "Navegació, metadades i controls."
+      },
+      "mono": {
+        "displayName": "Detall tècnic",
+        "purpose": "Ordres, paths, runtime i diffs oberts per l'usuari."
+      }
     },
     "shadows": [
-      { "name": "composer-ambient", "value": "0 22px 54px -34px rgba(40,36,30,.42), 0 5px 18px -15px rgba(40,36,30,.28), inset 0 1px 0 rgba(255,255,255,.94)", "purpose": "Separa el punt d'entrada persistent de la conversa." },
-      { "name": "composer-focus", "value": "0 26px 62px -34px rgba(40,36,30,.5), 0 6px 20px -15px rgba(40,36,30,.3), inset 0 1px 0 rgba(255,255,255,.96)", "purpose": "Confirma focus sense introduir una brillantor de color." },
-      { "name": "floating-menu", "value": "0 18px 40px -24px rgba(0,0,0,.55)", "purpose": "Eleva menús contextuals i avisos temporals." },
-      { "name": "onboarding-shell", "value": "0 30px 90px -58px rgba(35,32,27,.6)", "purpose": "Delimita l'onboarding com una missió acotada." }
+      {
+        "name": "composer-ambient",
+        "value": "0 22px 54px -34px rgba(40,36,30,.42), 0 5px 18px -15px rgba(40,36,30,.28), inset 0 1px 0 rgba(255,255,255,.94)",
+        "purpose": "Separa el punt d'entrada persistent de la conversa."
+      },
+      {
+        "name": "composer-focus",
+        "value": "0 26px 62px -34px rgba(40,36,30,.5), 0 6px 20px -15px rgba(40,36,30,.3), inset 0 1px 0 rgba(255,255,255,.96)",
+        "purpose": "Confirma focus sense introduir una brillantor de color."
+      },
+      {
+        "name": "floating-menu",
+        "value": "0 18px 40px -24px rgba(0,0,0,.55)",
+        "purpose": "Eleva menús contextuals i avisos temporals."
+      },
+      {
+        "name": "onboarding-shell",
+        "value": "0 30px 90px -58px rgba(35,32,27,.6)",
+        "purpose": "Delimita l'onboarding com una missió acotada."
+      }
     ],
     "motion": [
-      { "name": "state-fast", "value": "160ms ease", "purpose": "Hover i active de controls compactes." },
-      { "name": "composer-state", "value": "180ms ease", "purpose": "Vora, ombra i transform del composer." },
-      { "name": "panel-enter", "value": "320ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Entrada lateral d'un pas o panell." },
-      { "name": "message-enter", "value": "360ms cubic-bezier(0.16, 1, 0.3, 1)", "purpose": "Entrada vertical discreta d'un missatge." },
-      { "name": "reduced-motion", "value": "0.01ms", "purpose": "Substitució global quan l'usuari prefereix moviment reduït." }
+      {
+        "name": "state-fast",
+        "value": "160ms ease",
+        "purpose": "Hover i active de controls compactes."
+      },
+      {
+        "name": "composer-state",
+        "value": "180ms ease",
+        "purpose": "Vora, ombra i transform del composer."
+      },
+      {
+        "name": "panel-enter",
+        "value": "320ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Entrada lateral d'un pas o panell."
+      },
+      {
+        "name": "message-enter",
+        "value": "360ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Entrada vertical discreta d'un missatge."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "0.01ms",
+        "purpose": "Substitució global quan l'usuari prefereix moviment reduït."
+      }
     ],
     "breakpoints": [
-      { "name": "sm", "value": "640px" },
-      { "name": "md", "value": "768px" },
-      { "name": "lg", "value": "1024px" },
-      { "name": "xl", "value": "1280px" }
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
     ]
   },
   "components": [
@@ -56,7 +330,7 @@
       "refersTo": "button-primary",
       "description": "Acció única que avança o autoritza un pas.",
       "html": "<button class=\"ds-btn-primary\">Comença</button>",
-      "css": ".ds-btn-primary{border:0;border-radius:12px;background:var(--brain-accent,#171717);color:var(--brain-contrast,#fff);padding:12px 20px;font-family:Geist,system-ui,sans-serif;font-size:13px;font-weight:600;transition:transform 160ms ease,opacity 160ms ease}.ds-btn-primary:hover{opacity:.9}.ds-btn-primary:active{transform:scale(.98)}.ds-btn-primary:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px}"
+      "css": ".ds-btn-primary{border:0;border-radius:12px;background:var(--accent,#171717);color:var(--accent-contrast,#fff);padding:12px 20px;font-family:Geist,system-ui,sans-serif;font-size:14px;font-weight:600;transition:transform 160ms ease,opacity 160ms ease}.ds-btn-primary:hover{opacity:.9}.ds-btn-primary:active{transform:scale(.98)}.ds-btn-primary:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px}"
     },
     {
       "name": "Secondary Button",
@@ -64,7 +338,7 @@
       "refersTo": "button-secondary",
       "description": "Alternativa persistent que no competeix amb l'acció principal.",
       "html": "<button class=\"ds-btn-secondary\">Desa al projecte</button>",
-      "css": ".ds-btn-secondary{border:1px solid #d8d6d1;border-radius:12px;background:#fff;color:#625f5a;padding:12px 16px;font-family:Geist,system-ui,sans-serif;font-size:12px;font-weight:600;transition:background-color 160ms ease,border-color 160ms ease}.ds-btn-secondary:hover{border-color:#aaa69f;background:#f8f7f4}.ds-btn-secondary:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px}"
+      "css": ".ds-btn-secondary{border:1px solid #d8d6d1;border-radius:12px;background:#fff;color:#77736d;padding:12px 16px;font-family:Geist,system-ui,sans-serif;font-size:10px;font-weight:500;transition:background-color 160ms ease,border-color 160ms ease}.ds-btn-secondary:hover{border-color:#aaa69f;background:#f8f7f4}.ds-btn-secondary:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px}"
     },
     {
       "name": "Text Field",
@@ -72,7 +346,7 @@
       "refersTo": "input",
       "description": "Camp clar per aportar només la informació necessària.",
       "html": "<label class=\"ds-field\"><span class=\"ds-field-label\">Informació que hem d'analitzar</span><textarea class=\"ds-field-input\" placeholder=\"Enganxa el text o descriu la situació…\"></textarea></label>",
-      "css": ".ds-field{display:grid;gap:8px;font-family:Geist,system-ui,sans-serif}.ds-field-label{color:#625f5a;font-size:12px;font-weight:600}.ds-field-input{min-height:96px;resize:vertical;border:1px solid #d8d6d1;border-radius:12px;background:#fff;color:#292725;padding:12px 16px;font:400 14px/1.7 Geist,system-ui,sans-serif;transition:border-color 160ms ease}.ds-field-input::placeholder{color:#aaa69f}.ds-field-input:hover{border-color:#c8c4bd}.ds-field-input:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px;border-color:#8e8a83}"
+      "css": ".ds-field{display:grid;gap:8px;font-family:Geist,system-ui,sans-serif}.ds-field-label{color:#625f5a;font-size:12px;font-weight:600}.ds-field-input{min-height:96px;resize:vertical;border:1px solid #d8d6d1;border-radius:12px;background:#fff;color:#292725;padding:12px 16px;font:400 14px/1.7 Geist,system-ui,sans-serif;transition:border-color 160ms ease}.ds-field-input::placeholder{color:#aaa69f}.ds-field-input:hover{border-color:#c8c4bd}.ds-field-input:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px;border-color:#8e8a83}"
     },
     {
       "name": "Template Card",
@@ -80,7 +354,7 @@
       "refersTo": "card",
       "description": "Drecera de projecte amb nom i resultat concret.",
       "html": "<button class=\"ds-template\"><span class=\"ds-template-title\">Informe de seguiment</span><span class=\"ds-template-detail\">Converteix notes i dades en un informe accionable</span></button>",
-      "css": ".ds-template{display:block;width:260px;border:1px solid #dfddd8;border-radius:12px;background:#fff;color:#3b3834;padding:16px;text-align:left;font-family:Geist,system-ui,sans-serif;transition:background-color 160ms ease,border-color 160ms ease}.ds-template-title{display:block;font-size:13px;font-weight:600}.ds-template-detail{display:block;margin-top:6px;color:#85817a;font-size:12px;line-height:1.65}.ds-template:hover{border-color:#c8c4bd;background:#f8f7f4}.ds-template:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px}"
+      "css": ".ds-template{display:block;width:260px;border:1px solid #dfddd8;border-radius:16px;background:#fff;color:#3b3834;padding:20px;text-align:left;font-family:Geist,system-ui,sans-serif;transition:background-color 160ms ease,border-color 160ms ease}.ds-template-title{display:block;font-size:13px;font-weight:600}.ds-template-detail{display:block;margin-top:6px;color:#85817a;font-size:12px;line-height:1.65}.ds-template:hover{border-color:#c8c4bd;background:#f8f7f4}.ds-template:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px}"
     },
     {
       "name": "Guided Action Row",
@@ -88,7 +362,7 @@
       "refersTo": "action-row",
       "description": "Patró de signatura que uneix verb, explicació i resultat esperat.",
       "html": "<button class=\"ds-action-row\"><span class=\"ds-action-icon\" aria-hidden=\"true\"><svg viewBox=\"0 0 24 24\" width=\"16\" height=\"16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M4 20V10h4v10M10 20V4h4v16M16 20v-7h4v7M3 20h18\"/></svg></span><span class=\"ds-action-label\">Analitza</span><span class=\"ds-action-copy\"><span>Troba punts clau, riscos i oportunitats</span><small>Una anàlisi clara amb conclusions i següents passos</small></span><span class=\"ds-action-arrow\" aria-hidden=\"true\">→</span></button>",
-      "css": ".ds-action-row{display:grid;grid-template-columns:36px 130px 1fr 20px;align-items:center;gap:16px;width:100%;border:0;border-bottom:1px solid #e4e2dd;background:#fefefd;color:#34312d;padding:16px 20px;text-align:left;font-family:Geist,system-ui,sans-serif;transition:background-color 160ms ease}.ds-action-icon{display:grid;width:36px;height:36px;place-items:center;border-radius:12px;background:#eeede9;color:#504d48}.ds-action-label{font-size:14px;font-weight:600}.ds-action-copy{display:grid;gap:4px;color:#77736d;font-size:12px;line-height:1.5}.ds-action-copy small{color:#99958e;font-size:11px}.ds-action-arrow{color:#aaa69f;transition:transform 160ms ease,color 160ms ease}.ds-action-row:hover{background:#f5f4f1}.ds-action-row:hover .ds-action-icon{background:var(--brain-accent-soft,#ecebea);color:var(--brain-accent,#171717)}.ds-action-row:hover .ds-action-arrow{transform:translateX(4px);color:#55514c}.ds-action-row:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:-2px}"
+      "css": ".ds-action-row{display:grid;grid-template-columns:36px 130px 1fr 20px;align-items:center;gap:16px;width:100%;border:0;border-bottom:1px solid #e4e2dd;background:#fbfbfa;color:#34312d;padding:16px 20px;text-align:left;font-family:Geist,system-ui,sans-serif;transition:background-color 160ms ease}.ds-action-icon{display:grid;width:36px;height:36px;place-items:center;border-radius:12px;background:#eeede9;color:#504d48}.ds-action-label{font-size:14px;font-weight:600}.ds-action-copy{display:grid;gap:4px;color:#77736d;font-size:12px;line-height:1.5}.ds-action-copy small{color:#99958e;font-size:11px}.ds-action-arrow{color:#aaa69f;transition:transform 160ms ease,color 160ms ease}.ds-action-row:hover{background:#f5f4f1}.ds-action-row:hover .ds-action-icon{background:var(--accent-soft,#ecebea);color:var(--accent,#171717)}.ds-action-row:hover .ds-action-arrow{transform:translateX(4px);color:#55514c}.ds-action-row:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:-2px}"
     },
     {
       "name": "Active Sidebar Item",
@@ -96,14 +370,21 @@
       "refersTo": "sidebar-item-active",
       "description": "Selecció compacta i tonal dins del rail de navegació.",
       "html": "<button class=\"ds-sidebar-item\"><svg viewBox=\"0 0 24 24\" width=\"13\" height=\"13\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M3 7h7l2 2h9v10H3z\"/></svg><span>AiBrain</span><span class=\"ds-sidebar-pin\" aria-hidden=\"true\">•</span></button>",
-      "css": ".ds-sidebar-item{display:flex;width:260px;align-items:center;gap:8px;border:0;border-radius:8px;background:#deddd8;color:#2d2b28;padding:8px 10px;font-family:Geist,system-ui,sans-serif;font-size:10px;font-weight:600;text-align:left;transition:background-color 160ms ease}.ds-sidebar-item span:nth-child(2){flex:1}.ds-sidebar-pin{color:#8e8a84}.ds-sidebar-item:hover{background:#d9d8d3}.ds-sidebar-item:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px}"
+      "css": ".ds-sidebar-item{display:flex;width:260px;align-items:center;gap:8px;border:0;border-radius:8px;background:#deddd8;color:#2d2b28;padding:8px 10px;font-family:Geist,system-ui,sans-serif;font-size:10px;font-weight:600;text-align:left;transition:background-color 160ms ease}.ds-sidebar-item span:nth-child(2){flex:1}.ds-sidebar-pin{color:#8e8a84}.ds-sidebar-item:hover{background:#d9d8d3}.ds-sidebar-item:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px}"
     },
     {
       "name": "Approval Card",
       "kind": "custom",
       "description": "Decisió explícita amb motiu planer i detall tècnic col·lapsat.",
       "html": "<section class=\"ds-approval\"><div class=\"ds-approval-body\"><span class=\"ds-approval-icon\" aria-hidden=\"true\">✓</span><div><strong>Cal la teva aprovació</strong><p>Aquest pas intern necessita el teu permís. Pots permetre'l una vegada o cancel·lar-lo.</p><button class=\"ds-approval-details\">Mostra per què ho necessita</button></div></div><div class=\"ds-approval-actions\"><button class=\"ds-approval-decline\">No ho facis</button><button class=\"ds-approval-accept\">Sí, aquesta vegada</button></div></section>",
-      "css": ".ds-approval{overflow:hidden;border:1px solid #deddd9;border-radius:var(--brain-radius,12px);background:#fbfbfa;color:#282725;font-family:Geist,system-ui,sans-serif}.ds-approval-body{display:flex;gap:12px;padding:12px 14px}.ds-approval-icon{display:grid;width:28px;height:28px;flex:none;place-items:center;border-radius:8px;background:#f0efec;color:#464541;font-size:12px}.ds-approval strong{font-size:11px}.ds-approval p{max-width:420px;margin:4px 0 0;color:#77746f;font-size:10px;line-height:1.6}.ds-approval-details{border:0;background:transparent;color:#817d76;padding:8px 0 0;font-size:9px;font-weight:500}.ds-approval-details:hover{color:#34312d}.ds-approval-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e6e5e1;background:#fff;padding:10px 12px}.ds-approval-decline,.ds-approval-accept{border:0;border-radius:8px;padding:6px 10px;font-size:10px;font-weight:600}.ds-approval-decline{background:transparent;color:#716e69}.ds-approval-decline:hover{background:#f2f1ee}.ds-approval-accept{background:var(--brain-accent,#171717);color:var(--brain-contrast,#fff)}.ds-approval-accept:hover{opacity:.9}.ds-approval-decline:focus-visible,.ds-approval-accept:focus-visible,.ds-approval-details:focus-visible{outline:2px solid color-mix(in srgb,var(--brain-accent,#292725) 72%,white);outline-offset:2px}"
+      "css": ".ds-approval{overflow:hidden;border:1px solid #deddd9;border-radius:var(--brain-radius,12px);background:#fbfbfa;color:#282725;font-family:Geist,system-ui,sans-serif}.ds-approval-body{display:flex;gap:12px;padding:12px 14px}.ds-approval-icon{display:grid;width:28px;height:28px;flex:none;place-items:center;border-radius:8px;background:#f0efec;color:#464541;font-size:12px}.ds-approval strong{font-size:11px}.ds-approval p{max-width:420px;margin:4px 0 0;color:#77746f;font-size:10px;line-height:1.6}.ds-approval-details{border:0;background:transparent;color:#817d76;padding:8px 0 0;font-size:9px;font-weight:500}.ds-approval-details:hover{color:#34312d}.ds-approval-actions{display:flex;justify-content:flex-end;gap:8px;border-top:1px solid #e6e5e1;background:#fff;padding:10px 12px}.ds-approval-decline,.ds-approval-accept{border:0;border-radius:8px;padding:6px 10px;font-size:10px;font-weight:600}.ds-approval-decline{background:transparent;color:#716e69}.ds-approval-decline:hover{background:#f2f1ee}.ds-approval-accept{background:var(--accent,#171717);color:var(--accent-contrast,#fff)}.ds-approval-accept:hover{opacity:.9}.ds-approval-decline:focus-visible,.ds-approval-accept:focus-visible,.ds-approval-details:focus-visible{outline:2px solid color-mix(in srgb,var(--accent,#292725) 72%,white);outline-offset:2px}"
+    },
+    {
+      "name": "Spreadsheet Data Preview",
+      "kind": "custom",
+      "description": "Vista de dades de només lectura dins del panell documental; conserva adreces, permisos i avís de macros desactivades.",
+      "html": "<section class=\"ds-sheet\"><label>Hoja <select aria-label=\"Hoja del libro\"><option>Full de prova</option></select></label><p>Solo lectura · macros desactivadas. Valores guardados, sin recalcular fórmulas.</p><div class=\"ds-sheet-scroll\" tabindex=\"0\"><table><caption>Valors sintètics de prova</caption><thead><tr><th>Fila</th><th>A</th><th>B</th></tr></thead><tbody><tr><th>1</th><td>Persona fictícia</td><td>09:00</td></tr></tbody></table></div></section>",
+      "css": ".ds-sheet{background:var(--surface,#fff);color:var(--text,#292725);font:400 14px/1.5 Geist,system-ui,sans-serif}.ds-sheet label{display:flex;align-items:center;gap:12px;padding:16px;font-weight:500}.ds-sheet select{min-width:0;flex:1;min-height:44px;border:1px solid var(--border,#d8d6d1);border-radius:8px;background:var(--surface,#fff);color:inherit;padding:0 12px;font:inherit;font-size:16px}.ds-sheet p{margin:0;padding:0 16px 16px;color:var(--text-secondary,#77736d)}.ds-sheet-scroll{overflow:auto}.ds-sheet table{width:100%;border-collapse:collapse;text-align:left;font-variant-numeric:tabular-nums}.ds-sheet caption{text-align:left;padding:12px}.ds-sheet th,.ds-sheet td{padding:12px;border-bottom:1px solid var(--border,#d8d6d1)}.ds-sheet th{background:var(--surface-muted,#ecebea)}.ds-sheet tbody tr:hover{background:var(--surface-hover,#ecebea)}.ds-sheet select:focus-visible,.ds-sheet-scroll:focus-visible{outline:2px solid var(--focus,#77736d);outline-offset:2px}"
     }
   ],
   "narrative": {
@@ -117,12 +398,36 @@
       "Estat, permisos i recuperació explicats en llenguatge natural."
     ],
     "rules": [
-      { "name": "The One Accent Rule", "body": "Cada context usa grafit, blau o violeta com un únic accent actiu; no es barregen accents per decorar.", "section": "colors" },
-      { "name": "The Status Has Meaning Rule", "body": "Verd, ambre i terracota només comuniquen estat o risc, mai jerarquia ornamental.", "section": "colors" },
-      { "name": "The Plain First Rule", "body": "La capa principal parla amb Geist i llenguatge natural; Geist Mono només apareix després que l'usuari obri un detall avançat.", "section": "typography" },
-      { "name": "The Guided Hierarchy Rule", "body": "En una pantalla de member, l'acció comprensible i el resultat esperat precedeixen qualsevol selector de model, eina o activitat interna.", "section": "layout" },
-      { "name": "The Flat by Default Rule", "body": "Les superfícies en repòs són planes; només una capa que flota, demana focus o delimita una missió pot projectar ombra.", "section": "elevation" },
-      { "name": "The Nested Radius Rule", "body": "Un element interior mai ha de semblar més monumental que el contenidor que l'envolta: controls de 8–12px viuen dins de superfícies de 16–28px.", "section": "shapes" }
+      {
+        "name": "The One Accent Rule",
+        "body": "Cada context usa grafit, blau o violeta com un únic accent actiu; no es barregen accents per decorar.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Has Meaning Rule",
+        "body": "Verd, ambre i terracota només comuniquen estat o risc, mai jerarquia ornamental.",
+        "section": "colors"
+      },
+      {
+        "name": "The Plain First Rule",
+        "body": "La capa principal parla amb Geist i llenguatge natural; Geist Mono només apareix després que l'usuari obri un detall avançat.",
+        "section": "typography"
+      },
+      {
+        "name": "The Guided Hierarchy Rule",
+        "body": "En una pantalla de member, l'acció comprensible i el resultat esperat precedeixen qualsevol selector de model, eina o activitat interna.",
+        "section": "layout"
+      },
+      {
+        "name": "The Flat by Default Rule",
+        "body": "Les superfícies en repòs són planes; només una capa que flota, demana focus o delimita una missió pot projectar ombra.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Nested Radius Rule",
+        "body": "Un element interior mai ha de semblar més monumental que el contenidor que l'envolta: controls de 8–12px viuen dins de superfícies de 16–28px.",
+        "section": "shapes"
+      }
     ],
     "dos": [
       "Do començar per una acció amb verb entenedor, la informació necessària i el resultat que l'usuari podrà revisar.",

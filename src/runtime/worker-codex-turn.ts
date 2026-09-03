@@ -104,6 +104,7 @@ import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
+import { createSpreadsheetArtifact } from "@/runtime/enterprise-documents/spreadsheet-artifact";
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
 import { OnDemandDocumentSync } from "@/documents/on-demand-sync";
 import { ServerDocumentFiles } from "@/documents/server-files";
@@ -263,6 +264,7 @@ function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDo
     "Puedes listar y leer sin aprobación el workspace privado del empleado, los archivos del proyecto y sus artefactos, el contexto y conocimiento corporativo de solo lectura, la fuente documental corporativa de solo lectura y los documentos subidos por este empleado.",
     "Las raíces documentales de empresa ya autorizadas para este turno son:\n" + scopedRoots,
     "Usa `aibrain_company_files.search` y `aibrain_company_files.read` para localizarlas y leerlas. Estas herramientas no escriben en las raíces empresariales. No cites rutas internas del servidor. Los borrados, publicaciones y cualquier efecto externo siguen sujetos a la política del turno. Nunca intentes salir de los scopes entregados.",
+    "Los Excel .xlsx y .xlsm del servidor se leen con aibrain_company_files.read: no rechaces un .xlsm solo por contener macros ni pidas al empleado que lo convierta o vuelva a subir antes de intentar la lectura autorizada. Se leen valores guardados sin ejecutar macros, enlaces ni fórmulas. La primera parte puede adjuntar una vista de hojas y celdas al chat; preview.truncated indica vista parcial, no un documento completo. Si hay previewWarning, explica el fallo de la vista sin negar la lectura. Las fórmulas sin valor guardado se indican como tales; no inventes su resultado.",
     "Para contar o clasificar documentos usa aibrain_company_files.inventory con el path server- de una carpeta observada. El inventario completa bajo demanda páginas pendientes y devuelve el total de archivos del subárbol, tipos y listado paginado. No sumes totales entre páginas o reintentos. Si discovery.state=CONTINUE, repite para completar el recorrido; no esperes al mapa de todo el servidor. Lee los documentos relevantes para distinguir presupuestos, catálogos, anexos y versiones, comprobar emisor, fecha e identificador y separar presupuestos emitidos de recibidos. Un total de archivos no es un total de presupuestos. Devuelve el número y cuáles cumplen el criterio comprobado, con su ámbito; si faltan pruebas, da los hallazgos concretos y qué falta, sin convertirlo en cero o en una caída del servidor.",
     "En conversaciones antiguas sin la función inventory, usa aibrain_company_files.search con query='inventory:' seguido del path server- observado; por ejemplo inventory:server-conexion/Y/Ofertas. Añade ?offset=N para nextOffset. Es el mismo inventario y los mismos permisos; no requiere crear otra conversación ni perder el historial.",
     "Las herramientas de archivos actualizan bajo demanda las copias de fuentes configuradas y esperan el resultado antes de buscar o leer. Para solicitudes de archivos actuales, consulta las herramientas de nuevo, sin reutilizar una respuesta anterior. Una comprobación correcta muy reciente puede compartirse entre usuarios. Si synchronization indica failed, pending o unavailable, explica que la copia puede estar desactualizada; no afirmes que un archivo no existe en la fuente. Nunca busques credenciales ni intentes otra vía al servidor.",
@@ -1679,6 +1681,17 @@ export async function runWorkerCodexTurn(
               sync: enterpriseDocumentSync,
               serverFiles: serverDocumentFiles,
               knowledgeFiles: knowledgeDocumentFiles,
+              onServerRead: async (result) => {
+                const artifact = await createSpreadsheetArtifact(result, {
+                  installationId, dataRoot: runtime.config.paths.dataRoot, userId: authenticatedUserId,
+                  projectId: chatRequest.projectId, threadId: chatRequest.threadId,
+                  messageId: chatRequest.assistantMessageId, workspace: projectWorkspace,
+                });
+                if (artifact && !projectedDocumentArtifactIds.has(artifact.id)) {
+                  await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:source-preview:${artifact.id}` });
+                  projectedDocumentArtifactIds.add(artifact.id);
+                }
+              },
               runtimeThreadId: threadId,
               runtimeTurnId,
             }) as JsonValue;

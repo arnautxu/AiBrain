@@ -106,6 +106,7 @@ export type DocumentArtifact = {
   status: "processing" | "ready" | "error";
   pages: number | null;
   previewUrl: string | null;
+  previewFormat?: "spreadsheet";
   publicationStatus: PublicationStatus | null;
   publicationError: string | null;
   targetLabel: string | null;
@@ -428,6 +429,7 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
       (value.status === "processing" || value.status === "ready" || value.status === "error") &&
       (value.pages === null || (typeof value.pages === "number" && Number.isSafeInteger(value.pages) && value.pages >= 1 && value.pages <= 500)) &&
       (value.previewUrl === null || (typeof value.previewUrl === "string" && value.previewUrl.startsWith("/api/projects/"))) &&
+      (value.previewFormat === undefined || (value.previewFormat === "spreadsheet" && value.kind === "text" && value.mimeType === "application/json")) &&
       (value.publicationStatus === null || value.publicationStatus === "awaiting_confirmation" || value.publicationStatus === "publishing" || value.publicationStatus === "published" || value.publicationStatus === "declined" || value.publicationStatus === "conflict") &&
       (value.publicationError === null || (typeof value.publicationError === "string" && value.publicationError.length <= 500)) &&
       (value.targetLabel === null || (typeof value.targetLabel === "string" && value.targetLabel.length <= 160)) &&

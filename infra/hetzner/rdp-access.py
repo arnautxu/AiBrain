@@ -29,7 +29,7 @@ CONFIG_KEYS = {"AIBRAIN_RDP_HOST", "AIBRAIN_RDP_CREDENTIAL_FILE", "AIBRAIN_RDP_P
 CREDENTIAL_KEYS = {"AIBRAIN_RDP_USERNAME", "AIBRAIN_RDP_DOMAIN", "AIBRAIN_RDP_PASSWORD"}
 SENSITIVE = re.compile(r"(^|[._ -])(secrets?|credentials?|passwords?|passwd|tokens?|private.?key)([._ -]|$)", re.I)
 DEVICE_NAME = re.compile(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$", re.I)
-COPY_EXTENSIONS = {".txt", ".csv", ".json", ".md", ".pdf", ".xlsx", ".xls", ".doc", ".rtf", ".docx", ".png", ".jpg", ".jpeg", ".bmp"}
+COPY_EXTENSIONS = {".txt", ".csv", ".json", ".md", ".pdf", ".xlsx", ".xlsm", ".xls", ".doc", ".rtf", ".docx", ".png", ".jpg", ".jpeg", ".bmp"}
 
 
 def require(condition, message):
