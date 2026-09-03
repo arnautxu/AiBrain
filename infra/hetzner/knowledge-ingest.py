@@ -215,11 +215,12 @@ def record_failure(store,document,code,wall_time):
             (state,code,document["id"],document["fingerprint"]))
 
 
-def batch(store,root,manifest,max_files=5,max_bytes=64*1024*1024,quota_bytes=10*1024**3,copy=files.sync.rdp_call,extract=extract_sandboxed,formats=None,priority_roots=None,seconds=480,clock=time.monotonic,wall_clock=time.time):
+def batch(store,root,manifest,max_files=5,max_bytes=64*1024*1024,quota_bytes=10*1024**3,copy=files.sync.rdp_call,extract=extract_sandboxed,formats=None,priority_roots=None,seconds=480,clock=time.monotonic,wall_clock=time.time,prefer_documents=False):
     require(type(max_files) is int and 1 <= max_files <= 50 and type(max_bytes) is int and 0 < max_bytes <= 512*1024*1024,"INVALID_BATCH_LIMIT")
     require(type(quota_bytes) is int and 256*1024*1024 <= quota_bytes <= 1024**4,"INVALID_QUOTA")
     require(formats is None or isinstance(formats,list) and 0 < len(formats) <= len(catalogue.FORMATS) and all(f in catalogue.FORMATS for f in formats),"INVALID_FORMAT_FILTER")
     require(type(seconds) is int and 1 <= seconds <= 480,"INVALID_TIME_LIMIT")
+    require(type(prefer_documents) is bool,"INVALID_DOCUMENT_PREFERENCE")
     # Keep metadata discoverable, but do not open a Windows session for an
     # empty file or an Office lock record. Changed source versions are admitted
     # again by the ordinary inventory fingerprint reconciliation.
@@ -246,7 +247,22 @@ def batch(store,root,manifest,max_files=5,max_bytes=64*1024*1024,quota_bytes=10*
     # Preserve business priority, then discovery order. New small files must not
     # indefinitely displace older PDFs/tables; per-file and batch byte caps still
     # govern admission below, independently of queue order.
-    for row in store.db.execute("SELECT * FROM documents WHERE state='pending'"+eligible+" AND bytes<=?"+filter_sql+" ORDER BY "+order+"id LIMIT ?",values).fetchall():
+    def select(extra=""):
+        return store.db.execute("SELECT * FROM documents WHERE state='pending'"+eligible+" AND bytes<=?"+filter_sql+extra+" ORDER BY "+order+"id LIMIT ?",values).fetchall()
+    if prefer_documents and formats is None and max_files>1:
+        preferred="('.pdf','.doc','.docx','.xls','.xlsx','.csv','.rtf')"
+        business,other=select(" AND suffix IN "+preferred),select(" AND suffix NOT IN "+preferred)
+        rows=[];bi=oi=0
+        # Four document slots to one other slot; the first other slot comes
+        # second, before most expensive document copies. Keep FIFO within both
+        # groups and fill unused slots when either group is empty.
+        for index in range(max_files):
+            if oi<len(other) and (index%5==1 or bi==len(business)):
+                rows.append(other[oi]);oi+=1
+            elif bi<len(business):rows.append(business[bi]);bi+=1
+            else:break
+    else:rows=select()
+    for row in rows:
         document = dict(row)
         # This is an admission window, not an interrupt: finish the current
         # verified copy/extraction, but never start another after the budget.
@@ -315,6 +331,7 @@ def main():
     parser.add_argument("--retry-unreadable",action="store_true")
     parser.add_argument("--requeue-supported",action="store_true",help="Requeue previously unsupported files for explicitly selected --format values")
     parser.add_argument("--priority-manifest",help="Prioritize business folders from the existing approved mirror")
+    parser.add_argument("--prefer-documents",action="store_true",help="Reserve four of five queue slots for PDF, Office, CSV and RTF; retain other formats")
     args = parser.parse_args()
     require(os.geteuid()==0,"HOST_OPERATOR_REQUIRED")
     os.umask(0o077)
@@ -335,7 +352,7 @@ def main():
         if args.retry_unreadable:
             print(json.dumps({"requeuedUnreadable":requeue_unreadable(store,args.format)}))
         priority=files.sync.load_manifest(args.priority_manifest)["sourceRoots"] if args.priority_manifest else None
-        print(json.dumps(batch(store,root,manifest,max_files=args.max_files,quota_bytes=args.quota_bytes,formats=args.format,priority_roots=priority,seconds=args.seconds)))
+        print(json.dumps(batch(store,root,manifest,max_files=args.max_files,quota_bytes=args.quota_bytes,formats=args.format,priority_roots=priority,seconds=args.seconds,prefer_documents=args.prefer_documents)))
     finally:
         os.close(fd)
         store.close()

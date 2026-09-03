@@ -40,7 +40,15 @@ interruption. A path-local failure defers that directory until another invocatio
 while allowing other folders to proceed. Transport or policy failures retain their
 stop conditions. Source contention yields without bypassing the shared lock.
 
-Ingestion preserves approved business-root priority, then stable discovery order.
+The supplied schedule processes already discovered files before opening more
+directories. It admits ingestion for 240 seconds, then at most three inventory
+pages over sixty seconds, followed by the existing source checks and publication.
+Each admitted source/parser operation retains its separate timeout.
+
+With `--prefer-documents`, ingestion reserves four of five queue slots for PDF,
+Office, CSV and RTF. The first other-format slot is second in the batch, so text
+and image processing still advances. Empty queues yield their unused slots.
+Both groups preserve approved business-root priority, then stable discovery order.
 New small arrivals cannot repeatedly displace older records in the same group.
 Byte/time/storage limits and retry cooldowns still determine admission. Per-source
 and per-parser failures use fixed codes; raw exception text is not an audit field.
