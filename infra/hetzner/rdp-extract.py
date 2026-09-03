@@ -62,6 +62,9 @@ def spreadsheet(archive):
     require(0 < len(sheets) <= 100, "SHEET_LIMIT")
     preview = {"schemaVersion": 1, "kind": "spreadsheet", "sheets": [], "truncated": False}
     budget = sum(len(sheet.get("name", "").encode("utf-8")) + 100 for sheet in sheets)
+    visible_count = sum(sheet.get("state", "visible") == "visible" for sheet in sheets)
+    hidden_count = len(sheets) - visible_count
+    data_budget = 60000 - budget
     count, text_bytes = 0, 0
     lines = ["Valores guardados; macros desactivadas, fórmulas no recalculadas. Formatos no reconocidos: valor original."]
     for sheet in sheets:
@@ -70,6 +73,11 @@ def spreadsheet(archive):
         target = targets.get(sheet.get(relns + "id"))
         require(target is not None, "INVALID_SHEET_TARGET")
         view = {"name": name, "hidden": sheet.get("state", "visible") != "visible", "cells": []}
+        # A large hidden template must not starve the actual visible schedules.
+        # Reserve a bounded share for every sheet while preserving workbook order.
+        group_count = hidden_count if view["hidden"] else visible_count
+        share = (0.05 if view["hidden"] else 0.95) if visible_count and hidden_count else 1
+        sheet_limit, sheet_bytes = int(data_budget * share / group_count), 0
         preview["sheets"].append(view)
         lines.append("\nHoja: " + name + (" (oculta)" if view["hidden"] else ""))
         seen = set()
@@ -119,9 +127,10 @@ def spreadsheet(archive):
             lines.append(line)
             entry = {"address": address, "value": value}
             size = len(json.dumps(entry, ensure_ascii=False).encode("utf-8"))
-            if budget + size <= 60000 and len(view["cells"]) < 2000:
+            if budget + size <= 60000 and sheet_bytes + size <= sheet_limit and len(view["cells"]) < 2000:
                 view["cells"].append(entry)
                 budget += size
+                sheet_bytes += size
             else:
                 preview["truncated"] = True
     return "\n".join(lines), preview

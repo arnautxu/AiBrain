@@ -74,6 +74,19 @@ class PreviewTests(unittest.TestCase):
         self.assertIn("B1: Horari", text)
         self.assertEqual(preview["sheets"][0]["cells"], [{"address": "B1", "value": "Horari"}])
 
+    def test_hidden_template_cannot_starve_visible_sheets(self):
+        workbook(self.source, ''.join(f'<c r="A{i}" t="inlineStr"><is><t>{"x"*100}</t></is></c>' for i in range(1, 1001)))
+        with zipfile.ZipFile(self.source) as archive:
+            entries = {item.filename: archive.read(item) for item in archive.infolist()}
+        entries['xl/workbook.xml'] = entries['xl/workbook.xml'].replace(b'r:id="r1"', b'r:id="r1" state="hidden"').replace(b'r:id="r2" state="hidden"', b'r:id="r2"')
+        entries['xl/worksheets/sheet2.xml'] = f'<worksheet xmlns="{NS}"><sheetData><row><c r="A1" t="inlineStr"><is><t>Actual</t></is></c></row></sheetData></worksheet>'.encode()
+        with zipfile.ZipFile(self.source, 'w') as archive:
+            for name, data in entries.items(): archive.writestr(name, data)
+        preview = {}
+        extract.extract(self.source, '.xlsm', preview)
+        self.assertTrue(preview['truncated'])
+        self.assertEqual(preview['sheets'][1]['cells'], [{'address': 'A1', 'value': 'Actual'}])
+
     def test_external_sheet_relationship_and_credentials_are_rejected(self):
         workbook(self.source, external=True)
         with self.assertRaisesRegex(ValueError, "INVALID_SHEET_TARGET"):

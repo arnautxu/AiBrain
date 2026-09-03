@@ -11,6 +11,12 @@ const preview: SpreadsheetPreview = { schemaVersion: 1, kind: "spreadsheet", tru
 ] };
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
+it("opens a populated visible sheet instead of a hidden template", () => {
+  render(<SpreadsheetTable preview={{ ...preview, sheets: [preview.sheets[1], preview.sheets[0]] }} />);
+  expect(screen.getByRole("combobox")).toHaveValue("1");
+  expect(screen.getByRole("cell", { name: "09:00" })).toBeInTheDocument();
+});
+
 it("opens a spreadsheet inside the document panel with escaped values and sheet navigation", async () => {
   const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(preview), { headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", fetch);

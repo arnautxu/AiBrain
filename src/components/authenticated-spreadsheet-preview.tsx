@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { isSpreadsheetPreview, type SpreadsheetPreview } from "@/documents/spreadsheet-preview";
 
 export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
-  const [selected, setSelected] = useState(0);
+  const [selected, setSelected] = useState(() => Math.max(0, preview.sheets.findIndex((sheet) => !sheet.hidden && sheet.cells.length > 0)));
   const [rowPage, setRowPage] = useState(0);
   const [columnPage, setColumnPage] = useState(0);
   const sheet = preview.sheets[selected] ?? preview.sheets[0];
