@@ -126,6 +126,15 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         // either backend; a larger requested page is not a scope violation.
         ...(typeof params.arguments.limit === "number" ? { limit: Math.min(params.arguments.limit, 50) } : {}),
       };
+      // Older App Server threads retain their original dynamic-tool schema.
+      // Route this bounded query through the same inventory authorization.
+      if (input.query.startsWith("inventory:")) {
+        if (input.query.length > 200) return failure();
+        const [path, query, extra] = input.query.slice(10).split("?");
+        if (extra !== undefined || !isServerFilePath(path) || (query !== undefined && !/^offset=[0-9]{1,6}$/.test(query))) return failure();
+        return response(await context.serverFiles?.inventory(context.roots, { scope: "company", path,
+          offset: query === undefined ? 0 : Number(query.slice(7)) }) ?? { available: false });
+      }
       if (isServerDirectoryQuery(input.query)) {
         const server = await context.serverFiles?.search(context.roots, input.query, input.limit);
         return response({ results: server?.results ?? [], server: server ?? { available: false },

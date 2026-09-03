@@ -75,8 +75,12 @@ describe("server document file access", () => {
       expect((await f.tool("inventory", args)).success).toBe(false);
     }
     expect(f.requests).toHaveLength(1);
+    await f.tool("search", { query: "inventory:" + target });
+    expect(f.requests[1]).toMatchObject({ operation: "inventory", input: { path: target, offset: 0 } });
+    expect((await f.tool("search", { query: "inventory:" + target + "?offset=wrong" })).success).toBe(false);
     const denied = await fixture(false);
     expect(await denied.files.inventory(denied.roots, { scope: "company", path: target })).toBeNull();
+    await denied.tool("search", { query: "inventory:" + target });
     expect(denied.requests).toHaveLength(0);
   });
 

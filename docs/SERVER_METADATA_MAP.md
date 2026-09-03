@@ -54,6 +54,10 @@ are withheld. `businessRecordCount` is always unknown: the assistant must read
 relevant documents to distinguish quotes from catalogs and annexes, confirm issuer,
 date and identifier, and reconcile copies/versions before counting business records.
 Neither a folder year nor a filesystem modification year establishes document year.
+Existing App Server conversations retain their tool schema. Their current-turn
+instructions use the compatible `search` query `inventory:<server-path>` with an
+optional `?offset=N`; the handler routes to the identical inventory client and
+company permission checks. No thread reset or history migration is required.
 
 Live listings, reads and pending inventory requests use a private expiring
 `operator/interactive-until` marker. The background worker yields after its current
