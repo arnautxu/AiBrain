@@ -588,6 +588,54 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
+  it("never replays manual input when CDP reports a stale target after dispatch", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    client.failNext("Input.dispatchKeyEvent", new CdpClientError(
+      "CDP_COMMAND_FAILED", "Input.dispatchKeyEvent failed: Not attached to an active page",
+    ));
+    await expect(runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "a", text: "a" }))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    expect(client.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(1);
+    await runtime.stop();
+  });
+
+  it.each(["navigate", "reload"] as const)("does not repeat %s after a stale readback", async (action) => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    client.failNext("Runtime.evaluate", new CdpClientError(
+      "CDP_COMMAND_FAILED", "Runtime.evaluate failed: Not attached to an active page",
+    ));
+    const before = client.commands.length;
+    await expect(action === "navigate"
+      ? runtime.navigate(THREAD_A, "https://example.test/one-mutation")
+      : runtime.navigateHistory(THREAD_A, "reload"))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    expect(client.commands.slice(before).filter(({ method }) => method === (action === "navigate" ? "Page.navigate" : "Page.reload")))
+      .toHaveLength(1);
+    await runtime.stop();
+  });
+
   it("recreates only a stale thread target and restores its URL once", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();

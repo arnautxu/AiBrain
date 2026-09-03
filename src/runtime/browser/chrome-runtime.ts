@@ -659,7 +659,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       const current = await this.navigationStateForPage(page);
       await this.persistNavigation(page, current.url);
       return current;
-    });
+    }, false);
   }
 
   async agentNavigate(threadId: string, url: string) {
@@ -681,7 +681,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       }
       navigatedPage = page;
       return response;
-    });
+    }, false);
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
@@ -755,7 +755,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         text: command.text ?? "",
         modifiers: command.modifiers ?? 0,
       }, { sessionId: page.sessionId });
-    });
+    }, false);
   }
 
   async readPage(threadId: string): Promise<BrowserPageSnapshot> {
@@ -1465,12 +1465,16 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private async withThreadPageRecovery<Result>(
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
+    replayOnStale = true,
   ): Promise<Result> {
     return this.withExclusiveBrowserOperation(async () => {
       const page = await this.requireThreadPage(threadId);
       try {
         return await operation(page);
       } catch (error) {
+        // Input/navigation may already have affected the page before the stale
+        // response (including a subsequent readback). Never dispatch it twice.
+        if (!replayOnStale) throw error;
         if (!isRecoverableThreadSessionError(error)) throw error;
         if (this.threadPages.get(threadId) === page) {
           this.threadPages.delete(threadId);

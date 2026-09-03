@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "@/components/browser-panel";
 
@@ -77,6 +77,95 @@ afterEach(() => {
 });
 
 describe("BrowserPanel", () => {
+  it("keeps rapid click, exact typing, paste and scroll ordered while takeover is pending", async () => {
+    let takeOver!: (value: unknown) => void;
+    browser.control.mockImplementation(() => new Promise((resolve) => { takeOver = resolve; }));
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.click(image, { clientX: 10, clientY: 20 });
+    fireEvent.keyDown(image, { key: "H", code: "KeyH", shiftKey: true });
+    fireEvent.keyDown(image, { key: "i", code: "KeyI" });
+    fireEvent.paste(image, { clipboardData: { getData: () => " català 👋" } });
+    fireEvent.wheel(image, { clientX: 10, clientY: 20, deltaY: 137 });
+    await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
+    expect(browser.send).not.toHaveBeenCalled();
+    await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(8));
+    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    expect(commands.map((command) => command.event)).toEqual([
+      "mousePressed", "mouseReleased", "keyDown", "keyUp", "keyDown", "keyUp", "char", "mouseWheel",
+    ]);
+    expect(commands.filter((command) => command.text).map((command) => command.text).join("")).toBe("Hi català 👋");
+    expect(commands[7].deltaY).toBe(137);
+    expect(image).toHaveFocus();
+  });
+
+  it("does not send queued input into either thread after switching during takeover", async () => {
+    let takeOver!: (value: unknown) => void;
+    browser.control.mockImplementation(() => new Promise((resolve) => { takeOver = resolve; }));
+    const view = render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
+    const otherThread = "0198b9f0-6631-7000-8000-000000000613";
+    view.rerender(<BrowserPanel threadId={otherThread} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    expect(screen.queryByAltText("Vista actual del navegador privado")).not.toBeInTheDocument();
+    await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
+    await screen.findByAltText("Vista actual del navegador privado");
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(browser.issue.mock.calls.at(-1)?.[0]).toBe(otherThread);
+  });
+
+  it("never retries an uncertain input or dispatches the dependent queued text", async () => {
+    let rejectInput!: (reason: Error) => void;
+    browser.send.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectInput = reject; }));
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(1));
+    await act(async () => rejectInput(new Error("Resultado indeterminado")));
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Revisa la página|indeterminado/);
+  });
+
+  it("renews aged control tokens before new input without replaying mutations", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    const issued = browser.issue.mock.calls.length;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 26_000);
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(4));
+    expect(browser.issue.mock.calls.length).toBeGreaterThan(issued);
+  });
+
+  it("does not carry pending text across a rotated browser session", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    browser.issue.mockResolvedValue({ token: "rotated-token", browserSessionId: "0198b9f0-6631-7000-8000-000000000614" });
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("La sesión ha cambiado"));
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps shortcuts out of text and routes local paste exactly once", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA", ctrlKey: true });
+    fireEvent.keyDown(image, { key: "v", code: "KeyV", ctrlKey: true });
+    fireEvent.paste(image, { clipboardData: { getData: () => "exact paste" } });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(3));
+    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    expect(commands.map((command) => command.event)).toEqual(["keyDown", "keyUp", "char"]);
+    expect(commands[0]).toMatchObject({ key: "a", modifiers: 2 });
+    expect(commands[0].text).toBeUndefined();
+    expect(commands[2].text).toBe("exact paste");
+  });
+
   it("uses a minimal browser header and keeps the rest for the direct viewport", async () => {
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     expect(screen.getByText("Navegador")).toBeInTheDocument();
