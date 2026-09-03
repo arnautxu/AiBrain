@@ -517,6 +517,48 @@ describe("WorkerRuntimeRegistry", () => {
     await unsafeRegistry.close();
   });
 
+  it("never stops another employee's active runtime when a factory reuses it", async () => {
+    const { config } = await fixture();
+    const shared = new FakeRuntime(async () => undefined);
+    const registry = new WorkerRuntimeRegistry({ config, factory: { create: () => shared } });
+    try {
+      await registry.start(syntheticUser(1));
+      await expect(registry.start(syntheticUser(2))).rejects.toThrow(/reused/);
+      expect(shared.stopCalls).toBe(0);
+      expect(shared.transport.closeCalls).toBe(0);
+      expect((await registry.health(syntheticUser(1))).healthy).toBe(true);
+    } finally {
+      await registry.close();
+    }
+  });
+
+  it.each([false, true])("retains failed cleanup ownership and fences restart (startup failure: %s)", async (startupFails) => {
+    const { config } = await fixture();
+    let cleanupFails = true;
+    const runtime = new FakeRuntime(async () => {
+      if (startupFails) throw new Error("fixture startup failure");
+    });
+    runtime.stop = async () => {
+      if (cleanupFails) throw new Error("fixture cleanup failure");
+      runtime.started = false;
+    };
+    const registry = new WorkerRuntimeRegistry({ config, factory: { create: () => runtime } });
+    try {
+      if (startupFails) await expect(registry.start(syntheticUser(1))).rejects.toThrow(/startup failure/);
+      else {
+        await registry.start(syntheticUser(1));
+        await expect(registry.stop(syntheticUser(1))).rejects.toThrow(/cleanup failure/);
+      }
+      await expect(registry.start(syntheticUser(1))).rejects.toThrow(/cleanup must complete/);
+      cleanupFails = false;
+      await expect(registry.stop(syntheticUser(1))).resolves.toBe(true);
+      expect((await registry.health(syntheticUser(1))).state).toBe("stopped");
+    } finally {
+      cleanupFails = false;
+      await registry.close();
+    }
+  });
+
   it("builds a launch context without exposing publisher write access", async () => {
     const { config } = await fixture();
     const manifest = await new WorkerProvisioner({ config }).provision(syntheticUser(1));

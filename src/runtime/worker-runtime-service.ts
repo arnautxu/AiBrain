@@ -281,6 +281,7 @@ type RuntimeServiceState = {
   registry: WorkerRuntimeRegistry;
   maintenance: MaintenanceCoordinator;
   clients: Map<string, WorkerAppServerClient>;
+  clientAdmissions: Map<string, Promise<{ handle: WorkerRuntimeHandle; client: WorkerAppServerClient }>>;
   activeTurnCancellations: Map<string, {
     runtimeThreadId: string;
     cancelAfterRemoteInterrupt(remoteInterruptConfirmed: boolean): void;
@@ -331,6 +332,7 @@ async function serviceState(): Promise<RuntimeServiceState> {
       }),
       maintenance,
       clients: new Map(),
+      clientAdmissions: new Map(),
       activeTurnCancellations: new Map(),
     };
     runtimeGlobal.__aibrainWorkerRuntimeService = state;
@@ -359,6 +361,26 @@ export async function workerAppServerForUser(
   // This is sampled before `start()`: it distinguishes an already-running
   // employee process from a cold start without exposing a worker identifier.
   const workerWasWarm = state.registry.get(userId) !== null;
+  // Share only startup/recovery, never turn execution. Concurrent callers of
+  // a failed initialize must not each stop the successor's healthy worker.
+  let admission = state.clientAdmissions.get(userId);
+  if (!admission) {
+    admission = initializeWorkerClient(state, userId, activityLease);
+    state.clientAdmissions.set(userId, admission);
+    void admission.finally(() => {
+      if (state.clientAdmissions.get(userId) === admission) state.clientAdmissions.delete(userId);
+    }).catch(() => undefined);
+  }
+  const { handle, client } = await admission;
+  if (activityLease) state.maintenance.assertActiveLease(activityLease);
+  return { config: state.config, registry: state.registry, handle, client, workerWasWarm };
+}
+
+async function initializeWorkerClient(
+  state: RuntimeServiceState,
+  userId: string,
+  activityLease?: MaintenanceActivityLease,
+) {
   let handle: WorkerRuntimeHandle;
   try {
     handle = await state.registry.start(userId, activityLease);
@@ -394,7 +416,7 @@ export async function workerAppServerForUser(
     });
     await client.close().catch(() => undefined);
     state.clients.delete(userId);
-    await state.registry.stop(userId).catch(() => undefined);
+    await state.registry.stop(userId);
     handle = await state.registry.start(userId, activityLease);
     client = new WorkerAppServerClient(handle, state.maintenance);
     state.clients.set(userId, client);
@@ -402,6 +424,8 @@ export async function workerAppServerForUser(
       await client.initialize();
     } catch (retryError) {
       state.clients.delete(userId);
+      await client.close().catch(() => undefined);
+      await state.registry.stop(userId).catch(() => undefined);
       operationalLogger.error("codex.worker_recovery", {
         metricSchemaVersion: 1,
         installationId: state.config.installationId,
@@ -413,7 +437,7 @@ export async function workerAppServerForUser(
       throw retryError;
     }
   }
-  return { config: state.config, registry: state.registry, handle, client, workerWasWarm };
+  return { handle, client };
 }
 
 export async function acquireWorkerTurnActivity() {

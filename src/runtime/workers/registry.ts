@@ -221,6 +221,7 @@ export class WorkerRuntimeRegistry {
       return entry.handle;
     }
     if (entry.startPromise) return entry.startPromise;
+    if (entry.runtime) throw new Error("Previous worker cleanup must complete before restart.");
 
     const startLease = activityLease
       ? null
@@ -340,13 +341,15 @@ export class WorkerRuntimeRegistry {
       entry.lastError = safeError(error);
       entry.state = "failed";
       entry.handle = null;
-      if (runtime) {
-        await Promise.allSettled([
+      // A rejected factory object may belong to another employee. Cleanup
+      // only starts after this entry has acquired exclusive ownership.
+      if (runtime && entry.runtime === runtime) {
+        const cleanup = await Promise.allSettled([
           runtime.transport.close(),
           runtime.stop(),
         ]);
+        if (cleanup.every((result) => result.status === "fulfilled")) entry.runtime = null;
       }
-      entry.runtime = null;
       throw error;
     } finally {
       release?.();
@@ -379,7 +382,6 @@ export class WorkerRuntimeRegistry {
       runtime.transport.close(),
       runtime.stop(),
     ]);
-    entry.runtime = null;
     entry.handle = null;
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) {
@@ -387,6 +389,7 @@ export class WorkerRuntimeRegistry {
       entry.lastError = safeError(failure.reason);
       throw failure.reason;
     }
+    entry.runtime = null;
     entry.state = "stopped";
     entry.lastError = null;
     return true;
