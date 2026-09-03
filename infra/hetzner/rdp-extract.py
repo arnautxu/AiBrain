@@ -75,7 +75,9 @@ def spreadsheet(archive):
         seen = set()
         for cell in xml(archive, target).iter(ns + "c"):
             count += 1
-            require(count <= 100000, "CELL_LIMIT")
+            # Excel may retain hundreds of thousands of style-only cells.
+            # The XML/archive, CPU and memory bounds still apply independently.
+            require(count <= 1000000, "CELL_LIMIT")
             address = cell.get("r", "")
             require(re.fullmatch(r"[A-Z]{1,3}[1-9][0-9]{0,6}", address) and address not in seen, "INVALID_CELL_ADDRESS")
             seen.add(address)

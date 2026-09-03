@@ -66,12 +66,16 @@ retain raw values. Missing formula caches are labelled. This is a data view, not
 a pixel-faithful reproduction of printing, merged cells, colours or charts.
 The grid has a 60 KB cell/name budget and 2,000 cells per sheet (100 sheets
 maximum), with explicit partial coverage; text remains separately paginated.
+The bounded parser accepts up to one million scanned cells, including empty
+styled cells. The real S’Agaró workbook contains 351,692 cells across 43 sheets;
+its host-side sandbox extraction passed after correcting the initial 100,000-cell
+ceiling. Archive/XML, output size, memory and CPU limits remain enforced.
 Read failure never creates an artifact; preview failure preserves successful text
 reading and reports a preview warning. Existing conversations receive the updated
 runtime instructions without a new tool schema or manual re-upload.
 
 Release requires installing the candidate `rdp-access.py`, `rdp-sync.py`,
-`rdp-extract.py` and `rdp-server-files.py` together in the operator-managed server
+`rdp-extract.py`, `rdp-frame.py` and `rdp-server-files.py` together in the operator-managed server
 files bundle, preserving the existing owner/mode, manifest, sandbox and source
 permissions. Restarting its broker and updating any separately installed mirror
 bundle are host changes requiring explicit authorization. The app image alone
