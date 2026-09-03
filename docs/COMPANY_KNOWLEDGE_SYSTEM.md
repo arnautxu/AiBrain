@@ -45,6 +45,15 @@ New small arrivals cannot repeatedly displace older records in the same group.
 Byte/time/storage limits and retry cooldowns still determine admission. Per-source
 and per-parser failures use fixed codes; raw exception text is not an audit field.
 
+## Native RDP client home
+
+The FreeRDP child receives a private temporary HOME, configuration and cache
+directory for its session. Some service contexts omit HOME, and ProtectHome
+hides the operator home. The client must not depend on either. The parent environment,
+operator home, credentials and pinned endpoint remain unchanged. The directories
+are removed with the session, including failed startup. Keep ProtectHome enabled;
+validate native startup inside the same service restrictions before installation.
+
 ## Bounded listing session reuse
 
 The inventory reuses one RDP connection for at most three consecutive fixed
