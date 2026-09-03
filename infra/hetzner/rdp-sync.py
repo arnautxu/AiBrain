@@ -24,7 +24,7 @@ MODULE = Path(__file__).with_name("rdp-access.py")
 spec = importlib.util.spec_from_file_location("rdp_access", MODULE)
 rdp = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rdp)
-FORMATS = {".pdf", ".docx", ".xlsx", ".txt", ".csv", ".md", ".json"}
+FORMATS = {".pdf", ".docx", ".xlsx", ".xlsm", ".txt", ".csv", ".md", ".json"}
 ID = re.compile(r"[a-z0-9][a-z0-9-]{0,62}")
 UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}")
 CHUNK_BYTES = 120 * 1024
@@ -249,11 +249,11 @@ def scope_directory(manifest, audience):
     return root
 
 
-def text_chunks(text):
+def text_chunks(text, maximum_bytes=CHUNK_BYTES):
     chunk, count = [], 0
     for char in text:
         size = len(char.encode("utf-8"))
-        if count + size > CHUNK_BYTES:
+        if count + size > maximum_bytes:
             yield "".join(chunk)
             chunk, count = [], 0
         chunk.append(char)

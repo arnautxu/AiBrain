@@ -1,0 +1,33 @@
+import { expect, test } from "@playwright/test";
+
+for (const width of [1440, 390]) {
+  test(`source workbook preview stays inside the chat at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const url = "/api/projects/00000000-0000-4000-8000-000000000011/files?path=preview.json&raw=1&download=1";
+    await page.route("**/api/chat", (route) => route.fulfill({ contentType: "application/x-ndjson", body: [
+      { type: "delta", value: "Pots revisar els horaris desats. Dades sintètiques de prova." },
+      { type: "artifact", item: { id: "00000000-0000-4000-8000-000000000099", type: "document", name: "Horaris.xlsm",
+        kind: "text", mimeType: "application/json", size: 1000, status: "ready", pages: null, previewFormat: "spreadsheet",
+        url, previewUrl: url, publicationStatus: null, publicationError: null, targetLabel: null, error: null } },
+      { type: "done" },
+    ].map((event) => JSON.stringify(event)).join("\n") + "\n" }));
+    await page.route("**/api/projects/*/files?*", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({
+      schemaVersion: 1, kind: "spreadsheet", truncated: false, sheets: [
+        { name: "S’Agaró", hidden: false, cells: [{ address: "A1", value: "Treballador (prova)" }, { address: "B1", value: "Entrada" }, { address: "C1", value: "Sortida" }, { address: "A2", value: "Persona fictícia" }, { address: "B2", value: "09:00" }, { address: "C2", value: "17:00" }] },
+        { name: "Torre", hidden: false, cells: [{ address: "C3", value: "10:30" }] },
+      ],
+    }) }));
+    await page.goto("/login");
+    await page.getByRole("button", { name: /Alex/ }).click();
+    await page.getByRole("textbox", { name: "Mensaje" }).fill("Mostra els horaris.");
+    await page.getByRole("button", { name: "Enviar mensaje" }).click();
+    await page.getByRole("button", { name: "Ver hojas del libro" }).click();
+    await expect(page.getByRole("cell", { name: "09:00" })).toBeVisible();
+    await expect(page.getByText(/macros desactivadas/)).toBeVisible();
+    await page.screenshot({ path: `test-results/spreadsheet-${width}.png` });
+    await page.getByRole("combobox", { name: "Hoja del libro" }).selectOption("1");
+    await expect(page.getByRole("cell", { name: "10:30" })).toBeVisible();
+    await page.getByRole("button", { name: "Cerrar vista previa" }).click();
+    await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeVisible();
+  });
+}

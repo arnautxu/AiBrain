@@ -90,6 +90,7 @@ type Context = Readonly<{
   sync?: OnDemandDocumentSync;
   serverFiles?: ServerDocumentFiles;
   knowledgeFiles?: KnowledgeDocumentFiles;
+  onServerRead?: (result: Record<string, unknown>) => Promise<void>;
 }>;
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -188,6 +189,11 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
       }
       if (isServerFilePath(input.path)) {
         const result = await context.serverFiles?.read(context.roots, input);
+        if (result?.available && context.onServerRead) {
+          try { await context.onServerRead(result); } catch {
+            return response({ ...result, previewWarning: "La lectura está disponible, pero no se pudo preparar la vista previa. No afirmes que se ha mostrado." });
+          }
+        }
         return response(result ?? { available: false, warning: "El acceso directo al servidor no está disponible para este turno." });
       }
       await context.network.validateSyncRead(input);

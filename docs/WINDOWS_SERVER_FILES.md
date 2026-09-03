@@ -43,11 +43,51 @@ resetting history. See the metadata-map runbook for coverage and continuation.
   `nextPath` selects another bounded text part. Compare hashes between parts;
   stop and reread if the source changed.
 
-Each read is fresh. The current extractor supports PDF, DOCX, XLSX and UTF-8
+Each read is fresh. The current extractor supports PDF, DOCX, XLSX, XLSM and UTF-8
 TXT/CSV/MD/JSON, up to the existing 16 MiB source and extraction limits. Other
 formats can be listed, but an unsupported/scanned/unreadable file must be
 reported accurately. Original files remain private in the host import area.
 There is no remote write, rename, delete, permission change or shell tool.
+
+### Spreadsheet chat preview (local candidate, 2026-09-03)
+
+The first fresh XLSX/XLSM read returns a bounded worksheet/cell representation.
+The app persists only this data representation in the requesting project and
+registers its actor, project, thread, hash and source timestamp with the existing
+library resource index. Its authenticated download endpoint verifies the stored
+hash; the chat card opens a sheet selector and paginated cell grid in the existing
+document panel, including mobile focus management. The JSON download is explicitly
+the preview data, not the original workbook. Originals remain on the host.
+
+The parser reads OOXML values only: no VBA, macro execution, external links,
+formula evaluation or Office process. Sheet names, hidden-sheet flags and sparse
+cell addresses survive. Common date/time formats are displayed; unknown formats
+retain raw values. Missing formula caches are labelled. This is a data view, not
+a pixel-faithful reproduction of printing, merged cells, colours or charts.
+The grid has a 60 KB cell/name budget and 2,000 cells per sheet (100 sheets
+maximum), with explicit partial coverage; text remains separately paginated.
+Read failure never creates an artifact; preview failure preserves successful text
+reading and reports a preview warning. Existing conversations receive the updated
+runtime instructions without a new tool schema or manual re-upload.
+
+Release requires installing the candidate `rdp-access.py`, `rdp-sync.py`,
+`rdp-extract.py` and `rdp-server-files.py` together in the operator-managed server
+files bundle, preserving the existing owner/mode, manifest, sandbox and source
+permissions. Restarting its broker and updating any separately installed mirror
+bundle are host changes requiring explicit authorization. The app image alone
+does not update these files. Keep the previous bundle for rollback. Backend CI,
+GHCR publication, deployment and an authenticated read of the actual schedule
+workbook are separate pending gates; local synthetic tests do not prove them.
+
+Local verification for this candidate: 1,147 application tests passed (nine
+environment-gated cases skipped), 48 Python extraction/RDP tests passed, and
+four browser cases passed for spreadsheet/PDF desktop and mobile previews.
+The browser cases use synthetic data and intercepted chat/file responses;
+separate artifact tests exercise real private persistence, resource binding,
+idempotent readback, tamper rejection and the turn-bound read hook. Typecheck,
+production app and automation-worker builds, changed-file lint, generated
+contracts and static infrastructure checks passed. The original checkout and
+all production/source systems remain untouched.
 
 ## Trust and process boundaries
 

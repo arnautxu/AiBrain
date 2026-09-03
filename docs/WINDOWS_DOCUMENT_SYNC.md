@@ -49,13 +49,15 @@ verified originals without copying them again. Cache hash corruption fails
 closed. Unchanged size/mtime is the incremental change detector; this is not
 a continuous hash scan of the remote disk.
 
-PDF, DOCX, XLSX and UTF-8 text formats are extracted in a separate unprivileged,
+PDF, DOCX, XLSX/XLSM and UTF-8 text formats are extracted in a separate unprivileged,
 networkless Bubblewrap process. It sees only the input, extractor and system
 libraries. Archive sizes, XML entities, runtime, memory and output are bounded.
 Credential-shaped content is withheld. Scanned PDFs without extractable text,
 unsupported files and extraction failures are counted as unavailable, never
-silently presented as readable documents. XLSX uses stored values, without
-recalculating formulas.
+silently presented as readable documents. XLSX/XLSM uses stored values, without
+recalculating formulas or executing macros. The direct server-read path also
+provides the bounded chat data preview described in `WINDOWS_SERVER_FILES.md`;
+the scheduled mirror remains a text publication.
 
 The app reads bounded UTF-8 fragments through its existing
 `aibrain_company_files.search/read` tools. Each fragment carries the source
