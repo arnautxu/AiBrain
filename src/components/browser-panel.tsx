@@ -25,6 +25,7 @@ import {
   type BrowserViewerToken,
 } from "@/ui/browser-ui-adapter";
 import { consumeBrowserFrameStream } from "@/ui/browser-frame-stream";
+import { BrowserInputQueue } from "@/ui/browser-input-queue";
 import {
   ComputerUse,
   type ComputerStep,
@@ -51,12 +52,19 @@ function wait(milliseconds: number, signal: AbortSignal) {
   });
 }
 
-export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: {
+type BrowserPanelProps = {
   threadId: string | null;
   open: boolean;
   onClose: () => void;
   initialStatus?: BrowserUiStatus | null;
-}) {
+};
+
+export function BrowserPanel(props: BrowserPanelProps) {
+  // Never reuse a frame, token or pending input across viewer attachments.
+  return <BrowserPanelAttachment key={`${props.threadId}:${props.open}`} {...props} />;
+}
+
+function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null }: BrowserPanelProps) {
   const [status, setStatus] = useState<BrowserUiStatus | null>(initialStatus);
   const [viewerToken, setViewerToken] = useState<BrowserViewerToken | null>(null);
   const [navigation, setNavigation] = useState<BrowserViewerNavigationState>({
@@ -81,6 +89,9 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   const frameTimesRef = useRef<number[]>([]);
   const lastMetricsAtRef = useRef(0);
   const pendingPaintRef = useRef<number | null>(null);
+  const inputQueueRef = useRef(new BrowserInputQueue());
+  const attachmentRef = useRef(true);
+  const tokenIssuedAtRef = useRef(0);
 
   const replaceFrame = useCallback((blob: Blob) => {
     const next = URL.createObjectURL(blob);
@@ -89,10 +100,17 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     setFrameUrl(next);
   }, []);
 
-  useEffect(() => () => {
-    if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
-    if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
-    if (humanControlRef.current) void controlBrowser("release").catch(() => undefined);
+  useEffect(() => {
+    attachmentRef.current = true;
+    const inputQueue = new BrowserInputQueue();
+    inputQueueRef.current = inputQueue;
+    return () => {
+      attachmentRef.current = false;
+      inputQueue.cancel();
+      if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
+      if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
+      if (humanControlRef.current) void controlBrowser("release").catch(() => undefined);
+    };
   }, []);
 
   useEffect(() => { viewerTokenRef.current = viewerToken; }, [viewerToken]);
@@ -106,8 +124,11 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 
   const renewViewerToken = useCallback(async (control: boolean, signal?: AbortSignal) => {
     if (!threadId) throw new Error("Abre una conversación antes de iniciar el navegador.");
+    const requestedAt = Date.now();
     const next = await issueBrowserViewerToken(threadId, control, signal);
+    if (!attachmentRef.current || signal?.aborted) throw new Error("El visor se ha cerrado.");
     viewerTokenRef.current = next;
+    tokenIssuedAtRef.current = requestedAt;
     viewerTokenControlsRef.current = control;
     setViewerToken(next);
     return next;
@@ -115,15 +136,19 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
 
   const ensureControl = useCallback(async () => {
     if (!threadId) throw new Error("Abre una conversación antes de controlar el navegador.");
-    if (humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current) {
+    if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
+    if (humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current &&
+      Date.now() - tokenIssuedAtRef.current < 25_000) {
       return viewerTokenRef.current;
     }
     if (takeoverPromiseRef.current) return takeoverPromiseRef.current;
     const takeover = (async () => {
       const current = await refreshStatus();
+      if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
       if (current.state.lifecycle !== "human-control") {
         if (current.state.lifecycle !== "ready") throw new Error("La sesión se está reconectando.");
         const controlled = await controlBrowser("takeover");
+        if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
         setStatus(controlled);
         humanControlRef.current = true;
       }
@@ -194,7 +219,6 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
             if (record.metadata.kind === "heartbeat") return;
             reconnectAttempt = 0;
             setConnection("live");
-            setError(null);
             setPointerTrail((record.metadata.pointerTrail ?? []).map((point) => ({
               ...point,
               action: "click",
@@ -250,29 +274,42 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     return () => window.clearInterval(interval);
   }, [open, status?.state.lifecycle]);
 
-  const runViewerCommand = useCallback(async (command: Record<string, unknown>) => {
-    if (!threadId) return null;
+  const runViewerCommands = useCallback(async (commands: Record<string, unknown>[]) => {
+    if (!threadId || !open || !attachmentRef.current) return null;
     setError(null);
     try {
-      const token = await ensureControl();
-      const next = await sendBrowserViewerCommand(threadId, token.token, command);
-      if (next) {
-        setNavigation(next);
-        if (!addressEditingRef.current) setAddress(next.url);
-      }
-      return next;
+      return await inputQueueRef.current.enqueue(async (assertCurrent) => {
+        const token = await ensureControl();
+        assertCurrent();
+        if (token.browserSessionId !== status?.state.browserSessionId) {
+          throw new Error("La sesión ha cambiado. Revisa la página antes de continuar.");
+        }
+        let next: BrowserViewerNavigationState | null = null;
+        for (const command of commands) {
+          assertCurrent();
+          next = await sendBrowserViewerCommand(threadId, token.token, command);
+        }
+        assertCurrent();
+        if (next) {
+          setNavigation(next);
+          if (!addressEditingRef.current) setAddress(next.url);
+        }
+        return next;
+      });
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
+      // Renew on the next deliberate input, never retry a possibly dispatched mutation.
+      viewerTokenControlsRef.current = false;
+      if (attachmentRef.current) setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
       return null;
     }
-  }, [ensureControl, threadId]);
+  }, [ensureControl, open, status?.state.browserSessionId, threadId]);
 
   const navigate = async () => {
-    await runViewerCommand({ action: "navigate", url: normalizedAddress(address) });
+    await runViewerCommands([{ action: "navigate", url: normalizedAddress(address) }]);
   };
 
   const navigateHistory = async (direction: BrowserViewerHistoryAction) => {
-    await runViewerCommand({ action: "history", direction });
+    await runViewerCommands([{ action: "history", direction }]);
   };
 
   const clickFrame = async (event: MouseEvent<HTMLImageElement>) => {
@@ -291,18 +328,11 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
       x: relativeX * 100,
       y: relativeY * 100,
     }].slice(-3));
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    try {
-      for (const pointerEvent of ["mousePressed", "mouseReleased"] as const) {
-        await sendBrowserViewerCommand(threadId, token.token, {
-          action: "input",
-          command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
-        });
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido enviar el clic.");
-    }
+    image.focus();
+    await runViewerCommands(["mousePressed", "mouseReleased"].map((pointerEvent) => ({
+      action: "input",
+      command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
+    })));
   };
 
   const moveFrame = (event: PointerEvent<HTMLImageElement>) => {
@@ -316,14 +346,14 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const now = Date.now();
     if (now - lastPointerSentAtRef.current < 80) return;
     lastPointerSentAtRef.current = now;
-    void sendBrowserViewerCommand(threadId, viewerTokenRef.current.token, {
+    void runViewerCommands([{
       action: "input",
       command: {
         kind: "mouse", event: "mouseMoved",
         x: Math.round(relativeX * image.naturalWidth),
         y: Math.round(relativeY * image.naturalHeight), button: "none",
       },
-    }).catch(() => undefined);
+    }]);
   };
 
   const scrollFrame = async (event: WheelEvent<HTMLImageElement>) => {
@@ -331,9 +361,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const image = imageRef.current;
     if (!image || !threadId) return;
     const bounds = image.getBoundingClientRect();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    await sendBrowserViewerCommand(threadId, token.token, {
+    await runViewerCommands([{
       action: "input",
       command: {
         kind: "mouse", event: "mouseWheel",
@@ -343,47 +371,38 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
         deltaX: Math.max(-100_000, Math.min(100_000, event.deltaX)),
         deltaY: Math.max(-100_000, Math.min(100_000, event.deltaY)),
       },
-    }).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "No se ha podido desplazar la página.");
-    });
+    }]);
   };
 
   const keyFrame = async (event: KeyboardEvent<HTMLImageElement>) => {
     if (!threadId || event.key.length > 128) return;
+    // Let the local browser deliver clipboard text through onPaste.
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
     event.preventDefault();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
     const modifiers = (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) |
       (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
-    try {
-      for (const keyEvent of ["keyDown", "keyUp"] as const) {
-        await sendBrowserViewerCommand(threadId, token.token, {
-          action: "input",
-          command: {
-            kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
-            ...(keyEvent === "keyDown" && event.key.length === 1 ? { text: event.key } : {}),
-          },
-        });
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido escribir en la página.");
-    }
+    await runViewerCommands(["keyDown", "keyUp"].map((keyEvent) => ({
+      action: "input",
+      command: {
+        kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
+        ...(keyEvent === "keyDown" && event.key.length === 1 &&
+          !event.ctrlKey && !event.metaKey && !event.altKey ? { text: event.key } : {}),
+      },
+    })));
   };
 
   const pasteFrame = async (event: ClipboardEvent<HTMLImageElement>) => {
     const text = event.clipboardData.getData("text").slice(0, 4_096);
     if (!text || !threadId) return;
     event.preventDefault();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    await sendBrowserViewerCommand(threadId, token.token, {
+    await runViewerCommands([{
       action: "input", command: { kind: "key", event: "char", key: "Unidentified", text },
-    }).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "No se ha podido pegar el texto.");
-    });
+    }]);
   };
 
   const closePanel = async () => {
+    attachmentRef.current = false;
+    inputQueueRef.current.cancel();
     humanControlRef.current = false;
     if (status?.state.lifecycle === "human-control") {
       const released = await controlBrowser("release").catch(() => null);
