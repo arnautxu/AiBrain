@@ -60,6 +60,37 @@ async function fixture(allow = true, reply?: (request: Record<string, unknown>) 
 }
 
 describe("server document file access", () => {
+  it("returns whole-tree inventory counts separately from file pages without inferring business counts", async () => {
+    const target = "server-arnall/Y/Offers";
+    const f = await fixture(true, () => ({ available: true, checkedAt: new Date().toISOString(), scope: "company", path: target,
+      sourceChecked: false, snapshot: false, enumerationComplete: true, countBasis: "observed-files-in-folder-tree", businessRecordCount: null,
+      fileCount: 120, directories: { complete: 3 }, fileTypes: { ".pdf": 100, ".jpg": 20 }, folders: { ".": 100, "Annexes": 20 },
+      results: [{ scope: "company", path: target + "/offer.pdf", kind: "file" }], nextOffset: 50 }));
+    const result = await f.tool("inventory", { scope: "company", path: target });
+    expect(result.success).toBe(true);
+    expect(JSON.stringify(result)).toContain('fileCount\\":120');
+    expect(f.requests[0]).toMatchObject({ operation: "inventory", input: { path: target, offset: 0 } });
+    for (const args of [{ scope: "private", path: target }, { scope: "company", path: target, offset: -1 },
+      { scope: "company", path: target + "?part=1" }, { scope: "company", path: target, extra: true }]) {
+      expect((await f.tool("inventory", args)).success).toBe(false);
+    }
+    expect(f.requests).toHaveLength(1);
+    const denied = await fixture(false);
+    expect(await denied.files.inventory(denied.roots, { scope: "company", path: target })).toBeNull();
+    expect(denied.requests).toHaveLength(0);
+  });
+
+  it("rejects inventory rows outside the requested subtree and invented business totals", async () => {
+    const target = "server-arnall/Y/Offers";
+    for (const changed of [{ results: [{ scope: "company", path: target + "Other/file.pdf" }] }, { businessRecordCount: 12 }, { fileCount: -1 }]) {
+      const f = await fixture(true, () => ({ available: true, checkedAt: new Date().toISOString(), scope: "company", path: target,
+        sourceChecked: false, snapshot: false, enumerationComplete: true, countBasis: "observed-files-in-folder-tree", businessRecordCount: null,
+        fileCount: 1, directories: { complete: 1 }, fileTypes: { ".pdf": 1 }, folders: { ".": 1 },
+        results: [], nextOffset: null, ...changed }));
+      expect(await f.files.inventory(f.roots, { scope: "company", path: target })).toMatchObject({ available: false });
+    }
+  });
+
   it("caps oversized positive page sizes from the runtime before contacting the server", async () => {
     const f = await fixture();
     const response = await f.tool("search", { query: "server:/Y/PRESSUPOSTOS", limit: 100 });
