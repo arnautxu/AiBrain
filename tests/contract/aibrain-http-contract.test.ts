@@ -71,6 +71,21 @@ describe("versioned AiBrain UI/backend contract", () => {
     }
   });
 
+  it("distinguishes unavailable review data from an empty list and requires source versions", () => {
+    const examples = uiContract["x-examples"];
+    const listed = structuredClone(examples.find((item) => item.schema === "KnowledgeReviewGetResponse" &&
+      (item.value as { available?: boolean }).available === true)!.value) as {
+        available: boolean; records: Array<{ citations: Array<Record<string, unknown>>; correction?: object }>;
+        scopes: Array<{ scope: string; scopeId: string | null }>;
+      };
+    expect(uiContractErrors("KnowledgeReviewGetResponse", listed)).toBeNull();
+    expect(uiContractErrors("KnowledgeReviewGetResponse", { ...listed, available: false })).not.toBeNull();
+    expect(uiContractErrors("KnowledgeReviewGetResponse", { ...listed, scopes: [{ scope: "private", scopeId: null, label: "Private", canReview: false }] })).not.toBeNull();
+    delete listed.records[0].citations[0].sha256;
+    expect(uiContractErrors("KnowledgeReviewGetResponse", listed)).not.toBeNull();
+    expect(uiContractErrors("KnowledgeReviewPostResponse", { available: true, connectionId: "arnall" })).not.toBeNull();
+  });
+
   it("keeps representative TypeScript contracts compatible with JSON Schema", () => {
     const session = {
       provider: "local",

@@ -24,6 +24,16 @@ extract = module("rdp_extract", "rdp-extract.py")
 
 
 class SyncTests(unittest.TestCase):
+    def test_busy_operator_does_not_consume_document_retry_attempts(self):
+        from unittest.mock import MagicMock
+        child=MagicMock()
+        child.communicate.return_value=(b"",b"AIBRAIN_RDP_ACCESS_FAILED: [Errno 11] Resource temporarily unavailable")
+        child.returncode=1
+        with patch.object(sync.subprocess,"Popen",return_value=child) as start:
+            with self.assertRaises(BlockingIOError):
+                sync.rdp_call({"connectionConfig":"/private/config","accessManifest":"/private/access"},"copy",r"Y:\Approved\file.pdf")
+            self.assertEqual(start.call_count,1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

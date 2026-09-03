@@ -778,6 +778,389 @@
         "runtime": { "type": ["object", "null"] },
         "runningInProcess": { "type": "boolean" }
       }
+    },
+    "KnowledgeReviewScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "scopeId",
+        "label",
+        "canReview"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "company",
+            "department",
+            "project",
+            "private"
+          ]
+        },
+        "scopeId": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/Uuid"
+            }
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "canReview": {
+          "type": "boolean"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "scope": {
+              "const": "company"
+            },
+            "scopeId": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "scope": {
+              "enum": [
+                "department",
+                "project",
+                "private"
+              ]
+            },
+            "scopeId": {
+              "$ref": "#/$defs/Uuid"
+            }
+          }
+        }
+      ]
+    },
+    "KnowledgeReviewCitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "sha256",
+        "locator",
+        "quote",
+        "path"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "locator": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "quote": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "path": {
+          "type": "string",
+          "maxLength": 1024,
+          "pattern": "^knowledge-[a-z0-9-]+/[a-f0-9]{32}/[A-Z]/.+\\?sha256=[a-f0-9]{64}&part=[1-9][0-9]{0,3}(?:&table=[0-9]{1,4}&offset=[0-9]{1,7})?$"
+        }
+      }
+    },
+    "KnowledgeReviewRecord": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "topic",
+        "content",
+        "status",
+        "revision",
+        "citations",
+        "conflicts",
+        "events"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Uuid"
+        },
+        "kind": {
+          "enum": [
+            "fact",
+            "summary",
+            "insight",
+            "decision"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "topic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "status": {
+          "enum": [
+            "proposed",
+            "confirmed",
+            "rejected",
+            "deleted"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "$ref": "#/$defs/KnowledgeReviewCitation"
+          }
+        },
+        "conflicts": {
+          "type": "array",
+          "maxItems": 1000,
+          "items": {
+            "$ref": "#/$defs/Uuid"
+          }
+        },
+        "events": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "actor",
+              "recorded",
+              "revision"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              "actor": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              "recorded": {
+                "$ref": "#/$defs/IsoDate"
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        },
+        "correction": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "previousRecordId",
+            "previousRevision",
+            "previousContent",
+            "reason"
+          ],
+          "properties": {
+            "previousRecordId": {
+              "$ref": "#/$defs/Uuid"
+            },
+            "previousRevision": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "previousContent": {
+              "type": "string",
+              "maxLength": 8000
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1000
+            }
+          }
+        }
+      }
+    },
+    "KnowledgeReviewGetResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scopes"
+          ],
+          "properties": {
+            "scopes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KnowledgeReviewScope"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "connectionId",
+            "records",
+            "nextCursor",
+            "scopes"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "connectionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+            },
+            "records": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "$ref": "#/$defs/KnowledgeReviewRecord"
+              }
+            },
+            "nextCursor": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KnowledgeReviewScope"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "error",
+            "scopes"
+          ],
+          "properties": {
+            "available": {
+              "const": false
+            },
+            "error": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            "scopes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KnowledgeReviewScope"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error",
+            "code"
+          ],
+          "properties": {
+            "error": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          }
+        }
+      ]
+    },
+    "KnowledgeReviewPostResponse": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "available",
+            "connectionId",
+            "record"
+          ],
+          "properties": {
+            "available": {
+              "const": true
+            },
+            "connectionId": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+            },
+            "record": {
+              "$ref": "#/$defs/KnowledgeReviewRecord"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error",
+            "code"
+          ],
+          "properties": {
+            "error": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            },
+            "code": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 8000
+            }
+          }
+        }
+      ]
     }
   },
   "x-examples": [
@@ -812,6 +1195,106 @@
     {
       "schema": "PublicInstallationBranding",
       "value": { "installationId": "example-lab-dev", "companyName": "Example Laboratory", "companySlug": "example-laboratory", "publicUrl": "https://brain.example.test", "productName": "Example Brain", "logoPath": "/branding/example/logo.svg", "faviconPath": "/branding/example/favicon.svg", "accentColor": "#0f766e" }
+    },
+    {
+      "schema": "KnowledgeReviewGetResponse",
+      "value": {
+        "scopes": [
+          {
+            "scope": "company",
+            "scopeId": null,
+            "label": "Empresa",
+            "canReview": true
+          }
+        ]
+      }
+    },
+    {
+      "schema": "KnowledgeReviewGetResponse",
+      "value": {
+        "available": true,
+        "connectionId": "arnall",
+        "records": [
+          {
+            "id": "10000000-0000-4000-8000-000000000001",
+            "kind": "fact",
+            "label": "Proyecto de ejemplo",
+            "topic": "Revisión",
+            "content": "La revisión del proyecto es semanal.",
+            "status": "confirmed",
+            "revision": 1,
+            "citations": [
+              {
+                "source": "Y:\\example.txt",
+                "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "locator": "line:1",
+                "quote": "La revisión del proyecto es semanal.",
+                "path": "knowledge-arnall/f168ccdd91548c5a8c871bd4b9b757c5/Y/example.txt?sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&part=1"
+              }
+            ],
+            "conflicts": [],
+            "events": []
+          }
+        ],
+        "nextCursor": null,
+        "scopes": [
+          {
+            "scope": "company",
+            "scopeId": null,
+            "label": "Empresa",
+            "canReview": true
+          }
+        ]
+      }
+    },
+    {
+      "schema": "KnowledgeReviewGetResponse",
+      "value": {
+        "available": false,
+        "error": "KNOWLEDGE_UNAVAILABLE",
+        "scopes": [
+          {
+            "scope": "company",
+            "scopeId": null,
+            "label": "Empresa",
+            "canReview": true
+          }
+        ]
+      }
+    },
+    {
+      "schema": "KnowledgeReviewPostResponse",
+      "value": {
+        "available": true,
+        "connectionId": "arnall",
+        "record": {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "kind": "fact",
+          "label": "Proyecto de ejemplo",
+          "topic": "Revisión",
+          "content": "La revisión del proyecto es semanal.",
+          "status": "confirmed",
+          "revision": 1,
+          "citations": [
+            {
+              "source": "Y:\\example.txt",
+              "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "locator": "line:1",
+              "quote": "La revisión del proyecto es semanal.",
+              "path": "knowledge-arnall/f168ccdd91548c5a8c871bd4b9b757c5/Y/example.txt?sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&part=1"
+            }
+          ],
+          "conflicts": [],
+          "events": []
+        }
+      }
+    },
+    {
+      "schema": "KnowledgeReviewPostResponse",
+      "value": {
+        "error": "El registro ha cambiado.",
+        "code": "REVISION_CONFLICT"
+      }
     }
   ]
 }

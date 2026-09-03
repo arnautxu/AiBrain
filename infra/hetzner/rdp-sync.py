@@ -130,6 +130,8 @@ def rdp_call(manifest, operation, source, attempts=3):
                         "RDP_RECEIPT_MISMATCH")
                 return result
         # A policy prohibition or source boundary must never be retried as an alternate channel.
+        if b"AIBRAIN_RDP_ACCESS_FAILED: [Errno 11]" in error:
+            raise BlockingIOError("RDP_OPERATOR_BUSY")
         if b"RDP_DRIVE_REDIRECTION_DISABLED" in error:
             raise ValueError("RDP_DRIVE_REDIRECTION_DISABLED")
         if attempt + 1 < attempts:
