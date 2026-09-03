@@ -54,6 +54,13 @@ operator home, credentials and pinned endpoint remain unchanged. The directories
 are removed with the session, including failed startup. Keep ProtectHome enabled;
 validate native startup inside the same service restrictions before installation.
 
+The keyboard pipe and a visible local X window do not prove the remote desktop
+has rendered. Before sending Run or paste keys, the client requires three
+consecutive nonblank interior frame samples within sixty seconds. The helper
+returns only a boolean; it saves no screenshot or OCR text. This prevents input
+during a black frame, but does not prove arbitrary desktop/modal readiness.
+Failure closes the session without sending those keys and preserves retry bounds.
+
 ## Bounded listing session reuse
 
 The inventory reuses one RDP connection for at most three consecutive fixed

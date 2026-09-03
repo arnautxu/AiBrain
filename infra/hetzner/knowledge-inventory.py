@@ -41,6 +41,7 @@ def source_failure(error):
             "Display startup timeout": "SOURCE_CONNECTION_FAILED",
             "RDP session startup failed": "SOURCE_CONNECTION_FAILED",
             "RDP window unavailable": "SOURCE_CONNECTION_FAILED",
+            "RDP_DESKTOP_NOT_READY": "SOURCE_CONNECTION_FAILED",
         }.get(str(error), "INVALID_SOURCE_PAGE")
     return "INVALID_SOURCE_PAGE" if isinstance(error, (KeyError, TypeError, AttributeError)) else "SOURCE_UNAVAILABLE"
 

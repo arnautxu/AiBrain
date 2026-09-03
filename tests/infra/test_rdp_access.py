@@ -16,6 +16,33 @@ spec.loader.exec_module(rdp)
 
 
 class RdpAccessTests(unittest.TestCase):
+    def test_desktop_gate_requires_three_consecutive_nonblank_frames(self):
+        session = rdp.RdpSession({}, {}, 'ts', Path('/unused'))
+        session.rdp = MagicMock(); session.rdp.poll.return_value = None
+        clock = [0]
+        frames = [False, True, False, True, True, True]
+        def sample(*args, **kwargs):
+            return MagicMock(returncode=0, stdout=json.dumps({'visible': frames.pop(0)}).encode())
+        with patch.object(session, 'run', side_effect=sample) as run, \
+             patch.object(session, 'key') as key, \
+             patch.object(rdp.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(rdp.time, 'sleep', side_effect=lambda n: clock.__setitem__(0, clock[0]+n)):
+            session.wait_for_desktop()
+            self.assertEqual(run.call_count, 6)
+            key.assert_not_called()
+
+    def test_desktop_gate_times_out_without_sending_keys(self):
+        session = rdp.RdpSession({}, {}, 'ts', Path('/unused'))
+        session.rdp = MagicMock(); session.rdp.poll.return_value = None
+        clock = [0]
+        with patch.object(session, 'run', return_value=MagicMock(returncode=1, stdout=b'')), \
+             patch.object(session, 'key') as key, \
+             patch.object(rdp.time, 'monotonic', side_effect=lambda: clock[0]), \
+             patch.object(rdp.time, 'sleep', side_effect=lambda n: clock.__setitem__(0, clock[0]+n)):
+            with self.assertRaisesRegex(ValueError, 'RDP_DESKTOP_NOT_READY'):
+                session.wait_for_desktop(timeout=2)
+            key.assert_not_called()
+
     def test_native_client_home_is_private_ephemeral_and_parent_env_is_unchanged(self):
         parent = dict(rdp.os.environ)
         homes = []
