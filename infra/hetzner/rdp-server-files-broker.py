@@ -129,7 +129,10 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--manifest", self.manifest_path, "--execute"] + (["--cached-only"] if cached_only else []),
                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, start_new_session=True)
         try:
-            output, _ = child.communicate(json.dumps(value).encode(), timeout=20 if cached_only else 210)
+            # Leave room for the preceding lookup and child cleanup inside the
+            # app client's 220-second deadline.
+            timeout = 20 if cached_only else 190 if value['operation'] in ('search', 'inventory') else 210
+            output, _ = child.communicate(json.dumps(value).encode(), timeout=timeout)
             if child.returncode or len(output) > 256 * 1024:
                 raise ValueError("SERVER_FILES_UNAVAILABLE")
             return json.loads(output)
