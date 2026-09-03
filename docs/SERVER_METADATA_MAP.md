@@ -35,11 +35,33 @@ the first200 known direct children. No whole-map prompt injection is introduced.
 ## Lookup and permissions
 
 The server-files broker's existing search operation consults the map first.
-Absent maps, changed policy bindings and unmapped explicit directories use the
+Absent maps, changed policy bindings and unmapped or uncompleted explicit directories use the
 existing live listing path. Empty name searches in a partial map remain explicitly
 inconclusive; they do not silently launch another all-server recursive crawl.
 The read operation retains the existing fresh copy, hash verification and sandboxed
 extraction. No cached filename result itself establishes current Windows access.
+
+The `inventory` company-file tool accepts an observed `server-` directory path
+and an optional result offset. `knowledge-folder-inventory.py` advances only
+pending directories in that subtree, using the existing operator cursor and
+retry limits. Each call accepts at most two 50-entry source pages; a second page
+is admitted only within ten seconds of starting discovery. Repeated calls resume
+without resetting traversal, ingesting content or summing previous totals.
+The response counts the whole known subtree independently of its 50-file result
+page, classifies by extension and folder, and explicitly reports traversal coverage.
+Known denied descendants make ancestor coverage incomplete even though their names
+are withheld. `businessRecordCount` is always unknown: the assistant must read
+relevant documents to distinguish quotes from catalogs and annexes, confirm issuer,
+date and identifier, and reconcile copies/versions before counting business records.
+Neither a folder year nor a filesystem modification year establishes document year.
+
+Live listings, reads and pending inventory requests use a private expiring
+`operator/interactive-until` marker. The background worker yields after its current
+page and releases its existing locks; no Windows process is interrupted. The
+interactive request waits at most55 seconds for the catalogue lock, then uses the
+same nonblocking Windows source lock. Busy and path-specific rejection remain
+distinct error states. A killed request's marker expires within200 seconds;
+normal cleanup clears it. Completed mapped inventories remain local and fast.
 
 The map binds installation, connection, publication scope and both source-root
 policies. The broker still verifies app UID, request identity, company reader
@@ -64,6 +86,20 @@ service definition and changed modules. Install the map helper in both knowledge
 and server-files bundles before replacing the server-files broker. Existing broker
 parents execute a fresh child script per request, so no running request or app
 restart is required. Check parent hashes against the reviewed baseline first.
+
+For the inventory operation, additionally install `knowledge-folder-inventory.py`,
+`knowledge-inventory.py`, `knowledge-catalogue.py` and `knowledge-listing-session.py`
+in the server-files bundle. The knowledge bundle needs the updated inventory and
+map modules. The parent broker validates operation names, so this schema addition
+requires a broker restart after its active request has completed. Keep the app and
+Windows untouched during the host-module installation. Back up both bundles and
+verify new file hashes. Never restart an in-flight source request just to upgrade.
+The broker unit grants write access only to the installation's existing operator
+catalogue and server-map directories, in addition to its prior temporary import
+and socket paths. Reload the unit before the drained broker restart.
+Rebuild the map to apply ancestor coverage flags. Acceptance includes a real
+folder inventory, pending-folder continuation, and authenticated classification
+with source reads; a root search alone does not accept this capability.
 
 Build the first map from the existing catalogue, run positive/negative scope,
 literal search, identity, time and pagination checks, and prove a search roundtrip

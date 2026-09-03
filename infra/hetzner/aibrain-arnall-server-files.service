@@ -28,6 +28,8 @@ ProtectControlGroups=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 ReadWritePaths=/var/lib/aibrain/rdp-imports/arnall
 ReadWritePaths=/var/lib/docker/volumes/aibrain-company-qa-data/_data/locks/server-files
+ReadWritePaths=/var/lib/aibrain/knowledge/company-qa/operator
+ReadWritePaths=/var/lib/aibrain/knowledge/company-qa/server-map
 
 [Install]
 WantedBy=multi-user.target

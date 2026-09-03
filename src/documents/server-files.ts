@@ -55,7 +55,15 @@ export class ServerDocumentFiles {
     return this.call(roots, "read", { path: target.path });
   }
 
-  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "read", input: { query: string; limit: number } | { path: string }): Promise<ServerResult | null> {
+  async inventory(roots: readonly EnterpriseDocumentRoot[], target: { scope: string; path: string; offset?: number }) {
+    if (target.scope !== "company" || target.path.includes("?")) throw new Error("Server inventory scope denied");
+    validatePath(target.path);
+    const offset = target.offset ?? 0;
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 500_000) throw new Error("Invalid inventory offset");
+    return this.call(roots, "inventory", { path: target.path, offset });
+  }
+
+  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "read" | "inventory", input: { query: string; limit: number } | { path: string; offset?: number }): Promise<ServerResult | null> {
     await this.network.validateSyncRoots(roots);
     // Do not read even the host descriptor for a turn without company access.
     if (!roots.some((root) => root.scope === "company" && root.scopeId === null)) return null;
@@ -121,11 +129,21 @@ export class ServerDocumentFiles {
           if (!record(value) || value.requestId !== requestId || value.connectionId !== connectionId || value.installationId !== this.network.config.installationId || typeof value.available !== "boolean") return abort();
           if (value.available) {
             if (typeof value.checkedAt !== "string" || !Number.isFinite(Date.parse(value.checkedAt)) || Math.abs(Date.now() - Date.parse(value.checkedAt)) > 5 * 60_000) return abort();
-            if (operation === "search") {
+            if (operation === "search" || operation === "inventory") {
               if (!Array.isArray(value.results) || value.results.length > 50) return abort();
               for (const entry of value.results) {
                 if (!record(entry) || entry.scope !== "company" || typeof entry.path !== "string" || !entry.path.startsWith(`server-${connectionId}/`)) return abort();
                 validatePath(entry.path);
+                if (operation === "inventory" && !entry.path.toLowerCase().startsWith((input as { path: string }).path.replace(/\/$/, "").toLowerCase() + "/")) return abort();
+              }
+              if (operation === "inventory") {
+                const count = (n: unknown) => Number.isSafeInteger(n) && Number(n) >= 0 && Number(n) <= 500_000;
+                const counts = (v: unknown) => record(v) && Object.keys(v).length <= 50 && Object.entries(v).every(([k, n]) => k.length <= 1024 && count(n));
+                if (value.scope !== "company" || value.path !== (input as { path: string }).path ||
+                  value.countBasis !== "observed-files-in-folder-tree" || value.businessRecordCount !== null || value.snapshot !== false ||
+                  value.sourceChecked !== false || typeof value.enumerationComplete !== "boolean" || !count(value.fileCount) ||
+                  !counts(value.directories) || !counts(value.fileTypes) || !counts(value.folders) ||
+                  !(value.nextOffset === null || count(value.nextOffset) && Number(value.nextOffset) === Number((input as { offset: number }).offset) + 50)) return abort();
               }
             } else if (typeof value.content !== "string" || Buffer.byteLength(value.content) > 120 * 1024 || value.scope !== "company" || value.path !== (input as { path: string }).path) return abort();
           }
