@@ -66,6 +66,14 @@ class PreviewTests(unittest.TestCase):
         self.assertLess(len(json.dumps(preview).encode()), 80000)
         self.assertIn("A1000:", text)
 
+    def test_style_only_cells_do_not_reject_a_realistic_large_workbook(self):
+        workbook(self.source, ''.join(f'<c r="A{i}" s="0"/>' for i in range(1, 100002)) +
+                 '<c r="B1" t="inlineStr"><is><t>Horari</t></is></c>')
+        preview = {}
+        text = extract.extract(self.source, ".xlsm", preview)
+        self.assertIn("B1: Horari", text)
+        self.assertEqual(preview["sheets"][0]["cells"], [{"address": "B1", "value": "Horari"}])
+
     def test_external_sheet_relationship_and_credentials_are_rejected(self):
         workbook(self.source, external=True)
         with self.assertRaisesRegex(ValueError, "INVALID_SHEET_TARGET"):
