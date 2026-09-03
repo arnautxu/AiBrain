@@ -19,6 +19,9 @@ spec = importlib.util.spec_from_file_location("server_files", Path(__file__).wit
 files = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(files)
 sync = files.sync
+map_spec = importlib.util.spec_from_file_location("server_map", Path(__file__).with_name("knowledge-map.py"))
+server_map = importlib.util.module_from_spec(map_spec)
+map_spec.loader.exec_module(server_map)
 
 
 def validate_request(value, manifest):
@@ -51,6 +54,9 @@ def execute(manifest, value):
         sync.scope_directory(manifest, audience)
     try:
         if value["operation"] == "search":
+            cached = server_map.cached_search(manifest, files=files, **value["input"])
+            if cached is not None:
+                return cached
             return files.search(manifest, **value["input"])
         return files.read(manifest, **value["input"])
     except Exception as error:
