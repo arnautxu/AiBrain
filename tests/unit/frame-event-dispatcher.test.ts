@@ -19,7 +19,7 @@ describe("chat event frame dispatcher", () => {
     } };
     const tool: ChatStreamEvent = { type: "toolResult", item: {
       id: "tool", kind: "command", title: "Consulta", status: "complete",
-      summary: "Fuente consultada", sourceIds: [], sequence: 2,
+      summary: "Fuente consultada", output: "", sourceIds: [], sequence: 2,
       createdAt: "2026-09-04T00:00:01Z",
     } };
     dispatcher.dispatch(commentary);
