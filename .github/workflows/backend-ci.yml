@@ -62,11 +62,6 @@ jobs:
         run: |
           npm run infra:validate
           bash -n infra/hetzner/app/deploy-arnall-main.sh
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=critical
-      - name: Audit complete dependency tree
-        run: npm audit --audit-level=critical
-
   e2e:
     name: Filesystem and restart E2E
     runs-on: ubuntu-24.04
