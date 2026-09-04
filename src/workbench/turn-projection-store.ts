@@ -340,8 +340,10 @@ export class FileTurnProjectionStore {
     assistantMessageId: string,
     events: readonly TurnProjectionTransportEvent[],
   ) {
-    if (events.length < 1 || events.length > 256 || events.some(({ projectionKey, event }) =>
-      !PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event))) {
+    if (events.length < 1 || events.length > 256 || events.some(({ envelope, projectionKey, event }) =>
+      !envelope || !Number.isSafeInteger(envelope.sequence) || envelope.sequence < 1 ||
+      typeof envelope.eventId !== "string" || !EVENT_ID_PATTERN.test(envelope.eventId) ||
+      typeof projectionKey !== "string" || !PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event))) {
       throw new WorkbenchPersistenceError("El lot d’esdeveniments de projecció no és vàlid.");
     }
     const identity = await this.prepare(threadId, assistantMessageId);
@@ -369,18 +371,26 @@ export class FileTurnProjectionStore {
         } else {
           keys = [];
         }
-        projection = turnProjectionSchema.parse({
+        if (keys.length >= 32) {
+          throw new WorkbenchPersistenceError("La seqüència supera el límit de projeccions.");
+        }
+        // Events are validated above; validate the complete accumulated
+        // transcript at the atomic-write boundary, not once for every token.
+        projection = {
           ...projection,
           lastTransportSequence: envelope.sequence,
           lastTransportEventId: envelope.eventId,
           appliedKeysAtLastSequence: [...keys, projectionKey],
           message: applyChatStreamEvent(projection.message, event),
           updatedAt: new Date().toISOString(),
-        });
+        };
         changed = true;
         applied.push(true);
       }
-      if (changed) await this.write(identity.filePath, projection);
+      if (changed) {
+        projection = turnProjectionSchema.parse(projection);
+        await this.write(identity.filePath, projection);
+      }
       return { projection, applied };
     });
   }

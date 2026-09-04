@@ -61,6 +61,19 @@ export function publicToolOutput(value: unknown, maximum = 64_000) {
 }
 
 /**
+ * Publish all complete lexical tokens, not only chunks ending at a boundary.
+ * The last token stays private until it is complete: a UUID, host path or
+ * internal namespace split across network chunks must never flash in the UI.
+ * This is a sanitization boundary, not a pacing timer or a final-phase guess.
+ */
+export function completePublicTextPrefix(value: string) {
+  for (let index = value.length - 1; index >= 0; index -= 1) {
+    if (/\s/u.test(value[index])) return value.slice(0, index + 1);
+  }
+  return "";
+}
+
+/**
  * Redacts final-answer internals while retaining Markdown and safe links.
  * Runtime artifact/API links are protected before opaque IDs are removed.
  */

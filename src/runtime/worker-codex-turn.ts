@@ -129,7 +129,7 @@ import {
   parseTurnTokenUsage,
   type TokenUsageBreakdown,
 } from "@/usage/contracts";
-import { publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
+import { completePublicTextPrefix, publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
 
 const DEFAULT_WORKER_TURN_TIMEOUT_MS = 10 * 60_000;
 const MIN_WORKER_TURN_TIMEOUT_MS = 30_000;
@@ -529,10 +529,10 @@ export async function runWorkerCodexTurn(
   const commentaryText = new Map<string, string>();
   const projectedDocumentArtifactIds = new Set<string>();
   const projectingDocumentArtifactIds = new Set<string>();
-  let localDocumentToolInvoked = false;
   const pendingAgentText = new Map<string, string>();
   const finalAnswerText = new Map<string, string>();
-  const publishedFinalAnswerText = new Map<string, string>();
+  let publishedFinalItemId: string | null = null;
+  let publishedFinalText = "";
   const commandOutputText = new Map<string, string>();
   const reasoningSummaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
@@ -589,8 +589,7 @@ export async function runWorkerCodexTurn(
     projection?: WorkerTurnProjection,
   ) => {
     commentaryText.set(itemId, rawText.slice(0, 24_000));
-    if (status === "running" && !/(?:\s|[.!?…:;])$/u.test(rawText)) return;
-    const detail = publicActivityText(rawText);
+    const detail = publicActivityText(status === "running" ? completePublicTextPrefix(rawText) : rawText);
     if (!detail) return;
     await upsertActivity({
       id: itemId,
@@ -607,16 +606,19 @@ export async function runWorkerCodexTurn(
   ) => {
     const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
     finalAnswerText.set(itemId, rawValue);
-    if (!/(?:\s|[.!?…:;])$/u.test(rawValue)) return;
+    const completePrefix = completePublicTextPrefix(rawValue);
+    if (!completePrefix) return;
     const publicValue = publicAssistantText(
-      privateWorkspaceSafeText(rawValue, [projectWorkspace, runtime.handle.roots.workspace]),
+      privateWorkspaceSafeText(completePrefix, [projectWorkspace, runtime.handle.roots.workspace]),
       assistantName,
     );
-    if (!publicValue || publishedFinalAnswerText.get(itemId) === publicValue) return;
-    const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
-    publishedFinalAnswerText.set(itemId, publicValue);
+    if (!publicValue || (publishedFinalItemId === itemId && publishedFinalText === publicValue)) return;
+    const previousValue = publishedFinalText;
+    const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
+    publishedFinalItemId = itemId;
+    publishedFinalText = publicValue;
     telemetry.delta();
-    await emit(publicValue.startsWith(previousValue)
+    await emit(sameItem && publicValue.startsWith(previousValue)
       ? { type: "delta", value: publicValue.slice(previousValue.length) }
       : { type: "content", value: publicValue }, projection);
   };
@@ -630,11 +632,13 @@ export async function runWorkerCodexTurn(
       assistantName,
     );
     finalAnswerText.set(itemId, value.slice(0, 128_000));
-    if (publicValue && publishedFinalAnswerText.get(itemId) !== publicValue) {
-      const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
-      publishedFinalAnswerText.set(itemId, publicValue);
+    if (publishedFinalItemId !== itemId || publishedFinalText !== publicValue) {
+      const previousValue = publishedFinalText;
+      const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
+      publishedFinalItemId = itemId;
+      publishedFinalText = publicValue;
       telemetry.delta();
-      await emit(publicValue.startsWith(previousValue)
+      await emit(sameItem && publicValue.startsWith(previousValue)
         ? { type: "delta", value: publicValue.slice(previousValue.length) }
         : { type: "content", value: publicValue }, projection);
     }
@@ -1382,13 +1386,8 @@ export async function runWorkerCodexTurn(
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
             }
-            // A document-producing turn may echo private server paths. Its
-            // completed final message is emitted below after whole-string
-            // sanitization, avoiding leaks split across streaming chunks.
-            if (localDocumentToolInvoked) {
-              finalAnswerText.set(itemId, `${finalAnswerText.get(itemId) ?? ""}${delta}`.slice(0, 128_000));
-              return;
-            }
+            // The lexical prefix sanitizer also protects document paths split
+            // across chunks; a document tool no longer buffers the whole reply.
             await emitFinalChunk(itemId, delta, { envelope, key: `delta:${itemId}` });
           }
           return;
@@ -1585,9 +1584,15 @@ export async function runWorkerCodexTurn(
           } else if (status.status === "completed") {
             for (const [itemId, rawText] of pendingAgentText) {
               pendingAgentText.delete(itemId);
-              await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed-pending:${itemId}` });
+              finalAnswerText.set(itemId, rawText);
             }
-            for (const [itemId, rawText] of finalAnswerText) {
+            // Adapt Melso codexDeliverableOutput's final-over-legacy contract
+            // (7c667dd1; provenance in MELSO_R2_B_20260904.md). Match recovery's
+            // selection without ever publishing rejected fallback candidates.
+            const finalEntry = [...finalAnswerText].filter(([id]) => agentMessagePhases.get(id) === "final_answer").at(-1)
+              ?? [...finalAnswerText].at(-1);
+            if (finalEntry) {
+              const [itemId, rawText] = finalEntry;
               await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
             }
             await emit({ type: "done" }, { envelope, key: "turn:done" });
@@ -1643,7 +1648,6 @@ export async function runWorkerCodexTurn(
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
-            localDocumentToolInvoked = true;
             observedToolNames.add(`${AIBRAIN_DOCUMENT_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
             const result = await handleLocalDocumentDynamicToolCall(request.params as never, {
               installationId,

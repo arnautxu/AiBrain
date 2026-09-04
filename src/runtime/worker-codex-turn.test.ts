@@ -149,6 +149,64 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+  it("publishes safe prefixes between delayed chunks and replaces a prior final item", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-r2-stream-"));
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
+    const events: Array<{ type: string; value?: string }> = [];
+    const observations: string[] = [];
+    let sequence = 0;
+    const envelope = () => ({ eventId: `stream-${++sequence}`, sequence,
+      occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    const text = () => events.reduce((value, event) => event.type === "content"
+      ? event.value ?? "" : event.type === "delta" ? value + event.value : value, "");
+    const notify = (method: string, item: Record<string, unknown>) => handlers.onNotification({ method,
+      params: method === "item/agentMessage/delta"
+        ? { threadId: "r2-thread", turnId: "r2-turn", ...item }
+        : { threadId: "r2-thread", turnId: "r2-turn", item } }, envelope());
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        canReuseLoadedThread: () => false,
+        connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+          handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+        } },
+        async request(method: string, _params: unknown, _purpose: string, _timeout: number,
+          beforeResolve?: (value: never, event: never) => Promise<void>) {
+          const result = method === "thread/start" ? { thread: { id: "r2-thread" } } : { turn: { id: "r2-turn" } };
+          await beforeResolve?.(result as never, envelope() as never);
+          if (method === "turn/start") queueMicrotask(() => { void (async () => {
+            await notify("item/started", { id: "first", type: "agentMessage", phase: "final_answer", text: "" });
+            await notify("item/agentMessage/delta", { itemId: "first", delta: "Primera palabra" });
+            observations.push(text());
+            await new Promise((resolve) => setTimeout(resolve, 15));
+            await notify("item/agentMessage/delta", { itemId: "first", delta: " segunda palabra" });
+            observations.push(text());
+            await notify("item/completed", { id: "first", type: "agentMessage", phase: "final_answer", text: "Primera palabra segunda palabra." });
+            await notify("item/started", { id: "replacement", type: "agentMessage", phase: "final_answer", text: "" });
+            await notify("item/agentMessage/delta", { itemId: "replacement", delta: "Respuesta corregida. " });
+            observations.push(text());
+            await notify("item/completed", { id: "replacement", type: "agentMessage", phase: "final_answer", text: "Respuesta corregida." });
+            await notify("item/agentMessage/delta", { itemId: "unclassified", delta: "Unclassified trailing message" });
+            await handlers.onNotification({ method: "turn/completed", params: { threadId: "r2-thread",
+              turn: { id: "r2-turn", status: "completed", items: [], error: null } } }, envelope());
+          })(); });
+          return result;
+        },
+      },
+    };
+    await runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+      tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+      workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+    async (event) => { events.push(event); });
+    expect(observations).toEqual(["Primera ", "Primera palabra segunda ", "Respuesta corregida. "]);
+    expect(text()).toBe("Respuesta corregida.");
+    expect(events.filter((event) => event.type === "content" || event.type === "delta")
+      .some((event) => event.value?.includes("Unclassified"))).toBe(false);
+  });
+
   beforeEach(() => {
     mocked.runtime = null;
     mocked.maintenanceLease = null;
@@ -368,8 +426,9 @@ describe("worker Codex turn", () => {
     expect(artifacts).toHaveLength(4);
     expect(new Set(artifacts.map((event) => (event.item as { id: string }).id))).toHaveProperty("size", 4);
     expect(artifacts.map((event) => (event.item as { kind: string }).kind)).toEqual(["pdf", "docx", "pptx", "xlsx"]);
-    const finalContent = events.filter((event) => event.type === "delta").at(-1);
-    expect(finalContent).toEqual({ type: "delta", value: "Listo: ./documents/hello-world.pdf" });
+    const finalContent = events.filter((event) => event.type === "delta");
+    expect(finalContent.map((event) => event.value).join("")).toBe("Listo: ./documents/hello-world.pdf");
+    expect(finalContent[0]).toEqual({ type: "delta", value: "Listo: " });
     expect(JSON.stringify(events)).not.toContain(userRoot);
     expect(events).toContainEqual({ type: "done" });
     expect(calls).toEqual(["thread/start", "turn/start"]);
