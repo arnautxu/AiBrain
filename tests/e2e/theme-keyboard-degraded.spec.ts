@@ -217,6 +217,18 @@ test("compact Browser auto-open waits for blocking surfaces and active editing",
                 detail: "aibrain_browser",
                 status: "running",
               },
+            })}\n${JSON.stringify({
+              type: "toolResult",
+              item: {
+                id: "browser-demand",
+                kind: "browser",
+                title: "Comprobación web sintética",
+                status: "complete",
+                summary: "Navegador preparado",
+                output: null,
+                sourceIds: [],
+                createdAt: "2026-09-04T20:00:00.000Z",
+              },
             })}\n`)),
             __finishBrowserDemand: () => {
               streamController.enqueue(encoder.encode(`${JSON.stringify({ type: "delta", value: "Navegador preparado." })}\n`));
@@ -326,6 +338,18 @@ test("Browser stream renders the computer-use cursor and click trail", async ({ 
                   label: "Preparando navegador",
                   detail: "aibrain_browser",
                   status: "running",
+                },
+              })}\n${JSON.stringify({
+                type: "toolResult",
+                item: {
+                  id: "browser-pointer-trail",
+                  kind: "browser",
+                  title: "Comprobación web sintética",
+                  status: "complete",
+                  summary: "Navegador preparado",
+                  output: null,
+                  sourceIds: [],
+                  createdAt: "2026-09-04T20:00:00.000Z",
                 },
               })}\n`));
               controller.enqueue(encoder.encode(`${JSON.stringify({ type: "done" })}\n`));
