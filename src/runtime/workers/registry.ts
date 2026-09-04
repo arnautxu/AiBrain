@@ -99,7 +99,15 @@ export type WorkerRuntimeRegistryOptions = {
   backpressureRetryAfterMs?: number;
   workerConnectTimeoutMs?: number;
   maintenance?: MaintenanceCoordinator;
+  onLifecycleMetric?: (metric: WorkerLifecycleMetric) => void;
 };
+
+export type WorkerLifecycleMetric = Readonly<{
+  userId: string;
+  phase: "queue" | "provision" | "gateway_start" | "transport_connect";
+  outcome: "completed" | "error";
+  durationMs: number;
+}>;
 
 function positiveInteger(name: string, value: number, allowZero = false) {
   if (!Number.isSafeInteger(value) || (allowZero ? value < 0 : value < 1)) {
@@ -168,15 +176,18 @@ export class WorkerRuntimeRegistry {
   private readonly starts: StartGate;
   private readonly workerConnectTimeoutMs: number;
   private readonly maintenance: MaintenanceCoordinator | null;
+  private readonly onLifecycleMetric?: WorkerRuntimeRegistryOptions["onLifecycleMetric"];
   private readonly entries = new Map<string, RegistryEntry>();
   private readonly runtimeOwners = new WeakMap<object, string>();
   private readonly transportOwners = new WeakMap<object, string>();
   private closed = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(options: WorkerRuntimeRegistryOptions) {
     this.config = options.config;
     this.factory = options.factory;
     this.maintenance = options.maintenance ?? null;
+    this.onLifecycleMetric = options.onLifecycleMetric;
     this.provisioner = options.provisioner ?? new WorkerProvisioner({ config: options.config });
     const maxConcurrentStarts = positiveInteger(
       "maxConcurrentStarts",
@@ -221,6 +232,7 @@ export class WorkerRuntimeRegistry {
       return entry.handle;
     }
     if (entry.startPromise) return entry.startPromise;
+    if (entry.runtime) throw new Error("Previous worker cleanup must complete before restart.");
 
     const startLease = activityLease
       ? null
@@ -313,26 +325,32 @@ export class WorkerRuntimeRegistry {
   }
 
   async close() {
-    if (this.closed) return;
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.starts.close();
-    await Promise.allSettled([...this.entries.keys()].map((userId) => this.stop(userId)));
+    this.closePromise = (async () => {
+      const results = await Promise.allSettled([...this.entries.keys()].map((userId) => this.stop(userId)));
+      const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failure) throw failure.reason;
+    })().finally(() => { this.closePromise = null; });
+    return this.closePromise;
   }
 
   private async startEntry(entry: RegistryEntry) {
     let runtime: ManagedWorkerRuntime | null = null;
     let release: (() => void) | null = null;
     try {
-      release = await this.starts.acquire();
+      release = await this.measure(entry.userId, "queue", () => this.starts.acquire());
       if (this.closed) throw new Error("Worker registry is closed.");
-      entry.manifest = await this.provisioner.provision(entry.userId);
+      entry.manifest = await this.measure(entry.userId, "provision", () => this.provisioner.provision(entry.userId));
       const context = buildWorkerLaunchContext(this.config, entry.manifest);
       if (this.closed) throw new Error("Worker registry is closed.");
       runtime = await this.factory.create(context);
       this.assertExclusiveRuntime(entry.userId, runtime);
       entry.runtime = runtime;
-      await waitForWorkerConnection(runtime.start(), this.workerConnectTimeoutMs);
-      await waitForWorkerConnection(runtime.transport.connect(), this.workerConnectTimeoutMs);
+      const owned = runtime;
+      await this.measure(entry.userId, "gateway_start", () => waitForWorkerConnection(owned.start(), this.workerConnectTimeoutMs));
+      await this.measure(entry.userId, "transport_connect", () => waitForWorkerConnection(owned.transport.connect(), this.workerConnectTimeoutMs));
       entry.handle = frozenHandle(this.config.installationId, entry.manifest, runtime.transport);
       entry.state = "running";
       return entry.handle;
@@ -340,13 +358,15 @@ export class WorkerRuntimeRegistry {
       entry.lastError = safeError(error);
       entry.state = "failed";
       entry.handle = null;
-      if (runtime) {
-        await Promise.allSettled([
+      // A rejected factory object may belong to another employee. Cleanup
+      // only starts after this entry has acquired exclusive ownership.
+      if (runtime && entry.runtime === runtime) {
+        const cleanup = await Promise.allSettled([
           runtime.transport.close(),
           runtime.stop(),
         ]);
+        if (cleanup.every((result) => result.status === "fulfilled")) entry.runtime = null;
       }
-      entry.runtime = null;
       throw error;
     } finally {
       release?.();
@@ -366,6 +386,19 @@ export class WorkerRuntimeRegistry {
     this.transportOwners.set(runtime.transport, userId);
   }
 
+  private async measure<T>(userId: string, phase: WorkerLifecycleMetric["phase"], operation: () => Promise<T>): Promise<T> {
+    const started = performance.now();
+    let outcome: WorkerLifecycleMetric["outcome"] = "error";
+    try {
+      const result = await operation();
+      outcome = "completed";
+      return result;
+    } finally {
+      // Diagnostics must never turn an acquired slot into a leaked slot.
+      try { this.onLifecycleMetric?.({ userId, phase, outcome, durationMs: performance.now() - started }); } catch { /* observer only */ }
+    }
+  }
+
   private async stopEntry(entry: RegistryEntry) {
     if (entry.startPromise) await entry.startPromise.catch(() => undefined);
     const runtime = entry.runtime;
@@ -379,7 +412,6 @@ export class WorkerRuntimeRegistry {
       runtime.transport.close(),
       runtime.stop(),
     ]);
-    entry.runtime = null;
     entry.handle = null;
     const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failure) {
@@ -387,6 +419,7 @@ export class WorkerRuntimeRegistry {
       entry.lastError = safeError(failure.reason);
       throw failure.reason;
     }
+    entry.runtime = null;
     entry.state = "stopped";
     entry.lastError = null;
     return true;

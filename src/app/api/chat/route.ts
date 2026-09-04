@@ -30,7 +30,7 @@ import {
   CURRENT_THREAD_TOOLSET_REVISION,
   readThreadTokenContext,
 } from "@/runtime/thread-token";
-import { needsAutomationChatTools } from "@/automations/chat-tools";
+import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
 import { workbenchErrorResponse } from "@/workbench/http";
 import {
   finishThreadTurn,
@@ -74,17 +74,6 @@ const encoder = new TextEncoder();
 const PROJECTION_BATCH_DELAY_MS = 24;
 const PROJECTION_BATCH_MAX_EVENTS = 64;
 const CHAT_STREAM_KEEPALIVE_MS = 15_000;
-
-export function runtimeThreadIdForChatMessage(
-  context: { threadId: string; toolsetRevision: string | null } | null,
-  message: string,
-) {
-  if (!context) return null;
-  return context.toolsetRevision !== CURRENT_THREAD_TOOLSET_REVISION &&
-    needsAutomationChatTools(message)
-    ? null
-    : context.threadId;
-}
 
 type ChatSetupPhase =
   | "feature_policy"

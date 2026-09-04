@@ -85,47 +85,60 @@ export function encodeBrowserFrameStreamRecord(record: BrowserFrameStreamRecord)
 }
 
 export class BrowserFrameStreamDecoder {
-  private buffered = new Uint8Array(0);
+  private readonly header = new Uint8Array(HEADER_BYTES);
+  private headerLength = 0;
+  private payload: Uint8Array | null = null;
+  private payloadLength = 0;
+  private metadataLength = 0;
 
   push(chunk: Uint8Array): BrowserFrameStreamRecord[] {
-    if (chunk.byteLength === 0) return [];
-    if (this.buffered.byteLength + chunk.byteLength > HEADER_BYTES + MAX_METADATA_BYTES + MAX_FRAME_BYTES) {
-      throw new Error("El stream del navegador supera el límite seguro.");
-    }
-    const combined = new Uint8Array(this.buffered.byteLength + chunk.byteLength);
-    combined.set(this.buffered);
-    combined.set(chunk, this.buffered.byteLength);
-    this.buffered = combined;
     const records: BrowserFrameStreamRecord[] = [];
-    for (;;) {
-      if (this.buffered.byteLength < HEADER_BYTES) break;
-      const view = new DataView(this.buffered.buffer, this.buffered.byteOffset, this.buffered.byteLength);
-      const metadataLength = view.getUint32(0, false);
-      const dataLength = view.getUint32(4, false);
-      if (metadataLength < 1 || metadataLength > MAX_METADATA_BYTES || dataLength > MAX_FRAME_BYTES) {
-        throw new Error("El stream del navegador contiene un frame inválido.");
+    let offset = 0;
+    while (offset < chunk.byteLength) {
+      if (this.headerLength < HEADER_BYTES) {
+        const count = Math.min(HEADER_BYTES - this.headerLength, chunk.byteLength - offset);
+        this.header.set(chunk.subarray(offset, offset + count), this.headerLength);
+        this.headerLength += count;
+        offset += count;
+        if (this.headerLength < HEADER_BYTES) break;
+        const view = new DataView(this.header.buffer);
+        this.metadataLength = view.getUint32(0, false);
+        const dataLength = view.getUint32(4, false);
+        if (this.metadataLength < 1 || this.metadataLength > MAX_METADATA_BYTES || dataLength > MAX_FRAME_BYTES) {
+          throw new Error("El stream del navegador contiene un frame inválido.");
+        }
+        // Allocate once after validating the header. Repeatedly joining the
+        // partial frame copies quadratic bytes on fragmented network streams.
+        this.payload = new Uint8Array(this.metadataLength + dataLength);
       }
-      const recordLength = HEADER_BYTES + metadataLength + dataLength;
-      if (this.buffered.byteLength < recordLength) break;
+      const payload = this.payload!;
+      const count = Math.min(payload.byteLength - this.payloadLength, chunk.byteLength - offset);
+      payload.set(chunk.subarray(offset, offset + count), this.payloadLength);
+      this.payloadLength += count;
+      offset += count;
+      if (this.payloadLength < payload.byteLength) break;
       let parsed: unknown;
       try {
-        parsed = JSON.parse(decoder.decode(this.buffered.subarray(HEADER_BYTES, HEADER_BYTES + metadataLength)));
+        parsed = JSON.parse(decoder.decode(payload.subarray(0, this.metadataLength)));
       } catch {
         throw new Error("El stream del navegador contiene metadatos inválidos.");
       }
-      const data = this.buffered.slice(HEADER_BYTES + metadataLength, recordLength);
+      // This payload is never reused, so the record can own its data view.
+      const data = payload.subarray(this.metadataLength);
       const metadata = parseMetadata(parsed, data.byteLength);
       if (metadata.kind === "frame" && !isPng(data)) {
         throw new Error("El stream del navegador ha devuelto una imagen inválida.");
       }
       records.push(Object.freeze({ metadata, data }));
-      this.buffered = this.buffered.slice(recordLength);
+      this.headerLength = 0;
+      this.payloadLength = 0;
+      this.payload = null;
     }
     return records;
   }
 
   finish() {
-    if (this.buffered.byteLength !== 0) {
+    if (this.headerLength !== 0 || this.payload !== null) {
       throw new Error("El stream del navegador terminó con un frame incompleto.");
     }
   }
@@ -142,15 +155,22 @@ export async function consumeBrowserFrameStream(
   }
   const reader = response.body.getReader();
   const streamDecoder = new BrowserFrameStreamDecoder();
+  const abort = () => { void reader.cancel(signal?.reason).catch(() => undefined); };
+  signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   try {
     for (;;) {
       if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
       const { done, value } = await reader.read();
+      if (signal?.aborted) throw signal.reason ?? new DOMException("Aborted", "AbortError");
       if (done) break;
       for (const record of streamDecoder.push(value)) await onRecord(record);
     }
     streamDecoder.finish();
   } finally {
+    signal?.removeEventListener("abort", abort);
+    // A parser/renderer failure must detach the server capture loop as well.
+    await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
 }

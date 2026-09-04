@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "El control del navegador no és vàlid." }, { status: 400 });
   }
   try {
-    const result = await controlBrowser(auth.session.tenant.id, auth.session.user.id, parsed.action);
+    const result = await controlBrowser(auth.session.tenant.id, auth.session.user.id, parsed.action, parsed.binding);
     return NextResponse.json(result, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     return browserRuntimeError(error, "No s’ha pogut controlar el navegador de forma segura.");

@@ -62,8 +62,9 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
   };
 }
 
-function renderSidebar() {
+function renderSidebar(running = false) {
   const onNewThread = vi.fn();
+  const onSelectThread = vi.fn();
   const onOpenCommandPalette = vi.fn();
   const onOpenAutomations = vi.fn();
   const onOpenCustomization = vi.fn();
@@ -86,14 +87,14 @@ function renderSidebar() {
       mobileOpen={false}
       desktopOpen
       busy={false}
-      threadActivityById={{}}
+      threadActivityById={running ? { "thread-plan": { state: "running", unreadCount: 0 } } : {}}
       onCloseMobile={vi.fn()}
       onCloseDesktop={vi.fn()}
       onOpenDesktop={vi.fn()}
       onOpenCommandPalette={onOpenCommandPalette}
       onOpenAutomations={onOpenAutomations}
       onSelectProject={vi.fn()}
-      onSelectThread={vi.fn()}
+      onSelectThread={onSelectThread}
       onNewThread={onNewThread}
       onNewProject={vi.fn()}
       onProjectAction={vi.fn()}
@@ -102,12 +103,24 @@ function renderSidebar() {
     />,
   );
 
-  return { onNewThread, onOpenAutomations, onOpenCommandPalette, onOpenCustomization };
+  return { onNewThread, onSelectThread, onOpenAutomations, onOpenCommandPalette, onOpenCustomization };
 }
 
 afterEach(cleanup);
 
 describe("Sidebar", () => {
+  it("keeps navigation and new chats enabled while the selected chat works", () => {
+    const { onNewThread, onSelectThread } = renderSidebar(true);
+    const otherChat = screen.getByRole("button", { name: "Roadmap" });
+    const newChat = screen.getByRole("button", { name: "Nueva conversación en Operaciones" });
+    expect(otherChat).toBeEnabled();
+    expect(newChat).toBeEnabled();
+    fireEvent.click(otherChat);
+    fireEvent.click(newChat);
+    expect(onSelectThread).toHaveBeenCalledWith("thread-roadmap");
+    expect(onNewThread).toHaveBeenCalledWith("project-operations");
+  });
+
   it("keeps the primary navigation focused on conversations and automations", () => {
     const { onOpenAutomations, onOpenCommandPalette } = renderSidebar();
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });

@@ -2,6 +2,7 @@ import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy"
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
 import type { ServerNotification } from "../../contracts/codex/0.149.1/types/ServerNotification";
 import type { ServerRequest } from "../../contracts/codex/0.149.1/types/ServerRequest";
 import type {
@@ -129,7 +130,7 @@ import {
   parseTurnTokenUsage,
   type TokenUsageBreakdown,
 } from "@/usage/contracts";
-import { publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
+import { completePublicTextPrefix, publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
 
 const DEFAULT_WORKER_TURN_TIMEOUT_MS = 10 * 60_000;
 const MIN_WORKER_TURN_TIMEOUT_MS = 30_000;
@@ -207,16 +208,6 @@ function turnTerminalTimeouts() {
 
 function productSafeRuntimeMessage(message: string) {
   return publicActivityText(message, 2_000) ?? "El servicio no ha podido completar esta operación.";
-}
-
-function privateWorkspaceSafeText(value: string, roots: readonly string[]) {
-  const rootSanitized = [...new Set(roots.filter((root) => path.isAbsolute(root)))]
-    .sort((left, right) => right.length - left.length)
-    .reduce((text, root) => text.replaceAll(root, "."), value);
-  return rootSanitized.replace(
-    /\/var\/lib\/aibrain\/data\/users\/[^/\s"'<>]+\/workspace(?=\/|\s|$)/giu,
-    ".",
-  );
 }
 
 async function awaitLateAppServerResponse(
@@ -529,10 +520,10 @@ export async function runWorkerCodexTurn(
   const commentaryText = new Map<string, string>();
   const projectedDocumentArtifactIds = new Set<string>();
   const projectingDocumentArtifactIds = new Set<string>();
-  let localDocumentToolInvoked = false;
   const pendingAgentText = new Map<string, string>();
   const finalAnswerText = new Map<string, string>();
-  const publishedFinalAnswerText = new Map<string, string>();
+  let publishedFinalItemId: string | null = null;
+  let publishedFinalText = "";
   const commandOutputText = new Map<string, string>();
   const reasoningSummaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
@@ -589,8 +580,8 @@ export async function runWorkerCodexTurn(
     projection?: WorkerTurnProjection,
   ) => {
     commentaryText.set(itemId, rawText.slice(0, 24_000));
-    if (status === "running" && !/(?:\s|[.!?…:;])$/u.test(rawText)) return;
-    const detail = publicActivityText(rawText);
+    const safeText = privateWorkspaceSafeText(rawText, [projectWorkspace, runtime.handle.roots.workspace]);
+    const detail = publicActivityText(status === "running" ? completePublicTextPrefix(safeText) : safeText);
     if (!detail) return;
     await upsertActivity({
       id: itemId,
@@ -607,16 +598,23 @@ export async function runWorkerCodexTurn(
   ) => {
     const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
     finalAnswerText.set(itemId, rawValue);
-    if (!/(?:\s|[.!?…:;])$/u.test(rawValue)) return;
-    const publicValue = publicAssistantText(
+    if (agentMessagePhases.get(itemId) !== "final_answer" &&
+        [...agentMessagePhases.values()].includes("final_answer")) return;
+    const completePrefix = completePublicTextPrefix(
       privateWorkspaceSafeText(rawValue, [projectWorkspace, runtime.handle.roots.workspace]),
+    );
+    if (!completePrefix) return;
+    const publicValue = publicAssistantText(
+      completePrefix,
       assistantName,
     );
-    if (!publicValue || publishedFinalAnswerText.get(itemId) === publicValue) return;
-    const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
-    publishedFinalAnswerText.set(itemId, publicValue);
+    if (!publicValue || (publishedFinalItemId === itemId && publishedFinalText === publicValue)) return;
+    const previousValue = publishedFinalText;
+    const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
+    publishedFinalItemId = itemId;
+    publishedFinalText = publicValue;
     telemetry.delta();
-    await emit(publicValue.startsWith(previousValue)
+    await emit(sameItem && publicValue.startsWith(previousValue)
       ? { type: "delta", value: publicValue.slice(previousValue.length) }
       : { type: "content", value: publicValue }, projection);
   };
@@ -625,16 +623,20 @@ export async function runWorkerCodexTurn(
     value: string,
     projection?: WorkerTurnProjection,
   ) => {
+    finalAnswerText.set(itemId, value.slice(0, 128_000));
+    if (agentMessagePhases.get(itemId) !== "final_answer" &&
+        [...agentMessagePhases.values()].includes("final_answer")) return;
     const publicValue = publicAssistantText(
       privateWorkspaceSafeText(value, [projectWorkspace, runtime.handle.roots.workspace]),
       assistantName,
     );
-    finalAnswerText.set(itemId, value.slice(0, 128_000));
-    if (publicValue && publishedFinalAnswerText.get(itemId) !== publicValue) {
-      const previousValue = publishedFinalAnswerText.get(itemId) ?? "";
-      publishedFinalAnswerText.set(itemId, publicValue);
+    if (publishedFinalItemId !== itemId || publishedFinalText !== publicValue) {
+      const previousValue = publishedFinalText;
+      const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
+      publishedFinalItemId = itemId;
+      publishedFinalText = publicValue;
       telemetry.delta();
-      await emit(publicValue.startsWith(previousValue)
+      await emit(sameItem && publicValue.startsWith(previousValue)
         ? { type: "delta", value: publicValue.slice(previousValue.length) }
         : { type: "content", value: publicValue }, projection);
     }
@@ -1382,13 +1384,8 @@ export async function runWorkerCodexTurn(
             if (activeRuntimePhaseId) {
               await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("first-agent-text"));
             }
-            // A document-producing turn may echo private server paths. Its
-            // completed final message is emitted below after whole-string
-            // sanitization, avoiding leaks split across streaming chunks.
-            if (localDocumentToolInvoked) {
-              finalAnswerText.set(itemId, `${finalAnswerText.get(itemId) ?? ""}${delta}`.slice(0, 128_000));
-              return;
-            }
+            // The lexical prefix sanitizer also protects document paths split
+            // across chunks; a document tool no longer buffers the whole reply.
             await emitFinalChunk(itemId, delta, { envelope, key: `delta:${itemId}` });
           }
           return;
@@ -1409,7 +1406,7 @@ export async function runWorkerCodexTurn(
             const itemId = params.item.id;
             const phase = params.item.phase === "commentary" || params.item.phase === "final_answer"
               ? params.item.phase
-              : null;
+              : agentMessagePhases.get(itemId) ?? null;
             agentMessagePhases.set(itemId, phase);
             const buffered = pendingAgentText.get(itemId) ?? "";
             pendingAgentText.delete(itemId);
@@ -1585,9 +1582,15 @@ export async function runWorkerCodexTurn(
           } else if (status.status === "completed") {
             for (const [itemId, rawText] of pendingAgentText) {
               pendingAgentText.delete(itemId);
-              await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed-pending:${itemId}` });
+              finalAnswerText.set(itemId, rawText);
             }
-            for (const [itemId, rawText] of finalAnswerText) {
+            // Adapt Melso codexDeliverableOutput's final-over-legacy contract
+            // (7c667dd1; provenance in MELSO_R2_B_20260904.md). Match recovery's
+            // selection without ever publishing rejected fallback candidates.
+            const finalEntry = [...finalAnswerText].filter(([id]) => agentMessagePhases.get(id) === "final_answer").at(-1)
+              ?? [...finalAnswerText].at(-1);
+            if (finalEntry) {
+              const [itemId, rawText] = finalEntry;
               await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
             }
             await emit({ type: "done" }, { envelope, key: "turn:done" });
@@ -1643,7 +1646,6 @@ export async function runWorkerCodexTurn(
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
-            localDocumentToolInvoked = true;
             observedToolNames.add(`${AIBRAIN_DOCUMENT_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
             const result = await handleLocalDocumentDynamicToolCall(request.params as never, {
               installationId,

@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { stopOwnedWorkerProcess } from "./owned-process";
 import { createServer, type Server as HttpServer } from "node:http";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
@@ -315,6 +316,12 @@ export class PrivateWorkerGateway {
   private sockets: WebSocketServer | null = null;
   private activeSocket: WebSocket | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
+  private readonly ownsProcessGroup: boolean;
+  private stopPromise: Promise<void> | null = null;
+  // One gateway is one process generation. A stopped generation never revives,
+  // including when journal repair finishes after its owner has timed out.
+  private retired = false;
+  private listenPromise: Promise<void> | null = null;
   private lines: Interface | null = null;
   private stopping = false;
   private state: WorkerControllerHealth["state"] = "stopped";
@@ -349,6 +356,9 @@ export class PrivateWorkerGateway {
       this.now,
       options.maxRetainedCompletedRequests ?? DEFAULT_RETAINED_COMPLETED_REQUESTS,
     );
+    // Injected factories retain direct-child semantics: never assume that an
+    // arbitrary child PID is a process group owned by this gateway.
+    this.ownsProcessGroup = !options.processFactory && process.platform !== "win32";
     this.processFactory = options.processFactory ?? ((context) => spawn(/* turbopackIgnore: true */
       process.env.CODEX_BIN?.trim() || "codex",
       ["app-server", "--stdio"],
@@ -368,17 +378,20 @@ export class PrivateWorkerGateway {
           ...context.environment,
         },
         stdio: ["pipe", "pipe", "pipe"],
+        detached: this.ownsProcessGroup,
       },
     ));
   }
 
   async start() {
+    if (this.retired) throw new Error("Worker gateway startup was cancelled.");
     if (this.state === "running") return;
     if (this.state === "starting") throw new Error("Worker gateway is already starting.");
     this.state = "starting";
     this.stopping = false;
     try {
       await this.events.verifyAndRepair();
+      if (this.retired) throw new Error("Worker gateway startup was cancelled.");
       this.child = this.processFactory(this.context);
       this.lines = createInterface({ input: this.child.stdout });
       this.lines.on("line", (line) => {
@@ -387,9 +400,9 @@ export class PrivateWorkerGateway {
           .catch((error: unknown) => this.fail(error));
       });
       this.child.stderr.resume();
-      this.child.once("error", (error) => this.fail(error));
+      this.child.once("error", (error) => { if (!this.retired) this.fail(error); });
       this.child.once("exit", (code, signal) => {
-        if (!this.stopping) this.fail(new Error(`Codex App Server exited (${code ?? signal ?? "unknown"}).`));
+        if (!this.retired && !this.stopping) this.fail(new Error(`Codex App Server exited (${code ?? signal ?? "unknown"}).`));
       });
 
       this.server = createServer((_, response) => {
@@ -411,20 +424,26 @@ export class PrivateWorkerGateway {
         });
       });
       this.sockets.on("connection", (socket) => this.attach(socket));
-      await new Promise<void>((resolve, reject) => {
+      const server = this.server;
+      this.listenPromise = new Promise<void>((resolve, reject) => {
         const onError = (error: Error) => reject(error);
-        this.server?.once("error", onError);
-        this.server?.listen(0, "127.0.0.1", () => {
-          this.server?.off("error", onError);
+        server.once("error", onError);
+        server.listen(0, "127.0.0.1", () => {
+          server.off("error", onError);
           resolve();
         });
       });
-      const address = this.server.address();
+      await this.listenPromise;
+      if (this.retired) throw new Error("Worker gateway startup was cancelled.");
+      const address = server.address();
       if (!address || typeof address === "string") throw new Error("Worker gateway did not bind a TCP port.");
       this.endpoint = `ws://127.0.0.1:${address.port}/app-server`;
       this.state = "running";
       this.lastError = null;
     } catch (error) {
+      // stop owns cleanup once retired. Never recurse into stop from a late
+      // start continuation or overwrite stopped health with a stale failure.
+      if (this.retired) throw error;
       this.state = "failed";
       this.lastError = safeError(error);
       await this.stop().catch(() => undefined);
@@ -441,12 +460,24 @@ export class PrivateWorkerGateway {
   }
 
   async stop() {
-    if (this.state === "stopped" || this.state === "stopping") return;
+    this.retired = true;
+    if (this.stopPromise) return this.stopPromise;
+    if (this.state === "stopped") return;
+    this.stopPromise = this.stopOnce().finally(() => { this.stopPromise = null; });
+    return this.stopPromise;
+  }
+
+  private async stopOnce() {
     this.stopping = true;
     this.state = "stopping";
-    this.activeSocket?.close(1001, "Worker stopping");
+    // Node can still bind after close() if listen is pending. Drain that owned
+    // side effect before closing the server and releasing process ownership.
+    await this.listenPromise?.catch(() => undefined);
+    this.activeSocket?.terminate();
     this.activeSocket = null;
-    for (const client of this.sockets?.clients ?? []) client.close(1001, "Worker stopping");
+    // The durable cursor owns replay. Do not wait for a disconnected client
+    // to finish a WebSocket close handshake before stopping our process.
+    for (const client of this.sockets?.clients ?? []) client.terminate();
     await new Promise<void>((resolve) => {
       if (!this.sockets) return resolve();
       this.sockets.close(() => resolve());
@@ -460,21 +491,8 @@ export class PrivateWorkerGateway {
     this.lines?.close();
     this.lines = null;
     const child = this.child;
+    if (child) await stopOwnedWorkerProcess(child, this.ownsProcessGroup);
     this.child = null;
-    if (child && child.exitCode === null && child.signalCode === null) {
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
-          child.kill("SIGKILL");
-          resolve();
-        }, 5_000);
-        timeout.unref?.();
-        child.once("exit", () => {
-          clearTimeout(timeout);
-          resolve();
-        });
-        child.kill("SIGTERM");
-      });
-    }
     await Promise.all([
       this.appServerOutputChain.catch(() => undefined),
       this.clientFrameChain.catch(() => undefined),
@@ -807,6 +825,7 @@ export class PrivateWorkerGateway {
   }
 
   private fail(error: unknown) {
+    if (this.retired) return;
     this.lastError = safeError(error);
     this.state = "failed";
     this.activeSocket?.close(1011, "Worker runtime failure");
@@ -828,21 +847,22 @@ export class NodeWebSocketFactory implements WebSocketFactory {
 class DeferredAppServerTransport implements AppServerTransport {
   private inner: AppServerTransport | null = null;
   private closed = false;
-  private resolveInner!: (transport: AppServerTransport) => void;
-  private readonly innerReady = new Promise<AppServerTransport>((resolve) => {
+  private resolveInner!: (transport: AppServerTransport | null) => void;
+  private readonly innerReady = new Promise<AppServerTransport | null>((resolve) => {
     this.resolveInner = resolve;
   });
 
   configure(transport: AppServerTransport) {
+    if (this.closed) throw new Error("Worker transport is closed.");
     if (this.inner) throw new Error("Worker transport was already configured.");
     this.inner = transport;
     this.resolveInner(transport);
-    if (this.closed) void transport.close();
   }
 
   private async ready() {
-    if (this.closed && !this.inner) throw new Error("Worker transport is closed.");
-    return this.inner ?? this.innerReady;
+    const inner = this.inner ?? await this.innerReady;
+    if (this.closed || !inner) throw new Error("Worker transport is closed.");
+    return inner;
   }
 
   async connect() { return (await this.ready()).connect(); }
@@ -871,6 +891,7 @@ class DeferredAppServerTransport implements AppServerTransport {
   }
   async close() {
     this.closed = true;
+    this.resolveInner(null);
     if (this.inner) await this.inner.close();
   }
 }
@@ -886,6 +907,8 @@ export type LocalGatewayWorkerRuntimeFactoryOptions = {
 class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
   readonly transport = new DeferredAppServerTransport();
   private gateway: PrivateWorkerGateway | null = null;
+  private retired = false;
+  private startPromise: Promise<void> | null = null;
 
   constructor(
     private readonly context: WorkerLaunchContext,
@@ -893,6 +916,13 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
   ) {}
 
   async start() {
+    if (this.retired) throw new Error("Worker runtime startup was cancelled.");
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = this.startOnce();
+    return this.startPromise;
+  }
+
+  private async startOnce() {
     if (this.gateway) return;
     // The web app and the detached automation worker deliberately run
     // independent Codex App Server processes.  Their replay/ledger journals
@@ -913,7 +943,9 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
       maxRetainedCompletedRequests: this.options.maxRetainedCompletedRequests,
       maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,
     });
+    this.gateway = gateway;
     await gateway.start();
+    if (this.retired) throw new Error("Worker runtime startup was cancelled.");
     if (!gateway.endpoint) throw new Error("Worker gateway endpoint is unavailable.");
     const clientLocks = new ResourceLockManager({
       rootDirectory: path.join(isolatedContext.transportAudit, "client-locks"),
@@ -936,7 +968,6 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
       },
       journal,
     }));
-    this.gateway = gateway;
   }
 
   async health() {
@@ -948,9 +979,11 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
   }
 
   async stop() {
+    this.retired = true;
     const gateway = this.gateway;
-    this.gateway = null;
-    if (gateway) await gateway.stop();
+    // Closing before configuration also wakes callers awaiting ready().
+    await Promise.all([this.transport.close(), gateway?.stop()]);
+    if (this.gateway === gateway) this.gateway = null;
   }
 }
 

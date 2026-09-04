@@ -9,6 +9,16 @@ import { TurnActivity } from "@/components/turn-activity";
 afterEach(cleanup);
 
 describe("TurnActivity timeline", () => {
+  it("collapses the same mounted live timeline when the final response arrives", () => {
+    const message = turnActivityScenarios.multipleTools;
+    const { rerender } = render(<TurnActivity message={message} onResolveApproval={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Ocultar el proceso de trabajo" })).toHaveAttribute("aria-expanded", "true");
+    rerender(<TurnActivity message={{ ...message, status: "complete", content: "Respuesta final", durationMs: 2000 }} onResolveApproval={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" })).toHaveTextContent("Ha trabajado durante 0m 2s");
+    // The activity component never owns or repeats the final answer.
+    expect(screen.queryByText("Respuesta final")).not.toBeInTheDocument();
+  });
+
   it("starts expanded while running and interleaves compact tool cards in transport order", () => {
     const { container } = render(
       <TurnActivity message={turnActivityScenarios.multipleTools} onResolveApproval={vi.fn()} />,

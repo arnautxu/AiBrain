@@ -24,6 +24,7 @@ import type {
   BrowserPointerTrailPoint,
   BrowserViewerHistoryAction,
   BrowserViewerNavigationState,
+  BrowserViewerControlBinding,
 } from "@/runtime/browser/types";
 import { validateWorkerUserId } from "@/runtime/workers/provisioner";
 import { featurePolicyForIdentity } from "@/settings/server-service";
@@ -298,6 +299,7 @@ export async function controlBrowser(
   installationId: string,
   userId: string,
   action: "start" | "stop" | "takeover" | "release" | "heartbeat",
+  binding?: BrowserViewerControlBinding,
 ) {
   const state = await serviceState();
   ensureBinding(state, installationId, userId);
@@ -317,7 +319,8 @@ export async function controlBrowser(
         runtime: null,
         runningInProcess: false,
       };
-    } else if (action === "takeover") await state.registry.takeOver(userId);
+    } else if (binding) await state.registry.controlViewer(userId, action, binding);
+    else if (action === "takeover") await state.registry.takeOver(userId);
     else if (action === "release") await state.registry.releaseTakeover(userId);
     else await state.registry.heartbeat(userId, "human");
     return browserStatus(installationId, userId);

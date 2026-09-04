@@ -160,6 +160,45 @@ afterEach(() => {
 });
 
 describe("WebSocketAppServerTransport contract", () => {
+  it("does not revive after close during cursor loading", async () => {
+    const factory = new FakeSocketFactory();
+    const journal = new InMemoryTransportEventJournal();
+    let release!: () => void;
+    vi.spyOn(journal, "loadCursor").mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return null;
+    });
+    const transport = createTransport(factory, { journal });
+    const connecting = transport.connect().catch((error: unknown) => error);
+    await transport.close();
+    release();
+    expect(await connecting).toMatchObject({ code: "TRANSPORT_CLOSED" });
+    expect(factory.calls).toHaveLength(0);
+    expect((await transport.health()).state).toBe("closed");
+  });
+
+  it("does not revive after close during the ready handshake", async () => {
+    const factory = new FakeSocketFactory();
+    const journal = new InMemoryTransportEventJournal();
+    let release!: () => void;
+    vi.spyOn(journal, "loadDeliveryCursor").mockImplementation(async () => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return null;
+    });
+    const transport = createTransport(factory, { journal });
+    const connecting = transport.connect().catch((error: unknown) => error);
+    await settle();
+    factory.sockets[0].open();
+    ready(factory.sockets[0]);
+    await vi.waitFor(() => expect(release).toBeTypeOf("function"));
+    await transport.close();
+    release();
+    await settle();
+    expect(await connecting).toMatchObject({ code: "TRANSPORT_CLOSED" });
+    expect((await transport.health()).state).toBe("closed");
+    expect(factory.calls).toHaveLength(1);
+  });
+
   it("authenticates in the handshake, waits for acceptance, and dedupes clientRequestId", async () => {
     const factory = new FakeSocketFactory();
     const transport = createTransport(factory);

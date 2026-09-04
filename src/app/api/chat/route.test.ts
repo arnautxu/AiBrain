@@ -7,6 +7,7 @@ const mocked = vi.hoisted(() => {
   return {
     releaseMaintenance: vi.fn(),
     runWorkerCodexTurn: vi.fn(),
+    persistProjection: vi.fn(async (): Promise<void> => undefined),
     WorkerTurnRecoveryPendingError,
   };
 });
@@ -74,7 +75,11 @@ vi.mock("@/workbench/http", () => ({
 }));
 
 vi.mock("@/workbench/turn-projection-store", () => ({
-  FileTurnProjectionStore: class FileTurnProjectionStore {},
+  FileTurnProjectionStore: class FileTurnProjectionStore {
+    private message: unknown;
+    async initialize(_thread: string, message: unknown) { this.message = message; return { message }; }
+    async applyTransportEvents() { await mocked.persistProjection(); return { message: this.message }; }
+  },
 }));
 
 vi.mock("@/runtime/worker-runtime-service", () => ({
@@ -110,7 +115,7 @@ vi.mock("@/operations/maintenance", () => ({
 }));
 
 vi.mock("@/usage/server-service", () => ({
-  recordTurnUsage: vi.fn(),
+  recordTurnUsage: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/settings/server-service", () => ({
@@ -121,7 +126,9 @@ vi.mock("@/settings/server-service", () => ({
   })),
 }));
 
-import { POST, runtimeThreadIdForChatMessage } from "@/app/api/chat/route";
+import { POST } from "@/app/api/chat/route";
+import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
+import { isBrowserPreviewWorkbench, prepareThreadTurn } from "@/workbench/store";
 
 function deferred() {
   let resolve!: () => void;
@@ -161,6 +168,45 @@ function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknow
 describe("chat turn transport lifecycle", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("streams a 64-event burst while the durable projection write is stalled", async () => {
+    const persistence = deferred();
+    const completion = deferred();
+    vi.mocked(isBrowserPreviewWorkbench).mockReturnValueOnce(false);
+    vi.mocked(prepareThreadTurn).mockResolvedValueOnce({
+      context: { projectId: "00000000-0000-4000-8000-000000000011", projectName: "Test",
+        workspaceKey: "workspace", projectInstructions: "", projectMemory: "", projectSources: [],
+        visibleProjects: [], runtimeThreadToken: null, branchHistory: null },
+      begin: async (_user: unknown, assistantMessage: unknown) => ({ outcome: "created", assistantMessage }),
+    } as never);
+    mocked.persistProjection.mockImplementationOnce(() => persistence.promise);
+    mocked.runWorkerCodexTurn.mockImplementation(async (...args: unknown[]) => {
+      const emit = args[10] as (event: unknown, projection: unknown) => Promise<void>;
+      for (let index = 1; index <= 64; index += 1) await emit({ type: "delta", value: `${index} ` }, {
+        envelope: { eventId: `burst-${index}`, sequence: index, occurredAt: new Date().toISOString(),
+          message: { kind: "rpc-notification", rpc: {} } }, key: `delta:${index}`,
+      });
+      await completion.promise;
+      await emit({ type: "done" }, { envelope: { eventId: "burst-65", sequence: 65,
+        occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } }, key: "done" });
+    });
+    const response = await POST(chatRequest(new AbortController().signal));
+    const reader = response.body!.getReader();
+    try {
+      const received: string[] = [];
+      for (let index = 1; index <= 64; index += 1) {
+        const chunk = await reader.read();
+        received.push(JSON.parse(new TextDecoder().decode(chunk.value)).value);
+      }
+      expect(received).toEqual(Array.from({ length: 64 }, (_, index) => `${index + 1} `));
+      expect(mocked.persistProjection).toHaveBeenCalledOnce();
+    } finally {
+      persistence.resolve();
+      completion.resolve();
+      await reader.cancel();
+    }
+    await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
   });
 
   it("re-bootstraps only automation turns from a legacy dynamic-tool thread", () => {

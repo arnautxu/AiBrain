@@ -273,6 +273,15 @@ export class FileTurnProjectionStore {
     await atomicWriteJson(filePath, projection, turnProjectionSchema, { mode: 0o600 });
   }
 
+  private assertSnapshotBinding(event: ChatStreamEvent, message: ChatMessage) {
+    // These immutable fields cannot be laundered by a later valid snapshot.
+    // Structural validation already ran; no extra full-transcript scan here.
+    if (event.type === "snapshot" && (event.message.id !== message.id ||
+        event.message.role !== "assistant" || event.message.createdAt !== message.createdAt)) {
+      throw new WorkbenchPersistenceError("El snapshot no pertany al missatge original.");
+    }
+  }
+
   async initialize(threadId: string, message: ChatMessage) {
     const identity = await this.prepare(threadId, message.id);
     return this.locks.withLock(identity.lockKey, async () => {
@@ -340,8 +349,10 @@ export class FileTurnProjectionStore {
     assistantMessageId: string,
     events: readonly TurnProjectionTransportEvent[],
   ) {
-    if (events.length < 1 || events.length > 256 || events.some(({ projectionKey, event }) =>
-      !PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event))) {
+    if (events.length < 1 || events.length > 256 || events.some(({ envelope, projectionKey, event }) =>
+      !envelope || !Number.isSafeInteger(envelope.sequence) || envelope.sequence < 1 ||
+      typeof envelope.eventId !== "string" || !EVENT_ID_PATTERN.test(envelope.eventId) ||
+      typeof projectionKey !== "string" || !PROJECTION_KEY_PATTERN.test(projectionKey) || !isChatStreamEvent(event))) {
       throw new WorkbenchPersistenceError("El lot d’esdeveniments de projecció no és vàlid.");
     }
     const identity = await this.prepare(threadId, assistantMessageId);
@@ -353,6 +364,7 @@ export class FileTurnProjectionStore {
       let changed = false;
       const applied: boolean[] = [];
       for (const { envelope, projectionKey, event } of events) {
+        this.assertSnapshotBinding(event, stored.message);
         if (envelope.sequence < projection.lastTransportSequence) {
           applied.push(false);
           continue;
@@ -369,18 +381,26 @@ export class FileTurnProjectionStore {
         } else {
           keys = [];
         }
-        projection = turnProjectionSchema.parse({
+        if (keys.length >= 32) {
+          throw new WorkbenchPersistenceError("La seqüència supera el límit de projeccions.");
+        }
+        // Events are validated above; validate the complete accumulated
+        // transcript at the atomic-write boundary, not once for every token.
+        projection = {
           ...projection,
           lastTransportSequence: envelope.sequence,
           lastTransportEventId: envelope.eventId,
           appliedKeysAtLastSequence: [...keys, projectionKey],
           message: applyChatStreamEvent(projection.message, event),
           updatedAt: new Date().toISOString(),
-        });
+        };
         changed = true;
         applied.push(true);
       }
-      if (changed) await this.write(identity.filePath, projection);
+      if (changed) {
+        projection = turnProjectionSchema.parse(projection);
+        await this.write(identity.filePath, projection);
+      }
       return { projection, applied };
     });
   }
@@ -395,6 +415,8 @@ export class FileTurnProjectionStore {
     return this.locks.withLock(identity.lockKey, async () => {
       const projection = await this.readUnlocked(identity.filePath);
       if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      this.assertBinding(projection, threadId, assistantMessageId);
+      this.assertSnapshotBinding(event, projection.message);
       const next = turnProjectionSchema.parse({
         ...projection,
         localRevision: projection.localRevision + 1,

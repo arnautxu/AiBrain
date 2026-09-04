@@ -2,10 +2,12 @@ import type {
   BrowserGatewayCapability,
   BrowserInputCommand,
   BrowserViewerHistoryAction,
+  BrowserViewerControlBinding,
 } from "@/runtime/browser/types";
 
 export type BrowserControlRequest = Readonly<{
   action: "start" | "stop" | "takeover" | "release" | "heartbeat";
+  binding?: BrowserViewerControlBinding;
 }>;
 
 export type BrowserGatewayTokenRequest = Readonly<{
@@ -55,11 +57,15 @@ function canonicalUuid(value: unknown): value is string {
 }
 
 export function parseBrowserControlRequest(value: unknown): BrowserControlRequest | null {
-  const record = exactRecord(value, ["action"]);
-  return record && typeof record.action === "string" &&
-    CONTROL_ACTIONS.includes(record.action as BrowserControlRequest["action"])
-    ? { action: record.action as BrowserControlRequest["action"] }
-    : null;
+  const record = exactRecord(value, ["action"], ["binding"]);
+  if (!record || typeof record.action !== "string" ||
+    !CONTROL_ACTIONS.includes(record.action as BrowserControlRequest["action"])) return null;
+  const action = record.action as BrowserControlRequest["action"];
+  if (record.binding === undefined) return { action };
+  const binding = exactRecord(record.binding, ["attachmentId", "browserSessionId"]);
+  if (!binding || !canonicalUuid(binding.attachmentId) || !canonicalUuid(binding.browserSessionId) ||
+    action === "start" || action === "stop") return null;
+  return { action, binding: { attachmentId: binding.attachmentId, browserSessionId: binding.browserSessionId } };
 }
 
 export function parseBrowserGatewayTokenRequest(value: unknown): BrowserGatewayTokenRequest | null {
@@ -101,7 +107,9 @@ function parseKeyCommand(value: unknown): BrowserInputCommand | null {
     !KEY_EVENTS.includes(record.event as (typeof KEY_EVENTS)[number]) ||
     typeof record.key !== "string" || record.key.length < 1 || record.key.length > 128 ||
     /\p{C}/u.test(record.key) || !optionalString(record.code, 128) ||
-    !optionalString(record.text, 4_096) || !optionalInteger(record.modifiers, 0, 15)) return null;
+    !(record.text === undefined || (typeof record.text === "string" && record.text.length <= 4_096 &&
+      !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|\p{Cs}/u.test(record.text))) ||
+    !optionalInteger(record.modifiers, 0, 15)) return null;
   return record as BrowserInputCommand;
 }
 

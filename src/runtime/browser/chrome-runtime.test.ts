@@ -54,6 +54,7 @@ type FakeCommand = {
 
 class FakeCdpClient implements CdpClientLike {
   isOpen = true;
+  readiness = { readyState: "complete", textLength: 0, linkCount: 0 };
   readonly commands: FakeCommand[] = [];
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
   private readonly targetUrls = new Map<string, string>();
@@ -176,6 +177,9 @@ class FakeCdpClient implements CdpClientLike {
       return {} as Result;
     }
     if (method === "Runtime.evaluate" && scopedSessionId) {
+      if (String(params.expression).includes("document.readyState")) {
+        return { result: { value: this.readiness } } as Result;
+      }
       const targetId = this.sessionTargets.get(scopedSessionId);
       if (String(params.expression).includes("verifiable")) {
         return { result: { value: { verifiable: true, matched: true } } } as Result;
@@ -319,6 +323,27 @@ afterEach(async () => {
 });
 
 describe("ChromeCdpRuntime private pipe", () => {
+  it("accepts a complete form in one readiness RPC and rejects an unresolved document", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(), shutdownTimeoutMs: 100,
+    });
+    try {
+      await runtime.start();
+      await runtime.agentNavigate(THREAD_A, "https://example.test/form");
+      expect(client.commands.filter((command) => command.method === "Runtime.evaluate")).toHaveLength(1);
+      client.readiness.readyState = "loading";
+      await expect(runtime.agentNavigate(THREAD_A, "https://example.test/unresolved"))
+        .rejects.toMatchObject({ code: "CHROME_DOCUMENT_NOT_READY" });
+    } finally {
+      await runtime.stop();
+    }
+  }, 10_000);
+
   it("reports an explicitly missing Chrome executable as unavailable instead of falling back", async () => {
     await expect(probeChromeRuntimeCapability({
       executablePath: "/definitely/missing/aibrain-chrome",
@@ -599,6 +624,119 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(runtime.targetIdFor(THREAD_B)).not.toBeNull();
     await expect(runtime.captureFrame("not-a-thread"))
       .rejects.toMatchObject({ code: "CHROME_THREAD_INVALID" });
+    await runtime.stop();
+  });
+
+  it.each(["takeover", "release"] as const)("resets an in-flight held button before %s and fences queued old input", async (boundary) => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    const session = client.sessionForTarget(runtime.targetIdFor(THREAD_A) as string);
+    const block = client.blockNext("Input.dispatchMouseEvent");
+    const press = runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mousePressed", x: 42, y: 24, button: "left", buttons: 1,
+    });
+    await block.started;
+    const queued = runtime.dispatchInput(THREAD_B, {
+      kind: "mouse", event: "mousePressed", x: 99, y: 88, button: "left", buttons: 1,
+    });
+    const queuedRejected = expect(queued).rejects.toBeInstanceOf(ChromeRuntimeError);
+    const changed = boundary === "takeover" ? runtime.takeOver() : runtime.releaseTakeover();
+    block.release();
+    await press;
+    await queuedRejected;
+    await changed;
+    const mouse = client.commands.filter(({ method }) => method === "Input.dispatchMouseEvent");
+    expect(mouse.map(({ params }) => params.type)).toEqual(["mousePressed", "mouseReleased"]);
+    expect(mouse[1]).toMatchObject({ sessionId: session,
+      params: { x: 42, y: 24, button: "left", buttons: 0 } });
+    await runtime.takeOver();
+    await runtime.dispatchInput(THREAD_B, { kind: "key", event: "keyDown", key: "n" });
+    expect(client.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(2);
+    await runtime.stop();
+  });
+
+  it("resets a possibly dispatched press after a lost response and keeps failed cleanup fenced", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    client.failNext("Input.dispatchMouseEvent", new Error("Press response lost"));
+    await expect(runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mousePressed", x: 31, y: 21, button: "left", buttons: 1,
+    })).rejects.toThrow("Press response lost");
+    client.failNext("Input.dispatchMouseEvent", new Error("Release response lost"));
+    await expect(runtime.takeOver()).rejects.toThrow("Release response lost");
+    await expect(runtime.dispatchInput(THREAD_B, { kind: "key", event: "keyDown", key: "n" }))
+      .rejects.toBeInstanceOf(ChromeRuntimeError);
+    await runtime.takeOver();
+    const mouse = client.commands.filter(({ method }) => method === "Input.dispatchMouseEvent");
+    expect(mouse.map(({ params }) => params.type)).toEqual(["mousePressed", "mouseReleased", "mouseReleased"]);
+    expect(mouse[2]).toMatchObject({ params: { x: 31, y: 21, button: "left", buttons: 0 } });
+    await runtime.releaseTakeover();
+    expect(client.commands.filter(({ method }) => method === "Input.dispatchMouseEvent")).toHaveLength(3);
+    await runtime.stop();
+  });
+
+  it("never replays manual input when CDP reports a stale target after dispatch", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    client.failNext("Input.dispatchKeyEvent", new CdpClientError(
+      "CDP_COMMAND_FAILED", "Input.dispatchKeyEvent failed: Not attached to an active page",
+    ));
+    await expect(runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "a", text: "a" }))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    expect(client.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(1);
+    await runtime.stop();
+  });
+
+  it.each(["navigate", "reload"] as const)("does not repeat %s after a stale readback", async (action) => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    client.failNext("Runtime.evaluate", new CdpClientError(
+      "CDP_COMMAND_FAILED", "Runtime.evaluate failed: Not attached to an active page",
+    ));
+    const before = client.commands.length;
+    await expect(action === "navigate"
+      ? runtime.navigate(THREAD_A, "https://example.test/one-mutation")
+      : runtime.navigateHistory(THREAD_A, "reload"))
+      .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    expect(client.commands.slice(before).filter(({ method }) => method === (action === "navigate" ? "Page.navigate" : "Page.reload")))
+      .toHaveLength(1);
     await runtime.stop();
   });
 
