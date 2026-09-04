@@ -1,7 +1,9 @@
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { spawn } from "node:child_process";
+import { LocalGatewayWorkerRuntimeFactory, PrivateWorkerGateway } from "./local-gateway-runtime";
 import { parseInstallationConfig, type InstallationConfig } from "@/config/installation-schema";
 import { MaintenanceCoordinator } from "@/operations/maintenance";
 import type {
@@ -28,6 +30,8 @@ import type {
 } from "@/runtime/workers/types";
 
 const temporaryRoots: string[] = [];
+
+vi.mock("server-only", () => ({}));
 
 function syntheticUser(index: number) {
   return `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
@@ -492,6 +496,33 @@ describe("WorkerRuntimeRegistry", () => {
     await registry.close();
   });
 
+  it("fences a real factory startup after deadline cleanup before retrying the user", async () => {
+    const { config } = await fixture();
+    const processFactory = vi.fn(() => spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: ["pipe", "pipe", "pipe"], env: { NODE_ENV: "test" } }));
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const original = PrivateWorkerGateway.prototype.start;
+    let staleStart: Promise<void> | undefined;
+    const spy = vi.spyOn(PrivateWorkerGateway.prototype, "start").mockImplementationOnce(function(this: PrivateWorkerGateway) {
+      vi.spyOn((this as unknown as { events: { verifyAndRepair(): Promise<void> } }).events, "verifyAndRepair").mockImplementation(() => blocked);
+      staleStart = original.call(this);
+      return staleStart;
+    });
+    const registry = new WorkerRuntimeRegistry({ config, factory: new LocalGatewayWorkerRuntimeFactory({ processFactory }), workerConnectTimeoutMs: 250 });
+    try {
+      await expect(registry.start(syntheticUser(1))).rejects.toThrow(/connect in time/);
+      expect(processFactory).not.toHaveBeenCalled();
+      const replacement = await registry.start(syntheticUser(1));
+      await registry.start(syntheticUser(2));
+      release();
+      await expect(staleStart).rejects.toThrow(/cancelled/);
+      expect(processFactory).toHaveBeenCalledTimes(2);
+      expect(registry.get(syntheticUser(1))).toBe(replacement);
+      await registry.stop(syntheticUser(1));
+      expect((await registry.health(syntheticUser(2))).healthy).toBe(true);
+    } finally { release(); spy.mockRestore(); await staleStart?.catch(() => undefined); await registry.close(); }
+  });
+
   it("recovers durable roots in a new registry and rejects factory object reuse", async () => {
     const { config } = await fixture();
     const firstFactory = new RecordingFactory();
@@ -557,6 +588,37 @@ describe("WorkerRuntimeRegistry", () => {
       cleanupFails = false;
       await registry.close();
     }
+  });
+
+  it("surfaces registry close failures and retries cleanup without releasing ownership", async () => {
+    const { config } = await fixture();
+    let fails = true;
+    const runtime = new FakeRuntime(async () => undefined);
+    runtime.stop = async () => { if (fails) throw new Error("cleanup incomplete"); runtime.started = false; };
+    const registry = new WorkerRuntimeRegistry({ config, factory: { create: () => runtime } });
+    try {
+      await registry.start(syntheticUser(1));
+      await expect(registry.close()).rejects.toThrow("cleanup incomplete");
+      await expect(registry.close()).rejects.toThrow("cleanup incomplete");
+      expect((await registry.health(syntheticUser(1))).state).toBe("failed");
+      fails = false;
+      await registry.close();
+      expect((await registry.health(syntheticUser(1))).state).toBe("stopped");
+    } finally { fails = false; await registry.close(); }
+  });
+
+  it("reports real lifecycle phases and cannot leak a start slot when a metric observer throws", async () => {
+    const { config } = await fixture();
+    const observer = vi.fn(() => { throw new Error("metrics unavailable"); });
+    const registry = new WorkerRuntimeRegistry({ config, factory: new RecordingFactory(), maxConcurrentStarts: 1, onLifecycleMetric: observer });
+    try {
+      await registry.start(syntheticUser(1));
+      await registry.start(syntheticUser(2));
+      expect(observer.mock.calls).toHaveLength(8);
+      await registry.start(syntheticUser(1));
+      expect(observer.mock.calls).toHaveLength(8); // warm admission skips startup
+      expect(observer).toHaveBeenCalledWith(expect.objectContaining({ phase: "queue", outcome: "completed", durationMs: expect.any(Number) }));
+    } finally { await registry.close(); }
   });
 
   it("builds a launch context without exposing publisher write access", async () => {

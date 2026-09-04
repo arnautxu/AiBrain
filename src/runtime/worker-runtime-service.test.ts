@@ -20,6 +20,7 @@ import {
   requestPendingWorkerTurnCancellation,
   WorkerAppServerClient,
   workerAppServerForUser,
+  stopWorkerRuntimeForUser,
 } from "@/runtime/worker-runtime-service";
 import type { WorkerRuntimeHandle, WorkerRoots } from "@/runtime/workers/types";
 
@@ -207,6 +208,54 @@ describe("worker App Server client", () => {
       globals.__aibrainWorkerRuntimeService = previous;
       userRead.mockRestore(); initialize.mockRestore(); close.mockRestore();
     }
+  });
+
+  it("does not publish a replacement service while its previous registry cannot clean up", async () => {
+    const globals = globalThis as typeof globalThis & { __aibrainWorkerRuntimeService?: unknown };
+    const previous = globals.__aibrainWorkerRuntimeService;
+    const close = vi.fn().mockRejectedValue(new Error("owned process still alive"));
+    const old = { fingerprint: "different-configuration", clients: new Map(), registry: { close } };
+    globals.__aibrainWorkerRuntimeService = old;
+    try {
+      await expect(workerAppServerForUser("00000000-0000-4000-8000-000000000001")).rejects.toThrow("owned process still alive");
+      expect(globals.__aibrainWorkerRuntimeService).toBe(old);
+      await expect(workerAppServerForUser("00000000-0000-4000-8000-000000000001")).rejects.toThrow("owned process still alive");
+      expect(close).toHaveBeenCalledTimes(2);
+    } finally { globals.__aibrainWorkerRuntimeService = previous; }
+  });
+
+  it.each([false, true])("does not recover an admission invalidated by stopping its user (initialize fails: %s)", async (initializeFails) => {
+    const config = await loadInstallationConfig();
+    const fingerprint = createHash("sha256").update(JSON.stringify({ schemaVersion: config.schemaVersion, installationId: config.installationId, usersRoot: config.paths.usersRoot, companyContextRoot: config.paths.companyContextRoot, sourceReadRoot: config.paths.sourceReadRoot, publishWriteRoot: config.paths.publishWriteRoot })).digest("hex");
+    const globals = globalThis as typeof globalThis & { __aibrainWorkerRuntimeService?: unknown };
+    const previous = globals.__aibrainWorkerRuntimeService;
+    const first = handle(new FakeTransport());
+    const otherId = "00000000-0000-4000-8000-000000000002";
+    const otherClose = vi.fn();
+    const registry = { get: vi.fn(() => first), start: vi.fn().mockResolvedValue(first), stop: vi.fn().mockResolvedValue(true) };
+    const clients = new Map<string, unknown>([[otherId, { close: otherClose }]]);
+    globals.__aibrainWorkerRuntimeService = { fingerprint, config, registry, clients, clientAdmissions: new Map(), maintenance: new MaintenanceCoordinator(), activeTurnCancellations: new Map() };
+    let settleInitialize!: () => void;
+    const initialize = vi.spyOn(WorkerAppServerClient.prototype, "initialize").mockImplementationOnce(() => new Promise<void>((resolve, reject) => {
+      settleInitialize = () => initializeFails ? reject(new Error("initialization interrupted")) : resolve();
+    })).mockResolvedValue(undefined);
+    const close = vi.spyOn(WorkerAppServerClient.prototype, "close").mockResolvedValue(undefined);
+    const read = vi.spyOn(FileLocalUserStore.prototype, "read").mockResolvedValue({ enabled: true } as Awaited<ReturnType<FileLocalUserStore["read"]>>);
+    try {
+      const admission = workerAppServerForUser(first.userId).catch((error: unknown) => error);
+      await vi.waitFor(() => expect(initialize).toHaveBeenCalledTimes(1));
+      const stopping = stopWorkerRuntimeForUser(first.userId);
+      settleInitialize();
+      await stopping;
+      expect(await admission).toBeInstanceOf(Error);
+      expect(registry.start).toHaveBeenCalledTimes(1);
+      expect(clients.has(first.userId)).toBe(false);
+      expect(otherClose).not.toHaveBeenCalled();
+      expect(registry.stop).toHaveBeenCalledWith(first.userId);
+      await workerAppServerForUser(first.userId); // a later explicit admission is a new generation
+      expect(registry.start).toHaveBeenCalledTimes(2);
+      await stopWorkerRuntimeForUser(first.userId);
+    } finally { read.mockRestore(); initialize.mockRestore(); close.mockRestore(); globals.__aibrainWorkerRuntimeService = previous; }
   });
 
   it("admits another same-user request while optional metadata is still blocked", async () => {
