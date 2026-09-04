@@ -1756,7 +1756,9 @@ export function BrainApp({
     } catch {
       setNotice(workbenchNotice("S’ha perdut la connexió mentre s’aturava el torn.", "error"));
     } finally {
-      controller?.abort();
+      // Keep the stream attached until the runtime confirms stopped/error.
+      // Aborting here converted even rejected or pending stops into a false
+      // local success, which changed back to an error after refresh.
       setStoppingThreadIds((current) => {
         const next = new Set(current);
         next.delete(activeThread.id);

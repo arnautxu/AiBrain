@@ -28,3 +28,16 @@ Detailed feedback cases, source comparison and live evidence are recorded in
 the private round-feedback-02 CAPABILITIES.md and worker reports. Code, local
 tests, CI, image publication, deployment and authenticated acceptance remain
 separate gates. Missing OAuth consent or a second real identity is not PASS.
+
+## Cancellation regression reproduced on 907dacd
+
+A warm follow-up turn omitted its per-turn runtime thread token, so an active
+remote turn entered the pending cancellation path. That path persisted a
+confirmed stop before remote acknowledgment, while the client unconditionally
+aborted its stream (even on rejection). Reload exposed the actual terminal
+error. Warm turns now persist the same user-bound identity without an extra
+thread/resume RPC. Pending requests record only request acceptance; the runner
+owns terminal confirmation. Filesystem UI remains attached through confirmation
+or rejection instead of manufacturing a successful stop. Candidate live stop
+and refresh acceptance is still required; an uncertain interrupt is never
+rewritten into success.

@@ -146,7 +146,7 @@ describe("turn control", () => {
     );
   });
 
-  it("cancels and persists a stop before App Server has assigned a runtime turn id", async () => {
+  it("records only a pending request before App Server has assigned a runtime turn id", async () => {
     mocked.cancel.mockClear();
     mocked.cancel.mockReturnValueOnce(true);
     const persisted: unknown[] = [];
@@ -176,9 +176,8 @@ describe("turn control", () => {
       assistantMessageId,
       false,
     );
-    expect(persisted).toMatchObject([
-      { type: "activity", item: { id: `stop:${clientRequestId}`, status: "stopped" } },
-      { type: "stopped" },
+    expect(persisted).toEqual([
+      { type: "activity", item: expect.objectContaining({ id: `stop:${clientRequestId}`, status: "complete" }) },
     ]);
   });
 
@@ -220,7 +219,9 @@ describe("turn control", () => {
       async (event) => { persisted.push(event); },
     )).resolves.toMatchObject({ action: "stop", runtimeTurnId: null });
     expect(mocked.queueCancellation).toHaveBeenCalledWith(identity.userId, assistantMessageId);
-    expect(persisted).toHaveLength(2);
+    expect(persisted).toEqual([
+      { type: "activity", item: expect.objectContaining({ status: "complete" }) },
+    ]);
   });
 
   it("rejects an inconsistent steer response", async () => {
