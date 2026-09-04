@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -17,6 +18,28 @@ printf 'verified'
 }
 
 describe("host main promotion fence", () => {
+  it("stages only Arnall branding without changing current release inputs", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "arnall-branding-gate-"));
+    try {
+      const source = path.join(directory, "source.json");
+      const target = path.join(directory, "target.json");
+      const original = { companySlug: "arnall", branding: { productName: "Arnall AI", logoPath: "/branding/aibrain/logo.svg", faviconPath: "/branding/aibrain/favicon.svg", accentColor: "#315ee7" }, connectors: { retained: true } };
+      writeFileSync(source, JSON.stringify(original));
+      const result = spawnSync("bash", ["-c", `${functions}\nprepare_arnall_branding_config "$1" "$2"`, "test", source, target], { encoding: "utf8" });
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(readFileSync(source, "utf8"))).toEqual(original);
+      expect(JSON.parse(readFileSync(target, "utf8"))).toEqual({ ...original, branding: { ...original.branding, logoPath: "/branding/arnall/logo.jpg", faviconPath: "/branding/arnall/logo.jpg" } });
+      const newer = { ...original, branding: { ...original.branding, logoPath: "/branding/arnall/newer.svg", faviconPath: "/branding/arnall/newer.ico" } };
+      writeFileSync(source, JSON.stringify(newer));
+      expect(spawnSync("bash", ["-c", `${functions}\nprepare_arnall_branding_config "$1" "$2"`, "test", source, target]).status).toBe(0);
+      expect(JSON.parse(readFileSync(target, "utf8"))).toEqual(newer);
+      writeFileSync(source, JSON.stringify({ ...original, companySlug: "another-client" }));
+      expect(spawnSync("bash", ["-c", `${functions}\nprepare_arnall_branding_config "$1" "$2"`, "test", source, target]).status).not.toBe(0);
+      const promote = gateway.slice(gateway.indexOf("deploy_ghcr_release()"), gateway.indexOf("validate_existing_release_readbacks()"));
+      expect(promote).toContain('--installation-config "$target_config"');
+      expect(promote).not.toContain('--installation-config "$ACTIVE_CONFIG"');
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
   it("accepts the exact current main", () => {
     const result = check(revision);
     expect(result.status, result.stderr).toBe(0);

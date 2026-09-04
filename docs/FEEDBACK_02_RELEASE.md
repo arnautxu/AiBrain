@@ -24,6 +24,18 @@ New SHA256: `dfb5c250e3086185b5ce8ad693a94a50130325528cdac97ac8a97b6c6af34e3e`.
 Shell syntax and readback hashes passed; live app remained 907dacd. Do not
 interrupt an in-flight deployment or replace newer host changes.
 
+Branding is also staged transactionally by the gateway: only the generic
+AiBrain logo/favicon defaults are migrated to `/branding/arnall/logo.jpg`, and
+only for companySlug=arnall. Any newer custom paths, all other configuration,
+and the active release's configuration remain untouched until promotion.
+Directly editing the active JSON would violate the release input drift check.
+Pure contract tests verify original preservation, custom-path preservation and
+foreign-company rejection. Installed host gateway after this scoped follow-up:
+`e3effb3ec2b545f7bb8e63008df69cd6c845317d0ecca65dbd87553f2e3852dc`;
+prior fenced copies retained under `.before-feedback02-branding`. Active app
+and logo were still unchanged at installation readback. No wider cleanup
+changes from main were installed.
+
 The host lock serializes service promotions, not arbitrary GitHub pushes. A
 push after the final API read can still exist while the current transaction
 finishes, but no newer serialized deployment can be overwritten by it. Always

@@ -18,6 +18,11 @@ const PDF = "0198b9f0-6631-7000-8000-000000000912";
 const auth = vi.hoisted(() => ({ session: null as AuthSession | null }));
 
 vi.mock("server-only", () => ({}));
+// This suite verifies real authorization, ownership and source binding. Native
+// PDF parsing/rendering is covered by document-preview.integration.test.ts;
+// its synthetic provenance bytes deliberately aren't a complete PDF document.
+const previewConversion = vi.hoisted(() => vi.fn(async ({ data }: { data: Buffer }) => ({ data, pages: 1 })));
+vi.mock("@/documents/workspace-preview", () => ({ prepareWorkspaceDocumentPreview: previewConversion }));
 vi.mock("@/auth/session", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/auth/session")>();
   return { ...original, getSession: vi.fn(async () => auth.session) };
@@ -304,6 +309,7 @@ describe("shared Library resource provenance", () => {
   });
 
   it("streams an indexed editor PDF only for its exact resource/path binding", async () => {
+    previewConversion.mockClear();
     const route = await import("@/app/api/projects/[projectId]/files/route");
     const exactUrl = `http://localhost/api/projects/${projectId}/files?path=reports%2Fshared.pdf&raw=1&resourceId=${PDF}`;
     for (const allowed of [ownerSession, editorSession, viewerSession]) {
@@ -319,6 +325,11 @@ describe("shared Library resource provenance", () => {
       `http://localhost/api/projects/${projectId}/files?path=reports%2Fother.pdf&raw=1&resourceId=${PDF}`,
     ), { params: Promise.resolve({ projectId }) });
     expect(substituted.status).toBe(404);
+    expect(previewConversion).toHaveBeenCalledTimes(3);
+    for (const [input] of previewConversion.mock.calls) {
+      expect(input.data.toString()).toContain("editor generated pdf");
+      expect(input.data.toString()).not.toContain("viewer same-path substitute");
+    }
   });
 
   it("reads an editor-created advanced artifact across roles and returns 403 for viewer publication", async () => {
