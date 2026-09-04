@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import type { BrowserArtifact, DocumentArtifact } from "@/lib/chat-contract";
@@ -72,7 +72,7 @@ describe("TurnArtifactCard", () => {
     expect(alert).toHaveClass("text-body-2-medium");
   });
 
-  it("renders a generated image through the image generation component", () => {
+  it("renders a generated image through the image generation component", async () => {
     render(<TurnArtifactCard artifact={{
       id: "018f5f68-4a6e-7abc-8def-0123456789ad",
       type: "image",
@@ -83,11 +83,26 @@ describe("TurnArtifactCard", () => {
 
     expect(document.querySelector("[data-slot='image-generation']")).toBeInTheDocument();
     const image = screen.getByRole("img", { name: "Un diagrama verificable" });
-    expect(image).toHaveAttribute("src", "/api/projects/project/artifacts/image");
+    expect(new URL(image.getAttribute("src")!, window.location.href).pathname).toBe("/api/projects/project/artifacts/image");
     expect(image).toHaveClass("object-contain");
     expect(image).not.toHaveClass("object-cover");
+    fireEvent.load(image);
+    await waitFor(() => expect(screen.queryByText("Cargando imagen…")).not.toBeInTheDocument());
     expect(screen.getByRole("link", { name: "Descargar diagrama.png" })).toHaveAttribute("href", "/api/projects/project/artifacts/image?download=1");
     expect(screen.queryByRole("button", { name: "Volver a generar la imagen" })).not.toBeInTheDocument();
+  });
+
+  it("recovers the same private preview without requesting another generation", async () => {
+    render(<TurnArtifactCard artifact={{ id: "image", type: "image", name: "diagrama.png", url: "/api/projects/project/artifacts/image", prompt: "Diagrama" }} />);
+    fireEvent.error(screen.getByRole("img", { name: "Diagrama" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido cargar la imagen");
+    expect(screen.queryByRole("link", { name: "Descargar diagrama.png" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Volver a cargar" }));
+    const image = screen.getByRole("img", { name: "Diagrama" });
+    expect(new URL(image.getAttribute("src")!, window.location.href).pathname).toBe("/api/projects/project/artifacts/image");
+    fireEvent.load(image);
+    await waitFor(() => expect(screen.getByRole("link", { name: "Descargar diagrama.png" })).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /generar/i })).not.toBeInTheDocument();
   });
 
   it("links only to the supplied isolated browser viewer route", () => {

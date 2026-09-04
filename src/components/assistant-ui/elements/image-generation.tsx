@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import NextImage from "next/image";
 import { DownloadIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,10 +29,13 @@ export function ImageGeneration({
   downloadName?: string;
   onRegenerate?: () => void;
 }) {
+  const [preview, setPreview] = useState<{ src: string | null; status: "loading" | "ready" | "error" }>({ src, status: "loading" });
+  const [attempt, setAttempt] = useState(0);
+  const status = preview.src === src ? preview.status : "loading";
   return (
     <div
       data-slot="image-generation"
-      aria-busy={generating || undefined}
+      aria-busy={generating || (Boolean(src) && status === "loading") || undefined}
       className={cn("flex min-w-0 w-52 max-w-full flex-col gap-2.5", className)}
       {...props}
     >
@@ -42,16 +45,28 @@ export function ImageGeneration({
           "relative aspect-square w-full overflow-hidden rounded-2xl",
         )}
       >
-        {src && !generating ? (
+        {src && !generating && status === "error" ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm text-[var(--text-secondary)]">
+            <p role="alert">No se ha podido cargar la imagen. Comprueba la conexión y vuelve a intentarlo.</p>
+            <button type="button" className="touch-target min-h-11 rounded-lg border border-[var(--border)] px-3 font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => {
+              setPreview({ src, status: "loading" });
+              setAttempt((value) => value + 1);
+            }}>Volver a cargar</button>
+          </div>
+        ) : src && !generating ? (
           <a href={src} target="_blank" rel="noreferrer" className="absolute inset-0">
             <NextImage
+              key={`${src}:${attempt}`}
               unoptimized
               fill
               sizes="(max-width: 640px) 100vw, 420px"
               src={src}
               alt={alt ?? prompt}
               className="object-contain"
+              onLoad={() => setPreview({ src, status: "ready" })}
+              onError={() => setPreview({ src, status: "error" })}
             />
+            {status === "loading" ? <span role="status" className="absolute inset-0 grid place-items-center bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">Cargando imagen…</span> : null}
           </a>
         ) : (
           <>
@@ -108,7 +123,7 @@ export function ImageGeneration({
             prompt
           )}
         </p>
-        {downloadUrl && !generating ? (
+        {downloadUrl && !generating && status === "ready" ? (
           <a
             href={downloadUrl}
             download={downloadName}
