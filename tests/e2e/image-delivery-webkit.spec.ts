@@ -12,7 +12,7 @@ const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
 // fixture bytes over real HTTP, including the download, instead of allowing
 // that process to hit the real API with a nonexistent mocked artifact id.
 const test = base.extend<{ imageServer: { url: string; requests: Array<{ download: boolean; authenticated: boolean }> } }>({
-  imageServer: async ({ baseURL }, use) => {
+  imageServer: async ({ baseURL }, provideImageServer) => {
     if (!baseURL) throw new Error("baseURL required");
     const png = generatedPngFixture();
     const requests: Array<{ download: boolean; authenticated: boolean }> = [];
@@ -48,7 +48,7 @@ const test = base.extend<{ imageServer: { url: string; requests: Array<{ downloa
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("fixture address missing");
-    try { await use({ url: `http://127.0.0.1:${address.port}`, requests }); }
+    try { await provideImageServer({ url: `http://127.0.0.1:${address.port}`, requests }); }
     finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
   },
 });

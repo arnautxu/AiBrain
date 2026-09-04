@@ -63,3 +63,13 @@ validating it. Downloads retain original bytes; permission and indexed hash
 checks still precede conversion. A changed historical indexed artifact remains
 a safe 409, not an excuse to bypass identity checks. Both real URLs and refresh
 still need authenticated candidate acceptance.
+
+The first normalization regression failed correctly: a plain QPDF rewrite
+retained the absent trailer /Size. A separate page-only container now rebuilds
+that structure, then passes strict QPDF validation and text/pixel extraction.
+This is a viewing representation, not a replacement for original document
+metadata/bookmarks/signatures; downloads remain untouched. Exact legacy test
+passed (1.16s), and new PDF/old cache regression passed (1.17s). The other three
+native formats and aggregate native matrix passed before this PDF-only follow-up.
+Root visually inspected the rebuilt legacy page. Production acceptance remains
+independent from those native tests.
