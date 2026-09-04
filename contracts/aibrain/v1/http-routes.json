@@ -77,6 +77,7 @@
     "POST /api/connectors/outlook/disconnect": "JsonObject",
     "POST /api/knowledge/review": "KnowledgeReviewPostResponse",
     "POST /api/memory": "JsonObject",
+    "POST /api/memory/governed/{memoryId}/restore": "JsonObject",
     "POST /api/memory/proposals/{proposalId}/confirm": "JsonObject",
     "POST /api/memory/proposals/{proposalId}/reject": "JsonObject",
     "POST /api/memory/{memoryId}/revoke": "JsonObject",
