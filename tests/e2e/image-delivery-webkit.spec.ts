@@ -3,10 +3,11 @@ import { createServer, request as httpRequest } from "node:http";
 import { connect as connectTcp } from "node:net";
 import type { Duplex } from "node:stream";
 import { generatedPngFixture } from "../helpers/png-fixture";
+import AxeBuilder from "@axe-core/playwright";
 
 const artifactId = "018f5f68-4a6e-7abc-8def-0123456789aa";
 const artifactName = "imagen-webkit.png";
-const artifactPrompt = "Imagen PNG visible en Safari móvil";
+const artifactPrompt = "Imagen PNG visible en Safari móvil con una descripción extensa y sin recortar las acciones de descarga " + "detalle".repeat(35);
 const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 // WebKit's native download process bypasses Playwright page.route. Serve
@@ -176,6 +177,15 @@ test("an authenticated PNG remains visible and downloadable after reload in iPho
   expect(artifactRequests.filter((request) => !request.download).every((request) => request.resourceType === "image")).toBe(true);
 
   const downloadLink = page.getByRole("link", { name: `Descargar ${artifactName}` });
+  const bounds = await downloadLink.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
+    const results = await new AxeBuilder({ page }).include('[data-slot="image-generation"]').analyze();
+    expect(results.violations.filter((violation) => violation.impact === "serious" || violation.impact === "critical")).toEqual([]);
+  }
   await expect(downloadLink).toHaveAttribute(
     "href",
     new RegExp(`/api/projects/[0-9a-f-]{36}/artifacts/${artifactId}\\?download=1$`, "i"),

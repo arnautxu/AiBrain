@@ -33,7 +33,7 @@ export function ImageGeneration({
     <div
       data-slot="image-generation"
       aria-busy={generating || undefined}
-      className={cn("flex w-52 flex-col gap-2.5", className)}
+      className={cn("flex min-w-0 w-52 max-w-full flex-col gap-2.5", className)}
       {...props}
     >
       <div
@@ -100,8 +100,8 @@ export function ImageGeneration({
           </span>
         ) : null}
       </div>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-foreground/45 min-w-0 flex-1 truncate text-xs">
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <p className="min-w-0 flex-1 truncate text-xs text-[var(--text-secondary)]">
           {generating ? (
             <ShimmerLabel className="relative">Generando imagen</ShimmerLabel>
           ) : (
@@ -113,7 +113,7 @@ export function ImageGeneration({
             href={downloadUrl}
             download={downloadName}
             aria-label={downloadName ? `Descargar ${downloadName}` : "Descargar imagen"}
-            className={cn(ghostButton, "touch-target size-7 shrink-0")}
+            className={cn(ghostButton, "touch-target size-7 shrink-0 text-[var(--text-secondary)]")}
           >
             <DownloadIcon className="size-3" />
           </a>
