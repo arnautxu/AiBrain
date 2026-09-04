@@ -1,7 +1,7 @@
 "use client";
 
 import { Microphone, SpeakerHigh, Stop, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
 
 type RecognitionResultLike = {
   isFinal: boolean;
@@ -58,6 +58,73 @@ function recognitionError(error?: string) {
   return "No se ha podido completar el dictado. El texto anterior sigue intacto.";
 }
 
+export type VoiceNoticeKind = "status" | "success" | "warning" | "error";
+
+function anchoredDialogFocusables(container: HTMLElement) {
+  return Array.from(container.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), select:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => element.tabIndex >= 0);
+}
+
+function useAnchoredDialogFocus(
+  open: boolean,
+  onDismiss: (restoreFocus: boolean) => void,
+  initialFocusRef: RefObject<HTMLElement | null>,
+  triggerRef: RefObject<HTMLElement | null>,
+) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const dismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    dismissRef.current = onDismiss;
+  }, [onDismiss]);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      initialFocusRef.current?.focus();
+    });
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (dialogRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
+      dismissRef.current(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      const dialog = dialogRef.current;
+      if (!dialog) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        dismissRef.current(true);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = anchoredDialogFocusables(dialog);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        event.preventDefault();
+        dialog.focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, [initialFocusRef, open, triggerRef]);
+
+  return dialogRef;
+}
+
 export function VoiceDictationControl({
   value,
   disabled,
@@ -69,7 +136,7 @@ export function VoiceDictationControl({
   disabled: boolean;
   language?: string;
   onChange: (value: string) => void;
-  onNotice?: (message: string) => void;
+  onNotice?: (message: string, kind: VoiceNoticeKind) => void;
 }) {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const startingValueRef = useRef("");
@@ -77,10 +144,25 @@ export function VoiceDictationControl({
   const cancelledRef = useRef(false);
   const failedRef = useRef(false);
   const processingTimerRef = useRef<number | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const stopButtonRef = useRef<HTMLButtonElement>(null);
+  const consentDeclineRef = useRef<HTMLButtonElement>(null);
+  const fallbackDismissRef = useRef<HTMLButtonElement>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
   const [state, setState] = useState<DictationState>("idle");
   const [error, setError] = useState<string | null>(null);
+  const closePopover = useCallback((restoreFocus: boolean) => {
+    setConsentOpen(false);
+    setFallbackOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+  const dictationDialogRef = useAnchoredDialogFocus(
+    consentOpen || fallbackOpen,
+    closePopover,
+    consentOpen ? consentDeclineRef : fallbackDismissRef,
+    triggerRef,
+  );
 
   useEffect(() => {
     return () => {
@@ -96,7 +178,8 @@ export function VoiceDictationControl({
     processingTimerRef.current = window.setTimeout(() => {
       setState("idle");
       processingTimerRef.current = null;
-      onNotice?.("Dictado añadido. Revísalo y edítalo antes de enviar.");
+      onNotice?.("Dictado añadido. Revísalo y edítalo antes de enviar.", "success");
+      requestAnimationFrame(() => triggerRef.current?.focus());
     }, 350);
   };
 
@@ -118,7 +201,10 @@ export function VoiceDictationControl({
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.lang = language;
-    recognition.onstart = () => setState("listening");
+    recognition.onstart = () => {
+      setState("listening");
+      requestAnimationFrame(() => stopButtonRef.current?.focus());
+    };
     recognition.onresult = (event) => {
       let interim = "";
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
@@ -138,7 +224,8 @@ export function VoiceDictationControl({
       failedRef.current = true;
       setError(message);
       setState("error");
-      onNotice?.(message);
+      onNotice?.(message, "error");
+      requestAnimationFrame(() => triggerRef.current?.focus());
     };
     recognition.onend = () => {
       recognitionRef.current = null;
@@ -153,7 +240,8 @@ export function VoiceDictationControl({
       const message = "El micrófono ya está en uso o no ha podido iniciarse.";
       setError(message);
       setState("error");
-      onNotice?.(message);
+      onNotice?.(message, "error");
+      requestAnimationFrame(() => triggerRef.current?.focus());
     }
   };
 
@@ -186,7 +274,8 @@ export function VoiceDictationControl({
     onChange(startingValueRef.current);
     setState("idle");
     setError(null);
-    onNotice?.("Dictado cancelado. No se ha enviado nada.");
+    onNotice?.("Dictado cancelado. No se ha enviado nada.", "status");
+    requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   const active = state === "listening" || state === "processing";
@@ -197,11 +286,12 @@ export function VoiceDictationControl({
           <span className="hidden items-center gap-1 text-[10px] font-medium text-[var(--danger)] sm:flex" role="status">
             <span className="size-1.5 animate-pulse rounded-full bg-[var(--danger)] motion-reduce:animate-none" />Escuchando
           </span>
-          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!rounded-full" aria-label="Terminar dictado" title="Terminar dictado" onClick={stop}><Stop size={12} weight="fill" /></button>
+          <button ref={stopButtonRef} type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!rounded-full" aria-label="Terminar dictado" title="Terminar dictado" onClick={stop}><Stop size={12} weight="fill" /></button>
           <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full" aria-label="Cancelar dictado" title="Cancelar y descartar dictado" onClick={cancel}><X size={14} /></button>
         </div>
       ) : (
         <button
+          ref={triggerRef}
           type="button"
           className={`composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${state === "error" ? "text-[var(--danger)]" : ""}`}
           aria-label={state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
@@ -216,21 +306,21 @@ export function VoiceDictationControl({
       )}
 
       {consentOpen ? (
-        <div role="dialog" aria-label="Permiso para dictar" className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
+        <div ref={dictationDialogRef} role="dialog" aria-label="Permiso para dictar" tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
           <p className="text-[12px] font-semibold text-[var(--text)]">Usar el micrófono para dictar</p>
           <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">El navegador procesa tu voz con su propio servicio y añadirá el texto al mensaje. La aplicación no recibe audio ni lo guarda, y nunca enviará el mensaje automáticamente.</p>
           <div className="mt-3 flex justify-end gap-2">
-            <button type="button" className="min-h-10 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => setConsentOpen(false)}>Ahora no</button>
+            <button ref={consentDeclineRef} type="button" className="min-h-10 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>Ahora no</button>
             <button type="button" className="min-h-10 rounded-full bg-[var(--brain-accent)] px-4 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={confirmConsent}>Activar dictado</button>
           </div>
         </div>
       ) : null}
 
       {fallbackOpen ? (
-        <div role="dialog" aria-label="Dictado no disponible" className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
+        <div ref={dictationDialogRef} role="dialog" aria-label="Dictado no disponible" tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
           <p className="text-[12px] font-semibold text-[var(--text)]">Dictado no disponible</p>
           <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">Este navegador no ofrece dictado. Escribe o pega el texto en el mensaje. Esta instalación tampoco publica una transcripción de archivos de audio, así que no la simulamos.</p>
-          <button type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => setFallbackOpen(false)}>Entendido</button>
+          <button ref={fallbackDismissRef} type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>Entendido</button>
         </div>
       ) : null}
 
@@ -243,6 +333,8 @@ const READ_RATES = [0.75, 1, 1.25, 1.5] as const;
 
 export function ReadAloudControl({ text, language = "es-ES" }: { text: string; language?: string }) {
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const rateSelectRef = useRef<HTMLSelectElement>(null);
   const [open, setOpen] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [rate, setRate] = useState<number>(() => {
@@ -255,6 +347,11 @@ export function ReadAloudControl({ text, language = "es-ES" }: { text: string; l
     () => typeof window.speechSynthesis !== "undefined" && typeof window.SpeechSynthesisUtterance !== "undefined",
     () => false,
   );
+  const closePopover = useCallback((restoreFocus: boolean) => {
+    setOpen(false);
+    if (restoreFocus) requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+  const readDialogRef = useAnchoredDialogFocus(open, closePopover, rateSelectRef, triggerRef);
 
   useEffect(() => {
     return () => {
@@ -279,24 +376,24 @@ export function ReadAloudControl({ text, language = "es-ES" }: { text: string; l
     utterance.onerror = () => { utteranceRef.current = null; setSpeaking(false); };
     utteranceRef.current = utterance;
     setSpeaking(true);
-    setOpen(false);
+    closePopover(true);
     window.speechSynthesis.speak(utterance);
   };
 
   if (!supported) return null;
   return (
     <div className="relative">
-      <button type="button" title={speaking ? "Detener lectura" : "Leer en voz alta"} aria-label={speaking ? "Detener lectura" : "Leer en voz alta"} aria-expanded={open} aria-haspopup="menu" className={`result-action ${speaking ? "text-[var(--brain-accent)]" : ""}`} onClick={() => speaking ? stop() : setOpen((current) => !current)}>{speaking ? <Stop size={13} weight="fill" /> : <SpeakerHigh size={14} />}</button>
+      <button ref={triggerRef} type="button" title={speaking ? "Detener lectura" : "Leer en voz alta"} aria-label={speaking ? "Detener lectura" : "Leer en voz alta"} aria-expanded={open} aria-haspopup="dialog" className={`result-action ${speaking ? "text-[var(--brain-accent)]" : ""}`} onClick={() => speaking ? stop() : setOpen((current) => !current)}>{speaking ? <Stop size={13} weight="fill" /> : <SpeakerHigh size={14} />}</button>
       {open ? (
-        <div role="menu" aria-label="Lectura en voz alta" className="menu-enter absolute bottom-full left-0 z-30 mb-2 w-56 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-popover)]">
+        <div ref={readDialogRef} role="dialog" aria-label="Lectura en voz alta" tabIndex={-1} className="menu-enter absolute bottom-full left-0 z-30 mb-2 w-56 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-popover)]">
           <p className="text-[11px] font-semibold text-[var(--text)]">Leer esta respuesta</p>
           <label className="mt-2 block text-[10px] text-[var(--text-subtle)]">Velocidad
-            <select aria-label="Velocidad de lectura" className="mt-1 min-h-10 w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-[var(--text)]" value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); localStorage.setItem(READ_RATE_KEY, String(next)); }}>
+            <select ref={rateSelectRef} aria-label="Velocidad de lectura" className="mt-1 min-h-10 w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-[var(--text)]" value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); localStorage.setItem(READ_RATE_KEY, String(next)); }}>
               {READ_RATES.map((option) => <option key={option} value={option}>{option === 1 ? "Normal" : `${option}×`}</option>)}
             </select>
           </label>
           <p className="mt-2 text-[9px] leading-3 text-[var(--text-subtle)]">La voz se genera en tu navegador. La velocidad queda guardada solo en este dispositivo.</p>
-          <button type="button" role="menuitem" className="mt-3 min-h-10 w-full rounded-full bg-[var(--brain-accent)] px-3 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={read}>Reproducir</button>
+          <button type="button" className="mt-3 min-h-10 w-full rounded-full bg-[var(--brain-accent)] px-3 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={read}>Reproducir</button>
         </div>
       ) : null}
     </div>

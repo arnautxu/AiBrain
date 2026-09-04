@@ -13,6 +13,8 @@ const viewports = [
   { width: 600, height: 900 },
   { width: 390, height: 844 },
   { width: 375, height: 812 },
+  { width: 320, height: 568 },
+  { width: 844, height: 390 },
 ];
 
 function validPdf() {
@@ -178,10 +180,11 @@ for (const viewport of viewports) {
     await page.keyboard.press("Escape");
 
     if (viewport.width < 768) {
-      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
-      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+      const mobileNavigation = page.getByRole("dialog", { name: "Navegación" });
+      await expect(mobileNavigation).toBeVisible();
       await screenshot(page, "drawer-dark", viewport);
       await page.keyboard.press("Escape");
+      await expect(mobileNavigation).toBeHidden();
     }
 
     await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
@@ -202,7 +205,7 @@ for (const viewport of viewports) {
     const document = page.getByRole("heading", { name: "informe-sintetico.pdf" }).first();
     await expect(document).toBeVisible();
     await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
-    const preview = page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" });
+    const preview = page.locator('aside[aria-label="Vista previa de informe-sintetico.pdf"]');
     await expect(preview).toBeVisible();
     await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
     await centerArtifactInWorkbench(page, document);

@@ -45,11 +45,9 @@
   --color-accent-950: var(--color-blue-950);
 
   /* ----- Typography ----------------------------------------------------------
-   * Font sizes, weights, line-heights, and tracking all match Tailwind v4
-   * defaults. The family is Geist Sans, loaded via next/font in app/layout.tsx
-   * and exposed as --font-geist-sans on the document.
+   * Use the platform UI face for native metrics, optical sizing and legibility.
    * --------------------------------------------------------------------------*/
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif,
                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
                "Noto Color Emoji";
 

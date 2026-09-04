@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { WarningCircle, X } from "@phosphor-icons/react";
 import { useModalFocus } from "@/ui/use-modal-focus";
 
@@ -12,6 +12,7 @@ export function TextDialog({
   maxLength = 120,
   submitLabel,
   busy,
+  returnFocusRef,
   onClose,
   onSubmit,
 }: {
@@ -22,12 +23,13 @@ export function TextDialog({
   maxLength?: number;
   submitLabel: string;
   busy: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onSubmit: (value: string) => void;
 }) {
   const [value, setValue] = useState(initialValue);
   const inputRef = useRef<HTMLInputElement>(null);
-  const dialogRef = useModalFocus<HTMLFormElement>(open, onClose, inputRef);
+  const dialogRef = useModalFocus<HTMLFormElement>(open, onClose, inputRef, returnFocusRef);
 
   useEffect(() => {
     if (!open) return;
@@ -83,6 +85,7 @@ export function ConfirmDialog({
   description,
   confirmLabel,
   busy,
+  returnFocusRef,
   onClose,
   onConfirm,
 }: {
@@ -91,10 +94,11 @@ export function ConfirmDialog({
   description: string;
   confirmLabel: string;
   busy: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const dialogRef = useModalFocus<HTMLDivElement>(open, onClose);
+  const dialogRef = useModalFocus<HTMLDivElement>(open, onClose, undefined, returnFocusRef);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center bg-black/15 px-4 backdrop-blur-[1px]">

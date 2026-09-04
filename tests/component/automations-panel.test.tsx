@@ -193,4 +193,153 @@ describe("AutomationsPanel audience", () => {
       },
     });
   });
+
+  it("opens the editor as a named focus-trapped dialog and restores its opener on Escape", async () => {
+    const managedTask = { ...viewerTask, access: { canManage: true, canViewResults: true } };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      tasks: [managedTask],
+      audienceDirectory: {
+        membershipPolicy: "current",
+        currentUserId: ownerId,
+        users: [{ id: ownerId, name: "Owner" }],
+        groups: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    render(<AutomationsPanel open projects={[project]} />);
+    const opener = await screen.findByRole("button", { name: "Editar Informe compartido" });
+    fireEvent.click(opener);
+
+    const dialog = screen.getByRole("dialog", { name: "Editar automatización" });
+    const name = screen.getByRole("textbox", { name: "Nombre" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    await waitFor(() => expect(name).toHaveFocus());
+
+    const cancel = screen.getByRole("button", { name: "Cancelar" });
+    cancel.focus();
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("combobox", { name: "Zona horaria" })).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Editar automatización" })).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+  });
+
+  it("keeps a dirty draft on Escape until the user explicitly discards it", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      tasks: [],
+      audienceDirectory: {
+        membershipPolicy: "current",
+        currentUserId: ownerId,
+        users: [{ id: ownerId, name: "Owner" }],
+        groups: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    render(<AutomationsPanel open projects={[project]} />);
+    const opener = await screen.findByRole("button", { name: "Nueva" });
+    fireEvent.click(opener);
+    const name = screen.getByRole("textbox", { name: "Nombre" });
+    await waitFor(() => expect(name).toHaveFocus());
+    fireEvent.change(name, { target: { value: "Borrador importante" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    const confirmation = await screen.findByRole("alertdialog", { name: "¿Descartar los cambios?" });
+    expect(confirmation).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Nueva automatización" })).toBeInTheDocument();
+    const continueEditing = screen.getByRole("button", { name: "Seguir editando" });
+    const discard = screen.getByRole("button", { name: "Descartar cambios" });
+    await waitFor(() => expect(continueEditing).toHaveFocus());
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(discard).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(continueEditing).toHaveFocus();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("alertdialog", { name: "¿Descartar los cambios?" })).not.toBeInTheDocument();
+    await waitFor(() => expect(name).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.click(await screen.findByRole("button", { name: "Descartar cambios" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Nueva automatización" })).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+  });
+
+  it("uses a focus-managed confirmation dialog before deleting an automation", async () => {
+    const managedTask = { ...viewerTask, access: { canManage: true, canViewResults: true } };
+    const requests: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET") === "DELETE") {
+        requests.push(url);
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({
+        tasks: [managedTask],
+        audienceDirectory: {
+          membershipPolicy: "current",
+          currentUserId: ownerId,
+          users: [{ id: ownerId, name: "Owner" }],
+          groups: [],
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }));
+
+    render(<AutomationsPanel open projects={[project]} />);
+    const opener = await screen.findByRole("button", { name: "Eliminar Informe compartido" });
+    fireEvent.click(opener);
+
+    expect(screen.getByRole("alertdialog", { name: "¿Eliminar “Informe compartido”?" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancelar" })).toHaveFocus());
+    expect(requests).toEqual([]);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("alertdialog", { name: "¿Eliminar “Informe compartido”?" })).not.toBeInTheDocument());
+    expect(opener).toHaveFocus();
+
+    fireEvent.click(opener);
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar automatización" }));
+    await waitFor(() => expect(requests).toEqual([`/api/automations/${viewerTask.id}`]));
+    expect(screen.queryByText("Informe compartido")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Nueva" })).toHaveFocus());
+  });
+
+  it("reports editor and deletion surfaces so the app can prevent stacked global dialogs", async () => {
+    const managedTask = { ...viewerTask, access: { canManage: true, canViewResults: true } };
+    const onBlockingSurfaceChange = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      tasks: [managedTask],
+      audienceDirectory: {
+        membershipPolicy: "current",
+        currentUserId: ownerId,
+        users: [{ id: ownerId, name: "Owner" }],
+        groups: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+
+    render(
+      <AutomationsPanel
+        open
+        projects={[project]}
+        onBlockingSurfaceChange={onBlockingSurfaceChange}
+      />,
+    );
+    await screen.findByRole("button", { name: "Editar Informe compartido" });
+    await waitFor(() => expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(false));
+    onBlockingSurfaceChange.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
+    expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(true);
+    fireEvent.change(screen.getByRole("textbox", { name: "Nombre" }), { target: { value: "Borrador" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(await screen.findByRole("alertdialog", { name: "¿Descartar los cambios?" })).toBeInTheDocument();
+    expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Descartar cambios" }));
+    await waitFor(() => expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(false));
+
+    onBlockingSurfaceChange.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar Informe compartido" }));
+    expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(onBlockingSurfaceChange).toHaveBeenLastCalledWith(false));
+  });
 });

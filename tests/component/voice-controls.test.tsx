@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-controls";
 
@@ -49,6 +49,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
   vi.unstubAllGlobals();
   Reflect.deleteProperty(window, "SpeechRecognition");
@@ -59,15 +60,19 @@ afterEach(() => {
 describe("VoiceDictationControl", () => {
   it("asks for explicit consent, inserts editable text, and never sends", async () => {
     const onChange = vi.fn();
-    render(<VoiceDictationControl value="Informe:" disabled={false} onChange={onChange} />);
+    const onNotice = vi.fn();
+    vi.useFakeTimers();
+    render(<VoiceDictationControl value="Informe:" disabled={false} onChange={onChange} onNotice={onNotice} />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Dictar mensaje" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
     expect(screen.getByRole("dialog", { name: "Permiso para dictar" })).toBeInTheDocument();
     expect(recognition).toBeUndefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Activar dictado" }));
     expect(localStorage.getItem("aibrain.voice.dictation-consent.v1")).toBe("accepted");
     expect(screen.getByRole("status")).toHaveTextContent("Escuchando");
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.getByRole("button", { name: "Terminar dictado" })).toHaveFocus();
 
     act(() => recognition.onresult?.(Object.assign(new Event("result"), {
       resultIndex: 0,
@@ -75,6 +80,22 @@ describe("VoiceDictationControl", () => {
     })));
     expect(onChange).toHaveBeenLastCalledWith("Informe: ventas semanales");
     expect(screen.getByRole("button", { name: "Terminar dictado" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Terminar dictado" }));
+    act(() => vi.advanceTimersByTime(350));
+    expect(onNotice).toHaveBeenCalledWith("Dictado añadido. Revísalo y edítalo antes de enviar.", "success");
+    act(() => vi.runOnlyPendingTimers());
+    expect(screen.getByRole("button", { name: "Dictar mensaje" })).toHaveFocus();
+    vi.useRealTimers();
+  });
+
+  it("classifies recognition failures as errors", async () => {
+    localStorage.setItem("aibrain.voice.dictation-consent.v1", "accepted");
+    const onNotice = vi.fn();
+    render(<VoiceDictationControl value="" disabled={false} onChange={vi.fn()} onNotice={onNotice} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Dictar mensaje" }));
+    act(() => recognition.onerror?.(Object.assign(new Event("error"), { error: "network" })));
+    expect(onNotice).toHaveBeenCalledWith("El servicio de voz del navegador no está disponible ahora mismo.", "error");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Dictar mensaje" })).toHaveFocus());
   });
 
   it("restores the original prompt when dictation is cancelled", async () => {
@@ -89,14 +110,25 @@ describe("VoiceDictationControl", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancelar dictado" }));
     expect(recognition.abort).toHaveBeenCalled();
     expect(onChange).toHaveBeenLastCalledWith("Texto anterior");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Dictar mensaje" })).toHaveFocus());
   });
 
   it("shows an honest text fallback when the browser has no recognition API", async () => {
     Reflect.deleteProperty(window, "SpeechRecognition");
     render(<VoiceDictationControl value="" disabled={false} onChange={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Dictar mensaje" }));
-    expect(screen.getByRole("dialog", { name: "Dictado no disponible" })).toHaveTextContent("no ofrece dictado");
+    const fallback = screen.getByRole("dialog", { name: "Dictado no disponible" });
+    expect(fallback).toHaveTextContent("no ofrece dictado");
     expect(screen.getByText(/no la simulamos/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Entendido" })).toHaveFocus());
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(fallback).not.toBeInTheDocument());
+    const trigger = screen.getByRole("button", { name: "Dictar mensaje" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    fireEvent.click(trigger);
+    await screen.findByRole("dialog", { name: "Dictado no disponible" });
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByRole("dialog", { name: "Dictado no disponible" })).not.toBeInTheDocument();
   });
 });
 
@@ -105,11 +137,18 @@ describe("ReadAloudControl", () => {
     render(<ReadAloudControl text="Resultado listo" />);
     expect(speak).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Leer en voz alta" }));
-    fireEvent.change(screen.getByRole("combobox", { name: "Velocidad de lectura" }), { target: { value: "1.25" } });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Reproducir" }));
+    const rate = screen.getByRole("combobox", { name: "Velocidad de lectura" });
+    await waitFor(() => expect(rate).toHaveFocus());
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(screen.getByRole("button", { name: "Reproducir" })).toHaveFocus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(rate).toHaveFocus();
+    fireEvent.change(rate, { target: { value: "1.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reproducir" }));
     expect(localStorage.getItem("aibrain.voice.read-rate.v1")).toBe("1.25");
     expect(speak).toHaveBeenCalledOnce();
     expect(speak.mock.calls[0]?.[0]).toMatchObject({ text: "Resultado listo", lang: "es-ES", rate: 1.25 });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Detener lectura" })).toHaveFocus());
     fireEvent.click(screen.getByRole("button", { name: "Detener lectura" }));
     expect(cancelSpeech).toHaveBeenCalled();
   });

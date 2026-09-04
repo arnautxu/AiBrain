@@ -117,6 +117,7 @@ export type BrowserInputCommand =
     x: number;
     y: number;
     button?: "none" | "left" | "middle" | "right";
+    buttons?: number;
     clickCount?: number;
     deltaX?: number;
     deltaY?: number;

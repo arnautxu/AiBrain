@@ -504,6 +504,20 @@ describe("ChromeCdpRuntime private pipe", () => {
       runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "A" }),
       runtime.dispatchInput(THREAD_B, { kind: "key", event: "keyDown", key: "B" }),
     ]);
+    await runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseMoved", x: 42, y: 24, button: "left", buttons: 1,
+    });
+    expect(client.commands).toContainEqual(expect.objectContaining({
+      method: "Input.dispatchMouseEvent",
+      params: expect.objectContaining({ type: "mouseMoved", button: "left", buttons: 1 }),
+    }));
+    await runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseMoved", x: 43, y: 25, button: "left",
+    });
+    expect(client.commands.at(-1)?.params).not.toHaveProperty("buttons");
+    await expect(runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseMoved", x: 42, y: 24, button: "left", buttons: 8,
+    })).rejects.toMatchObject({ code: "CHROME_INPUT_REJECTED" });
     await expect(runtime.navigate(THREAD_A, "http://169.254.169.254/latest/meta-data/"))
       .rejects.toMatchObject({ code: "BROWSER_NETWORK_PRIVATE_DESTINATION" });
     await expect(runtime.currentUrl(THREAD_A)).resolves.toBe("https://a.example.test/path");
@@ -881,6 +895,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(args).toContain("--remote-debugging-pipe");
     expect(args).toContain("--disable-quic");
     expect(args).toContain("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+    expect(args).toContain("--force-device-scale-factor=1");
     expect(args).toContain("--proxy-server=http://127.0.0.1:49152");
     expect(args).toContain("--proxy-bypass-list=<-loopback>");
     expect(args.some((argument) => argument.includes("remote-debugging-port"))).toBe(false);

@@ -17,6 +17,8 @@ export interface ComputerStep {
 export interface ComputerCursorPosition {
   x: number;
   y: number;
+  coordinateSpace?: "percent" | "pixel";
+  pressed?: boolean;
 }
 
 export function ComputerUseTrail({
@@ -34,6 +36,7 @@ export function ComputerUseTrail({
   const active = at(steps, index);
   const trail = steps.slice(Math.max(0, index - 2), index + 1);
   const currentCursor = cursor ?? active;
+  const cursorUsesPixels = cursor?.coordinateSpace === "pixel";
 
   return (
     <div
@@ -45,7 +48,7 @@ export function ComputerUseTrail({
       {trail.map((step, trailIndex) => (
         <span
           key={step.id}
-          className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500 transition-opacity duration-300 dark:bg-blue-400"
+          className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-blue-500 transition-opacity duration-300 motion-reduce:transition-none dark:bg-blue-400"
           style={{
             left: `${step.x}%`,
             top: `${step.y}%`,
@@ -56,8 +59,16 @@ export function ComputerUseTrail({
 
       {currentCursor ? (
         <MousePointer2Icon
-          className="absolute size-4 fill-blue-500 text-blue-500 drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] transition-[left,top] duration-500 ease-out motion-reduce:transition-none dark:fill-blue-400 dark:text-blue-400"
-          style={{ left: `${currentCursor.x}%`, top: `${currentCursor.y}%` }}
+          data-slot="computer-use-cursor"
+          data-pressed={cursor?.pressed ? "true" : "false"}
+          className="absolute left-0 top-0 size-4 fill-blue-500 text-blue-500 drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] will-change-transform dark:fill-blue-400 dark:text-blue-400"
+          style={cursorUsesPixels ? {
+            transform: `translate3d(${currentCursor.x}px, ${currentCursor.y}px, 0) scale(${cursor?.pressed ? 0.9 : 1})`,
+          } : {
+            left: `${currentCursor.x}%`,
+            top: `${currentCursor.y}%`,
+            transform: `translate3d(0, 0, 0) scale(${cursor?.pressed ? 0.9 : 1})`,
+          }}
         />
       ) : null}
     </div>

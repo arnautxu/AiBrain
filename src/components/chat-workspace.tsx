@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -38,13 +38,14 @@ import { publicAssistantText } from "@/ui/public-activity";
 import { TurnArtifactCard } from "@/components/turn-artifact-card";
 import { DocumentPublicationCard } from "@/components/document-publication-card";
 import { TurnSourceChips } from "@/components/turn-sources";
-import { VoiceDictationControl } from "@/components/voice-controls";
+import { VoiceDictationControl, type VoiceNoticeKind } from "@/components/voice-controls";
 import { StreamRecoveryBanner } from "@/components/stream-recovery-banner";
 import type { StagedComposerDocument } from "@/ui/document-ui-adapter";
 import type { DocumentPublicationDraft } from "@/ui/publication-ui-adapter";
 import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import type { ConnectorMention } from "@/connectors/mentions-contract";
+import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -82,12 +83,12 @@ type ChatWorkspaceProps = {
   onAddDocuments: (files: File[]) => Promise<void>;
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
-  onComposerNotice: (message: string) => void;
+  onComposerNotice: (message: string, kind?: VoiceNoticeKind) => void;
   onSend: (message?: string, displayMessage?: string) => void;
   onStop: () => void;
   onCancelQueuedMessage: (id: string) => void;
   sidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  onToggleSidebar: (opener?: HTMLElement | null) => void;
   onResolveApproval: (
     messageId: string,
     approval: ApprovalItem,
@@ -98,6 +99,7 @@ type ChatWorkspaceProps = {
   managedAppApprovalKeys: readonly string[];
   onManagedAppPrepared: (descriptor: ManagedAppActionDescriptor) => void;
   onPreviewDocument: (artifact: DocumentArtifact) => void;
+  onOpenReview: (messageId: string) => void;
   onOpenBrowser: () => void;
   readOnly?: boolean;
 };
@@ -108,6 +110,23 @@ type ComposerPickerOption = {
   detail?: string;
   icon?: ReactNode;
 };
+
+function connectorOptionId(scope: "mention" | "catalog", id: string) {
+  return `connector-${scope}-${id}`;
+}
+
+function nextEnabledConnectorIndex(
+  options: readonly ConnectorMention[],
+  current: number,
+  direction: 1 | -1,
+) {
+  if (!options.length) return 0;
+  for (let step = 1; step <= options.length; step += 1) {
+    const index = (current + direction * step + options.length) % options.length;
+    if (options[index]?.canRead) return index;
+  }
+  return Math.max(0, Math.min(current, options.length - 1));
+}
 
 function ComposerPicker({
   ariaLabel,
@@ -136,25 +155,55 @@ function ComposerPicker({
   onOpenChange: (open: boolean) => void;
   onSelect: (value: string) => void;
 }) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const closeAndRestore = useCallback(() => {
+    onOpenChange(false);
+    requestAnimationFrame(() => triggerRef.current?.focus());
+  }, [onOpenChange]);
+  const onMenuKeyDown = useMenuKeyboardNavigation(closeAndRestore);
+
+  useEffect(() => {
+    if (!open) return;
+    const frame = requestAnimationFrame(() => {
+      const menu = menuRef.current;
+      const target = menu?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]')
+        ?? menu?.querySelector<HTMLElement>('[role="menuitemradio"]');
+      target?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [open]);
+
   return (
     <div className={`composer-picker shrink-0 ${anchor === "controls" ? "static" : "relative"} ${className ?? ""}`}>
       <button
+        ref={triggerRef}
         type="button"
         aria-label={ariaLabel}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
         className={`composer-picker-button !min-h-11 ${open ? "composer-picker-button-active" : ""}`}
         disabled={disabled}
         onClick={() => onOpenChange(!open)}
+        onKeyDown={(event) => {
+          if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          onOpenChange(true);
+        }}
       >
         <span className="max-w-32 truncate">{valueLabel}</span>
         <CaretDown size={11} className={`shrink-0 transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
       </button>
       {open ? (
         <div
+          ref={menuRef}
+          id={menuId}
           role="menu"
           aria-label={ariaLabel}
-          className={`menu-enter absolute z-40 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)] ${placement === "above" ? "bottom-full mb-2" : "top-full mt-2"} ${align === "end" ? "right-0" : "left-0"}`}
+          className={`menu-enter absolute z-40 w-56 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)] ${placement === "above" ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"} ${align === "end" ? "right-0" : "left-0"}`}
+          onKeyDown={onMenuKeyDown}
         >
           {options.map((option) => {
             const selected = option.value === value;
@@ -163,11 +212,13 @@ function ComposerPicker({
                 key={option.value}
                 type="button"
                 role="menuitemradio"
+                tabIndex={-1}
                 aria-checked={selected}
                 className={`flex min-h-10 w-full items-center gap-2.5 rounded-[14px] px-3 py-2 text-left transition-colors ${selected ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]"}`}
                 onClick={() => {
                   onSelect(option.value);
                   onOpenChange(false);
+                  requestAnimationFrame(() => triggerRef.current?.focus());
                 }}
               >
                 {option.icon ? <span className="grid size-5 shrink-0 place-items-center text-[var(--text-subtle)]">{option.icon}</span> : null}
@@ -224,6 +275,7 @@ function AssistantMessage({
   managedAppAction,
   managedAppApprovalKeys,
   onPreviewDocument,
+  onOpenReview,
   onOpenBrowser,
   readOnly = false,
 }: {
@@ -242,6 +294,7 @@ function AssistantMessage({
   } | null;
   managedAppApprovalKeys: readonly string[];
   onPreviewDocument: (artifact: DocumentArtifact) => void;
+  onOpenReview: (messageId: string) => void;
   onOpenBrowser: () => void;
   readOnly?: boolean;
 }) {
@@ -252,7 +305,7 @@ function AssistantMessage({
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenReview={() => onOpenReview(message.id)} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
@@ -381,6 +434,7 @@ export function ChatWorkspace({
   managedAppApprovalKeys,
   onManagedAppPrepared,
   onPreviewDocument,
+  onOpenReview,
   onOpenBrowser,
   readOnly = false,
 }: ChatWorkspaceProps) {
@@ -393,15 +447,25 @@ export function ChatWorkspace({
   const composerShellRef = useRef<HTMLDivElement>(null);
   const composerMeasurementRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const composerAddButtonRef = useRef<HTMLButtonElement>(null);
+  const composerMenuRef = useRef<HTMLDivElement>(null);
+  const connectorCatalogRef = useRef<HTMLDivElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
+  const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
+  const [catalogActiveIndex, setCatalogActiveIndex] = useState(0);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
+  const closeComposerMenuAndRestore = useCallback(() => {
+    setComposerMenuOpen(false);
+    requestAnimationFrame(() => composerAddButtonRef.current?.focus());
+  }, []);
+  const onComposerMenuKeyDown = useMenuKeyboardNavigation(closeComposerMenuAndRestore);
 
   useLayoutEffect(() => {
     // New/recovered threads start at their latest message. Resize observation
@@ -484,15 +548,38 @@ export function ChatWorkspace({
   const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
   const runningMessage = thread?.messages.findLast((message) => message.role === "user")?.content ?? "Respuesta en curso";
   const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
+  const visibleMentionActiveIndex = Math.min(mentionActiveIndex, Math.max(mentionOptions.length - 1, 0));
+  const activeMentionOption = mentionOptions[visibleMentionActiveIndex] ?? null;
+  const visibleCatalogActiveIndex = Math.min(catalogActiveIndex, Math.max(connectorMentions.length - 1, 0));
+  const activeCatalogOption = connectorMentions[visibleCatalogActiveIndex] ?? null;
+
+  useEffect(() => {
+    if (!composerMenuOpen) return;
+    const frame = requestAnimationFrame(() => {
+      composerMenuRef.current?.querySelector<HTMLElement>(
+        '[role="menuitem"]:not(:disabled), [role="menuitemcheckbox"]:not(:disabled)',
+      )?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [composerMenuOpen]);
+
+  useEffect(() => {
+    if (!connectorCatalogOpen) return;
+    const frame = requestAnimationFrame(() => connectorCatalogRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [connectorCatalogOpen]);
 
   const openAuthorizedConnectors = () => {
     if (connectorMentions.length === 0) {
       onComposerNotice("No hay conectores habilitados en tu catálogo.");
       setComposerMenuOpen(false);
+      requestAnimationFrame(() => composerAddButtonRef.current?.focus());
       return;
     }
     setComposerMenuOpen(false);
     setMentionOpen(false);
+    const firstEnabled = connectorMentions.findIndex((mention) => mention.canRead);
+    setCatalogActiveIndex(firstEnabled >= 0 ? firstEnabled : 0);
     setConnectorCatalogOpen(true);
   };
 
@@ -523,12 +610,18 @@ export function ChatWorkspace({
       setConnectorCatalogOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const returnToAddButton = composerMenuOpen || connectorCatalogOpen;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
       setMentionOpen(false);
       setConnectorCatalogOpen(false);
-      composerRef.current?.focus();
+      requestAnimationFrame(() => {
+        if (returnToAddButton) composerAddButtonRef.current?.focus();
+        else composerRef.current?.focus();
+      });
     };
     document.addEventListener("pointerdown", closeOnOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -591,16 +684,15 @@ export function ChatWorkspace({
   };
 
   return (
-    <main aria-busy={!hydrated} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+    <main aria-busy={!hydrated} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       <header data-testid="mobile-app-header" className="mobile-app-header flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
+          <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
             <SidebarSimple size={17} />
           </button>
-          <div data-testid="project-breadcrumb" className="flex min-w-0 items-center gap-1.5 px-1 py-1 text-left">
-            {!standaloneConversation ? <FolderOpen size={14} className="hidden shrink-0 text-[var(--text-subtle)] sm:block" weight="fill" /> : null}
-            {!standaloneConversation ? <span className="hidden max-w-44 truncate text-[12px] font-medium text-[var(--text-secondary)] sm:block">{project?.name}</span> : null}
-            {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
+          <div data-testid="project-breadcrumb" className="min-w-0 px-1 py-1 text-left">
+            {!standaloneConversation ? <span className="flex min-w-0 items-center gap-1 text-[11px] font-medium leading-4 text-[var(--text-subtle)]"><FolderOpen size={12} className="shrink-0" weight="fill" /><span className="max-w-[calc(100vw-6rem)] truncate sm:max-w-44">{project?.name}</span></span> : null}
+            {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold leading-4 text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
           </div>
         </div>
       </header>
@@ -640,6 +732,7 @@ export function ChatWorkspace({
                       onDecidePublication={onDecidePublication}
                       managedAppApprovalKeys={managedAppApprovalKeys}
                       onPreviewDocument={onPreviewDocument}
+                      onOpenReview={onOpenReview}
                       onOpenBrowser={onOpenBrowser}
                       readOnly={readOnly}
                       managedAppAction={!readOnly && managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
@@ -701,10 +794,10 @@ export function ChatWorkspace({
           >
             {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--text)]">Suelta los archivos para adjuntarlos</div> : null}
             {composerMenuOpen ? (
-              <div role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
-                {(canAttachImages || canAttachDocuments) ? <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
-                {canGenerateImages ? <button role="menuitemcheckbox" aria-checked={imageGeneration} className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
-                <button role="menuitem" className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Conectores</button>
+              <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
+                {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
+                {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Conectores</button>
               </div>
             ) : null}
             {attachments.length || documents.length ? (
@@ -713,7 +806,7 @@ export function ChatWorkspace({
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><ImageIcon size={12} /></span>
                     <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[11px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
-                    <button type="button" aria-label={`Quitar ${attachment.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
+                    <button type="button" aria-label={`Quitar ${attachment.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>
                 ))}
                 {documents.map((document) => (
@@ -721,16 +814,16 @@ export function ChatWorkspace({
                     <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
                     <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
                     {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
-                    <button type="button" aria-label={`Quitar ${document.name}`} className="ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
+                    <button type="button" aria-label={`Quitar ${document.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
                   </div>
                 ))}
               </div>
             ) : null}
             {selectedMentions.length ? <div className="flex flex-wrap gap-1.5 px-2 pt-1" aria-label="Conectores seleccionados">
-              {selectedMentions.map((mention) => <span key={mention.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><At size={11} />{mention.label}<button type="button" aria-label={`Quitar ${mention.label}`} className="rounded-full hover:bg-[var(--surface-raised)]" onClick={() => onConnectorMentionIdsChange(selectedConnectorMentionIds.filter((id) => id !== mention.id))}><X size={10} /></button></span>)}
+              {selectedMentions.map((mention) => <span key={mention.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><At size={11} />{mention.label}<button type="button" aria-label={`Quitar ${mention.label}`} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)]" onClick={() => onConnectorMentionIdsChange(selectedConnectorMentionIds.filter((id) => id !== mention.id))}><X size={10} /></button></span>)}
             </div> : null}
             {imageGeneration ? <div className="flex px-2 pt-1" aria-label="Generación de imágenes activada">
-              <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
+              <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
             </div> : null}
             <div
               ref={composerMeasurementRef}
@@ -742,17 +835,39 @@ export function ChatWorkspace({
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
+              aria-autocomplete="list"
+              aria-controls={mentionOpen ? "connector-mention-options" : undefined}
+              aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
               autoFocus={!hasMessages}
               className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] md:text-[14px] ${hasMessages ? "min-h-8" : "min-h-12"}`}
               placeholder={`Escribe a ${placeholderName}…`}
               rows={1}
               defaultValue={prompt}
-              onChange={(event) => { onPromptChange(event.target.value); setConnectorCatalogOpen(false); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
+              onChange={(event) => { onPromptChange(event.target.value); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
+              onBlur={() => setMentionOpen(false)}
               onKeyDown={(event) => {
-                if (mentionOpen && mentionOptions.length && (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter")) {
-                  event.preventDefault();
-                  if (event.key === "Enter") selectConnectorMention(mentionOptions.find((option) => option.canRead) ?? mentionOptions[0]);
-                  return;
+                if (mentionOpen) {
+                  if (event.key === "ArrowDown" && mentionOptions.length) {
+                    event.preventDefault();
+                    setMentionActiveIndex((current) => (current + 1) % Math.max(mentionOptions.length, 1));
+                    return;
+                  }
+                  if (event.key === "ArrowUp" && mentionOptions.length) {
+                    event.preventDefault();
+                    setMentionActiveIndex((current) => (current - 1 + Math.max(mentionOptions.length, 1)) % Math.max(mentionOptions.length, 1));
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setMentionOpen(false);
+                    return;
+                  }
+                  if (event.key === "Enter" && activeMentionOption && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    selectConnectorMention(activeMentionOption);
+                    return;
+                  }
                 }
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
@@ -763,15 +878,37 @@ export function ChatWorkspace({
                 }
               }}
             />
-            {mentionOpen && mentionQuery !== null ? <div role="listbox" aria-label="Conectores disponibles" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
-              {mentionOptions.length ? mentionOptions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectConnectorMention(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "requiere inicio de sesión" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span></button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
+            {mentionOpen && mentionQuery !== null ? <div id="connector-mention-options" role="listbox" aria-label="Conectores disponibles" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}>
+              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={!mention.canRead || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "requiere inicio de sesión" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
             </div> : null}
-            {connectorCatalogOpen ? <div role="listbox" aria-label="Catálogo de conectores" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2" : "top-full mt-2"}`}>
-              {connectorMentions.map((mention) => <button key={mention.id} type="button" role="option" aria-selected={selectedConnectorMentionIds.includes(mention.id)} disabled={!mention.canRead || sending} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-55" onMouseDown={(event) => event.preventDefault()} onClick={() => selectCatalogConnector(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[10px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "conecta la cuenta en Ajustes" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span></button>)}
+            {connectorCatalogOpen ? <div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label="Catálogo de conectores" aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={(event) => {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setCatalogActiveIndex((current) => nextEnabledConnectorIndex(connectorMentions, current, event.key === "ArrowDown" ? 1 : -1));
+              } else if (event.key === "Home" || event.key === "End") {
+                event.preventDefault();
+                const ordered = event.key === "Home" ? connectorMentions : [...connectorMentions].reverse();
+                const target = ordered.find((mention) => mention.canRead);
+                if (target) setCatalogActiveIndex(connectorMentions.indexOf(target));
+              } else if (event.key === "Enter" && activeCatalogOption?.canRead) {
+                event.preventDefault();
+                selectCatalogConnector(activeCatalogOption);
+              } else if (event.key === "Escape") {
+                event.preventDefault();
+                event.stopPropagation();
+                setConnectorCatalogOpen(false);
+                requestAnimationFrame(() => composerAddButtonRef.current?.focus());
+              } else if (event.key === "Tab") {
+                event.preventDefault();
+                setConnectorCatalogOpen(false);
+                requestAnimationFrame(() => (event.shiftKey ? composerRef.current : composerAddButtonRef.current)?.focus());
+              }
+            }}>
+              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={!mention.canRead || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => mention.canRead && setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "conecta la cuenta en Ajustes" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>)}
             </div> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
-                <button aria-label="Añadir al mensaje" aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
+                <button ref={composerAddButtonRef} aria-label="Añadir al mensaje" aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
                 {!hasMessages ? (
                   <ComposerPicker
                     ariaLabel="Destino de la conversación"
@@ -782,11 +919,11 @@ export function ChatWorkspace({
                     placement={hasMessages ? "above" : "below"}
                     className="composer-destination"
                     disabled={sending}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "destination" : null); }}
+                    onOpenChange={(open) => { setComposerMenuOpen(false); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerPickerOpen(open ? "destination" : null); }}
                     onSelect={onDestinationChange}
                   />
                 ) : null}
-                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple onChange={(event) => void addFiles(event.target.files)} /> : null}
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <ComposerPicker
@@ -804,7 +941,7 @@ export function ChatWorkspace({
                   anchor="controls"
                   className="composer-experience"
                   disabled={sending}
-                  onOpenChange={(open) => { setComposerMenuOpen(false); setComposerPickerOpen(open ? "experience" : null); }}
+                  onOpenChange={(open) => { setComposerMenuOpen(false); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerPickerOpen(open ? "experience" : null); }}
                   onSelect={(value) => onComposerExperienceChange(value as ComposerExperience)}
                 />
                 <VoiceDictationControl
@@ -838,7 +975,7 @@ export function ChatWorkspace({
           </div>
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-7 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
             {suggestions.map((suggestion) => (
-              <button key={suggestion.id} type="button" className="block w-full rounded-xl px-4 py-2 text-left text-[13px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => onSend(suggestion.prompt)}>
+              <button key={suggestion.id} type="button" className="touch-target block min-h-11 w-full rounded-xl px-4 py-2 text-left text-[13px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => onSend(suggestion.prompt)}>
                 <span className="font-medium text-[var(--text)]">{suggestion.label}</span>
                 <span className="ml-2 text-[var(--text-muted)]">{suggestion.prompt}</span>
               </button>

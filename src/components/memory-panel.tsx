@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, Check, ClockCounterClockwise, Plus, Trash, X } from "@phosphor-icons/react";
 import type { MemoryKind, MemoryRecord } from "@/memory/types";
 import type { GovernedMemoryRecord, MemoryProposal, MemoryScope } from "@/memory/proposal-store";
@@ -11,6 +11,7 @@ import {
   listMemoryGovernance,
   listExplicitMemories,
   rejectMemoryProposal,
+  restoreGovernedMemory,
   revokeExplicitMemory,
   updateGovernedMemory,
 } from "@/ui/memory-ui-adapter";
@@ -29,7 +30,6 @@ function kindLabel(kind: MemoryKind) {
 function scopeLabel(scope: MemoryScope) { return scope === "private" ? "Privada" : scope === "project" ? "Proyecto" : "Empresa"; }
 
 export function MemoryPanel({ open, projectId, productName, onClose, embedded = false }: { open: boolean; projectId: string | null; productName: string; onClose: () => void; embedded?: boolean }) {
-  const panelRef = useModalFocus(open && !embedded, onClose);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [proposals, setProposals] = useState<MemoryProposal[]>([]);
   const [governed, setGoverned] = useState<GovernedMemoryRecord[]>([]);
@@ -42,12 +42,28 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
   const [kind, setKind] = useState<MemoryKind>("recollection");
   const [revokeTarget, setRevokeTarget] = useState<MemoryRecord | null>(null);
   const [revokeReason, setRevokeReason] = useState("");
+  const [undoMemory, setUndoMemory] = useState<{ memory: GovernedMemoryRecord; projectId: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<GovernedMemoryRecord | null>(null);
+  const undoButtonRef = useRef<HTMLButtonElement>(null);
+
+  const cancelDeleteConfirmation = useCallback(() => {
+    const memoryId = deleteTarget?.memoryId;
+    setDeleteTarget(null);
+    if (memoryId) requestAnimationFrame(() => document.getElementById(`governed-memory-delete-${memoryId}`)?.focus());
+  }, [deleteTarget]);
+  const closeOrCancelDelete = useCallback(() => {
+    if (deleteTarget) cancelDeleteConfirmation();
+    else onClose();
+  }, [cancelDeleteConfirmation, deleteTarget, onClose]);
+  const panelRef = useModalFocus(open && !embedded, closeOrCancelDelete);
 
   const activeMemories = useMemo(() => memories.filter((memory) => memory.status === "active"), [memories]);
   const revokedMemories = useMemo(() => memories.filter((memory) => memory.status === "revoked"), [memories]);
   const projectDataIsCurrent = loadedProjectId === projectId;
   const visibleProposals = projectDataIsCurrent ? proposals : [];
   const visibleGoverned = projectDataIsCurrent ? governed : [];
+  const activeGoverned = visibleGoverned.filter((memory) => memory.status === "active");
+  const deletedGoverned = visibleGoverned.filter((memory) => memory.status === "deleted");
   const updatingProject = loadedProjectId !== undefined && !projectDataIsCurrent;
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
@@ -63,6 +79,11 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
       setProposals(governance.proposals);
       setGoverned(governance.memories);
       setAllowCompanyScope(governance.allowCompanyScope);
+      setUndoMemory((current) => {
+        if (!current || current.projectId !== requestedProjectId) return current;
+        const latest = governance.memories.find((memory) => memory.memoryId === current.memory.memoryId);
+        return latest?.status === "deleted" ? { memory: latest, projectId: current.projectId } : null;
+      });
     } catch (cause) {
       if (!signal?.aborted) setError(cause instanceof Error ? cause.message : "No se ha podido cargar la memoria.");
     } finally {
@@ -122,14 +143,47 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
     }
   };
 
+  const deleteMemory = async (memory: GovernedMemoryRecord) => {
+    if (saving || !projectId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const deleted = await deleteGovernedMemory(memory, projectId);
+      setGoverned((current) => current.map((item) => item.memoryId === deleted.memoryId ? deleted : item));
+      setUndoMemory({ memory: deleted, projectId });
+      setDeleteTarget(null);
+      requestAnimationFrame(() => undoButtonRef.current?.focus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se ha podido eliminar la memoria.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restoreMemory = async (memory: GovernedMemoryRecord) => {
+    if (saving || !projectId) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const restored = await restoreGovernedMemory(memory, projectId);
+      setGoverned((current) => current.map((item) => item.memoryId === restored.memoryId ? restored : item));
+      setUndoMemory((current) => current?.memory.memoryId === restored.memoryId ? null : current);
+      requestAnimationFrame(() => document.getElementById(`governed-memory-edit-${restored.memoryId}`)?.focus());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "No se ha podido restaurar la memoria.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!open) return null;
   return (
     <div className={embedded ? "relative" : "fixed inset-0 z-50 flex justify-end bg-[var(--overlay)] backdrop-blur-[2px]"}>
-      {!embedded ? <button className="absolute inset-0" aria-label="Cerrar memoria" onClick={onClose} /> : null}
+      {!embedded ? <button className="absolute inset-0" aria-label="Cerrar memoria" onClick={closeOrCancelDelete} /> : null}
       <aside ref={panelRef} tabIndex={embedded ? undefined : -1} role={embedded ? "region" : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby="memory-title" className={embedded ? "relative flex w-full flex-col" : "panel-enter relative flex h-full w-full max-w-[460px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)]"}>
         {!embedded ? <header className="flex h-14 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5">
           <div className="flex items-center gap-2"><BookOpenText size={16} /><h2 id="memory-title" className="text-[13px] font-semibold text-[var(--text)]">Memoria</h2></div>
-          <button type="button" aria-label="Cerrar memoria" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={16} /></button>
+          <button type="button" aria-label="Cerrar memoria" className="rounded-md p-1.5 text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={closeOrCancelDelete}><X size={16} /></button>
         </header> : <h2 id="memory-title" className="sr-only">Memoria</h2>}
 
         <div className={embedded ? "min-h-0" : "scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6"}>
@@ -142,7 +196,11 @@ export function MemoryPanel({ open, projectId, productName, onClose, embedded = 
 
           {visibleProposals.some((proposal) => proposal.status === "pending") ? <section className="mt-6"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Propuestas pendientes</h3><span className="text-[10px] text-[var(--text-subtle)]">No guardadas</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">Revisa contenido, alcance y procedencia. Rechazar nunca crea una memoria.</p><div className="mt-3 space-y-3">{visibleProposals.filter((proposal) => proposal.status === "pending").map((proposal) => <ProposalCard key={proposal.proposalId} proposal={proposal} allowCompanyScope={allowCompanyScope} disabled={saving || !projectId} onConfirm={(content, scope) => void runGovernance(() => confirmMemoryProposal({ proposalId: proposal.proposalId, projectId: projectId!, content, scope }))} onReject={() => void runGovernance(() => rejectMemoryProposal(proposal.proposalId, projectId!))} />)}</div></section> : null}
 
-          {visibleGoverned.some((memory) => memory.status === "active") ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Memoria automática y gobernada</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{visibleGoverned.filter((memory) => memory.status === "active").length}</span></div><div className="mt-3 space-y-2">{visibleGoverned.filter((memory) => memory.status === "active").map((memory) => <GovernedCard key={memory.memoryId} memory={memory} disabled={saving || !projectId} onUpdate={(content) => void runGovernance(() => updateGovernedMemory(memory, projectId!, content))} onDelete={() => void runGovernance(() => deleteGovernedMemory(memory, projectId!))} />)}</div></section> : null}
+          {undoMemory?.projectId === projectId && projectDataIsCurrent ? <div className="mt-4 flex min-h-11 items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] shadow-[var(--shadow-sm)]"><span role="status" className="min-w-0 flex-1 text-[var(--text-secondary)]">Memoria eliminada. Ya no se usará en futuras conversaciones.</span><button ref={undoButtonRef} type="button" disabled={saving} onClick={() => void restoreMemory(undoMemory.memory)} className="touch-target shrink-0 rounded-lg px-2 font-semibold text-[var(--brain-accent-on-soft)] hover:bg-[var(--brain-accent-soft)] disabled:opacity-40">Deshacer</button><button type="button" aria-label="Ocultar aviso" onClick={() => setUndoMemory(null)} className="touch-target grid size-9 shrink-0 place-items-center rounded-lg text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]"><X size={14} /></button></div> : null}
+
+          {activeGoverned.length ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Memoria automática y gobernada</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{activeGoverned.length}</span></div><div className="mt-3 space-y-2">{activeGoverned.map((memory) => <GovernedCard key={memory.memoryId} memory={memory} disabled={saving || !projectId} confirmingDelete={deleteTarget?.memoryId === memory.memoryId} onUpdate={(content) => void runGovernance(() => updateGovernedMemory(memory, projectId!, content))} onRequestDelete={() => setDeleteTarget(memory)} onCancelDelete={cancelDeleteConfirmation} onDelete={() => void deleteMemory(memory)} />)}</div></section> : null}
+
+          {deletedGoverned.length ? <section className="mt-7"><div className="flex items-center justify-between"><h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Eliminadas</h3><span className="text-[10px] tabular-nums text-[var(--text-subtle)]">{deletedGoverned.length}</span></div><p className="mt-2 text-[10px] leading-4 text-[var(--text-muted)]">No se usan en conversaciones. Puedes restaurarlas cuando quieras.</p><div className="mt-3 space-y-2">{deletedGoverned.map((memory) => <DeletedGovernedCard key={memory.memoryId} memory={memory} disabled={saving || !projectId} onRestore={() => void restoreMemory(memory)} />)}</div></section> : null}
 
           <section className="mt-6">
             <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-subtle)]">Añadir memoria</h3>
@@ -178,10 +236,14 @@ function ProposalCard({ proposal, allowCompanyScope, disabled, onConfirm, onReje
   return <article className="rounded-[var(--brain-radius)] border border-[var(--brain-accent)] bg-[var(--surface)] p-3"><textarea aria-label="Contenido propuesto" value={content} maxLength={32_000} rows={3} onChange={(event) => setContent(event.target.value)} className="w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-[12px] leading-5" /><div className="mt-2 flex items-center gap-2"><label className="text-[10px] text-[var(--text-muted)]">Alcance <select value={scope} onChange={(event) => setScope(event.target.value as MemoryScope)} className="ml-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1"><option value="private">Privada</option><option value="project">Proyecto</option>{allowCompanyScope ? <option value="company">Empresa</option> : null}</select></label></div><p className="mt-2 text-[9px] leading-4 text-[var(--text-subtle)]">Procedencia: chat {proposal.provenance.threadId} · herramientas: {proposal.provenance.toolNames.join(", ") || "ninguna registrada"} · {new Date(proposal.provenance.capturedAt).toLocaleString("es-ES")}</p><div className="mt-3 flex justify-end gap-2"><button type="button" disabled={disabled} onClick={onReject} className="min-h-8 rounded-lg px-3 text-[10px] font-semibold text-[var(--danger)]">Rechazar</button><button type="button" disabled={disabled || !content.trim()} onClick={() => onConfirm(content, scope)} className="min-h-8 rounded-lg bg-[var(--brain-accent)] px-3 text-[10px] font-semibold text-[var(--brain-contrast)]">Confirmar y guardar</button></div></article>;
 }
 
-function GovernedCard({ memory, disabled, onUpdate, onDelete }: { memory: GovernedMemoryRecord; disabled: boolean; onUpdate: (content: string) => void; onDelete: () => void }) {
+function GovernedCard({ memory, disabled, confirmingDelete, onUpdate, onRequestDelete, onCancelDelete, onDelete }: { memory: GovernedMemoryRecord; disabled: boolean; confirmingDelete: boolean; onUpdate: (content: string) => void; onRequestDelete: () => void; onCancelDelete: () => void; onDelete: () => void }) {
   const [editing, setEditing] = useState(false); const [content, setContent] = useState(memory.content);
   const textareaId = `governed-memory-${memory.memoryId}`;
-  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3"><div className="flex items-start gap-2"><span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold">{scopeLabel(memory.scope)}</span>{editing ? <div className="min-w-0 flex-1"><label htmlFor={textareaId} className="mb-1 block text-[10px] font-medium text-[var(--text-muted)]">Contenido de la memoria</label><textarea id={textareaId} value={content} rows={3} maxLength={32_000} onChange={(event) => setContent(event.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-2 py-1.5 text-[12px]" /></div> : <p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5">{memory.content}</p>}</div><p className="mt-2 text-[9px] text-[var(--text-subtle)]">Revisión {memory.revision} · {memory.provenance.sourceType === "background-conversation" ? "extraída automáticamente" : "guardada desde conversación"}</p><div className="mt-2 flex justify-end gap-2">{editing ? <><button type="button" onClick={() => { setEditing(false); setContent(memory.content); }} className="px-2 py-1 text-[10px]">Cancelar</button><button type="button" disabled={disabled || !content.trim()} onClick={() => { onUpdate(content); setEditing(false); }} className="px-2 py-1 text-[10px] font-semibold text-[var(--brain-accent)]">Guardar edición</button></> : <><button type="button" disabled={disabled} onClick={() => setEditing(true)} className="px-2 py-1 text-[10px]">Editar</button><button type="button" disabled={disabled} onClick={onDelete} className="px-2 py-1 text-[10px] text-[var(--danger)]">Eliminar</button></>}</div></article>;
+  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3"><div className="flex items-start gap-2"><span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold">{scopeLabel(memory.scope)}</span>{editing ? <div className="min-w-0 flex-1"><label htmlFor={textareaId} className="mb-1 block text-[10px] font-medium text-[var(--text-muted)]">Contenido de la memoria</label><textarea id={textareaId} value={content} rows={3} maxLength={32_000} onChange={(event) => setContent(event.target.value)} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-2 py-1.5 text-[12px]" /></div> : <p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5">{memory.content}</p>}</div><p className="mt-2 text-[9px] text-[var(--text-subtle)]">Revisión {memory.revision} · {memory.provenance.sourceType === "background-conversation" ? "extraída automáticamente" : "guardada desde conversación"}</p>{confirmingDelete ? <div role="group" aria-label="Confirmar eliminación" onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onCancelDelete(); } }} className="mt-3 rounded-xl bg-[var(--danger-soft)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">¿Eliminar esta memoria?</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">Dejará de usarse, pero podrás restaurarla después.</p><div className="mt-3 flex justify-end gap-2"><button autoFocus type="button" disabled={disabled} onClick={onCancelDelete} className="touch-target min-h-9 rounded-lg px-3 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Cancelar</button><button type="button" disabled={disabled} onClick={onDelete} className="touch-target min-h-9 rounded-lg bg-[var(--danger)] px-3 text-[10px] font-semibold text-white disabled:opacity-40">Eliminar memoria</button></div></div> : <div className="mt-2 flex justify-end gap-2">{editing ? <><button type="button" onClick={() => { setEditing(false); setContent(memory.content); }} className="touch-target min-h-9 px-2 text-[10px]">Cancelar</button><button type="button" disabled={disabled || !content.trim()} onClick={() => { onUpdate(content); setEditing(false); }} className="touch-target min-h-9 px-2 text-[10px] font-semibold text-[var(--brain-accent)]">Guardar edición</button></> : <><button id={`governed-memory-edit-${memory.memoryId}`} type="button" disabled={disabled} onClick={() => setEditing(true)} className="touch-target min-h-9 px-2 text-[10px]">Editar</button><button id={`governed-memory-delete-${memory.memoryId}`} type="button" disabled={disabled} onClick={onRequestDelete} className="touch-target min-h-9 px-2 text-[10px] text-[var(--danger)]">Eliminar</button></>}</div>}</article>;
+}
+
+function DeletedGovernedCard({ memory, disabled, onRestore }: { memory: GovernedMemoryRecord; disabled: boolean; onRestore: () => void }) {
+  return <article className="rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] p-3 opacity-80"><div className="flex items-start gap-2"><span className="rounded-md bg-[var(--surface-muted)] px-1.5 py-0.5 text-[9px] font-semibold">{scopeLabel(memory.scope)}</span><p className="min-w-0 flex-1 whitespace-pre-wrap text-[12px] leading-5 text-[var(--text-muted)]">{memory.content}</p></div><div className="mt-2 flex items-center justify-between gap-3"><p className="text-[9px] text-[var(--text-subtle)]">Eliminada {memory.deletedAt ? memoryDate(memory.deletedAt) : ""}</p><button type="button" disabled={disabled} onClick={onRestore} className="touch-target min-h-9 rounded-lg px-3 text-[10px] font-semibold text-[var(--brain-accent-on-soft)] hover:bg-[var(--brain-accent-soft)] disabled:opacity-40">Restaurar</button></div></article>;
 }
 
 function EmptyState() {

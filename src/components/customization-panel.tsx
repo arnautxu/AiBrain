@@ -1,11 +1,13 @@
 "use client";
 
 import { Archive, Bell, Brain, Gauge, PaintBrush, Plugs, X } from "@phosphor-icons/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { useEffect, useState, type ReactNode, type RefObject } from "react";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import { isSettingsSnapshot, type NotificationSettings, type SettingsPatch, type SettingsSnapshot } from "@/settings/contracts";
 import type { CompanyUsageResponse, PersonalUsageResponse } from "@/usage/contracts";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { OverlayPresenceLayer } from "@/ui/overlay-presence";
 import { ThemeToggle } from "@/components/ui/primitives";
 import { MemoryPanel } from "@/components/memory-panel";
 import { STANDALONE_PROJECT_SLUG, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
@@ -22,6 +24,7 @@ type Props = {
   onRestoreThread?: (thread: WorkbenchThread) => void;
   onSettingsSnapshot?: (snapshot: SettingsSnapshot) => void;
   activeProjectId?: string | null;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onClose: () => void;
 };
 type Tab = "appearance" | "connectors" | "memory" | "notifications" | "archived" | "usage";
@@ -37,8 +40,8 @@ function Toggle({ label, checked, disabled = false, onChange }: { label: string;
 }
 
 /** Employee preferences only. Workspace governance is server-protected at /admin. */
-export function CustomizationPanel({ productName, open, initialTab = "appearance", runtimeStatus, projects = [], threads = [], archiveBusy = false, onRestoreProject, onRestoreThread, onSettingsSnapshot, activeProjectId = null, onClose }: Props) {
-  const panelRef = useModalFocus(open, onClose);
+export function CustomizationPanel({ productName, open, initialTab = "appearance", runtimeStatus, projects = [], threads = [], archiveBusy = false, onRestoreProject, onRestoreThread, onSettingsSnapshot, activeProjectId = null, returnFocusRef, onClose }: Props) {
+  const panelRef = useModalFocus(open, onClose, undefined, returnFocusRef);
   const [tab, setTab] = useState<Tab>(initialTab);
   const [personalUsage, setPersonalUsage] = useState<PersonalUsageResponse | null>(null);
   const [companyUsage, setCompanyUsage] = useState<CompanyUsageResponse | null>(null);
@@ -96,16 +99,19 @@ export function CustomizationPanel({ productName, open, initialTab = "appearance
     { id: "archived", label: "Archivados", icon: <Archive size={17} /> },
     { id: "usage", label: "Uso", icon: <Gauge size={17} /> },
   ];
-  if (!open) return null;
-  return <div className="workspace-overlay fixed inset-0 z-50 grid place-items-center p-0 md:p-6">
-    <button className="absolute inset-0" aria-label="Cerrar configuración" onClick={onClose} />
-    <section ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Configuración de ${productName}`} className="workspace-panel panel-enter relative flex h-full w-full max-w-[840px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(680px,calc(100dvh-3rem))] md:rounded-[22px]">
-      <header className="workspace-panel-header flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><div><h2 className="workspace-panel-title">Configuración</h2><p className="workspace-panel-subtitle mt-0.5 hidden sm:block">Tu apariencia, avisos, archivados y uso.</p></div><button type="button" aria-label="Cerrar" className="grid size-10 place-items-center rounded-full text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
-      <div className="flex min-h-0 flex-1 flex-col md:flex-row"><nav aria-label="Secciones de configuración" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">{tabs.map((item) => <button key={item.id} type="button" aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}</nav>
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <div className="mb-5 flex items-center justify-between gap-3 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><p role="alert">{error}</p>{!settings ? <button type="button" className="shrink-0 rounded-lg border border-current px-3 py-2 font-semibold hover:bg-[var(--surface-hover)]" onClick={retryLoad}>Reintentar</button> : null}</div> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">Cargando configuración…</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "connectors" ? <Connectors settings={settings} onChanged={retryLoad} /> : null}{tab === "memory" ? <MemorySettings productName={productName} settings={settings} projectId={activeProjectId} /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "archived" ? <Archived projects={projects} threads={threads} busy={archiveBusy} onRestoreProject={onRestoreProject} onRestoreThread={onRestoreThread} /> : null}{tab === "usage" ? <Usage usage={usage} companyUsage={companyUsage} usedPercent={usedPercent} runtimeStatus={runtimeStatus} /> : null}</div>
-      </div>
-    </section>
-  </div>;
+  return <AnimatePresence initial={false}>{open ? (
+    <OverlayPresenceLayer key="customization-panel" origin="center" className="workspace-overlay fixed inset-0 z-50 grid place-items-center p-0 md:p-6">
+      {(surfaceMotion) => <>
+        <button className="absolute inset-0" aria-label="Cerrar configuración" onClick={onClose} />
+        <motion.section {...surfaceMotion} ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={`Configuración de ${productName}`} className="workspace-panel relative flex h-full w-full max-w-[840px] flex-col overflow-hidden border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] md:h-[min(680px,calc(100dvh-3rem))] md:rounded-[22px]">
+          <header className="workspace-panel-header flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-5"><div><h2 className="workspace-panel-title">Configuración</h2><p className="workspace-panel-subtitle mt-0.5 hidden sm:block">Tu apariencia, avisos, archivados y uso.</p></div><button type="button" aria-label="Cerrar" className="grid size-10 place-items-center rounded-full text-[var(--text-subtle)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
+          <div className="flex min-h-0 flex-1 flex-col md:flex-row"><nav aria-label="Secciones de configuración" className="flex shrink-0 gap-1 overflow-x-auto border-b border-[var(--border-subtle)] p-2 md:w-52 md:flex-col md:border-b-0 md:border-r md:p-3">{tabs.map((item) => <button key={item.id} type="button" aria-current={tab === item.id ? "page" : undefined} className={`flex min-h-10 shrink-0 items-center gap-2.5 rounded-[12px] px-3 text-left text-[12px] font-medium ${tab === item.id ? "bg-[var(--surface-selected)] text-[var(--text)]" : "text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setTab(item.id)}>{item.icon}{item.label}</button>)}</nav>
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-6 md:px-8">{error ? <div className="mb-5 flex items-center justify-between gap-3 rounded-[12px] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]"><p role="alert">{error}</p>{!settings ? <button type="button" className="shrink-0 rounded-lg border border-current px-3 py-2 font-semibold hover:bg-[var(--surface-hover)]" onClick={retryLoad}>Reintentar</button> : null}</div> : null}{loading && !settings ? <p className="text-[12px] text-[var(--text-subtle)]">Cargando configuración…</p> : null}{tab === "appearance" ? <Appearance /> : null}{tab === "connectors" ? <Connectors settings={settings} onChanged={retryLoad} /> : null}{tab === "memory" ? <MemorySettings productName={productName} settings={settings} projectId={activeProjectId} /> : null}{tab === "notifications" ? <Notifications settings={settings} busy={savingKey === "notifications"} onSave={save} /> : null}{tab === "archived" ? <Archived projects={projects} threads={threads} busy={archiveBusy} onRestoreProject={onRestoreProject} onRestoreThread={onRestoreThread} /> : null}{tab === "usage" ? <Usage usage={usage} companyUsage={companyUsage} usedPercent={usedPercent} runtimeStatus={runtimeStatus} /> : null}</div>
+          </div>
+        </motion.section>
+      </>}
+    </OverlayPresenceLayer>
+  ) : null}</AnimatePresence>;
 }
 
 function Appearance() { return <section><SectionTitle>Tema</SectionTitle><div className="flex items-center justify-between rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><div><p className="text-[12px] font-semibold">Claro u oscuro</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Se guarda en este navegador.</p></div><ThemeToggle /></div></section>; }

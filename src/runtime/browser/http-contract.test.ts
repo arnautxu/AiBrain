@@ -29,11 +29,25 @@ describe("browser HTTP contracts", () => {
     expect(parseBrowserViewerCommand({
       threadId: THREAD_ID,
       action: "input",
-      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left" },
+      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left", buttons: 1 },
     })).toEqual({
       threadId: THREAD_ID,
       action: "input",
-      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left" },
+      command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left", buttons: 1 },
+    });
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "mouse", event: "mouseMoved", x: 12, y: 24, button: "left", buttons: 8 },
+    })).toBeNull();
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "mouse", event: "mouseReleased", x: 12, y: 24, button: "left" },
+    })).toEqual({
+      threadId: THREAD_ID,
+      action: "input",
+      command: { kind: "mouse", event: "mouseReleased", x: 12, y: 24, button: "left" },
     });
     expect(parseBrowserViewerCommand({
       threadId: THREAD_ID,

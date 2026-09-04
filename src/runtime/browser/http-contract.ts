@@ -81,13 +81,14 @@ function parseMouseCommand(value: unknown): BrowserInputCommand | null {
   const record = exactRecord(
     value,
     ["kind", "event", "x", "y"],
-    ["button", "clickCount", "deltaX", "deltaY"],
+    ["button", "buttons", "clickCount", "deltaX", "deltaY"],
   );
   if (!record || record.kind !== "mouse" || typeof record.event !== "string" ||
     !MOUSE_EVENTS.includes(record.event as (typeof MOUSE_EVENTS)[number]) ||
     !finiteNumber(record.x, 0, 100_000) || !finiteNumber(record.y, 0, 100_000) ||
     (record.button !== undefined && (typeof record.button !== "string" ||
       !MOUSE_BUTTONS.includes(record.button as (typeof MOUSE_BUTTONS)[number]))) ||
+    !optionalInteger(record.buttons, 0, 7) ||
     !optionalInteger(record.clickCount, 0, 3) ||
     (record.deltaX !== undefined && !finiteNumber(record.deltaX, -100_000, 100_000)) ||
     (record.deltaY !== undefined && !finiteNumber(record.deltaY, -100_000, 100_000))) return null;

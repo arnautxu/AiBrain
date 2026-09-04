@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Bell,
   BellRinging,
@@ -19,6 +20,7 @@ import type {
   TaskNotificationPreferences,
 } from "@/task-center/contracts";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { OverlayPresenceLayer } from "@/ui/overlay-presence";
 
 const filters: Array<{ id: TaskCenterFilter; label: string }> = [
   { id: "all", label: "Todas" },
@@ -109,11 +111,11 @@ export function TaskCenterPanel({
   );
   const unread = tasks.filter((task) => task.unread).length;
 
-  if (!open) return null;
-  return (
-    <div className="workspace-overlay fixed inset-0 z-[76] flex justify-end">
-      <button aria-label="Cerrar centro de tareas" className="absolute inset-0" onClick={onClose} />
-      <section ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Centro de tareas" className="workspace-panel panel-enter relative flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-popover)]">
+  return <AnimatePresence initial={false}>{open ? (
+    <OverlayPresenceLayer key="task-center-panel" origin="right" className="workspace-overlay fixed inset-0 z-[76] flex justify-end">
+      {(surfaceMotion) => <>
+        <button aria-label="Cerrar centro de tareas" className="absolute inset-0" onClick={onClose} />
+        <motion.section {...surfaceMotion} ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Centro de tareas" className="workspace-panel relative flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border-subtle)] bg-[var(--surface-raised)] pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-popover)]">
         <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-4 pt-[env(safe-area-inset-top)] sm:px-5 sm:pt-0">
           <span className="grid size-9 shrink-0 place-items-center rounded-[13px] bg-[var(--accent-soft)] text-[var(--brain-accent-on-soft)]"><ClockCounterClockwise size={18} /></span>
           <div className="min-w-0 flex-1"><h2 className="workspace-panel-title text-[var(--text)]">Tareas</h2><p className="workspace-panel-subtitle mt-0.5">Sigue el trabajo de todas tus conversaciones.</p></div>
@@ -164,7 +166,8 @@ export function TaskCenterPanel({
             <div className="grid min-h-72 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-12 place-items-center rounded-[16px] bg-[var(--surface-muted)] text-[var(--text-subtle)]"><CheckCircle size={21} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Todo al día</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Las tareas en curso, completadas o que necesiten tu atención aparecerán aquí.</p></div></div>
           )}
         </div>
-      </section>
-    </div>
-  );
+        </motion.section>
+      </>}
+    </OverlayPresenceLayer>
+  ) : null}</AnimatePresence>;
 }

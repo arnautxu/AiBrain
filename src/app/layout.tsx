@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import type { CSSProperties } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -7,11 +7,6 @@ import { loadInstallationConfig } from "@/config/installation";
 import { publicInstallationBranding } from "@/config/installation-branding";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/ui/theme";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -57,7 +52,7 @@ export default async function RootLayout({
       suppressHydrationWarning
       style={installationStyle}
     >
-      <body className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className={geistMono.variable}>
         <ThemeProvider>{children}</ThemeProvider>
         <Script id="aibrain-theme" strategy="beforeInteractive">
           {THEME_BOOTSTRAP_SCRIPT}

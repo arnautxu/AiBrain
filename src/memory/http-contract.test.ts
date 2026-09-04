@@ -4,6 +4,7 @@ import {
   isConfirmMemoryProposalRequest,
   isDeleteGovernedMemoryRequest,
   isRejectMemoryProposalRequest,
+  isRestoreGovernedMemoryRequest,
   isRevokeExplicitMemoryRequest,
   isUpdateGovernedMemoryRequest,
   parseMemoryListQuery,
@@ -47,12 +48,14 @@ describe("memory HTTP contract", () => {
     expect(parseMemoryListQuery(new URLSearchParams("unknown=1"))).toBeNull();
   });
 
-  it("requires explicit scoped confirmation, rejection, edit and deletion", () => {
+  it("requires explicit scoped confirmation, rejection, edit, deletion and restoration", () => {
     expect(isConfirmMemoryProposalRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, content: "Confirmado", scope: "project" })).toBe(true);
     expect(isConfirmMemoryProposalRequest({ explicit: false, projectId: CLIENT_REQUEST_ID, content: "Confirmado", scope: "project" })).toBe(false);
     expect(isRejectMemoryProposalRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, reason: "No guardar" })).toBe(true);
     expect(isUpdateGovernedMemoryRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, expectedRevision: 2, content: "Editada" })).toBe(true);
     expect(isDeleteGovernedMemoryRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, expectedRevision: 2 })).toBe(true);
     expect(isDeleteGovernedMemoryRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, expectedRevision: 0 })).toBe(false);
+    expect(isRestoreGovernedMemoryRequest({ explicit: true, projectId: CLIENT_REQUEST_ID, expectedRevision: 2 })).toBe(true);
+    expect(isRestoreGovernedMemoryRequest({ explicit: false, projectId: CLIENT_REQUEST_ID, expectedRevision: 2 })).toBe(false);
   });
 });

@@ -5,6 +5,32 @@ const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Ta
 const tenantId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations" : "studio";
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
+const browserArtifact = {
+  id: "018f5f68-4a6e-7abc-8def-0123456789af",
+  type: "browser",
+  name: "Comprobación web sintética",
+  status: "disconnected",
+  control: null,
+  viewerUrl: null,
+  captureUrl: null,
+  downloadUrl: null,
+  error: null,
+};
+const stoppedBrowserStatus = {
+  available: true,
+  capabilityCode: null,
+  healthy: true,
+  state: {
+    browserSessionId: null,
+    lifecycle: "stopped",
+    controller: "none",
+    generation: 0,
+    heartbeatExpiresAt: null,
+    downloads: [],
+  },
+  runtime: { healthy: true },
+  runningInProcess: true,
+};
 
 function validPdf() {
   const header = "%PDF-1.4\n";
@@ -60,25 +86,13 @@ test("mobile drawer, Review, PDF preview and Browser overlays have no blocking a
         error: null,
       },
     },
+    {
+      type: "artifact",
+      item: browserArtifact,
+    },
     { type: "delta", value: "## Resultado móvil\n\nEl turno está listo para revisión." },
     { type: "done" },
   ];
-  const browserStatus = {
-    available: true,
-    capabilityCode: null,
-    healthy: true,
-    state: {
-      browserSessionId: null,
-      lifecycle: "stopped",
-      controller: "none",
-      generation: 0,
-      heartbeatExpiresAt: null,
-      downloads: [],
-    },
-    runtime: { healthy: true },
-    runningInProcess: true,
-  };
-
   await page.route("**/api/chat", (route) => route.fulfill({
     status: 200,
     headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
@@ -97,6 +111,15 @@ test("mobile drawer, Review, PDF preview and Browser overlays have no blocking a
       account: { userId: "example-user", displayName: accountName, email: "user@example.test" },
       company: { installationId: "example-lab-playwright", name: "Example Laboratory", isAdmin: false },
       apps: [{ id: "managed-browser", label: "Navegador de trabajo", effectiveEnabled: true }],
+      connectors: [],
+      memory: {
+        enabled: true,
+        confirmationRequired: false,
+        scopes: ["private", "project", "company"],
+        provenanceVisible: true,
+        employeeRuntimeIsolated: true,
+        sharedComputerHistory: false,
+      },
       notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
       permissions: [],
       privacy: {},
@@ -106,7 +129,7 @@ test("mobile drawer, Review, PDF preview and Browser overlays have no blocking a
   await page.route("**/api/runtime/browser", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
-    body: JSON.stringify(browserStatus),
+    body: JSON.stringify(stoppedBrowserStatus),
   }));
   await page.route("**/api/runtime/browser/history?*", (route) => route.fulfill({
     status: 200,
@@ -144,12 +167,84 @@ test("mobile drawer, Review, PDF preview and Browser overlays have no blocking a
   ]);
   await preview.getByRole("button", { name: "Cerrar vista previa" }).click();
 
-  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
-  await page.getByRole("dialog", { name: "Navegación" }).getByRole("button", { name: "Navegador" }).click();
+  const openBrowser = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
+  await expect(openBrowser).toBeVisible();
+  await openBrowser.focus();
+  await openBrowser.press("Enter");
   const browser = page.getByRole("dialog", { name: "Navegador" });
   await expect(browser).toBeVisible();
-  await expect(browser.getByText("Navegador detenido")).toBeVisible();
+  await expect(browser.getByText("Conectando…")).toBeVisible();
+  await expect(browser.getByRole("button", { name: "Cerrar navegador" })).toBeFocused();
   await assertNoBlockingViolations(page, "mobile Browser overlay");
+  await page.keyboard.press("Escape");
+  await expect(browser).toHaveCount(0);
+  await expect(openBrowser).toBeFocused();
+});
+
+test("mobile Browser traps focus, closes with Escape and returns focus to its opener", async ({ page }) => {
+  const events = [
+    { type: "artifact", item: browserArtifact },
+    { type: "delta", value: "## Navegación preparada\n\nLa sesión está disponible para abrir." },
+    { type: "done" },
+  ];
+  await page.route("**/api/chat", (route) => route.fulfill({
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+    body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  }));
+  await page.route("**/api/settings", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      schemaVersion: 1,
+      account: { userId: "example-user", displayName: accountName, email: "user@example.test" },
+      company: { installationId: "example-lab-playwright", name: "Example Laboratory", isAdmin: false },
+      apps: [{ id: "managed-browser", label: "Navegador de trabajo", effectiveEnabled: true }],
+      connectors: [],
+      memory: {
+        enabled: true,
+        confirmationRequired: false,
+        scopes: ["private", "project", "company"],
+        provenanceVisible: true,
+        employeeRuntimeIsolated: true,
+        sharedComputerHistory: false,
+      },
+      notifications: { backgroundTurns: true, approvals: true, failures: true, sound: false },
+      permissions: [],
+      privacy: {},
+      browser: {},
+    }),
+  }));
+  await page.route("**/api/runtime/browser", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify(stoppedBrowserStatus),
+  }));
+
+  await page.goto("/login");
+  await page.getByRole("button", { name: new RegExp(accountName) }).click();
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Abre la comprobación web sintética.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByRole("heading", { name: "Navegación preparada" })).toBeVisible();
+
+  const opener = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
+  await opener.focus();
+  await expect(opener).toBeFocused();
+  await opener.press("Enter");
+
+  const browser = page.getByRole("dialog", { name: "Navegador" });
+  const close = browser.getByRole("button", { name: "Cerrar navegador" });
+  await expect(browser).toHaveAttribute("aria-modal", "true");
+  await expect(browser.getByText("Conectando…")).toBeVisible();
+  await expect(close).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect.poll(() => browser.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+  await page.keyboard.press("Shift+Tab");
+  await expect(close).toBeFocused();
+
+  await page.keyboard.press("Escape");
+  await expect(browser).toHaveCount(0);
+  await expect(opener).toBeFocused();
 });
 
 test("mobile viewer projects expose an accessible read-only history and context surface", async ({ page }) => {

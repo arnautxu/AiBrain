@@ -28,8 +28,11 @@ describe("DocumentPublicationCard", () => {
     render(<DocumentPublicationCard draft={draft} onFreeze={onFreeze} onDecide={vi.fn()} />);
 
     const destination = screen.getByRole("textbox", { name: "Destino de notes.md" });
+    expect(destination).toHaveClass("text-body-regular");
     fireEvent.change(destination, { target: { value: "official/notes.md" } });
-    fireEvent.click(screen.getByRole("button", { name: "Preparar publicación" }));
+    const prepare = screen.getByRole("button", { name: "Preparar publicación" });
+    expect(prepare).toHaveClass("touch-target", "text-body-2-semibold");
+    fireEvent.click(prepare);
     expect(onFreeze).toHaveBeenCalledWith(draft.id, "official/notes.md");
 
     fireEvent.change(destination, { target: { value: "../private.md" } });
@@ -61,7 +64,9 @@ describe("DocumentPublicationCard", () => {
       onDecide={onDecide}
     />);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("La conexión se ha interrumpido.");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("La conexión se ha interrumpido.");
+    expect(alert).toHaveClass("text-body-2-regular");
     fireEvent.click(screen.getByRole("button", { name: "Publicar" }));
     expect(onDecide).toHaveBeenCalledWith(draft.id, "confirm");
   });
