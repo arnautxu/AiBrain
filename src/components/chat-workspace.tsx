@@ -341,7 +341,7 @@ function AssistantMessage({
       {message.status === "stopped" ? <p className="mt-3 text-[12px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
 
       {message.artifacts.length ? (
-        <div className={`mt-4 grid gap-3 ${message.artifacts.every((artifact) => artifact.type === "image") ? "sm:grid-cols-2" : "grid-cols-1"}`}>
+        <div className={`mt-4 grid min-w-0 grid-cols-1 gap-3 ${message.artifacts.length > 1 && message.artifacts.every((artifact) => artifact.type === "image") ? "sm:grid-cols-2" : ""}`}>
           {message.artifacts.map((artifact) => (
             <TurnArtifactCard key={artifact.id} artifact={artifact} onPreviewDocument={onPreviewDocument} onOpenBrowser={onOpenBrowser} />
           ))}
