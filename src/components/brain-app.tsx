@@ -31,6 +31,7 @@ import {
   type ApprovalDecision,
   type ApprovalItem,
   type ChatMessage,
+  type ChatAttachment,
   type ChatInputAttachment,
   type DocumentArtifact,
   type ToolResult,
@@ -1164,13 +1165,19 @@ export function BrainApp({
     };
   }, [preferences.corners]);
 
+  const documentUploadControllersRef = useRef(new Map<string, AbortController>());
+  const documentUploadEpochRef = useRef(0);
+  const cancelDocumentUploads = useCallback(() => {
+    documentUploadEpochRef.current += 1;
+    for (const controller of documentUploadControllersRef.current.values()) controller.abort();
+    documentUploadControllersRef.current.clear();
+    setDocumentUploading(false);
+  }, []);
+
   const selectProject = useCallback((projectId: string) => {
-    if (documentUploading) {
-      setNotice(workbenchNotice("Espera a que termine de prepararse el documento antes de cambiar de proyecto.", "warning"));
-      return false;
-    }
     const project = projects.find((candidate) => candidate.id === projectId && candidate.status === "active");
     if (!project) return false;
+    cancelDocumentUploads();
     if (activeProjectId && activeThreadId) threadByProjectRef.current[activeProjectId] = activeThreadId;
     const rememberedId = threadByProjectRef.current[projectId];
     const remembered = threads.find((thread) =>
@@ -1186,15 +1193,12 @@ export function BrainApp({
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
     return true;
-  }, [activeProjectId, activeThreadId, documentUploading, projects, switchComposerSelection, threads]);
+  }, [activeProjectId, activeThreadId, cancelDocumentUploads, projects, switchComposerSelection, threads]);
 
   const selectThread = useCallback((threadId: string) => {
-    if (documentUploading) {
-      setNotice(workbenchNotice("Espera a que termine de prepararse el documento antes de cambiar de conversación.", "warning"));
-      return;
-    }
     const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
     if (!thread) return;
+    cancelDocumentUploads();
     switchComposerSelection({ projectId: thread.projectId, threadId: thread.id });
     setActiveProjectId(thread.projectId);
     setActiveThreadId(thread.id);
@@ -1204,15 +1208,15 @@ export function BrainApp({
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
-  }, [documentUploading, switchComposerSelection, threads]);
+  }, [cancelDocumentUploads, switchComposerSelection, threads]);
 
   const startNewThread = useCallback((projectId?: string) => {
-    if (documentUploading) return;
     const destination = newThreadDestination(projects, projectId);
     if (!destination) {
       setNotice(workbenchNotice("No se ha podido preparar el espacio de conversaciones.", "error"));
       return;
     }
+    cancelDocumentUploads();
     delete threadByProjectRef.current[destination.id];
     switchComposerSelection({ projectId: destination.id, threadId: null });
     setActiveProjectId(destination.id);
@@ -1223,7 +1227,14 @@ export function BrainApp({
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [documentUploading, projects, switchComposerSelection]);
+  }, [cancelDocumentUploads, projects, switchComposerSelection]);
+
+  const changeDocuments = useCallback((next: StagedComposerDocument[]) => {
+    for (const [id, controller] of documentUploadControllersRef.current) {
+      if (!next.some((document) => document.uploadId === id)) controller.abort();
+    }
+    setDocuments(next);
+  }, []);
 
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
@@ -1239,16 +1250,19 @@ export function BrainApp({
     let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id
       ? activeThread
       : null;
+    const uploadEpoch = documentUploadEpochRef.current;
     setDocumentUploading(true);
     try {
       if (!thread) {
         thread = await createThreadRequest(activeProject.id, "Conversación con documentos");
         setThreads((current) => [thread as WorkbenchThread, ...current]);
+        if (documentUploadEpochRef.current !== uploadEpoch) return;
         adoptCurrentComposerThread(activeProject.id, thread.id);
         setActiveThreadId(thread.id);
         threadByProjectRef.current[activeProject.id] = thread.id;
       }
       for (const file of selected) {
+        if (documentUploadEpochRef.current !== uploadEpoch) break;
         const uploadId = crypto.randomUUID();
         const placeholder: StagedComposerDocument = {
           id: uploadId,
@@ -1265,7 +1279,9 @@ export function BrainApp({
         };
         setDocuments((current) => [...current, placeholder]);
         try {
-          const result = await stageDocument(thread.id, file, uploadId);
+          const controller = new AbortController();
+          documentUploadControllersRef.current.set(uploadId, controller);
+          const result = await stageDocument(thread.id, file, uploadId, controller.signal);
           setDocuments((current) => current.map((document) => document.uploadId === uploadId ? {
             ...document,
             name: result.document.fileName,
@@ -1281,15 +1297,27 @@ export function BrainApp({
           setDocuments((current) => current.map((document) => document.uploadId === uploadId
             ? { ...document, status: "error", error: message }
             : document));
-          setNotice(workbenchNotice(message, "error"));
+          if (documentUploadEpochRef.current === uploadEpoch && !documentUploadControllersRef.current.get(uploadId)?.signal.aborted) setNotice(workbenchNotice(message, "error"));
+        } finally {
+          documentUploadControllersRef.current.delete(uploadId);
         }
       }
     } catch (reason) {
-      setNotice(workbenchNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.", "error"));
+      if (documentUploadEpochRef.current === uploadEpoch) setNotice(workbenchNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.", "error"));
     } finally {
-      setDocumentUploading(false);
+      if (documentUploadEpochRef.current === uploadEpoch) setDocumentUploading(false);
     }
   }, [activeProject, activeThread, adoptCurrentComposerThread, documentUploading, documents, initialWorkbench.persistence, sending]);
+
+  const requestDocumentPublication = useCallback((attachment: ChatAttachment, turnId: string) => {
+    if (!activeThread) return;
+    setPublications((current) => [
+      ...current.filter((candidate) => candidate.uploadId !== attachment.id),
+      { id: attachment.id, threadId: activeThread.id, turnId, uploadId: attachment.id,
+        fileName: attachment.name, size: attachment.size, targetRelativePath: publicationTarget(attachment.name),
+        phase: "ready", operation: null, confirmationToken: null, permissionFingerprint: null, error: null },
+    ]);
+  }, [activeThread]);
 
   const freezePublication = useCallback(async (draftId: string, targetRelativePath: string) => {
     const draft = publications.find((candidate) => candidate.id === draftId);
@@ -1484,25 +1512,6 @@ export function BrainApp({
         next.add(threadId);
         return next;
       });
-      if (readyDocuments.length) {
-        setPublications((current) => [
-          ...current.filter((candidate) => !readyDocuments.some((document) => document.uploadId === candidate.uploadId)),
-          ...readyDocuments.map((document): DocumentPublicationDraft => ({
-            id: document.uploadId,
-            threadId,
-            turnId: assistantId,
-            uploadId: document.uploadId,
-            fileName: document.name,
-            size: document.size,
-            targetRelativePath: publicationTarget(document.name),
-            phase: "ready",
-            operation: null,
-            confirmationToken: null,
-            permissionFingerprint: null,
-            error: null,
-          })),
-        ]);
-      }
       setThreads((current) => current.map((candidate) => candidate.id === threadId
         ? {
             ...candidate,
@@ -2288,8 +2297,9 @@ export function BrainApp({
         onDestinationChange={startNewThread}
         onConnectorMentionIdsChange={setSelectedConnectorMentionIds}
         onAttachmentsChange={setAttachments}
-        onDocumentsChange={setDocuments}
+        onDocumentsChange={changeDocuments}
         onAddDocuments={addDocuments}
+        onRequestPublication={requestDocumentPublication}
         onFreezePublication={freezePublication}
         onDecidePublication={decidePublication}
         onComposerNotice={(message, kind = "warning") => setNotice(workbenchNotice(message, kind))}

@@ -188,6 +188,7 @@ button:disabled {
 
 .ui-brand {
   display: inline-flex;
+  flex-shrink: 0;
   min-width: 0;
   align-items: center;
   gap: 0.55rem;

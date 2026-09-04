@@ -390,6 +390,9 @@ export class DocumentPreviewService {
       const work = await mkdtemp(path.join(directory, ".work-"));
       try {
         const source = await readRegularFileWithin(this.stagingRoot, document.relativePath, 50 * 1024 * 1024);
+        if (source.length !== document.size || createHash("sha256").update(source).digest("hex") !== document.sha256) {
+          throw new StorageError("DOCUMENT_PREVIEW_SOURCE_CHANGED", "Staged source no longer matches its immutable identity.");
+        }
         if (options.signal?.aborted) {
           throw new StorageError("DOCUMENT_OPERATION_ABORTED", "Document preview was aborted.");
         }

@@ -20,6 +20,8 @@ export function BrandMark({
   compact?: boolean;
   className?: string;
 }) {
+  const imagePath = compact ? branding.faviconPath : branding.logoPath;
+  const officialArnall = imagePath === "/branding/arnall/logo.jpg";
   return (
     <span
       role="img"
@@ -28,7 +30,8 @@ export function BrandMark({
     >
       <Image
         preload
-        src={compact ? branding.faviconPath : branding.logoPath}
+        src={officialArnall ? `${imagePath}?v=d09bb6bb7e8a` : imagePath}
+        unoptimized={officialArnall}
         alt=""
         width={compact ? 40 : 194}
         height={compact ? 40 : 194}
