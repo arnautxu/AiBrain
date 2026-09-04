@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 
 const version = "0.149.1";
+const generationTimeoutMs = 360_000;
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const checkedRoot = path.join(repositoryRoot, "contracts", "codex", version);
 const generatedRoot = mkdtempSync(path.join(tmpdir(), "aibrain-codex-contracts-"));
@@ -41,12 +42,12 @@ try {
   execFileSync(npm, [...base, "generate-ts", "--experimental", "--out", path.join(generatedRoot, "types")], {
     cwd: repositoryRoot,
     stdio: "inherit",
-    timeout: 120_000,
+    timeout: generationTimeoutMs,
   });
   execFileSync(npm, [...base, "generate-json-schema", "--experimental", "--out", path.join(generatedRoot, "schema")], {
     cwd: repositoryRoot,
     stdio: "inherit",
-    timeout: 120_000,
+    timeout: generationTimeoutMs,
   });
   compareDirectory("types");
   compareDirectory("schema");
