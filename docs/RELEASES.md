@@ -204,6 +204,13 @@ los dos archivos fuente.
 
 ## Evidencia QA obligatoria
 
+La promoción recrea primero únicamente `egress-gateway` con `--no-deps --wait`.
+Solo después de que Docker confirme su health se recrean app, automation worker,
+ingress y alert dispatcher. La app y el worker ejecutan un preflight real de App
+Server a través del gateway durante su entrypoint; arrancarlos simultáneamente
+con un gateway todavía frío puede terminar en `EX_CONFIG` (78). Las dos fases
+comparten el mismo deadline de release y el mismo rollback transaccional.
+
 ```bash
 npx vitest run tests/unit/release-manager.test.ts
 ```

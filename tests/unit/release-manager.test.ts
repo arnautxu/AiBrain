@@ -199,7 +199,11 @@ if (args[0] === "image" && args[1] === "inspect") {
   const envFile = args[args.indexOf("--env-file") + 1];
   const image = readFileSync(envFile, "utf8").match(/^AIBRAIN_IMAGE=(.+)$/m)?.[1];
   const egressImage = readFileSync(envFile, "utf8").match(/^AIBRAIN_EGRESS_IMAGE=(.+)$/m)?.[1];
-  if (args.includes("up") && (image === process.env.FAKE_FAIL_IMAGE || egressImage === process.env.FAKE_FAIL_IMAGE)) {
+  const services = args.includes("--no-deps") ? args.slice(args.indexOf("--no-deps") + 1) : [];
+  const startsAppImage = services.some((service) => ["app", "automation-worker", "alert-dispatcher"].includes(service));
+  const startsEgressImage = services.some((service) => ["egress-gateway", "ingress-gateway"].includes(service));
+  if (args.includes("up") && ((startsAppImage && image === process.env.FAKE_FAIL_IMAGE)
+    || (startsEgressImage && egressImage === process.env.FAKE_FAIL_IMAGE))) {
     if (process.env.FAKE_MUTATE_ENV_ON_FAIL === "1") {
       const { appendFileSync: append } = await import("node:fs");
       append(envFile, "EXTERNAL_CHANGE=preserve\\n");
@@ -208,7 +212,10 @@ if (args[0] === "image" && args[1] === "inspect") {
   }
   if (args.includes("up")) {
     const { writeFileSync } = await import("node:fs");
-    writeFileSync(process.env.FAKE_RUNTIME_FILE, JSON.stringify({ app: image, egress: egressImage }));
+    const runtime = JSON.parse(readFileSync(process.env.FAKE_RUNTIME_FILE, "utf8"));
+    if (startsAppImage) runtime.app = image;
+    if (startsEgressImage) runtime.egress = egressImage;
+    writeFileSync(process.env.FAKE_RUNTIME_FILE, JSON.stringify(runtime));
   }
   if (args.includes("ps")) {
     if (process.env.FAKE_NO_RUNNING_AUTOMATION_WORKER === "1" && args.at(-1) === "automation-worker") process.exit(1);
@@ -321,7 +328,10 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("immutable release manager", () => {
+// Each case exercises the CLI through a real advisory-lock subprocess and a
+// separate fake-Docker subprocess per command. Keep this suite's harness bound
+// independently from the production release and Docker deadlines it asserts.
+describe("immutable release manager", { timeout: 20_000 }, () => {
   it("promotes and rolls back exact image digests with durable state", async () => {
     const files = await fixture();
     const promoted = await execFileAsync(process.execPath, commandArgs(files, "promote"), {
@@ -357,7 +367,18 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.seccomp.json`, "utf8")).toContain('"read"');
     const log = await readFile(files.logFile, "utf8");
     expect(log).toContain('"config","--quiet"');
-    expect(log).toContain('"up","-d","--force-recreate","--no-deps","egress-gateway","automation-worker","app","ingress-gateway","alert-dispatcher"');
+    const commands = log.trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    const upCommands = commands.filter((args) => args.includes("up"));
+    expect(upCommands).toHaveLength(4);
+    expect(upCommands.filter((args) => args.includes("--wait"))).toHaveLength(2);
+    expect(upCommands.slice(0, 2).map((args) => args.slice(args.indexOf("--no-deps") + 1))).toEqual([
+      ["egress-gateway"],
+      ["automation-worker", "app", "ingress-gateway", "alert-dispatcher"],
+    ]);
+    expect(upCommands.slice(2).map((args) => args.slice(args.indexOf("--no-deps") + 1))).toEqual([
+      ["egress-gateway"],
+      ["automation-worker", "app", "ingress-gateway", "alert-dispatcher"],
+    ]);
     expect(log).toContain('"{{.State.Status}} {{.State.Health.Status}}"');
   }, 20_000);
 
@@ -370,8 +391,8 @@ describe("immutable release manager", () => {
 
     const afterDisable = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
     const disabledUp = afterDisable.filter((args) => args.includes("up"));
-    expect(disabledUp).toHaveLength(1);
-    expect(disabledUp[0]).not.toContain("automation-worker");
+    expect(disabledUp).toHaveLength(2);
+    expect(disabledUp.every((args) => !args.includes("automation-worker"))).toBe(true);
     expect(afterDisable.filter((args) => args.includes("stop") && args.at(-1) === "automation-worker")).toHaveLength(2);
     expect(afterDisable.some((args) => args.includes("ps") && args.includes("--status")
       && args.includes("running") && args.at(-1) === "automation-worker")).toBe(true);
@@ -382,8 +403,8 @@ describe("immutable release manager", () => {
       env: { ...environment(files), AIBRAIN_AUTOMATION_WORKER_ENABLED: "true" },
     });
     const afterRestore = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
-    const restoredUp = afterRestore.filter((args) => args.includes("up")).at(-1);
-    expect(restoredUp).toContain("automation-worker");
+    const restoredUp = afterRestore.filter((args) => args.includes("up"));
+    expect(restoredUp.some((args) => args.includes("automation-worker") && args.includes("app"))).toBe(true);
   }, 20_000);
 
   it("accepts Compose's no-running-worker status while automation is disabled", async () => {
@@ -424,7 +445,7 @@ describe("immutable release manager", () => {
     expect(await readFile(`${files.stateFile}.active.compose.yaml`, "utf8")).toContain("x-release: A");
     await expect(readFile(files.stateFile, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     const log = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(log.filter((args) => args.includes("up"))).toHaveLength(2);
+    expect(log.filter((args) => args.includes("up"))).toHaveLength(4);
   });
 
   it("restores both images when the egress gateway promotion fails", async () => {
@@ -700,7 +721,7 @@ describe("immutable release manager", () => {
     })).rejects.toMatchObject({ code: expect.any(Number) });
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestB}`);
-    expect(JSON.parse(await readFile(files.runtimeFile, "utf8"))).toEqual({ app: digestB, egress: egressDigestB });
+    expect(JSON.parse(await readFile(files.runtimeFile, "utf8"))).toEqual({ app: digestA, egress: egressDigestB });
     await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), {
       env: environment(files),
     })).rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INTERRUPTED_RECOVERED") });
