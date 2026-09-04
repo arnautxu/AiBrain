@@ -211,7 +211,7 @@ async function assertRealDirectory(root: string, candidate: string) {
   if (!inside(canonicalRoot, canonicalCandidate)) {
     throw new BrowserStateError("BROWSER_ROOT_ESCAPE", "Browser root resolves outside its user boundary.");
   }
-  await chmod(candidate, 0o700);
+  if ((metadata.mode & 0o777) !== 0o700) await chmod(candidate, 0o700);
 }
 
 function newState(installationId: string, userId: string, now: string): BrowserPersistentState {
@@ -250,6 +250,7 @@ export class BrowserSessionStore {
   readonly heartbeatTtlMs: number;
   readonly maxDownloadRecords: number;
   private readonly now: () => number;
+  private readonly initializedRoots = new Map<string, Promise<void>>();
 
   constructor(options: BrowserSessionStoreOptions) {
     this.config = options.config;
@@ -277,12 +278,34 @@ export class BrowserSessionStore {
 
   async roots(userId: string): Promise<BrowserRoots> {
     validateWorkerUserId(userId);
-    const manifest = await this.provisioner.provision(userId);
     const expected = deriveWorkerRoots(this.config, userId);
-    if (manifest.roots.browserRoot !== expected.browserRoot ||
-      manifest.roots.browserProfile !== expected.browserProfile ||
-      manifest.roots.browserDownloads !== expected.browserDownloads) {
-      throw new BrowserStateError("BROWSER_ROOT_MISMATCH", "Browser roots do not match worker provisioning.");
+    // Provision once per store, not once per input/frame. This is initialization,
+    // never a cached permission/path check: all browser ancestors are checked below.
+    let initialization = this.initializedRoots.get(userId);
+    if (!initialization) {
+      initialization = this.provisioner.provision(userId).then((manifest) => {
+        if (manifest.roots.browserRoot !== expected.browserRoot ||
+          manifest.roots.browserProfile !== expected.browserProfile ||
+          manifest.roots.browserDownloads !== expected.browserDownloads) {
+          throw new BrowserStateError("BROWSER_ROOT_MISMATCH", "Browser roots do not match worker provisioning.");
+        }
+      });
+      this.initializedRoots.set(userId, initialization);
+      void initialization.catch(() => {
+        if (this.initializedRoots.get(userId) === initialization) this.initializedRoots.delete(userId);
+      });
+    }
+    await initialization;
+    const root = this.config.paths.dataRoot;
+    await assertRealDirectory(root, root);
+    let ancestor = root;
+    const relative = path.relative(root, expected.userRoot);
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+      throw new BrowserStateError("BROWSER_ROOT_ESCAPE", "Browser user root escapes installation data.");
+    }
+    for (const part of relative.split(path.sep)) {
+      ancestor = path.join(ancestor, part);
+      await assertRealDirectory(root, ancestor);
     }
     await Promise.all([
       assertRealDirectory(expected.userRoot, expected.browserRoot),
@@ -345,13 +368,19 @@ export class BrowserSessionStore {
     return state;
   }
 
-  private async mutate<T>(userId: string, operation: (state: BrowserPersistentState) => T | Promise<T>) {
+  private async mutate<T>(
+    userId: string,
+    operation: (state: BrowserPersistentState) => T | Promise<T>,
+    shouldWrite: (result: T) => boolean = () => true,
+  ) {
     const roots = await this.roots(userId);
     return this.lockManager(roots).withLock(`browser-state:${this.config.installationId}:${userId}`, async () => {
       const state = await this.readUnlocked(userId, roots);
       const result = await operation(state);
-      state.updatedAt = this.iso();
-      await this.writeUnlocked(roots.stateFile, state);
+      if (shouldWrite(result)) {
+        state.updatedAt = this.iso();
+        await this.writeUnlocked(roots.stateFile, state);
+      }
       return result;
     });
   }
@@ -462,7 +491,7 @@ export class BrowserSessionStore {
       state.lastRecoveryReason = "heartbeat_timeout";
       this.failActiveDownloads(state);
       return { changed: true, state } as const;
-    });
+    }, (result) => result.changed);
   }
 
   async markDegraded(userId: string, sessionId: string) {

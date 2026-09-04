@@ -70,4 +70,14 @@ describe("browser HTTP contracts", () => {
       command: { kind: "key", event: "keyDown", key: "A", extra: true },
     })).toBeNull();
   });
+  it("validates the entire bounded batch before dispatching any input", () => {
+    const key = { kind: "key", event: "keyDown", key: "a", text: "a" };
+    const batch = { threadId: THREAD_ID, action: "inputs", commands: [key, { ...key, event: "keyUp", text: undefined }] };
+    expect(parseBrowserViewerCommand(batch)).toEqual(batch);
+    expect(parseBrowserViewerCommand({ ...batch, commands: [] })).toBeNull();
+    expect(parseBrowserViewerCommand({ ...batch, commands: Array(33).fill(key) })).toBeNull();
+    expect(parseBrowserViewerCommand({ ...batch, commands: [key, { ...key, method: "Runtime.evaluate" }] })).toBeNull();
+    expect(parseBrowserViewerCommand({ ...batch, commands: [key, { action: "navigate", url: "file:///etc/passwd" }] })).toBeNull();
+  });
+
 });

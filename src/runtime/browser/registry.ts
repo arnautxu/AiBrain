@@ -446,6 +446,24 @@ export class BrowserRuntimeRegistry {
     await runtime.dispatchInput(threadId, command);
   }
 
+  async dispatchInputs(
+    userId: string,
+    threadId: string,
+    commands: readonly BrowserInputCommand[],
+    onDispatched?: (command: BrowserInputCommand) => void,
+  ) {
+    validateBrowserThreadId(threadId);
+    if (commands.length < 1 || commands.length > 32) throw new Error("Invalid browser input batch.");
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.recoverExpired(userId);
+    this.assertHumanControl(userId, state);
+    for (const command of commands) {
+      // Runtime checks controller ownership again when each queued CDP input executes.
+      await runtime.dispatchInput(threadId, command);
+      onDispatched?.(command);
+    }
+  }
+
   async stop(userId: string) {
     validateWorkerUserId(userId);
     const entry = this.entries.get(userId);

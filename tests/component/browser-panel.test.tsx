@@ -76,7 +76,7 @@ beforeEach(() => {
   browser.control.mockReset().mockImplementation(async (action: string) => action === "takeover"
     ? { ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }
     : readyStatus);
-  browser.issue.mockReset().mockResolvedValue({ token: "private-viewer-token", browserSessionId: SESSION_ID });
+  browser.issue.mockReset().mockImplementation(async () => ({ token: "private-viewer-token", browserSessionId: SESSION_ID }));
   browser.openStream.mockReset().mockResolvedValue(new Response("stream"));
   browser.readNavigation.mockReset().mockResolvedValue({
     url: "https://example.test/current", canGoBack: true, canGoForward: false,
@@ -127,8 +127,8 @@ describe("BrowserPanel", () => {
     await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
     expect(browser.send).not.toHaveBeenCalled();
     await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
-    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(8));
-    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(6));
+    const commands = browser.send.mock.calls.flatMap((call) => call[2].commands ?? [call[2].command]);
     expect(commands.map((command) => command.event)).toEqual([
       "mousePressed", "mouseReleased", "keyDown", "keyUp", "keyDown", "keyUp", "char", "mouseWheel",
     ]);
@@ -174,12 +174,12 @@ describe("BrowserPanel", () => {
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     const image = await screen.findByAltText("Vista actual del navegador privado");
     fireEvent.keyDown(image, { key: "a", code: "KeyA" });
-    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(1));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
     const issued = browser.issue.mock.calls.length;
     vi.spyOn(Date, "now").mockReturnValue(Date.now() + 26_000);
     fireEvent.keyDown(image, { key: "b", code: "KeyB" });
-    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
     expect(browser.issue.mock.calls.length).toBeGreaterThan(issued);
   });
 
@@ -198,8 +198,8 @@ describe("BrowserPanel", () => {
     fireEvent.keyDown(image, { key: "a", code: "KeyA", ctrlKey: true });
     fireEvent.keyDown(image, { key: "v", code: "KeyV", ctrlKey: true });
     fireEvent.paste(image, { clipboardData: { getData: () => "exact paste" } });
-    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(3));
-    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
+    const commands = browser.send.mock.calls.flatMap((call) => call[2].commands ?? [call[2].command]);
     expect(commands.map((command) => command.event)).toEqual(["keyDown", "keyUp", "char"]);
     expect(commands[0]).toMatchObject({ key: "a", modifiers: 2 });
     expect(commands[0].text).toBeUndefined();
@@ -476,8 +476,27 @@ describe("BrowserPanel", () => {
       .mockResolvedValueOnce(undefined)
       .mockImplementation(async () => new Promise<void>(() => undefined));
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
-    await waitFor(() => expect(browser.openStream.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() => expect(browser.openStream).toHaveBeenCalledTimes(2));
     expect(browser.issue.mock.calls.length).toBeGreaterThan(1);
     expect(browser.send).not.toHaveBeenCalled();
   });
+  it("combines a waiting wheel burst without moving it past a keyboard barrier", async () => {
+    let takeOver!: (value: unknown) => void;
+    browser.control.mockImplementation((action: string) => action === "takeover"
+      ? new Promise((resolve) => { takeOver = resolve; }) : Promise.resolve(readyStatus));
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    Object.defineProperties(image, { naturalWidth: { value: 1440 }, naturalHeight: { value: 900 } });
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 720, height: 450 } as DOMRect);
+    for (let index = 0; index < 80; index += 1) fireEvent.wheel(image, { clientX: 10, clientY: 20, deltaY: 3 });
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    fireEvent.wheel(image, { clientX: 10, clientY: 20, deltaY: 7, deltaMode: 1 });
+    await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
+    await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(3));
+    const commands = browser.send.mock.calls.flatMap((call) => call[2].commands ?? [call[2].command]);
+    expect(commands.map((command) => command.event)).toEqual(["mouseWheel", "keyDown", "keyUp", "mouseWheel"]);
+    expect(commands.filter((command) => command.event === "mouseWheel").map((command) => command.deltaY)).toEqual([240, 112]);
+  });
+
 });

@@ -715,7 +715,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
-  it.each(["navigate", "reload"] as const)("does not repeat %s after a stale readback", async (action) => {
+  it.each(["navigate", "reload"] as const)("does not repeat %s after an uncertain command or stale history readback", async (action) => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
     const client = new FakeCdpClient(() => child.exit());
@@ -727,7 +727,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.start();
     await runtime.takeOver();
     await runtime.captureFrame(THREAD_A);
-    client.failNext("Runtime.evaluate", new CdpClientError(
+    client.failNext(action === "navigate" ? "Page.navigate" : "Page.getNavigationHistory", new CdpClientError(
       "CDP_COMMAND_FAILED", "Runtime.evaluate failed: Not attached to an active page",
     ));
     const before = client.commands.length;
@@ -756,7 +756,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     const staleTarget = runtime.targetIdFor(THREAD_A);
     client.failNext("Page.captureScreenshot", new CdpClientError(
       "CDP_COMMAND_FAILED",
-      "Page.captureScreenshot failed: Not attached to an active page",
+      "Page.captureScreenshot failed: Session not found",
     ));
 
     await expect(runtime.agentCaptureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
@@ -766,7 +766,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
-  it("serializes viewer work behind navigation and keeps health checks non-intrusive while busy", async () => {
+  it("serializes CDP work during navigation dispatch and keeps health checks non-intrusive while busy", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
     const client = new FakeCdpClient(() => child.exit());
