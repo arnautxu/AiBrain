@@ -85,3 +85,19 @@ passed (1.16s), and new PDF/old cache regression passed (1.17s). The other three
 native formats and aggregate native matrix passed before this PDF-only follow-up.
 Root visually inspected the rebuilt legacy page. Production acceptance remains
 independent from those native tests.
+
+## Deployment startup ordering repair
+
+The failed `d927d92` promotion recreated the egress gateway, app and automation
+worker in one `docker compose up --no-deps` call. Both application containers
+run the packaged App Server acceptance through the private gateway before their
+long-lived process starts. The candidate app exited with code 78 during that
+cold-gateway window; the worker consequently never became healthy. The exact
+image passed the same host preflight in an isolated no-traffic run once egress
+was already healthy, ruling out a candidate schema, secret-name or packaged
+binary mismatch.
+
+The release manager now recreates and health-waits the immutable egress gateway
+first, then starts the remaining services. The existing shared deadline,
+validation and automatic rollback are unchanged. The release-manager regression
+requires this two-stage order for both promotion and rollback.

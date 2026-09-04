@@ -696,17 +696,33 @@ function deploy(options, release, deadline = performance.now() + options.healthT
   assertSelectedReleaseInputs(options, release);
   runDocker(options, composeArgs(options, release, "config", "--quiet"), remainingDockerTimeout(options, deadline));
   if (!automationWorkerEnabled) stopAutomationWorkerIfRunning(options, release, deadline);
+  // `--no-deps` is deliberate: release inputs are selected transactionally and
+  // Compose must not start an implicit, stale dependency set. Start the private
+  // egress gateway explicitly first, though. Both application processes run a
+  // real App Server acceptance through that gateway in their entrypoint; when
+  // every service was recreated in one call they could fail with EX_CONFIG
+  // before the new gateway became healthy.
+  runDocker(
+    options,
+    composeArgs(
+      options,
+      release,
+      "up", "-d", "--force-recreate", "--wait", "--no-deps",
+      "egress-gateway",
+    ),
+    remainingDockerTimeout(options, deadline),
+  );
+
   runDocker(
     options,
     composeArgs(
       options,
       release,
       "up", "-d", "--force-recreate", "--no-deps",
-      ...managedServiceSet(automationWorkerEnabled),
+      ...managedServiceSet(automationWorkerEnabled).filter((service) => service !== "egress-gateway"),
     ),
     remainingDockerTimeout(options, deadline),
   );
-  waitUntilHealthy(options, release, "egress-gateway", deadline);
   if (automationWorkerEnabled) waitUntilHealthy(options, release, "automation-worker", deadline);
   waitUntilHealthy(options, release, "app", deadline);
   waitUntilHealthy(options, release, "ingress-gateway", deadline);
