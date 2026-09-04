@@ -323,12 +323,20 @@ verify_public_health() {
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
 }
 
+prepare_arnall_branding_config() {
+  local source="$1" target="$2"
+  jq -e 'if .companySlug != "arnall" then error("not the Arnall installation") else
+    (if .branding.logoPath == "/branding/aibrain/logo.svg" then .branding.logoPath = "/branding/arnall/logo.jpg" else . end) |
+    (if .branding.faviconPath == "/branding/aibrain/favicon.svg" then .branding.faviconPath = "/branding/arnall/logo.jpg" else . end) end' "$source" > "$target" \
+    || fail "cannot prepare the reviewed Arnall branding config"
+}
+
 deploy_ghcr_release() {
   local revision="$1" app_image="$2" egress_image="$3" ghcr_user="$4"
   local short_revision="${revision:0:7}"
   local target_env="${CONFIG_DIR}/compose.env.target-${short_revision}"
   local compose_file="${OPS_ROOT}/compose.yaml"
-  local manager_args
+  local manager_args target_config
 
   umask 077
   install -d -m 0700 -o root -g root "$RELEASE_ROOT" "$CONFIG_DIR"
@@ -359,6 +367,10 @@ deploy_ghcr_release() {
   fi
 
   pull_ghcr_images "$app_image" "$egress_image" "$ghcr_user" "$revision"
+  # Stage a target config: editing ACTIVE_CONFIG here would violate the
+  # release manager's drift check and lose transactional rollback of branding.
+  target_config="$(mktemp "${CONFIG_DIR}/installation.target-${short_revision}.XXXXXX")"
+  prepare_arnall_branding_config "$ACTIVE_CONFIG" "$target_config"
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"
   set_automation_worker_flag "$target_env"
   manager_args=(
@@ -370,7 +382,7 @@ deploy_ghcr_release() {
     --env-file "$ACTIVE_ENV"
     --target-env-file "$target_env"
     --compose-file "$compose_file"
-    --installation-config "$ACTIVE_CONFIG"
+    --installation-config "$target_config"
     --state-file "$STATE_FILE"
     --health-timeout-ms 240000
     --docker-command-timeout-ms 240000
