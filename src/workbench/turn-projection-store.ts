@@ -273,6 +273,15 @@ export class FileTurnProjectionStore {
     await atomicWriteJson(filePath, projection, turnProjectionSchema, { mode: 0o600 });
   }
 
+  private assertSnapshotBinding(event: ChatStreamEvent, message: ChatMessage) {
+    // These immutable fields cannot be laundered by a later valid snapshot.
+    // Structural validation already ran; no extra full-transcript scan here.
+    if (event.type === "snapshot" && (event.message.id !== message.id ||
+        event.message.role !== "assistant" || event.message.createdAt !== message.createdAt)) {
+      throw new WorkbenchPersistenceError("El snapshot no pertany al missatge original.");
+    }
+  }
+
   async initialize(threadId: string, message: ChatMessage) {
     const identity = await this.prepare(threadId, message.id);
     return this.locks.withLock(identity.lockKey, async () => {
@@ -355,6 +364,7 @@ export class FileTurnProjectionStore {
       let changed = false;
       const applied: boolean[] = [];
       for (const { envelope, projectionKey, event } of events) {
+        this.assertSnapshotBinding(event, stored.message);
         if (envelope.sequence < projection.lastTransportSequence) {
           applied.push(false);
           continue;
@@ -405,6 +415,8 @@ export class FileTurnProjectionStore {
     return this.locks.withLock(identity.lockKey, async () => {
       const projection = await this.readUnlocked(identity.filePath);
       if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
+      this.assertBinding(projection, threadId, assistantMessageId);
+      this.assertSnapshotBinding(event, projection.message);
       const next = turnProjectionSchema.parse({
         ...projection,
         localRevision: projection.localRevision + 1,

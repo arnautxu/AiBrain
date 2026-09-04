@@ -88,6 +88,36 @@ describe("turn projection store", () => {
     expect(validation.mock.calls.length).toBe(3);
   });
 
+  it("rejects masked intermediate snapshot bindings without changing disk or cursor", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    const initial = assistant(id);
+    await projections.initialize(thread, initial);
+    for (const patch of [
+      { id: "00000000-0000-4000-8000-000000000083" },
+      { role: "user" as const },
+      { createdAt: "2026-08-28T00:00:00.001Z" },
+      { createdAt: "2026-08-27T00:00:00.001+00:00" },
+    ]) {
+      const before = await projections.read(thread, id);
+      await expect(projections.applyTransportEvents(thread, id, [
+        { envelope: envelope(1), projectionKey: "delta", event: { type: "delta", value: "valid" } },
+        { envelope: envelope(2), projectionKey: "snapshot", event: { type: "snapshot", message: { ...initial, ...patch } } },
+        { envelope: envelope(3), projectionKey: "restore", event: { type: "snapshot", message: initial } },
+      ])).rejects.toThrow();
+      expect(await projections.read(thread, id)).toEqual(before);
+      await expect(projections.applyLocalEvent(thread, id,
+        { type: "snapshot", message: { ...initial, ...patch } })).rejects.toThrow();
+      expect(await projections.read(thread, id)).toEqual(before);
+    }
+    const valid = await projections.applyTransportEvents(thread, id, [
+      { envelope: envelope(1), projectionKey: "snapshot", event: { type: "snapshot", message: { ...initial, content: "valid" } } },
+    ]);
+    expect(valid.projection.lastTransportSequence).toBe(1);
+    expect(valid.projection.message.content).toBe("valid");
+  });
+
   it("rejects malformed intermediate envelopes and oversized key sets without partial persistence", async () => {
     const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
     const thread = "00000000-0000-4000-8000-000000000081";
