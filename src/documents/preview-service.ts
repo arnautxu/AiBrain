@@ -431,7 +431,9 @@ export class DocumentPreviewService {
               // Fatal parsing errors still fail; the resulting file must pass
               // a strict check below. The staged/workspace source is untouched.
               const normalizedPdfPath = path.join(work, "normalized.pdf");
-              await this.runner.run(this.tools.qpdf, ["--warning-exit-0", pdfPath, normalizedPdfPath], {
+              // Building a new page container also repairs absent trailer /Size;
+              // a plain qpdf rewrite preserves that defect in historical PDFs.
+              await this.runner.run(this.tools.qpdf, ["--warning-exit-0", "--empty", "--pages", pdfPath, "1-z", "--", normalizedPdfPath], {
                 cwd: work, env: environment, timeoutMs: 15_000, signal: options.signal,
               });
               pdfPath = normalizedPdfPath;
