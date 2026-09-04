@@ -151,20 +151,36 @@ cleanup_ghcr_credentials() {
   exit "$status"
 }
 
+verify_current_main() {
+  local revision="$1" token="$2" remote_sha
+  # Token goes through stdin, never argv, a durable file, or diagnostic output.
+  [[ "$token" =~ ^[A-Za-z0-9_]+$ ]] || fail "deployment token has invalid characters"
+  remote_sha="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | \
+    curl --config - --fail --silent --show-error --connect-timeout 10 --max-time 20 \
+      -H 'Accept: application/vnd.github+json' \
+      'https://api.github.com/repos/arnautxu/AiBrain/git/ref/heads/main' | jq -er '.object.sha')" \
+    || fail "cannot verify current GitHub main; promotion refused"
+  [[ "$remote_sha" == "$revision" ]] || fail "candidate superseded by current GitHub main; promotion refused"
+}
+
 pull_ghcr_images() {
-  local app_image="$1" egress_image="$2" ghcr_user="$3" ghcr_token=""
+  local app_image="$1" egress_image="$2" ghcr_user="$3" revision="$4" ghcr_token=""
   [[ "$app_image" =~ ^${GHCR_APP_REPOSITORY}@sha256:[0-9a-f]{64}$ ]] || fail "application image is not the approved GHCR repository and digest"
   [[ "$egress_image" =~ ^${GHCR_EGRESS_REPOSITORY}@sha256:[0-9a-f]{64}$ ]] || fail "egress image is not the approved GHCR repository and digest"
   [[ "$ghcr_user" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail "GHCR username is invalid"
   IFS= read -r ghcr_token || [[ -n "$ghcr_token" ]] || fail "GHCR pull token was not supplied"
   [[ -n "$ghcr_token" ]] || fail "GHCR pull token was empty"
+  verify_current_main "$revision" "$ghcr_token"
   umask 077
   ghcr_docker_config="$(mktemp -d "${RELEASE_ROOT}/.ghcr-docker.XXXXXX")"
   trap cleanup_ghcr_credentials EXIT
   printf '%s' "$ghcr_token" | docker --config "$ghcr_docker_config" login ghcr.io --username "$ghcr_user" --password-stdin >/dev/null
-  unset ghcr_token
   docker --config "$ghcr_docker_config" pull "$app_image" >/dev/null
   docker --config "$ghcr_docker_config" pull "$egress_image" >/dev/null
+  # This runs under deploy.lock, AFTER slow image pulls and before any service
+  # mutation. A concurrent main push invalidates this candidate, not user work.
+  verify_current_main "$revision" "$ghcr_token"
+  unset ghcr_token
 }
 
 is_aibrain_image_reference() {
@@ -342,7 +358,7 @@ deploy_ghcr_release() {
     return
   fi
 
-  pull_ghcr_images "$app_image" "$egress_image" "$ghcr_user"
+  pull_ghcr_images "$app_image" "$egress_image" "$ghcr_user" "$revision"
   replace_release_values "$ACTIVE_ENV" "$target_env" "$app_image" "$egress_image" "$revision"
   set_automation_worker_flag "$target_env"
   manager_args=(
