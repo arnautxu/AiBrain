@@ -16,11 +16,16 @@ function documentIcon(kind: DocumentArtifact["kind"]) {
   return <FilePdf size={17} />;
 }
 
-export function DocumentPreviewPanel({ artifact, onClose }: {
+export function DocumentPreviewPanel(props: { artifact: DocumentArtifact; onClose: () => void }) {
+  return <DocumentPreviewContent key={`${props.artifact.id}:${props.artifact.previewUrl}`} {...props} />;
+}
+
+function DocumentPreviewContent({ artifact, onClose }: {
   artifact: DocumentArtifact;
   onClose: () => void;
 }) {
-  const [loaded, setLoaded] = useState(artifact.kind === "text");
+  const [loaded, setLoaded] = useState(artifact.kind === "text" || artifact.previewFormat === "spreadsheet");
+  const [failureReason, setFailureReason] = useState<string | null>(null);
   const [failed, setFailed] = useState(!artifact.previewUrl);
   const [reload, setReload] = useState(0);
   const previewKind = artifact.kind === "pdf" ? "PDF" : "documento";
@@ -28,7 +33,7 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const panelRef = useModalFocus<HTMLElement>(mobileOverlay, onClose, closeButtonRef);
   const handleLoad = useCallback(() => setLoaded(true), []);
-  const handleError = useCallback(() => setFailed(true), []);
+  const handleError = useCallback((error: Error) => { setFailureReason(error.message); setFailed(true); }, []);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -41,8 +46,9 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
 
   const retry = () => {
     if (!artifact.previewUrl) return;
-    setLoaded(false);
+    setLoaded(artifact.kind === "text" || artifact.previewFormat === "spreadsheet");
     setFailed(false);
+    setFailureReason(null);
     setReload((current) => current + 1);
   };
 
@@ -76,7 +82,7 @@ export function DocumentPreviewPanel({ artifact, onClose }: {
         ) : null}
         {failed ? (
           <div className="grid h-full place-items-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-8 text-center" role="alert">
-            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el {previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">Puedes volver a intentarlo o descargar el archivo original.</p><button type="button" className="touch-target mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
+            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el {previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">{failureReason ?? "Puedes volver a intentarlo o descargar el archivo original."}</p><button type="button" className="touch-target mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
           </div>
         ) : artifact.previewUrl && artifact.previewFormat === "spreadsheet" ? (
           <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} />

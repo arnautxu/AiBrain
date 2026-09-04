@@ -51,6 +51,8 @@ export async function GET(
         staged.size !== version.size || staged.sha256 !== version.sha256) {
       return NextResponse.json({ error: "La versión ya no coincide con su contenido inmutable." }, { status: 409 });
     }
+    // Authorization and immutable source binding above must precede cache repair.
+    await services.previews.create(staged, { signal: _request.signal });
     const data = await services.previews.readFile(threadId, version.contentUploadId, fileName);
     return new Response(new Uint8Array(data), {
       headers: {

@@ -1,4 +1,6 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { generatedPngFixture } from "../helpers/png-fixture";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -156,8 +158,52 @@ describe("authenticated document routes", () => {
     expect(preview.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(await preview.text()).toBe("Private document\n");
 
+    // A previously uploaded document keeps its authorized URL after a cache
+    // schema upgrade, deletion, or corruption. Retry must rebuild real bytes.
+    const { loadInstallationConfig } = await import("@/config/installation");
+    const { documentServicesForUser } = await import("@/documents/server-service");
+    const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
+    const previewDirectory = path.join(services.previews.previewRoot, threadId, UPLOAD_ID);
+    const metadataPath = path.join(previewDirectory, "preview.json");
+    const oldMetadata = JSON.parse(await readFile(metadataPath, "utf8"));
+    oldMetadata.schemaVersion = 1;
+    delete oldMetadata.artifacts;
+    await writeFile(metadataPath, JSON.stringify(oldMetadata), { mode: 0o600 });
+    const recovered = await previewRoute.GET(new Request("http://localhost/preview"), previewContext);
+    expect(recovered.status).toBe(200);
+    expect(await recovered.text()).toBe("Private document\n");
+    await rm(path.join(previewDirectory, "preview.txt"));
+    const recreated = await previewRoute.GET(new Request("http://localhost/preview"), previewContext);
+    expect(recreated.status).toBe(200);
+    expect(await recreated.text()).toBe("Private document\n");
+
     auth.session = session(USER_B);
     expect((await previewRoute.GET(new Request("http://localhost/preview"), previewContext)).status).toBe(404);
+  });
+
+  it("stages a PNG privately and supplies image bytes to the model without publication", async () => {
+    const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+    const previewRoute = await import("@/app/api/threads/[threadId]/documents/[uploadId]/preview/[fileName]/route");
+    const { documentServicesForUser } = await import("@/documents/server-service");
+    const { loadInstallationConfig } = await import("@/config/installation");
+    const { ServerTurnDocumentInputResolver } = await import("@/documents/turn-attachments");
+    auth.session = session(USER_A);
+    const uploadId = "0198b9f0-6631-7000-8000-000000000519";
+    const png = generatedPngFixture();
+    const response = await uploadRoute.POST(uploadRequest(uploadId, new File([new Uint8Array(png)], "input.png", { type: "image/png" })), { params: Promise.resolve({ threadId }) });
+    expect(response.status).toBe(201);
+    expect((await response.json()).document.kind).toBe("image");
+    const config = await loadInstallationConfig();
+    const services = await documentServicesForUser(config, USER_A);
+    const staged = await services.staging.readById(threadId, uploadId);
+    const resolver = new ServerTurnDocumentInputResolver({ stagingRoot: services.manifest.roots.staging, previews: services.previews, pdftotext: "/unused/pdftotext" });
+    expect(await resolver.resolve(staged)).toEqual([{ type: "image", url: `data:image/png;base64,${png.toString("base64")}` }]);
+    const preview = await previewRoute.GET(new Request("http://localhost/preview"), { params: Promise.resolve({ threadId, uploadId, fileName: "preview.png" }) });
+    expect(preview.status).toBe(200);
+    expect(Buffer.from(await preview.arrayBuffer()).equals(png)).toBe(true);
+    expect(existsSync(config.paths.publishWriteRoot)).toBe(false);
+    auth.session = session(USER_B);
+    expect((await previewRoute.GET(new Request("http://localhost/preview"), { params: Promise.resolve({ threadId, uploadId, fileName: "preview.png" }) })).status).toBe(404);
   });
 
   it("rejects false MIME before any staged response is returned", async () => {

@@ -21,13 +21,16 @@ import {
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
+import { ChatAttachmentImage } from "@/components/chat-attachment-image";
+import NextImage from "next/image";
+import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { DaySeparator } from "@/components/assistant-ui/elements/day-separator";
 import { MarkdownMessage } from "@/components/markdown-message";
 import { StreamingResponse } from "@/components/agents/streaming-response";
 import { MessageQueue, type QueuedMessage } from "@/components/assistant-ui/elements/message-queue";
 import { ThinkingOrb } from "thinking-orbs";
-import type { ApprovalDecision, ApprovalItem, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
+import type { ApprovalDecision, ApprovalItem, ChatAttachment, ChatInputAttachment, ChatMessage, DocumentArtifact } from "@/lib/chat-contract";
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
@@ -81,6 +84,7 @@ type ChatWorkspaceProps = {
   onAttachmentsChange: (value: ChatInputAttachment[]) => void;
   onDocumentsChange: (value: StagedComposerDocument[]) => void;
   onAddDocuments: (files: File[]) => Promise<void>;
+  onRequestPublication?: (attachment: ChatAttachment, turnId: string) => void;
   onFreezePublication: (draftId: string, targetRelativePath: string) => Promise<void>;
   onDecidePublication: (draftId: string, action: "confirm" | "decline") => Promise<void>;
   onComposerNotice: (message: string, kind?: VoiceNoticeKind) => void;
@@ -353,7 +357,7 @@ function AssistantMessage({
   );
 }
 
-function UserMessage({ message, onEdit, readOnly = false }: { message: ChatMessage; onEdit: (content: string) => void; readOnly?: boolean }) {
+function UserMessage({ message, threadId, onRequestPublication, onEdit, readOnly = false }: { message: ChatMessage; threadId: string; onRequestPublication?: (attachment: ChatAttachment) => void; onEdit: (content: string) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.content);
   return (
@@ -364,7 +368,9 @@ function UserMessage({ message, onEdit, readOnly = false }: { message: ChatMessa
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
               <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[12px] text-[var(--text)]">
-                <ImageIcon size={11} /><span className="truncate">{attachment.name}</span>
+                {attachment.mimeType.startsWith("image/") ? <ChatAttachmentImage attachment={attachment} threadId={threadId} /> : <FileIcon size={11} />}
+                <span className="truncate">{attachment.name}</span>
+                {!readOnly && onRequestPublication ? <button type="button" aria-label={`Preparar publicación de ${attachment.name}`} title="Publicar como documento oficial" onClick={() => onRequestPublication(attachment)} className="touch-target shrink-0 rounded p-1 hover:bg-[var(--surface-hover)]"><Plus size={12} /></button> : null}
               </span>
             ))}
           </div>
@@ -420,6 +426,7 @@ export function ChatWorkspace({
   onAttachmentsChange,
   onDocumentsChange,
   onAddDocuments,
+  onRequestPublication,
   onFreezePublication,
   onDecidePublication,
   onComposerNotice,
@@ -452,7 +459,13 @@ export function ChatWorkspace({
   const connectorCatalogRef = useRef<HTMLDivElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
-  const [dragActive, setDragActive] = useState(false);
+  const fileReadingRef = useRef(false);
+  const [fileReading, setFileReading] = useState(false);
+  const attachmentSelectionRef = useRef(0);
+  useEffect(() => {
+    attachmentSelectionRef.current += 1;
+    return () => { attachmentSelectionRef.current += 1; };
+  }, [project?.id, thread?.id]);
   const [mentionOpen, setMentionOpen] = useState(false);
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
@@ -633,6 +646,7 @@ export function ChatWorkspace({
 
   const addImages = async (files: FileList | File[] | null) => {
     if (!files || !canAttachImages) return;
+    const selection = attachmentSelectionRef.current;
     const available = Math.max(0, 3 - attachments.length);
     const selected = Array.from(files).slice(0, available);
     if (files.length > available) onComposerNotice("Puedes adjuntar un máximo de 3 imágenes por mensaje.");
@@ -658,16 +672,20 @@ export function ChatWorkspace({
       }
       next.push({ id: crypto.randomUUID(), name: file.name, mimeType: file.type, size: file.size, dataUrl });
     }
+    if (selection !== attachmentSelectionRef.current) return;
     if (next.length) onAttachmentsChange([...attachments, ...next]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const addFiles = async (files: FileList | File[] | null) => {
-    if (!files) return;
+    if (!files || sending || documentUploading || readOnly || fileReadingRef.current) return;
+    fileReadingRef.current = true;
+    setFileReading(true);
+    try {
     const images: File[] = [];
     const documentFiles: File[] = [];
     for (const file of Array.from(files)) {
-      if (canAttachImages && /^image\/(png|jpeg|webp|gif)$/.test(file.type) && file.size <= 2_000_000) {
+      if (!canAttachDocuments && canAttachImages && /^image\/(png|jpeg|webp|gif)$/.test(file.type) && file.size <= 2_000_000) {
         images.push(file);
       } else if (canAttachDocuments) {
         documentFiles.push(file);
@@ -677,14 +695,26 @@ export function ChatWorkspace({
     }
     if (images.length) await addImages(images);
     if (documentFiles.length) await onAddDocuments(documentFiles);
+    } finally {
+      fileReadingRef.current = false;
+      setFileReading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
+
+  const { dragActive, dropProps } = useComposerFileDrop({
+    enabled: (canAttachImages || canAttachDocuments) && !readOnly && !sending && !documentUploading && !fileReading,
+    selection: `${project?.id}:${thread?.id}`,
+    onFiles: (files) => { void addFiles(files); },
+    onNotice: onComposerNotice,
+  });
 
   const jumpToBottom = () => {
     void scrollToBottom({ animation: "instant" });
   };
 
   return (
-    <main aria-busy={!hydrated} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+    <main {...dropProps} aria-busy={!hydrated} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       <header data-testid="mobile-app-header" className="mobile-app-header flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
         <div className="flex min-w-0 items-center gap-2">
           <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
@@ -720,7 +750,7 @@ export function ChatWorkspace({
               {thread?.messages.map((message, index) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
                   <DaySeparator date={message.createdAt} previousDate={thread.messages[index - 1]?.createdAt} />
-                  {message.role === "user" ? <UserMessage message={message} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
+                  {message.role === "user" ? <UserMessage message={message} threadId={thread.id} onRequestPublication={onRequestPublication && thread.messages[index + 1]?.role === "assistant" ? (attachment) => onRequestPublication(attachment, thread.messages[index + 1]!.id) : undefined} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
                       assistantName={assistantName}
@@ -783,15 +813,17 @@ export function ChatWorkspace({
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
             className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !selectedMentions.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            onPaste={(event) => {
+              if (!event.clipboardData.files.length) return;
+              event.preventDefault();
+              void addFiles(event.clipboardData.files);
+            }}
             onFocusCapture={() => setComposerFocused(true)}
             onBlurCapture={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false);
             }}
-            onDragEnter={(event) => { event.preventDefault(); if ((canAttachImages || canAttachDocuments) && !sending && !documentUploading) setDragActive(true); }}
-            onDragOver={(event) => { event.preventDefault(); }}
-            onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragActive(false); }}
-            onDrop={(event) => { event.preventDefault(); setDragActive(false); if (!sending && !documentUploading) void addFiles(event.dataTransfer.files); }}
           >
+            {fileReading ? <p role="status" className="px-3 py-1 text-[11px] text-[var(--text-muted)]">Preparando adjuntos…</p> : null}
             {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--text)]">Suelta los archivos para adjuntarlos</div> : null}
             {composerMenuOpen ? (
               <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
@@ -804,14 +836,14 @@ export function ChatWorkspace({
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><ImageIcon size={12} /></span>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><NextImage unoptimized src={attachment.dataUrl} width={32} height={32} alt={`Vista previa de ${attachment.name}`} className="size-6 object-contain" /></span>
                     <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[11px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
                     <button type="button" aria-label={`Quitar ${attachment.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>
                 ))}
                 {documents.map((document) => (
                   <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.kind === "image" && document.status === "ready" && document.previewFiles[0] ? <NextImage unoptimized src={document.previewFiles[0].url} width={32} height={32} alt={`Vista previa de ${document.name}`} className="size-6 object-contain" /> : document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
                     <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
                     {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
                     <button type="button" aria-label={`Quitar ${document.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>

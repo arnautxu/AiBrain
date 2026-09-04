@@ -156,6 +156,55 @@ beforeAll(() => {
 });
 
 describe("chat workspace simplificado", () => {
+  it("stages dropped and pasted files in the current draft without sending or publishing", async () => {
+    const onAddDocuments = vi.fn(async () => undefined);
+    const onSend = vi.fn();
+    const onRequestPublication = vi.fn();
+    renderWorkspace(null, project, { prompt: "Keep this draft", onAddDocuments, onSend, onRequestPublication,
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true } });
+    const png = new File(["synthetic image bytes"], "image.png", { type: "image/png" });
+    const pdf = new File(["synthetic pdf bytes"], "notes.pdf", { type: "application/pdf" });
+    fireEvent.drop(screen.getByRole("main"), { dataTransfer: { types: ["Files"], files: [png, pdf] } });
+    await waitFor(() => expect(onAddDocuments).toHaveBeenCalledWith([png, pdf]));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Keep this draft");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onRequestPublication).not.toHaveBeenCalled();
+    expect(screen.queryByText("Destino oficial")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Preparando adjuntos…")).toBeNull());
+    fireEvent.paste(screen.getByRole("textbox", { name: "Mensaje" }), { clipboardData: { files: [png] } });
+    await waitFor(() => expect(onAddDocuments).toHaveBeenCalledTimes(2));
+    expect(onAddDocuments).toHaveBeenLastCalledWith([png]);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Keep this draft");
+  });
+
+  it("offers publication only after a deliberate action on a sent attachment", () => {
+    const onRequestPublication = vi.fn();
+    const attachment = { id: "00000000-0000-4000-8000-000000000019", name: "notes.pdf", mimeType: "application/pdf", size: 128 };
+    renderWorkspace({ id: "thread-1", projectId: project.id, title: "Private files", status: "active", pinned: false,
+      createdAt: project.createdAt, updatedAt: project.updatedAt,
+      messages: [{ ...assistantMessage(), id: "user-1", role: "user", content: "Read this", attachments: [attachment], approvals: [] }, assistantMessage()],
+    }, project, { onRequestPublication });
+    expect(onRequestPublication).not.toHaveBeenCalled();
+    expect(screen.queryByText("Destino oficial")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Preparar publicación de notes.pdf" }));
+    expect(onRequestPublication).toHaveBeenCalledExactlyOnceWith(attachment, "message-1");
+  });
+
+  it("rejects dropped directories and ignores normal text drags", () => {
+    const onAddDocuments = vi.fn(async () => undefined);
+    const onComposerNotice = vi.fn();
+    renderWorkspace(null, project, { onAddDocuments, onComposerNotice,
+      runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true } });
+    fireEvent.dragEnter(screen.getByRole("main"), { dataTransfer: { types: ["text/plain"], files: [] } });
+    expect(screen.queryByText("Suelta los archivos para adjuntarlos")).toBeNull();
+    fireEvent.drop(screen.getByRole("main"), { dataTransfer: { types: ["Files"], files: [], items: [
+      { kind: "file", webkitGetAsEntry: () => ({ isDirectory: true }), getAsFile: () => null },
+    ] } });
+    expect(onComposerNotice).toHaveBeenCalledWith(expect.stringContaining("carpetas"));
+    expect(onAddDocuments).not.toHaveBeenCalled();
+  });
+
   it("renders the final answer as rich Markdown once and outside collapsed work activity", () => {
     const message: ChatMessage = {
       ...assistantMessage(),

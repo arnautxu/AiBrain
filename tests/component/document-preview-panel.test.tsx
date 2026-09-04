@@ -39,6 +39,18 @@ function MobilePreviewHarness() {
 }
 
 describe("DocumentPreviewPanel", () => {
+  it("resets a failed preview when selecting another document", async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response("missing", { status: 404 }))
+      .mockResolvedValueOnce(new Response("%PDF-1.7", { headers: { "Content-Type": "application/pdf" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:second", revokeObjectURL: vi.fn() });
+    const { rerender } = render(<DocumentPreviewPanel artifact={artifact} onClose={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("No se ha podido mostrar el PDF");
+    rerender(<DocumentPreviewPanel artifact={{ ...artifact, id: "second", name: "second.pdf", previewUrl: "/api/projects/project/files?path=second.pdf&raw=1" }} onClose={vi.fn()} />);
+    expect(await screen.findByTitle("Documento second.pdf")).toHaveAttribute("src", "blob:second");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("previews the private PDF blob and keeps download and close actions available", async () => {
     const onClose = vi.fn();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.7\\n%%EOF", {

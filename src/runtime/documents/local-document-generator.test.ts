@@ -43,6 +43,23 @@ describe("local document generator", () => {
     await expect(pptxZip.file("ppt/slides/slide1.xml")!.async("text")).resolves.toContain("Impacto medible");
   });
 
+  it("writes explicit numeric formulas while leaving formula-looking text inert", async () => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Formula regression", content: "10 plus 20",
+      rows: [["Values"], [10], [20], [{ formula: "SUM(A2:A3)" }], ["=SUM(A2:A3)"], ["=WEBSERVICE(\"https://example.test\")"]] });
+    const archive = await JSZip.loadAsync(generated.data);
+    const sheet = await archive.file("xl/worksheets/sheet1.xml")!.async("text");
+    expect(sheet).toContain('<c r="A4"><f>SUM(A2:A3)</f></c>');
+    expect(sheet).toContain('<c r="A5" t="inlineStr"><is><t xml:space="preserve">=SUM(A2:A3)</t>');
+    expect(sheet).toContain('=WEBSERVICE(&quot;https://example.test&quot;)');
+    expect(await archive.file("xl/workbook.xml")!.async("text")).toContain('fullCalcOnLoad="1"');
+  });
+
+  it.each(['WEBSERVICE("https://example.test")', '[external.xlsx]Sheet1!A1', "cmd|' /C calc'!A0", 'HYPERLINK("https://example.test")'])
+    ("rejects an explicit non-local formula %s", async (formula) => {
+      await expect(generateLocalDocument({ format: "xlsx", title: "Rejected", content: "Data", rows: [[{ formula }]] }))
+        .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_ROWS_INVALID" });
+    });
+
   it("embeds the PNG itself on one A4 PDF page without a text layer", async () => {
     const generated = await generateLocalDocument({
       format: "pdf",

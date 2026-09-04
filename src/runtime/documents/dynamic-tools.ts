@@ -13,6 +13,7 @@ import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile } from "@/storage";
 import {
   generateLocalDocument,
+  isLocalDocumentFormula,
   type LocalDocumentCell,
   type LocalDocumentFormat,
 } from "@/runtime/documents/local-document-generator";
@@ -24,6 +25,12 @@ export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const FILE_NAME_PATTERN = /^[^/\\\0\r\n]{1,160}$/u;
+const CELL_SCHEMA = {
+  anyOf: [
+    { type: ["string", "number", "boolean", "null"] },
+    { type: "object", properties: { formula: { type: "string", minLength: 1, maxLength: 1000 } }, required: ["formula"], additionalProperties: false },
+  ],
+};
 const FORMATS = ["pdf", "docx", "pptx", "xlsx"] as const;
 
 export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([{
@@ -34,7 +41,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     {
       type: "function",
       name: "create",
-      description: "Create one non-empty local document, verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table.",
+      description: "Create one non-empty local document, verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table. Formula cells must be explicit objects like {formula: 'SUM(A2:A3)'}; plain strings stay literal text. Only same-sheet numeric references/arithmetic and SUM, MIN, MAX, AVERAGE, COUNT, ROUND, ABS are supported; no external links.",
       inputSchema: {
         type: "object",
         properties: {
@@ -50,7 +57,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
               type: "array",
               minItems: 1,
               maxItems: 100,
-              items: { type: ["string", "number", "boolean", "null"] },
+              items: CELL_SCHEMA,
             },
           },
         },
@@ -84,7 +91,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
                     type: "array",
                     minItems: 1,
                     maxItems: 100,
-                    items: { type: ["string", "number", "boolean", "null"] },
+                    items: CELL_SCHEMA,
                   },
                 },
               },
@@ -205,7 +212,7 @@ function parseRows(value: unknown): readonly (readonly LocalDocumentCell[])[] | 
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Spreadsheet row width is invalid.");
     }
     return row.map((cell) => {
-      if (cell !== null && typeof cell !== "string" && typeof cell !== "number" && typeof cell !== "boolean") {
+      if (cell !== null && typeof cell !== "string" && typeof cell !== "number" && typeof cell !== "boolean" && !isLocalDocumentFormula(cell)) {
         throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Spreadsheet cell is invalid.");
       }
       return cell as LocalDocumentCell;

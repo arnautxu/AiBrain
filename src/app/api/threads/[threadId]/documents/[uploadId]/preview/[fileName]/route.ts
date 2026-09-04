@@ -52,6 +52,8 @@ export async function GET(_request: Request, context: RouteContext) {
         staged.relativePath !== resource.location.relativePath) {
       return NextResponse.json({ error: "El preview ya no coincide con su registro." }, { status: 409 });
     }
+    // Authorization and immutable source binding above must precede cache repair.
+    await services.previews.create(staged, { signal: _request.signal });
     const data = await services.previews.readFile(threadId, uploadId, fileName);
     return new Response(new Uint8Array(data), {
       headers: {
