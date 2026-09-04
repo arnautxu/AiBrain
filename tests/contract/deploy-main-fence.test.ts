@@ -12,7 +12,7 @@ function check(remote: string, failure = false) {
   // Only exercise the pure remote fence. No network, files, Docker or host mutation.
   return spawnSync("bash", ["-c", `${functions}\n
 curl() { ${failure ? "return 22" : `printf '%s' '${JSON.stringify({ object: { sha: remote } })}'`}; }
-verify_current_main '${revision}' 'ephemeral_test_token'
+verify_current_main '${revision}'
 printf 'verified'
 `], { encoding: "utf8" });
 }
@@ -46,11 +46,11 @@ describe("host main promotion fence", () => {
     expect(result.stdout).toBe("verified");
   });
 
-  it("refuses a superseded candidate without logging the token", () => {
+  it("refuses a superseded candidate without requiring a deployment token", () => {
     const result = check("b".repeat(40));
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("candidate superseded");
-    expect(result.stdout + result.stderr).not.toContain("ephemeral_test_token");
+    expect(gateway.slice(gateway.indexOf("verify_current_main()"), gateway.indexOf("pull_ghcr_images()"))).not.toContain("Authorization:");
   });
 
   it("fails closed when GitHub cannot be read", () => {
@@ -61,7 +61,7 @@ describe("host main promotion fence", () => {
 
   it("checks main again after both pulls while holding the host lock", () => {
     const pull = gateway.slice(gateway.indexOf("pull_ghcr_images()"), gateway.indexOf("is_aibrain_image_reference()"));
-    expect(pull.match(/verify_current_main "\$revision" "\$ghcr_token"/gu)).toHaveLength(2);
+    expect(pull.match(/verify_current_main "\$revision"/gu)).toHaveLength(2);
     expect(pull.lastIndexOf("verify_current_main")).toBeGreaterThan(pull.indexOf('pull "$egress_image"'));
     const promote = gateway.slice(gateway.indexOf("deploy_ghcr_release()"), gateway.indexOf("validate_existing_release_readbacks()"));
     expect(promote.indexOf("flock --exclusive")).toBeLessThan(promote.indexOf('pull_ghcr_images "$app_image"'));
