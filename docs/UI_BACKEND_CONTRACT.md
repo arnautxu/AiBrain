@@ -6,6 +6,23 @@ Contrato ejecutable V1: `contracts/aibrain/v1/ui-backend.schema.json` contiene l
 
 ## 1. Convenciones de transporte y seguridad
 
+### Recuperación de una solicitud fallida (2026-09-04)
+
+«Editar solicitud» recupera el texto en el composer del mismo thread sin
+crear un turno, repetir efectos ni modificar el historial. Conserva cualquier
+borrador ya escrito y descarta respuestas tardías si cambia la selección.
+Los adjuntos se verifican mediante el GET autorizado de su historial: se
+reutiliza el upload original únicamente si coinciden thread, identificador,
+nombre, MIME y tamaño. Nunca se sustituye por la última revisión del archivo.
+La lectura de versiones no cambia la autorización server-side del siguiente
+turno, que vuelve a resolver staging y permisos.
+
+Un adjunto sin contenido recuperable (incluidas imágenes inline antiguas sin
+upload persistente) permanece visible como no disponible. Botón de envío,
+Enter y dispatch del composer se bloquean hasta volver a adjuntarlo o quitarlo
+explícitamente; no se envía silenciosamente una solicitud sin sus documentos.
+El usuario revisa los modos y conectores actuales antes del nuevo envío.
+
 - Todas las rutas de producto se ejecutan en Node.js y usan la cookie de sesión; la UI no envía tokens de Supabase ni credenciales de Codex.
 - Las mutaciones exigen mismo origen. El backend compara `Origin` con `InstallationConfig.publicUrl`; si no hay `Origin`, usa `Sec-Fetch-Site: same-origin`. La excepción sin esas cabeceras solo existe fuera de producción.
 - La respuesta de error HTTP estable es, como mínimo, `{ "error": string }`. Algunas rutas retiradas añaden `code`.

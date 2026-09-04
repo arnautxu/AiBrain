@@ -1434,7 +1434,7 @@ export function BrainApp({
     const runtimeContent = (messageOverride ?? (pendingRuntimeContext
       ? `${prompt.trim()}\n\n${pendingRuntimeContext}`
       : prompt)).trim();
-    if (!visibleContent || !runtimeContent || sending || documentUploading || !activeProject || activeProject.status !== "active") return;
+    if (!visibleContent || !runtimeContent || sending || documentUploading || documents.some((document) => document.status !== "ready") || !activeProject || activeProject.status !== "active") return;
 
     const initialThreadId = activeThread?.id ?? null;
     const selectionAtStart = {
@@ -1625,6 +1625,7 @@ export function BrainApp({
   }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
 
   const submitComposerMessage = useCallback((messageOverride?: string, displayMessageOverride?: string) => {
+    if (documentUploading || documents.some((document) => document.status !== "ready")) return;
     if (!sending) {
       void sendMessage(messageOverride, displayMessageOverride);
       return;
@@ -1650,7 +1651,7 @@ export function BrainApp({
     }]);
     updateComposerPrompt("");
     setPendingRuntimeContext(null);
-  }, [activeProject, activeThread, pendingRuntimeContext, queuedTurns, sendMessage, sending, updateComposerPrompt]);
+  }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, sendMessage, sending, updateComposerPrompt]);
 
   useEffect(() => {
     if (sending || actionBusy || documentUploading || dispatchingQueuedTurnId || !activeProject || !activeThread) return;

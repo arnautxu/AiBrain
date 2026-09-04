@@ -49,6 +49,7 @@ import type { ManagedAppActionDescriptor } from "@/ui/codex-managed-app-ui";
 import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import type { ConnectorMention } from "@/connectors/mentions-contract";
 import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
+import { restoreRequestDocument } from "@/ui/restore-request-documents";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -281,6 +282,8 @@ function AssistantMessage({
   onPreviewDocument,
   onOpenReview,
   onOpenBrowser,
+  onRestoreRequest,
+  restoreDisabled,
   readOnly = false,
 }: {
   message: ChatMessage;
@@ -300,6 +303,8 @@ function AssistantMessage({
   onPreviewDocument: (artifact: DocumentArtifact) => void;
   onOpenReview: (messageId: string) => void;
   onOpenBrowser: () => void;
+  onRestoreRequest?: () => void;
+  restoreDisabled?: boolean;
   readOnly?: boolean;
 }) {
   const hasExecution = hasRelevantWorkProcess(message);
@@ -334,7 +339,13 @@ function AssistantMessage({
       {message.status === "error" ? (
         <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
-          <span>No se ha podido completar esta respuesta. Inténtalo de nuevo.</span>
+          <div className="min-w-0">
+            <p>No se ha podido completar esta respuesta.</p>
+            {!readOnly && onRestoreRequest ? <>
+              <p className="mt-1">Revisa la solicitud y los resultados parciales antes de volver a enviarla.</p>
+              <button type="button" disabled={restoreDisabled} className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 py-2 font-medium disabled:opacity-40" onClick={onRestoreRequest}>Editar solicitud</button>
+            </> : null}
+          </div>
         </div>
       ) : null}
 
@@ -472,6 +483,50 @@ export function ChatWorkspace({
   const [catalogActiveIndex, setCatalogActiveIndex] = useState(0);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
+  const [restoringThreadId, setRestoringThreadId] = useState<string | null>(null);
+  const restoringRequest = Boolean(thread && restoringThreadId === thread.id);
+  const restoreControllerRef = useRef<AbortController | null>(null);
+  const currentDraftRef = useRef({ prompt, attachments, documents });
+  currentDraftRef.current = { prompt, attachments, documents };
+  useEffect(() => () => {
+    restoreControllerRef.current?.abort();
+    restoreControllerRef.current = null;
+  }, [project?.id, thread?.id]);
+  const restoreFailedRequest = async (request: ChatMessage) => {
+    if (!thread || readOnly || sending || documentUploading || restoreControllerRef.current) return;
+    if (prompt.trim() || attachments.length || documents.length) {
+      onComposerNotice("Conserva o vacía el borrador actual antes de recuperar otra solicitud.");
+      return;
+    }
+    const selection = attachmentSelectionRef.current;
+    const controller = new AbortController();
+    restoreControllerRef.current = controller;
+    setRestoringThreadId(thread.id);
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
+    try {
+      const restored = await Promise.all(request.attachments.map((attachment) => restoreRequestDocument(thread.id, attachment, controller.signal)));
+      if (controller.signal.aborted || selection !== attachmentSelectionRef.current) return;
+      const current = currentDraftRef.current;
+      if (current.prompt.trim() || current.attachments.length || current.documents.length) {
+        onComposerNotice("Tu borrador actual se ha conservado. Vacíalo antes de recuperar otra solicitud.");
+        return;
+      }
+      onPromptChange(request.content);
+      onDocumentsChange(restored);
+      onComposerNotice(restored.some((document) => document.status === "error")
+        ? "Solicitud recuperada. Vuelve a adjuntar los archivos no disponibles o quítalos antes de enviar."
+        : "Solicitud recuperada para revisar. No se ha enviado nada.", "status");
+      requestAnimationFrame(() => composerRef.current?.focus());
+    } catch {
+      if (selection === attachmentSelectionRef.current) onComposerNotice("No se ha podido recuperar la solicitud. Vuelve a intentarlo.");
+    } finally {
+      window.clearTimeout(timeout);
+      if (restoreControllerRef.current === controller) {
+        restoreControllerRef.current = null;
+        setRestoringThreadId(null);
+      }
+    }
+  };
   const standaloneConversation = Boolean(project && isStandaloneProject(project));
   const latestAssistantMessageId = thread?.messages.filter((message) => message.role === "assistant").at(-1)?.id ?? null;
   const closeComposerMenuAndRestore = useCallback(() => {
@@ -533,6 +588,7 @@ export function ChatWorkspace({
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const canAttachDocuments = runtimeStatus.mode === "codex";
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
+  const documentsBlocked = restoringRequest || documents.some((document) => document.status !== "ready");
   const destinationOptions = useMemo(() => projects
     .filter((candidate) => candidate.status === "active")
     .map((candidate) => ({
@@ -764,6 +820,8 @@ export function ChatWorkspace({
                       onPreviewDocument={onPreviewDocument}
                       onOpenReview={onOpenReview}
                       onOpenBrowser={onOpenBrowser}
+                      onRestoreRequest={message.status === "error" && thread.messages[index - 1]?.role === "user" ? () => void restoreFailedRequest(thread.messages[index - 1]) : undefined}
+                      restoreDisabled={sending || documentUploading || restoringRequest}
                       readOnly={readOnly}
                       managedAppAction={!readOnly && managedAppActionEnabled && message.id === latestAssistantMessageId && thread ? {
                         enabled: true,
@@ -857,6 +915,7 @@ export function ChatWorkspace({
             {imageGeneration ? <div className="flex px-2 pt-1" aria-label="Generación de imágenes activada">
               <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
             </div> : null}
+            {restoringRequest ? <p className="px-3 py-2 text-xs text-[var(--text-secondary)]" role="status">Recuperando solicitud…</p> : documents.some((document) => document.status === "error") ? <p className="px-3 py-2 text-xs text-[var(--danger)]" role="alert">Hay archivos no disponibles. Vuelve a adjuntarlos o quítalos antes de enviar.</p> : null}
             <div
               ref={composerMeasurementRef}
               aria-hidden="true"
@@ -903,7 +962,7 @@ export function ChatWorkspace({
                 }
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
-                  if (!documentUploading && prompt.trim() && runtimeReady) {
+                  if (!documentUploading && !documentsBlocked && prompt.trim() && runtimeReady) {
                     jumpToBottom();
                     onSend();
                   }
@@ -987,7 +1046,7 @@ export function ChatWorkspace({
                   aria-label={queueingMessage ? "Añadir mensaje a la cola" : sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
                   aria-busy={(!queueingMessage && stopping) || undefined}
                   className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
-                  disabled={queueingMessage ? !project || !runtimeReady || documentUploading : sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading}
+                  disabled={queueingMessage ? !project || !runtimeReady || documentUploading || documentsBlocked : sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading || documentsBlocked}
                   onClick={() => {
                     if (sending) {
                       if (queueingMessage) onSend();
