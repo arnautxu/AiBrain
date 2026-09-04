@@ -24,6 +24,7 @@ import {
   assertFilesystemWorkbenchId,
   FileWorkbenchStore,
 } from "@/workbench/filesystem-store";
+import { FilePinnedThreadStore } from "@/workbench/pinned-thread-store";
 import { loadInstallationConfig } from "@/config/installation";
 import type {
   BranchThreadInput,
@@ -117,6 +118,28 @@ async function filesystemStore(session: AuthSession) {
   return FileWorkbenchStore.fromInstallation(installation);
 }
 
+async function pinnedThreadStore(session: AuthSession) {
+  if (session.provider !== "local") {
+    throw new WorkbenchPersistenceError("La sessió no pertany al workbench local.");
+  }
+  const installation = await loadInstallationConfig();
+  if (session.tenant.id !== installation.installationId) {
+    throw new WorkbenchPersistenceError("La sessió no pertany a aquesta instal·lació.");
+  }
+  return new FilePinnedThreadStore(
+    installation.paths.dataRoot,
+    installation.paths.usersRoot,
+    installation.installationId,
+  );
+}
+
+function legacyPinnedIds(threads: WorkbenchSnapshot["threads"]) {
+  return threads
+    .filter((thread) => thread.pinned)
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+    .map((thread) => thread.id);
+}
+
 export function isBrowserPreviewWorkbench() {
   return isVercelPreviewDemoEnabled();
 }
@@ -175,18 +198,19 @@ export async function listThreads(
 ) {
   if (projectId !== null) assertFilesystemWorkbenchId(projectId);
   await filesystemStore(session);
-  const snapshot = projectId === null
-    ? await loadSharedWorkbench(session)
-    : await (async () => {
-        const access = await resolveProjectAccess(session, projectId);
-        return access.store.load(access.ownerUserId);
-      })();
+  if (projectId !== null) await resolveProjectAccess(session, projectId);
+  const snapshot = await loadSharedWorkbench(session);
   const needle = query.query?.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase();
+  const snapshotOrder = new Map(snapshot.threads.map((thread, index) => [thread.id, index]));
   const items = snapshot.threads.filter((thread) => projectId === null || thread.projectId === projectId)
     .filter((thread) => query.status === "all" || thread.status === query.status)
     .filter((thread) => !needle || thread.title.normalize("NFD").replace(/\p{M}/gu, "").toLocaleLowerCase().includes(needle))
     .map(threadSummary)
-    .toSorted((left, right) => Number(right.pinned) - Number(left.pinned) || right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id));
+    .toSorted((left, right) => Number(right.pinned) - Number(left.pinned) || (
+      left.pinned && right.pinned
+        ? (snapshotOrder.get(left.id) ?? 0) - (snapshotOrder.get(right.id) ?? 0)
+        : right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id)
+    ));
   return sharedPage(items, query, `threads:${session.user.id}:${projectId ?? "all"}`);
 }
 
@@ -194,7 +218,11 @@ export async function getThread(session: AuthSession, threadId: string) {
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
     const access = await resolveThreadAccess(session, threadId);
-    return access.store.getThread(access.ownerUserId, threadId);
+    const pinnedThreadIds = await (await pinnedThreadStore(session)).read(
+      session.user.id,
+      legacyPinnedIds(access.context.own.threads),
+    );
+    return { ...access.thread, pinned: pinnedThreadIds.includes(threadId) };
   }
   assertWorkbenchId(threadId);
   return getDemoThread(session, threadId);
@@ -258,8 +286,22 @@ export async function updateThread(
   if (mode(session) === "filesystem") {
     assertFilesystemWorkbenchId(threadId);
     const access = await resolveThreadAccess(session, threadId);
-    if (access.role === "viewer") throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
-    return access.store.updateThread(access.ownerUserId, threadId, patch);
+    const resourcePatch: UpdateThreadInput = {
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+    };
+    if (Object.keys(resourcePatch).length > 0 && access.role === "viewer") {
+      throw new WorkbenchConflictError("Aquest projecte compartit és de només lectura.");
+    }
+    const thread = Object.keys(resourcePatch).length > 0
+      ? await access.store.updateThread(access.ownerUserId, threadId, resourcePatch)
+      : access.thread;
+    const pins = await pinnedThreadStore(session);
+    const existingLegacyPins = legacyPinnedIds(access.context.own.threads);
+    const orderedIds = patch.pinned === undefined
+      ? await pins.read(session.user.id, existingLegacyPins)
+      : await pins.update(session.user.id, threadId, patch.pinned, existingLegacyPins);
+    return { ...thread, pinned: orderedIds.includes(threadId) };
   }
   assertWorkbenchId(threadId);
   return updateDemoThread(session, threadId, patch);

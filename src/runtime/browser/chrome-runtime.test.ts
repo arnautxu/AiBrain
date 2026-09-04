@@ -180,6 +180,9 @@ class FakeCdpClient implements CdpClientLike {
       if (String(params.expression).includes("document.readyState")) {
         return { result: { value: this.readiness } } as Result;
       }
+      if (String(params.expression).includes("document.elementFromPoint")) {
+        return { result: { value: { beforeX: 0, beforeY: 0, afterX: 0, afterY: 480 } } } as Result;
+      }
       const targetId = this.sessionTargets.get(scopedSessionId);
       if (String(params.expression).includes("verifiable")) {
         return { result: { value: { verifiable: true, matched: true } } } as Result;
@@ -323,6 +326,51 @@ afterEach(async () => {
 });
 
 describe("ChromeCdpRuntime private pipe", () => {
+  it("keeps the graphikai footer scroll and FAQ click on the live session without CDP wheel dispatch", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      allowPrivateNetwork: true,
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+    });
+    try {
+      await runtime.start();
+      await runtime.agentNavigate(THREAD_A, "https://graphikai.com/");
+      await runtime.agentScroll(THREAD_A, 0, 5_000);
+      await runtime.takeOver();
+      await runtime.dispatchInput(THREAD_A, {
+        kind: "mouse", event: "mouseWheel", x: 720, y: 780, deltaX: 0, deltaY: 640,
+      });
+      await runtime.dispatchInput(THREAD_A, {
+        kind: "mouse", event: "mousePressed", x: 720, y: 640, button: "left", buttons: 1, clickCount: 1,
+      });
+      await runtime.dispatchInput(THREAD_A, {
+        kind: "mouse", event: "mouseReleased", x: 720, y: 640, button: "left", buttons: 0, clickCount: 1,
+      });
+
+      expect(client.commands).toContainEqual(expect.objectContaining({
+        method: "Runtime.evaluate",
+        params: expect.objectContaining({ expression: "window.scrollBy({ left: 0, top: 5000, behavior: \"instant\" })" }),
+      }));
+      expect(client.commands).toContainEqual(expect.objectContaining({
+        method: "Runtime.evaluate",
+        params: expect.objectContaining({ expression: expect.stringContaining("document.elementFromPoint(720, 780)") }),
+      }));
+      expect(client.commands.filter((command) =>
+        command.method === "Input.dispatchMouseEvent" && command.params.type === "mouseWheel")).toHaveLength(0);
+      expect(client.commands.filter((command) =>
+        command.method === "Input.dispatchMouseEvent" &&
+        (command.params.type === "mousePressed" || command.params.type === "mouseReleased"))).toHaveLength(2);
+      await expect(runtime.health()).resolves.toMatchObject({ healthy: true });
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it("accepts a complete form in one readiness RPC and rejects an unresolved document", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
@@ -540,6 +588,17 @@ describe("ChromeCdpRuntime private pipe", () => {
       kind: "mouse", event: "mouseMoved", x: 43, y: 25, button: "left",
     });
     expect(client.commands.at(-1)?.params).not.toHaveProperty("buttons");
+    const wheelDispatchesBefore = client.commands.filter((command) =>
+      command.method === "Input.dispatchMouseEvent" && command.params.type === "mouseWheel").length;
+    await runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseWheel", x: 320, y: 240, button: "none", deltaX: 0, deltaY: 480,
+    });
+    expect(client.commands.filter((command) =>
+      command.method === "Input.dispatchMouseEvent" && command.params.type === "mouseWheel")).toHaveLength(wheelDispatchesBefore);
+    expect(client.commands.at(-1)).toMatchObject({
+      method: "Runtime.evaluate",
+      params: { expression: expect.stringContaining("document.elementFromPoint(320, 240)") },
+    });
     await expect(runtime.dispatchInput(THREAD_A, {
       kind: "mouse", event: "mouseMoved", x: 42, y: 24, button: "left", buttons: 8,
     })).rejects.toMatchObject({ code: "CHROME_INPUT_REJECTED" });

@@ -31,6 +31,7 @@ const viewerTask: AutomationTaskView = {
   id: "20000000-0000-4000-8000-000000000001",
   installationId: "audience-qa",
   userId: ownerId,
+  owner: { userId: ownerId, name: "Propietario" },
   audience: { membershipPolicy: "current", userIds: [], groupIds: [groupId] },
   name: "Informe compartido",
   prompt: "Prepara el informe.",
@@ -98,7 +99,7 @@ describe("AutomationsPanel audience", () => {
     expect(screen.getByRole("main", { name: "Automatizaciones" })).toBeInTheDocument();
     expect(screen.queryByText("Centro de tareas")).not.toBeInTheDocument();
     expect(screen.queryByText(/Servicio de automatizaciones|Se ejecutan mientras/i)).not.toBeInTheDocument();
-    expect(await screen.findByText("Destinatarios: Grupo: Operaciones")).toBeInTheDocument();
+    expect(await screen.findByText(/Propietario: Propietario · Destinatarios: Grupo: Operaciones/)).toBeInTheDocument();
     expect(screen.queryByText("Centro de tareas")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Editar Informe compartido" })).not.toBeInTheDocument();
 

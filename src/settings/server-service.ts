@@ -309,7 +309,7 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
     connectors.push(projectPersonalConnectorSettings(
       gmail ?? {
         connectorId: GMAIL_CONNECTOR_ID,
-        label: "Gmail",
+        label: "Google",
         status: "degraded",
         statusCode: "GMAIL_CAPABILITY_CHECK_FAILED",
         checkedAt: null,
@@ -333,7 +333,7 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
     connectors.push(projectPersonalConnectorSettings(
       outlook ?? {
         connectorId: OUTLOOK_CONNECTOR_ID,
-        label: "Outlook",
+        label: "Microsoft 365",
         status: "degraded",
         statusCode: "OUTLOOK_CAPABILITY_CHECK_FAILED",
         checkedAt: null,

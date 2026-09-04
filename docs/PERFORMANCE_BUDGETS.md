@@ -266,6 +266,14 @@ server first-delta time, delta count, inter-delta p50/p95/max, server total and
 lifecycle counts. It deliberately excludes prompt/message/content fields,
 model output, token data, error text, file paths and credentials.
 
+`codex.turn_model` closes the branded experience-selector chain by recording
+the server-resolved requested model and the effective model returned by
+`thread/start` or `thread/resume`, plus effort and whether the value came from
+the runtime response, explicit request or runtime default. A later
+`model/rerouted` notification emits `codex.turn_model_rerouted` with the new
+effective model. These records contain model identifiers but still exclude
+prompts, output, tokens, paths, credentials and provider secrets.
+
 `codex.app_server_request` records the RPC method and opaque request ID,
 transport-acceptance time, total time, active-turn count, pending-request count
 and a bounded outcome (`completed`, `timeout`, connection/send failure or

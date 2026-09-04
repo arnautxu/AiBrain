@@ -41,7 +41,7 @@ describe("personal connector settings", () => {
 
   it("exposes a connected personal binding without provider credentials", () => {
     const projected = projectPersonalConnectorSettings(capability("connected"), ["mail.read"], copy);
-    expect(projected).toMatchObject({ status: "connected", accountEmail: "user@example.com", connectionVersion: 2 });
+    expect(projected).toMatchObject({ status: "connected", accountEmail: "user@example.com", connectionVersion: 2, connectUrl: "/api/connectors/gmail/oauth/start" });
     expect(JSON.stringify(projected)).not.toMatch(/token|secret|credentialRef/i);
   });
 });

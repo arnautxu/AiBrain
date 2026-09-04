@@ -30,6 +30,7 @@ const session = {
   provider: "local" as const,
   tenant: { id: "document-test", name: "Document Test" },
   user: { id: OWNER, name: "Owner", email: "owner@example.test" },
+  expiresAt: "2030-01-01T00:00:00.000Z",
 };
 
 describe("generated document server ACL", () => {

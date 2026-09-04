@@ -47,6 +47,7 @@
     "backup:orchestrate": "node scripts/orchestrate-backup.mjs",
     "documents:maintain": "tsx scripts/maintain-document-temporaries.ts",
     "workbench:rebuild-shared-access": "tsx scripts/rebuild-shared-access-index.ts",
+    "workbench:plan-chat-archive": "tsx scripts/plan-chat-archive.ts",
     "alerts:run": "tsx scripts/run-operational-alerts.ts",
     "automations:worker": "tsx scripts/run-automations.ts",
     "automations:once": "tsx scripts/run-automations.ts --once",

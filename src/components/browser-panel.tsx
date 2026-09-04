@@ -542,7 +542,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       button: "none", deltaX: x, deltaY: y,
     } };
     pendingWheelRef.current = next;
-    void runViewerCommands([{ action: "input", command: next.command }], true, undefined, () => {
+    void runViewerCommands([{ action: "input", command: next.command }], true, "wheel", () => {
       if (pendingWheelRef.current === next) pendingWheelRef.current = null;
     }).finally(() => {
       if (pendingWheelRef.current === next) pendingWheelRef.current = null;

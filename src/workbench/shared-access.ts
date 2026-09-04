@@ -6,6 +6,7 @@ import { FileLocalUserStore, type LocalUser } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";
 import { WorkbenchNotFoundError, WorkbenchPersistenceError } from "@/workbench/errors";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
+import { FilePinnedThreadStore, projectPinnedThreads } from "@/workbench/pinned-thread-store";
 import {
   FileSharedAccessIndex,
   type SharedAccessProvenance,
@@ -127,7 +128,20 @@ async function loadSharedWorkbenchFromContext(
       threads.push(thread);
     }
   }
-  return { persistence: "filesystem", projects, threads };
+  const legacyPinnedThreadIds = own.threads
+    .filter((thread) => thread.pinned)
+    .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.id.localeCompare(right.id))
+    .map((thread) => thread.id);
+  const pinnedThreadIds = await new FilePinnedThreadStore(
+    context.installation.paths.dataRoot,
+    context.installation.paths.usersRoot,
+    context.installation.installationId,
+  ).read(principal.userId, legacyPinnedThreadIds);
+  return {
+    persistence: "filesystem",
+    projects,
+    threads: projectPinnedThreads(threads, pinnedThreadIds),
+  };
 }
 
 export async function syncOwnSharedAccess(session: AuthSession) {

@@ -100,3 +100,17 @@ RestartSec=5
   conservado mantiene el error y el vínculo a la conversación si ya existía.
 
 Los fallos se guardan y se muestran en la tarea. En horarios recurrentes se calcula la siguiente ocurrencia; una tarea de una sola vez termina aunque su ejecución falle, para evitar reintentos infinitos no solicitados.
+
+## Propiedad y destinatarios
+
+Every automation has exactly one immutable owner in `task.userId`. The store is
+physically rooted under that same user's private directory and rejects any task
+whose persisted owner does not match the directory owner. Existing legacy
+snapshots are migrated on their next locked read by adding an explicit audience
+whose sole initial recipient is the owner; the owner field itself was already
+mandatory, so no ownership inference or cross-user move is required.
+
+Recipients are an independent, non-empty set of direct users and groups.
+Current membership is resolved on every authorized result read. The owner is not
+implicitly a recipient. Only that owner or a workspace administrator can edit,
+pause, run or delete; other recipients can only view results.

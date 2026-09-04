@@ -307,7 +307,7 @@ type WorkbenchThread = {
   projectId: string;
   title: string;      // 1–120 caracteres no vacíos
   status: "active" | "archived";
-  pinned: boolean;
+  pinned: boolean; // preferencia durable del usuario que recibe la respuesta
   createdAt: string;
   updatedAt: string;
   messages: ChatMessage[];
@@ -403,7 +403,7 @@ Threads listados usan `WorkbenchThreadSummary` y la clave `threads`.
 
 `GET /api/threads/{threadId}` → `{ "thread": WorkbenchThread }` con todos los mensajes.
 
-`PATCH /api/threads/{threadId}` acepta `title`, `pinned` y/o `status`, con las mismas reglas que project. No existe borrado HTTP; archivo/restauración es el lifecycle soportado.
+`PATCH /api/threads/{threadId}` acepta `title`, `pinned` y/o `status`, con las mismas reglas que project. No existe borrado HTTP; archivo/restauración es el lifecycle soportado. `pinned` es una preferencia personal y durable: se guarda bajo la raíz del usuario autenticado, no modifica el thread del propietario y también puede aplicarse a un thread compartido de solo lectura después de resolver su ACL. `title` y `status` sí siguen requiriendo permiso de edición. Los ids anclados se proyectan únicamente sobre threads visibles y mantienen orden de anclado estable; un id sin acceso nunca provoca una lectura del recurso extranjero.
 
 Los recursos se resuelven por el usuario de sesión. Un ID válido de otro usuario se presenta como `404`, no como recurso global.
 
@@ -419,7 +419,7 @@ type WorkbenchSnapshot = {
 };
 ```
 
-Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia es `filesystem`. Supabase no es un valor válido de persistencia: participa únicamente durante los flujos de identidad anteriores a la emisión de la sesión local.
+Respuesta: `{ "workbench": WorkbenchSnapshot }`. Para una sesión local real la persistencia es `filesystem`. Supabase no es un valor válido de persistencia: participa únicamente durante los flujos de identidad anteriores a la emisión de la sesión local. Los threads anclados aparecen primero en su orden personal durable; el sidebar los muestra una sola vez en “Anclados” y los excluye de las listas de Chats/Proyectos mientras sigan anclados.
 
 ### 5.5 Centro de tareas
 

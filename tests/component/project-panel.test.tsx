@@ -67,9 +67,8 @@ describe("ProjectPanel", () => {
     render(<ProjectPanel project={project} open onClose={vi.fn()} onSave={vi.fn(async () => true)} />);
 
     expect(screen.getByRole("textbox", { name: "Instrucciones del proyecto" })).toBeInTheDocument();
-    const memorySwitch = screen.getByRole("switch", { name: "Activar memoria del proyecto" });
-    expect(memorySwitch).toBeInTheDocument();
-    expect(memorySwitch.querySelector("span > span")).toHaveClass("bg-[var(--brain-contrast)]");
+    expect(screen.queryByRole("switch", { name: "Activar memoria del proyecto" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Siempre activa/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Notas de memoria del proyecto" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Fuentes" }));
@@ -84,6 +83,15 @@ describe("ProjectPanel", () => {
     expect(screen.getByRole("combobox", { name: "Rol de ada@example.com" })).toBeInTheDocument();
   });
 
+  it("refreshes the form when the selected project changes while the panel stays open", () => {
+    const { rerender } = render(<ProjectPanel project={{ ...project, instructions: "Proyecto A" }} open onClose={vi.fn()} onSave={vi.fn(async () => true)} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Instrucciones del proyecto" }), { target: { value: "Borrador sin guardar" } });
+
+    rerender(<ProjectPanel project={{ ...project, id: "project-sales", name: "Ventas", instructions: "Proyecto B" }} open onClose={vi.fn()} onSave={vi.fn(async () => true)} />);
+
+    expect(screen.getByRole("textbox", { name: "Instrucciones del proyecto" })).toHaveValue("Proyecto B");
+  });
+
   it("renders a viewer project as a fully readable but non-mutable surface", () => {
     const viewerProject: WorkbenchProject = {
       ...project,
@@ -94,7 +102,7 @@ describe("ProjectPanel", () => {
 
     expect(screen.getByText(/Tienes acceso de solo lectura/)).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Instrucciones del proyecto" })).toHaveAttribute("readonly");
-    expect(screen.getByRole("switch", { name: "Activar memoria del proyecto" })).toBeDisabled();
+    expect(screen.queryByRole("switch", { name: "Activar memoria del proyecto" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Guardar cambios" })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Fuentes" }));

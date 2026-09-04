@@ -54,7 +54,9 @@ export function branchHistory(thread: StoredThread) {
 
 export function publicProject(project: StoredProject): WorkbenchProject {
   const { workspaceKey: _workspaceKey, ...visible } = project;
-  return visible;
+  // `enabled: false` is accepted only as a legacy on-disk shape. Memory is a
+  // product invariant now and every server projection advertises it as active.
+  return { ...visible, memory: { ...visible.memory, enabled: true } };
 }
 
 export function publicThread(thread: StoredThread): WorkbenchThread {

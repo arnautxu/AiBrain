@@ -163,4 +163,29 @@ describe("turn telemetry", () => {
     }));
     expect(JSON.stringify(records)).not.toContain("private-call-id");
   });
+
+  it("records the selected and rerouted effective model without prompt payloads", () => {
+    const records: Array<{ event: string; attributes: Record<string, unknown> }> = [];
+    const telemetry = new TurnTelemetry({
+      installationId: "qa-company", userId: "user-1", projectId: "project-1",
+      threadId: "thread-1", localTurnId: "turn-1", clientRequestId: "request-1",
+    }, { logger: { info: (event, attributes = {}) => records.push({ event, attributes: { ...attributes } }) } });
+
+    telemetry.modelSelected({
+      experience: "expert", requestedModel: "gpt-5.6-sol", effectiveModel: "gpt-5.6-sol",
+      effort: "high", source: "runtime",
+    });
+    telemetry.modelRerouted("gpt-5.6-sol", "gpt-6-astra", "capacity");
+
+    expect(records).toEqual([
+      expect.objectContaining({ event: "codex.turn_model", attributes: expect.objectContaining({
+        experience: "expert", requestedModel: "gpt-5.6-sol", effectiveModel: "gpt-5.6-sol",
+        effort: "high", source: "runtime",
+      }) }),
+      expect.objectContaining({ event: "codex.turn_model_rerouted", attributes: expect.objectContaining({
+        fromModel: "gpt-5.6-sol", effectiveModel: "gpt-6-astra", reason: "capacity",
+      }) }),
+    ]);
+    expect(JSON.stringify(records)).not.toMatch(/prompt|content|token|secret/iu);
+  });
 });

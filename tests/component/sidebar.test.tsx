@@ -62,9 +62,10 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
   };
 }
 
-function renderSidebar(running = false) {
+function renderSidebar(running = false, pinnedIds: string[] = []) {
   const onNewThread = vi.fn();
   const onSelectThread = vi.fn();
+  const onThreadAction = vi.fn();
   const onOpenCommandPalette = vi.fn();
   const onOpenAutomations = vi.fn();
   const onOpenCustomization = vi.fn();
@@ -72,16 +73,22 @@ function renderSidebar(running = false) {
   const product = project("project-product", "Producto");
   const standalone = project("project-standalone", "Chats", STANDALONE_PROJECT_SLUG);
 
+  const allThreads = [
+    thread("thread-plan", operations.id, "Plan semanal"),
+    thread("thread-roadmap", product.id, "Roadmap"),
+    thread("thread-personal", standalone.id, "Recordatorio personal"),
+  ];
+  const orderedThreads = [
+    ...pinnedIds.map((id) => allThreads.find((candidate) => candidate.id === id)).filter((candidate): candidate is WorkbenchThread => Boolean(candidate)),
+    ...allThreads.filter((candidate) => !pinnedIds.includes(candidate.id)),
+  ].map((candidate) => ({ ...candidate, pinned: pinnedIds.includes(candidate.id) }));
+
   render(
     <Sidebar
       branding={branding}
       session={session}
       projects={[operations, product, standalone]}
-      threads={[
-        thread("thread-plan", operations.id, "Plan semanal"),
-        thread("thread-roadmap", product.id, "Roadmap"),
-        thread("thread-personal", standalone.id, "Recordatorio personal"),
-      ]}
+      threads={orderedThreads}
       activeProjectId={operations.id}
       activeThreadId="thread-plan"
       mobileOpen={false}
@@ -98,12 +105,12 @@ function renderSidebar(running = false) {
       onNewThread={onNewThread}
       onNewProject={vi.fn()}
       onProjectAction={vi.fn()}
-      onThreadAction={vi.fn()}
+      onThreadAction={onThreadAction}
       onOpenCustomization={onOpenCustomization}
     />,
   );
 
-  return { onNewThread, onSelectThread, onOpenAutomations, onOpenCommandPalette, onOpenCustomization };
+  return { onNewThread, onSelectThread, onThreadAction, onOpenAutomations, onOpenCommandPalette, onOpenCustomization };
 }
 
 afterEach(cleanup);
@@ -144,14 +151,14 @@ describe("Sidebar", () => {
     fireEvent.click(account);
     fireEvent.click(screen.getByRole("menuitem", { name: "Ayuda" }));
 
-    const menu = screen.getByRole("menu", { name: "Cuenta y preferencias" });
-    expect(screen.getByRole("note")).toHaveTextContent("archivos o elegir conectores autorizados");
-    expect(within(menu).queryByText("Tema rápido")).not.toBeInTheDocument();
-    expect(within(menu).queryByText("Acme")).not.toBeInTheDocument();
-    fireEvent.pointerDown(document.body);
+    const dialog = screen.getByRole("dialog", { name: "Ayuda y feedback" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Bug" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Request" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ayuda" })).toBeInTheDocument();
     expect(screen.queryByRole("menu", { name: "Cuenta y preferencias" })).not.toBeInTheDocument();
-    fireEvent.click(account);
-    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    expect(account).toHaveFocus();
   });
 
   it("keeps the brand informational and gives account menus complete keyboard navigation", async () => {
@@ -196,6 +203,32 @@ describe("Sidebar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación independiente" }));
     expect(onNewThread).toHaveBeenNthCalledWith(1, "project-operations");
     expect(onNewThread).toHaveBeenNthCalledWith(2);
+  });
+
+  it("shows pinned chats once above projects and chats in their durable order", () => {
+    const { onThreadAction } = renderSidebar(false, ["thread-personal", "thread-plan"]);
+    const pinned = screen.getByRole("region", { name: "Anclados" });
+    const chats = screen.getByRole("region", { name: "Chats" });
+    const projects = screen.getByRole("region", { name: "Proyectos" });
+
+    expect(pinned.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pinned.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const firstPinned = within(pinned).getByRole("button", { name: "Recordatorio personal" });
+    const secondPinned = within(pinned).getByRole("button", { name: "Plan semanal" });
+    expect(firstPinned.compareDocumentPosition(secondPinned) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Recordatorio personal" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Plan semanal" })).toHaveLength(1);
+    expect(within(chats).queryByRole("button", { name: "Recordatorio personal" })).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Chats de Operaciones")).queryByRole("button", { name: "Plan semanal" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Operaciones" })).toBeInTheDocument();
+
+    fireEvent.click(within(pinned).getByRole("button", { name: "Acciones de Recordatorio personal" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Desfijar" }));
+    expect(onThreadAction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "thread-personal", pinned: true }),
+      "unpin",
+      expect.anything(),
+    );
   });
 
   it("uses one left content guide without indenting projects or their chats", () => {
