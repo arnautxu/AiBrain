@@ -29,6 +29,13 @@ export function CommandPalette({ open, projects, threads, activeProjectId, retur
   const visibleItems = useMemo(() => { const normalized = searchable(query.trim()); return normalized ? items.filter((item) => searchable(`${item.label} ${item.detail} ${item.keywords}`).includes(normalized)) : items; }, [items, query]);
   useEffect(() => { if (!open) return; const frame = requestAnimationFrame(() => { setQuery(""); setActiveIndex(0); inputRef.current?.focus(); }); return () => cancelAnimationFrame(frame); }, [open]);
   const visibleActiveIndex = Math.min(activeIndex, Math.max(visibleItems.length - 1, 0));
+  const activeOptionId = visibleItems[visibleActiveIndex]?.id;
+  useEffect(() => {
+    if (!open || !activeOptionId) return;
+    // Keep the combobox focused; only its active descendant follows selection.
+    const option = document.getElementById(`command-palette-option-${activeOptionId}`);
+    option?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "instant" });
+  }, [activeOptionId, open]);
   const run = (item: SearchItem) => { item.run(); onClose(); };
   return <AnimatePresence initial={false}>{open ? (
     <OverlayPresenceLayer key="command-palette" origin="top" className="fixed inset-0 z-[80] flex items-start justify-center bg-black/15 px-3 pt-[8vh] backdrop-blur-[1px] sm:px-6 sm:pt-[11vh]">
