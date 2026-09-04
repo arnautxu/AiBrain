@@ -2,17 +2,21 @@
 
 import { useState, type ComponentProps } from "react";
 import NextImage from "next/image";
-import { DownloadIcon, RefreshCwIcon } from "lucide-react";
+import { DownloadIcon, ExpandIcon, RefreshCwIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { ghostButton, mono, paper, ShimmerLabel } from "@/lib/surfaces";
 
-const DOTS = Array.from({ length: 64 }, (_, i) => i);
+const imageAction = "touch-target inline-flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]";
+
+type PreviewState = { src: string | null; status: "loading" | "ready" | "error"; width?: number; height?: number };
 
 export function ImageGeneration({
+  name,
   prompt,
   generating,
   src = null,
   alt,
+  width,
+  height,
   dimensions,
   downloadUrl,
   downloadName,
@@ -20,130 +24,84 @@ export function ImageGeneration({
   className,
   ...props
 }: Omit<ComponentProps<"div">, "children" | "prompt" | "generating"> & {
+  name?: string;
   prompt: string;
   generating: boolean;
   src?: string | null;
   alt?: string;
+  width?: number;
+  height?: number;
   dimensions?: string;
   downloadUrl?: string;
   downloadName?: string;
   onRegenerate?: () => void;
 }) {
-  const [preview, setPreview] = useState<{ src: string | null; status: "loading" | "ready" | "error" }>({ src, status: "loading" });
+  const [preview, setPreview] = useState<PreviewState>({ src, status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const status = preview.src === src ? preview.status : "loading";
+  const naturalWidth = preview.src === src ? preview.width : undefined;
+  const naturalHeight = preview.src === src ? preview.height : undefined;
+  const imageWidth = naturalWidth || width;
+  const imageHeight = naturalHeight || height;
+  const ratio = imageWidth && imageHeight ? imageWidth / imageHeight : 1;
+  const frameRatio = Math.min(3, Math.max(1 / 3, ratio));
+  const sizeLabel = imageWidth && imageHeight ? `${imageWidth} × ${imageHeight} px` : dimensions;
+  const title = name ?? downloadName ?? "Imagen";
+  const ready = Boolean(src) && !generating && status === "ready";
+  const failed = Boolean(src) && !generating && status === "error";
+
   return (
     <div
       data-slot="image-generation"
       aria-busy={generating || (Boolean(src) && status === "loading") || undefined}
-      className={cn("flex min-w-0 w-52 max-w-full flex-col gap-2.5", className)}
+      className={cn("flex min-w-0 w-full max-w-full flex-col gap-3", className)}
       {...props}
     >
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-[var(--text)]" title={title}>{title}</p>
+        {sizeLabel ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">PNG · {sizeLabel}</p> : null}
+      </div>
       <div
-        className={cn(
-          paper,
-          "relative aspect-square w-full overflow-hidden rounded-2xl",
-        )}
+        data-slot="image-preview"
+        className={cn("relative max-w-full overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-muted)]", failed && "min-h-40")}
+        style={{ aspectRatio: frameRatio, width: `min(100%, ${480 * frameRatio}px)` }}
       >
-        {src && !generating && status === "error" ? (
+        {failed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm text-[var(--text-secondary)]">
             <p role="alert">No se ha podido cargar la imagen. Comprueba la conexión y vuelve a intentarlo.</p>
-            <button type="button" className="touch-target min-h-11 rounded-lg border border-[var(--border)] px-3 font-medium text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => {
+            <button type="button" className={imageAction} onClick={() => {
               setPreview({ src, status: "loading" });
               setAttempt((value) => value + 1);
             }}>Volver a cargar</button>
           </div>
         ) : src && !generating ? (
-          <a href={src} target="_blank" rel="noreferrer" className="absolute inset-0">
-            <NextImage
-              key={`${src}:${attempt}`}
-              unoptimized
-              fill
-              sizes="(max-width: 640px) 100vw, 420px"
-              src={src}
-              alt={alt ?? prompt}
-              className="object-contain"
-              onLoad={() => setPreview({ src, status: "ready" })}
-              onError={() => setPreview({ src, status: "error" })}
-            />
-            {status === "loading" ? <span role="status" className="absolute inset-0 grid place-items-center bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">Cargando imagen…</span> : null}
-          </a>
-        ) : (
           <>
-            <div
-              className="absolute inset-0 grid grid-cols-8 place-items-center p-6"
-              aria-hidden
-            >
-              {DOTS.map((dot) => {
-                const row = Math.floor(dot / 8);
-                const col = dot % 8;
-                return (
-                  <span
-                    key={dot}
-                    className={cn(
-                      "bg-foreground/20 size-1 rounded-full transition-opacity duration-500",
-                      generating
-                        ? "animate-pulse motion-reduce:animate-none"
-                        : "opacity-0",
-                    )}
-                    style={{ animationDelay: `${(row + col) * 90}ms` }}
-                  />
-                );
-              })}
-            </div>
-            <div
-              aria-hidden
-              className={cn(
-                "absolute inset-0 transition-[opacity,filter] duration-1000 ease-out motion-reduce:transition-none",
-                generating ? "opacity-0 blur-xl" : "blur-0 opacity-100",
-              )}
-              style={{
-                background:
-                  "radial-gradient(120% 90% at 20% 100%, oklch(0.45 0.09 265) 0%, transparent 55%), radial-gradient(110% 80% at 85% 90%, oklch(0.62 0.1 300 / 0.8) 0%, transparent 60%), radial-gradient(130% 100% at 60% 0%, oklch(0.88 0.06 60) 0%, oklch(0.74 0.09 25 / 0.9) 45%, transparent 75%), linear-gradient(to top, oklch(0.35 0.06 275), oklch(0.82 0.07 50))",
-              }}
-            />
+            <a href={src} target="_blank" rel="noreferrer" className="absolute inset-0" aria-label={`Ampliar ${title} (nueva pestaña)`}>
+              <NextImage
+                key={`${src}:${attempt}`}
+                unoptimized
+                fill
+                sizes="(max-width: 640px) 100vw, 640px"
+                src={src}
+                alt={alt ?? prompt}
+                className="object-contain"
+                onLoad={(event) => setPreview({ src, status: "ready", width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight })}
+                onError={() => setPreview({ src, status: "error" })}
+              />
+            </a>
+            {status === "loading" ? <span role="status" className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">Cargando imagen…</span> : null}
           </>
-        )}
-        {dimensions ? (
-          <span
-            className={cn(
-              mono,
-              "absolute end-2.5 top-2.5 rounded-full bg-black/35 px-2 py-1 text-white/80 tabular-nums backdrop-blur-sm",
-            )}
-          >
-            {dimensions}
-          </span>
-        ) : null}
+        ) : <span role="status" className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-[var(--text-secondary)]">{generating ? "Generando imagen…" : "Imagen no disponible."}</span>}
       </div>
-      <div className="flex min-w-0 items-center justify-between gap-2">
-        <p className="min-w-0 flex-1 truncate text-xs text-[var(--text-secondary)]">
-          {generating ? (
-            <ShimmerLabel className="relative">Generando imagen</ShimmerLabel>
-          ) : (
-            prompt
-          )}
-        </p>
-        {downloadUrl && !generating && status === "ready" ? (
-          <a
-            href={downloadUrl}
-            download={downloadName}
-            aria-label={downloadName ? `Descargar ${downloadName}` : "Descargar imagen"}
-            className={cn(ghostButton, "touch-target size-7 shrink-0 text-[var(--text-secondary)]")}
-          >
-            <DownloadIcon className="size-3" />
-          </a>
-        ) : null}
-        {onRegenerate && !generating ? (
-          <button
-            type="button"
-            aria-label="Volver a generar la imagen"
-            onClick={onRegenerate}
-            className={cn(ghostButton, "touch-target size-7 shrink-0")}
-          >
-            <RefreshCwIcon className="size-3" />
-          </button>
-        ) : null}
-      </div>
+      <details className="min-w-0 text-xs leading-5 text-[var(--text-secondary)]">
+        <summary className="touch-target w-fit cursor-pointer rounded py-2 font-medium">Ver descripción</summary>
+        <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{prompt}</p>
+      </details>
+      {ready ? <div className="flex min-w-0 flex-wrap gap-2">
+        <a href={src!} target="_blank" rel="noreferrer" aria-label={`Ampliar imagen ${title} (nueva pestaña)`} className={imageAction}><ExpandIcon className="size-3.5" aria-hidden />Ampliar</a>
+        {downloadUrl ? <a href={downloadUrl} download={downloadName} aria-label={downloadName ? `Descargar ${downloadName}` : "Descargar imagen"} className={imageAction}><DownloadIcon className="size-3.5" aria-hidden />Descargar PNG</a> : null}
+        {onRegenerate ? <button type="button" aria-label="Volver a generar la imagen" onClick={onRegenerate} className={imageAction}><RefreshCwIcon className="size-3.5" aria-hidden />Volver a generar</button> : null}
+      </div> : null}
     </div>
   );
 }

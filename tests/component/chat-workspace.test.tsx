@@ -457,6 +457,26 @@ describe("chat workspace simplificado", () => {
     expect(onImageGenerationChange).toHaveBeenCalledWith(true);
   });
 
+  it("offers image examples as editable drafts without sending or discarding existing text", () => {
+    const onSend = vi.fn();
+    renderWorkspace(null, project, { imageGeneration: true, prompt: "Usa mis colores.", onSend });
+    expect(screen.getByRole("heading", { name: "¿Qué imagen quieres crear?" })).toBeInTheDocument();
+    const composer = screen.getByRole("textbox", { name: "Mensaje" });
+    expect(composer).toHaveAttribute("placeholder", "Describe la imagen que quieres crear…");
+    expect(screen.queryByText("Prioridades")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Para una presentación/ }));
+    expect(composer).toHaveValue("Usa mis colores.\n\nCrea una imagen horizontal para una presentación sobre…");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("fills a normal suggestion for review rather than submitting it", () => {
+    const onSend = vi.fn();
+    renderWorkspace(null, project, { onSend });
+    fireEvent.click(screen.getByRole("button", { name: /^Prioridades/ }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue(`Organiza las prioridades de esta semana para ${project.name}.`);
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("queues the next message while keeping stop and cancellation available", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();

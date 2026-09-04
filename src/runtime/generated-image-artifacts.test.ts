@@ -85,6 +85,7 @@ describe("generated image artifacts", () => {
     }, files.context);
 
     expect(artifact).not.toBeNull();
+    expect(artifact).toMatchObject({ width: PNG.readUInt32BE(16), height: PNG.readUInt32BE(20) });
     expect(artifact?.name).toMatch(/^imagen-[0-9a-f]{8}\.png$/u);
     expect(artifact?.name).not.toContain(".png.json");
     expect(artifact?.url).toBe(`/api/projects/${PROJECT_ID}/artifacts/${artifact?.id}`);

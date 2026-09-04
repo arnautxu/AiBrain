@@ -90,6 +90,9 @@ export type ImageArtifact = {
   name: string;
   url: string;
   prompt: string | null;
+  /** Intrinsic PNG dimensions, omitted by older persisted messages. */
+  width?: number;
+  height?: number;
 };
 
 export type DocumentKind = "docx" | "xlsx" | "pptx" | "pdf" | "text";
@@ -421,7 +424,10 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
     return /^[^/\\\u0000-\u001f\u007f]+\.png$/u.test(value.name) &&
       typeof value.url === "string" &&
       new RegExp(`^/api/projects/[0-9a-f-]{36}/artifacts/${value.id}$`, "iu").test(value.url) &&
-      (value.prompt === null || typeof value.prompt === "string");
+      (value.prompt === null || typeof value.prompt === "string") &&
+      ((value.width === undefined && value.height === undefined) ||
+        (Number.isSafeInteger(value.width) && Number(value.width) >= 1 && Number(value.width) <= 8192 &&
+          Number.isSafeInteger(value.height) && Number(value.height) >= 1 && Number(value.height) <= 8192));
   }
   if (value.type === "document") {
     return typeof value.url === "string" && value.url.startsWith("/api/projects/") &&

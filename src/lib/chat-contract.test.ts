@@ -114,4 +114,11 @@ describe("generated image artifact contract", () => {
     expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, url: "/workspace/.aibrain/artifacts/image.png" } })).toBe(false);
     expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, url: `${artifact.url}?path=/tmp/image.png` } })).toBe(false);
   });
+
+  it("accepts legacy images and bounded pairs of intrinsic dimensions", () => {
+    const valid = (dimensions: object) => isChatStreamEvent({ type: "artifact", item: { ...artifact, ...dimensions } });
+    expect(valid({})).toBe(true);
+    expect(valid({ width: 1536, height: 1024 })).toBe(true);
+    for (const dimensions of [{ width: 100 }, { height: 100 }, { width: 0, height: 100 }, { width: 9000, height: 100 }, { width: 1.5, height: 100 }]) expect(valid(dimensions)).toBe(false);
+  });
 });

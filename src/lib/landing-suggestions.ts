@@ -1,7 +1,7 @@
 import { isStandaloneProject, type WorkbenchProject } from "@/workbench/types";
 
 export type LandingSuggestion = {
-  id: "priorities" | "summary" | "plan" | "gmail";
+  id: "priorities" | "summary" | "plan" | "gmail" | "presentation-image" | "illustration" | "diagram";
   label: string;
   prompt: string;
 };
@@ -10,8 +10,13 @@ export type LandingSuggestion = {
 export function landingSuggestions(
   project: WorkbenchProject | null,
   companyName: string,
-  capabilities: { gmailAuthorized?: boolean } = {},
+  capabilities: { gmailAuthorized?: boolean; imageGeneration?: boolean } = {},
 ): LandingSuggestion[] {
+  if (capabilities.imageGeneration) return [
+    { id: "presentation-image", label: "Para una presentación", prompt: "Crea una imagen horizontal para una presentación sobre…" },
+    { id: "illustration", label: "Ilustrar una idea", prompt: "Crea una ilustración que represente…" },
+    { id: "diagram", label: "Explicar un proceso", prompt: "Crea un diagrama visual que explique estos pasos: …" },
+  ];
   if (project && !isStandaloneProject(project)) {
     const projectName = project.name;
     return [

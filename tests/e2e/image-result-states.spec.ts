@@ -50,3 +50,33 @@ for (const failure of [401, 403, 404, 503]) {
     expect(turns).toBe(0);
   });
 }
+
+for (const [viewport, width, height] of [[320, 64, 96], [390, 96, 64], [768, 64, 64], [1440, 96, 64]]) {
+  test(`image actions and intrinsic ratio remain usable at ${viewport}px`, async ({ page }) => {
+    await page.setViewportSize({ width: viewport, height: 844 });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    await page.route(`**/artifacts/${artifactId}`, async (route) => {
+      await gate;
+      await route.fulfill({ status: 200, contentType: "image/png", body: generatedPngFixture(width, height) });
+    });
+    await seedImage(page, width, height);
+    const frame = page.locator('[data-slot="image-preview"]');
+    await expect(page.getByText("Cargando imagen…")).toBeVisible();
+    const reserved = await frame.boundingBox();
+    release();
+    const download = page.getByRole("link", { name: "Descargar prueba.png" });
+    await expect(download).toBeVisible();
+    const loaded = await frame.boundingBox();
+    expect(Math.abs(loaded!.height - reserved!.height)).toBeLessThanOrEqual(1);
+    expect(loaded!.width / loaded!.height).toBeCloseTo(width / height, 1);
+    await expect(page.getByText(`PNG · ${width} × ${height} px`)).toBeVisible();
+    await page.getByText("Ver descripción", { exact: true }).click();
+    await expect(page.getByText(imagePrompt, { exact: true })).toBeVisible();
+    const bounds = await download.boundingBox();
+    expect(bounds!.x).toBeGreaterThanOrEqual(0);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(viewport);
+    await download.click({ trial: true });
+    await expect(page.getByRole("link", { name: "Ampliar imagen prueba.png (nueva pestaña)" })).toHaveAttribute("target", "_blank");
+  });
+}
