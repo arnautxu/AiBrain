@@ -172,7 +172,8 @@ export async function consumeRecoverableChatStream(options: {
               options.onRecoveryState({ state: "recovered" });
             }
           }
-          if (event.type === "done" || event.type === "stopped" || event.type === "error") sawTerminal = true;
+          if (event.type === "done" || event.type === "stopped" || event.type === "error" ||
+              (event.type === "snapshot" && event.message.status !== "streaming")) sawTerminal = true;
           options.onEvent(event);
         }, { signal: options.signal });
         update({ closedAtMs: elapsed(), closeReason: options.signal.aborted ? "aborted" : "stream-ended" });

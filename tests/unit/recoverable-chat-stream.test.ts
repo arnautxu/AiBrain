@@ -79,6 +79,24 @@ async function flush() {
 }
 
 describe("recoverable chat stream", () => {
+  it.each(["complete", "stopped", "error"] as const)("accepts a terminal %s snapshot without another reattach", async (status) => {
+    const scheduler = new ControlledScheduler();
+    const request = vi.fn(async () => response([{ type: "snapshot", message: {
+      id: "assistant-turn", role: "assistant", content: "Persisted answer", status,
+      createdAt: "2026-08-28T12:00:00.000Z", activity: [], plan: [], approvals: [],
+      diff: "", attachments: [], artifacts: [], sources: [], toolResults: [],
+    } }]));
+    const states: unknown[] = [];
+    const run = consumeRecoverableChatStream({ request, signal: new AbortController().signal,
+      onEvent: () => undefined, onRecoveryState: (state) => states.push(state),
+      onMeasurement: () => undefined, scheduler: scheduler.api });
+    // Baseline schedules recovery despite already receiving a durable terminal.
+    await vi.waitFor(() => expect(states.length).toBeGreaterThan(0));
+    expect(states).toEqual([{ state: "idle" }]);
+    await run;
+    expect(request).toHaveBeenCalledOnce();
+    expect(scheduler.hasPending()).toBe(false);
+  });
   it("observes idle beyond three seconds without showing recovery or closing a healthy stream", async () => {
     const scheduler = new ControlledScheduler();
     const source = controlledResponse();
