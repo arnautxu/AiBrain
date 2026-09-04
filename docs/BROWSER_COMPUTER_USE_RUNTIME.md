@@ -185,8 +185,10 @@ Only TCP 80 and 443 are allowed by default for absolute HTTP and CONNECT; a
 different bounded server-side allowlist must be explicit and is never chosen
 by the browser/UI.
 
-`open` waits for a bounded readable document state instead of returning at the
-first navigation acknowledgement. `read` returns bounded page text plus at
+`open` waits for the document's `interactive`/`complete` state (or one bounded
+DOMContentLoaded wait), rather than requiring a minimum text length and links.
+Blank pages and forms are valid documents. Malformed or still-loading results
+fail closed. `read` returns bounded page text plus at
 most 40 HTTP(S) links, ranked to place article/news destinations before menus.
 Every returned link includes an exact ephemeral CSS selector owned by that
 thread target. The model is instructed to use those selectors rather than
@@ -197,9 +199,9 @@ authority and never relax the explicit mutation approval.
 Screenshots are idempotent reads. A generic transient CDP failure is retried up
 to three times on the same target so selectors returned by the preceding read
 remain valid. Only an explicit stale-page/session failure recreates that thread
-target; navigation state then restores the last safe URL. Mutating calls retain
-the narrow stale-session predicate so an indeterminate click or type is never
-replayed broadly.
+target; navigation state then restores the last safe URL. Mutating calls do not
+use stale-target replay: an indeterminate click, type, navigation or its failed
+readback is never dispatched again automatically.
 
 The loopback proxy is not an unauthenticated local capability. It generates a
 new 256-bit password per runtime and returns a Basic challenge. Chrome receives
@@ -217,6 +219,16 @@ remaining validation is host-specific: exercise bwrap/seccomp/Chromium and
 resource probes inside the immutable QA image.
 
 ## Focused validation
+
+Viewer takeover, heartbeat and release bind an attachment UUID to the current
+browser-session UUID, with a bounded per-user control lane. Stale release is an
+idempotent no-op; late takeover completion after unmount sends a scoped
+compensating release. It cannot release a successor attachment. Clipboard text
+uses one CDP `Input.insertText`; editing keys carry Chromium virtual-key codes.
+The frame decoder allocates one bounded payload per frame and cancels its source
+on abort or parsing/callback failure. These are local implementation guarantees;
+see [R2 integration evidence](MELSO_R2_F_20260904.md) for joined application/CDP
+fixtures and the remaining independent/live gates.
 
 Run:
 

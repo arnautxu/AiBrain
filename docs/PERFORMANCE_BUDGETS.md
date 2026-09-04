@@ -68,6 +68,16 @@ not acceptance of this candidate.
 
 ## Metric definitions and budgets
 
+The R2 worker publishes the sanitized complete lexical prefix of each arrival,
+including document turns; the trailing unfinished token stays private until it
+can be sanitized or the item completes. Distinct authoritative final items
+replace previous answers rather than concatenate. Structured terminal snapshots
+stop client reattachment. Projection batches validate envelopes/events first,
+then the accumulated message at the atomic-write boundary (64-delta fixture:
+66 to 3 complete-message validations). These are operation-count/correctness
+results, not provider-speed measurements. The local evidence and caveats are in
+[MELSO_R2_F_20260904.md](MELSO_R2_F_20260904.md).
+
 Remote/model-dependent budgets are comparative: measure AiBrain and ChatGPT
 Work on the same Mac, network, account/model and prompt set. AiBrain passes when
 its p50 and p95 are no worse than the reference by more than 10% or 250 ms,
