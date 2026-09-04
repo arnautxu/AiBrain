@@ -91,7 +91,18 @@ export async function cancelPendingWorkerTurn(
       "El worker encara no té un torn local que es pugui aturar.",
     );
   }
-  await persistAcceptedStop(request, persistAccepted);
+  // Acceptance of a local cancellation request is not remote confirmation.
+  // The runner emits the terminal stopped/error event after reconciliation.
+  await persistAccepted({
+    type: "activity",
+    item: {
+      id: `stop:${request.clientRequestId}`,
+      kind: "system",
+      label: "Aturada sol·licitada",
+      detail: "Esperant que el servei confirmi la interrupció del torn.",
+      status: "complete",
+    },
+  });
   return { action: request.action, runtimeTurnId: null, activeRunnerCancelled } as const;
 }
 

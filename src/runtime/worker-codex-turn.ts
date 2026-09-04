@@ -955,6 +955,18 @@ export async function runWorkerCodexTurn(
   let threadResult: JsonValue;
   if (reuseLoadedThread && runtimeThreadId) {
     threadResult = { thread: { id: runtimeThreadId, turns: [] } };
+    // Each local turn needs its own durable, user-bound identity, including
+    // warm turns which intentionally skip thread/resume. Stop must not route
+    // an already running remote turn through the pre-start cancellation path.
+    await emit({
+      type: "runtimeThread",
+      threadToken: issueThreadToken(
+        installationId,
+        authenticatedUserId,
+        runtimeThreadId,
+        toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision),
+      ),
+    });
   } else {
     await setRuntimePhase(
       "runtime-thread",

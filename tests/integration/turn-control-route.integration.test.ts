@@ -61,11 +61,10 @@ vi.mock("@/runtime/turn-control", async (importOriginal) => {
         item: {
           id: `${request.action}:${request.clientRequestId}`,
           kind: "system",
-          label: "Control acceptat",
-          status: "stopped",
+          label: "Aturada sol·licitada",
+          status: "complete",
         },
       });
-      await persist({ type: "stopped" });
       return { action: request.action, runtimeTurnId: null, activeRunnerCancelled: true };
     }),
   };
@@ -300,6 +299,10 @@ describe("turn control route", () => {
     expect(controls.calls.some((call) =>
       call.request.assistantMessageId === PENDING_ASSISTANT_MESSAGE && call.request.action === "stop"))
       .toBe(true);
+    const projections = new FileTurnProjectionStore({
+      installationId: "control-lab", userId: USER_A, usersRoot: path.join(root, "data", "users"),
+    });
+    expect((await projections.read(pendingThreadId, PENDING_ASSISTANT_MESSAGE))?.message.status).toBe("streaming");
   });
 
   it("accepts an immediate stop before App Server has returned a thread id", async () => {

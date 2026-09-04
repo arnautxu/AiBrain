@@ -1516,6 +1516,7 @@ describe("worker Codex turn", () => {
     );
 
     expect(calls.map(({ method }) => method)).toEqual(["turn/start"]);
+    expect(events).toContainEqual({ type: "runtimeThread", threadToken: "user-bound-runtime-thread-token" });
     expect(calls[0]?.params).toMatchObject({
       threadId: "runtime-thread-1",
       summary: "concise",
