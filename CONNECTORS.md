@@ -84,3 +84,19 @@ Melso exposes every provisionable toolkit, can provision auth configs automatica
 - Release integration/deployment belongs only to task `01a06d0d-0ea0-7420-ac29-31015f795d0f`. Connector external dependency must not hold up other critical fixes.
 
 Official API references checked: https://docs.composio.dev/reference/api-reference/connected-accounts/postConnectedAccountsLink , https://docs.composio.dev/reference/api-reference/auth-configs/getAuthConfigsByNanoid , https://docs.composio.dev/reference/api-reference/tools/getToolsByToolSlug .
+
+## Integration review follow-up
+
+The connector screen displays both managed callback outcomes: failure guidance,
+or a return-from-consent notice that explicitly directs the user to the
+server-verified card status (the query parameter never proves connection).
+When managed apps are present, the screen explains that users should open a
+new chat and select the app with @; older chats may lack the new tools.
+Optional capability listing returns an empty inventory for non-local sessions
+or absent toolkit configuration. Configured local sessions still reject a
+foreign installation; connect/callback/action authorization is unchanged.
+
+Validation: 16 tests in the lifecycle and Settings component suites passed,
+including both callback renderings with a still-unconnected account, new-chat
+copy, and non-local/unconfigured inventory behavior. Targeted lint passed.
+No brain-app edit, OAuth operation, account creation, heavy test or deployment.

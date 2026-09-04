@@ -87,7 +87,10 @@ export async function composioCapability(config: Readonly<InstallationConfig>, u
   }
 }
 export async function composioCapabilitiesForSession(session: AuthSession) {
-  const config = await sessionConfig(session);
+  const config = await loadInstallationConfig();
+  // This optional local-auth integration must not break legacy/demo Settings.
+  if (!config.connectors?.composio?.toolkits.length || session.provider !== "local") return [];
+  if (config.installationId !== session.tenant.id) throw new ComposioError("COMPOSIO_TENANT_MISMATCH");
   const results: GmailConnectionSnapshot[] = [];
   for (const toolkit of config.connectors?.composio?.toolkits ?? []) {
     try { results.push(await composioCapability(config, session.user.id, toolkit.slug)); }
