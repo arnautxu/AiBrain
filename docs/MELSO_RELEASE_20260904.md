@@ -53,3 +53,28 @@ Real model turns, browser interaction, documents/previews and persisted final
 state must be checked again after the new release identity is verified.
 Historical local CLI inference, synthetic sessions and the uncollected cloud
 task do not substitute for these live checks.
+
+## First CI result and bounded correction
+
+Backend CI `33891075724` for `f1c77b7fc493a46a931bd2e854d81dd9d6d4845e`
+passed quality (1,246 tests; 13 opt-in tests skipped), native documents and
+clean container/App Server acceptance. UI E2E passed 62 cases, skipped the
+opt-in real-provider case, and failed only `streaming-fluidity` in all three
+attempts: 72 input deltas produced 76 DOM mutations, below its >100 assertion.
+That count depended on the removed artificial text-reveal subdivision.
+
+The corrected fixture sends 144 deltas at the unchanged 80 ms interval and
+checks all 24 headings and all 144 paragraph fragments after completion.
+The >100 frame/mutation thresholds and controlled-run timing budgets remain
+unchanged. This increases the workload; no production code or gate is weakened.
+This first CI result did not publish or deploy an image. The correction requires
+its own exact-SHA successful pipeline before live acceptance.
+
+The corrected fixture's local warm run verified every heading/paragraph and
+149 mutations. Its optional 4x CPU-throttled timing check failed on the shared
+Mac: p95 frame gap 50 ms (requires <50), 7,665 ms cumulative long tasks (requires
+<500); slow-frame ratio was 0.0433. This is not a performance pass, and no budget
+was changed. A cold run first exceeded the whole-test 30 s deadline while the
+development shell compiled. The local bundler used webpack because Turbopack
+rejects this worktree's dependency symlink. These local limitations are distinct
+from the unchanged CI behavioral mode and later authenticated live evidence.

@@ -12,7 +12,9 @@ test("a long paced answer keeps rendering fluidly while Markdown grows", async (
     rate: controlledPerformanceRun ? 4 : 1,
   });
   const paragraph = "La resposta ha d'arribar de manera contínua, mantenint el xat interactiu i sense salts visibles mentre el contingut creix. ";
-  const fragments = Array.from({ length: 72 }, (_, index) =>
+  // Each provider fragment is painted directly, without artificial subdivision.
+  // Keep >100 real opportunities to render and retain the existing frame budgets.
+  const fragments = Array.from({ length: 144 }, (_, index) =>
     index % 6 === 0 ? `\n\n### Bloc ${index / 6 + 1}\n\n${paragraph}` : paragraph,
   );
 
@@ -116,8 +118,13 @@ test("a long paced answer keeps rendering fluidly while Markdown grows", async (
     __aibrainStreamingFluidity?: { reset: () => void };
   }).__aibrainStreamingFluidity?.reset());
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
-  await expect(page.getByRole("heading", { name: "Bloc 12" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Bloc 24" })).toBeVisible({ timeout: 20_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
+  const answer = page.locator("article").filter({ has: page.getByRole("heading", { name: "Bloc 24" }) });
+  await expect(answer.getByRole("heading")).toHaveText(
+    Array.from({ length: 24 }, (_, index) => `Bloc ${index + 1}`),
+  );
+  await expect(answer.locator("p")).toHaveText(Array.from({ length: 24 }, () => paragraph.repeat(6).trim()));
 
   const metrics = await page.evaluate(() => {
     const state = (window as typeof window & {
