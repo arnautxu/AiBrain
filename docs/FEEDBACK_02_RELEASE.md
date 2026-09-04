@@ -13,10 +13,16 @@ stdin and used for GitHub contents read as well as GHCR pull; it is not logged
 or persisted as a GitHub credential. Existing GitHub workflow permissions
 already include contents:read. No new credentials or purchases are required.
 
-The host gateway must be installed from this reviewed source before promoting
-this release; an image alone cannot update the host-only entrypoint. Verify its
-hash and shell syntax, retain the prior controlled script, and install while
-the same deploy lock is free. Do not interrupt an in-flight deployment.
+The host gateway requires the reviewed promotion-fence change before promoting
+this release; an image alone cannot update the host-only entrypoint. The active
+host script predates unrelated cleanup changes in main, so only the fence and
+its call argument were applied to that exact host source. No cleanup policy or
+legacy release directories were changed. Installed under the existing free
+deploy lock, with original SHA256 `795407353e0c2e20a7c803d3e78c57f1da265f2116da2aa7206bae9343b9f385`
+retained in `.before-feedback02-cc17d42` copies of both controlled scripts.
+New SHA256: `dfb5c250e3086185b5ce8ad693a94a50130325528cdac97ac8a97b6c6af34e3e`.
+Shell syntax and readback hashes passed; live app remained 907dacd. Do not
+interrupt an in-flight deployment or replace newer host changes.
 
 The host lock serializes service promotions, not arbitrary GitHub pushes. A
 push after the final API read can still exist while the current transaction
@@ -41,3 +47,19 @@ owns terminal confirmation. Filesystem UI remains attached through confirmation
 or rejection instead of manufacturing a successful stop. Candidate live stop
 and refresh acceptance is still required; an uncertain interrupt is never
 rewritten into success.
+
+## Original legacy PDF, not a regenerated substitute
+
+The actual workspace `hello-world.pdf` is 435 bytes, SHA256
+`33da4c464e46fb867012cbdd8803bd14913590897d074824a4754f4e05656d07`.
+QPDF reports missing startxref and an incorrect stream length. Exact bytes are
+retained in the regression fixture, with no source repair in production.
+The distinct `documents/hello-world.pdf` is 586 bytes, SHA256
+`92b6394f4cd824ea0f8c4fa38f5762766cd21fc8d0bf860bbc50d5be1e0d84f0`,
+and passes QPDF checks. Both original chat URLs use project/files, not staged
+document previews. Private PDF raw previews now use the existing content-bound
+representation cache, normalizing a separate copy with QPDF and strictly
+validating it. Downloads retain original bytes; permission and indexed hash
+checks still precede conversion. A changed historical indexed artifact remains
+a safe 409, not an excuse to bypass identity checks. Both real URLs and refresh
+still need authenticated candidate acceptance.

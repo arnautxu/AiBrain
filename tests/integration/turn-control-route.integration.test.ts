@@ -299,6 +299,7 @@ describe("turn control route", () => {
     expect(controls.calls.some((call) =>
       call.request.assistantMessageId === PENDING_ASSISTANT_MESSAGE && call.request.action === "stop"))
       .toBe(true);
+    const { FileTurnProjectionStore } = await import("@/workbench/turn-projection-store");
     const projections = new FileTurnProjectionStore({
       installationId: "control-lab", userId: USER_A, usersRoot: path.join(root, "data", "users"),
     });

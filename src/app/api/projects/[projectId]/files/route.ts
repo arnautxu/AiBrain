@@ -194,11 +194,23 @@ export async function GET(
     }
 
     if (raw) {
+      let responseContents = contents;
       if (preview.kind === "text" && !download) {
         return privateJson({ error: "Este archivo se muestra como texto." }, 400);
       }
       if (preview.kind === "pdf" && !contents.subarray(0, PDF_SIGNATURE.length).equals(PDF_SIGNATURE)) {
         return privateJson({ error: "El archivo no es un PDF válido." }, 415);
+      }
+      if (preview.kind === "pdf" && !download) {
+        // Old chat artifacts point directly at this URL. Normalize a private
+        // representation, never rewrite the original or bypass its index hash.
+        const services = await documentServicesForUser(installation, session.user.id);
+        const converted = await prepareWorkspaceDocumentPreview({
+          services, projectId, relativePath: normalizedRelativePath,
+          fileName: path.basename(filePath), declaredMimeType: preview.mimeType,
+          data: contents, signal: request.signal,
+        });
+        responseContents = converted.data;
       }
       if (preview.kind === "office") {
         try {
@@ -214,7 +226,7 @@ export async function GET(
           throw error;
         }
       }
-      return new Response(contents, {
+      return new Response(responseContents, {
         headers: {
           "Cache-Control": "private, no-store",
           "Content-Disposition": contentDisposition(path.basename(filePath), download ? "attachment" : "inline"),
