@@ -134,6 +134,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   });
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [address, setAddress] = useState("about:blank");
+  const [navigating, setNavigating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [compactOverlay, setCompactOverlay] = useState(false);
@@ -149,6 +150,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const humanControlRef = useRef(false);
   const addressEditingRef = useRef(false);
   const lastPointerSentAtRef = useRef(0);
+  const pendingWheelRef = useRef<{ command: { kind: string; event: string; x: number; y: number; button: string; deltaX: number; deltaY: number } } | null>(null);
   const heldPointerRef = useRef<HeldViewerPointer | null>(null);
   const frameTimesRef = useRef<number[]>([]);
   const lastMetricsAtRef = useRef(0);
@@ -298,12 +300,12 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     if (!open || !threadId || !viewerToken) return;
     const controller = new AbortController();
     let reconnectAttempt = 0;
-    let currentToken = viewerToken;
+
     const run = async () => {
       while (!controller.signal.aborted) {
         try {
           setConnection(reconnectAttempt === 0 ? "connecting" : "reconnecting");
-          const response = await openBrowserFrameStream(threadId, currentToken.token, controller.signal);
+          const response = await openBrowserFrameStream(threadId, viewerToken.token, controller.signal);
           await consumeBrowserFrameStream(response, (record) => {
             if (record.metadata.kind === "heartbeat") return;
             reconnectAttempt = 0;
@@ -336,7 +338,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           if (controller.signal.aborted) return;
           reconnectAttempt += 1;
           setConnection("reconnecting");
-          currentToken = await renewViewerToken(humanControlRef.current, controller.signal);
+          await renewViewerToken(humanControlRef.current, controller.signal);
+          return; // The token state starts exactly one replacement effect/stream.
         } catch (reason) {
           if (controller.signal.aborted) return;
           reconnectAttempt += 1;
@@ -344,7 +347,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           if (reconnectAttempt >= 4) setError(reason instanceof Error ? reason.message : "La pantalla se está reconectando.");
           await wait(Math.min(2_000, 150 * (2 ** Math.min(reconnectAttempt, 4))), controller.signal);
           try {
-            currentToken = await renewViewerToken(humanControlRef.current, controller.signal);
+            await renewViewerToken(humanControlRef.current, controller.signal);
+            return; // The token state starts exactly one replacement effect/stream.
           } catch {
             // Retry only the viewer attachment. Browser inputs are never replayed.
           }
@@ -367,8 +371,12 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const runViewerCommands = useCallback(async (
     commands: Record<string, unknown>[],
     acquireControl = true,
+    coalesceKey?: string,
+    beforeDispatch?: () => void,
   ) => {
     if (!threadId || !open || !attachmentRef.current) return null;
+    if (commands.some((command) => command.action !== "input" ||
+      (command.command as { event?: string })?.event !== "mouseWheel")) pendingWheelRef.current = null;
     setError(null);
     try {
       return await inputQueueRef.current.enqueue(async (assertCurrent) => {
@@ -382,10 +390,17 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         if (token.browserSessionId !== status?.state.browserSessionId) {
           throw new Error("La sesión ha cambiado. Revisa la página antes de continuar.");
         }
+        beforeDispatch?.();
         let next: BrowserViewerNavigationState | null = null;
-        for (const command of commands) {
-          assertCurrent();
-          next = await sendBrowserViewerCommand(threadId, token.token, command);
+        if (commands.length > 1 && commands.every((command) => command.action === "input")) {
+          next = await sendBrowserViewerCommand(threadId, token.token, {
+            action: "inputs", commands: commands.map((command) => command.command),
+          });
+        } else {
+          for (const command of commands) {
+            assertCurrent();
+            next = await sendBrowserViewerCommand(threadId, token.token, command);
+          }
         }
         assertCurrent();
         if (next) {
@@ -393,7 +408,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           if (!addressEditingRef.current) setAddress(next.url);
         }
         return next;
-      });
+      }, coalesceKey);
     } catch (reason) {
       // Renew on the next deliberate input, never retry a possibly dispatched mutation.
       viewerTokenControlsRef.current = false;
@@ -403,11 +418,15 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   }, [ensureControl, open, status?.state.browserSessionId, threadId]);
 
   const navigate = async () => {
-    await runViewerCommands([{ action: "navigate", url: normalizedAddress(address) }]);
+    setNavigating(true);
+    try { await runViewerCommands([{ action: "navigate", url: normalizedAddress(address) }]); }
+    finally { setNavigating(false); }
   };
 
   const navigateHistory = async (direction: BrowserViewerHistoryAction) => {
-    await runViewerCommands([{ action: "history", direction }]);
+    setNavigating(true);
+    try { await runViewerCommands([{ action: "history", direction }]); }
+    finally { setNavigating(false); }
   };
 
   const releaseHeldPointer = useCallback((options: {
@@ -466,7 +485,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const now = performance.now();
     if (now - lastPointerSentAtRef.current < 80) return;
     lastPointerSentAtRef.current = now;
-    void runViewerCommands([mouseInput("mouseMoved", point, held ? "left" : "none")], Boolean(held));
+    void runViewerCommands([mouseInput("mouseMoved", point, held ? "left" : "none")], Boolean(held), `move:${held ? "held" : "hover"}`);
   };
 
   const releaseFrame = (event: PointerEvent<HTMLImageElement>) => {
@@ -493,22 +512,35 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     void releaseHeldPointer({ pointerId: event.pointerId, cancelled: true });
   };
 
-  const scrollFrame = async (event: WheelEvent<HTMLImageElement>) => {
+  const scrollFrame = (event: WheelEvent<HTMLImageElement>) => {
     event.preventDefault();
     const image = imageRef.current;
     if (!image || !threadId) return;
-    const bounds = image.getBoundingClientRect();
-    await runViewerCommands([{
-      action: "input",
-      command: {
-        kind: "mouse", event: "mouseWheel",
-        x: Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width),
-        y: Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height),
-        button: "none",
-        deltaX: Math.max(-100_000, Math.min(100_000, event.deltaX)),
-        deltaY: Math.max(-100_000, Math.min(100_000, event.deltaY)),
-      },
-    }]);
+    const point = pointerPosition(image, event.clientX, event.clientY, false);
+    if (!point) return;
+    // Browsers report wheel deltas in pixels, lines or pages. Preserve total
+    // movement while one HTTP request is pending instead of replaying a backlog.
+    const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? image.naturalHeight : 1;
+    const x = clamp(event.deltaX * scale, -100_000, 100_000);
+    const y = clamp(event.deltaY * scale, -100_000, 100_000);
+    const pending = pendingWheelRef.current;
+    if (pending) {
+      pending.command.x = point.remoteX;
+      pending.command.y = point.remoteY;
+      pending.command.deltaX = clamp(pending.command.deltaX + x, -100_000, 100_000);
+      pending.command.deltaY = clamp(pending.command.deltaY + y, -100_000, 100_000);
+      return;
+    }
+    const next = { command: {
+      kind: "mouse", event: "mouseWheel", x: point.remoteX, y: point.remoteY,
+      button: "none", deltaX: x, deltaY: y,
+    } };
+    pendingWheelRef.current = next;
+    void runViewerCommands([{ action: "input", command: next.command }], true, undefined, () => {
+      if (pendingWheelRef.current === next) pendingWheelRef.current = null;
+    }).finally(() => {
+      if (pendingWheelRef.current === next) pendingWheelRef.current = null;
+    });
   };
 
   const keyFrame = async (event: KeyboardEvent<HTMLImageElement>) => {
@@ -569,7 +601,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   );
 
   const live = connection === "live";
-  const indicator = live
+  const indicator = navigating ? "Cargando página…" : live
     ? metrics ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
     : connection === "reconnecting" ? "Reconectando" : "Conectando";
 
@@ -579,6 +611,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       data-side-window="browser"
       className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
       aria-label="Navegador"
+      aria-busy={navigating}
       aria-hidden={!open ? "true" : undefined}
       aria-modal={open && compactOverlay ? "true" : undefined}
       role={open && compactOverlay ? "dialog" : undefined}
@@ -589,7 +622,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
         <button type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
         <button type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
-        <button type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}><ArrowClockwise size={15} /></button>
+        <button type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigating ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
         <form className="mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <label className="sr-only" htmlFor="browser-address">Dirección web</label>
           <input id="browser-address" type="text" inputMode="url" spellCheck={false}

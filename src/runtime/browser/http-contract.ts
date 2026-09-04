@@ -19,7 +19,8 @@ export type BrowserGatewayTokenRequest = Readonly<{
 export type BrowserViewerCommand =
   | Readonly<{ threadId: string; action: "navigate"; url: string }>
   | Readonly<{ threadId: string; action: "history"; direction: BrowserViewerHistoryAction }>
-  | Readonly<{ threadId: string; action: "input"; command: BrowserInputCommand }>;
+  | Readonly<{ threadId: string; action: "input"; command: BrowserInputCommand }>
+  | Readonly<{ threadId: string; action: "inputs"; commands: BrowserInputCommand[] }>;
 
 const CONTROL_ACTIONS = ["start", "stop", "takeover", "release", "heartbeat"] as const;
 const CAPABILITIES = ["view", "control", "heartbeat", "takeover"] as const;
@@ -143,6 +144,18 @@ export function parseBrowserViewerCommand(value: unknown): BrowserViewerCommand 
       action: "history",
       direction: history.direction as BrowserViewerHistoryAction,
     };
+  }
+  const batch = exactRecord(value, ["threadId", "action", "commands"]);
+  if (batch?.action === "inputs") {
+    if (!canonicalUuid(batch.threadId) || !Array.isArray(batch.commands) ||
+      batch.commands.length < 1 || batch.commands.length > 32) return null;
+    const commands: BrowserInputCommand[] = [];
+    for (const raw of batch.commands) {
+      const parsed = parseMouseCommand(raw) ?? parseKeyCommand(raw);
+      if (!parsed) return null;
+      commands.push(parsed);
+    }
+    return { threadId: batch.threadId, action: "inputs", commands };
   }
   const input = exactRecord(value, ["threadId", "action", "command"]);
   if (input?.action !== "input" || !canonicalUuid(input.threadId)) return null;

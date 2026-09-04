@@ -79,9 +79,10 @@ export async function GET(request: Request) {
     });
     return new Response(stream, {
       headers: {
-        "Cache-Control": "private, no-store",
+        "Cache-Control": "private, no-store, no-transform",
         "Content-Security-Policy": "default-src 'none'; sandbox",
         "Content-Type": BROWSER_FRAME_STREAM_CONTENT_TYPE,
+        "Content-Encoding": "identity",
         "X-Accel-Buffering": "no",
         "X-Content-Type-Options": "nosniff",
       },

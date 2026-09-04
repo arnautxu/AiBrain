@@ -13,6 +13,7 @@ import { getThreadRuntimeContext } from "@/workbench/store";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const startedAt = performance.now();
   if (!await isSameOriginMutation(request)) {
     return NextResponse.json({ error: "Origen no autoritzat." }, { status: 403 });
   }
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
   }
   try {
     await getThreadRuntimeContext(auth.session, command.threadId);
+    const authorizedAt = performance.now();
     const navigation = await sendBrowserViewerCommand({
       installationId: auth.session.tenant.id,
       userId: auth.session.user.id,
@@ -40,7 +42,11 @@ export async function POST(request: Request) {
     });
     return NextResponse.json(
       { ok: true, navigation: navigation ?? null },
-      { headers: { "Cache-Control": "private, no-store" } },
+      { headers: {
+        "Cache-Control": "private, no-store",
+        // Durations only: never put identity, URL, input text or tokens in timing headers.
+        "Server-Timing": `browser_auth;dur=${(authorizedAt - startedAt).toFixed(1)}, browser_dispatch;dur=${(performance.now() - authorizedAt).toFixed(1)}`,
+      } },
     );
   } catch (error) {
     if (error instanceof WorkbenchNotFoundError) {

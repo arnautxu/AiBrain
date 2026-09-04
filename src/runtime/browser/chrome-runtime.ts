@@ -646,7 +646,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
 
   async navigate(threadId: string, url: string) {
     this.assertHumanControl();
-    await this.navigatePage(threadId, url, () => this.assertHumanControl());
+    await this.navigatePage(threadId, url, () => this.assertHumanControl(), false);
   }
 
   async viewerNavigationState(threadId: string): Promise<BrowserViewerNavigationState> {
@@ -675,7 +675,6 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         await browser.send("Page.navigateToHistoryEntry", { entryId: target.id }, { sessionId: page.sessionId });
         this.pointerTrails.delete(threadId);
       }
-      await this.waitForReadablePage(page, () => this.assertHumanControl());
       const current = await this.navigationStateForPage(page);
       await this.persistNavigation(page, current.url);
       return current;
@@ -687,7 +686,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     await this.navigatePage(threadId, url, () => this.assertAgentControl());
   }
 
-  private async navigatePage(threadId: string, url: string, assertController: () => void) {
+  private async navigatePage(threadId: string, url: string, assertController: () => void, waitForDocument = true) {
     const destination = validateBrowserNavigationUrl(url);
     await this.networkPolicy.assertAllowed(destination);
     let navigatedPage: ThreadPage | null = null;
@@ -696,7 +695,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       const response = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
         url: destination,
       }, { sessionId: page.sessionId });
-      if (!response.errorText && !response.isDownload) {
+      if (waitForDocument && !response.errorText && !response.isDownload) {
         await this.waitForReadablePage(page, assertController);
       }
       navigatedPage = page;
@@ -1579,8 +1578,11 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       } catch (error) {
         if (!(error instanceof CdpClientError) || error.code !== "CDP_COMMAND_FAILED") throw error;
         lastError = error;
-        if (isRecoverableThreadSessionError(error) || attempt === 2) throw error;
-        await wait(250 * (attempt + 1));
+        // A freshly attached/committing target can temporarily lack a drawable
+        // surface. Retrying that read must not close the target and replay its URL.
+        const surfacePending = /not attached to an active page/iu.test(error.message);
+        if ((isRecoverableThreadSessionError(error) && !surfacePending) || attempt === 2) throw error;
+        await wait(50 * (attempt + 1));
       }
     }
     throw lastError;

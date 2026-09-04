@@ -1,7 +1,7 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { InstallationConfig } from "@/config/installation-schema";
 import {
   BrowserGatewayTokenError,
@@ -255,6 +255,42 @@ describe("BrowserSessionStore", () => {
     expect(expired.state.browserSessionId).not.toBe(secondSession);
   });
 
+  it("checks a warm lease without rewriting it or reprovisioning the worker", async () => {
+    let now = Date.UTC(2026, 8, 4);
+    const { store } = await fixture({ now: () => now });
+    const provision = vi.spyOn(store.provisioner, "provision");
+    const starting = await store.createSession(USER_A);
+    await store.markReady(USER_A, starting.browserSessionId!);
+    const roots = await store.roots(USER_A);
+    const before = await readFile(roots.stateFile, "utf8");
+    const metadata = await stat(roots.stateFile);
+    now += 100;
+    await Promise.all(Array.from({ length: 8 }, () => store.recoverExpired(USER_A)));
+    expect(await readFile(roots.stateFile, "utf8")).toBe(before);
+    expect((await stat(roots.stateFile)).ino).toBe(metadata.ino);
+    expect(provision).toHaveBeenCalledTimes(1);
+    now += 30_001;
+    expect((await store.recoverExpired(USER_A)).changed).toBe(true);
+    expect(await readFile(roots.stateFile, "utf8")).not.toBe(before);
+  });
+
+  it.runIf(Boolean(process.env.AIBRAIN_BROWSER_STORE_EVIDENCE))("measures real durable viewer lease checks", async () => {
+    const { store } = await fixture();
+    const starting = await store.createSession(USER_A);
+    await store.markReady(USER_A, starting.browserSessionId!);
+    const roots = await store.roots(USER_A);
+    const samples: number[] = [];
+    let writes = 0;
+    for (let index = 0; index < 20; index += 1) {
+      const before = await stat(roots.stateFile);
+      const start = performance.now();
+      await store.recoverExpired(USER_A);
+      samples.push(performance.now() - start);
+      if ((await stat(roots.stateFile)).ino !== before.ino) writes += 1;
+    }
+    await writeFile(process.env.AIBRAIN_BROWSER_STORE_EVIDENCE!, JSON.stringify({ samples, writes }, null, 2));
+  });
+
   it("fails closed on corrupt state and symlinked profile roots", async () => {
     const { root, store } = await fixture();
     const rootsA = await store.roots(USER_A);
@@ -267,7 +303,7 @@ describe("BrowserSessionStore", () => {
     const outside = path.join(root, "outside-profile");
     await mkdir(outside);
     await symlink(outside, rootsA.profile);
-    await expect(store.roots(USER_A)).rejects.toMatchObject({ code: "WORKER_SYMLINK_REJECTED" });
+    await expect(store.roots(USER_A)).rejects.toMatchObject({ code: "BROWSER_ROOT_UNSAFE" });
   });
 });
 
@@ -371,6 +407,35 @@ describe("BrowserRuntimeRegistry", () => {
       expect(ready.browserSessionId).not.toBe(handle.browserSessionId);
       await registry.controlViewer(USER_A, "release", next);
       expect((await registry.state(USER_A)).browserSessionId).toBe(ready.browserSessionId);
+    } finally {
+      await registry.close();
+    }
+  });
+
+  it("stops an uncertain batch without replay and reports only its confirmed prefix", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    try {
+      await registry.start(USER_A);
+      await registry.takeOver(USER_A);
+      const dispatch = vi.spyOn(factory.runtimes[0], "dispatchInput")
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error("uncertain dispatch"));
+      const confirmed = vi.fn();
+      const commands = [
+        { kind: "key" as const, event: "keyDown" as const, key: "a" },
+        { kind: "key" as const, event: "keyUp" as const, key: "a" },
+        { kind: "key" as const, event: "keyDown" as const, key: "b" },
+      ];
+      await expect(registry.dispatchInputs(USER_A, THREAD_A, commands, confirmed))
+        .rejects.toThrow("uncertain dispatch");
+      expect(dispatch).toHaveBeenCalledTimes(2);
+      expect(confirmed).toHaveBeenCalledExactlyOnceWith(commands[0]);
+      await registry.releaseTakeover(USER_A);
+      await expect(registry.dispatchInputs(USER_A, THREAD_A, commands, confirmed))
+        .rejects.toThrow("requires an active human takeover");
+      expect(dispatch).toHaveBeenCalledTimes(2);
     } finally {
       await registry.close();
     }

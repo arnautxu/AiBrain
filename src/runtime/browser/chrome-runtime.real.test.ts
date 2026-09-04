@@ -154,6 +154,23 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       expect.soft(pasteError).toBeNull();
       expect.soft(afterPaste).toBe(`a${unicode}`);
       expect.soft(afterBackspace).toBe(afterPaste);
+      // A real held pointer must select text, and release must clear the drag.
+      await runtime.takeOver();
+      await runtime.dispatchInput(THREAD_A, { kind: "mouse", event: "mousePressed", x: 18, y: 30, button: "left", buttons: 1, clickCount: 1 });
+      await runtime.dispatchInput(THREAD_A, { kind: "mouse", event: "mouseMoved", x: 180, y: 30, button: "left", buttons: 1 });
+      await runtime.dispatchInput(THREAD_A, { kind: "mouse", event: "mouseReleased", x: 180, y: 30, button: "left", buttons: 0, clickCount: 1 });
+      const owned = runtime as unknown as {
+        requireThreadPage(id: string): Promise<{ sessionId: string }>;
+        requireBrowser(): PrivateCdpClient;
+      };
+      const page = await owned.requireThreadPage(THREAD_A);
+      const selection = await owned.requireBrowser().send<{ result: { value: number } }>("Runtime.evaluate", {
+        expression: "entry.selectionEnd-entry.selectionStart", returnByValue: true,
+      }, { sessionId: page.sessionId });
+      expect(selection.result.value).toBeGreaterThan(0);
+      await runtime.releaseTakeover();
+      await expect(runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "x", text: "x" }))
+        .rejects.toMatchObject({ code: "CHROME_TAKEOVER_REQUIRED" });
     } finally {
       await runtime.stop();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -251,6 +268,68 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
   }, 90_000);
+
+  it("renders a slow manual navigation before document completion", async () => {
+    if (!executablePath) throw new Error("A pinned Chrome executable is required.");
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-feedback-slow-"));
+    temporaryRoots.push(root);
+    let finishDocument!: () => void;
+    let requestArrived!: () => void;
+    let responseEnded = false;
+    const arrived = new Promise<void>((resolve) => { requestArrived = resolve; });
+    const server = createServer((_request, response) => {
+      response.setHeader("Content-Type", "text/html; charset=utf-8");
+      response.write('<!doctype html><title>Useful first paint</title><body style="background:#123456;color:white;font:48px sans-serif">Usable content before slow footer');
+      requestArrived();
+      finishDocument = () => { responseEnded = true; response.end('</body>'); };
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Missing fixture port.");
+    const runtime = new ChromeCdpRuntime(await runtimeContext(root,
+      "0198b9f0-6631-7000-8000-000000000471", "0198b9f0-6631-7000-8000-000000000472"), {
+      executablePath, expectedVersion: process.env.AIBRAIN_CHROME_EXPECTED_VERSION, allowPrivateNetwork: true,
+    });
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const coldStart = performance.now();
+      await runtime.start();
+      const coldStartMs = performance.now() - coldStart;
+      const blank = await runtime.captureFrame(THREAD_A);
+      await runtime.takeOver();
+      const started = performance.now();
+      const navigation = runtime.navigate(THREAD_A, `http://127.0.0.1:${address.port}/slow`);
+      await arrived;
+      // Upper bound belongs to this test fixture, not a product wait.
+      timeout = setTimeout(() => finishDocument(), 1800);
+      let changed = false;
+      let frame;
+      await eventually(async () => {
+        frame = await runtime.captureFrame(THREAD_A);
+        changed = frame.dataBase64 !== blank.dataBase64;
+        return changed;
+      });
+      const firstChangedFrameMs = performance.now() - started;
+      const beforeCompletion = !responseEnded;
+      finishDocument();
+      await navigation;
+      if (process.env.AIBRAIN_BROWSER_MANUAL_EVIDENCE) {
+        await writeFile(process.env.AIBRAIN_BROWSER_MANUAL_EVIDENCE, JSON.stringify({
+          coldStartMs, firstChangedFrameMs, beforeCompletion, platform: process.platform,
+          scope: "local CDP screenshot, no HTTP gateway or UI paint", changesObserved: changed,
+        }, null, 2));
+      }
+      expect(beforeCompletion).toBe(true);
+      await runtime.releaseTakeover();
+      expect((await runtime.readPage(THREAD_A)).title).toBe("Useful first paint");
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      finishDocument?.();
+      await runtime.stop();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 30_000);
 
   it("loads a public HTTPS page only through the pinned egress proxy", async () => {
     if (!executablePath) {

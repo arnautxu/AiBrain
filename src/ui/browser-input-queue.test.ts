@@ -32,4 +32,19 @@ describe("browser input lane", () => {
     await expect(first).rejects.toThrow("cancelada");
     await expect(queue.enqueue(async () => undefined)).rejects.toThrow("no está disponible");
   });
+  it("coalesces waiting pointer moves but never crosses a press or release", async () => {
+    const queue = new BrowserInputQueue();
+    const seen: string[] = [];
+    let release!: () => void;
+    const first = queue.enqueue(() => new Promise<void>((resolve) => { release = resolve; }));
+    await Promise.resolve();
+    const moves = Array.from({ length: 1000 }, (_, index) => queue.enqueue(async () => { seen.push(`move${index}`); }, "move"));
+    const press = queue.enqueue(async () => { seen.push("press"); });
+    const finalMove = queue.enqueue(async () => { seen.push("held-move"); }, "move");
+    const up = queue.enqueue(async () => { seen.push("release"); });
+    release();
+    await Promise.all([first, ...moves, press, finalMove, up]);
+    expect(seen).toEqual(["move999", "press", "held-move", "release"]);
+  });
+
 });

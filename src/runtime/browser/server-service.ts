@@ -246,7 +246,7 @@ async function ensureBrowserCapability() {
 }
 
 async function currentHandle(state: BrowserServiceState, userId: string) {
-  await state.registry.start(userId);
+  if (!state.registry.get(userId)) await state.registry.start(userId);
   const handle = state.registry.get(userId);
   const persistent = await state.registry.state(userId);
   if (!handle || !persistent.browserSessionId || handle.browserSessionId !== persistent.browserSessionId) {
@@ -479,7 +479,7 @@ export async function* streamBrowserFrames(input: {
   const detach = () => streamController.abort();
   input.signal.addEventListener("abort", detach, { once: true });
   if (input.signal.aborted) detach();
-  const frameIntervalMs = Math.max(100, Math.min(1_000, input.frameIntervalMs ?? 180));
+  const frameIntervalMs = Math.max(100, Math.min(1_000, input.frameIntervalMs ?? 100));
   const heartbeatIntervalMs = Math.max(1_000, Math.min(10_000, input.heartbeatIntervalMs ?? 2_500));
   const maximumDurationMs = Math.max(1_000, Math.min(25_000, input.maximumDurationMs ?? 20_000));
   const deadline = Date.now() + maximumDurationMs;
@@ -572,61 +572,74 @@ export async function sendBrowserViewerCommand(input: {
   command:
     | { action: "navigate"; url: string }
     | { action: "history"; direction: BrowserViewerHistoryAction }
-    | { action: "input"; command: BrowserInputCommand };
+    | { action: "input"; command: BrowserInputCommand }
+    | { action: "inputs"; commands: BrowserInputCommand[] };
 }) {
   const state = await authorizeGateway({ ...input, capability: "control" });
   const command = input.command;
   let navigationState: BrowserViewerNavigationState | undefined;
-  if (command.action === "navigate") {
-    navigationState = await executeViewerOperation({
-      registry: state.registry,
-      userId: input.userId,
-      signal: input.signal,
-      operation: async () => {
-        await state.registry.navigate(input.userId, input.threadId, command.url);
-        return state.registry.viewerNavigationState(input.userId, input.threadId);
-      },
-    });
-  } else if (command.action === "history") {
-    navigationState = await executeViewerOperation({
-      registry: state.registry,
-      userId: input.userId,
-      signal: input.signal,
-      operation: () => state.registry.navigateHistory(input.userId, input.threadId, command.direction),
-    });
-  } else {
-    await executeViewerOperation({
-      registry: state.registry,
-      userId: input.userId,
-      signal: input.signal,
-      operation: () => state.registry.dispatchInput(input.userId, input.threadId, command.command),
-    });
-  }
-  const action = command.action === "navigate"
-    ? "open"
-    : command.action === "history"
-      ? "open"
-      : command.command.event === "mouseWheel"
-        ? "scroll"
-        : command.command.event === "mouseReleased"
-          ? "click"
-          : command.command.event === "keyDown"
-            ? "type"
-            : null;
-  if (action) {
-    const roots = await state.registry.store.roots(input.userId);
-    await new BrowserActionHistoryStore({ userRoot: path.dirname(roots.browserRoot) }).append({
-      schemaVersion: 1,
-      installationId: input.installationId,
-      userId: input.userId,
-      threadId: input.threadId,
-      turnId: "manual-takeover",
-      callId: randomUUID(),
-      action,
-      phase: "dispatched",
-      success: true,
-      actor: "human",
-    }).catch(() => null);
+  const actions: Array<Exclude<typeof command, { action: "inputs" }>> = [];
+  try {
+    if (command.action === "navigate") {
+      navigationState = await executeViewerOperation({
+        registry: state.registry,
+        userId: input.userId,
+        signal: input.signal,
+        operation: async () => {
+          await state.registry.navigate(input.userId, input.threadId, command.url);
+          return state.registry.viewerNavigationState(input.userId, input.threadId);
+        },
+      });
+    } else if (command.action === "history") {
+      navigationState = await executeViewerOperation({
+        registry: state.registry,
+        userId: input.userId,
+        signal: input.signal,
+        operation: () => state.registry.navigateHistory(input.userId, input.threadId, command.direction),
+      });
+    } else {
+      await executeViewerOperation({
+        registry: state.registry,
+        userId: input.userId,
+        signal: input.signal,
+        operation: () => command.action === "inputs"
+          ? state.registry.dispatchInputs(input.userId, input.threadId, command.commands,
+            (entry) => actions.push({ action: "input", command: entry }))
+          : state.registry.dispatchInput(input.userId, input.threadId, command.command),
+      });
+    }
+    if (command.action !== "inputs") actions.push(command);
+  } finally {
+    // Preserve the confirmed prefix even if a later batch input has an uncertain
+    // result. Audit carries no text or coordinates and never replays a mutation.
+    for (const command of actions) {
+      const action = command.action === "navigate"
+        ? "open"
+        : command.action === "history"
+          ? "open"
+          : command.command.event === "mouseWheel"
+            ? "scroll"
+            : command.command.event === "mouseReleased"
+              ? "click"
+              : command.command.event === "keyDown"
+                ? "type"
+                : null;
+      if (action) {
+        const roots = await state.registry.store.roots(input.userId);
+        await new BrowserActionHistoryStore({ userRoot: path.dirname(roots.browserRoot) }).append({
+          schemaVersion: 1,
+          installationId: input.installationId,
+          userId: input.userId,
+          threadId: input.threadId,
+          turnId: "manual-takeover",
+          callId: randomUUID(),
+          action,
+          phase: "dispatched",
+          success: true,
+          actor: "human",
+        }).catch(() => null);
+      }
+    }
   }
   return navigationState;
 }

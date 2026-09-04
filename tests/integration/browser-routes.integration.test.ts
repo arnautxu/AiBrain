@@ -191,6 +191,23 @@ describe("authenticated browser runtime routes", () => {
     expect(foreign.status).toBe(404);
   });
 
+  it("accepts bounded key pairs only for the authenticated private thread", async () => {
+    const route = await import("@/app/api/runtime/browser/viewer/input/route");
+    const commands = [{ kind: "key", event: "keyDown", key: "Enter" }, { kind: "key", event: "keyUp", key: "Enter" }];
+    const valid = await route.POST(request("/api/runtime/browser/viewer/input",
+      { threadId: THREAD_A, action: "inputs", commands }, "payload.signature"));
+    expect(valid.status).toBe(200);
+    expect(valid.headers.get("Server-Timing")).toContain("browser_dispatch;dur=");
+    expect(browser.command).toHaveBeenCalledTimes(1);
+    const foreign = await route.POST(request("/api/runtime/browser/viewer/input",
+      { threadId: THREAD_B, action: "inputs", commands }, "payload.signature"));
+    expect(foreign.status).toBe(404);
+    const malformed = await route.POST(request("/api/runtime/browser/viewer/input",
+      { threadId: THREAD_A, action: "inputs", commands: [...commands, { method: "Runtime.evaluate" }] }, "payload.signature"));
+    expect(malformed.status).toBe(400);
+    expect(browser.command).toHaveBeenCalledTimes(1);
+  });
+
   it("streams bounded frames and exposes navigation without leaking runtime details", async () => {
     const streamRoute = await import("@/app/api/runtime/browser/viewer/stream/route");
     const stateRoute = await import("@/app/api/runtime/browser/viewer/state/route");
