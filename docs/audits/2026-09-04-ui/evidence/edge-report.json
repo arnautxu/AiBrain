@@ -1,0 +1,72 @@
+[
+  {
+    "engine": "chromium",
+    "image": {
+      "card": {
+        "x": 16,
+        "right": 436,
+        "width": 420,
+        "height": 473.9999694824219
+      },
+      "container": {
+        "x": 16,
+        "right": 374,
+        "width": 358,
+        "height": 473.9999694824219
+      },
+      "download": {
+        "x": 392,
+        "right": 436,
+        "width": 44,
+        "height": 44
+      },
+      "viewport": 390,
+      "documentWidth": 390,
+      "coarse": true
+    },
+    "palette": {
+      "listTop": 114.07156372070312,
+      "listBottom": 544.3409423828125,
+      "selectedTop": 1583.60498046875,
+      "selectedBottom": 1637.7379150390625,
+      "scrollTop": 0,
+      "selectedVisible": false,
+      "selectedText": "Auditoría 25Conversaciones"
+    }
+  },
+  {
+    "engine": "webkit",
+    "image": {
+      "card": {
+        "x": 16,
+        "right": 436,
+        "width": 420,
+        "height": 474
+      },
+      "container": {
+        "x": 16,
+        "right": 374,
+        "width": 358,
+        "height": 474
+      },
+      "download": {
+        "x": 392,
+        "right": 436,
+        "width": 44,
+        "height": 44
+      },
+      "viewport": 390,
+      "documentWidth": 390,
+      "coarse": true
+    },
+    "palette": {
+      "listTop": 116.73429107666016,
+      "listBottom": 548.9279251098633,
+      "selectedTop": 1592.83984375,
+      "selectedBottom": 1647.2147216796875,
+      "scrollTop": 0,
+      "selectedVisible": false,
+      "selectedText": "Auditoría 25Conversaciones"
+    }
+  }
+]
