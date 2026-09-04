@@ -7,7 +7,7 @@ const mocked = vi.hoisted(() => {
   return {
     releaseMaintenance: vi.fn(),
     runWorkerCodexTurn: vi.fn(),
-    persistProjection: vi.fn(async () => undefined),
+    persistProjection: vi.fn(async (): Promise<void> => undefined),
     WorkerTurnRecoveryPendingError,
   };
 });
@@ -126,7 +126,8 @@ vi.mock("@/settings/server-service", () => ({
   })),
 }));
 
-import { POST, runtimeThreadIdForChatMessage } from "@/app/api/chat/route";
+import { POST } from "@/app/api/chat/route";
+import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
 import { isBrowserPreviewWorkbench, prepareThreadTurn } from "@/workbench/store";
 
 function deferred() {
