@@ -137,6 +137,48 @@ describe("BrowserPanel", () => {
     expect(image).toHaveFocus();
   });
 
+  it("routes keyboard input to the remote page after the address bar navigates and the viewport is clicked", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    const address = screen.getByRole("textbox", { name: "Dirección web" });
+    Object.defineProperties(image, {
+      naturalWidth: { value: 1440 }, naturalHeight: { value: 900 },
+      setPointerCapture: { value: vi.fn() }, releasePointerCapture: { value: vi.fn() },
+      hasPointerCapture: { value: () => true },
+    });
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 720, bottom: 450, width: 720, height: 450,
+      toJSON: () => ({}),
+    });
+    // Reproduce the production failure: browser automation can dispatch the
+    // viewport pointer sequence while native DOM focus remains in the URL bar.
+    vi.spyOn(image, "focus").mockImplementation(() => undefined);
+    address.focus();
+    fireEvent.change(address, { target: { value: "https://www.wikipedia.org/" } });
+    fireEvent.submit(address.closest("form")!);
+    await waitFor(() => expect(browser.send).toHaveBeenCalledWith(
+      THREAD_ID, expect.any(String), expect.objectContaining({ action: "navigate" }),
+    ));
+
+    fireEvent.pointerDown(image, { pointerId: 31, isPrimary: true, button: 0, clientX: 120, clientY: 90 });
+    fireEvent.pointerUp(image, { pointerId: 31, isPrimary: true, button: 0, clientX: 120, clientY: 90 });
+    expect(address).toHaveFocus();
+    const acceptedLocally = fireEvent.keyDown(address, { key: "O", code: "KeyO", shiftKey: true });
+
+    expect(acceptedLocally).toBe(false);
+    await waitFor(() => {
+      const commands = browser.send.mock.calls.flatMap((call) => call[2].commands ?? [call[2].command]);
+      expect(commands.filter(Boolean).map((command) => command.event)).toContain("keyDown");
+    });
+    expect(address).toHaveValue("https://www.wikipedia.org/");
+
+    const sendsBeforeFocusRelease = browser.send.mock.calls.length;
+    fireEvent.pointerDown(address, { pointerId: 32, isPrimary: true, button: 0 });
+    const acceptedAfterFocusRelease = fireEvent.keyDown(address, { key: "L", code: "KeyL" });
+    expect(acceptedAfterFocusRelease).toBe(true);
+    expect(browser.send).toHaveBeenCalledTimes(sendsBeforeFocusRelease);
+  });
+
   it("does not send queued input into either thread after switching during takeover", async () => {
     let takeOver!: (value: unknown) => void;
     browser.control.mockImplementation((action: string) => action === "takeover"
@@ -223,6 +265,17 @@ describe("BrowserPanel", () => {
     const trail = document.querySelector('[data-slot="computer-use-trail"]');
     expect(trail).toBeInTheDocument();
     expect(trail?.querySelector("svg")).toHaveStyle({ left: "25%", top: "40%" });
+  });
+
+  it("does not announce a live viewer before the first real frame finishes loading", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    expect(screen.getByRole("status", { name: "Conectando" })).toBeInTheDocument();
+
+    fireEvent.load(image);
+
+    expect(screen.queryByRole("status", { name: "Conectando" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status").getAttribute("aria-label")).toMatch(/FPS|Conectado/u);
   });
 
   it("tracks locally at pointer speed while preserving remote press, held move, and release order", async () => {

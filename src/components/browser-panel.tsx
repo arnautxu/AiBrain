@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- authenticated blob URLs cannot be optimized by next/image. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, PointerEvent, WheelEvent } from "react";
+import type { ClipboardEvent, FocusEvent, KeyboardEvent, PointerEvent, WheelEvent } from "react";
 import {
   ArrowClockwise,
   ArrowLeft,
@@ -149,6 +149,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const takeoverPromiseRef = useRef<Promise<BrowserViewerToken> | null>(null);
   const humanControlRef = useRef(false);
   const addressEditingRef = useRef(false);
+  const viewportOwnsKeyboardRef = useRef(false);
   const lastPointerSentAtRef = useRef(0);
   const pendingWheelRef = useRef<{ command: { kind: string; event: string; x: number; y: number; button: string; deltaX: number; deltaY: number } } | null>(null);
   const heldPointerRef = useRef<HeldViewerPointer | null>(null);
@@ -309,7 +310,6 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           await consumeBrowserFrameStream(response, (record) => {
             if (record.metadata.kind === "heartbeat") return;
             reconnectAttempt = 0;
-            setConnection("live");
             setPointerTrail((record.metadata.pointerTrail ?? []).map((point) => ({
               ...point,
               action: "click",
@@ -465,6 +465,12 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     if (!point) return;
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
+    // The remote page is a streamed image, not an embedded document. Native
+    // automation and some pointer paths can leave document.activeElement on
+    // the URL input even though this pointer event reached the viewport. Keep
+    // explicit keyboard ownership so subsequent keys follow the last surface
+    // the person deliberately interacted with.
+    viewportOwnsKeyboardRef.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
     heldPointerRef.current = { pointerId: event.pointerId, start: point, last: point };
     lastPointerSentAtRef.current = 0;
@@ -543,7 +549,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     });
   };
 
-  const keyFrame = async (event: KeyboardEvent<HTMLImageElement>) => {
+  const keyFrame = async (event: KeyboardEvent<HTMLElement>) => {
     if (!threadId || event.key.length > 128) return;
     // Let the local browser deliver clipboard text through onPaste.
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
@@ -560,7 +566,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     })));
   };
 
-  const pasteFrame = async (event: ClipboardEvent<HTMLImageElement>) => {
+  const pasteFrame = async (event: ClipboardEvent<HTMLElement>) => {
     const text = event.clipboardData.getData("text").slice(0, 4_096);
     if (!text || !threadId) return;
     event.preventDefault();
@@ -578,6 +584,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     setFullscreen(false);
     setPointer(null);
     setPointerTrail([]);
+    viewportOwnsKeyboardRef.current = false;
     onClose();
     window.requestAnimationFrame(() => {
       if (returnFocusTarget?.isConnected) returnFocusTarget.focus({ preventScroll: true });
@@ -617,8 +624,18 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       role={open && compactOverlay ? "dialog" : undefined}
       tabIndex={open && compactOverlay ? -1 : undefined}
       inert={!open ? true : undefined}
+      onKeyDownCapture={(event) => {
+        if (event.target === imageRef.current || viewportOwnsKeyboardRef.current) void keyFrame(event);
+      }}
+      onPasteCapture={(event) => {
+        if (event.target === imageRef.current || viewportOwnsKeyboardRef.current) void pasteFrame(event);
+      }}
     >
-      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-2">
+      <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-2"
+        onPointerDownCapture={() => { viewportOwnsKeyboardRef.current = false; }}
+        onFocusCapture={(event: FocusEvent<HTMLElement>) => {
+          if (event.target instanceof HTMLElement) viewportOwnsKeyboardRef.current = false;
+        }}>
         <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
         <button type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
         <button type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
@@ -628,7 +645,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           <input id="browser-address" type="text" inputMode="url" spellCheck={false}
             className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)] focus:text-left"
             value={address} onChange={(event) => setAddress(event.target.value)}
-            onFocus={() => { addressEditingRef.current = true; }}
+            onFocus={() => { addressEditingRef.current = true; viewportOwnsKeyboardRef.current = false; }}
             onBlur={() => { addressEditingRef.current = false; }} />
         </form>
         <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
@@ -656,11 +673,12 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           >
             <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
               draggable={false} onDragStart={(event) => event.preventDefault()}
+              onFocus={() => { viewportOwnsKeyboardRef.current = true; }}
+              onLoad={() => setConnection("live")}
               onPointerDown={pressFrame} onPointerMove={moveFrame} onPointerUp={releaseFrame}
               onPointerCancel={cancelFrame} onLostPointerCapture={loseFrameCapture}
               onPointerLeave={() => { if (!heldPointerRef.current) setPointer(null); }}
-              onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)}
-              onPaste={(event) => void pasteFrame(event)}
+              onWheel={(event) => void scrollFrame(event)}
               className={`${pointer ? "cursor-none" : ""} max-h-full max-w-full touch-none select-none bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]`} />
           </ComputerUse>
         ) : (

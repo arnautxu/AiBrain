@@ -899,8 +899,9 @@ export function BrainApp({
   const activeBrowserDemandKey = useMemo(() => {
     const latestAssistant = activeThread?.messages.findLast((message) => message.role === "assistant") ?? null;
     if (!latestAssistant) return null;
-    const activity = latestAssistant.activity.findLast((item) => item.detail === "aibrain_browser");
-    if (activity) return `${latestAssistant.id}:${activity.id}`;
+    // A tool-start activity can precede target navigation and its first usable
+    // frame. Auto-open only after the browser result is durable; BrowserPanel
+    // then marks the connection live only when that frame has actually loaded.
     const result = latestAssistant.toolResults?.findLast((item) => item.kind === "browser");
     return result ? `${latestAssistant.id}:${result.id}` : null;
   }, [activeThread]);

@@ -54,9 +54,15 @@ export function useComposerFileDrop(options: {
         const items = Array.from(event.dataTransfer.items ?? []).filter((item) => item.kind === "file");
         const hasDirectory = items.some((item) => item.webkitGetAsEntry?.()?.isDirectory);
         if (hasDirectory) options.onNotice("Las carpetas no se pueden adjuntar. Selecciona archivos individuales.");
-        const files = items.length
-          ? items.filter((item) => !item.webkitGetAsEntry?.()?.isDirectory).map((item) => item.getAsFile()).filter((file): file is File => file !== null)
-          : Array.from(event.dataTransfer.files);
+        const itemFiles = items
+          .filter((item) => !item.webkitGetAsEntry?.()?.isDirectory)
+          .map((item) => item.getAsFile())
+          .filter((file): file is File => file !== null);
+        // Finder can expose protected DataTransferItems whose getAsFile()
+        // returns null even though the same drop has a populated FileList.
+        // Fall back to that canonical list so native drops share the selector
+        // pipeline instead of being silently discarded.
+        const files = itemFiles.length ? itemFiles : Array.from(event.dataTransfer.files);
         if (files.length) options.onFiles(files);
       },
     },

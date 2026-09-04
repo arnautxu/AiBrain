@@ -164,7 +164,16 @@ describe("chat workspace simplificado", () => {
       runtimeStatus: { ...initialRuntimeStatus, mode: "codex", codex: "connected", ready: true } });
     const png = new File(["synthetic image bytes"], "image.png", { type: "image/png" });
     const pdf = new File(["synthetic pdf bytes"], "notes.pdf", { type: "application/pdf" });
-    fireEvent.drop(screen.getByRole("main"), { dataTransfer: { types: ["Files"], files: [png, pdf] } });
+    fireEvent.drop(screen.getByRole("main"), { dataTransfer: {
+      types: ["Files"],
+      files: [png, pdf],
+      // macOS Finder can leave protected item handles unreadable while the
+      // drop FileList is valid. This is the native shape that regressed.
+      items: [
+        { kind: "file", webkitGetAsEntry: () => ({ isDirectory: false }), getAsFile: () => null },
+        { kind: "file", webkitGetAsEntry: () => ({ isDirectory: false }), getAsFile: () => null },
+      ],
+    } });
     await waitFor(() => expect(onAddDocuments).toHaveBeenCalledWith([png, pdf]));
     expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Keep this draft");
     expect(onSend).not.toHaveBeenCalled();

@@ -627,7 +627,7 @@ export async function runWorkerCodexTurn(
     }
   };
 
-  await setRuntimePhase("runtime-context", "Preparant el context", "Memòria, permisos i documents");
+  await setRuntimePhase("runtime-context", "Preparando el contexto", "Memoria, permisos y documentos");
   const observedToolNames = new Set<string>();
   // Context and the private worker are independent. Start both together so a
   // cold worker does not sit idle while memory is prepared (and vice versa).
@@ -667,8 +667,8 @@ export async function runWorkerCodexTurn(
       });
     }
   };
-  await completeRuntimePhase("runtime-context", { label: "Context preparat" });
-  await setRuntimePhase("runtime-connect", "Preparant l’assistent", "Entorn privat i sessió segura");
+  await completeRuntimePhase("runtime-context", { label: "Contexto preparado" });
+  await setRuntimePhase("runtime-connect", "Preparando el asistente", "Entorno privado y sesión segura");
   telemetry.workerReadiness(runtime.workerWasWarm ?? false);
   if (runtime.config.installationId !== installationId) {
     throw new RuntimeNotReadyError("La instal·lació del worker no coincideix amb la sessió.");
@@ -735,8 +735,8 @@ export async function runWorkerCodexTurn(
   );
   if (!account.connected) throw new RuntimeNotReadyError("El servei privat de la instal·lació no està disponible.");
   await completeRuntimePhase("runtime-connect", {
-    label: "Assistent preparat",
-    detail: "Sessió privada verificada",
+    label: "Asistente preparado",
+    detail: "Sesión privada verificada",
   });
 
   let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
@@ -937,8 +937,8 @@ export async function runWorkerCodexTurn(
     const resolvedThreadId = extractThreadId(result);
     if (!resolvedThreadId) throw new Error("El servei no ha retornat una conversa vàlida.");
     await completeRuntimePhase("runtime-thread", {
-      label: runtimeThreadId ? "Conversa recuperada" : "Conversa oberta",
-      detail: "El servei ha confirmat la conversa",
+      label: runtimeThreadId ? "Conversación recuperada" : "Conversación abierta",
+      detail: "El servicio ha confirmado la conversación",
     }, { envelope, key: "runtime-phase:thread-ready" });
     await emit({
       type: "runtimeThread",
@@ -971,8 +971,8 @@ export async function runWorkerCodexTurn(
   } else {
     await setRuntimePhase(
       "runtime-thread",
-      runtimeThreadId ? "Recuperant la conversa" : "Obrint la conversa",
-      runtimeThreadId ? "Reprenent la conversa segura" : "Creant la conversa segura",
+      runtimeThreadId ? "Recuperando la conversación" : "Abriendo la conversación",
+      runtimeThreadId ? "Reanudando la conversación segura" : "Creando la conversación segura",
     );
     try {
       threadResult = await telemetry.measure(runtimeThreadId ? "thread_resume" : "thread_start", () => runtimeThreadId
@@ -1005,8 +1005,8 @@ export async function runWorkerCodexTurn(
       } catch {
         await setRuntimePhase(
           "runtime-thread-recovery",
-          "Comprovant la conversa",
-          "La represa ha tardat massa; llegint l’estat durable abans de repetir-la",
+          "Comprobando la conversación",
+          "La reanudación ha tardado demasiado; leyendo el estado durable antes de repetirla",
         );
         const recoveredResult = await requestWithLateResponseRecovery(
           () => runtime.client.request(
@@ -1024,8 +1024,8 @@ export async function runWorkerCodexTurn(
         if (durableTurn && durableTurn.status !== "inProgress") {
           threadResult = recoveredResult;
           await completeRuntimePhase("runtime-thread-recovery", {
-            label: "Conversa recuperada",
-            detail: "S’ha trobat el resultat durable sense repetir la petició",
+            label: "Conversación recuperada",
+            detail: "Se ha encontrado el resultado durable sin repetir la petición",
           });
         } else {
           // `thread/resume` does not submit a model turn. Once the durable read
@@ -1033,8 +1033,8 @@ export async function runWorkerCodexTurn(
           // reattach the stream; there is deliberately no retry loop.
           await setRuntimePhase(
             "runtime-thread-retry",
-            "Reprenent la conversa",
-            "L’estat durable s’ha verificat; reconnectant una sola vegada",
+            "Reanudando la conversación",
+            "El estado durable se ha verificado; reconectando una sola vez",
           );
           threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
             threadId: runtimeThreadId,
@@ -1231,8 +1231,8 @@ export async function runWorkerCodexTurn(
     void upsertActivity({
       id: "runtime-turn-timeout",
       kind: "system",
-      label: "Temps màxim assolit",
-      detail: "S’ha demanat aturar el torn; no es repetirà cap acció amb resultat incert.",
+      label: "Tiempo máximo alcanzado",
+      detail: "Se ha solicitado detener la tarea; no se repetirá ninguna acción con resultado incierto.",
       status: "failed",
     }).catch(() => undefined);
     turnController.abort(new Error("Worker turn exceeded its bounded runtime."));
@@ -1254,13 +1254,13 @@ export async function runWorkerCodexTurn(
         });
         if (method === "turn/started") {
           await completeRuntimePhase("runtime-turn-start", {
-            label: "Torn iniciat",
-            detail: "El servei ha acceptat la petició",
+            label: "Tarea iniciada",
+            detail: "El servicio ha aceptado la petición",
           }, phaseProjection("turn-started"));
           await setRuntimePhase(
             "runtime-awaiting-model",
-            "Esperant activitat de l’assistent",
-            "El torn ja està actiu",
+            "Esperando actividad del asistente",
+            "La tarea ya está activa",
             phaseProjection("awaiting-model"),
           );
           return;
@@ -1271,15 +1271,15 @@ export async function runWorkerCodexTurn(
             ? params.status.activeFlags.filter((flag) => typeof flag === "string")
             : [];
           const flagLabels = flags.map((flag) => flag === "waitingOnApproval"
-            ? "Esperant aprovació"
-            : flag === "waitingOnUserInput" ? "Esperant resposta de l’usuari" : flag);
+            ? "Esperando aprobación"
+            : flag === "waitingOnUserInput" ? "Esperando respuesta del usuario" : flag);
           if (flags.some((flag) => flag === "waitingOnApproval" || flag === "waitingOnUserInput")) {
             terminalWatchdog?.pause();
           }
           await setRuntimePhase(
             "runtime-model-active",
-            "L’assistent està treballant",
-            flagLabels.length ? flagLabels.join(" · ") : "Activitat confirmada",
+            "El asistente está trabajando",
+            flagLabels.length ? flagLabels.join(" · ") : "Actividad confirmada",
             phaseProjection("thread-active"),
           );
           return;
@@ -1288,8 +1288,8 @@ export async function runWorkerCodexTurn(
           telemetry.summary();
           await setRuntimePhase(
             "runtime-reasoning",
-            "Preparant el resum del raonament",
-            "L’assistent ha iniciat una nova part del resum",
+            "Preparando el resumen del razonamiento",
+            "El asistente ha iniciado una nueva parte del resumen",
             phaseProjection("reasoning-summary-part"),
           );
           return;
@@ -1297,8 +1297,8 @@ export async function runWorkerCodexTurn(
         if (method === "item/reasoning/textDelta") {
           await setRuntimePhase(
             "runtime-reasoning",
-            "L’assistent està preparant la resposta",
-            "Esperant el resum publicable",
+            "El asistente está preparando la respuesta",
+            "Esperando el resumen publicable",
             phaseProjection("reasoning-private"),
           );
           return;
@@ -1306,8 +1306,8 @@ export async function runWorkerCodexTurn(
         if (method === "model/verification") {
           await setRuntimePhase(
             "runtime-model-verification",
-            "Verificant la resposta",
-            "Comprovació del servei en curs",
+            "Verificando la respuesta",
+            "Comprobación del servicio en curso",
             phaseProjection("model-verification"),
           );
           return;
@@ -1315,8 +1315,8 @@ export async function runWorkerCodexTurn(
         if (method === "model/rerouted" && isRecord(params)) {
           await setRuntimePhase(
             "runtime-model-reroute",
-            "Ajustant el processament",
-            "El servei ha redirigit el torn sense canviar-ne l’abast",
+            "Ajustando el procesamiento",
+            "El servicio ha redirigido la tarea sin cambiar su alcance",
             phaseProjection("model-rerouted"),
           );
           return;
@@ -1324,8 +1324,8 @@ export async function runWorkerCodexTurn(
         if (method === "model/safetyBuffering/updated" && isRecord(params) && params.showBufferingUi === true) {
           await setRuntimePhase(
             "runtime-safety-buffering",
-            "Verificant la resposta",
-            "Control de seguretat en curs",
+            "Verificando la respuesta",
+            "Control de seguridad en curso",
             phaseProjection("safety-buffering"),
           );
           return;
@@ -1345,7 +1345,7 @@ export async function runWorkerCodexTurn(
               await upsertActivity({
                 id: typeof params.item.id === "string" ? params.item.id : `reasoning:${envelope.eventId}`,
                 kind: "reasoning",
-                label: "Raonament completat",
+                label: "Razonamiento completado",
                 detail: summary,
                 status: "complete",
               }, phaseProjection("raw-reasoning-summary-item"));
@@ -1354,8 +1354,8 @@ export async function runWorkerCodexTurn(
           }
           await setRuntimePhase(
             "runtime-response-processing",
-            "Processant la resposta",
-            typeof params.item.type === "string" ? `Element ${params.item.type} rebut` : "Element rebut",
+            "Procesando la respuesta",
+            typeof params.item.type === "string" ? `Elemento ${params.item.type} recibido` : "Elemento recibido",
             phaseProjection("raw-response-item"),
           );
           return;
@@ -1363,8 +1363,8 @@ export async function runWorkerCodexTurn(
         if (method === "rawResponse/completed") {
           await setRuntimePhase(
             "runtime-response-processing",
-            "Resposta rebuda",
-            "L’assistent està preparant el resultat final",
+            "Respuesta recibida",
+            "El asistente está preparando el resultado final",
             phaseProjection("raw-response-completed"),
           );
           return;
@@ -1903,15 +1903,15 @@ export async function runWorkerCodexTurn(
       startTerminalWatchdog();
       await setRuntimePhase(
         "runtime-awaiting-model",
-        "Torn recuperat",
-        "Escoltant els esdeveniments del servei",
+        "Tarea recuperada",
+        "Escuchando los eventos del servicio",
       );
     } else {
       turnStartRequested = true;
       await setRuntimePhase(
         "runtime-turn-start",
-        "Iniciant el torn",
-        "Enviant la petició a l’assistent",
+        "Iniciando la tarea",
+        "Enviando la petición al asistente",
       );
       let turnResult: JsonValue;
       try {
@@ -1969,14 +1969,14 @@ export async function runWorkerCodexTurn(
         startTerminalWatchdog();
         await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
         await completeRuntimePhase("runtime-turn-start", {
-          label: "Torn iniciat",
-          detail: "El servei ha confirmat la petició",
+          label: "Tarea iniciada",
+          detail: "El servicio ha confirmado la petición",
         });
         if (!terminalTurnStatus) {
           await setRuntimePhase(
             "runtime-awaiting-model",
-            "Esperant activitat de l’assistent",
-            "El torn ja està actiu",
+            "Esperando actividad del asistente",
+            "La tarea ya está activa",
           );
         }
         if (turnSignal.aborted && !remoteInterruptConfirmed) {
@@ -1990,8 +1990,8 @@ export async function runWorkerCodexTurn(
         } catch {
           await setRuntimePhase(
             "runtime-turn-recovery",
-            "Recuperant el torn",
-            "La confirmació ha trigat massa; comprovant el fil sense repetir la petició",
+            "Recuperando la tarea",
+            "La confirmación ha tardado demasiado; comprobando la conversación sin repetir la petición",
           );
           let recoveryEnvelope: AppServerEvent | null = null;
           const recoveredResult = await requestWithLateResponseRecovery(
@@ -2008,8 +2008,8 @@ export async function runWorkerCodexTurn(
             await upsertActivity({
               id: "runtime-turn-recovery",
               kind: "system",
-              label: "No s’ha pogut recuperar el torn",
-              detail: "El servei no ha retornat cap torn associat a aquesta petició",
+              label: "No se ha podido recuperar la tarea",
+              detail: "El servicio no ha devuelto ninguna tarea asociada a esta petición",
               status: "failed",
             });
             throw error;
@@ -2017,8 +2017,8 @@ export async function runWorkerCodexTurn(
           runtimeTurnId = recoveredAfterTimeout.id;
           telemetry.bindRuntimeTurn(recoveredAfterTimeout.id);
           await completeRuntimePhase("runtime-turn-recovery", {
-            label: "Torn recuperat",
-            detail: "Continuant amb el torn existent, sense duplicar-lo",
+            label: "Tarea recuperada",
+            detail: "Continuando con la tarea existente, sin duplicarla",
           });
           if (recoveredAfterTimeout.status !== "inProgress") {
             if (!recoveryEnvelope) throw new Error("El servei no ha proporcionat evidència de recuperació.");
@@ -2037,8 +2037,8 @@ export async function runWorkerCodexTurn(
           if (!terminalTurnStatus) {
             await setRuntimePhase(
               "runtime-awaiting-model",
-              "Torn recuperat",
-              "Escoltant els esdeveniments del servei",
+              "Tarea recuperada",
+              "Escuchando los eventos del servicio",
             );
           }
           turnResult = { turn: { id: recoveredAfterTimeout.id } };
@@ -2058,10 +2058,10 @@ export async function runWorkerCodexTurn(
     if (terminalRace.kind === "timeout" && !terminalTurnStatus && !turnSignal.aborted) {
       await setRuntimePhase(
         "runtime-turn-timeout",
-        "Comprovant un torn sense resposta",
+        "Comprobando una tarea sin respuesta",
         terminalRace.timeout === "hard"
-          ? "S’ha assolit el límit màxim del torn"
-          : "App Server no ha enviat progrés dins del límit segur",
+          ? "Se ha alcanzado el límite máximo de la tarea"
+          : "App Server no ha enviado progreso dentro del límite seguro",
       );
       let recoveredTimedOutTurn: RecoveredTurn | null = null;
       let recoveryEnvelope: AppServerEvent | null = null;
@@ -2132,8 +2132,8 @@ export async function runWorkerCodexTurn(
     await upsertActivity({
       id: "runtime-performance",
       kind: "system",
-      label: "Rendiment del torn",
-      detail: `${metrics.serverFirstDeltaMs === null ? "Sense text incremental" : `Primer text ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker ${metrics.workerWarm ? "calent" : "fred"}`,
+      label: "Rendimiento de la tarea",
+      detail: `${metrics.serverFirstDeltaMs === null ? "Sin texto incremental" : `Primer texto ${metrics.serverFirstDeltaMs} ms`} · Total ${metrics.totalMs} ms · Worker ${metrics.workerWarm ? "caliente" : "frío"}`,
       status: "complete",
     });
     await scheduleCompletedConversationMemory();
