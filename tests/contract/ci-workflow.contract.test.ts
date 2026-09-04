@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 const workflowPath = path.join(process.cwd(), ".github", "workflows", "backend-ci.yml");
 
 describe("backend CI contract", () => {
-  it("keeps every required local gate in the protected workflow", async () => {
+  it("keeps every required deterministic gate in the protected workflow", async () => {
     const workflow = await readFile(workflowPath, "utf8");
     for (const command of [
       "npm ci",
@@ -16,8 +16,6 @@ describe("backend CI contract", () => {
       "npm run test:e2e",
       "npm run build",
       "npm run infra:validate",
-      "npm audit --omit=dev --audit-level=critical",
-      "npm audit --audit-level=critical",
       "npm run test:documents:real",
       "docker compose",
       "--target runtime",
@@ -26,6 +24,7 @@ describe("backend CI contract", () => {
     ]) {
       expect(workflow, `missing CI gate: ${command}`).toContain(command);
     }
+    expect(workflow).not.toContain("npm audit");
     expect(workflow).toContain("node-version: 24.18.1");
     expect(workflow).toMatch(/permissions:\n\s+contents: read/u);
   });
