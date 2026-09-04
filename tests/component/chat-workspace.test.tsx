@@ -477,6 +477,39 @@ describe("chat workspace simplificado", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("restores a failed request for review without changing the original or sending", async () => {
+    const request: ChatMessage = { ...assistantMessage(), id: "request", role: "user", content: "Revisa el informe.", approvals: [] };
+    const failure: ChatMessage = { ...assistantMessage(), id: "failure", status: "error", content: "Resultado parcial", approvals: [] };
+    const thread: WorkbenchThread = { id: "thread-recovery", projectId: project.id, title: "Recuperar", status: "active", pinned: false, createdAt: request.createdAt, updatedAt: request.createdAt, messages: [request, failure] };
+    const onSend = vi.fn();
+    renderWorkspace(thread, project, { onSend });
+    fireEvent.click(screen.getByRole("button", { name: "Editar solicitud" }));
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue(request.content));
+    expect(screen.getByText("Resultado parcial")).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(thread.messages).toEqual([request, failure]);
+  });
+
+  it("does not discard the current draft when recovering a failed request", async () => {
+    const request: ChatMessage = { ...assistantMessage(), id: "request", role: "user", content: "Solicitud anterior", approvals: [] };
+    const failure: ChatMessage = { ...assistantMessage(), id: "failure", status: "error", approvals: [] };
+    const thread: WorkbenchThread = { id: "thread-recovery", projectId: project.id, title: "Recuperar", status: "active", pinned: false, createdAt: request.createdAt, updatedAt: request.createdAt, messages: [request, failure] };
+    const onComposerNotice = vi.fn();
+    renderWorkspace(thread, project, { prompt: "Borrador actual", onComposerNotice });
+    fireEvent.click(screen.getByRole("button", { name: "Editar solicitud" }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Borrador actual");
+    expect(onComposerNotice).toHaveBeenCalledWith(expect.stringContaining("borrador actual"));
+  });
+
+  it("blocks button and Enter submission while a recovered attachment is unavailable", () => {
+    const onSend = vi.fn();
+    renderWorkspace(null, project, { prompt: "Revisa el informe.", onSend, documents: [{ id: "missing", uploadId: "missing", threadId: "thread", name: "informe.pdf", size: 2048, mimeType: "application/pdf", kind: "pdf", status: "error", error: "Vuelve a adjuntar este archivo.", pages: null, previewFiles: [] }] });
+    expect(screen.getByRole("button", { name: "Enviar mensaje" })).toBeDisabled();
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Mensaje" }), { key: "Enter" });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("Hay archivos no disponibles");
+  });
+
   it("queues the next message while keeping stop and cancellation available", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();
