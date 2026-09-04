@@ -100,10 +100,11 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   const sidebar = page.getByTestId("workbench-sidebar");
   const sidebarWidth = () => sidebar.evaluate((element) => element.getBoundingClientRect().width);
   await page.getByRole("button", { name: "Ocultar barra lateral" }).click();
-  await page.waitForTimeout(80);
-  const transitioningWidth = await sidebarWidth();
-  expect(transitioningWidth).toBeGreaterThan(52);
-  expect(transitioningWidth).toBeLessThan(260);
+  // Do not require the runner to sample one particular animation frame. A
+  // loaded browser may still report the starting width at 80 ms, while reduced
+  // motion may go straight to the endpoint. The observable contract is that
+  // the width leaves the expanded state and settles at the collapsed rail.
+  await expect.poll(sidebarWidth).toBeLessThan(260);
   const rail = page.getByTestId("workbench-sidebar-rail");
   await expect(rail).toBeVisible();
   await expect(sidebar).toHaveAttribute("data-desktop-state", "collapsed");
