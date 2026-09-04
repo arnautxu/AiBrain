@@ -352,6 +352,30 @@ describe("BrowserGatewayTokenService", () => {
 });
 
 describe("BrowserRuntimeRegistry", () => {
+  it("fences late release and heartbeat against a newer viewer attachment and session", async () => {
+    const { store } = await fixture();
+    const factory = new FakeBrowserFactory();
+    const registry = new BrowserRuntimeRegistry({ store, factory });
+    try {
+      const handle = await registry.start(USER_A);
+      const old = { attachmentId: THREAD_A, browserSessionId: handle.browserSessionId };
+      const next = { attachmentId: THREAD_B, browserSessionId: handle.browserSessionId };
+      await registry.controlViewer(USER_A, "takeover", old);
+      await registry.controlViewer(USER_A, "takeover", next);
+      await registry.controlViewer(USER_A, "release", old);
+      expect((await registry.state(USER_A)).lifecycle).toBe("human-control");
+      await expect(registry.controlViewer(USER_A, "heartbeat", old)).rejects.toThrow("no longer current");
+      await registry.controlViewer(USER_A, "release", next);
+      const ready = await registry.state(USER_A);
+      expect(ready.lifecycle).toBe("ready");
+      expect(ready.browserSessionId).not.toBe(handle.browserSessionId);
+      await registry.controlViewer(USER_A, "release", next);
+      expect((await registry.state(USER_A)).browserSessionId).toBe(ready.browserSessionId);
+    } finally {
+      await registry.close();
+    }
+  });
+
   it("projects real downloads through a rotated takeover session without losing ownership", async () => {
     const { store } = await fixture();
     const factory = new FakeBrowserFactory();

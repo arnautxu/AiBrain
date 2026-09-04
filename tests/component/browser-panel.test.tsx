@@ -79,7 +79,9 @@ afterEach(() => {
 describe("BrowserPanel", () => {
   it("keeps rapid click, exact typing, paste and scroll ordered while takeover is pending", async () => {
     let takeOver!: (value: unknown) => void;
-    browser.control.mockImplementation(() => new Promise((resolve) => { takeOver = resolve; }));
+    browser.control.mockImplementation((action: string) => action === "takeover"
+      ? new Promise((resolve) => { takeOver = resolve; })
+      : Promise.resolve(readyStatus));
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     const image = await screen.findByAltText("Vista actual del navegador privado");
     fireEvent.click(image, { clientX: 10, clientY: 20 });
@@ -102,7 +104,9 @@ describe("BrowserPanel", () => {
 
   it("does not send queued input into either thread after switching during takeover", async () => {
     let takeOver!: (value: unknown) => void;
-    browser.control.mockImplementation(() => new Promise((resolve) => { takeOver = resolve; }));
+    browser.control.mockImplementation((action: string) => action === "takeover"
+      ? new Promise((resolve) => { takeOver = resolve; })
+      : Promise.resolve(readyStatus));
     const view = render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     const image = await screen.findByAltText("Vista actual del navegador privado");
     fireEvent.keyDown(image, { key: "a", code: "KeyA" });
@@ -115,6 +119,7 @@ describe("BrowserPanel", () => {
     await screen.findByAltText("Vista actual del navegador privado");
     expect(browser.send).not.toHaveBeenCalled();
     expect(browser.issue.mock.calls.at(-1)?.[0]).toBe(otherThread);
+    expect(browser.control).toHaveBeenCalledWith("release", undefined, browser.control.mock.calls[0][2]);
   });
 
   it("never retries an uncertain input or dispatches the dependent queued text", async () => {
@@ -197,7 +202,8 @@ describe("BrowserPanel", () => {
     });
     fireEvent.click(image, { clientX: 360, clientY: 225 });
     expect(document.querySelector('[data-slot="computer-use-trail"] svg')).toHaveStyle({ left: "50%", top: "50%" });
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover"));
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover", undefined,
+      expect.objectContaining({ browserSessionId: SESSION_ID })));
     await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
     expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual(["mousePressed", "mouseReleased"]);
 
@@ -207,7 +213,8 @@ describe("BrowserPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cerrar navegador" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    expect(browser.control).toHaveBeenCalledWith("release");
+    expect(browser.control).toHaveBeenCalledWith("release", undefined,
+      expect.objectContaining({ browserSessionId: SESSION_ID }));
     expect(browser.control).not.toHaveBeenCalledWith("stop");
     view.rerender(<BrowserPanel threadId={THREAD_ID} open={false} onClose={onClose} initialStatus={readyStatus} />);
     view.rerender(<BrowserPanel threadId={THREAD_ID} open onClose={onClose} initialStatus={readyStatus} />);

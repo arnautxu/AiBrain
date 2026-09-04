@@ -37,6 +37,7 @@ export type BrowserActionHistoryItem = {
 };
 
 export type BrowserViewerToken = { token: string; browserSessionId: string };
+export type BrowserViewerControlBinding = { attachmentId: string; browserSessionId: string };
 export type BrowserControlAction = "start" | "stop" | "takeover" | "release" | "heartbeat";
 export type BrowserViewerNavigationState = {
   url: string;
@@ -147,11 +148,11 @@ export async function readBrowserStatus(signal?: AbortSignal) {
   return status;
 }
 
-export async function controlBrowser(action: BrowserControlAction, signal?: AbortSignal) {
+export async function controlBrowser(action: BrowserControlAction, signal?: AbortSignal, binding?: BrowserViewerControlBinding) {
   const response = await fetch("/api/runtime/browser", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action }),
+    body: JSON.stringify({ action, ...(binding ? { binding } : {}) }),
     signal,
   });
   if (!response.ok) throw await responseError(response);

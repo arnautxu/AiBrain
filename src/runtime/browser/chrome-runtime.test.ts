@@ -54,6 +54,7 @@ type FakeCommand = {
 
 class FakeCdpClient implements CdpClientLike {
   isOpen = true;
+  readiness = { readyState: "complete", textLength: 0, linkCount: 0 };
   readonly commands: FakeCommand[] = [];
   private readonly listeners = new Map<string, Set<(params: unknown) => void>>();
   private readonly targetUrls = new Map<string, string>();
@@ -176,6 +177,9 @@ class FakeCdpClient implements CdpClientLike {
       return {} as Result;
     }
     if (method === "Runtime.evaluate" && scopedSessionId) {
+      if (String(params.expression).includes("document.readyState")) {
+        return { result: { value: this.readiness } } as Result;
+      }
       const targetId = this.sessionTargets.get(scopedSessionId);
       if (String(params.expression).includes("verifiable")) {
         return { result: { value: { verifiable: true, matched: true } } } as Result;
@@ -319,6 +323,27 @@ afterEach(async () => {
 });
 
 describe("ChromeCdpRuntime private pipe", () => {
+  it("accepts a complete form in one readiness RPC and rejects an unresolved document", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh", expectedVersion: "140.0.0.0",
+      spawnProcess: () => child, connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(), shutdownTimeoutMs: 100,
+    });
+    try {
+      await runtime.start();
+      await runtime.agentNavigate(THREAD_A, "https://example.test/form");
+      expect(client.commands.filter((command) => command.method === "Runtime.evaluate")).toHaveLength(1);
+      client.readiness.readyState = "loading";
+      await expect(runtime.agentNavigate(THREAD_A, "https://example.test/unresolved"))
+        .rejects.toMatchObject({ code: "CHROME_DOCUMENT_NOT_READY" });
+    } finally {
+      await runtime.stop();
+    }
+  }, 10_000);
+
   it("reports an explicitly missing Chrome executable as unavailable instead of falling back", async () => {
     await expect(probeChromeRuntimeCapability({
       executablePath: "/definitely/missing/aibrain-chrome",

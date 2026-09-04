@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { writeFileSync } from "node:fs";
 import {
   BROWSER_FRAME_STREAM_CONTENT_TYPE,
   BrowserFrameStreamDecoder,
@@ -42,6 +43,64 @@ function heartbeat(sequence = 1): BrowserFrameStreamRecord {
 }
 
 describe("browser frame stream protocol", () => {
+  it("accepts coalesced bounded records even when the HTTP chunk exceeds one record", () => {
+    const data = new Uint8Array(11 * 1024 * 1024);
+    data.set(png);
+    const first = encodeBrowserFrameStreamRecord({ ...frame(), data });
+    const second = encodeBrowserFrameStreamRecord({ ...frame(2), data });
+    const chunk = new Uint8Array(first.length + second.length);
+    chunk.set(first);
+    chunk.set(second, first.length);
+    const decoder = new BrowserFrameStreamDecoder();
+    expect(decoder.push(chunk).map((record) => record.metadata.sequence)).toEqual([1, 2]);
+    decoder.finish();
+  });
+
+  it("cancels an attached HTTP stream when its consumer rejects a frame", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(encodeBrowserFrameStreamRecord(frame())); },
+      cancel,
+    }), { headers: { "Content-Type": BROWSER_FRAME_STREAM_CONTENT_TYPE } });
+    await expect(consumeBrowserFrameStream(response, () => { throw new Error("viewer closed"); }))
+      .rejects.toThrow("viewer closed");
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("aborts a reader waiting on an idle stream and releases the attachment", async () => {
+    const cancel = vi.fn();
+    const response = new Response(new ReadableStream<Uint8Array>({ cancel }), {
+      headers: { "Content-Type": BROWSER_FRAME_STREAM_CONTENT_TYPE },
+    });
+    const controller = new AbortController();
+    const consumed = consumeBrowserFrameStream(response, () => undefined, controller.signal);
+    controller.abort(new Error("attachment replaced"));
+    await expect(consumed).rejects.toThrow("attachment replaced");
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(response.body?.locked).toBe(false);
+  });
+
+  it("measures fragmented PNG decoding without browser or provider claims", () => {
+    const data = new Uint8Array(1024 * 1024);
+    data.set(png);
+    const encoded = encodeBrowserFrameStreamRecord({ ...frame(), data });
+    const samples = [];
+    for (let sample = 0; sample < 3; sample += 1) {
+      const decoder = new BrowserFrameStreamDecoder();
+      const started = performance.now();
+      let count = 0;
+      for (let offset = 0; offset < encoded.length; offset += 1024) {
+        count += decoder.push(encoded.subarray(offset, offset + 1024)).length;
+      }
+      decoder.finish();
+      samples.push(Math.round((performance.now() - started) * 100) / 100);
+      expect(count).toBe(1);
+    }
+    if (process.env.AIBRAIN_FRAME_DECODE_EVIDENCE) {
+      writeFileSync(process.env.AIBRAIN_FRAME_DECODE_EVIDENCE, JSON.stringify(samples));
+    }
+  });
+
   it("decodes fragmented changed frames and idle heartbeats without buffering the response", () => {
     const payload = new Uint8Array([
       ...encodeBrowserFrameStreamRecord(frame()),

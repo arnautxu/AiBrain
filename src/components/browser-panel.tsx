@@ -23,6 +23,7 @@ import {
   type BrowserViewerHistoryAction,
   type BrowserViewerNavigationState,
   type BrowserViewerToken,
+  type BrowserViewerControlBinding,
 } from "@/ui/browser-ui-adapter";
 import { consumeBrowserFrameStream } from "@/ui/browser-frame-stream";
 import { BrowserInputQueue } from "@/ui/browser-input-queue";
@@ -92,6 +93,16 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const inputQueueRef = useRef(new BrowserInputQueue());
   const attachmentRef = useRef(true);
   const tokenIssuedAtRef = useRef(0);
+  const [attachmentId] = useState(() => crypto.randomUUID());
+  const controlBindingRef = useRef<BrowserViewerControlBinding | null>(null);
+
+  const releaseControl = useCallback(async () => {
+    const binding = controlBindingRef.current;
+    controlBindingRef.current = null;
+    humanControlRef.current = false;
+    if (binding) return controlBrowser("release", undefined, binding).catch(() => null);
+    return null;
+  }, []);
 
   const replaceFrame = useCallback((blob: Blob) => {
     const next = URL.createObjectURL(blob);
@@ -109,9 +120,9 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       inputQueue.cancel();
       if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
       if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
-      if (humanControlRef.current) void controlBrowser("release").catch(() => undefined);
+      void releaseControl();
     };
-  }, []);
+  }, [releaseControl]);
 
   useEffect(() => { viewerTokenRef.current = viewerToken; }, [viewerToken]);
   useEffect(() => { humanControlRef.current = status?.state.lifecycle === "human-control"; }, [status?.state.lifecycle]);
@@ -137,7 +148,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const ensureControl = useCallback(async () => {
     if (!threadId) throw new Error("Abre una conversación antes de controlar el navegador.");
     if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
-    if (humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current &&
+    if (controlBindingRef.current && humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current &&
       Date.now() - tokenIssuedAtRef.current < 25_000) {
       return viewerTokenRef.current;
     }
@@ -145,10 +156,17 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const takeover = (async () => {
       const current = await refreshStatus();
       if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
-      if (current.state.lifecycle !== "human-control") {
-        if (current.state.lifecycle !== "ready") throw new Error("La sesión se está reconectando.");
-        const controlled = await controlBrowser("takeover");
-        if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
+      if (!controlBindingRef.current || controlBindingRef.current.browserSessionId !== current.state.browserSessionId ||
+        current.state.lifecycle !== "human-control") {
+        if ((current.state.lifecycle !== "ready" && current.state.lifecycle !== "human-control") ||
+          !current.state.browserSessionId) throw new Error("La sesión se está reconectando.");
+        const binding = { attachmentId, browserSessionId: current.state.browserSessionId };
+        const controlled = await controlBrowser("takeover", undefined, binding);
+        controlBindingRef.current = binding;
+        if (!attachmentRef.current) {
+          await releaseControl();
+          throw new Error("El visor se ha cerrado.");
+        }
         setStatus(controlled);
         humanControlRef.current = true;
       }
@@ -160,7 +178,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     } finally {
       if (takeoverPromiseRef.current === takeover) takeoverPromiseRef.current = null;
     }
-  }, [refreshStatus, renewViewerToken, threadId]);
+  }, [attachmentId, refreshStatus, releaseControl, renewViewerToken, threadId]);
 
   useEffect(() => {
     if (!open) return;
@@ -269,7 +287,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   useEffect(() => {
     if (!open || status?.state.lifecycle !== "human-control") return;
     const interval = window.setInterval(() => {
-      void controlBrowser("heartbeat").then(setStatus).catch(() => undefined);
+      const binding = controlBindingRef.current;
+      if (binding) void controlBrowser("heartbeat", undefined, binding).then(setStatus).catch(() => undefined);
     }, 10_000);
     return () => window.clearInterval(interval);
   }, [open, status?.state.lifecycle]);
@@ -403,11 +422,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const closePanel = async () => {
     attachmentRef.current = false;
     inputQueueRef.current.cancel();
-    humanControlRef.current = false;
-    if (status?.state.lifecycle === "human-control") {
-      const released = await controlBrowser("release").catch(() => null);
-      if (released) setStatus(released);
-    }
+    const released = await releaseControl();
+    if (released) setStatus(released);
     setFullscreen(false);
     setPointer(null);
     setPointerTrail([]);
