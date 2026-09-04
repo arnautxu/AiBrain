@@ -1514,3 +1514,18 @@ button:disabled {
   -webkit-background-clip: text;
   animation: thinking-steps-shimmer 1.5s ease-in-out infinite;
 }
+
+/* Administration keeps data readable while allowing compact secondary labels. */
+.admin-center input,
+.admin-center textarea,
+.admin-center select {
+  font-size: var(--font-body);
+}
+
+@media (pointer: coarse) {
+  .admin-center input,
+  .admin-center textarea,
+  .admin-center select {
+    font-size: var(--font-reading);
+  }
+}

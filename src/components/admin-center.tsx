@@ -99,65 +99,65 @@ export function AdminCenter() {
     <section>
       <div className="flex items-start gap-3 rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
         <ShieldCheck size={19} className="mt-0.5 text-[var(--positive)]" />
-        <div><h3 className="text-[12px] font-semibold">Centro de administración</h3><p className="mt-1 text-[10px] leading-4 text-[var(--text-muted)]">Solo propietario y administradores pueden acceder. Todos los cambios quedan en el registro de auditoría de {snapshot.companyName}.</p></div>
+        <div><h3 className="text-body-semibold">Centro de administración</h3><p className="mt-1 text-caption-1-regular leading-4 text-[var(--text-muted)]">Solo propietario y administradores pueden acceder. Todos los cambios quedan en el registro de auditoría de {snapshot.companyName}.</p></div>
       </div>
-      {error ? <p className="mt-3 rounded-xl bg-[var(--danger-soft)] px-3 py-2 text-[10px] text-[var(--danger)]" role="alert">{error}</p> : null}
+      {error ? <p className="mt-3 rounded-xl bg-[var(--danger-soft)] px-3 py-2 text-caption-1-regular text-[var(--danger)]" role="alert">{error}</p> : null}
     </section>
 
     <section>
-      <h3 className="mb-1 text-[12px] font-semibold">Personas, roles y workers</h3>
-      <p className="mb-4 text-[10px] leading-4 text-[var(--text-muted)]">El uso mostrado procede de los turnos guardados en esta instalación; el estado del worker no lo inicia.</p>
+      <h3 className="mb-1 text-body-semibold">Personas, roles y workers</h3>
+      <p className="mb-4 text-caption-1-regular leading-4 text-[var(--text-muted)]">El uso mostrado procede de los turnos guardados en esta instalación; el estado del worker no lo inicia.</p>
       <div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">
         {snapshot.members.map((member) => <div key={member.userId} className="grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_150px_auto] sm:items-center">
-          <div className="min-w-0"><p className="truncate text-[12px] font-semibold">{member.displayName}</p><p className="truncate text-[10px] text-[var(--text-muted)]">{member.email}</p><p className="mt-1 text-[9px] text-[var(--text-subtle)]">{member.workerId} · {member.workerHealthy ? "worker operativo" : `worker ${member.workerState}`} · {member.usage.turns} turnos</p></div>
-          <select aria-label={`Rol de ${member.displayName}`} value={member.roleId} disabled={busy !== null} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-[10px]" onChange={(event) => void run({ action: "set-member-role", userId: member.userId, roleId: event.target.value as WorkspaceRoleId }, `role:${member.userId}`)}>{snapshot.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select>
-          <button type="button" disabled={busy !== null} className={`touch-target min-h-8 rounded-lg px-3 text-[10px] font-semibold ${member.enabled ? "border border-[var(--border)]" : "bg-[var(--brain-accent)] text-[var(--brain-contrast)]"}`} onClick={() => void run({ action: "set-member-enabled", userId: member.userId, enabled: !member.enabled }, `enabled:${member.userId}`)}>{busy === `enabled:${member.userId}` ? <SpinnerGap size={12} className="mx-auto motion-safe:animate-spin" /> : member.enabled ? "Desactivar" : "Activar"}</button>
+          <div className="min-w-0"><p className="truncate text-body-semibold">{member.displayName}</p><p className="truncate text-caption-1-regular text-[var(--text-muted)]">{member.email}</p><p className="mt-1 text-caption-1-regular text-[var(--text-subtle)]">{member.workerId} · {member.workerHealthy ? "worker operativo" : `worker ${member.workerState}`} · {member.usage.turns} turnos</p></div>
+          <select aria-label={`Rol de ${member.displayName}`} value={member.roleId} disabled={busy !== null} className="rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-2 text-caption-1-regular" onChange={(event) => void run({ action: "set-member-role", userId: member.userId, roleId: event.target.value as WorkspaceRoleId }, `role:${member.userId}`)}>{snapshot.roles.map((role) => <option key={role.id} value={role.id}>{role.name}</option>)}</select>
+          <button type="button" disabled={busy !== null} className={`touch-target min-h-8 rounded-lg px-3 text-caption-1-regular font-semibold ${member.enabled ? "border border-[var(--border)]" : "bg-[var(--brain-accent)] text-[var(--brain-contrast)]"}`} onClick={() => void run({ action: "set-member-enabled", userId: member.userId, enabled: !member.enabled }, `enabled:${member.userId}`)}>{busy === `enabled:${member.userId}` ? <SpinnerGap size={12} className="mx-auto motion-safe:animate-spin" /> : member.enabled ? "Desactivar" : "Activar"}</button>
         </div>)}
       </div>
     </section>
 
     <section>
-      <h3 className="mb-1 text-[12px] font-semibold">Alta local</h3>
-      <p className="mb-3 text-[10px] leading-4 text-[var(--text-muted)]">{snapshot.identityProvisioning.detail} No se enviará ningún correo.</p>
+      <h3 className="mb-1 text-body-semibold">Alta local</h3>
+      <p className="mb-3 text-caption-1-regular leading-4 text-[var(--text-muted)]">{snapshot.identityProvisioning.detail} No se enviará ningún correo.</p>
       <div className="grid gap-2 rounded-[16px] border border-[var(--border)] p-4 sm:grid-cols-2">
         <label className="block" htmlFor="admin-member-name">
-          <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Nombre</span>
-          <input id="admin-member-name" value={newMember.displayName} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px]" autoComplete="name" onChange={(event) => setNewMember((value) => ({ ...value, displayName: event.target.value }))} />
+          <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Nombre</span>
+          <input id="admin-member-name" value={newMember.displayName} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body-2-regular" autoComplete="name" onChange={(event) => setNewMember((value) => ({ ...value, displayName: event.target.value }))} />
         </label>
         <label className="block" htmlFor="admin-member-email">
-          <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Correo</span>
-          <input id="admin-member-email" value={newMember.email} type="email" className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px]" placeholder="persona@empresa.com" autoComplete="email" onChange={(event) => setNewMember((value) => ({ ...value, email: event.target.value.toLocaleLowerCase() }))} />
+          <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Correo</span>
+          <input id="admin-member-email" value={newMember.email} type="email" className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body-2-regular" placeholder="persona@empresa.com" autoComplete="email" onChange={(event) => setNewMember((value) => ({ ...value, email: event.target.value.toLocaleLowerCase() }))} />
         </label>
         <label className="block sm:col-span-2" htmlFor="admin-member-user-id">
-          <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Identificador del proveedor</span>
-          <input id="admin-member-user-id" value={newMember.userId} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-[10px]" placeholder="UUID existente" autoComplete="off" onChange={(event) => setNewMember((value) => ({ ...value, userId: event.target.value.toLocaleLowerCase() }))} />
+          <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Identificador del proveedor</span>
+          <input id="admin-member-user-id" value={newMember.userId} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 font-mono text-caption-1-regular" placeholder="UUID existente" autoComplete="off" onChange={(event) => setNewMember((value) => ({ ...value, userId: event.target.value.toLocaleLowerCase() }))} />
         </label>
-        <button type="button" disabled={busy !== null} className="touch-target flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--brain-accent)] px-3 text-[10px] font-semibold text-[var(--brain-contrast)] sm:col-span-2" onClick={provision}>{busy === "provision-member" ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : <UserPlus size={13} />}Crear perfil y worker local</button>
+        <button type="button" disabled={busy !== null} className="touch-target flex min-h-9 items-center justify-center gap-2 rounded-lg bg-[var(--brain-accent)] px-3 text-caption-1-regular font-semibold text-[var(--brain-contrast)] sm:col-span-2" onClick={provision}>{busy === "provision-member" ? <SpinnerGap size={13} className="motion-safe:animate-spin" /> : <UserPlus size={13} />}Crear perfil y worker local</button>
       </div>
     </section>
 
     <section>
-      <h3 className="mb-1 text-[12px] font-semibold">Grupos y políticas</h3>
-      <p className="mb-4 text-[10px] leading-4 text-[var(--text-muted)]">Las restricciones de grupo se combinan con el rol y siempre prevalece el bloqueo. Afectan al runtime y a las apps publicadas.</p>
+      <h3 className="mb-1 text-body-semibold">Grupos y políticas</h3>
+      <p className="mb-4 text-caption-1-regular leading-4 text-[var(--text-muted)]">Las restricciones de grupo se combinan con el rol y siempre prevalece el bloqueo. Afectan al runtime y a las apps publicadas.</p>
       <div className="mb-4 grid gap-2 rounded-[16px] border border-dashed border-[var(--border)] p-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <label className="block" htmlFor="admin-group-name">
-          <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Nombre del grupo</span>
-          <input id="admin-group-name" value={name} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px]" onChange={(event) => setName(event.target.value)} />
+          <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Nombre del grupo</span>
+          <input id="admin-group-name" value={name} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body-2-regular" onChange={(event) => setName(event.target.value)} />
         </label>
         <label className="block" htmlFor="admin-group-description">
-          <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Descripción</span>
-          <input id="admin-group-description" value={description} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px]" onChange={(event) => setDescription(event.target.value)} />
+          <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Descripción</span>
+          <input id="admin-group-description" value={description} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body-2-regular" onChange={(event) => setDescription(event.target.value)} />
         </label>
-        <button type="button" disabled={busy !== null || !name.trim()} className="touch-target flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 text-[10px] font-semibold" onClick={createGroup}><Plus size={12} />Crear</button>
+        <button type="button" disabled={busy !== null || !name.trim()} className="touch-target flex min-h-9 items-center justify-center gap-2 rounded-lg border border-[var(--border)] px-3 text-caption-1-regular font-semibold" onClick={createGroup}><Plus size={12} />Crear</button>
       </div>
-      <div className="space-y-3">{snapshot.groups.map((group) => <GroupCard key={group.id} group={group} snapshot={snapshot} busy={busy !== null} onSave={(next) => void run({ action: "update-group", groupId: next.id, name: next.name, description: next.description, memberIds: next.memberIds, policy: next.policy }, `group:${next.id}`)} onDelete={() => void run({ action: "delete-group", groupId: group.id }, `delete:${group.id}`)} />)}{snapshot.groups.length === 0 ? <p className="rounded-[16px] border border-[var(--border-subtle)] p-4 text-[11px] text-[var(--text-subtle)]">Todavía no hay grupos. Los miembros usan únicamente la política de su rol.</p> : null}</div>
+      <div className="space-y-3">{snapshot.groups.map((group) => <GroupCard key={group.id} group={group} snapshot={snapshot} busy={busy !== null} onSave={(next) => void run({ action: "update-group", groupId: next.id, name: next.name, description: next.description, memberIds: next.memberIds, policy: next.policy }, `group:${next.id}`)} onDelete={() => void run({ action: "delete-group", groupId: group.id }, `delete:${group.id}`)} />)}{snapshot.groups.length === 0 ? <p className="rounded-[16px] border border-[var(--border-subtle)] p-4 text-body-2-regular text-[var(--text-subtle)]">Todavía no hay grupos. Los miembros usan únicamente la política de su rol.</p> : null}</div>
     </section>
 
     <SkillAdministration snapshot={snapshot} />
 
     <section>
-      <h3 className="mb-3 text-[12px] font-semibold">Registro de auditoría</h3>
-      <div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{snapshot.audit.map((event) => <div key={event.sequence} className="px-4 py-3"><div className="flex items-center justify-between gap-3"><p className="text-[10px] font-semibold">{event.action}</p><time className="text-[9px] text-[var(--text-subtle)]">{new Date(event.occurredAt).toLocaleString("es-ES")}</time></div><p className="mt-1 text-[10px] text-[var(--text-muted)]">{event.summary}</p><p className="mt-1 font-mono text-[8px] text-[var(--text-subtle)]">actor {event.actorUserId}</p></div>)}{snapshot.audit.length === 0 ? <p className="p-4 text-[11px] text-[var(--text-subtle)]">No hay cambios administrativos registrados.</p> : null}</div>
+      <h3 className="mb-3 text-body-semibold">Registro de auditoría</h3>
+      <div className="divide-y divide-[var(--border-subtle)] rounded-[16px] border border-[var(--border)]">{snapshot.audit.map((event) => <div key={event.sequence} className="px-4 py-3"><div className="flex flex-wrap items-center justify-between gap-2"><p className="text-caption-1-regular font-semibold [overflow-wrap:anywhere]">{event.action}</p><time className="text-caption-1-regular text-[var(--text-subtle)]">{new Date(event.occurredAt).toLocaleString("es-ES")}</time></div><p className="mt-1 text-caption-1-regular text-[var(--text-muted)]">{event.summary}</p><details className="mt-2 text-caption-1-regular text-[var(--text-subtle)]"><summary className="touch-target w-fit cursor-pointer rounded py-1">Detalles del registro</summary><p className="mt-1 font-mono [overflow-wrap:anywhere]">Actor: {event.actorUserId}</p></details></div>)}{snapshot.audit.length === 0 ? <p className="p-4 text-body-2-regular text-[var(--text-subtle)]">No hay cambios administrativos registrados.</p> : null}</div>
     </section>
   </div>;
 }
@@ -223,16 +223,16 @@ function SkillAdministration({ snapshot }: { snapshot: WorkspaceAdminSnapshot })
     finally { setSaving(false); }
   };
   const validDraft = Boolean(draft.id && draft.label && draft.description && draft.instructions && (draft.scope === "installation" || draft.subjectId));
-  const fieldClass = "mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[10px]";
-  const labelClass = "block text-[10px] font-medium text-[var(--text-muted)]";
+  const fieldClass = "mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-caption-1-regular";
+  const labelClass = "block text-caption-1-regular font-medium text-[var(--text-muted)]";
   return <section>
-    <h3 className="mb-1 text-[12px] font-semibold">Skills gestionadas</h3>
-    <p className="mb-4 text-[10px] leading-4 text-[var(--text-muted)]">Solo administración puede crear, versionar, asignar o revocar. El contenido no debe incluir secretos.</p>
-    {message ? <p role={messageIsError ? "alert" : "status"} className={`mb-3 rounded-lg px-3 py-2 text-[10px] ${messageIsError ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-muted)]"}`}>{message}</p> : null}
-    {catalogLoading && !packages.length ? <p role="status" aria-busy="true" className="flex min-h-24 items-center justify-center gap-2 text-[11px] text-[var(--text-muted)]"><SpinnerGap size={14} className="motion-safe:animate-spin" />Cargando catálogo de skills…</p> : catalogError && !packages.length ? <div role="alert" className="rounded-xl bg-[var(--danger-soft)] p-3 text-[11px] text-[var(--danger)]"><p>{catalogError}</p><button type="button" className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 font-semibold" onClick={() => void refresh()}>Reintentar</button></div> : <>
-      {catalogError ? <div role="alert" className="mb-3 rounded-xl bg-[var(--danger-soft)] p-3 text-[11px] text-[var(--danger)]"><p>{catalogError}</p><button type="button" className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 font-semibold" onClick={() => void refresh()}>Reintentar</button></div> : null}
-      <div className="space-y-2">{packages.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2"><div><p className="text-[11px] font-semibold">{item.label} <span className="font-mono text-[9px] text-[var(--text-subtle)]">{item.id}@{item.version}</span></p><p className="mt-1 text-[9px] text-[var(--text-muted)]">{item.source === "versioned" ? "GraphikAI versionada" : "Empresa"} · {item.status === "active" ? "activa" : "revocada"}</p></div>{item.source === "company" && item.status === "active" ? <button type="button" disabled={saving} onClick={() => void revoke(item.id)} className="touch-target min-h-8 rounded-lg px-2 py-1 text-[10px] text-[var(--danger)]">Revocar</button> : null}</div>)}</div>
-      {!catalogLoading && !packages.length ? <p className="rounded-xl border border-dashed border-[var(--border)] p-4 text-[11px] text-[var(--text-subtle)]">No hay skills publicadas en este catálogo.</p> : null}
+    <h3 className="mb-1 text-body-semibold">Skills gestionadas</h3>
+    <p className="mb-4 text-caption-1-regular leading-4 text-[var(--text-muted)]">Solo administración puede crear, versionar, asignar o revocar. El contenido no debe incluir secretos.</p>
+    {message ? <p role={messageIsError ? "alert" : "status"} className={`mb-3 rounded-lg px-3 py-2 text-caption-1-regular ${messageIsError ? "bg-[var(--danger-soft)] text-[var(--danger)]" : "bg-[var(--surface-muted)]"}`}>{message}</p> : null}
+    {catalogLoading && !packages.length ? <p role="status" aria-busy="true" className="flex min-h-24 items-center justify-center gap-2 text-body-2-regular text-[var(--text-muted)]"><SpinnerGap size={14} className="motion-safe:animate-spin" />Cargando catálogo de skills…</p> : catalogError && !packages.length ? <div role="alert" className="rounded-xl bg-[var(--danger-soft)] p-3 text-body-2-regular text-[var(--danger)]"><p>{catalogError}</p><button type="button" className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 font-semibold" onClick={() => void refresh()}>Reintentar</button></div> : <>
+      {catalogError ? <div role="alert" className="mb-3 rounded-xl bg-[var(--danger-soft)] p-3 text-body-2-regular text-[var(--danger)]"><p>{catalogError}</p><button type="button" className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 font-semibold" onClick={() => void refresh()}>Reintentar</button></div> : null}
+      <div className="space-y-2">{packages.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-xl border border-[var(--border)] px-3 py-2"><div><p className="text-body-2-regular font-semibold">{item.label} <span className="font-mono text-caption-1-regular text-[var(--text-subtle)]">{item.id}@{item.version}</span></p><p className="mt-1 text-caption-1-regular text-[var(--text-muted)]">{item.source === "versioned" ? "GraphikAI versionada" : "Empresa"} · {item.status === "active" ? "activa" : "revocada"}</p></div>{item.source === "company" && item.status === "active" ? <button type="button" disabled={saving} onClick={() => void revoke(item.id)} className="touch-target min-h-8 rounded-lg px-2 py-1 text-caption-1-regular text-[var(--danger)]">Revocar</button> : null}</div>)}</div>
+      {!catalogLoading && !packages.length ? <p className="rounded-xl border border-dashed border-[var(--border)] p-4 text-body-2-regular text-[var(--text-subtle)]">No hay skills publicadas en este catálogo.</p> : null}
     </>}
     <div className="mt-4 grid gap-3 rounded-[16px] border border-dashed border-[var(--border)] p-4 sm:grid-cols-2">
       <label htmlFor={`${fieldId}-skill-id`} className={labelClass}>Identificador de la skill<input id={`${fieldId}-skill-id`} value={draft.id} placeholder="id-de-la-skill" onChange={(event) => setDraft((value) => ({ ...value, id: event.target.value.toLowerCase().replace(/[^a-z0-9-]/gu, "") }))} className={fieldClass} /></label>
@@ -243,7 +243,7 @@ function SkillAdministration({ snapshot }: { snapshot: WorkspaceAdminSnapshot })
       <label htmlFor={`${fieldId}-skill-provenance`} className={`${labelClass} sm:col-span-2`}>Procedencia y fecha de confirmación<input id={`${fieldId}-skill-provenance`} value={draft.provenance} placeholder="Fuente confirmada" onChange={(event) => setDraft((value) => ({ ...value, provenance: event.target.value }))} className={fieldClass} /></label>
       <label htmlFor={`${fieldId}-skill-scope`} className={labelClass}>Audiencia<select id={`${fieldId}-skill-scope`} value={draft.scope} onChange={(event) => setDraft((value) => ({ ...value, scope: event.target.value, subjectId: "" }))} className={fieldClass}><option value="installation">Toda la empresa</option><option value="role">Rol</option><option value="group">Grupo</option><option value="user">Persona</option></select></label>
       {draft.scope === "installation" ? <div /> : <label htmlFor={`${fieldId}-skill-subject`} className={labelClass}>Asignar a<select id={`${fieldId}-skill-subject`} value={draft.subjectId} onChange={(event) => setDraft((value) => ({ ...value, subjectId: event.target.value }))} className={fieldClass}><option value="">Selecciona</option>{subjectOptions.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
-      <button type="button" disabled={saving || !validDraft} onClick={() => void save()} className="touch-target min-h-9 rounded-lg bg-[var(--brain-accent)] text-[10px] font-semibold text-[var(--brain-contrast)] disabled:opacity-40 sm:col-span-2">{saving ? "Guardando…" : "Guardar y asignar skill"}</button>
+      <button type="button" disabled={saving || !validDraft} onClick={() => void save()} className="touch-target min-h-9 rounded-lg bg-[var(--brain-accent)] text-caption-1-regular font-semibold text-[var(--brain-contrast)] disabled:opacity-40 sm:col-span-2">{saving ? "Guardando…" : "Guardar y asignar skill"}</button>
     </div>
   </section>;
 }
@@ -255,21 +255,21 @@ function GroupCard({ group, snapshot, busy, onSave, onDelete }: { group: Workspa
   return <article className="rounded-[16px] border border-[var(--border)] p-4">
     <div className="flex items-end gap-2">
       <label className="min-w-0 flex-1" htmlFor={`${fieldId}-name`}>
-        <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Nombre del grupo</span>
-        <input id={`${fieldId}-name`} value={draft.name} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] font-semibold" onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} />
+        <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Nombre del grupo</span>
+        <input id={`${fieldId}-name`} value={draft.name} className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-body-2-regular font-semibold" onChange={(event) => setDraft((value) => ({ ...value, name: event.target.value }))} />
       </label>
       <button type="button" aria-label={`Eliminar ${group.name}`} disabled={busy} className="touch-target grid size-8 place-items-center rounded-lg text-[var(--danger)] hover:bg-[var(--danger-soft)]" onClick={onDelete}><Trash size={14} /></button>
     </div>
     <label className="mt-2 block" htmlFor={`${fieldId}-description`}>
-      <span className="mb-1.5 block text-[10px] font-medium text-[var(--text-muted)]">Descripción</span>
-      <input id={`${fieldId}-description`} value={draft.description} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 text-[10px]" onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} />
+      <span className="mb-1.5 block text-caption-1-regular font-medium text-[var(--text-muted)]">Descripción</span>
+      <input id={`${fieldId}-description`} value={draft.description} className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2 text-caption-1-regular" onChange={(event) => setDraft((value) => ({ ...value, description: event.target.value }))} />
     </label>
-    <p className="mb-2 mt-4 text-[10px] font-semibold">Miembros</p><div className="flex flex-wrap gap-2">{snapshot.members.map((member) => { const selected = draft.memberIds.includes(member.userId); return <button key={member.userId} type="button" aria-pressed={selected} className={`touch-target flex min-h-7 items-center gap-1.5 rounded-full px-2.5 text-[9px] ${selected ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`} onClick={() => setDraft((value) => ({ ...value, memberIds: selected ? value.memberIds.filter((id) => id !== member.userId) : [...value.memberIds, member.userId] }))}>{selected ? <Check size={9} /> : null}{member.displayName}</button>; })}</div>
+    <p className="mb-2 mt-4 text-caption-1-regular font-semibold">Miembros</p><div className="flex flex-wrap gap-2">{snapshot.members.map((member) => { const selected = draft.memberIds.includes(member.userId); return <button key={member.userId} type="button" aria-pressed={selected} className={`touch-target flex min-h-7 items-center gap-1.5 rounded-full px-2.5 text-caption-1-regular ${selected ? "bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`} onClick={() => setDraft((value) => ({ ...value, memberIds: selected ? value.memberIds.filter((id) => id !== member.userId) : [...value.memberIds, member.userId] }))}>{selected ? <Check size={9} /> : null}{member.displayName}</button>; })}</div>
     <div className="mt-4 grid gap-4 sm:grid-cols-2"><PolicyList title="Apps" values={draft.policy.apps} labels={appLabels} onChange={(key, enabled) => updatePolicy("apps", key, enabled)} /><PolicyList title="Capacidades" values={draft.policy.capabilities} labels={capabilityLabels} onChange={(key, enabled) => updatePolicy("capabilities", key, enabled)} /></div>
-    <button type="button" disabled={busy || !draft.name.trim()} className="touch-target mt-4 min-h-9 w-full rounded-lg bg-[var(--brain-accent)] text-[10px] font-semibold text-[var(--brain-contrast)] disabled:opacity-50" onClick={() => onSave({ ...draft, updatedAt: new Date().toISOString() })}>Guardar grupo</button>
+    <button type="button" disabled={busy || !draft.name.trim()} className="touch-target mt-4 min-h-9 w-full rounded-lg bg-[var(--brain-accent)] text-caption-1-regular font-semibold text-[var(--brain-contrast)] disabled:opacity-50" onClick={() => onSave({ ...draft, updatedAt: new Date().toISOString() })}>Guardar grupo</button>
   </article>;
 }
 
 function PolicyList<Key extends string>({ title, values, labels, onChange }: { title: string; values: Record<Key, boolean>; labels: Record<Key, string>; onChange: (key: Key, enabled: boolean) => void }) {
-  return <div><p className="mb-2 text-[10px] font-semibold">{title}</p><div className="space-y-1">{(Object.keys(values) as Key[]).map((key) => <label key={key} className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface-muted)] px-2.5 py-2 text-[9px]"><span>{labels[key]}</span><input type="checkbox" checked={values[key]} onChange={(event) => onChange(key, event.target.checked)} /></label>)}</div></div>;
+  return <div><p className="mb-2 text-caption-1-regular font-semibold">{title}</p><div className="space-y-1">{(Object.keys(values) as Key[]).map((key) => <label key={key} className="flex items-center justify-between gap-3 rounded-lg bg-[var(--surface-muted)] px-2.5 py-2 text-caption-1-regular"><span>{labels[key]}</span><input type="checkbox" checked={values[key]} onChange={(event) => onChange(key, event.target.checked)} /></label>)}</div></div>;
 }

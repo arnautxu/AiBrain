@@ -1,0 +1,474 @@
+[
+  {
+    "surface": "image",
+    "width": 1440,
+    "theme": "light",
+    "download": {
+      "x": 598.375,
+      "y": 683,
+      "width": 136.546875,
+      "height": 36
+    },
+    "violations": []
+  },
+  {
+    "surface": "image",
+    "width": 1440,
+    "theme": "dark",
+    "download": {
+      "x": 598.375,
+      "y": 683,
+      "width": 136.546875,
+      "height": 36
+    },
+    "violations": []
+  },
+  {
+    "surface": "admin-component-fixture",
+    "width": 1440,
+    "theme": "light",
+    "coarse": false,
+    "rootFont": "16px",
+    "reading": "1rem",
+    "overflow": false,
+    "fields": [
+      {
+        "font": "14px",
+        "width": 150
+      },
+      {
+        "font": "14px",
+        "width": 491
+      },
+      {
+        "font": "14px",
+        "width": 491
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 447
+      },
+      {
+        "font": "14px",
+        "width": 447
+      },
+      {
+        "font": "14px",
+        "width": 950
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 489
+      }
+    ],
+    "smallest": 12,
+    "violations": []
+  },
+  {
+    "surface": "admin-component-fixture",
+    "width": 1440,
+    "theme": "dark",
+    "coarse": false,
+    "rootFont": "16px",
+    "reading": "1rem",
+    "overflow": false,
+    "fields": [
+      {
+        "font": "14px",
+        "width": 150
+      },
+      {
+        "font": "14px",
+        "width": 491
+      },
+      {
+        "font": "14px",
+        "width": 491
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 447
+      },
+      {
+        "font": "14px",
+        "width": 447
+      },
+      {
+        "font": "14px",
+        "width": 950
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 489
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 990
+      },
+      {
+        "font": "14px",
+        "width": 489
+      }
+    ],
+    "smallest": 12,
+    "violations": []
+  },
+  {
+    "surface": "admin-200-percent-layout-equivalent",
+    "overflow": false
+  },
+  {
+    "surface": "image",
+    "width": 390,
+    "theme": "light",
+    "download": {
+      "x": 116.375,
+      "y": 614.75,
+      "width": 136.546875,
+      "height": 44
+    },
+    "violations": []
+  },
+  {
+    "surface": "image",
+    "width": 390,
+    "theme": "dark",
+    "download": {
+      "x": 116.375,
+      "y": 614.75,
+      "width": 136.546875,
+      "height": 44
+    },
+    "violations": []
+  },
+  {
+    "surface": "admin-component-fixture",
+    "width": 390,
+    "theme": "light",
+    "coarse": false,
+    "rootFont": "16px",
+    "reading": "1rem",
+    "overflow": false,
+    "fields": [
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 284
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      }
+    ],
+    "smallest": 12,
+    "violations": []
+  },
+  {
+    "surface": "admin-component-fixture",
+    "width": 390,
+    "theme": "dark",
+    "coarse": false,
+    "rootFont": "16px",
+    "reading": "1rem",
+    "overflow": false,
+    "fields": [
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 284
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 13
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      },
+      {
+        "font": "14px",
+        "width": 324
+      }
+    ],
+    "smallest": 12,
+    "violations": []
+  }
+]

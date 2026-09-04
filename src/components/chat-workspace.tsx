@@ -229,7 +229,7 @@ function ComposerPicker({
                 {option.icon ? <span className="grid size-5 shrink-0 place-items-center text-[var(--text-subtle)]">{option.icon}</span> : null}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[12px] font-medium">{option.label}</span>
-                  {option.detail ? <span className="mt-0.5 block truncate text-[12px] text-[var(--text-subtle)]">{option.detail}</span> : null}
+                  {option.detail ? <span className="mt-0.5 block text-[12px] leading-4 text-[var(--text-subtle)]">{option.detail}</span> : null}
                 </span>
                 <Check size={13} weight="bold" className={selected ? "opacity-100" : "opacity-0"} />
               </button>
@@ -487,7 +487,9 @@ export function ChatWorkspace({
   const restoringRequest = Boolean(thread && restoringThreadId === thread.id);
   const restoreControllerRef = useRef<AbortController | null>(null);
   const currentDraftRef = useRef({ prompt, attachments, documents });
-  currentDraftRef.current = { prompt, attachments, documents };
+  useLayoutEffect(() => {
+    currentDraftRef.current = { prompt, attachments, documents };
+  }, [prompt, attachments, documents]);
   useEffect(() => () => {
     restoreControllerRef.current?.abort();
     restoreControllerRef.current = null;
@@ -1022,9 +1024,9 @@ export function ChatWorkspace({
                   value={composerExperience}
                   valueLabel={composerExperience === "fast" ? "Rápido" : composerExperience === "expert" ? "Experto" : "Inteligente"}
                   options={[
-                    { value: "fast", label: "Rápido", detail: "Para avanzar con agilidad" },
-                    { value: "smart", label: "Inteligente", detail: "Equilibrio para el día a día" },
-                    { value: "expert", label: "Experto", detail: "Para trabajo más exigente" },
+                    { value: "fast", label: "Rápido", detail: "Resúmenes breves y consultas" },
+                    { value: "smart", label: "Inteligente", detail: "Redacción y planificación diaria" },
+                    { value: "expert", label: "Experto", detail: "Análisis y problemas complejos" },
                   ]}
                   open={composerPickerOpen === "experience"}
                   placement={hasMessages ? "above" : "below"}
