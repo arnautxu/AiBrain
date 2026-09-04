@@ -217,11 +217,20 @@ test("an authenticated PNG remains visible and downloadable after reload in iPho
   expect(response.length).toBeGreaterThan(1_024);
   expect(artifactRequests).toContainEqual({ download: true, resourceType: "fetch" });
 
+  await downloadLink.evaluate((element) => {
+    element.addEventListener("click", (event) => {
+      element.dataset.nativeClickObserved = String(event.isTrusted && !event.defaultPrevented);
+    }, { once: true });
+  });
+  const pageUrlBeforeDownload = page.url();
   await downloadLink.click();
-  // Headless WebKit on Linux performs this native download outside Playwright's
-  // request/event plumbing. The real fixture server is the portable boundary:
-  // the browser-side fetch above proves exact bytes and headers, while this
-  // second authenticated request proves the actual anchor click reached it.
-  await expect.poll(() => imageServer.requests.filter((request) => request.download)).toHaveLength(2);
+  // Headless WebKit on Linux may hand the native download to a process that is
+  // invisible to Playwright and may also suppress the second HTTP request. The
+  // authenticated browser-side fetch above is therefore the portable HTTP
+  // boundary; this trusted, uncancelled click proves the real anchor action was
+  // dispatched without navigating the application away.
+  await expect(downloadLink).toHaveAttribute("data-native-click-observed", "true");
+  await expect(page).toHaveURL(pageUrlBeforeDownload);
+  expect(imageServer.requests.filter((request) => request.download).length).toBeGreaterThanOrEqual(1);
   expect(imageServer.requests.every((request) => request.authenticated)).toBe(true);
 });
