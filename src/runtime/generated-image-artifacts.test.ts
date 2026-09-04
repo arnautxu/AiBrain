@@ -205,7 +205,9 @@ describe("generated image artifacts", () => {
     }
     await expect(persistence).resolves.not.toBeNull();
     expect(observedSizes.every((size) => size === largePng.byteLength)).toBe(true);
-    expect(await readFile(target)).toEqual(largePng);
+    // Buffer.equals compares every byte natively; deep object equality walks
+    // four million numeric properties and can consume the entire test budget.
+    expect((await readFile(target)).equals(largePng)).toBe(true);
   });
 
   it("allows only one complete value to win a stable-id content race", async () => {
