@@ -66,3 +66,13 @@ límites de cargas administrativas y contexto de nuevos turnos/reanudaciones.
 La aplicación en Arnall requiere publicar y desplegar el candidato por el flujo
 protegido, y después comprobar una petición real de diseño y una continuación
 con lectura observable de Impeccable. Esos gates live son independientes.
+
+## Apps gestionadas por usuario (Composio)
+
+`connectors.composio.toolkits` admite auth configs OAuth2 propios y herramientas
+revisadas de lectura con versiones fijas. La API key se instala exclusivamente en
+el entorno secreto del servidor (`AIBRAIN_COMPOSIO_API_KEY`). No crea cuentas ni
+configs externos. Catálogo, consentimiento, readback ACTIVE por usuario, @,
+lecturas y revocación están enlazados; las cuentas/configuración externas siguen
+siendo un gate independiente. Véase [CONNECTORS.md](../CONNECTORS.md) para el
+manifiesto, callbacks, scopes, comparación con Melso y aceptación pendiente.

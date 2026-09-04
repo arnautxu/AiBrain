@@ -59,6 +59,7 @@ export function connectorMentionDeveloperInstructions(selected: readonly Resolve
       readTools: resource.mcp?.readTools ?? [],
       sensitiveWriteTools: resource.mcp?.sensitiveWriteTools ?? [],
       credentialMode: resource.credentialMode,
+      ...(resource.connectorId?.startsWith("composio-") ? { toolkit: resource.connectorId.slice(9).replaceAll("-", "_"), toolNamespace: "aibrain_connected_apps" } : {}),
     }))),
     "END AIBRAIN CONNECTOR MENTIONS",
   ].join("\n");

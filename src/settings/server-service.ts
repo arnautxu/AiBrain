@@ -1,3 +1,4 @@
+import { composioCapabilitiesForSession } from "@/connectors/composio-service";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -351,6 +352,15 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
         unavailable: "Outlook está autorizado, pero no se puede comprobar ahora mismo.",
       },
     ));
+  }
+  for (const capability of await composioCapabilitiesForSession(session)) {
+    const toolkit = installation.connectors?.composio?.toolkits.find(t => `composio-${t.slug.replaceAll("_", "-")}` === capability.connectorId);
+    connectors.push(projectPersonalConnectorSettings(capability, toolkit?.scopes ?? [], {
+      connected: "Conexión personal activa, comprobada con el proveedor.",
+      requiresLogin: "Conecta tu cuenta y autoriza los permisos de lectura indicados.",
+      adminSetupRequired: "El administrador debe configurar el proveedor de conexiones.",
+      unavailable: "No se puede verificar la conexión. Puedes reconectar o reintentar la revocación.",
+    }));
   }
   return {
     schemaVersion: 1,

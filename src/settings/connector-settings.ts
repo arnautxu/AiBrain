@@ -60,10 +60,8 @@ export function projectPersonalConnectorSettings(
           : copy.unavailable,
     accountEmail: capability.accountEmail,
     scopes: [...scopes],
-    connectUrl: status === "requires_login" ? capability.connectUrl : null,
-    disconnectUrl: status === "connected" || status === "unavailable"
-      ? capability.disconnectUrl
-      : null,
+    connectUrl: status === "requires_login" || status === "unavailable" ? capability.connectUrl : null,
+    disconnectUrl: capability.disconnectUrl,
     connectionVersion: capability.connectionVersion,
   };
 }
