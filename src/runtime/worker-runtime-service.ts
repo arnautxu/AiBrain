@@ -282,6 +282,9 @@ type RuntimeServiceState = {
   maintenance: MaintenanceCoordinator;
   clients: Map<string, WorkerAppServerClient>;
   clientAdmissions: Map<string, Promise<{ handle: WorkerRuntimeHandle; client: WorkerAppServerClient }>>;
+  // Lazy fields preserve compatibility with a service surviving hot reload.
+  admissionGenerations?: Map<string, number>;
+  userStops?: Map<string, Promise<boolean>>;
   activeTurnCancellations: Map<string, {
     runtimeThreadId: string;
     cancelAfterRemoteInterrupt(remoteInterruptConfirmed: boolean): void;
@@ -316,10 +319,14 @@ async function serviceState(): Promise<RuntimeServiceState> {
   const initialize = (async () => {
     const replaced = runtimeGlobal.__aibrainWorkerRuntimeService;
     if (replaced) {
-      await Promise.allSettled([
+      const cleanup = await Promise.allSettled([
         ...[...replaced.clients.values()].map((client) => client.close()),
         replaced.registry.close(),
       ]);
+      // Keep the old registry reachable when process cleanup fails. Publishing
+      // a replacement would bypass its per-user ownership/restart fence.
+      const failure = cleanup.find((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failure) throw failure.reason;
     }
     const maintenance = new MaintenanceCoordinator();
     const state: RuntimeServiceState = {
@@ -329,6 +336,11 @@ async function serviceState(): Promise<RuntimeServiceState> {
         config,
         factory: new LocalGatewayWorkerRuntimeFactory(),
         maintenance,
+        onLifecycleMetric: (metric) => operationalLogger.info("codex.worker_lifecycle", {
+          metricSchemaVersion: 1,
+          installationId: config.installationId,
+          ...metric,
+        }),
       }),
       maintenance,
       clients: new Map(),
@@ -353,7 +365,9 @@ export async function workerAppServerForUser(
   activityLease?: MaintenanceActivityLease,
 ) {
   const state = await serviceState();
+  const generation = state.admissionGenerations?.get(userId) ?? 0;
   const localUser = await new FileLocalUserStore(state.config.paths.usersRoot).read(userId);
+  assertAdmissionGeneration(state, userId, generation);
   if (!localUser?.enabled) {
     throw new Error("Worker user is not provisioned or is disabled.");
   }
@@ -365,26 +379,37 @@ export async function workerAppServerForUser(
   // a failed initialize must not each stop the successor's healthy worker.
   let admission = state.clientAdmissions.get(userId);
   if (!admission) {
-    admission = initializeWorkerClient(state, userId, activityLease);
+    admission = initializeWorkerClient(state, userId, generation, activityLease);
     state.clientAdmissions.set(userId, admission);
     void admission.finally(() => {
       if (state.clientAdmissions.get(userId) === admission) state.clientAdmissions.delete(userId);
     }).catch(() => undefined);
   }
   const { handle, client } = await admission;
+  assertAdmissionGeneration(state, userId, generation);
   if (activityLease) state.maintenance.assertActiveLease(activityLease);
   return { config: state.config, registry: state.registry, handle, client, workerWasWarm };
+}
+
+function assertAdmissionGeneration(state: RuntimeServiceState, userId: string, generation: number) {
+  if (state.userStops?.has(userId) || (state.admissionGenerations?.get(userId) ?? 0) !== generation) {
+    throw new Error("Worker admission was cancelled by user runtime stop.");
+  }
 }
 
 async function initializeWorkerClient(
   state: RuntimeServiceState,
   userId: string,
+  generation: number,
   activityLease?: MaintenanceActivityLease,
 ) {
   let handle: WorkerRuntimeHandle;
+  const assertCurrent = () => assertAdmissionGeneration(state, userId, generation);
+  assertCurrent();
   try {
     handle = await state.registry.start(userId, activityLease);
   } catch {
+    assertCurrent();
     operationalLogger.warn("codex.worker_recovery", {
       metricSchemaVersion: 1,
       installationId: state.config.installationId,
@@ -397,15 +422,18 @@ async function initializeWorkerClient(
     // One clean retry recovers transient process and socket startup races.
     handle = await state.registry.start(userId, activityLease);
   }
+  assertCurrent();
   let client = state.clients.get(userId);
   if (!client || client.handle.transport !== handle.transport) {
     if (client) await client.close();
+    assertCurrent();
     client = new WorkerAppServerClient(handle, state.maintenance);
     state.clients.set(userId, client);
   }
   try {
     await client.initialize();
   } catch {
+    assertCurrent();
     operationalLogger.warn("codex.worker_recovery", {
       metricSchemaVersion: 1,
       installationId: state.config.installationId,
@@ -417,7 +445,9 @@ async function initializeWorkerClient(
     await client.close().catch(() => undefined);
     state.clients.delete(userId);
     await state.registry.stop(userId);
+    assertCurrent();
     handle = await state.registry.start(userId, activityLease);
+    assertCurrent();
     client = new WorkerAppServerClient(handle, state.maintenance);
     state.clients.set(userId, client);
     try {
@@ -437,6 +467,7 @@ async function initializeWorkerClient(
       throw retryError;
     }
   }
+  assertCurrent();
   return { handle, client };
 }
 
@@ -466,11 +497,27 @@ export async function workerRuntimeHealth(userId: string) {
 export async function stopWorkerRuntimeForUser(userId: string) {
   const state = runtimeGlobal.__aibrainWorkerRuntimeService;
   if (!state) return false;
+  const stops = state.userStops ??= new Map();
+  const existing = stops.get(userId);
+  if (existing) return existing;
+  const generations = state.admissionGenerations ??= new Map();
+  generations.set(userId, (generations.get(userId) ?? 0) + 1);
+  const stopping = stopUserRuntime(state, userId).finally(() => {
+    if (stops.get(userId) === stopping) stops.delete(userId);
+  });
+  stops.set(userId, stopping);
+  return stopping;
+}
+
+async function stopUserRuntime(state: RuntimeServiceState, userId: string) {
   const client = state.clients.get(userId);
   if (client) {
     await client.close().catch(() => undefined);
     state.clients.delete(userId);
   }
+  // Invalidated admissions may still own a registry start/initialize. Drain
+  // them before the final stop; they may not retry or install a new client.
+  await state.clientAdmissions.get(userId)?.catch(() => undefined);
   for (const [key, registration] of state.activeTurnCancellations) {
     if (!key.startsWith(`${userId}:`)) continue;
     registration.cancelAfterRemoteInterrupt(true);
