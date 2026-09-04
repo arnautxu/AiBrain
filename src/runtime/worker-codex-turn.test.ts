@@ -803,7 +803,10 @@ describe("worker Codex turn", () => {
       expect.objectContaining({
         type: "namespace",
         name: "aibrain_documents",
-        tools: expect.arrayContaining([expect.objectContaining({ name: "create" })]),
+        tools: expect.arrayContaining([
+          expect.objectContaining({ name: "create" }),
+          expect.objectContaining({ name: "image_to_pdf" }),
+        ]),
       }),
       expect.objectContaining({
         type: "namespace",
@@ -831,6 +834,8 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
     expect(instructions).toContain("usa por defecto `aibrain_documents.create`");
+    expect(instructions).toContain("usa `aibrain_documents.image_to_pdf`");
+    expect(instructions).toContain("incrusta el PNG real en una única página A4");
     expect(instructions).toContain("`aibrain_documents.create_batch` está disponible");
     expect(instructions).toContain("No uses Google Drive");
     expect(instructions).toContain("Nunca muestres al usuario una ruta interna del servidor");

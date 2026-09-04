@@ -111,6 +111,7 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 - Release mechanics and rollback: [RELEASES.md](RELEASES.md)
 - User and context provisioning: [USER_PROVISIONING.md](USER_PROVISIONING.md)
 - Trust boundaries: [ARCHITECTURE_AND_TRUST_BOUNDARIES.md](ARCHITECTURE_AND_TRUST_BOUNDARIES.md)
+- Generated PNG delivery and image-to-PDF: [GENERATED_IMAGE_ARTIFACTS.md](GENERATED_IMAGE_ARTIFACTS.md)
 - Company knowledge implementation and reusable runbooks:
   [COMPANY_KNOWLEDGE_SYSTEM.md](COMPANY_KNOWLEDGE_SYSTEM.md). The private host
   catalogue is distinct from employee-visible knowledge; source ingestion,

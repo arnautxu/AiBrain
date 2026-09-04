@@ -108,7 +108,7 @@ export function TurnArtifactCard({ artifact, onPreviewDocument, onOpenBrowser }:
     generating={false}
     src={artifact.url}
     alt={artifact.prompt ?? artifact.name}
-    downloadUrl={artifact.url}
+    downloadUrl={`${artifact.url}?download=1`}
     downloadName={artifact.name}
     className="w-full max-w-[420px]"
   />;

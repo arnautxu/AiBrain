@@ -78,8 +78,8 @@ jobs:
           package-manager-cache: false
       - name: Install locked dependencies
         run: npm ci
-      - name: Install pinned Chromium runtime
-        run: npx playwright install --with-deps chromium
+      - name: Install pinned Chromium and WebKit runtimes
+        run: npx playwright install --with-deps chromium webkit
       - name: Run HTTP E2E
         run: npm run test:e2e
 

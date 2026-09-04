@@ -1,5 +1,5 @@
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
@@ -93,7 +93,6 @@ import {
 import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import type { JsonValue } from "@/runtime/transport";
 import type { AppServerEvent } from "@/runtime/transport";
-import { atomicWriteFile } from "@/storage";
 import {
   assertWorkerTurnDocuments,
   turnDocumentCodexInputs,
@@ -105,6 +104,10 @@ import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
+import {
+  persistGeneratedImageArtifact,
+  type GeneratedImageArtifactContext,
+} from "@/runtime/generated-image-artifacts";
 import { createSpreadsheetArtifact } from "@/runtime/enterprise-documents/spreadsheet-artifact";
 import { EnterpriseDocumentNetwork, type EnterpriseDocumentRoot } from "@/documents/enterprise-document-network";
 import { OnDemandDocumentSync } from "@/documents/on-demand-sync";
@@ -269,6 +272,7 @@ function localDocumentDeveloperInstructions() {
   return [
     "## Generación documental local",
     "Cuando el usuario pida crear un PDF, Word/DOCX, PowerPoint/PPTX o Excel/XLSX, usa por defecto `aibrain_documents.create`. El servidor guardará y verificará el archivo dentro de `documents/` en el workspace privado de este proyecto y devolverá la previsualización y descarga autenticadas.",
+    "Cuando pida un PDF de una imagen generada en este hilo, incluso en un mensaje anterior, usa `aibrain_documents.image_to_pdf` con el `sourceImageItemId` opaco del elemento de generación completado. La herramienta incrusta el PNG real en una única página A4. No copies la descripción como contenido y no uses ni reveles rutas del servidor o del workspace.",
     "Si pide dos o más archivos o formatos y `aibrain_documents.create_batch` está disponible, úsala exactamente una vez con todos los archivos solicitados. Solo en una conversación antigua donde esa función no exista, usa `aibrain_documents.create` una vez por archivo; nunca cambies a almacenamiento externo.",
     "No uses Google Drive, Dropbox ni ningún conector o almacenamiento externo para crear o guardar estos documentos salvo que el usuario elija explícitamente ese proveedor o destino en su petición actual. Una credencial disponible no constituye esa elección.",
     "No anuncies un archivo como creado hasta que la herramienta local devuelva `success: true`, tamaño mayor que cero y hash. Si la herramienta no está disponible en un hilo antiguo, crea el archivo dentro de `documents/` con las herramientas locales del workspace y verifica el formato; nunca sustituyas este flujo por Drive.",
@@ -370,40 +374,20 @@ function legacyServerRequest(request: ServerRequest): LegacyServerRequest {
   };
 }
 
-function deterministicArtifactId(eventId: string, itemId: string) {
-  const digest = createHash("sha256").update(`${eventId}\0${itemId}`).digest("hex").slice(0, 32).split("");
-  digest[12] = "4";
-  digest[16] = "8";
-  const hex = digest.join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
 async function persistGeneratedImage(
   params: unknown,
-  projectWorkspace: string,
-  projectId: string,
+  context: GeneratedImageArtifactContext,
   envelope: AppServerEvent,
   emit: EmitEvent,
 ) {
   if (!isRecord(params) || !isRecord(params.item) || params.item.type !== "imageGeneration") return;
   const item = params.item;
-  if (typeof item.result !== "string" || item.result.length === 0) return;
-  const encoded = item.result.includes(",") ? item.result.slice(item.result.indexOf(",") + 1) : item.result;
-  const bytes = Buffer.from(encoded, "base64");
-  if (bytes.length === 0 || bytes.length > 20_000_000) return;
-  const artifactId = deterministicArtifactId(envelope.eventId, String(item.id ?? "image"));
-  const artifactRoot = path.join(projectWorkspace, ".aibrain", "artifacts");
-  await atomicWriteFile(path.join(artifactRoot, `${artifactId}.png`), bytes, { mode: 0o600 });
+  const artifact = await persistGeneratedImageArtifact(item, context);
+  if (!artifact) return;
   await emit({
     type: "artifact",
-    item: {
-      id: artifactId,
-      type: "image",
-      name: `imatge-${artifactId.slice(0, 8)}.png`,
-      url: `/api/projects/${projectId}/artifacts/${artifactId}`,
-      prompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : null,
-    },
-  }, { envelope, key: `artifact:${String(item.id ?? artifactId)}` });
+    item: artifact,
+  }, { envelope, key: `artifact:${String(item.id ?? artifact.id)}` });
 }
 
 async function projectGeneratedDocuments(
@@ -903,8 +887,14 @@ export async function runWorkerCodexTurn(
       if (item.type === "imageGeneration") {
         await persistGeneratedImage(
           { item },
-          projectWorkspace,
-          chatRequest.projectId,
+          {
+            installation: runtime.config,
+            projectWorkspace,
+            projectId: chatRequest.projectId,
+            threadId: chatRequest.threadId,
+            messageId: chatRequest.assistantMessageId,
+            storageOwnerId: authenticatedUserId,
+          },
           envelope,
           emit,
         );
@@ -1440,8 +1430,14 @@ export async function runWorkerCodexTurn(
           if (method === "item/completed") {
             await persistGeneratedImage(
               params,
-              projectWorkspace,
-              chatRequest.projectId,
+              {
+                installation: runtime.config,
+                projectWorkspace,
+                projectId: chatRequest.projectId,
+                threadId: chatRequest.threadId,
+                messageId: chatRequest.assistantMessageId,
+                storageOwnerId: authenticatedUserId,
+              },
               envelope,
               emit,
             );
@@ -1648,6 +1644,7 @@ export async function runWorkerCodexTurn(
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
             observedToolNames.add(`${AIBRAIN_DOCUMENT_TOOL_NAMESPACE}.${String(request.params.tool ?? "unknown")}`);
             const result = await handleLocalDocumentDynamicToolCall(request.params as never, {
+              installation: runtime.config,
               installationId,
               userId: authenticatedUserId,
               projectId: chatRequest.projectId,
@@ -1655,6 +1652,7 @@ export async function runWorkerCodexTurn(
               receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
               runtimeThreadId: threadId,
               runtimeTurnId,
+              sourceThreadId: chatRequest.threadId,
               sourceTurnId: chatRequest.assistantMessageId,
               permissions,
             });

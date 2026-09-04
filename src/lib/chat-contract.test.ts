@@ -97,3 +97,21 @@ describe("turn evidence contract", () => {
     expect(withResult.toolResults).toEqual([result]);
   });
 });
+
+describe("generated image artifact contract", () => {
+  const artifact = {
+    id: "11111111-1111-4111-8111-111111111119",
+    type: "image",
+    name: "imagen-11111111.png",
+    url: "/api/projects/11111111-1111-4111-8111-111111111118/artifacts/11111111-1111-4111-8111-111111111119",
+    prompt: null,
+  } as const;
+
+  it("accepts only an opaque authenticated PNG URL and a single .png suffix", () => {
+    expect(isChatStreamEvent({ type: "artifact", item: artifact })).toBe(true);
+    expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, name: `${artifact.name}.json` } })).toBe(false);
+    expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, name: "image.json" } })).toBe(false);
+    expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, url: "/workspace/.aibrain/artifacts/image.png" } })).toBe(false);
+    expect(isChatStreamEvent({ type: "artifact", item: { ...artifact, url: `${artifact.url}?path=/tmp/image.png` } })).toBe(false);
+  });
+});

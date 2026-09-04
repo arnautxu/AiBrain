@@ -138,6 +138,9 @@ export async function GET(
       : filePath;
     const preview = previewType(filePath);
     const normalizedRelativePath = path.normalize(workspaceRelativePath).split(path.sep).join("/");
+    if (normalizedRelativePath === ".aibrain" || normalizedRelativePath.startsWith(".aibrain/")) {
+      return privateJson({ error: "Archivo no encontrado." }, 404);
+    }
     if (indexedResource && (
       indexedResource.location.relativePath !== normalizedRelativePath ||
       indexedResource.location.mediaType !== preview.mimeType

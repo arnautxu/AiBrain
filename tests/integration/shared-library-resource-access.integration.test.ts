@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
 import type { ChatMessage } from "@/lib/chat-contract";
+import { generatedPngFixture } from "../helpers/png-fixture";
 
 const OWNER = "0198b9f0-6631-7000-8000-000000000901";
 const EDITOR = "0198b9f0-6631-7000-8000-000000000902";
@@ -174,16 +175,20 @@ describe("shared Library resource provenance", () => {
       size: editorDocument.size,
       sha256: editorDocument.sha256,
     });
-    const editorImage = Buffer.from("editor generated image bytes");
-    const viewerImage = Buffer.from("viewer same-path image substitute");
-    for (const [workspace, bytes] of [
-      [editorServices.manifest.roots.workspace, editorImage],
-      [viewerServices.manifest.roots.workspace, viewerImage],
-    ] as const) {
-      const artifactRoot = path.join(workspace, "projects", projectId, ".aibrain", "artifacts");
-      await mkdir(artifactRoot, { recursive: true, mode: 0o700 });
-      await writeFile(path.join(artifactRoot, `${IMAGE}.png`), bytes, { mode: 0o600 });
-    }
+    const editorImage = generatedPngFixture(32, 32);
+    const viewerImage = generatedPngFixture(31, 33);
+    const artifactRoot = path.join(dataRoot, "generated-image-artifacts");
+    await mkdir(artifactRoot, { mode: 0o700 });
+    await writeFile(path.join(artifactRoot, `${IMAGE}.png`), editorImage, { mode: 0o600 });
+    const viewerSpoofRoot = path.join(
+      viewerServices.manifest.roots.workspace,
+      "projects",
+      projectId,
+      ".aibrain",
+      "artifacts",
+    );
+    await mkdir(viewerSpoofRoot, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(viewerSpoofRoot, `${IMAGE}.png`), viewerImage, { mode: 0o600 });
     await resourceLocationIndexForInstallation(installation).register({
       kind: "generated-image",
       resourceId: IMAGE,
@@ -191,7 +196,7 @@ describe("shared Library resource provenance", () => {
       threadId,
       messageId: "0198b9f0-6631-7000-8000-000000000907",
       storageOwnerId: EDITOR,
-      relativePath: `.aibrain/artifacts/${IMAGE}.png`,
+      relativePath: `generated-image-artifacts/${IMAGE}.png`,
       fileName: `imatge-${IMAGE.slice(0, 8)}.png`,
       mediaType: "image/png",
       size: editorImage.length,
@@ -292,7 +297,7 @@ describe("shared Library resource provenance", () => {
       auth.session = allowed;
       const response = await route.GET(new Request("http://localhost/api/image"), context);
       expect(response.status, allowed.user.name).toBe(200);
-      expect(Buffer.from(await response.arrayBuffer()).toString("utf8")).toBe("editor generated image bytes");
+      expect(Buffer.from(await response.arrayBuffer())).toEqual(generatedPngFixture(32, 32));
     }
     auth.session = outsiderSession;
     expect((await route.GET(new Request("http://localhost/api/image"), context)).status).toBe(404);
