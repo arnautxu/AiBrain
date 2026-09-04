@@ -58,6 +58,20 @@ function recognitionError(error?: string) {
   return "No se ha podido completar el dictado. El texto anterior sigue intacto.";
 }
 
+function microphonePermissionError(error: unknown) {
+  const name = error instanceof DOMException ? error.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError") {
+    return "El navegador ha denegado el micrófono. Permítelo para este sitio y vuelve a intentarlo.";
+  }
+  if (name === "NotFoundError" || name === "DevicesNotFoundError") {
+    return "No se ha encontrado un micrófono disponible.";
+  }
+  if (name === "NotReadableError" || name === "TrackStartError") {
+    return "El micrófono está ocupado por otra aplicación o no se puede leer.";
+  }
+  return "No se ha podido solicitar acceso al micrófono.";
+}
+
 export type VoiceNoticeKind = "status" | "success" | "warning" | "error";
 
 function anchoredDialogFocusables(container: HTMLElement) {
@@ -144,6 +158,7 @@ export function VoiceDictationControl({
   const cancelledRef = useRef(false);
   const failedRef = useRef(false);
   const processingTimerRef = useRef<number | null>(null);
+  const startAttemptRef = useRef(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const stopButtonRef = useRef<HTMLButtonElement>(null);
   const consentDeclineRef = useRef<HTMLButtonElement>(null);
@@ -166,6 +181,7 @@ export function VoiceDictationControl({
 
   useEffect(() => {
     return () => {
+      startAttemptRef.current += 1;
       cancelledRef.current = true;
       recognitionRef.current?.abort();
       if (processingTimerRef.current !== null) window.clearTimeout(processingTimerRef.current);
@@ -183,7 +199,7 @@ export function VoiceDictationControl({
     }, 350);
   };
 
-  const start = () => {
+  const start = async () => {
     const Recognition = recognitionConstructor();
     if (!Recognition) {
       setFallbackOpen(true);
@@ -193,10 +209,33 @@ export function VoiceDictationControl({
     setConsentOpen(false);
     setFallbackOpen(false);
     setError(null);
+    setState("processing");
     cancelledRef.current = false;
     failedRef.current = false;
     startingValueRef.current = value;
     finalTranscriptRef.current = "";
+    const attempt = ++startAttemptRef.current;
+    if (window.isSecureContext === false || !navigator.mediaDevices?.getUserMedia) {
+      const message = "El micrófono necesita una conexión HTTPS y un navegador compatible.";
+      setError(message);
+      setState("error");
+      onNotice?.(message, "error");
+      requestAnimationFrame(() => triggerRef.current?.focus());
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      for (const track of stream.getTracks()) track.stop();
+    } catch (reason) {
+      if (attempt !== startAttemptRef.current) return;
+      const message = microphonePermissionError(reason);
+      setError(message);
+      setState("error");
+      onNotice?.(message, "error");
+      requestAnimationFrame(() => triggerRef.current?.focus());
+      return;
+    }
+    if (attempt !== startAttemptRef.current || cancelledRef.current) return;
     const recognition = new Recognition();
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -254,12 +293,12 @@ export function VoiceDictationControl({
       setConsentOpen(true);
       return;
     }
-    start();
+    void start();
   };
 
   const confirmConsent = () => {
     localStorage.setItem(DICTATION_CONSENT_KEY, "accepted");
-    start();
+    void start();
   };
 
   const stop = () => {
@@ -268,6 +307,7 @@ export function VoiceDictationControl({
   };
 
   const cancel = () => {
+    startAttemptRef.current += 1;
     cancelledRef.current = true;
     recognitionRef.current?.abort();
     recognitionRef.current = null;

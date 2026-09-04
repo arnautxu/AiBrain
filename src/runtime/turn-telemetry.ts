@@ -121,6 +121,38 @@ export class TurnTelemetry {
     this.runtimeTurnId = runtimeTurnId;
   }
 
+  modelSelected(input: {
+    experience: string;
+    requestedModel: string | null;
+    effectiveModel: string | null;
+    effort: string | null;
+    source: "runtime" | "request" | "default";
+  }) {
+    const safe = (value: string | null) => value && /^[A-Za-z0-9._-]{1,100}$/u.test(value) ? value : null;
+    this.options.logger.info("codex.turn_model", {
+      metricSchemaVersion: 1,
+      ...this.attributes(),
+      experience: safe(input.experience) ?? "unknown",
+      requestedModel: safe(input.requestedModel),
+      effectiveModel: safe(input.effectiveModel),
+      effort: safe(input.effort),
+      source: input.source,
+      requestElapsedMs: elapsedMs(this.startedAt, this.now),
+    });
+  }
+
+  modelRerouted(fromModel: string, toModel: string, reason: string | null) {
+    const safe = (value: string | null) => value && /^[A-Za-z0-9._:-]{1,128}$/u.test(value) ? value : null;
+    this.options.logger.info("codex.turn_model_rerouted", {
+      metricSchemaVersion: 1,
+      ...this.attributes(),
+      fromModel: safe(fromModel),
+      effectiveModel: safe(toModel),
+      reason: safe(reason),
+      requestElapsedMs: elapsedMs(this.startedAt, this.now),
+    });
+  }
+
   workerReadiness(warm: boolean) {
     this.workerWarm = warm;
   }

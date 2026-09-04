@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
@@ -52,7 +52,6 @@ function sourceIcon(kind: ProjectSource["kind"]) {
 export function ProjectPanel({ project, open, onClose, onSave, access: accessOverride, returnFocusRef }: ProjectPanelProps) {
   const [tab, setTab] = useState<Tab>("context");
   const [instructions, setInstructions] = useState(project?.instructions ?? "");
-  const [memoryEnabled, setMemoryEnabled] = useState(project?.memory.enabled ?? true);
   const [memoryNotes, setMemoryNotes] = useState(project?.memory.notes ?? "");
   const [sources, setSources] = useState<ProjectSource[]>(project?.sources ?? []);
   const [visibility, setVisibility] = useState<"private" | "shared">(project?.sharing.visibility ?? "private");
@@ -72,6 +71,20 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
     if (!busy) onClose();
   }, closeButtonRef, returnFocusRef);
 
+  // The panel stays mounted while users switch projects. Refresh every field
+  // from the selected server projection so desktop and mobile never edit the
+  // previous project's draft by accident.
+  useEffect(() => {
+    if (!open || !project) return;
+    setTab("context");
+    setInstructions(project.instructions);
+    setMemoryNotes(project.memory.notes);
+    setSources(project.sources);
+    setVisibility(project.sharing.visibility);
+    setMembers(project.sharing.members);
+    setSourceValue(""); setSourceName(""); setMemberEmail(""); setNotice(null);
+  }, [open, project]);
+
   const save = async () => {
     if (!project || !canEdit) return;
     setBusy(true);
@@ -81,9 +94,9 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
       instructions,
       sources,
       memory: {
-        enabled: memoryEnabled,
+        enabled: true,
         notes: memoryNotes,
-        updatedAt: memoryNotes === project.memory.notes && memoryEnabled === project.memory.enabled
+        updatedAt: memoryNotes === project.memory.notes
           ? project.memory.updatedAt
           : now,
       },
@@ -173,11 +186,10 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
             <section className="rounded-2xl border border-[var(--border)] p-4">
               <div className="flex items-center gap-3">
                 <Brain size={17} className="text-[var(--brain-accent)]" />
-                <div className="min-w-0 flex-1"><p className="text-[12px] font-semibold">Memoria del proyecto</p><p className="text-[10px] text-[var(--text-muted)]">Solo usa lo que guardes explícitamente aquí.</p></div>
-                <button type="button" role="switch" aria-label="Activar memoria del proyecto" aria-checked={memoryEnabled} disabled={!canEdit} className="touch-target grid place-items-center rounded-full disabled:cursor-default" onClick={() => setMemoryEnabled((value) => !value)}><span aria-hidden="true" className={`relative h-6 w-11 rounded-full transition ${memoryEnabled ? "bg-[var(--brain-accent)]" : "bg-[var(--surface-selected)]"}`}><span className={`absolute top-1 size-4 rounded-full transition ${memoryEnabled ? "left-6 bg-[var(--brain-contrast)]" : "left-1 bg-[var(--text-secondary)]"}`} /></span></button>
+                <div className="min-w-0 flex-1"><p className="text-[12px] font-semibold">Memoria del proyecto</p><p className="text-[10px] text-[var(--text-muted)]">Siempre activa. Usa estas notas junto con la memoria automática privada.</p></div>
               </div>
               <label htmlFor="project-memory-notes" className="mt-4 block text-[11px] font-semibold text-[var(--text-secondary)]">Notas de memoria del proyecto</label>
-              <textarea id="project-memory-notes" disabled={canEdit && !memoryEnabled} readOnly={!canEdit} value={memoryNotes} maxLength={16_000} rows={5} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[12px] leading-5 outline-none disabled:opacity-45 read-only:cursor-default" placeholder="Decisiones, definiciones y preferencias que no deben perderse…" onChange={(event) => setMemoryNotes(event.target.value)} />
+              <textarea id="project-memory-notes" readOnly={!canEdit} value={memoryNotes} maxLength={16_000} rows={5} className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[12px] leading-5 outline-none read-only:cursor-default" placeholder="Decisiones, definiciones y preferencias que no deben perderse…" onChange={(event) => setMemoryNotes(event.target.value)} />
             </section>
           </div> : null}
 

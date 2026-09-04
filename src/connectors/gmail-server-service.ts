@@ -114,7 +114,7 @@ export async function gmailCapabilityForSession(session: AuthSession, fetcher: F
   let principal: ConnectorPrincipal;
   try { ({ config, principal } = await context(session)); }
   catch (error) { if (error instanceof GmailConnectorError && error.code === "GMAIL_CATALOG_DENIED") throw error; throw error; }
-  const base = { connectorId: GMAIL_CONNECTOR_ID, label: "Gmail", effectiveOperations: [], approvalRequiredOperations: [], connectUrl: "/api/connectors/gmail/oauth/start", disconnectUrl: null, accountEmail: null, connectionVersion: null };
+  const base = { connectorId: GMAIL_CONNECTOR_ID, label: "Google", effectiveOperations: [], approvalRequiredOperations: [], connectUrl: "/api/connectors/gmail/oauth/start", disconnectUrl: null, accountEmail: null, connectionVersion: null };
   if (!config.connectors?.gmail?.enabled) return { ...base, status: "not_configured", statusCode: "GMAIL_NOT_ENABLED", checkedAt: null, connectUrl: null };
   try { oauthConfiguration(config); }
   catch (error) { return { ...base, status: "not_configured", statusCode: code(error), checkedAt: null, connectUrl: null }; }

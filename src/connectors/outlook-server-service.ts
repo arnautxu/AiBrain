@@ -109,7 +109,7 @@ async function connectedReadback(config: Readonly<InstallationConfig>, principal
 
 export async function outlookCapabilityForSession(session: AuthSession, fetcher: Fetcher = fetch): Promise<OutlookConnectionSnapshot> {
   const { config, principal } = await context(session);
-  const base = { connectorId: OUTLOOK_CONNECTOR_ID, label: "Outlook", effectiveOperations: [], approvalRequiredOperations: [], connectUrl: "/api/connectors/outlook/oauth/start", disconnectUrl: null, accountEmail: null, connectionVersion: null };
+  const base = { connectorId: OUTLOOK_CONNECTOR_ID, label: "Microsoft 365", effectiveOperations: [], approvalRequiredOperations: [], connectUrl: "/api/connectors/outlook/oauth/start", disconnectUrl: null, accountEmail: null, connectionVersion: null };
   try { oauthConfiguration(config); }
   catch (error) { return { ...base, status: "not_configured", statusCode: code(error), checkedAt: null, connectUrl: null }; }
   try {

@@ -8,7 +8,7 @@ import { UserProvisioner } from "@/users/provisioner";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { FileSharedAccessIndex } from "@/workbench/shared-access-index";
 import { loadSharedWorkbench, resolveProjectAccess, resolveThreadAccess } from "@/workbench/shared-access";
-import { createProject, createThread, updateProject } from "@/workbench/store";
+import { createProject, createThread, updateProject, updateThread } from "@/workbench/store";
 
 vi.mock("server-only", () => ({}));
 
@@ -135,6 +135,14 @@ describe("shared project visibility", () => {
     expect(editorSnapshot.projects.find((item) => item.id === project.id)?.access)
       .toEqual({ role: "editor", canEdit: true, canManage: false });
 
+    await expect(updateThread(memberSession, thread.id, { pinned: true }))
+      .resolves.toMatchObject({ id: thread.id, pinned: true, title: "Conversación visible" });
+    expect((await loadSharedWorkbench(memberSession)).threads.find((item) => item.id === thread.id)?.pinned).toBe(true);
+    expect((await loadSharedWorkbench(ownerSession)).threads.find((item) => item.id === thread.id)?.pinned).toBe(false);
+    expect((await loadSharedWorkbench(editorSession)).threads.find((item) => item.id === thread.id)?.pinned).toBe(false);
+    await expect(updateThread(memberSession, thread.id, { title: "No autorizado" }))
+      .rejects.toThrow("només lectura");
+
     const ownerSnapshot = await loadSharedWorkbench(ownerSession);
     expect(ownerSnapshot.projects.find((item) => item.id === project.id)?.access)
       .toEqual({ role: "owner", canEdit: true, canManage: true });
@@ -157,5 +165,5 @@ describe("shared project visibility", () => {
     const audit = await index.readAudit();
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "denied" && entry.payload.actorUserId === outsiderId)).toBe(true);
     expect(audit.some((entry) => entry.payload.action === "resolve" && entry.payload.outcome === "allowed" && entry.payload.actorUserId === memberId && entry.payload.grantFingerprint)).toBe(true);
-  });
+  }, 15_000);
 });

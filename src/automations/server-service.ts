@@ -131,6 +131,10 @@ export function visibleAutomationTasks(
     const access = automationTaskAccess(task, principalUserId, workspace, isAdmin);
     return access.canManage || access.canViewResults ? [{
       ...task,
+      owner: {
+        userId: task.userId,
+        name: workspace.users.find(({ userId }) => userId === task.userId)?.displayName ?? "Usuario no disponible",
+      },
       access,
     }] : [];
   });
@@ -173,7 +177,7 @@ export async function createAutomationTask(session: AuthSession, input: Automati
     groupIds: [],
   }, context, context.principal.userId);
   const task = await storeForOwner(context, context.principal.userId).create({ ...input, audience }, { id: options.taskId });
-  return { ...task, access: { canManage: true, canViewResults: true } } satisfies AutomationTaskView;
+  return { ...task, owner: { userId: context.principal.userId, name: context.principal.displayName }, access: { canManage: true, canViewResults: true } } satisfies AutomationTaskView;
 }
 
 export async function updateAutomationTask(session: AuthSession, taskId: string, patch: AutomationTaskPatch) {
@@ -187,7 +191,7 @@ export async function updateAutomationTask(session: AuthSession, taskId: string,
     ? { ...patch, audience: validateAutomationAudience(patch.audience, context, context.principal.userId) }
     : patch;
   const task = await located.store.update(taskId, nextPatch);
-  return { ...task, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
+  return { ...task, owner: { userId: task.userId, name: context.users.find(({ userId }) => userId === task.userId)?.displayName ?? "Usuario no disponible" }, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
 }
 
 export async function deleteAutomationTask(session: AuthSession, taskId: string) {
@@ -208,7 +212,7 @@ export async function runAutomationTaskNow(session: AuthSession, taskId: string,
     throw new AutomationAccessError("AUTOMATION_NOT_FOUND", "Automatización no encontrada.", 404);
   }
   const task = await located.store.runNow(taskId, clientRequestId);
-  return { ...task, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
+  return { ...task, owner: { userId: task.userId, name: context.users.find(({ userId }) => userId === task.userId)?.displayName ?? "Usuario no disponible" }, access: automationTaskAccess(task, context.principal.userId, context, context.isAdmin) } satisfies AutomationTaskView;
 }
 
 export async function automationRunsForSession(session: AuthSession, taskId: string) {

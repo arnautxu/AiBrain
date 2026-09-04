@@ -96,6 +96,7 @@ describe("filesystem workbench lifecycle routes", () => {
     const projectThreadsRoute = await import("@/app/api/projects/[projectId]/threads/route");
     const threadsRoute = await import("@/app/api/threads/route");
     const threadRoute = await import("@/app/api/threads/[threadId]/route");
+    const workbenchRoute = await import("@/app/api/workbench/route");
 
     auth.session = null;
     expect((await projectsRoute.GET(request("http://localhost/api/projects"))).status).toBe(401);
@@ -185,6 +186,9 @@ describe("filesystem workbench lifecycle routes", () => {
       request(`http://localhost/api/threads/${createdThread.id}`, "PATCH", { status: "active" }),
       { params: Promise.resolve({ threadId: createdThread.id }) },
     )).status).toBe(200);
+    expect(await (await workbenchRoute.GET()).json()).toMatchObject({
+      workbench: { threads: [{ id: createdThread.id, pinned: true }] },
+    });
 
     auth.session = session(USER_B);
     expect((await projectRoute.GET(
@@ -193,6 +197,10 @@ describe("filesystem workbench lifecycle routes", () => {
     )).status).toBe(404);
     expect((await threadRoute.GET(
       request(`http://localhost/api/threads/${createdThread.id}`),
+      { params: Promise.resolve({ threadId: createdThread.id }) },
+    )).status).toBe(404);
+    expect((await threadRoute.PATCH(
+      request(`http://localhost/api/threads/${createdThread.id}`, "PATCH", { pinned: true }),
       { params: Promise.resolve({ threadId: createdThread.id }) },
     )).status).toBe(404);
 

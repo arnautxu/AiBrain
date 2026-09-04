@@ -757,6 +757,23 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       }
       const browser = this.requireBrowser();
       if (command.kind === "mouse") {
+        // Chrome 151 can leave Input.dispatchMouseEvent(mouseWheel) pending on
+        // some composited pages. That stalls the shared CDP lane, which in
+        // turn starves frame capture until the service deadline fences the
+        // whole browser session. Use the page's synchronous scrolling
+        // primitive at the pointer location instead. It supports nested
+        // scroll containers, preserves wheel/trackpad deltas and returns on
+        // the same bounded Runtime.evaluate path used by agent scrolling.
+        if (command.event === "mouseWheel") {
+          await this.scrollViewportAt(
+            page,
+            command.x,
+            command.y,
+            command.deltaX ?? 0,
+            command.deltaY ?? 0,
+          );
+          return;
+        }
         // Record before dispatch: a lost response cannot prove the press failed.
         if ((command.event === "mousePressed" && command.button === "left") ||
           (command.event === "mouseMoved" && page.heldMouse)) {
@@ -1278,6 +1295,49 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     }, { sessionId: page.sessionId });
     if (evaluated.exceptionDetails) {
       throw new ChromeRuntimeError("CHROME_SCROLL_FAILED", "Browser page rejected the scroll operation.");
+    }
+  }
+
+  private async scrollViewportAt(
+    page: ThreadPage,
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+  ) {
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `(() => {
+        const deltaX = ${deltaX};
+        const deltaY = ${deltaY};
+        const canMove = (element) => {
+          const style = getComputedStyle(element);
+          const vertical = deltaY !== 0 && element.scrollHeight > element.clientHeight &&
+            /^(auto|scroll|overlay)$/u.test(style.overflowY) &&
+            (deltaY < 0 ? element.scrollTop > 0 : element.scrollTop + element.clientHeight < element.scrollHeight);
+          const horizontal = deltaX !== 0 && element.scrollWidth > element.clientWidth &&
+            /^(auto|scroll|overlay)$/u.test(style.overflowX) &&
+            (deltaX < 0 ? element.scrollLeft > 0 : element.scrollLeft + element.clientWidth < element.scrollWidth);
+          return vertical || horizontal;
+        };
+        let target = document.elementFromPoint(${x}, ${y});
+        while (target && target !== document.documentElement && !canMove(target)) target = target.parentElement;
+        if (!target || target === document.documentElement) target = document.scrollingElement || document.documentElement;
+        const beforeX = target.scrollLeft;
+        const beforeY = target.scrollTop;
+        target.scrollBy({ left: deltaX, top: deltaY, behavior: "instant" });
+        return { beforeX, beforeY, afterX: target.scrollLeft, afterY: target.scrollTop };
+      })()`,
+      returnByValue: true,
+      awaitPromise: false,
+      userGesture: true,
+    }, { sessionId: page.sessionId });
+    const value = evaluated.result?.value;
+    if (evaluated.exceptionDetails || !isRecord(value) ||
+      ![value.beforeX, value.beforeY, value.afterX, value.afterY].every(Number.isFinite)) {
+      throw new ChromeRuntimeError("CHROME_SCROLL_FAILED", "Browser page rejected the viewport scroll operation.");
     }
   }
 

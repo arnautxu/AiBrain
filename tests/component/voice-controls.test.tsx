@@ -36,11 +36,19 @@ class FakeUtterance {
 
 const speak = vi.fn();
 const cancelSpeech = vi.fn();
+const stopMicrophoneTrack = vi.fn();
+const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop: stopMicrophoneTrack }] }));
 
 beforeEach(() => {
+  recognition = undefined as unknown as typeof recognition;
   localStorage.clear();
   vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
   Object.defineProperty(window, "SpeechRecognition", { configurable: true, value: FakeRecognition });
+  Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+  Object.defineProperty(navigator, "mediaDevices", {
+    configurable: true,
+    value: { getUserMedia },
+  });
   Object.defineProperty(window, "speechSynthesis", {
     configurable: true,
     value: { speak, cancel: cancelSpeech, speaking: false },
@@ -70,7 +78,10 @@ describe("VoiceDictationControl", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Activar dictado" }));
     expect(localStorage.getItem("aibrain.voice.dictation-consent.v1")).toBe("accepted");
+    await act(async () => { await Promise.resolve(); });
     expect(screen.getByRole("status")).toHaveTextContent("Escuchando");
+    expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
+    expect(stopMicrophoneTrack).toHaveBeenCalledOnce();
     act(() => vi.runOnlyPendingTimers());
     expect(screen.getByRole("button", { name: "Terminar dictado" })).toHaveFocus();
 
@@ -93,6 +104,7 @@ describe("VoiceDictationControl", () => {
     const onNotice = vi.fn();
     render(<VoiceDictationControl value="" disabled={false} onChange={vi.fn()} onNotice={onNotice} />);
     fireEvent.click(await screen.findByRole("button", { name: "Dictar mensaje" }));
+    await waitFor(() => expect(recognition).toBeDefined());
     act(() => recognition.onerror?.(Object.assign(new Event("error"), { error: "network" })));
     expect(onNotice).toHaveBeenCalledWith("El servicio de voz del navegador no está disponible ahora mismo.", "error");
     await waitFor(() => expect(screen.getByRole("button", { name: "Dictar mensaje" })).toHaveFocus());
@@ -103,6 +115,7 @@ describe("VoiceDictationControl", () => {
     const onChange = vi.fn();
     render(<VoiceDictationControl value="Texto anterior" disabled={false} onChange={onChange} />);
     fireEvent.click(await screen.findByRole("button", { name: "Dictar mensaje" }));
+    await waitFor(() => expect(recognition).toBeDefined());
     act(() => recognition.onresult?.(Object.assign(new Event("result"), {
       resultIndex: 0,
       results: [{ isFinal: false, 0: { transcript: "texto temporal" } }],
@@ -129,6 +142,33 @@ describe("VoiceDictationControl", () => {
     await screen.findByRole("dialog", { name: "Dictado no disponible" });
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("dialog", { name: "Dictado no disponible" })).not.toBeInTheDocument();
+  });
+
+  it("surfaces native microphone denial without starting speech recognition", async () => {
+    localStorage.setItem("aibrain.voice.dictation-consent.v1", "accepted");
+    getUserMedia.mockRejectedValueOnce(new DOMException("denied", "NotAllowedError"));
+    const onNotice = vi.fn();
+    render(<VoiceDictationControl value="" disabled={false} onChange={vi.fn()} onNotice={onNotice} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
+
+    await waitFor(() => expect(onNotice).toHaveBeenCalledWith(
+      expect.stringMatching(/denegado el micrófono/i), "error",
+    ));
+    expect(recognition).toBeUndefined();
+  });
+
+  it("requires HTTPS before requesting or starting the microphone", async () => {
+    localStorage.setItem("aibrain.voice.dictation-consent.v1", "accepted");
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    const onNotice = vi.fn();
+    render(<VoiceDictationControl value="" disabled={false} onChange={vi.fn()} onNotice={onNotice} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
+
+    expect(onNotice).toHaveBeenCalledWith(expect.stringMatching(/HTTPS/i), "error");
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(recognition).toBeUndefined();
   });
 });
 

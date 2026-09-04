@@ -116,6 +116,7 @@ export type AutomationSnapshot = {
 };
 
 export type AutomationTaskView = AutomationTask & {
+  owner: { userId: string; name: string };
   access: {
     canManage: boolean;
     canViewResults: boolean;

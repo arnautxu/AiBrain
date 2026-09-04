@@ -141,6 +141,32 @@ test("mobile navigation closes when the viewport becomes desktop", async ({ page
   await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
 });
 
+test("a pinned chat persists once across mobile and desktop sidebars", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await login(page);
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  const projectThread = page.locator('button[data-testid="sidebar-project-thread"]').first();
+  await expect(projectThread).toBeVisible();
+  const title = (await projectThread.textContent())?.trim();
+  expect(title).toBeTruthy();
+
+  await projectThread.locator("xpath=..").getByRole("button", { name: `Acciones de ${title}` }).click();
+  await page.getByRole("menuitem", { name: "Fijar" }).click();
+  const pinned = page.getByRole("region", { name: "Anclados" });
+  await expect(pinned).toBeVisible();
+  await expect(page.getByRole("button", { name: title!, exact: true })).toHaveCount(1);
+  await expect(pinned.getByRole("button", { name: title!, exact: true })).toBeVisible();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await expect(page.getByRole("region", { name: "Anclados" }).getByRole("button", { name: title!, exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: title!, exact: true })).toHaveCount(1);
+
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(page.getByTestId("workbench-sidebar")).toHaveAttribute("data-desktop-state", "expanded");
+  await expect(page.getByRole("region", { name: "Anclados" }).getByRole("button", { name: title!, exact: true })).toBeVisible();
+});
+
 test("settings can recover after its initial request fails", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);

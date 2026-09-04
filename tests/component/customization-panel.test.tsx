@@ -109,6 +109,29 @@ describe("CustomizationPanel", () => {
     expect(screen.queryByText("No tienes conectores autorizados.")).not.toBeInTheDocument();
   });
 
+  it("shows reviewed service coverage and reconnect/disconnect controls for a connected personal toolkit", async () => {
+    const snapshot = settings(false);
+    snapshot.connectors = [{
+      ...snapshot.connectors[0],
+      id: "composio-google-workspace",
+      label: "Google Workspace",
+      status: "connected",
+      accountEmail: "arnau@example.com",
+      connectUrl: "/api/connectors/composio/google-workspace/connect",
+      disconnectUrl: "/api/connectors/composio/google-workspace/disconnect",
+      connectionVersion: 2,
+    }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? new Response(JSON.stringify(snapshot), { status: 200 })
+      : new Response(JSON.stringify(usage("personal")), { status: 200 })));
+
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+
+    expect(await screen.findByText(/Servicios: Gmail, Google Calendar, Google Drive/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconectar Google Workspace" })).toHaveAttribute("href", "/api/connectors/composio/google-workspace/connect");
+    expect(screen.getByRole("button", { name: "Desconectar Google Workspace" })).toBeInTheDocument();
+  });
+
   it("keeps archived projects and conversations in settings and restores them explicitly", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

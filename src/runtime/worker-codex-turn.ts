@@ -1058,6 +1058,16 @@ export async function runWorkerCodexTurn(
   const threadId = extractThreadId(threadResult);
   if (!threadId) throw new Error("El servei no ha retornat una conversa vàlida.");
   telemetry.bindRuntimeThread(threadId);
+  const runtimeSelectedModel = isRecord(threadResult) && typeof threadResult.model === "string"
+    ? threadResult.model
+    : null;
+  telemetry.modelSelected({
+    experience: chatRequest.options.experience ?? "unknown",
+    requestedModel: selectedModel,
+    effectiveModel: runtimeSelectedModel ?? selectedModel,
+    effort: chatRequest.options.effort,
+    source: runtimeSelectedModel ? "runtime" : selectedModel ? "request" : "default",
+  });
   if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
   recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
@@ -1324,6 +1334,11 @@ export async function runWorkerCodexTurn(
           return;
         }
         if (method === "model/rerouted" && isRecord(params)) {
+          telemetry.modelRerouted(
+            typeof params.fromModel === "string" ? params.fromModel : "",
+            typeof params.toModel === "string" ? params.toModel : "",
+            typeof params.reason === "string" ? params.reason : null,
+          );
           await setRuntimePhase(
             "runtime-model-reroute",
             "Ajustando el procesamiento",

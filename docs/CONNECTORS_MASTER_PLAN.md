@@ -3,6 +3,44 @@
 Estado: propuesta funcional revisada, 29 de agosto de 2026
 Base: `main` en `6eda510`
 
+## Estado implementado en el candidato de producto
+
+- OAuth nativo personal de Google/Gmail y Microsoft/Outlook con PKCE, estado
+  de un solo uso, tokens AES-256-GCM bajo el directorio privado del usuario y
+  binding `instalación + usuario + conector`.
+- Catálogo personal con conectar, reconectar, desconectar y readback de cuenta.
+- Google Calendar/Drive, Microsoft Calendar/OneDrive, GitHub y Slack se
+  habilitan, según soporte revisado, como toolkits Composio de solo lectura con
+  versiones de tools fijadas. Composio conserva los tokens; AiBrain guarda solo
+  el ID opaco de cuenta, aislado por usuario.
+- El runtime expone únicamente recursos admitidos por el catálogo efectivo del
+  usuario. Desconectar revoca primero el binding local y luego intenta revocar
+  el proveedor, de modo que un fallo remoto no mantiene acceso local.
+
+Configuración externa mínima exacta:
+
+1. Google nativo: `AIBRAIN_GOOGLE_CLIENT_ID`,
+   `AIBRAIN_GOOGLE_CLIENT_SECRET`, clave aleatoria de 32 bytes base64 en
+   `AIBRAIN_GOOGLE_OAUTH_ENCRYPTION_KEY`, y callback
+   `<publicUrl>/api/connectors/gmail/oauth/callback`.
+2. Microsoft nativo: tenant UUID exacto en `connectors.outlook.tenantId`,
+   `AIBRAIN_MICROSOFT_CLIENT_ID`, `AIBRAIN_MICROSOFT_CLIENT_SECRET`, clave
+   aleatoria de 32 bytes base64 en
+   `AIBRAIN_MICROSOFT_OAUTH_ENCRYPTION_KEY`, y callback
+   `<publicUrl>/api/connectors/outlook/oauth/callback`.
+3. Toolkits adicionales: `AIBRAIN_COMPOSIO_API_KEY` y, para cada uno de
+   `googlecalendar`, `googledrive`, `microsoft_calendar`, `onedrive`, `github`
+   y `slack`, un `authConfigId`, lista exacta de scopes y lista revisada de
+   `readTools` con versión fija en `connectors.composio.toolkits` de la
+   InstallationConfig. No se aceptan tools de escritura en este contrato.
+4. Registrar en las consolas de proveedor las URLs de callback que muestra el
+   servidor para cada toolkit y completar una autorización con dos usuarios QA.
+
+Sin esos valores la tarjeta aparece como falta de configuración o login; el
+código no degrada a tokens en navegador ni credenciales compartidas. La
+aceptación real sigue requiriendo login/readback por proveedor y una prueba
+negativa entre dos usuarios en el mismo SHA desplegado.
+
 ## 1. Objetivo real
 
 Cada usuario de AiBrain debe poder entrar en **Configuración > Conectores** y conectar sus propias cuentas, igual que conecta una aplicación en Codex:

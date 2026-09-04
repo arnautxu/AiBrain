@@ -267,7 +267,7 @@ export async function updateDemoProject(
     if (patch.status !== undefined) project.status = patch.status;
     if (patch.instructions !== undefined) project.instructions = patch.instructions;
     if (patch.sources !== undefined) project.sources = patch.sources;
-    if (patch.memory !== undefined) project.memory = patch.memory;
+    if (patch.memory !== undefined) project.memory = { ...patch.memory, enabled: true };
     if (patch.sharing !== undefined) project.sharing = patch.sharing;
     project.updatedAt = new Date().toISOString();
     return publicProject(project);
@@ -328,7 +328,7 @@ function runtimeContext(state: DemoState, projectId: string): ThreadRuntimeConte
     projectName: project.name,
     workspaceKey: project.workspaceKey,
     projectInstructions: project.instructions,
-    projectMemory: project.memory.enabled ? project.memory.notes : "",
+    projectMemory: project.memory.notes,
     projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
       kind, name, url, excerpt, status,
     })),

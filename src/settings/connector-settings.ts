@@ -60,7 +60,9 @@ export function projectPersonalConnectorSettings(
           : copy.unavailable,
     accountEmail: capability.accountEmail,
     scopes: [...scopes],
-    connectUrl: status === "requires_login" || status === "unavailable" ? capability.connectUrl : null,
+    // Keep the OAuth start route available for an explicit reconnect. It uses
+    // a fresh one-use state receipt and replaces only this user's binding.
+    connectUrl: status === "admin_setup_required" ? null : capability.connectUrl,
     disconnectUrl: capability.disconnectUrl,
     connectionVersion: capability.connectionVersion,
   };

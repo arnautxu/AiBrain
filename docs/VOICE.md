@@ -6,10 +6,10 @@ AiBrain ofrece voz como ayuda de entrada y accesibilidad del navegador. No intro
 
 - El botón **Dictar mensaje** aparece en el composer en escritorio y móvil.
 - La primera activación muestra una explicación y requiere consentimiento explícito antes de pedir acceso al micrófono.
-- El reconocimiento usa `SpeechRecognition`/`webkitSpeechRecognition` del navegador. El audio lo procesa el servicio de voz del propio navegador; AiBrain recibe únicamente el texto que se inserta en el composer.
+- Tras ese gesto, AiBrain llama a `getUserMedia({ audio: true })`, de modo que el permiso real aparece en el prompt nativo del navegador o del sistema. La pista de comprobación se cierra inmediatamente; el reconocimiento posterior usa `SpeechRecognition`/`webkitSpeechRecognition` del navegador. El audio lo procesa el servicio de voz del propio navegador; AiBrain recibe únicamente el texto que se inserta en el composer.
 - El usuario ve los estados escuchando, procesando y error. Puede terminar y conservar el texto, o cancelar y volver exactamente al texto anterior.
 - El texto siempre queda editable y nunca se envía automáticamente.
-- Si la API no existe, la interfaz indica que se debe escribir o pegar texto. La instalación actual no expone una API de transcripción de archivos de audio, por lo que no se simula esa capacidad.
+- La denegación, la ausencia de dispositivo y un origen que no sea HTTPS se muestran como estados distintos y recuperables. Si la API no existe, la interfaz indica que se debe escribir o pegar texto. La instalación actual no expone una API de transcripción de archivos de audio, por lo que no se simula esa capacidad.
 
 El consentimiento se recuerda solo en el navegador con `aibrain.voice.dictation-consent.v1`. Los permisos reales del micrófono siguen bajo control del navegador y del sistema operativo.
 

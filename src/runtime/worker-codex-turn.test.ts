@@ -394,7 +394,7 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId, paths: installationPaths },
+      config: { installationId, paths: { ...installationPaths, dataRoot: userRoot } },
       handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
       client,
     };
