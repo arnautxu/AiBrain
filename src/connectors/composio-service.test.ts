@@ -5,7 +5,7 @@ import path from "node:path";
 import { parseInstallationConfig, type InstallationConfig } from "@/config/installation-schema";
 import type { AuthSession } from "@/auth/types";
 import { ComposioApi, composioUserId } from "./composio-api";
-import { completeComposio, composioCapability, composioReadTool, disconnectComposio } from "./composio-service";
+import { completeComposio, composioCapabilitiesForSession, composioCapability, composioReadTool, disconnectComposio } from "./composio-service";
 import { FileGmailOAuthStateStore } from "./gmail-oauth-store";
 import { handleComposioTool, COMPOSIO_NAMESPACE } from "@/runtime/composio-dynamic-tools";
 import { FileConnectorBindingStore } from "./binding-store";
@@ -35,6 +35,15 @@ beforeEach(async () => {
 });
 afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
 describe("personal connected apps lifecycle (synthetic provider, not live acceptance)", () => {
+  it("keeps optional inventories harmless for non-local or unconfigured sessions", async () => {
+    const nonLocal = { ...session(), provider: "mock" } as unknown as AuthSession;
+    expect(await composioCapabilitiesForSession(nonLocal)).toEqual([]);
+    state.config = { ...config, connectors: undefined };
+    expect(await composioCapabilitiesForSession(nonLocal)).toEqual([]);
+    expect(await composioCapabilitiesForSession({ ...session(), tenant: { id: "other" } } as AuthSession)).toEqual([]);
+    state.config = config;
+    await expect(composioCapabilitiesForSession({ ...session(), tenant: { id: "other" } } as AuthSession)).rejects.toMatchObject({ code: "COMPOSIO_TENANT_MISMATCH" });
+  });
   it("reproduces missing configuration without claiming a connection or making a provider call", async () => {
     vi.stubEnv("AIBRAIN_COMPOSIO_API_KEY", ""); const fetcher = provider();
     expect(await composioCapability(config, A, "github", fetcher)).toMatchObject({ status: "not_configured", connectUrl: null });

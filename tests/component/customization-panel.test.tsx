@@ -24,10 +24,21 @@ function CustomizationFocusHarness() {
   </>;
 }
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(null, "", "/"); });
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
+  it.each(["verified", "failed"])("shows callback %s and new-chat guidance without treating URL as connection proof", async (status) => {
+    window.history.replaceState(null, "", `/?settings=connectors&connection=${status}`);
+    const snapshot = settings(false);
+    snapshot.connectors = [{ ...snapshot.connectors[0], id: "composio-gmail" }];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === "/api/settings" ? snapshot : usage("personal"))));
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByText(/abre un chat nuevo y selecciónalas con @/)).toBeInTheDocument();
+    expect(screen.getByText(status === "failed" ? /No se completó la conexión/ : /Has vuelto de autorizar la cuenta/)).toBeInTheDocument();
+    expect(screen.queryByText("Conectado")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Conectar Gmail" })).toBeInTheDocument();
+  });
   it("returns focus to the stable opener while its exit is inert", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
       ? new Response(JSON.stringify(settings(false)), { status: 200 })
