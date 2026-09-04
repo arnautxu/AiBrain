@@ -392,6 +392,19 @@ function validateInput(command: BrowserInputCommand) {
   }
 }
 
+function virtualKeyCode(key: string, code?: string) {
+  const editing: Record<string, number> = {
+    Backspace: 8, Tab: 9, Enter: 13, Escape: 27, " ": 32,
+    PageUp: 33, PageDown: 34, End: 35, Home: 36,
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+    Insert: 45, Delete: 46,
+  };
+  if (Object.hasOwn(editing, key)) return editing[key];
+  if (code && /^Key[A-Z]$/u.test(code)) return code.charCodeAt(3);
+  if (code && /^Digit[0-9]$/u.test(code)) return code.charCodeAt(5);
+  return /^[A-Za-z0-9]$/u.test(key) ? key.toUpperCase().charCodeAt(0) : 0;
+}
+
 function validateThreadId(threadId: string) {
   if (!THREAD_ID_PATTERN.test(threadId)) {
     throw new ChromeRuntimeError(
@@ -748,12 +761,19 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         }
         return;
       }
+      // Clipboard/IME text is not a single keyboard character. CDP rejects
+      // multi-codepoint text on dispatchKeyEvent; insertText preserves it once.
+      if (command.event === "char") {
+        await browser.send("Input.insertText", { text: command.text ?? "" }, { sessionId: page.sessionId });
+        return;
+      }
       await browser.send("Input.dispatchKeyEvent", {
         type: command.event,
         key: command.key,
         code: command.code ?? "",
         text: command.text ?? "",
         modifiers: command.modifiers ?? 0,
+        windowsVirtualKeyCode: virtualKeyCode(command.key, command.code),
       }, { sessionId: page.sessionId });
     }, false);
   }
@@ -1530,26 +1550,36 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   }
 
   private async waitForReadablePage(page: ThreadPage, assertController: () => void) {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      assertController();
-      const evaluated = await this.requireBrowser().send<{
-        result?: { value?: unknown };
-        exceptionDetails?: unknown;
-      }>("Runtime.evaluate", {
-        expression: `(() => ({
-          readyState: document.readyState,
-          textLength: (document.body?.innerText ?? "").length,
-          linkCount: document.querySelectorAll("a[href]").length,
-        }))()`,
-        returnByValue: true,
-        awaitPromise: false,
-        userGesture: false,
-      }, { sessionId: page.sessionId });
-      const value = evaluated.result?.value;
-      if (!isRecord(value) || typeof value.readyState !== "string") return;
-      if (attempt >= 5 && value.readyState === "complete" &&
-        Number(value.textLength) >= 20 && Number(value.linkCount) >= 1) return;
-      await wait(100);
+    assertController();
+    // Wait in the owned document, not by repeatedly reading all its text and
+    // links. Blank pages, forms and canvas applications are valid documents.
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `new Promise((resolve) => {
+        if (document.readyState !== "loading") {
+          resolve({ readyState: document.readyState });
+          return;
+        }
+        let timer;
+        const finish = () => {
+          clearTimeout(timer);
+          document.removeEventListener("DOMContentLoaded", finish);
+          resolve({ readyState: document.readyState });
+        };
+        document.addEventListener("DOMContentLoaded", finish, { once: true });
+        timer = setTimeout(finish, 4000);
+      })`,
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    assertController();
+    const value = evaluated.result?.value;
+    if (evaluated.exceptionDetails || !isRecord(value) ||
+      (value.readyState !== "interactive" && value.readyState !== "complete")) {
+      throw new ChromeRuntimeError("CHROME_DOCUMENT_NOT_READY", "Browser document did not become readable.");
     }
   }
 

@@ -110,6 +110,11 @@ export type BrowserViewerNavigationState = Readonly<{
 
 export type BrowserViewerHistoryAction = "back" | "forward" | "reload";
 
+export type BrowserViewerControlBinding = Readonly<{
+  attachmentId: string;
+  browserSessionId: string;
+}>;
+
 export type BrowserInputCommand =
   | Readonly<{
     kind: "mouse";
