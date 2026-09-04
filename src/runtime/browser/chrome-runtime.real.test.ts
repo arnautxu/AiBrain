@@ -217,6 +217,7 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
           const started = performance.now();
           await runtime.agentNavigate(THREAD_A, kind === "blank" ? "about:blank" :
             `http://127.0.0.1:${address.port}/${kind}?sample=${sample}`);
+          // Navigation-only: screenshot validation below is outside the timed interval.
           samples.push({ kind, elapsedMs: Math.round(performance.now() - started), readinessRpcs: evaluations - before });
           expect((await runtime.captureFrame(THREAD_A)).mediaType).toBe("image/png");
         }
