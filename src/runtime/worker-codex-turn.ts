@@ -396,6 +396,11 @@ async function projectGeneratedDocuments(
   projectWorkspace: string,
   projectId: string,
   turnId: string,
+  persistence: {
+    installation: GeneratedImageArtifactContext["installation"];
+    threadId: string;
+    storageOwnerId: string;
+  },
   envelope: AppServerEvent,
   emit: EmitEvent,
   projectedArtifactIds: Set<string>,
@@ -406,6 +411,7 @@ async function projectGeneratedDocuments(
     projectWorkspace,
     projectId,
     turnId,
+    persistence,
   );
   for (const artifact of artifacts) {
     if (projectedArtifactIds.has(artifact.id) || projectingArtifactIds.has(artifact.id)) continue;
@@ -905,6 +911,11 @@ export async function runWorkerCodexTurn(
         projectWorkspace,
         chatRequest.projectId,
         chatRequest.assistantMessageId,
+        {
+          installation: runtime.config,
+          threadId: chatRequest.threadId,
+          storageOwnerId: authenticatedUserId,
+        },
         envelope,
         emit,
         projectedDocumentArtifactIds,
@@ -1461,6 +1472,11 @@ export async function runWorkerCodexTurn(
                 projectWorkspace,
                 chatRequest.projectId,
                 chatRequest.assistantMessageId,
+                {
+                  installation: runtime.config,
+                  threadId: chatRequest.threadId,
+                  storageOwnerId: authenticatedUserId,
+                },
                 envelope,
                 emit,
                 projectedDocumentArtifactIds,

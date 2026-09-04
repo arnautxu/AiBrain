@@ -430,13 +430,14 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
           Number.isSafeInteger(value.height) && Number(value.height) >= 1 && Number(value.height) <= 8192));
   }
   if (value.type === "document") {
-    return typeof value.url === "string" && value.url.startsWith("/api/projects/") &&
+    return typeof value.url === "string" && (value.url.startsWith("/api/projects/") || value.url.startsWith("/api/threads/")) &&
       (value.kind === "docx" || value.kind === "xlsx" || value.kind === "pptx" || value.kind === "pdf" || value.kind === "text") &&
       typeof value.mimeType === "string" && value.mimeType.length <= 180 &&
       typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size > 0 && value.size <= 50 * 1024 * 1024 &&
       (value.status === "processing" || value.status === "ready" || value.status === "error") &&
       (value.pages === null || (typeof value.pages === "number" && Number.isSafeInteger(value.pages) && value.pages >= 1 && value.pages <= 500)) &&
-      (value.previewUrl === null || (typeof value.previewUrl === "string" && value.previewUrl.startsWith("/api/projects/"))) &&
+      (value.previewUrl === null || (typeof value.previewUrl === "string" &&
+        (value.previewUrl.startsWith("/api/projects/") || value.previewUrl.startsWith("/api/threads/")))) &&
       (value.previewFormat === undefined || (value.previewFormat === "spreadsheet" && value.kind === "text" && value.mimeType === "application/json")) &&
       (value.publicationStatus === null || value.publicationStatus === "awaiting_confirmation" || value.publicationStatus === "publishing" || value.publicationStatus === "published" || value.publicationStatus === "declined" || value.publicationStatus === "conflict") &&
       (value.publicationError === null || (typeof value.publicationError === "string" && value.publicationError.length <= 500)) &&

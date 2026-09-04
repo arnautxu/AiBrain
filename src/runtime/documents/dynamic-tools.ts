@@ -17,7 +17,7 @@ import {
   type LocalDocumentCell,
   type LocalDocumentFormat,
 } from "@/runtime/documents/local-document-generator";
-import { generatedDocumentArtifactId } from "@/runtime/generated-document-artifacts";
+import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@/runtime/generated-document-artifacts";
 import { generatedImageArtifactId, isPng } from "@/runtime/generated-image-artifacts";
 
 export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
@@ -301,24 +301,20 @@ function receiptNameFor(callId: string) {
   return `${createHash("sha256").update(callId).digest("hex")}.json`;
 }
 
-function artifactFromReceipt(receipt: Receipt, projectId: string, sourceTurnId: string): DocumentArtifact {
-  const encodedPath = encodeURIComponent(receipt.relativePath.split(path.sep).join("/"));
-  const fileRoute = `/api/projects/${projectId}/files?path=${encodedPath}`;
-  return Object.freeze({
-    id: generatedDocumentArtifactId(sourceTurnId, receipt.relativePath),
-    type: "document",
-    name: path.basename(receipt.relativePath),
-    url: `${fileRoute}&raw=1&download=1`,
-    kind: receipt.format,
-    mimeType: receipt.mimeType,
-    size: receipt.size,
-    status: "ready",
+async function artifactFromReceipt(receipt: Receipt, context: LocalDocumentDynamicToolContext): Promise<DocumentArtifact> {
+  const contents = await readRegularFileWithin(context.projectWorkspace, receipt.relativePath, 20_000_000);
+  return persistGeneratedDocumentArtifact({
+    artifactId: generatedDocumentArtifactId(context.sourceTurnId, receipt.relativePath),
+    relativePath: receipt.relativePath,
+    contents,
     pages: receipt.pages,
-    previewUrl: receipt.format === "pdf" ? `${fileRoute}&raw=1` : `${fileRoute}&representation=1`,
-    publicationStatus: null,
-    publicationError: null,
-    targetLabel: null,
-    error: null,
+    context: {
+      installation: context.installation,
+      projectId: context.projectId,
+      threadId: context.sourceThreadId,
+      messageId: context.sourceTurnId,
+      storageOwnerId: context.userId,
+    },
   });
 }
 
@@ -553,7 +549,7 @@ async function completedBatchResult(
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_RECEIPT_CORRUPT", "Completed document batch is missing a child receipt.");
     }
     await verifyReceipt(receipt, createHash("sha256").update(canonicalInput(file)).digest("hex"), context);
-    results.push({ response: responseFor(receipt), artifacts: [artifactFromReceipt(receipt, context.projectId, context.sourceTurnId)] });
+    results.push({ response: responseFor(receipt), artifacts: [await artifactFromReceipt(receipt, context)] });
   }
   return batchResult(results);
 }
@@ -607,13 +603,13 @@ async function handleSingleLocalDocumentDynamicToolCall(
         );
       }
       await verifyReceipt(existing, inputFingerprint, context);
-      return { response: responseFor(existing), artifacts: [artifactFromReceipt(existing, context.projectId, context.sourceTurnId)] };
+      return { response: responseFor(existing), artifacts: [await artifactFromReceipt(existing, context)] };
     }
     try {
       const existing = await readReceipt(receiptPath);
       if (existing) {
         await verifyReceipt(existing, inputFingerprint, context);
-        return { response: responseFor(existing), artifacts: [artifactFromReceipt(existing, context.projectId, context.sourceTurnId)] };
+        return { response: responseFor(existing), artifacts: [await artifactFromReceipt(existing, context)] };
       }
       const documents = await secureDirectory(context.projectWorkspace);
       const sourcePng = await sourcePngFor(input, context);
@@ -662,7 +658,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
           createdAt: (context.now ?? (() => new Date()))().toISOString(),
         });
         await atomicWriteFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-        return { response: responseFor(receipt), artifacts: [artifactFromReceipt(receipt, context.projectId, context.sourceTurnId)] };
+        return { response: responseFor(receipt), artifacts: [await artifactFromReceipt(receipt, context)] };
       } catch (error) {
         if (written) await rm(selected.target, { force: true }).catch(() => undefined);
         throw error;

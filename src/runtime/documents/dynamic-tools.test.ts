@@ -139,8 +139,8 @@ describe("local document dynamic tool", () => {
       expect(result.artifacts).toEqual([expect.objectContaining({
         kind: format,
         status: "ready",
-        url: expect.stringContaining("raw=1&download=1"),
-        previewUrl: expect.stringContaining(format === "pdf" ? "raw=1" : "representation=1"),
+        url: expect.stringContaining("?download=1"),
+        previewUrl: expect.stringContaining("?preview=1"),
       })]);
       const payload = JSON.parse((result.response.contentItems[0] as { text: string }).text);
       expect(payload).toMatchObject({ storage: "local-private-workspace", externalConnectorUsed: false, format });

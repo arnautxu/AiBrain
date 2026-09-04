@@ -48,5 +48,27 @@ export async function prepareWorkspaceDocumentPreview(input: {
     validated,
     data: await input.services.previews.readFile(threadId, uploadId, "document.pdf"),
     pages: preview.pages,
+    threadId,
+    uploadId,
+  };
+}
+
+export async function prepareWorkspaceDocumentPage(input: {
+  services: DocumentServices;
+  projectId: string;
+  relativePath: string;
+  fileName: string;
+  declaredMimeType: string;
+  data: Buffer;
+  page: number;
+  signal?: AbortSignal;
+}) {
+  const preview = await prepareWorkspaceDocumentPreview(input);
+  if (preview.pages === null || input.page > preview.pages) {
+    throw new StorageError("DOCUMENT_PREVIEW_PAGE_INVALID", "Workspace document page does not exist.");
+  }
+  return {
+    data: await input.services.previews.renderPage(preview.threadId, preview.uploadId, input.page, { signal: input.signal }),
+    pages: preview.pages,
   };
 }

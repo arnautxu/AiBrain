@@ -114,4 +114,31 @@ describe("DocumentPreviewPanel", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Vista previa de informe-precios.pdf" })).not.toBeInTheDocument());
     expect(opener).toHaveFocus();
   });
+
+  it("offers persisted page navigation, zoom and document-only fullscreen", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1]), {
+      headers: { "Content-Type": "image/png", "Content-Length": "5" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:page"), revokeObjectURL: vi.fn() });
+    render(<DocumentPreviewPanel artifact={{
+      ...artifact,
+      id: "00000000-0000-4000-8000-000000000099",
+      pages: 3,
+      previewUrl: "/api/threads/00000000-0000-4000-8000-000000000013/artifacts/00000000-0000-4000-8000-000000000099?preview=1",
+      url: "/api/threads/00000000-0000-4000-8000-000000000013/artifacts/00000000-0000-4000-8000-000000000099?download=1",
+    }} onClose={vi.fn()} />);
+
+    const first = await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 1" });
+    fireEvent.load(first);
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=1"), expect.objectContaining({ credentials: "same-origin" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Página siguiente" })[0]!);
+    expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=2"), expect.anything());
+    fireEvent.click(screen.getAllByRole("button", { name: "Acercar" })[0]!);
+    expect(screen.getAllByText("125%").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Pantalla completa" }));
+    expect(screen.getByRole("complementary")).toHaveClass("xl:fixed");
+    expect(screen.getByRole("link", { name: "Descargar informe-precios.pdf" })).toHaveAttribute("href", expect.stringContaining("/api/threads/"));
+  });
 });
