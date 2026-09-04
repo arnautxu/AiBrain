@@ -270,6 +270,11 @@ function maximumArtifactBytes(fileName: string) {
   return fileName === "document.pdf" ? MAX_PDF_PREVIEW_BYTES : MAX_IMAGE_PREVIEW_BYTES;
 }
 
+function isPng(bytes: Uint8Array) {
+  const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return bytes.byteLength > signature.length && signature.every((value, index) => bytes[index] === value);
+}
+
 export class DocumentPreviewService {
   readonly previewRoot: string;
   private readonly tools: Required<Omit<DocumentToolchain, "qpdf">> & { qpdf?: string };
@@ -486,6 +491,51 @@ export class DocumentPreviewService {
         };
         await atomicWriteJson(metadataPath, preview, previewSchema);
         return preview;
+      } finally {
+        await rm(work, { recursive: true, force: true });
+      }
+    });
+  }
+
+  async renderPage(threadId: string, uploadId: string, page: number, options: { signal?: AbortSignal } = {}) {
+    if (!Number.isSafeInteger(page) || page < 1 || page > 500) {
+      throw new StorageError("DOCUMENT_PREVIEW_PAGE_INVALID", "Preview page is outside the safe range.");
+    }
+    const { directory, metadataPath } = this.previewLocations(threadId, uploadId);
+    const preview = await this.readMetadata(metadataPath);
+    if (preview.kind === "text" || preview.kind === "image" || preview.pages === null || page > preview.pages) {
+      throw new StorageError("DOCUMENT_PREVIEW_PAGE_INVALID", "Preview page does not exist.");
+    }
+    if (preview.schemaVersion === 2) await this.verifyArtifacts(preview, directory);
+    const fileName = `page-${page}.png`;
+    return this.lockManager.withLock(`document-preview-page:${metadataPath}:${page}`, async () => {
+      try {
+        const cached = await readRegularFileWithin(directory, fileName, MAX_IMAGE_PREVIEW_BYTES);
+        if (!isPng(cached)) throw new Error("invalid cached page");
+        return cached;
+      } catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ENOENT") {
+          if (!(error instanceof Error && error.message === "invalid cached page")) throw error;
+        }
+      }
+      const work = await mkdtemp(path.join(directory, `.page-${page}-`));
+      try {
+        await this.runWithConversionAdmission(async () => {
+          await this.runner.run(this.tools.pdftoppm, [
+            "-f", String(page), "-l", String(page), "-singlefile", "-png", "-r", "144",
+            path.join(directory, "document.pdf"), path.join(work, "page"),
+          ], {
+            cwd: work,
+            env: { HOME: work, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },
+            timeoutMs: 30_000,
+            signal: options.signal,
+          });
+        }, options.signal);
+        const rendered = await readRegularFileWithin(work, "page.png", MAX_IMAGE_PREVIEW_BYTES);
+        if (!isPng(rendered)) throw new StorageError("DOCUMENT_PREVIEW_PAGE_INVALID", "Rendered page is not a PNG.");
+        await atomicWriteFile(path.join(directory, fileName), rendered, { mode: 0o600 });
+        await chmod(path.join(directory, fileName), 0o600);
+        return rendered;
       } finally {
         await rm(work, { recursive: true, force: true });
       }

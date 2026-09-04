@@ -172,6 +172,28 @@ describe("turn projection store", () => {
       thread.id,
       assistantId,
       envelope(1),
+      "artifact:document",
+      { type: "artifact", item: {
+        id: "00000000-0000-4000-8000-000000000013",
+        type: "document",
+        name: "persisted.pdf",
+        url: `/api/threads/${thread.id}/artifacts/00000000-0000-4000-8000-000000000013?download=1`,
+        kind: "pdf",
+        mimeType: "application/pdf",
+        size: 128,
+        status: "ready",
+        pages: 2,
+        previewUrl: `/api/threads/${thread.id}/artifacts/00000000-0000-4000-8000-000000000013?preview=1`,
+        publicationStatus: null,
+        publicationError: null,
+        targetLabel: null,
+        error: null,
+      } },
+    );
+    await projections.applyTransportEvent(
+      thread.id,
+      assistantId,
+      envelope(1),
       "source:official",
       { type: "source", item: {
         id: "source-official", kind: "web", title: "Fuente oficial",
@@ -199,6 +221,7 @@ describe("turn projection store", () => {
       id: assistantId,
       content: "Hello",
       status: "complete",
+      artifacts: [{ id: "00000000-0000-4000-8000-000000000013", name: "persisted.pdf" }],
       sources: [{ id: "source-official", url: "https://example.com/oficial" }],
       toolResults: [{ id: "search-1", sourceIds: ["source-official"] }],
     });

@@ -84,6 +84,33 @@ export async function resolveAdvancedArtifactResource(
   return { installation, access, index, location };
 }
 
+/**
+ * Generated documents are immutable server blobs bound to one source thread.
+ * Resolve the thread ACL before returning the owning user's storage location;
+ * the caller-provided thread id must match the durable binding exactly.
+ */
+export async function resolveGeneratedDocumentResource(
+  session: AuthSession,
+  input: { artifactId: string; threadId: string },
+) {
+  const installation = await installationForLibraryResource(session);
+  const index = resourceLocationIndexForInstallation(installation);
+  const binding = await index.binding("generated-document", input.artifactId);
+  if (!binding || binding.threadId !== input.threadId) {
+    throw new LibraryResourceLocationNotFoundError("Documento no encontrado.");
+  }
+  const access = await resolveThreadAccess(session, input.threadId);
+  const location = await index.resolve("generated-document", input.artifactId, {
+    projectId: access.project.id,
+    threadId: access.thread.id,
+  });
+  if (location.storageOwnerId !== binding.storageOwnerId || location.sha256 !== binding.sha256 ||
+      location.size !== binding.size || location.relativePath !== binding.relativePath) {
+    throw new LibraryResourceLocationNotFoundError("Documento no encontrado.");
+  }
+  return { installation, access, index, location };
+}
+
 export function assertLibraryResourceWritable(access: { role: "owner" | "editor" | "viewer" }) {
   if (access.role === "viewer") {
     throw new LibraryResourceForbiddenError("Este proyecto compartido es de solo lectura.");

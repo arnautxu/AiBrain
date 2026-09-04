@@ -47,6 +47,7 @@
     "GET /api/task-center": "TaskCenterResponse",
     "GET /api/threads": "JsonObject",
     "GET /api/threads/{threadId}": "JsonObject",
+    "GET /api/threads/{threadId}/artifacts/{artifactId}": "binary:document",
     "GET /api/threads/{threadId}/export": "binary:conversation-export",
     "GET /api/threads/{threadId}/documents/{uploadId}": "JsonObject",
     "GET /api/threads/{threadId}/documents/{uploadId}/preview/{fileName}": "binary:document-preview",

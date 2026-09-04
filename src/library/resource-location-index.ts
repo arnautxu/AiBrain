@@ -17,6 +17,7 @@ import {
 export type LibraryResourceKind =
   | "upload"
   | "generated-image"
+  | "generated-document"
   | "workspace-file"
   | "advanced-artifact";
 
@@ -83,7 +84,7 @@ const locationSchema = defineVersionedSchema<LibraryResourceLocation>({
     return {
       schemaVersion: 1,
       kind: expectOneOf(record.kind, [
-        "upload", "generated-image", "workspace-file", "advanced-artifact",
+        "upload", "generated-image", "generated-document", "workspace-file", "advanced-artifact",
       ] as const, context.at("kind")),
       resourceId: expectString(record.resourceId, context.at("resourceId"), { pattern: UUID }),
       projectId: expectString(record.projectId, context.at("projectId"), { pattern: UUID }),
