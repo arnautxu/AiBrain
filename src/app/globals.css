@@ -36,6 +36,7 @@
   --warning: #846224;
   --warning-soft: #fff5df;
   --danger: #934d3d;
+  --danger-contrast: #ffffff;
   --danger-soft: #fff0eb;
   --shadow-sm: 0 1px 2px rgba(28, 27, 24, 0.06), 0 8px 24px -20px rgba(28, 27, 24, 0.28);
   --shadow-md: 0 20px 56px -34px rgba(28, 27, 24, 0.38), 0 3px 12px -8px rgba(28, 27, 24, 0.12);
@@ -86,6 +87,7 @@
   --warning: #d5ad65;
   --warning-soft: #352c1d;
   --danger: #dc8b78;
+  --danger-contrast: #21100c;
   --danger-soft: #38231f;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24), 0 8px 24px -18px rgba(0, 0, 0, 0.72);
   --shadow-md: 0 24px 64px -36px rgba(0, 0, 0, 0.82), 0 3px 14px -8px rgba(0, 0, 0, 0.64);
@@ -132,8 +134,9 @@ body {
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: 13px;
+  font-size: 0.8125rem;
   line-height: 1.5;
+  font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -146,6 +149,19 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+button:not(:disabled),
+a[href],
+summary {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:active:not(:disabled),
+a[href]:active,
+summary:active {
+  opacity: 0.86;
+  transition-duration: 80ms;
 }
 
 button:disabled {
@@ -434,6 +450,7 @@ button:disabled {
    conversation product, not a collection of miniature dashboards. */
 .workspace-overlay {
   background: var(--overlay);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
 }
 
@@ -654,7 +671,8 @@ button:disabled {
   }
 
   .composer-compact .composer-mode-chip,
-  .composer-compact .composer-destination {
+  .composer-compact .composer-destination,
+  .composer-landing .composer-destination {
     display: none;
   }
 
@@ -801,6 +819,19 @@ button:disabled {
   .composer-conversation.composer-compact.composer-focused .composer-controls-start,
   .composer-conversation.composer-compact.composer-focused .composer-controls-end {
     display: flex;
+  }
+}
+
+/* At 320px the compact composer has room for only ~8 characters beside its
+   controls. Keep the complete two-line placeholder visible instead of
+   clipping its second line inside the 40px idle textarea. */
+@media (max-width: 359px) {
+  .composer-conversation.composer-compact:not(.composer-focused) {
+    min-height: 76px;
+  }
+
+  .composer-conversation.composer-compact:not(.composer-focused) .composer-textarea {
+    min-height: 64px;
   }
 }
 
@@ -1307,6 +1338,87 @@ button:disabled {
   }
 }
 
+@media (prefers-reduced-transparency: reduce) {
+  .workspace-overlay,
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .workspace-panel-header,
+  .mobile-composer-dock[class*="backdrop-blur"] {
+    background: var(--surface) !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --border: color-mix(in srgb, var(--text) 40%, transparent);
+    --border-subtle: color-mix(in srgb, var(--text) 24%, transparent);
+    --border-strong: color-mix(in srgb, var(--text) 58%, transparent);
+  }
+
+  .workspace-overlay,
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .workspace-panel-header,
+  .mobile-composer-dock[class*="backdrop-blur"] {
+    border-color: var(--border-strong) !important;
+    background: var(--surface) !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :root {
+    --canvas: Canvas;
+    --surface: Canvas;
+    --surface-raised: Canvas;
+    --surface-muted: Canvas;
+    --surface-hover: Canvas;
+    --surface-selected: Canvas;
+    --sidebar: Canvas;
+    --text: CanvasText;
+    --text-secondary: CanvasText;
+    --text-muted: CanvasText;
+    --text-subtle: CanvasText;
+    --border: CanvasText;
+    --border-subtle: CanvasText;
+    --border-strong: CanvasText;
+    --focus: Highlight;
+  }
+
+  .workspace-overlay,
+  [class*="backdrop-blur"] {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+  }
+
+  .workspace-panel,
+  .workspace-panel-header,
+  .ui-surface,
+  .composer-shadow,
+  .mobile-composer-dock[class*="backdrop-blur"] {
+    border-color: CanvasText !important;
+    background: Canvas !important;
+    color: CanvasText !important;
+  }
+
+  :focus-visible {
+    outline-color: Highlight !important;
+  }
+
+  [aria-current="page"],
+  [aria-selected="true"],
+  [aria-pressed="true"] {
+    border-color: Highlight !important;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+}
+
 @media (pointer: coarse) {
   .touch-target,
   .ui-icon-button {
@@ -1336,8 +1448,33 @@ button:disabled {
     min-height: 2.75rem;
   }
 
+  .sidebar-touch-row[data-testid="sidebar-project-row"] {
+    padding-right: 8.25rem;
+  }
+
   .sidebar-item-action {
     opacity: 1;
+  }
+
+  .sidebar-project-disclosure {
+    pointer-events: auto;
+    min-width: 2.75rem;
+    opacity: 1;
+  }
+
+  .landing-suggestions button,
+  .workspace-panel button,
+  [role="dialog"] button,
+  [role="menuitem"],
+  [role="menuitemcheckbox"],
+  [role="option"],
+  summary {
+    min-height: 2.75rem;
+  }
+
+  .workspace-panel button[aria-label],
+  [role="dialog"] button[aria-label] {
+    min-width: 2.75rem;
   }
 }
 

@@ -74,7 +74,7 @@ export type MemoryGovernanceAuditEvent = {
   schemaVersion: 1;
   installationId: string;
   actorUserId: string;
-  action: "memory.proposed" | "memory.confirmed" | "memory.rejected" | "memory.updated" | "memory.deleted" |
+  action: "memory.proposed" | "memory.confirmed" | "memory.rejected" | "memory.updated" | "memory.deleted" | "memory.restored" |
     "memory.auto_saved" | "memory.deduplicated" | "memory.versioned" | "memory.auto_suppressed";
   targetId: string;
   scope: MemoryScope;
@@ -162,13 +162,13 @@ function parseGovernedRecord(value: unknown, context: ValidationContext): Govern
 
 const proposalStateSchema = defineVersionedSchema<ProposalState>({ name: "MemoryProposalState", schemaVersion: 1, keys: ["installationId", "userId", "proposals"], parse(record, context) { const installationId = expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }); const userId = expectString(record.userId, context.at("userId"), { pattern: UUID }); const proposals = expectArray(record.proposals, context.at("proposals"), parseProposal, { maxLength: 100_000 }); if (proposals.some((item) => item.installationId !== installationId || item.userId !== userId) || new Set(proposals.map(({ proposalId }) => proposalId)).size !== proposals.length) context.at("proposals").fail("proposal identities are not isolated"); return { schemaVersion: 1, installationId, userId, proposals }; } });
 const recordStateSchema = defineVersionedSchema<RecordState>({ name: "GovernedMemoryState", schemaVersion: 1, keys: ["installationId", "owner", "records"], parse(record, context) { const installationId = expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }); const owner = expectString(record.owner, context.at("owner"), { minLength: 7, maxLength: 64 }); const records = expectArray(record.records, context.at("records"), parseGovernedRecord, { maxLength: 100_000 }); if (records.some((item) => item.installationId !== installationId) || new Set(records.map(({ memoryId }) => memoryId)).size !== records.length) context.at("records").fail("record identities are not isolated"); return { schemaVersion: 1, installationId, owner, records }; } });
-const auditSchema = defineVersionedSchema<MemoryGovernanceAuditEvent>({ name: "MemoryGovernanceAuditEvent", schemaVersion: 1, keys: ["installationId", "actorUserId", "action", "targetId", "scope", "projectId", "occurredAt", "summary"], parse(record, context) { return { schemaVersion: 1, installationId: expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }), actorUserId: expectString(record.actorUserId, context.at("actorUserId"), { pattern: UUID }), action: expectOneOf(record.action, ["memory.proposed", "memory.confirmed", "memory.rejected", "memory.updated", "memory.deleted", "memory.auto_saved", "memory.deduplicated", "memory.versioned", "memory.auto_suppressed"] as const, context.at("action")), targetId: expectString(record.targetId, context.at("targetId"), { pattern: UUID }), scope: expectOneOf(record.scope, ["private", "project", "company"] as const, context.at("scope")), projectId: nullableUuid(record.projectId, context.at("projectId")), occurredAt: expectIsoDate(record.occurredAt, context.at("occurredAt")), summary: boundedText(record.summary, context.at("summary"), 500) }; } });
+const auditSchema = defineVersionedSchema<MemoryGovernanceAuditEvent>({ name: "MemoryGovernanceAuditEvent", schemaVersion: 1, keys: ["installationId", "actorUserId", "action", "targetId", "scope", "projectId", "occurredAt", "summary"], parse(record, context) { return { schemaVersion: 1, installationId: expectString(record.installationId, context.at("installationId"), { pattern: INSTALLATION_ID }), actorUserId: expectString(record.actorUserId, context.at("actorUserId"), { pattern: UUID }), action: expectOneOf(record.action, ["memory.proposed", "memory.confirmed", "memory.rejected", "memory.updated", "memory.deleted", "memory.restored", "memory.auto_saved", "memory.deduplicated", "memory.versioned", "memory.auto_suppressed"] as const, context.at("action")), targetId: expectString(record.targetId, context.at("targetId"), { pattern: UUID }), scope: expectOneOf(record.scope, ["private", "project", "company"] as const, context.at("scope")), projectId: nullableUuid(record.projectId, context.at("projectId")), occurredAt: expectIsoDate(record.occurredAt, context.at("occurredAt")), summary: boundedText(record.summary, context.at("summary"), 500) }; } });
 
 export type MemoryProposalContext = { installationId: string; userId: string; projectId: string };
 
 export class FileMemoryProposalStore {
-  private readonly config: Readonly<InstallationConfig>; private readonly now: () => number; private readonly locks: ResourceLockManager;
-  constructor(options: { config: Readonly<InstallationConfig>; now?: () => number }) { this.config = options.config; this.now = options.now ?? Date.now; this.locks = new ResourceLockManager({ rootDirectory: path.join(this.config.paths.dataRoot, "locks", "memory-proposals") }); }
+  private readonly config: Readonly<InstallationConfig>; private readonly now: () => number; private readonly locks: ResourceLockManager; private readonly beforeAuditAppend?: (event: MemoryGovernanceAuditEvent) => void | Promise<void>;
+  constructor(options: { config: Readonly<InstallationConfig>; now?: () => number; beforeAuditAppend?: (event: MemoryGovernanceAuditEvent) => void | Promise<void> }) { this.config = options.config; this.now = options.now ?? Date.now; this.beforeAuditAppend = options.beforeAuditAppend; this.locks = new ResourceLockManager({ rootDirectory: path.join(this.config.paths.dataRoot, "locks", "memory-proposals") }); }
   private async roots(context: MemoryProposalContext) {
     if (context.installationId !== this.config.installationId || !UUID.test(context.userId) || !UUID.test(context.projectId)) throw new MemoryProposalError("MEMORY_PROPOSAL_CONTEXT_INVALID", "Memory proposal context is invalid.");
     const usersRoot = path.resolve(this.config.paths.usersRoot); const userRoot = path.join(usersRoot, context.userId);
@@ -183,6 +183,32 @@ export class FileMemoryProposalStore {
   private async readRecords(filePath: string, owner: string) { try { const state = (await recoverAtomicJsonFile(filePath, recordStateSchema)).value; if (state.installationId !== this.config.installationId || state.owner !== owner) throw new MemoryProposalError("MEMORY_PROPOSAL_TENANT_MISMATCH", "Governed memory state belongs to another identity."); return state; } catch (error) { if (!missing(error)) throw error; const state = recordStateSchema.parse({ schemaVersion: 1, installationId: this.config.installationId, owner, records: [] }); await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 }); return state; } }
   private audit(roots: Awaited<ReturnType<FileMemoryProposalStore["roots"]>>) { return new FileJournal({ filePath: path.join(roots.auditRoot, "events.jsonl"), lockManager: new ResourceLockManager({ rootDirectory: path.join(roots.auditRoot, "locks") }), payloadSchema: auditSchema, now: this.now }); }
   private async appendAudit(roots: Awaited<ReturnType<FileMemoryProposalStore["roots"]>>, event: Omit<MemoryGovernanceAuditEvent, "schemaVersion" | "installationId" | "occurredAt">) { await this.audit(roots).append({ schemaVersion: 1, installationId: this.config.installationId, ...event, occurredAt: new Date(this.now()).toISOString() }); }
+  private transitionAuditPayload(event: Omit<MemoryGovernanceAuditEvent, "schemaVersion" | "installationId" | "occurredAt">): MemoryGovernanceAuditEvent {
+    return { schemaVersion: 1, installationId: this.config.installationId, ...event, occurredAt: new Date(this.now()).toISOString() };
+  }
+  private sameTransitionAudit(left: MemoryGovernanceAuditEvent, right: MemoryGovernanceAuditEvent) {
+    return left.installationId === right.installationId &&
+      left.actorUserId === right.actorUserId &&
+      left.action === right.action &&
+      left.targetId === right.targetId &&
+      left.scope === right.scope &&
+      left.projectId === right.projectId &&
+      left.summary === right.summary;
+  }
+  private async appendTransitionAudit(roots: Awaited<ReturnType<FileMemoryProposalStore["roots"]>>, event: Omit<MemoryGovernanceAuditEvent, "schemaVersion" | "installationId" | "occurredAt">) {
+    const payload = this.transitionAuditPayload(event);
+    await this.audit(roots).appendIf(payload, async (entries) => {
+      const alreadyDurable = entries.some(({ payload: existing }) => this.sameTransitionAudit(existing, payload));
+      if (alreadyDurable) return false;
+      await this.beforeAuditAppend?.(payload);
+      return true;
+    });
+  }
+  private async requireTransitionAudit(roots: Awaited<ReturnType<FileMemoryProposalStore["roots"]>>, event: Omit<MemoryGovernanceAuditEvent, "schemaVersion" | "installationId" | "occurredAt">) {
+    const payload = this.transitionAuditPayload(event);
+    const durable = (await this.audit(roots).read()).some(({ payload: existing }) => this.sameTransitionAudit(existing, payload));
+    if (!durable) throw new MemoryProposalError("MEMORY_AUDIT_MISSING", "Memory transition has no durable audit record.");
+  }
   async propose(context: MemoryProposalContext, input: { kind: MemoryKind; content: string; proposedScope: MemoryScope; threadId: string; turnId: string; callId: string; toolNames: string[]; sourceExcerpt: string }) {
     assertNoSecretMaterial(input.content); assertNoSecretMaterial(input.sourceExcerpt);
     const roots = await this.roots(context); const now = new Date(this.now()).toISOString();
@@ -271,9 +297,75 @@ export class FileMemoryProposalStore {
       records.records.unshift(memory); await atomicWriteJson(filePath, records, recordStateSchema, { mode: 0o600 }); proposal.status = "confirmed"; proposal.resolvedAt = now; proposal.confirmedMemoryId = memory.memoryId; await atomicWriteJson(roots.proposalPath, proposals, proposalStateSchema, { mode: 0o600 }); await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.confirmed", targetId: memory.memoryId, scope: memory.scope, projectId: memory.projectId, summary: `Propuesta ${proposal.proposalId} confirmada explícitamente.` }); return { memory, created: true }; });
   }
   async reject(context: MemoryProposalContext, input: { proposalId: string; explicit: true; reason: string }) { if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory rejection must be explicit."); const roots = await this.roots(context); return this.locks.withLock(`memory-governance:${context.installationId}`, async () => { const state = await this.readProposals(roots.proposalPath, context); const proposal = state.proposals.find(({ proposalId }) => proposalId === input.proposalId); if (!proposal) throw new MemoryProposalError("MEMORY_PROPOSAL_NOT_FOUND", "Memory proposal was not found."); if (proposal.status === "confirmed") throw new MemoryProposalError("MEMORY_PROPOSAL_CONFIRMED", "Confirmed memory proposal cannot be rejected."); if (proposal.status === "rejected") return { proposal, changed: false }; proposal.status = "rejected"; proposal.resolvedAt = new Date(this.now()).toISOString(); proposal.rejectionReason = input.reason; await atomicWriteJson(roots.proposalPath, state, proposalStateSchema, { mode: 0o600 }); await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.rejected", targetId: proposal.proposalId, scope: proposal.proposedScope, projectId: proposal.projectId, summary: "Propuesta rechazada; no se creó memoria." }); return { proposal, changed: true }; }); }
-  async listRecords(context: MemoryProposalContext, includeDeleted = false) { const roots = await this.roots(context); const [user, company] = await Promise.all([this.readRecords(roots.userRecordsPath, context.userId), this.readRecords(roots.companyRecordsPath, "company")]); return [...user.records.filter((record) => record.scope === "private" || record.projectId === context.projectId), ...company.records].filter((record) => includeDeleted || record.status === "active").sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)); }
-  async update(context: MemoryProposalContext, input: { memoryId: string; explicit: true; expectedRevision: number; content: string; allowCompanyScope: boolean }) { assertNoSecretMaterial(input.content); if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory update must be explicit."); const roots = await this.roots(context); return this.mutateRecord(context, roots, input.memoryId, input.allowCompanyScope, async (record, state, filePath) => { if (record.revision !== input.expectedRevision || record.status !== "active") throw new MemoryProposalError("MEMORY_REVISION_CONFLICT", "Memory changed before this edit was confirmed."); record.content = input.content; record.revision += 1; record.updatedAt = new Date(this.now()).toISOString(); await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 }); await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.updated", targetId: record.memoryId, scope: record.scope, projectId: record.projectId, summary: `Memoria actualizada a revisión ${record.revision}.` }); return record; }); }
-  async delete(context: MemoryProposalContext, input: { memoryId: string; explicit: true; expectedRevision: number; allowCompanyScope: boolean }) { if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory deletion must be explicit."); const roots = await this.roots(context); return this.mutateRecord(context, roots, input.memoryId, input.allowCompanyScope, async (record, state, filePath) => { if (record.status === "deleted") return record; if (record.revision !== input.expectedRevision) throw new MemoryProposalError("MEMORY_REVISION_CONFLICT", "Memory changed before deletion was confirmed."); const now = new Date(this.now()).toISOString(); record.status = "deleted"; record.revision += 1; record.updatedAt = now; record.deletedAt = now; record.deletedBy = context.userId; await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 }); await this.appendAudit(roots, { actorUserId: context.userId, action: "memory.deleted", targetId: record.memoryId, scope: record.scope, projectId: record.projectId, summary: "Memoria eliminada y excluida de futuras inyecciones." }); return record; }); }
+  async listRecords(context: MemoryProposalContext, includeDeleted = false, allowCompanyScope = false) { const roots = await this.roots(context); const [user, company] = await Promise.all([this.readRecords(roots.userRecordsPath, context.userId), this.readRecords(roots.companyRecordsPath, "company")]); return [...user.records.filter((record) => record.scope === "private" || record.projectId === context.projectId), ...company.records].filter((record) => record.status === "active" || (includeDeleted && (record.scope !== "company" || allowCompanyScope))).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)); }
+  async update(context: MemoryProposalContext, input: { memoryId: string; explicit: true; expectedRevision: number; content: string; allowCompanyScope: boolean }) {
+    assertNoSecretMaterial(input.content);
+    if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory update must be explicit.");
+    const roots = await this.roots(context);
+    return this.mutateRecord(context, roots, input.memoryId, input.allowCompanyScope, async (record, state, filePath) => {
+      const nextRevision = input.expectedRevision + 1;
+      const operationHash = sha256({ action: "memory.updated", actorUserId: context.userId, memoryId: record.memoryId, expectedRevision: input.expectedRevision, nextRevision, content: input.content });
+      const audit = { actorUserId: context.userId, action: "memory.updated" as const, targetId: record.memoryId, scope: record.scope, projectId: record.projectId, summary: `Memoria actualizada a revisión ${nextRevision}. Operación ${operationHash}.` };
+      if (record.status === "active" && record.revision === nextRevision && record.content === input.content) {
+        await this.requireTransitionAudit(roots, audit);
+        return record;
+      }
+      if (record.revision !== input.expectedRevision || record.status !== "active") throw new MemoryProposalError("MEMORY_REVISION_CONFLICT", "Memory changed before this edit was confirmed.");
+      const now = new Date(this.now()).toISOString();
+      await this.appendTransitionAudit(roots, audit);
+      record.content = input.content;
+      record.revision = nextRevision;
+      record.updatedAt = now;
+      await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 });
+      return record;
+    });
+  }
+  async delete(context: MemoryProposalContext, input: { memoryId: string; explicit: true; expectedRevision: number; allowCompanyScope: boolean }) {
+    if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory deletion must be explicit.");
+    const roots = await this.roots(context);
+    return this.mutateRecord(context, roots, input.memoryId, input.allowCompanyScope, async (record, state, filePath) => {
+      const nextRevision = input.expectedRevision + 1;
+      const operationHash = sha256({ action: "memory.deleted", actorUserId: context.userId, memoryId: record.memoryId, expectedRevision: input.expectedRevision, nextRevision });
+      const audit = { actorUserId: context.userId, action: "memory.deleted" as const, targetId: record.memoryId, scope: record.scope, projectId: record.projectId, summary: `Memoria eliminada en revisión ${nextRevision} y excluida de futuras inyecciones. Operación ${operationHash}.` };
+      if (record.status === "deleted" && record.revision === nextRevision && record.deletedBy === context.userId) {
+        await this.requireTransitionAudit(roots, audit);
+        return record;
+      }
+      if (record.revision !== input.expectedRevision || record.status !== "active") throw new MemoryProposalError("MEMORY_REVISION_CONFLICT", "Memory changed before deletion was confirmed.");
+      const now = new Date(this.now()).toISOString();
+      await this.appendTransitionAudit(roots, audit);
+      record.status = "deleted";
+      record.revision = nextRevision;
+      record.updatedAt = now;
+      record.deletedAt = now;
+      record.deletedBy = context.userId;
+      await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 });
+      return record;
+    });
+  }
+  async restore(context: MemoryProposalContext, input: { memoryId: string; explicit: true; expectedRevision: number; allowCompanyScope: boolean }) {
+    if (input.explicit !== true) throw new MemoryProposalError("MEMORY_CONFIRMATION_REQUIRED", "Memory restoration must be explicit.");
+    const roots = await this.roots(context);
+    return this.mutateRecord(context, roots, input.memoryId, input.allowCompanyScope, async (record, state, filePath) => {
+      const nextRevision = input.expectedRevision + 1;
+      const operationHash = sha256({ action: "memory.restored", actorUserId: context.userId, memoryId: record.memoryId, expectedRevision: input.expectedRevision, nextRevision });
+      const audit = { actorUserId: context.userId, action: "memory.restored" as const, targetId: record.memoryId, scope: record.scope, projectId: record.projectId, summary: `Memoria restaurada en revisión ${nextRevision} y disponible para futuras conversaciones. Operación ${operationHash}.` };
+      if (record.status === "active" && record.revision === nextRevision) {
+        await this.requireTransitionAudit(roots, audit);
+        return record;
+      }
+      if (record.revision !== input.expectedRevision || record.status !== "deleted") throw new MemoryProposalError("MEMORY_REVISION_CONFLICT", "Memory changed before restoration was confirmed.");
+      const now = new Date(this.now()).toISOString();
+      await this.appendTransitionAudit(roots, audit);
+      record.status = "active";
+      record.revision = nextRevision;
+      record.updatedAt = now;
+      record.deletedAt = null;
+      record.deletedBy = null;
+      await atomicWriteJson(filePath, state, recordStateSchema, { mode: 0o600 });
+      return record;
+    });
+  }
   private async mutateRecord<T>(context: MemoryProposalContext, roots: Awaited<ReturnType<FileMemoryProposalStore["roots"]>>, memoryId: string, allowCompanyScope: boolean, operation: (record: GovernedMemoryRecord, state: RecordState, filePath: string) => Promise<T>) { if (!UUID.test(memoryId)) throw new MemoryProposalError("MEMORY_ID_INVALID", "Memory id is invalid."); return this.locks.withLock(`memory-governance:${context.installationId}`, async () => { const user = await this.readRecords(roots.userRecordsPath, context.userId); let record = user.records.find(({ memoryId: candidate }) => candidate === memoryId); let state = user; let filePath = roots.userRecordsPath; if (!record) { const company = await this.readRecords(roots.companyRecordsPath, "company"); record = company.records.find(({ memoryId: candidate }) => candidate === memoryId); state = company; filePath = roots.companyRecordsPath; } if (!record || (record.scope === "project" && record.projectId !== context.projectId)) throw new MemoryProposalError("MEMORY_NOT_FOUND", "Memory is outside this user or project scope."); if (record.scope === "company" && !allowCompanyScope) throw new MemoryProposalError("MEMORY_COMPANY_SCOPE_FORBIDDEN", "Company memory requires workspace administration permission."); return operation(record, state, filePath); }); }
   async auditLog(context: MemoryProposalContext, limit = 100) { const roots = await this.roots(context); return (await this.audit(roots).read({ limit })).reverse().map(({ sequence, payload }) => ({ sequence, ...payload })); }
 }

@@ -104,6 +104,14 @@ async function governanceMutation(url: string, method: "POST" | "PATCH" | "DELET
   return response.json() as Promise<unknown>;
 }
 
+async function governedMemoryMutation(url: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown>) {
+  const result = await governanceMutation(url, method, body);
+  if (!isRecord(result) || !isGovernedMemory(result.memory)) {
+    throw new Error("La memoria actualizada no es válida.");
+  }
+  return result.memory;
+}
+
 export async function confirmMemoryProposal(input: { proposalId: string; projectId: string; content: string; scope: MemoryScope }) {
   return governanceMutation(`/api/memory/proposals/${encodeURIComponent(input.proposalId)}/confirm`, "POST", { explicit: true, projectId: input.projectId, content: input.content.trim(), scope: input.scope });
 }
@@ -111,8 +119,11 @@ export async function rejectMemoryProposal(proposalId: string, projectId: string
   return governanceMutation(`/api/memory/proposals/${encodeURIComponent(proposalId)}/reject`, "POST", { explicit: true, projectId, reason: "El usuario rechazó explícitamente la propuesta." });
 }
 export async function updateGovernedMemory(memory: GovernedMemoryRecord, projectId: string, content: string) {
-  return governanceMutation(`/api/memory/governed/${encodeURIComponent(memory.memoryId)}`, "PATCH", { explicit: true, projectId, expectedRevision: memory.revision, content: content.trim() });
+  return governedMemoryMutation(`/api/memory/governed/${encodeURIComponent(memory.memoryId)}`, "PATCH", { explicit: true, projectId, expectedRevision: memory.revision, content: content.trim() });
 }
 export async function deleteGovernedMemory(memory: GovernedMemoryRecord, projectId: string) {
-  return governanceMutation(`/api/memory/governed/${encodeURIComponent(memory.memoryId)}`, "DELETE", { explicit: true, projectId, expectedRevision: memory.revision });
+  return governedMemoryMutation(`/api/memory/governed/${encodeURIComponent(memory.memoryId)}`, "DELETE", { explicit: true, projectId, expectedRevision: memory.revision });
+}
+export async function restoreGovernedMemory(memory: GovernedMemoryRecord, projectId: string) {
+  return governedMemoryMutation(`/api/memory/governed/${encodeURIComponent(memory.memoryId)}/restore`, "POST", { explicit: true, projectId, expectedRevision: memory.revision });
 }

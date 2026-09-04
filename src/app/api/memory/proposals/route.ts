@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   if (!isMemoryProjectId(projectId)) return NextResponse.json({ error: "Proyecto no válido." }, { status: 400, headers });
   try {
     const { store, context, allowCompanyScope } = await memoryProposalServiceForSession(session, projectId);
-    const [proposals, memories, audit] = await Promise.all([store.listProposals(context, "all"), store.listRecords(context, true), store.auditLog(context, 100)]);
+    const [proposals, memories, audit] = await Promise.all([store.listProposals(context, "all"), store.listRecords(context, true, allowCompanyScope), store.auditLog(context, 100)]);
     return NextResponse.json({ schemaVersion: 1, proposals, memories, audit, allowCompanyScope }, { headers });
   } catch { return NextResponse.json({ error: "La memoria propuesta no está disponible." }, { status: 503, headers }); }
 }

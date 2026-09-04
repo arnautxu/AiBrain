@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarBlank,
   Clock,
@@ -17,9 +17,26 @@ import { AUTOMATION_TIME_ZONES } from "@/automations/contracts";
 import { describeSchedule, localMinuteToInstant, localParts } from "@/automations/schedule";
 import type { WorkbenchProject } from "@/workbench/types";
 import { STANDALONE_PROJECT_SLUG } from "@/workbench/types";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 type ScheduleKind = AutomationSchedule["kind"];
+type AutomationDraft = {
+  name: string;
+  prompt: string;
+  projectId: string;
+  kind: ScheduleKind;
+  timeZone: string;
+  time: string;
+  onceAt: string;
+  selectedWeekdays: number[];
+  audienceUserIds: string[];
+  audienceGroupIds: string[];
+};
 const weekdays = ["D", "L", "M", "X", "J", "V", "S"];
+
+function draftSignature(draft: AutomationDraft) {
+  return JSON.stringify(draft);
+}
 
 function dateLabel(value: string | null, timeZone: string) {
   if (!value) return "—";
@@ -53,11 +70,12 @@ function audienceLabel(task: AutomationTask, directory: AutomationAudienceDirect
   return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} y ${labels.length - 2} más` : labels.join(", ");
 }
 
-export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar }: {
+export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar, onBlockingSurfaceChange }: {
   open: boolean;
   projects: WorkbenchProject[];
   onOpenThread?: (threadId: string) => void;
-  onToggleSidebar?: () => void;
+  onToggleSidebar?: (opener?: HTMLElement | null) => void;
+  onBlockingSurfaceChange?: (open: boolean) => void;
 }) {
   const availableProjects = useMemo(() => projects.filter((project) => project.status === "active"), [projects]);
   const [tasks, setTasks] = useState<AutomationTaskView[]>([]);
@@ -79,6 +97,76 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
   const [audienceGroupIds, setAudienceGroupIds] = useState<string[]>([]);
   const [historyTaskId, setHistoryTaskId] = useState<string | null>(null);
   const [runsByTask, setRunsByTask] = useState<Record<string, AutomationRun[]>>({});
+  const [baselineDraft, setBaselineDraft] = useState("");
+  const [discardConfirmation, setDiscardConfirmation] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AutomationTaskView | null>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const discardContinueRef = useRef<HTMLButtonElement>(null);
+  const discardPreviousFocusRef = useRef<HTMLElement | null>(null);
+  const restoreDraftFocusRef = useRef(false);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+  const newAutomationRef = useRef<HTMLButtonElement>(null);
+  const formOpenerRef = useRef<HTMLElement>(null);
+  const formOpenedFromNewRef = useRef(false);
+  const deleteOpenerRef = useRef<HTMLElement>(null);
+  const blockingCallbackRef = useRef(onBlockingSurfaceChange);
+  const reportedBlockingCallbackRef = useRef<typeof onBlockingSurfaceChange>(undefined);
+  const reportedBlockingValueRef = useRef<boolean | undefined>(undefined);
+
+  const reportBlockingSurface = useCallback((nextOpen: boolean) => {
+    const callback = blockingCallbackRef.current;
+    if (reportedBlockingCallbackRef.current === callback && reportedBlockingValueRef.current === nextOpen) return;
+    reportedBlockingCallbackRef.current = callback;
+    reportedBlockingValueRef.current = nextOpen;
+    callback?.(nextOpen);
+  }, []);
+
+  useEffect(() => {
+    blockingCallbackRef.current = onBlockingSurfaceChange;
+  }, [onBlockingSurfaceChange]);
+
+  const bindNewAutomationButton = useCallback((element: HTMLButtonElement | null) => {
+    newAutomationRef.current = element;
+    if (element && formOpenedFromNewRef.current) formOpenerRef.current = element;
+  }, []);
+
+  const currentDraft = useMemo<AutomationDraft>(() => ({
+    name,
+    prompt,
+    projectId,
+    kind,
+    timeZone,
+    time,
+    onceAt,
+    selectedWeekdays,
+    audienceUserIds,
+    audienceGroupIds,
+  }), [audienceGroupIds, audienceUserIds, kind, name, onceAt, projectId, prompt, selectedWeekdays, time, timeZone]);
+  const formDirty = formOpen && baselineDraft !== draftSignature(currentDraft);
+
+  const closeForm = useCallback(() => {
+    setDiscardConfirmation(false);
+    setFormOpen(false);
+  }, []);
+
+  const requestCloseForm = useCallback(() => {
+    if (saving) return;
+    if (discardConfirmation) {
+      restoreDraftFocusRef.current = true;
+      setDiscardConfirmation(false);
+      return;
+    }
+    if (formDirty) {
+      discardPreviousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      setDiscardConfirmation(true);
+      return;
+    }
+    closeForm();
+  }, [closeForm, discardConfirmation, formDirty, saving]);
+
+  const formDialogRef = useModalFocus<HTMLDivElement>(formOpen, requestCloseForm, nameInputRef, formOpenerRef);
+  const deleteDialogRef = useModalFocus<HTMLDivElement>(deleteTarget !== null, () => setDeleteTarget(null), deleteCancelRef, deleteOpenerRef);
+  const blockingSurfaceOpen = open && (formOpen || deleteTarget !== null);
 
   const projectLabel = (project: WorkbenchProject | undefined) =>
     project?.slug === STANDALONE_PROJECT_SLUG ? "Sin proyecto" : project?.name ?? "Sin proyecto";
@@ -113,18 +201,63 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     return () => controller.abort();
   }, [open]);
 
-  const openForm = (task: AutomationTaskView | null) => {
+  useEffect(() => {
+    if (!discardConfirmation && !restoreDraftFocusRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      if (discardConfirmation) discardContinueRef.current?.focus();
+      else if (formOpen) {
+        restoreDraftFocusRef.current = false;
+        discardPreviousFocusRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [discardConfirmation, formOpen]);
+
+  useEffect(() => {
+    if (!formDirty) return;
+    const protectDraft = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", protectDraft);
+    return () => window.removeEventListener("beforeunload", protectDraft);
+  }, [formDirty]);
+
+  useEffect(() => {
+    reportBlockingSurface(blockingSurfaceOpen);
+  }, [blockingSurfaceOpen, onBlockingSurfaceChange, reportBlockingSurface]);
+
+  useEffect(() => () => reportBlockingSurface(false), [reportBlockingSurface]);
+
+  const openForm = (task: AutomationTaskView | null, opener: HTMLElement) => {
+    const nextDraft: AutomationDraft = {
+      name: task?.name ?? "",
+      prompt: task?.prompt ?? "",
+      projectId: task?.projectId ?? availableProjects[0]?.id ?? "",
+      kind: task?.schedule.kind ?? "daily",
+      timeZone: task?.timeZone ?? "Europe/Madrid",
+      time: scheduleTime(task),
+      onceAt: localInput(task?.schedule.kind === "once" ? task.schedule.runAt : null, task?.timeZone ?? "Europe/Madrid"),
+      selectedWeekdays: task?.schedule.kind === "weekly" ? task.schedule.weekdays : [1],
+      audienceUserIds: task?.audience.userIds ?? (audienceDirectory.currentUserId ? [audienceDirectory.currentUserId] : []),
+      audienceGroupIds: task?.audience.groupIds ?? [],
+    };
+    formOpenerRef.current = opener;
+    formOpenedFromNewRef.current = task === null;
+    reportBlockingSurface(true);
     setEditing(task);
-    setName(task?.name ?? "");
-    setPrompt(task?.prompt ?? "");
-    setProjectId(task?.projectId ?? availableProjects[0]?.id ?? "");
-    setKind(task?.schedule.kind ?? "daily");
-    setTimeZone(task?.timeZone ?? "Europe/Madrid");
-    setTime(scheduleTime(task));
-    setOnceAt(localInput(task?.schedule.kind === "once" ? task.schedule.runAt : null, task?.timeZone ?? "Europe/Madrid"));
-    setSelectedWeekdays(task?.schedule.kind === "weekly" ? task.schedule.weekdays : [1]);
-    setAudienceUserIds(task?.audience.userIds ?? (audienceDirectory.currentUserId ? [audienceDirectory.currentUserId] : []));
-    setAudienceGroupIds(task?.audience.groupIds ?? []);
+    setName(nextDraft.name);
+    setPrompt(nextDraft.prompt);
+    setProjectId(nextDraft.projectId);
+    setKind(nextDraft.kind);
+    setTimeZone(nextDraft.timeZone);
+    setTime(nextDraft.time);
+    setOnceAt(nextDraft.onceAt);
+    setSelectedWeekdays(nextDraft.selectedWeekdays);
+    setAudienceUserIds(nextDraft.audienceUserIds);
+    setAudienceGroupIds(nextDraft.audienceGroupIds);
+    setBaselineDraft(draftSignature(nextDraft));
+    setDiscardConfirmation(false);
     setError(null);
     setFormOpen(true);
   };
@@ -164,7 +297,7 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
       const body = await response.json();
       if (!response.ok) throw new Error(body.error || "No se ha podido guardar la automatización.");
       setTasks((current) => [body.task, ...current.filter((task) => task.id !== body.task.id)]);
-      setFormOpen(false);
+      closeForm();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se ha podido guardar la automatización.");
     } finally {
@@ -219,13 +352,20 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
     }
   };
 
-  const deleteTask = async (task: AutomationTaskView) => {
-    if (!window.confirm(`¿Eliminar “${task.name}”? El historial de ejecuciones se conserva.`)) return;
+  const deleteTask = async () => {
+    if (!deleteTarget) return;
     setSaving(true);
+    setError(null);
     try {
-      const response = await fetch(`/api/automations/${task.id}`, { method: "DELETE" });
+      const response = await fetch(`/api/automations/${deleteTarget.id}`, { method: "DELETE" });
       if (!response.ok) throw new Error("No se ha podido eliminar.");
-      setTasks((current) => current.filter((item) => item.id !== task.id));
+      setTasks((current) => current.filter((item) => item.id !== deleteTarget.id));
+      setDeleteTarget(null);
+      const opener = deleteOpenerRef.current;
+      requestAnimationFrame(() => {
+        if (opener?.isConnected) opener.focus();
+        else newAutomationRef.current?.focus();
+      });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se ha podido eliminar.");
     } finally {
@@ -235,16 +375,16 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
 
   if (!open) return null;
   return <main aria-labelledby="automations-title" className="automations-page automations-page-panel workspace-panel relative flex min-w-0 flex-1 flex-col bg-[var(--surface-raised)]">
-      <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-2 md:px-5">
-        <button type="button" aria-label="Mostrar u ocultar la barra lateral" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={onToggleSidebar}>
+      <header inert={formOpen || deleteTarget ? true : undefined} aria-hidden={formOpen || deleteTarget ? true : undefined} className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-2 md:px-5">
+        <button type="button" aria-label="Mostrar u ocultar la barra lateral" className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar?.(event.currentTarget)}>
           <SidebarSimple size={17} />
         </button>
         <CalendarBlank size={19} />
         <div className="min-w-0 flex-1"><h2 id="automations-title" className="workspace-panel-title text-[var(--text)]">Automatizaciones</h2></div>
-        {tasks.length ? <button type="button" disabled={!availableProjects.length} onClick={() => openForm(null)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button> : null}
+        {tasks.length ? <button ref={bindNewAutomationButton} type="button" disabled={!availableProjects.length} onClick={(event) => openForm(null, event.currentTarget)} className="touch-target inline-flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button> : null}
       </header>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div inert={formOpen || deleteTarget ? true : undefined} aria-hidden={formOpen || deleteTarget ? true : undefined} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-5 py-5">
         {error ? <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
         {loading ? <div className="flex min-h-44 items-center justify-center gap-2 text-[11px] text-[var(--text-subtle)]"><SpinnerGap size={15} className="motion-safe:animate-spin" />Cargando automatizaciones…</div> : tasks.length ? <div className="space-y-2.5">{tasks.map((task) => <article key={task.id} className="rounded-[16px] border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex items-start gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><Clock size={16} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-[13px] font-semibold text-[var(--text)]">{task.name}</h3><span className={`rounded-full px-2 py-0.5 text-[9px] font-semibold ${task.state === "active" ? "bg-[var(--positive-soft)] text-[var(--positive)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{task.state === "active" ? "Activa" : task.state === "paused" ? "En pausa" : "Completada"}</span>{task.manualRun ? <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[9px] font-semibold text-[var(--brain-accent-on-soft)]">Ejecución en cola</span> : null}</div><p className="mt-1 truncate text-[10px] text-[var(--text-subtle)]">{taskProjectLabel(task)} · {describeSchedule(task.schedule, task.timeZone)} · {task.timeZone}</p></div></div>
@@ -252,15 +392,16 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
           <p className="mt-2 text-[10px] leading-4 text-[var(--text-subtle)]">Destinatarios: {audienceLabel(task, audienceDirectory)}</p>
           <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px]"><div><dt className="text-[var(--text-subtle)]">Próxima</dt><dd className="mt-0.5 font-medium text-[var(--text)]">{dateLabel(task.nextRunAt, task.timeZone)}</dd></div><div><dt className="text-[var(--text-subtle)]">Última</dt><dd className={`mt-0.5 font-medium ${task.lastRunStatus === "failed" ? "text-[var(--danger)]" : "text-[var(--text)]"}`}>{task.lastRunAt ? `${dateLabel(task.lastRunAt, task.timeZone)}${task.lastRunStatus === "failed" ? " · Falló" : ""}` : "Aún no ejecutada"}</dd></div></dl>
           {task.lastRunError ? <p className="mt-2 text-[10px] leading-4 text-[var(--danger)]">{task.lastRunError}</p> : null}
-          <div className="mt-3 flex flex-wrap justify-end gap-1"><button type="button" onClick={() => void toggleHistory(task)} className="min-h-8 rounded-lg px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Historial y resultados</button>{task.access.canManage ? <><button type="button" disabled={saving || Boolean(task.manualRun)} onClick={() => void runNow(task)} className="min-h-8 rounded-lg px-2 text-[10px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-30">Ejecutar ahora</button><button type="button" disabled={saving || task.state === "completed"} onClick={() => void patchTask(task, { state: task.state === "active" ? "paused" : "active" })} aria-label={task.state === "active" ? `Pausar ${task.name}` : `Reanudar ${task.name}`} className="grid size-8 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{task.state === "active" ? <Pause size={14} /> : <Play size={14} />}</button><button type="button" disabled={saving} onClick={() => openForm(task)} aria-label={`Editar ${task.name}`} className="grid size-8 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><PencilSimple size={14} /></button><button type="button" disabled={saving} onClick={() => void deleteTask(task)} aria-label={`Eliminar ${task.name}`} className="grid size-8 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash size={14} /></button></> : null}</div>
+          <div className="mt-3 flex flex-wrap justify-end gap-1"><button type="button" onClick={() => void toggleHistory(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Historial y resultados</button>{task.access.canManage ? <><button type="button" disabled={saving || Boolean(task.manualRun)} onClick={() => void runNow(task)} className="touch-target min-h-9 rounded-lg px-2 text-[10px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)] disabled:opacity-30">Ejecutar ahora</button><button type="button" disabled={saving || task.state === "completed"} onClick={() => void patchTask(task, { state: task.state === "active" ? "paused" : "active" })} aria-label={task.state === "active" ? `Pausar ${task.name}` : `Reanudar ${task.name}`} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-30">{task.state === "active" ? <Pause size={14} /> : <Play size={14} />}</button><button type="button" disabled={saving} onClick={(event) => openForm(task, event.currentTarget)} aria-label={`Editar ${task.name}`} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"><PencilSimple size={14} /></button><button type="button" disabled={saving} onClick={(event) => { deleteOpenerRef.current = event.currentTarget; reportBlockingSurface(true); setError(null); setDeleteTarget(task); }} aria-label={`Eliminar ${task.name}`} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]"><Trash size={14} /></button></> : null}</div>
           {historyTaskId === task.id ? <div className="mt-3 space-y-2 rounded-xl bg-[var(--surface-muted)] p-3">{(runsByTask[task.id] ?? []).length ? (runsByTask[task.id] ?? []).slice(0, 8).map((run) => <div key={`${run.runKey}:${run.attempt}:${run.status}`} className="flex items-center gap-2 text-[10px]"><span className={run.status === "succeeded" ? "text-[var(--positive)]" : run.status === "failed" ? "text-[var(--danger)]" : "text-[var(--text-secondary)]"}>{run.status === "succeeded" ? "Completada" : run.status === "failed" ? "Con error" : "En curso"}</span><time className="text-[var(--text-subtle)]">{dateLabel(run.finishedAt ?? run.startedAt, task.timeZone)}</time>{run.threadId && onOpenThread ? <button type="button" onClick={() => onOpenThread(run.threadId!)} className="ml-auto font-semibold text-[var(--brain-accent-on-soft)]">Abrir resultado</button> : null}</div>) : <p className="text-[10px] text-[var(--text-subtle)]">Aún no hay ejecuciones registradas.</p>}</div> : null}
-        </article>)}</div> : <div className="grid min-h-64 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><CalendarBlank size={21} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Aún no hay automatizaciones</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Programa trabajo recurrente en un proyecto o Sin proyecto.</p><button type="button" disabled={!availableProjects.length} onClick={() => openForm(null)} className="mx-auto mt-5 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--text)] px-4 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button></div></div>}
+        </article>)}</div> : <div className="grid min-h-64 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><CalendarBlank size={21} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Aún no hay automatizaciones</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Programa trabajo recurrente en un proyecto o Sin proyecto.</p><button ref={bindNewAutomationButton} type="button" disabled={!availableProjects.length} onClick={(event) => openForm(null, event.currentTarget)} className="touch-target mx-auto mt-5 inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[var(--text)] px-4 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35"><Plus size={14} />Nueva</button></div></div>}
       </div>
 
-      {formOpen ? <div className="absolute inset-0 z-10 flex flex-col bg-[var(--surface-raised)]">
-        <header className="flex min-h-16 items-center border-b border-[var(--border-subtle)] px-5"><button type="button" onClick={() => setFormOpen(false)} className="mr-3 text-[11px] font-medium text-[var(--text-secondary)]">Cancelar</button><h3 className="flex-1 text-[14px] font-semibold text-[var(--text)]">{editing ? "Editar automatización" : "Nueva automatización"}</h3><button type="button" disabled={saving || !name.trim() || !prompt.trim() || !projectId || (kind === "weekly" && !selectedWeekdays.length) || audienceUserIds.length + audienceGroupIds.length === 0} onClick={() => void save()} className="min-h-9 rounded-full bg-[var(--text)] px-4 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35">{saving ? "Guardando…" : "Guardar"}</button></header>
-        <form className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-          <label className="block text-[11px] font-semibold text-[var(--text)]">Nombre<input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="Resumen diario del proyecto" className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none focus:border-[var(--brain-accent)]" /></label>
+      {formOpen ? <div ref={formDialogRef} role="dialog" aria-modal="true" aria-labelledby="automation-form-title" aria-describedby="automation-form-description" tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-[var(--surface-raised)] outline-none">
+        <header inert={discardConfirmation ? true : undefined} aria-hidden={discardConfirmation ? true : undefined} className="flex min-h-16 items-center border-b border-[var(--border-subtle)] px-5"><button type="button" onClick={requestCloseForm} className="touch-target mr-3 min-h-9 rounded-lg px-2 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Cancelar</button><h3 id="automation-form-title" className="flex-1 text-[14px] font-semibold text-[var(--text)]">{editing ? "Editar automatización" : "Nueva automatización"}</h3><button type="button" disabled={saving || !name.trim() || !prompt.trim() || !projectId || (kind === "weekly" && !selectedWeekdays.length) || audienceUserIds.length + audienceGroupIds.length === 0} onClick={() => void save()} className="touch-target min-h-9 rounded-full bg-[var(--text)] px-4 text-[11px] font-semibold text-[var(--surface)] disabled:opacity-35">{saving ? "Guardando…" : "Guardar"}</button></header>
+        <form inert={discardConfirmation ? true : undefined} aria-hidden={discardConfirmation ? true : undefined} className="scrollbar-thin min-h-0 flex-1 space-y-5 overflow-y-auto p-5" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          {error ? <p role="alert" className="rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}
+          <label className="block text-[11px] font-semibold text-[var(--text)]">Nombre<input ref={nameInputRef} value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="Resumen diario del proyecto" className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none focus:border-[var(--brain-accent)]" /></label>
           <label className="block text-[11px] font-semibold text-[var(--text)]">Qué debe hacer<textarea value={prompt} maxLength={20_000} rows={6} onChange={(event) => setPrompt(event.target.value)} placeholder="Revisa las novedades del proyecto y prepara un resumen con próximos pasos." className="mt-2 w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-3 text-[13px] font-normal leading-5 outline-none focus:border-[var(--brain-accent)]" /></label>
           <label className="block text-[11px] font-semibold text-[var(--text)]">Proyecto<select value={projectId} onChange={(event) => setProjectId(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal outline-none">{availableProjects.map((project) => <option key={project.id} value={project.id}>{projectLabel(project)}</option>)}</select></label>
           <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Quién recibe el resultado</legend><div className="mt-2 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">
@@ -268,12 +409,16 @@ export function AutomationsPanel({ open, projects, onOpenThread, onToggleSidebar
             {audienceDirectory.groups.length ? <div><p className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-subtle)]">Grupos</p><div className="mt-2 grid gap-2">{audienceDirectory.groups.map((group) => <label key={group.id} className="flex items-center gap-2 text-[11px] font-normal text-[var(--text)]"><input type="checkbox" checked={audienceGroupIds.includes(group.id)} onChange={() => setAudienceGroupIds((current) => current.includes(group.id) ? current.filter((id) => id !== group.id) : [...current, group.id])} />{group.name}</label>)}</div></div> : null}
             <p className="text-[10px] leading-4 text-[var(--text-subtle)]">La audiencia y pertenencia actuales se comprueban al abrir cualquier resultado, también los anteriores. Si alguien sale del grupo o se desactiva, pierde el acceso.</p>
           </div></fieldset>
-          <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Frecuencia</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? "Una vez" : option === "daily" ? "Cada día" : "Semanal"}</button>)}</div></fieldset>
-          {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Días</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
+          <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Frecuencia</legend><div className="mt-2 flex gap-1 rounded-xl bg-[var(--surface-muted)] p-1">{(["once", "daily", "weekly"] as const).map((option) => <button key={option} type="button" aria-pressed={kind === option} onClick={() => setKind(option)} className={`touch-target min-h-9 flex-1 rounded-lg text-[11px] font-medium ${kind === option ? "bg-[var(--surface-raised)] text-[var(--text)] shadow-[var(--shadow-sm)]" : "text-[var(--text-muted)]"}`}>{option === "once" ? "Una vez" : option === "daily" ? "Cada día" : "Semanal"}</button>)}</div></fieldset>
+          {kind === "weekly" ? <fieldset><legend className="text-[11px] font-semibold text-[var(--text)]">Días</legend><div className="mt-2 flex gap-1.5">{weekdays.map((label, day) => <button key={day} type="button" aria-pressed={selectedWeekdays.includes(day)} onClick={() => setSelectedWeekdays((current) => current.includes(day) ? current.filter((item) => item !== day) : [...current, day])} className={`touch-target grid size-9 place-items-center rounded-full text-[10px] font-semibold ${selectedWeekdays.includes(day) ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-muted)]"}`}>{label}</button>)}</div></fieldset> : null}
           {kind === "once" ? <div className="grid grid-cols-2 gap-3"><label className="block text-[11px] font-semibold text-[var(--text)]">Fecha<input type="date" value={onceAt.split("T")[0] ?? ""} onChange={(event) => setOnceAt(`${event.target.value}T${onceAt.split("T")[1] ?? "09:00"}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label><label className="block text-[11px] font-semibold text-[var(--text)]">Hora<input type="time" value={onceAt.split("T")[1] ?? "09:00"} onChange={(event) => setOnceAt(`${onceAt.split("T")[0] ?? ""}T${event.target.value}`)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label></div> : <label className="block text-[11px] font-semibold text-[var(--text)]">Hora<input type="time" value={time} onChange={(event) => setTime(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal" /></label>}
           <label className="block text-[11px] font-semibold text-[var(--text)]">Zona horaria<select value={timeZone} onChange={(event) => setTimeZone(event.target.value)} className="mt-2 h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-[13px] font-normal">{AUTOMATION_TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}</select></label>
-          <p className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.</p>
+          <p id="automation-form-description" className="rounded-xl bg-[var(--surface-muted)] px-3 py-2.5 text-[10px] leading-4 text-[var(--text-muted)]">La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.</p>
         </form>
+
+        {discardConfirmation ? <div className="absolute inset-0 z-10 grid place-items-center bg-[var(--overlay)] p-5 backdrop-blur-[2px]"><div role="alertdialog" aria-modal="true" aria-labelledby="discard-automation-title" aria-describedby="discard-automation-description" className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-lg)]"><h4 id="discard-automation-title" className="text-[14px] font-semibold text-[var(--text)]">¿Descartar los cambios?</h4><p id="discard-automation-description" className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">La automatización tiene cambios sin guardar. Si sales ahora, se perderán.</p><div className="mt-5 flex justify-end gap-2"><button ref={discardContinueRef} type="button" onClick={() => { restoreDraftFocusRef.current = true; setDiscardConfirmation(false); }} className="touch-target min-h-10 rounded-lg px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Seguir editando</button><button type="button" onClick={closeForm} className="touch-target min-h-10 rounded-lg bg-[var(--danger)] px-3 text-[11px] font-semibold text-white">Descartar cambios</button></div></div></div> : null}
       </div> : null}
+
+      {deleteTarget ? <div className="fixed inset-0 z-[60] grid place-items-center bg-[var(--overlay)] p-5 backdrop-blur-[2px]"><div ref={deleteDialogRef} role="alertdialog" aria-modal="true" aria-labelledby="delete-automation-title" aria-describedby="delete-automation-description" tabIndex={-1} className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-5 shadow-[var(--shadow-lg)] outline-none"><h3 id="delete-automation-title" className="text-[14px] font-semibold text-[var(--text)]">¿Eliminar “{deleteTarget.name}”?</h3><p id="delete-automation-description" className="mt-2 text-[11px] leading-5 text-[var(--text-muted)]">La programación se eliminará. El historial de ejecuciones se conservará.</p>{error ? <p role="alert" className="mt-3 rounded-lg bg-[var(--danger-soft)] px-3 py-2 text-[11px] text-[var(--danger)]">{error}</p> : null}<div className="mt-5 flex justify-end gap-2"><button ref={deleteCancelRef} type="button" disabled={saving} onClick={() => setDeleteTarget(null)} className="touch-target min-h-10 rounded-lg px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-40">Cancelar</button><button type="button" disabled={saving} onClick={() => void deleteTask()} className="touch-target min-h-10 rounded-lg bg-[var(--danger)] px-3 text-[11px] font-semibold text-white disabled:opacity-40">{saving ? "Eliminando…" : "Eliminar automatización"}</button></div></div></div> : null}
   </main>;
 }

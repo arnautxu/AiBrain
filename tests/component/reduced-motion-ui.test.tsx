@@ -11,6 +11,7 @@ interface MotionRecord {
   animate?: unknown;
   exit?: unknown;
   transition?: unknown;
+  style?: unknown;
 }
 
 const motionTestState = vi.hoisted(() => ({
@@ -49,6 +50,7 @@ vi.mock("framer-motion", async () => {
         animate,
         exit,
         transition,
+        style: props.style,
       });
       return React.createElement(tag, { ...props, ref }, children);
     });
@@ -59,6 +61,13 @@ vi.mock("framer-motion", async () => {
     motion: {
       div: motionElement("div"),
       span: motionElement("span"),
+    },
+    useMotionValue: (initial: number) => {
+      let value = initial;
+      return {
+        get: () => value,
+        set: (next: number) => { value = next; },
+      };
     },
     useReducedMotion: () => motionTestState.reduce,
   };
@@ -79,6 +88,7 @@ import {
   SidebarMenuItem,
   SidebarMenuSub,
 } from "@/components/ui/sidebar-menu";
+import { Tooltip } from "@/components/ui/tooltip";
 
 function transitionDuration(value: unknown) {
   if (!value || typeof value !== "object" || !("duration" in value)) return undefined;
@@ -179,6 +189,28 @@ describe("reduced-motion UI effects", () => {
       expect(activeOverlay).toBeDefined();
       expect(transitionDuration(activeOverlay?.transition)).toBe(0);
       expect(exitTransitionDuration(activeOverlay?.exit)).toBe(0);
+    });
+  });
+
+  it("shows tooltips without slide or cursor-follow travel under reduced motion", async () => {
+    render(
+      <Tooltip content="Ayuda contextual" forceOpen side="right" followCursor="y">
+        <button type="button">Control</button>
+      </Tooltip>
+    );
+
+    await screen.findByText("Ayuda contextual");
+    const tooltipRecord = motionTestState.records.find((record) =>
+      record.className?.includes("bg-foreground")
+    );
+    expect(tooltipRecord).toBeDefined();
+    expect(tooltipRecord?.initial).toBe(false);
+    expect(tooltipRecord?.animate).toEqual({ opacity: 1 });
+    expect(tooltipRecord?.transition).toEqual({ duration: 0 });
+
+    motionTestState.records.forEach((record) => {
+      expect(record.style).not.toMatchObject({ x: expect.anything() });
+      expect(record.style).not.toMatchObject({ y: expect.anything() });
     });
   });
 

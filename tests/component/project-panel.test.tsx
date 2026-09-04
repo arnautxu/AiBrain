@@ -56,8 +56,11 @@ describe("ProjectPanel", () => {
     expect(dialog).toHaveAttribute("aria-modal", "true");
 
     fireEvent.keyDown(document, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Configurar proyecto" })).not.toBeInTheDocument());
+    const exiting = document.querySelector('[data-overlay-presence="exiting"]');
+    expect(exiting).toHaveAttribute("inert");
+    expect(exiting).toHaveAttribute("aria-hidden", "true");
     expect(opener).toHaveFocus();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Configurar proyecto" })).not.toBeInTheDocument());
   });
 
   it("keeps every settings field persistently named", async () => {

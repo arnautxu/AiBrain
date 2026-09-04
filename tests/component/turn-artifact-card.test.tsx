@@ -39,7 +39,9 @@ describe("TurnArtifactCard", () => {
 
   it("announces document conversion errors", () => {
     render(<TurnArtifactCard artifact={{ ...documentArtifact, status: "error", previewUrl: null, publicationStatus: null, error: "El PDF está cifrado." }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("El PDF está cifrado.");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("El PDF está cifrado.");
+    expect(alert).toHaveClass("text-body-2-medium");
   });
 
   it.each([
@@ -65,7 +67,9 @@ describe("TurnArtifactCard", () => {
 
   it("announces publication failures without claiming success", () => {
     render(<TurnArtifactCard artifact={{ ...documentArtifact, publicationStatus: null, publicationError: "No se ha podido publicar." }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido publicar.");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("No se ha podido publicar.");
+    expect(alert).toHaveClass("text-body-2-medium");
   });
 
   it("renders a generated image through the image generation component", () => {

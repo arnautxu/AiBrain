@@ -288,6 +288,7 @@ export function buildChromeArguments(context: BrowserRuntimeContext, egressProxy
     "--mute-audio",
     "--password-store=basic",
     "--use-mock-keychain",
+    "--force-device-scale-factor=1",
     `--window-size=${BROWSER_VIEWPORT_WIDTH},${BROWSER_VIEWPORT_HEIGHT}`,
   ];
   if (proxyUrl) {
@@ -375,6 +376,10 @@ function validateInput(command: BrowserInputCommand) {
     if (command.clickCount !== undefined &&
       (!Number.isSafeInteger(command.clickCount) || command.clickCount < 0 || command.clickCount > 3)) {
       throw new ChromeRuntimeError("CHROME_INPUT_REJECTED", "Mouse click count is invalid.");
+    }
+    if (command.buttons !== undefined &&
+      (!Number.isSafeInteger(command.buttons) || command.buttons < 0 || command.buttons > 7)) {
+      throw new ChromeRuntimeError("CHROME_INPUT_REJECTED", "Mouse buttons bitfield is invalid.");
     }
     for (const delta of [command.deltaX, command.deltaY]) {
       if (delta !== undefined && (!Number.isFinite(delta) || Math.abs(delta) > 100_000)) {
@@ -739,6 +744,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
           x: command.x,
           y: command.y,
           button: command.button ?? "none",
+          ...(command.buttons === undefined ? {} : { buttons: command.buttons }),
           clickCount: command.clickCount ?? 0,
           deltaX: command.deltaX ?? 0,
           deltaY: command.deltaY ?? 0,

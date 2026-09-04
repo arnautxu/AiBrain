@@ -107,3 +107,5 @@ export function isDeleteGovernedMemoryRequest(value: unknown): value is { explic
   return isRecord(value) && hasExactKeys(value, ["explicit", "projectId", "expectedRevision"]) && value.explicit === true &&
     isMemoryProjectId(value.projectId) && Number.isSafeInteger(value.expectedRevision) && (value.expectedRevision as number) >= 1;
 }
+
+export const isRestoreGovernedMemoryRequest = isDeleteGovernedMemoryRequest;

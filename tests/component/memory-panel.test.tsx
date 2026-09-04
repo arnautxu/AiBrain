@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GovernedMemoryRecord } from "@/memory/proposal-store";
 import { MemoryPanel } from "@/components/memory-panel";
 import {
+  deleteGovernedMemory,
   listExplicitMemories,
   listMemoryGovernance,
+  restoreGovernedMemory,
 } from "@/ui/memory-ui-adapter";
 
 vi.mock("@/ui/memory-ui-adapter", () => ({
@@ -16,6 +18,7 @@ vi.mock("@/ui/memory-ui-adapter", () => ({
   listExplicitMemories: vi.fn(),
   listMemoryGovernance: vi.fn(),
   rejectMemoryProposal: vi.fn(),
+  restoreGovernedMemory: vi.fn(),
   revokeExplicitMemory: vi.fn(),
   updateGovernedMemory: vi.fn(),
 }));
@@ -84,6 +87,84 @@ describe("MemoryPanel states and governed editor", () => {
     expect(editor).toHaveValue(governedMemory.content);
     expect(screen.getByText("Contenido de la memoria")).toBeVisible();
     await waitFor(() => expect(screen.getByRole("button", { name: "Guardar edición" })).toBeEnabled());
+  });
+
+  it("confirms governed deletion and supports both immediate undo and later restore", async () => {
+    const deleted = {
+      ...governedMemory,
+      status: "deleted" as const,
+      revision: 2,
+      updatedAt: "2026-08-30T09:00:00.000Z",
+      deletedAt: "2026-08-30T09:00:00.000Z",
+      deletedBy: governedMemory.ownerUserId,
+    };
+    const restored = {
+      ...governedMemory,
+      revision: 3,
+      updatedAt: "2026-08-30T09:01:00.000Z",
+    };
+    vi.mocked(listExplicitMemories).mockResolvedValue([]);
+    vi.mocked(listMemoryGovernance).mockResolvedValue({ ...governanceEmpty, memories: [governedMemory] });
+    vi.mocked(deleteGovernedMemory).mockResolvedValue(deleted);
+    vi.mocked(restoreGovernedMemory).mockResolvedValue(restored);
+
+    render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
+
+    expect(deleteGovernedMemory).not.toHaveBeenCalled();
+    expect(screen.getByRole("group", { name: "Confirmar eliminación" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar memoria" }));
+
+    await waitFor(() => expect(deleteGovernedMemory).toHaveBeenCalledWith(governedMemory, projectId));
+    const undo = await screen.findByRole("button", { name: "Deshacer" });
+    await waitFor(() => expect(undo).toHaveFocus());
+    expect(screen.getByRole("button", { name: "Restaurar" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Deshacer" }));
+
+    await waitFor(() => expect(restoreGovernedMemory).toHaveBeenCalledWith(deleted, projectId));
+    expect(screen.queryByRole("button", { name: "Restaurar" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Eliminar" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Editar" })).toHaveFocus());
+  });
+
+  it("restores an already deleted governed memory from its recoverable list", async () => {
+    const deleted = {
+      ...governedMemory,
+      status: "deleted" as const,
+      revision: 2,
+      deletedAt: "2026-08-30T09:00:00.000Z",
+      deletedBy: governedMemory.ownerUserId,
+    };
+    vi.mocked(listExplicitMemories).mockResolvedValue([]);
+    vi.mocked(listMemoryGovernance).mockResolvedValue({ ...governanceEmpty, memories: [deleted] });
+    vi.mocked(restoreGovernedMemory).mockResolvedValue({ ...governedMemory, revision: 3 });
+
+    render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Restaurar" }));
+
+    await waitFor(() => expect(restoreGovernedMemory).toHaveBeenCalledWith(deleted, projectId));
+    expect(screen.getByRole("button", { name: "Eliminar" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Editar" })).toHaveFocus());
+  });
+
+  it("cancels inline deletion on Escape or Cancel before closing the memory panel and restores delete focus", async () => {
+    const onClose = vi.fn();
+    vi.mocked(listExplicitMemories).mockResolvedValue([]);
+    vi.mocked(listMemoryGovernance).mockResolvedValue({ ...governanceEmpty, memories: [governedMemory] });
+
+    render(<MemoryPanel open projectId={projectId} productName="AiBrain" onClose={onClose} />);
+    const deleteButton = await screen.findByRole("button", { name: "Eliminar" });
+    fireEvent.click(deleteButton);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Cancelar" })).toHaveFocus());
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Eliminar" })).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Eliminar" })).toHaveFocus());
   });
 
   it("hides stale governed records immediately and ignores a late project response", async () => {

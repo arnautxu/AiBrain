@@ -12,6 +12,7 @@ import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { AutomationsPanel } from "@/components/automations-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
+import { isEditableShortcutTarget, isTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 import {
   Sidebar,
   type ProjectMenuAction,
@@ -138,6 +139,14 @@ export function createTaskCenterResponseGate() {
 }
 
 type SideWindowId = Exclude<BrainWindowId, "chat" | "runtime">;
+type WorkbenchNotice = Readonly<{
+  message: string;
+  kind: "status" | "success" | "warning" | "error";
+}>;
+
+function workbenchNotice(message: string, kind: WorkbenchNotice["kind"] = "status"): WorkbenchNotice {
+  return { message, kind };
+}
 
 type BrainStyle = CSSProperties & {
   "--brain-accent": string;
@@ -591,15 +600,19 @@ export function BrainApp({
   const [taskCenterRequested, setTaskCenterRequested] = useState(false);
   const [taskCenterBusy, setTaskCenterBusy] = useState(false);
   const taskCenterGateRef = useRef(createTaskCenterResponseGate());
+  const taskCenterOpenRef = useRef(false);
   const [automationsOpen, setAutomationsOpen] = useState(false);
+  const [automationsBlockingSurfaceOpen, setAutomationsBlockingSurfaceOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
   const [networkOnline, setNetworkOnline] = useState(true);
   const [runtimeRetry, setRuntimeRetry] = useState(0);
+  const [mobileSidebarRestoreFocus, setMobileSidebarRestoreFocus] = useState(false);
+  const [compactOverlayLayout, setCompactOverlayLayout] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<WorkbenchNotice | null>(null);
   const [streamRecoveryNotice, setStreamRecoveryNotice] = useState<StreamRecoveryNotice | null>(null);
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const [queuedTurns, setQueuedTurns] = useState<QueuedChatTurn[]>([]);
@@ -622,6 +635,59 @@ export function BrainApp({
   });
   const taskStatusRef = useRef(new Map<string, TaskCenterItem["status"]>());
   const taskCenterInitializedRef = useRef(false);
+  const sidebarReturnFocusRef = useRef<HTMLElement | null>(null);
+  const mobileSidebarOpenerRef = useRef<HTMLElement | null>(null);
+  const mobileSidebarHandoffRef = useRef<"customization" | "project" | "text" | "confirm" | "command" | null>(null);
+
+  useEffect(() => {
+    taskCenterOpenRef.current = taskCenterOpen;
+  }, [taskCenterOpen]);
+
+  const beginSidebarOverlay = useCallback((surface: NonNullable<typeof mobileSidebarHandoffRef.current>, returnFocus?: HTMLElement | null) => {
+    sidebarReturnFocusRef.current = returnFocus ?? null;
+    mobileSidebarHandoffRef.current = mobileSidebarOpen ? surface : null;
+    if (mobileSidebarOpen) setMobileSidebarOpen(false);
+  }, [mobileSidebarOpen]);
+
+  const finishSidebarOverlay = useCallback((surface: NonNullable<typeof mobileSidebarHandoffRef.current>) => {
+    const shouldRestoreMobile = mobileSidebarHandoffRef.current === surface &&
+      !window.matchMedia("(min-width: 768px)").matches;
+    mobileSidebarHandoffRef.current = null;
+    if (shouldRestoreMobile) {
+      setMobileSidebarRestoreFocus(true);
+      setMobileSidebarOpen(true);
+    } else {
+      sidebarReturnFocusRef.current = null;
+    }
+  }, []);
+
+  const closeCustomization = useCallback(() => {
+    finishSidebarOverlay("customization");
+    setCustomizationOpen(false);
+  }, [finishSidebarOverlay]);
+  const closeProjectPanel = useCallback(() => {
+    finishSidebarOverlay("project");
+    setProjectOpen(false);
+  }, [finishSidebarOverlay]);
+  const closeTextDialog = useCallback(() => {
+    finishSidebarOverlay("text");
+    setTextDialog(null);
+  }, [finishSidebarOverlay]);
+  const closeConfirmDialog = useCallback(() => {
+    finishSidebarOverlay("confirm");
+    setConfirmDialog(null);
+  }, [finishSidebarOverlay]);
+  const closeCommandPalette = useCallback(() => {
+    finishSidebarOverlay("command");
+    setCommandPaletteOpen(false);
+  }, [finishSidebarOverlay]);
+  const dismissMobileSidebar = useCallback(() => {
+    mobileSidebarHandoffRef.current = null;
+    sidebarReturnFocusRef.current = null;
+    mobileSidebarOpenerRef.current = null;
+    setMobileSidebarOpen(false);
+    setMobileSidebarRestoreFocus(false);
+  }, []);
 
   useEffect(() => {
     const snapshot = initialWorkbench.persistence === "browser-preview"
@@ -725,8 +791,8 @@ export function BrainApp({
   }, [activeProjectId, activeThreadId]);
 
   useEffect(() => {
-    if (!notice) return;
-    const timeout = window.setTimeout(() => setNotice(null), 4200);
+    if (!notice || notice.kind === "error") return;
+    const timeout = window.setTimeout(() => setNotice(null), notice.kind === "warning" ? 8_000 : 4_200);
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
@@ -896,11 +962,12 @@ export function BrainApp({
     const newest = fresh[0];
     if (!newest) return;
     if (payload.preferences.inApp) {
-      setNotice(newest.status === "needs_attention"
+      setNotice(workbenchNotice(newest.status === "needs_attention"
         ? `Una tarea necesita tu atención: ${newest.threadTitle}`
         : newest.status === "completed"
           ? `Tarea completada: ${newest.threadTitle}`
-          : `Una tarea ha terminado con error: ${newest.threadTitle}`);
+          : `Una tarea ha terminado con error: ${newest.threadTitle}`,
+        newest.status === "completed" ? "success" : newest.status === "failed" ? "error" : "warning"));
     }
     if (payload.preferences.desktop && typeof Notification !== "undefined" && Notification.permission === "granted") {
       const notification = new Notification(
@@ -910,7 +977,7 @@ export function BrainApp({
       );
       notification.onclick = () => {
         window.focus();
-        setTaskCenterRequested(true);
+        setTaskCenterRequested(!taskCenterOpenRef.current);
         notification.close();
       };
     }
@@ -941,7 +1008,7 @@ export function BrainApp({
       if (!taskCenterGateRef.current.isCurrent(requestGeneration)) return;
       applyTaskCenterPayload(value, false);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.");
+      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.", "error"));
     } finally {
       taskCenterGateRef.current.finishMutation();
       setTaskCenterBusy(false);
@@ -951,7 +1018,7 @@ export function BrainApp({
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
     void refreshTaskCenter(false).catch(() => {
-      setNotice("El historial de tareas no se ha podido sincronizar. Tus conversaciones siguen disponibles.");
+      setNotice(workbenchNotice("El historial de tareas no se ha podido sincronizar. Tus conversaciones siguen disponibles.", "warning"));
     });
   }, [hydrated, initialWorkbench.persistence, refreshTaskCenter]);
 
@@ -1099,11 +1166,11 @@ export function BrainApp({
 
   const selectProject = useCallback((projectId: string) => {
     if (documentUploading) {
-      setNotice("Espera a que termine de prepararse el documento antes de cambiar de proyecto.");
-      return;
+      setNotice(workbenchNotice("Espera a que termine de prepararse el documento antes de cambiar de proyecto.", "warning"));
+      return false;
     }
     const project = projects.find((candidate) => candidate.id === projectId && candidate.status === "active");
-    if (!project) return;
+    if (!project) return false;
     if (activeProjectId && activeThreadId) threadByProjectRef.current[activeProjectId] = activeThreadId;
     const rememberedId = threadByProjectRef.current[projectId];
     const remembered = threads.find((thread) =>
@@ -1118,11 +1185,12 @@ export function BrainApp({
     setSelectedMessageId(null);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
+    return true;
   }, [activeProjectId, activeThreadId, documentUploading, projects, switchComposerSelection, threads]);
 
   const selectThread = useCallback((threadId: string) => {
     if (documentUploading) {
-      setNotice("Espera a que termine de prepararse el documento antes de cambiar de conversación.");
+      setNotice(workbenchNotice("Espera a que termine de prepararse el documento antes de cambiar de conversación.", "warning"));
       return;
     }
     const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
@@ -1142,7 +1210,7 @@ export function BrainApp({
     if (documentUploading) return;
     const destination = newThreadDestination(projects, projectId);
     if (!destination) {
-      setNotice("No se ha podido preparar el espacio de conversaciones.");
+      setNotice(workbenchNotice("No se ha podido preparar el espacio de conversaciones.", "error"));
       return;
     }
     delete threadByProjectRef.current[destination.id];
@@ -1160,12 +1228,12 @@ export function BrainApp({
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
     if (initialWorkbench.persistence !== "filesystem") {
-      setNotice("Los documentos reales requieren el runtime privado de la instalación.");
+      setNotice(workbenchNotice("Los documentos reales requieren el runtime privado de la instalación.", "warning"));
       return;
     }
     const available = Math.max(0, 10 - documents.filter((document) => document.status !== "error").length);
     const selected = files.slice(0, available);
-    if (files.length > available) setNotice("Puedes preparar un máximo de 10 documentos por turno.");
+    if (files.length > available) setNotice(workbenchNotice("Puedes preparar un máximo de 10 documentos por turno.", "warning"));
     if (!selected.length) return;
 
     let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id
@@ -1213,11 +1281,11 @@ export function BrainApp({
           setDocuments((current) => current.map((document) => document.uploadId === uploadId
             ? { ...document, status: "error", error: message }
             : document));
-          setNotice(message);
+          setNotice(workbenchNotice(message, "error"));
         }
       }
     } catch (reason) {
-      setNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.");
+      setNotice(workbenchNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.", "error"));
     } finally {
       setDocumentUploading(false);
     }
@@ -1519,7 +1587,7 @@ export function BrainApp({
           }),
         ));
       } else {
-        setNotice(error instanceof Error ? error.message : "No se ha podido crear la conversación.");
+        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear la conversación.", "error"));
       }
     } finally {
       if (thread) {
@@ -1560,7 +1628,7 @@ export function BrainApp({
       : promptContent)).trim();
     if (!displayContent || !runtimeContent || !activeProject || !activeThread || activeThread.status !== "active") return;
     if (queuedTurns.filter((item) => item.threadId === activeThread.id).length >= MAX_QUEUED_MESSAGES_PER_THREAD) {
-      setNotice(`La cola admite hasta ${MAX_QUEUED_MESSAGES_PER_THREAD} mensajes por conversación.`);
+      setNotice(workbenchNotice(`La cola admite hasta ${MAX_QUEUED_MESSAGES_PER_THREAD} mensajes por conversación.`, "warning"));
       return;
     }
 
@@ -1585,7 +1653,7 @@ export function BrainApp({
     setQueuedTurns((current) => current.filter((item) => item.id !== next.id));
     void sendMessage(next.runtimeContent, next.displayContent)
       .then((completed) => {
-        if (!completed) setNotice("No se ha podido enviar el siguiente mensaje de la cola.");
+        if (!completed) setNotice(workbenchNotice("No se ha podido enviar el siguiente mensaje de la cola.", "error"));
       })
       .finally(() => setDispatchingQueuedTurnId(null));
   }, [actionBusy, activeProject, activeThread, dispatchingQueuedTurnId, documentUploading, queuedTurns, sendMessage, sending]);
@@ -1636,10 +1704,10 @@ export function BrainApp({
       if (autoSend && result.draftMessage) {
         setPendingBranchSend({ threadId: result.thread.id, content: result.draftMessage });
       } else {
-        setNotice("Rama creada. La conversación original se conserva intacta.");
+        setNotice(workbenchNotice("Rama creada. La conversación original se conserva intacta.", "success"));
       }
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido crear la rama.");
+      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear la rama.", "error"));
     } finally {
       setActionBusy(false);
     }
@@ -1683,10 +1751,10 @@ export function BrainApp({
           typeof payload.error === "string"
           ? payload.error
           : "No s’ha pogut confirmar l’aturada amb el runtime.";
-        setNotice(message);
+        setNotice(workbenchNotice(message, "error"));
       }
     } catch {
-      setNotice("S’ha perdut la connexió mentre s’aturava el torn.");
+      setNotice(workbenchNotice("S’ha perdut la connexió mentre s’aturava el torn.", "error"));
     } finally {
       controller?.abort();
       setStoppingThreadIds((current) => {
@@ -1706,7 +1774,7 @@ export function BrainApp({
     const managedAppAction = managedAppActionForApproval(managedAppActions, selectedApproval);
     if (managedAppAction) {
       if (managedAppAction.locator.threadId !== activeThreadId || managedAppAction.locator.turnId !== messageId) {
-        setNotice("La acción conectada ya no corresponde a esta conversación.");
+        setNotice(workbenchNotice("La acción conectada ya no corresponde a esta conversación.", "warning"));
         return;
       }
       const result = await resolveManagedAppAction(fetch, managedAppAction, {
@@ -1714,9 +1782,9 @@ export function BrainApp({
         turnId: messageId,
       }, decision);
       if (result.state === "recoverable") {
-        setNotice(result.stage === "current-thread"
+        setNotice(workbenchNotice(result.stage === "current-thread"
           ? "Vuelve a la conversación original para resolver esta acción conectada."
-          : "La acción conectada sigue pendiente. Puedes volver a intentarlo.");
+          : "La acción conectada sigue pendiente. Puedes volver a intentarlo.", "warning"));
         return;
       }
       setManagedAppActions((current) => forgetManagedAppAction(current, selectedApproval));
@@ -1742,7 +1810,7 @@ export function BrainApp({
       }),
     });
     if (!response.ok) {
-      setNotice("Esta aprobación ya no está pendiente.");
+      setNotice(workbenchNotice("Esta aprobación ya no está pendiente.", "warning"));
       return;
     }
     const status = decision === "accept"
@@ -1799,7 +1867,7 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar el proyecto.");
+      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido actualizar el proyecto.", "error"));
       return null;
     } finally {
       setActionBusy(false);
@@ -1831,7 +1899,7 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "No se ha podido actualizar la conversación.");
+      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido actualizar la conversación.", "error"));
       return null;
     } finally {
       setActionBusy(false);
@@ -1851,24 +1919,25 @@ export function BrainApp({
         setActiveProjectId(project.id);
         setActiveThreadId(null);
         setSelectedMessageId(null);
-        setTextDialog(null);
+        closeTextDialog();
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "No se ha podido crear el proyecto.");
+        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear el proyecto.", "error"));
       } finally {
         setActionBusy(false);
       }
       return;
     }
     if (textDialog.kind === "rename-project") {
-      if (await persistProjectPatch(textDialog.project, { name: value })) setTextDialog(null);
+      if (await persistProjectPatch(textDialog.project, { name: value })) closeTextDialog();
       return;
     }
-    if (await persistThreadPatch(textDialog.thread, { title: value })) setTextDialog(null);
-  }, [initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog]);
+    if (await persistThreadPatch(textDialog.thread, { title: value })) closeTextDialog();
+  }, [closeTextDialog, initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog]);
 
-  const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction) => {
+  const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction, returnFocus?: HTMLElement | null) => {
     if (action === "settings") {
-      selectProject(project.id);
+      if (!selectProject(project.id)) return;
+      beginSidebarOverlay("project", returnFocus);
       setProjectOpen(true);
       return;
     }
@@ -1876,26 +1945,36 @@ export function BrainApp({
       thread.projectId === project.id &&
       (threadActivityById[thread.id]?.state === "running" ||
         threadActivityById[thread.id]?.state === "needs_attention"))) {
-      setNotice("Detén o resuelve las conversaciones en curso antes de archivar el proyecto.");
+      setNotice(workbenchNotice("Detén o resuelve las conversaciones en curso antes de archivar el proyecto.", "warning"));
       return;
     }
-    if (action === "rename") setTextDialog({ kind: "rename-project", project });
-    else if (action === "archive") setConfirmDialog({ kind: "archive-project", project });
+    if (action === "rename") {
+      beginSidebarOverlay("text", returnFocus);
+      setTextDialog({ kind: "rename-project", project });
+    } else if (action === "archive") {
+      beginSidebarOverlay("confirm", returnFocus);
+      setConfirmDialog({ kind: "archive-project", project });
+    }
     else if (action === "restore") void persistProjectPatch(project, { status: "active" });
     else void persistProjectPatch(project, { pinned: action === "pin" });
-  }, [persistProjectPatch, selectProject, threadActivityById, threads]);
+  }, [beginSidebarOverlay, persistProjectPatch, selectProject, threadActivityById, threads]);
 
-  const handleThreadAction = useCallback((thread: WorkbenchThread, action: ThreadMenuAction) => {
+  const handleThreadAction = useCallback((thread: WorkbenchThread, action: ThreadMenuAction, returnFocus?: HTMLElement | null) => {
     const workState = threadActivityById[thread.id]?.state;
     if (action === "archive" && (workState === "running" || workState === "needs_attention")) {
-      setNotice("Detén o resuelve esta conversación antes de archivarla.");
+      setNotice(workbenchNotice("Detén o resuelve esta conversación antes de archivarla.", "warning"));
       return;
     }
-    if (action === "rename") setTextDialog({ kind: "rename-thread", thread });
-    else if (action === "archive") setConfirmDialog({ kind: "archive-thread", thread });
+    if (action === "rename") {
+      beginSidebarOverlay("text", returnFocus);
+      setTextDialog({ kind: "rename-thread", thread });
+    } else if (action === "archive") {
+      beginSidebarOverlay("confirm", returnFocus);
+      setConfirmDialog({ kind: "archive-thread", thread });
+    }
     else if (action === "restore") void persistThreadPatch(thread, { status: "active" });
     else void persistThreadPatch(thread, { pinned: action === "pin" });
-  }, [persistThreadPatch, threadActivityById]);
+  }, [beginSidebarOverlay, persistThreadPatch, threadActivityById]);
 
   const confirmAction = useCallback(async () => {
     if (!confirmDialog) return;
@@ -1918,7 +1997,7 @@ export function BrainApp({
           setThreads((current) => updateThreadMessage(current, activeThreadId, target.id, () => updated));
         };
         await updateState("undo_waiting");
-        setConfirmDialog(null);
+        closeConfirmDialog();
         setActionBusy(false);
         const completed = await sendMessage(
           `Revierte exclusivamente los cambios de este resultado. Antes de terminar, comprueba el estado final y explica qué se ha restaurado.\n\nCambios originales:\n${target.diff.slice(0, 10_000)}`,
@@ -1927,9 +2006,9 @@ export function BrainApp({
         setActionBusy(true);
         if (!completed) throw new Error("La reversió no s’ha pogut verificar.");
         await updateState("undo_complete");
-        setNotice("Cambios revertidos y verificados. El estado se ha guardado.");
+        setNotice(workbenchNotice("Cambios revertidos y verificados. El estado se ha guardado.", "success"));
       } catch (error) {
-        setNotice(error instanceof Error ? error.message : "No se ha podido completar la reversión.");
+        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido completar la reversión.", "error"));
       } finally {
         setActionBusy(false);
       }
@@ -1938,8 +2017,8 @@ export function BrainApp({
     const updated = confirmDialog.kind === "archive-project"
       ? await persistProjectPatch(confirmDialog.project, { status: "archived" })
       : await persistThreadPatch(confirmDialog.thread, { status: "archived" });
-    if (updated) setConfirmDialog(null);
-  }, [activeThreadId, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage]);
+    if (updated) closeConfirmDialog();
+  }, [activeThreadId, closeConfirmDialog, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage]);
 
   const changePreference = useCallback(
     <Key extends keyof BrainPreferences>(key: Key, value: BrainPreferences[Key]) => {
@@ -1955,24 +2034,28 @@ export function BrainApp({
   const browserSetting = settingsSnapshot?.apps.find((app) => app.id === "managed-browser") ?? null;
   const browserEnabled = browserDeclared &&
     (browserSetting ? browserSetting.effectiveEnabled === true : browserMonitorStatus?.available === true);
-  const blockingSurfaceOpen = customizationOpen || projectOpen || commandPaletteOpen ||
-    taskCenterOpen || Boolean(textDialog) || Boolean(confirmDialog) || Boolean(previewDocument);
+  const blockingModalSurfaceOpen = customizationOpen || projectOpen || commandPaletteOpen || mobileSidebarOpen ||
+    taskCenterOpen || automationsBlockingSurfaceOpen || Boolean(textDialog) || Boolean(confirmDialog) || Boolean(previewDocument);
+  const modalSurfaceOpen = blockingModalSurfaceOpen ||
+    (compactOverlayLayout && Boolean(activeSideWindow));
+  const browserAutoOpenBlocked = modalSurfaceOpen || automationsOpen;
 
   useEffect(() => {
-    if (!taskCenterRequested || blockingSurfaceOpen) return;
+    if (!taskCenterRequested || modalSurfaceOpen) return;
     setTaskCenterRequested(false);
     setTaskCenterOpen(true);
-  }, [blockingSurfaceOpen, taskCenterRequested]);
+  }, [modalSurfaceOpen, taskCenterRequested]);
 
   useEffect(() => {
     if (!browserDeclared || !activeBrowserDemandKey || !activeThreadId ||
-        blockingSurfaceOpen || autoOpenedBrowserDemandRef.current === activeBrowserDemandKey) return;
+        browserAutoOpenBlocked || autoOpenedBrowserDemandRef.current === activeBrowserDemandKey) return;
     const controller = new AbortController();
     let interval: number | null = null;
     const refresh = () => {
       void readBrowserStatus(controller.signal).then((status) => {
         setBrowserMonitorStatus(status);
         if (!shouldPresentBrowserPanel(status, true)) return;
+        if (window.matchMedia("(max-width: 1279px)").matches && isEditableShortcutTarget(document.activeElement)) return;
         setActiveSideWindow((current) => {
           if (current && current !== "browser") return current;
           autoOpenedBrowserDemandRef.current = activeBrowserDemandKey;
@@ -1989,79 +2072,116 @@ export function BrainApp({
       controller.abort();
       if (interval !== null) window.clearInterval(interval);
     };
-  }, [activeBrowserDemandKey, activeThreadId, blockingSurfaceOpen, browserDeclared]);
+  }, [activeBrowserDemandKey, activeThreadId, browserAutoOpenBlocked, browserDeclared]);
 
-  const toggleSidebar = useCallback(() => {
+  const toggleSidebar = useCallback((opener?: HTMLElement | null) => {
     if (window.matchMedia("(min-width: 768px)").matches) {
       setDesktopSidebarOpen((current) => !current);
       return;
     }
-    setMobileSidebarOpen((current) => !current);
+    mobileSidebarHandoffRef.current = null;
+    sidebarReturnFocusRef.current = null;
+    setMobileSidebarRestoreFocus(false);
+    setMobileSidebarOpen((current) => {
+      if (!current) {
+        mobileSidebarOpenerRef.current = opener ?? (
+          document.activeElement instanceof HTMLElement ? document.activeElement : null
+        );
+      }
+      return !current;
+    });
   }, []);
 
   useEffect(() => {
     const desktopQuery = window.matchMedia("(min-width: 768px)");
     const closeMobileSidebar = (event: MediaQueryListEvent) => {
-      if (event.matches) setMobileSidebarOpen(false);
+      if (!event.matches) return;
+      mobileSidebarHandoffRef.current = null;
+      sidebarReturnFocusRef.current = null;
+      mobileSidebarOpenerRef.current = null;
+      setMobileSidebarRestoreFocus(false);
+      setMobileSidebarOpen(false);
     };
-    if (desktopQuery.matches) setMobileSidebarOpen(false);
+    if (desktopQuery.matches) {
+      mobileSidebarHandoffRef.current = null;
+      sidebarReturnFocusRef.current = null;
+      mobileSidebarOpenerRef.current = null;
+      setMobileSidebarRestoreFocus(false);
+      setMobileSidebarOpen(false);
+    }
     desktopQuery.addEventListener("change", closeMobileSidebar);
     return () => desktopQuery.removeEventListener("change", closeMobileSidebar);
   }, []);
 
   useEffect(() => {
+    const compactQuery = window.matchMedia("(max-width: 1279px)");
+    const syncCompactLayout = () => {
+      if (compactQuery.matches && blockingModalSurfaceOpen) setActiveSideWindow(null);
+      setCompactOverlayLayout(compactQuery.matches);
+    };
+    const frame = requestAnimationFrame(syncCompactLayout);
+    compactQuery.addEventListener("change", syncCompactLayout);
+    return () => {
+      cancelAnimationFrame(frame);
+      compactQuery.removeEventListener("change", syncCompactLayout);
+    };
+  }, [blockingModalSurfaceOpen]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const modifier = event.metaKey || event.ctrlKey;
-      const key = event.key.toLocaleLowerCase("ca");
-      const target = event.target as HTMLElement | null;
-      const editing = target?.matches("input, textarea, [contenteditable='true']") ?? false;
-      if (modifier && key === "k") {
+      if (event.defaultPrevented) return;
+      const modifier = (event.metaKey || event.ctrlKey) && event.metaKey !== event.ctrlKey;
+      const editing = isEditableShortcutTarget(event.target);
+      const searchShortcut = modifier && !event.altKey && !event.shiftKey && event.code === "KeyK";
+      if (searchShortcut) {
         event.preventDefault();
-        if (commandPaletteOpen) setCommandPaletteOpen(false);
-        else if (!blockingSurfaceOpen && !editing) setCommandPaletteOpen(true);
+        if (event.repeat) return;
+        if (commandPaletteOpen) {
+          closeCommandPalette();
+        } else if (!modalSurfaceOpen) {
+          setCommandPaletteOpen(true);
+        }
         return;
       }
-      if (modifier && event.altKey && key === "u") {
+      const taskCenterShortcut = !event.shiftKey && isTaskCenterShortcut(event);
+      if (taskCenterShortcut) {
         event.preventDefault();
-        if (taskCenterOpen) setTaskCenterOpen(false);
-        else if (!blockingSurfaceOpen && !editing) setTaskCenterOpen(true);
-        return;
-      }
-      if (modifier && key === "n") {
-        event.preventDefault();
-        startNewThread();
-        return;
-      }
-      if (modifier && event.shiftKey && key === "p" && !actionBusy) {
-        event.preventDefault();
-        setTextDialog({ kind: "create-project" });
+        if (event.repeat) return;
+        if (taskCenterOpen) {
+          setTaskCenterOpen(false);
+        } else if (!modalSurfaceOpen && !editing) {
+          setTaskCenterOpen(true);
+        }
         return;
       }
       if (event.key !== "Escape") return;
-      if (commandPaletteOpen) setCommandPaletteOpen(false);
+      if (commandPaletteOpen) closeCommandPalette();
       else if (taskCenterOpen) setTaskCenterOpen(false);
-      else if (customizationOpen) setCustomizationOpen(false);
+      else if (customizationOpen) closeCustomization();
       else if (automationsOpen) setAutomationsOpen(false);
-      else if (textDialog && !actionBusy) setTextDialog(null);
-      else if (confirmDialog && !actionBusy) setConfirmDialog(null);
+      else if (textDialog && !actionBusy) closeTextDialog();
+      else if (confirmDialog && !actionBusy) closeConfirmDialog();
       else if (previewDocument) setPreviewDocument(null);
       else if (activeSideWindow) setActiveSideWindow(null);
-      else if (mobileSidebarOpen) setMobileSidebarOpen(false);
+      else if (mobileSidebarOpen) dismissMobileSidebar();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
     actionBusy,
-    activeProject,
     activeSideWindow,
+    closeCommandPalette,
     commandPaletteOpen,
-    blockingSurfaceOpen,
+    closeConfirmDialog,
+    closeCustomization,
+    closeTextDialog,
+    dismissMobileSidebar,
+    modalSurfaceOpen,
     confirmDialog,
     customizationOpen,
     automationsOpen,
     mobileSidebarOpen,
     previewDocument,
-    startNewThread,
     textDialog,
     taskCenterOpen,
   ]);
@@ -2073,6 +2193,20 @@ export function BrainApp({
       : textDialog?.kind === "rename-thread"
         ? { title: "Renombrar conversación", label: "Título de la conversación", value: textDialog.thread.title, submit: "Guardar", maxLength: 120 }
         : null;
+  const noticeLabel = notice?.kind === "error"
+    ? "Error"
+    : notice?.kind === "warning"
+      ? "Aviso"
+      : notice?.kind === "success"
+        ? "Completado"
+        : "Estado";
+  const noticeTone = notice?.kind === "error"
+    ? "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"
+    : notice?.kind === "warning"
+      ? "border-[var(--warning)] bg-[var(--warning-soft)] text-[var(--warning)]"
+      : notice?.kind === "success"
+        ? "border-[var(--positive)] bg-[var(--positive-soft)] text-[var(--positive)]"
+        : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text-secondary)]";
 
   return (
     <div style={style} className="flex h-[100dvh] overflow-hidden bg-[var(--page)] font-sans text-[var(--text)]">
@@ -2084,27 +2218,39 @@ export function BrainApp({
         activeProjectId={activeProjectId}
         activeThreadId={activeThreadId}
         mobileOpen={mobileSidebarOpen}
+        mobileInitialFocusRef={mobileSidebarRestoreFocus ? sidebarReturnFocusRef : undefined}
+        mobileReturnFocusRef={mobileSidebarOpenerRef}
         desktopOpen={desktopSidebarOpen}
         busy={actionBusy}
         threadActivityById={threadActivityById}
-        onCloseMobile={() => setMobileSidebarOpen(false)}
+        onCloseMobile={dismissMobileSidebar}
         onCloseDesktop={() => setDesktopSidebarOpen(false)}
         onOpenDesktop={() => setDesktopSidebarOpen(true)}
-        onOpenCommandPalette={() => { setMobileSidebarOpen(false); setCommandPaletteOpen(true); }}
+        onOpenCommandPalette={(returnFocus) => {
+          beginSidebarOverlay("command", returnFocus);
+          setCommandPaletteOpen(true);
+        }}
         onOpenAutomations={() => { setMobileSidebarOpen(false); setAutomationsOpen(true); }}
         onSelectProject={(projectId) => { setAutomationsOpen(false); selectProject(projectId); }}
         onSelectThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
         onNewThread={(projectId) => { setAutomationsOpen(false); startNewThread(projectId); }}
-        onNewProject={() => { setMobileSidebarOpen(false); setTextDialog({ kind: "create-project" }); }}
+        onNewProject={(returnFocus) => {
+          beginSidebarOverlay("text", returnFocus);
+          setTextDialog({ kind: "create-project" });
+        }}
         onProjectAction={handleProjectAction}
         onThreadAction={handleThreadAction}
-        onOpenCustomization={() => { setMobileSidebarOpen(false); setCustomizationOpen(true); }}
+        onOpenCustomization={(returnFocus) => {
+          beginSidebarOverlay("customization", returnFocus);
+          setCustomizationOpen(true);
+        }}
       />
 
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
-        onToggleSidebar={() => setMobileSidebarOpen((open) => !open)}
+        onToggleSidebar={toggleSidebar}
+        onBlockingSurfaceChange={setAutomationsBlockingSurfaceOpen}
         onOpenThread={(threadId) => { setAutomationsOpen(false); selectThread(threadId); }}
       /> : <ChatWorkspace
         manifest={manifest}
@@ -2144,7 +2290,7 @@ export function BrainApp({
         onAddDocuments={addDocuments}
         onFreezePublication={freezePublication}
         onDecidePublication={decidePublication}
-        onComposerNotice={setNotice}
+        onComposerNotice={(message, kind = "warning") => setNotice(workbenchNotice(message, kind))}
         onSend={submitComposerMessage}
         onStop={() => void stopActiveTurn()}
         onCancelQueuedMessage={(id) => setQueuedTurns((current) => current.filter((item) => item.id !== id))}
@@ -2160,6 +2306,11 @@ export function BrainApp({
         onPreviewDocument={(artifact) => {
           setActiveSideWindow(null);
           setPreviewDocument(artifact);
+        }}
+        onOpenReview={(messageId) => {
+          setPreviewDocument(null);
+          setSelectedMessageId(messageId);
+          setActiveSideWindow("inspector");
         }}
         onOpenBrowser={() => {
           setPreviewDocument(null);
@@ -2232,14 +2383,16 @@ export function BrainApp({
         onRestoreThread={(thread) => handleThreadAction(thread, "restore")}
         onSettingsSnapshot={setSettingsSnapshot}
         activeProjectId={activeProject?.id ?? null}
-        onClose={() => setCustomizationOpen(false)}
+        returnFocusRef={sidebarReturnFocusRef}
+        onClose={closeCustomization}
       />
 
       <ProjectPanel
         key={activeProject?.id ?? "none"}
         project={activeProject && activeProject.slug !== STANDALONE_PROJECT_SLUG ? activeProject : null}
         open={projectOpen}
-        onClose={() => setProjectOpen(false)}
+        returnFocusRef={sidebarReturnFocusRef}
+        onClose={closeProjectPanel}
         onSave={async (patch) => Boolean(activeProject && await persistProjectPatch(activeProject, patch))}
       />
 
@@ -2248,9 +2401,18 @@ export function BrainApp({
         projects={projects}
         threads={threads}
         activeProjectId={activeProjectId}
-        onClose={() => setCommandPaletteOpen(false)}
-        onSelectProject={selectProject}
-        onSelectThread={selectThread}
+        returnFocusRef={sidebarReturnFocusRef}
+        onClose={closeCommandPalette}
+        onSelectProject={(projectId) => {
+          mobileSidebarHandoffRef.current = null;
+          sidebarReturnFocusRef.current = null;
+          selectProject(projectId);
+        }}
+        onSelectThread={(threadId) => {
+          mobileSidebarHandoffRef.current = null;
+          sidebarReturnFocusRef.current = null;
+          selectThread(threadId);
+        }}
       />
 
       {textDialogCopy ? (
@@ -2262,7 +2424,8 @@ export function BrainApp({
           maxLength={textDialogCopy.maxLength}
           submitLabel={textDialogCopy.submit}
           busy={actionBusy}
-          onClose={() => !actionBusy && setTextDialog(null)}
+          returnFocusRef={sidebarReturnFocusRef}
+          onClose={() => !actionBusy && closeTextDialog()}
           onSubmit={(value) => void submitTextDialog(value)}
         />
       ) : null}
@@ -2277,13 +2440,16 @@ export function BrainApp({
             : "La conversación dejará de aparecer en la lista activa. Podrás restaurarla desde Configuración > Archivados."}
         confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, deshacer" : "Archivar"}
         busy={actionBusy}
-        onClose={() => !actionBusy && setConfirmDialog(null)}
+        returnFocusRef={sidebarReturnFocusRef}
+        onClose={() => !actionBusy && closeConfirmDialog()}
         onConfirm={() => void confirmAction()}
       />
 
       {notice ? (
-        <div role="status" aria-live="polite" className="fixed right-4 top-4 z-[90] flex max-w-[min(24rem,calc(100%-2rem))] items-start gap-2.5 rounded-xl border border-[var(--border)] bg-[var(--surface-raised)] px-4 py-2.5 text-[12px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-md)]">
-          <span className="mt-1 size-2 shrink-0 rounded-full bg-[var(--notification-accent)]" aria-hidden="true" />{notice}
+        <div role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"} aria-atomic="true" className={`fixed right-4 top-4 z-[90] flex max-w-[min(26rem,calc(100%-2rem))] items-center gap-2.5 rounded-xl border px-3 py-2.5 text-[13px] font-medium leading-5 shadow-[var(--shadow-md)] ${noticeTone}`}>
+          <span className="size-2 shrink-0 rounded-full bg-current" aria-hidden="true" />
+          <span className="min-w-0 flex-1"><span className="sr-only">{noticeLabel}: </span>{notice.message}</span>
+          {!modalSurfaceOpen ? <button type="button" className="touch-target grid size-8 shrink-0 place-items-center rounded-lg text-current opacity-70 transition hover:bg-black/5 hover:opacity-100 active:scale-95 dark:hover:bg-white/10" aria-label={`Cerrar ${noticeLabel.toLocaleLowerCase("es")}`} onClick={() => setNotice(null)}><span aria-hidden="true">×</span></button> : null}
         </div>
       ) : null}
     </div>

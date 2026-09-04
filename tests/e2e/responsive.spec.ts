@@ -40,6 +40,15 @@ for (const viewport of viewports) {
     expect(composer!.x + composer!.width).toBeLessThanOrEqual(viewport.width + 1);
     expect(composer!.y - (emptyHeading!.y + emptyHeading!.height)).toBeGreaterThanOrEqual(16);
 
+    if (viewport.width < 480) {
+      await expect(page.locator(".composer-landing .composer-destination")).toBeHidden();
+      const controlsStart = await page.locator('[data-testid="composer-controls"] .composer-controls-start').boundingBox();
+      const controlsEnd = await page.locator('[data-testid="composer-controls"] .composer-controls-end').boundingBox();
+      expect(controlsStart).not.toBeNull();
+      expect(controlsEnd).not.toBeNull();
+      expect(controlsStart!.x + controlsStart!.width).toBeLessThanOrEqual(controlsEnd!.x);
+    }
+
     await page.getByRole("button", { name: "Añadir al mensaje" }).click();
     const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
     await expect(addMenu.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
@@ -66,14 +75,14 @@ for (const viewport of viewports) {
       await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
 
-      await page.getByRole("button", { name: "Buscar" }).click();
+      const sidebarSearch = page.getByRole("button", { name: "Buscar" });
+      await sidebarSearch.click();
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
       await expect(page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" })).toBeVisible();
       await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
       await page.keyboard.press("Escape");
-
-      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
       await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+      await expect(sidebarSearch).toBeFocused();
 
       const sidebarAction = page.getByRole("button", { name: /Acciones de/ }).first();
       await expect(sidebarAction).toBeVisible();
@@ -100,10 +109,12 @@ for (const viewport of viewports) {
 
     if (viewport.width < 768) {
       const sidebarTrigger = page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" });
-      await sidebarTrigger.click();
-      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+      const restoredSidebar = page.getByRole("dialog", { name: "Navegación" });
+      await expect(restoredSidebar).toBeVisible();
+      await expect(page.locator('[aria-modal="true"]')).toHaveCount(1);
+      await expect(accountButton).toBeFocused();
       await page.keyboard.press("Escape");
-      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeHidden();
+      await expect(restoredSidebar).toBeHidden();
       await expect(sidebarTrigger).toBeFocused();
     }
 

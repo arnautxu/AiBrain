@@ -8,10 +8,14 @@ const focusableSelector = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "summary",
+  "audio[controls]",
+  "video[controls]",
+  '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(",");
 
-function isHiddenFromFocus(element: HTMLElement, container: HTMLElement) {
+export function isHiddenFromFocus(element: HTMLElement, container: HTMLElement) {
   let current: HTMLElement | null = element;
   while (current && container.contains(current)) {
     if (
@@ -20,6 +24,10 @@ function isHiddenFromFocus(element: HTMLElement, container: HTMLElement) {
       current.getAttribute("aria-hidden") === "true"
     ) {
       return true;
+    }
+    if (current instanceof HTMLDetailsElement && !current.open) {
+      const summary = current.querySelector<HTMLElement>(":scope > summary");
+      if (!summary?.contains(element)) return true;
     }
     const style = window.getComputedStyle(current);
     if (
@@ -37,13 +45,14 @@ function isHiddenFromFocus(element: HTMLElement, container: HTMLElement) {
 
 function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(focusableSelector))
-    .filter((element) => !element.matches(":disabled") && !isHiddenFromFocus(element, container));
+    .filter((element) => element.tabIndex >= 0 && !element.matches(":disabled") && !isHiddenFromFocus(element, container));
 }
 
 export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
   open: boolean,
   onClose: () => void,
   initialFocus?: RefObject<HTMLElement | null>,
+  returnFocus?: RefObject<HTMLElement | null>,
 ) {
   const containerRef = useRef<ElementType | null>(null);
   const onCloseRef = useRef(onClose);
@@ -55,6 +64,7 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const explicitReturnTarget = returnFocus?.current ?? null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const frame = requestAnimationFrame(() => {
@@ -101,9 +111,11 @@ export function useModalFocus<ElementType extends HTMLElement = HTMLElement>(
       cancelAnimationFrame(frame);
       document.removeEventListener("keydown", onKeyDown, true);
       document.body.style.overflow = previousOverflow;
-      if (previous?.isConnected && !isHiddenFromFocus(previous, document.body)) previous.focus();
+      const returnTarget = [explicitReturnTarget, previous].find((candidate) =>
+        candidate?.isConnected && !isHiddenFromFocus(candidate, document.body));
+      returnTarget?.focus();
     };
-  }, [initialFocus, open]);
+  }, [initialFocus, open, returnFocus]);
 
   return containerRef;
 }

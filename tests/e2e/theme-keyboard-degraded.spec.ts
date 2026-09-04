@@ -120,7 +120,7 @@ test("keyboard dialogs trap focus, close with Escape and restore their opener", 
   const search = page.getByRole("combobox", { name: "Buscar proyectos y conversaciones" });
   await expect(search).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(palette.getByRole("option").last()).toBeFocused();
+  await expect(search).toBeFocused();
   await page.keyboard.press("Escape");
   await expect(palette).toBeHidden();
   await expect(searchTrigger).toBeFocused();
@@ -128,7 +128,8 @@ test("keyboard dialogs trap focus, close with Escape and restore their opener", 
 
 test("global shortcuts never stack modal surfaces or hijack an editor", async ({ page }) => {
   await login(page);
-  await page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) }).click();
+  const accountButton = page.getByRole("button", { name: new RegExp(`${accountName}.*Abrir menú de cuenta`) });
+  await accountButton.click();
   await page.getByRole("menu", { name: "Cuenta y preferencias" }).getByRole("menuitem", { name: "Configuración" }).click();
   const preferences = page.getByRole("dialog", { name: new RegExp("Configuración de") });
   await expect(preferences).toBeVisible();
@@ -141,14 +142,61 @@ test("global shortcuts never stack modal surfaces or hijack an editor", async ({
   await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
 
   await page.keyboard.press("Escape");
+  await expect(accountButton).toBeFocused();
   const editor = page.getByRole("textbox", { name: "Mensaje" });
   await editor.focus();
   await page.keyboard.press("Meta+Alt+U");
   await expect(editor).toBeFocused();
   await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toHaveCount(0);
+
+  await editor.fill("Borrador conservado");
+  await page.keyboard.press("Meta+K");
+  const palette = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
+  await expect(palette).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", {
+    key: "k", code: "KeyK", metaKey: true, repeat: true, bubbles: true,
+  })));
+  await expect(palette).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue("Borrador conservado");
+
+  await page.keyboard.press("Meta+Shift+P");
+  await expect(page.getByRole("heading", { name: "Nuevo proyecto" })).toHaveCount(0);
 });
 
-test("Browser auto-open waits for the blocking surface to close", async ({ page }) => {
+test("resizing a desktop review beside a palette leaves a single modal owner", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const events = [
+    { type: "diff", value: "diff --git a/estado.txt b/estado.txt\n--- a/estado.txt\n+++ b/estado.txt\n@@ -1 +1 @@\n-Pendiente\n+Completado" },
+    { type: "delta", value: "## Resultado para redimensionar\n\nListo para revisar." },
+    { type: "done" },
+  ];
+  await page.route("**/api/chat", (route) => route.fulfill({
+    status: 200,
+    headers: { "Content-Type": "application/x-ndjson; charset=utf-8" },
+    body: `${events.map((event) => JSON.stringify(event)).join("\n")}\n`,
+  }));
+  await login(page);
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Prepara una revisión para redimensionar.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await expect(page.getByRole("heading", { name: "Resultado para redimensionar" })).toBeVisible();
+  await page.getByRole("button", { name: "Abrir cambios y resultados" }).click();
+  const review = page.locator('aside[aria-label="Cambios y resultados del turno"]');
+  await expect(review).toBeVisible();
+  await page.keyboard.press("Meta+K");
+  const palette = page.getByRole("dialog", { name: "Buscar proyectos y conversaciones" });
+  await expect(palette).toBeVisible();
+  await expect(page.locator('[aria-modal="true"]')).toHaveCount(1);
+
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await expect(review).toHaveCount(0);
+  await expect(palette).toBeVisible();
+  await expect(page.locator('[aria-modal="true"]')).toHaveCount(1);
+});
+
+test("compact Browser auto-open waits for blocking surfaces and active editing", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
   await page.addInitScript(() => {
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -186,6 +234,8 @@ test("Browser auto-open waits for the blocking surface to close", async ({ page 
   });
 
   let browserStatusRequests = 0;
+  let releaseBrowserStatus: () => void = () => undefined;
+  const browserStatusGate = new Promise<void>((resolve) => { releaseBrowserStatus = resolve; });
   await page.route("**/api/settings", (route) => route.fulfill({
     status: 200,
     contentType: "application/json",
@@ -200,8 +250,9 @@ test("Browser auto-open waits for the blocking surface to close", async ({ page 
       browser: {},
     }),
   }));
-  await page.route("**/api/runtime/browser", (route) => {
+  await page.route("**/api/runtime/browser", async (route) => {
     browserStatusRequests += 1;
+    await browserStatusGate;
     return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(readyBrowserStatus) });
   });
   await page.route("**/api/runtime/browser/token", (route) => route.fulfill({
@@ -239,11 +290,20 @@ test("Browser auto-open waits for the blocking surface to close", async ({ page 
 
   await page.keyboard.press("Escape");
   await expect(preferences).toBeHidden();
-  const browser = page.locator('aside[aria-label="Navegador"]');
-  await expect(browser).toBeVisible();
+  const editor = page.getByRole("textbox", { name: "Mensaje" });
+  await editor.focus();
+  await editor.fill("Borrador paralelo conservado");
   await expect.poll(() => browserStatusRequests).toBeGreaterThan(0);
+  releaseBrowserStatus();
+  const browser = page.locator('aside[aria-label="Navegador"]');
+  await page.waitForTimeout(250);
+  await expect(browser).toHaveCount(0);
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue("Borrador paralelo conservado");
+  await editor.evaluate((element) => (element as HTMLTextAreaElement).blur());
+  await expect(browser).toBeVisible();
   await expect(page.locator("[data-side-window=browser]")).toBeVisible();
-  await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(0);
+  await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
   await page.evaluate(() => (window as typeof window & { __finishBrowserDemand: () => void }).__finishBrowserDemand());
 });
 
@@ -468,6 +528,15 @@ test("desktop notification clicks never stack Task Center over a blocking surfac
   });
   await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeVisible();
   await expect(page.locator('[role="dialog"][aria-modal="true"]')).toHaveCount(1);
+  await page.evaluate(() => {
+    const notifications = (window as typeof window & { __syntheticNotifications: Array<{ onclick: (() => void) | null }> }).__syntheticNotifications;
+    notifications.at(-1)?.onclick?.();
+  });
+  await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeHidden();
+  await page.waitForTimeout(150);
+  await expect(page.getByRole("dialog", { name: "Centro de tareas" })).toBeHidden();
 });
 
 test("mobile completed responses expose only the copy action", async ({ page }) => {

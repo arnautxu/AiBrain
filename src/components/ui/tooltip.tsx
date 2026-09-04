@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip";
-import { motion, useMotionValue } from "framer-motion";
+import { motion, useMotionValue, useReducedMotion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { spring } from "@/lib/springs";
 import { fontWeights } from "@/lib/font-weight";
@@ -138,8 +138,10 @@ function Tooltip({
   const shape = useShape();
   const portalContainer = useContext(TooltipPortalContainerContext);
   const hasAmbientProvider = useContext(TooltipGroupContext);
+  const reduceMotion = useReducedMotion() ?? false;
 
   const slideOffset = getSlideOffset(side);
+  const effectiveFollowCursor = reduceMotion ? undefined : followCursor;
 
   // Cursor-follow offset from the trigger's center, driven as a motion value
   // so per-move updates skip React re-renders.
@@ -150,10 +152,10 @@ function Tooltip({
     if (forceOpen && followCursor) followOffset.set(0);
   }, [forceOpen, followCursor, followOffset]);
   const handleFollowMove = (event: React.PointerEvent) => {
-    if (!followCursor) return;
+    if (!effectiveFollowCursor) return;
     const rect = event.currentTarget.getBoundingClientRect();
     followOffset.set(
-      followCursor === "y"
+      effectiveFollowCursor === "y"
         ? event.clientY - (rect.top + rect.height / 2)
         : event.clientX - (rect.left + rect.width / 2)
     );
@@ -172,7 +174,7 @@ function Tooltip({
       <TooltipPrimitive.Trigger
         render={children}
         delay={delayDuration}
-        onPointerMove={followCursor ? handleFollowMove : undefined}
+        onPointerMove={effectiveFollowCursor ? handleFollowMove : undefined}
       />
       <TooltipPrimitive.Portal container={portalContainer ?? undefined}>
         <TooltipPrimitive.Positioner
@@ -204,9 +206,9 @@ function Tooltip({
                   {...rest}
                   style={{
                     ...(baseStyle as React.CSSProperties | undefined),
-                    ...(followCursor === "y"
+                    ...(effectiveFollowCursor === "y"
                       ? { y: followOffset }
-                      : followCursor === "x"
+                      : effectiveFollowCursor === "x"
                         ? { x: followOffset }
                         : {}),
                   }}
@@ -222,13 +224,17 @@ function Tooltip({
                       className
                     )}
                     style={{ fontVariationSettings: fontWeights.medium }}
-                    initial={{ opacity: 0, ...slideOffset }}
+                    initial={reduceMotion ? false : { opacity: 0, ...slideOffset }}
                     animate={
                       exiting
-                        ? { opacity: 0, ...slideOffset }
-                        : { opacity: 1, x: 0, y: 0 }
+                        ? reduceMotion
+                          ? { opacity: 0 }
+                          : { opacity: 0, ...slideOffset }
+                        : reduceMotion
+                          ? { opacity: 1 }
+                          : { opacity: 1, x: 0, y: 0 }
                     }
-                    transition={exiting ? spring.fast.exit : spring.fast}
+                    transition={reduceMotion ? { duration: 0 } : exiting ? spring.fast.exit : spring.fast}
                   >
                     {contentChildren}
                   </motion.div>

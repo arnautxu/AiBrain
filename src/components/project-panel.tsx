@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type RefObject } from "react";
+import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
   FileText,
@@ -22,6 +23,7 @@ import type {
 } from "@/workbench/types";
 import { workbenchProjectAccess } from "@/workbench/types";
 import { useModalFocus } from "@/ui/use-modal-focus";
+import { OverlayPresenceLayer } from "@/ui/overlay-presence";
 
 type ProjectPanelProps = {
   project: WorkbenchProject | null;
@@ -29,6 +31,7 @@ type ProjectPanelProps = {
   onClose: () => void;
   onSave: (patch: UpdateProjectInput) => Promise<boolean>;
   access?: Readonly<WorkbenchProjectAccess>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 };
 
 type Tab = "context" | "sources" | "people";
@@ -46,7 +49,7 @@ function sourceIcon(kind: ProjectSource["kind"]) {
   return kind === "file" ? <FileText size={15} /> : kind === "link" ? <LinkSimple size={15} /> : <Brain size={15} />;
 }
 
-export function ProjectPanel({ project, open, onClose, onSave, access: accessOverride }: ProjectPanelProps) {
+export function ProjectPanel({ project, open, onClose, onSave, access: accessOverride, returnFocusRef }: ProjectPanelProps) {
   const [tab, setTab] = useState<Tab>("context");
   const [instructions, setInstructions] = useState(project?.instructions ?? "");
   const [memoryEnabled, setMemoryEnabled] = useState(project?.memory.enabled ?? true);
@@ -67,9 +70,7 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
   const canManage = access.canManage;
   const modalRef = useModalFocus<HTMLDivElement>(open, () => {
     if (!busy) onClose();
-  }, closeButtonRef);
-
-  if (!open) return null;
+  }, closeButtonRef, returnFocusRef);
 
   const save = async () => {
     if (!project || !canEdit) return;
@@ -150,9 +151,9 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
     setNotice("Acceso registrado localmente. La aplicación todavía no envía invitaciones por correo.");
   };
 
-  return (
-    <div ref={modalRef} tabIndex={-1} className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      <aside className="workspace-panel panel-enter flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
+  return <AnimatePresence initial={false}>{open ? (
+    <OverlayPresenceLayer key="project-panel" origin="right" rootRef={modalRef} tabIndex={-1} className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
+      {(surfaceMotion) => <motion.aside {...surfaceMotion} className="workspace-panel flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
         <header className="safe-area-panel-header workspace-panel-header flex items-center gap-3 border-b border-[var(--border-subtle)]">
           <span className="grid size-9 place-items-center rounded-xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><Brain size={18} /></span>
           <div className="min-w-0 flex-1"><h2 className="workspace-panel-title truncate">{project?.name ?? "Proyecto"}</h2><p className="workspace-panel-subtitle">{canEdit ? "Contexto compartido por todas sus conversaciones" : "Consulta del contexto compartido · solo lectura"}</p></div>
@@ -204,7 +205,7 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
         </div>
 
         <footer className="safe-area-panel-footer border-t border-[var(--border-subtle)] pt-4"><div className="flex items-center gap-3"><p className="min-w-0 flex-1 text-[10px] text-[var(--text-muted)]" aria-live="polite">{notice ?? (!canEdit ? "No puedes modificar este proyecto." : !canManage ? "Puedes editar el contexto y las fuentes; la compartición corresponde al propietario." : null)}</p>{canEdit ? <button type="button" disabled={busy || !project} className="flex min-h-10 items-center gap-2 rounded-xl bg-[var(--brain-accent)] px-4 text-[12px] font-semibold text-[var(--brain-contrast)] disabled:opacity-50" onClick={() => void save()}>{busy ? <SpinnerGap size={14} className="animate-spin" /> : null}Guardar cambios</button> : null}</div></footer>
-      </aside>
-    </div>
-  );
+      </motion.aside>}
+    </OverlayPresenceLayer>
+  ) : null}</AnimatePresence>;
 }

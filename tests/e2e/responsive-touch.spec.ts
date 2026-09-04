@@ -25,12 +25,23 @@ for (const viewport of [{ width: 390, height: 844 }, { width: 844, height: 390 }
     await login(page);
 
     await expectTouchTarget(page.getByRole("button", { name: "Añadir al mensaje" }));
-    await expectTouchTarget(page.getByRole("button", { name: "Destino de la conversación" }));
+    if (viewport.width >= 480) {
+      await expectTouchTarget(page.getByRole("button", { name: "Destino de la conversación" }));
+    } else {
+      await expect(page.locator(".composer-landing .composer-destination")).toBeHidden();
+    }
     await expectTouchTarget(page.getByRole("button", { name: "Experiencia" }));
     await expectTouchTarget(page.getByRole("button", { name: "Dictar mensaje" }));
 
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Comprobar controles táctiles");
     await expectTouchTarget(page.getByRole("button", { name: "Enviar mensaje" }));
+
+    if (viewport.width < 768) {
+      await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+      await expect(page.getByRole("dialog", { name: "Navegación" })).toBeVisible();
+    }
+    await expectTouchTarget(page.getByRole("button", { name: /Contraer|Expandir/ }).first());
+    await expectTouchTarget(page.getByRole("button", { name: /Acciones de/ }).first());
   });
 }
 
@@ -71,6 +82,13 @@ test("long user content and its editor remain inside a 320px touch viewport", as
     }));
   }, longToken);
   await page.reload();
+
+  const composer = page.getByRole("textbox", { name: "Mensaje" });
+  await expect(composer).toBeVisible();
+  expect(
+    await composer.evaluate((element) => element.scrollHeight - element.clientHeight),
+    "the idle 320px composer must not clip its full placeholder",
+  ).toBeLessThanOrEqual(1);
 
   const message = page.locator("article.flex.justify-end").filter({ hasText: "https://example.test/" });
   await expect(message).toBeVisible();

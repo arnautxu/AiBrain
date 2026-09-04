@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CustomizationPanel } from "@/components/customization-panel";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -12,10 +13,39 @@ function usage(scope: "personal" | "company") { return { schemaVersion: 1, scope
 const archivedProject: WorkbenchProject = { id: "project-archived", name: "Fiscal 2025", slug: "fiscal-2025", status: "archived", pinned: false, instructions: "", sources: [], memory: { enabled: true, notes: "", updatedAt: null }, sharing: { visibility: "private", members: [] }, workspace: { id: "workspace-archived", label: "Fiscal 2025", hostType: "managed", status: "ready", isPrimary: true }, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" };
 const archivedThread: WorkbenchThread = { id: "thread-archived", projectId: "project-active", title: "Cierre de julio", status: "archived", pinned: false, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z", messages: [] };
 
+function CustomizationFocusHarness() {
+  const [open, setOpen] = useState(false);
+  const openerRef = useRef<HTMLButtonElement>(null);
+  return <>
+    <button ref={openerRef} type="button" onClick={() => setOpen(true)}>Abrir configuración</button>
+    <ThemeProvider>
+      <CustomizationPanel productName="Arnall AI" open={open} runtimeStatus={initialRuntimeStatus} returnFocusRef={openerRef} onClose={() => setOpen(false)} />
+    </ThemeProvider>
+  </>;
+}
+
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
+  it("returns focus to the stable opener while its exit is inert", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
+      ? new Response(JSON.stringify(settings(false)), { status: 200 })
+      : new Response(JSON.stringify(usage("personal")), { status: 200 })));
+    render(<CustomizationFocusHarness />);
+    const opener = screen.getByRole("button", { name: "Abrir configuración" });
+    opener.focus();
+    fireEvent.click(opener);
+    await screen.findByRole("dialog", { name: "Configuración de Arnall AI" });
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    const exiting = document.querySelector('[data-overlay-presence="exiting"]');
+    expect(exiting).toHaveAttribute("inert");
+    expect(exiting).toHaveAttribute("aria-hidden", "true");
+    expect(screen.queryByRole("dialog", { name: "Configuración de Arnall AI" })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
   it("keeps employee settings to theme, notifications and personal usage", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

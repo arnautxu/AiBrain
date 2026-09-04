@@ -168,7 +168,7 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       }
       response.setHeader("Content-Type", "text/html");
       if (requestPath === "/form") {
-        response.end(`<html><body style="height:3000px"><input id="entry"><button id="apply" onclick="document.querySelector('#out').textContent=document.querySelector('#entry').value">Apply</button><p id="out">empty</p><a href="/next">Next</a></body></html>`);
+        response.end(`<html><body style="height:3000px"><input id="entry"><button id="apply" onclick="document.querySelector('#out').textContent=document.querySelector('#entry').value">Apply</button><p id="out">empty</p><p>device-pixel-ratio:<span id="dpr"></span></p><a href="/next">Next</a><script>document.querySelector('#dpr').textContent=String(window.devicePixelRatio)</script></body></html>`);
         return;
       }
       response.end(`<html><body>${requestPath}</body></html>`);
@@ -213,6 +213,9 @@ describe.runIf(enabled)("real Chrome per-user isolation", () => {
       expect(contextA.roots.profile).not.toBe(contextB.roots.profile);
       await runtimeA.agentNavigate(THREAD_A, `${origin}/form`);
       await eventually(async () => (await runtimeA.readPage(THREAD_A)).text.includes("Apply"));
+      await expect(runtimeA.readPage(THREAD_A)).resolves.toMatchObject({
+        text: expect.stringContaining("device-pixel-ratio:1"),
+      });
       await runtimeA.agentType(THREAD_A, "#entry", "real-cdp-readback", true);
       await runtimeA.agentClick(THREAD_A, "#apply");
       await eventually(async () => (await runtimeA.readPage(THREAD_A)).text.includes("real-cdp-readback"));

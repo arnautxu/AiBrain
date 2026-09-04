@@ -2,7 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- authenticated blob URLs cannot be optimized by next/image. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent, MouseEvent, PointerEvent, WheelEvent } from "react";
+import type { ClipboardEvent, KeyboardEvent, PointerEvent, WheelEvent } from "react";
 import {
   ArrowClockwise,
   ArrowLeft,
@@ -29,13 +29,74 @@ import {
   ComputerUse,
   type ComputerStep,
 } from "@/components/assistant-ui/elements/computer-use";
+import { useModalFocus } from "@/ui/use-modal-focus";
 
 type ViewerMetrics = Readonly<{ fps: number; latencyMs: number; captureMs: number }>;
+type ViewerPointer = Readonly<{
+  displayX: number;
+  displayY: number;
+  relativeX: number;
+  relativeY: number;
+  remoteX: number;
+  remoteY: number;
+  pressed: boolean;
+}>;
+type HeldViewerPointer = {
+  pointerId: number;
+  start: ViewerPointer;
+  last: ViewerPointer;
+};
 
 function normalizedAddress(value: string) {
   const trimmed = value.trim();
   if (trimmed === "about:blank" || /^https?:\/\//iu.test(trimmed)) return trimmed;
   return `https://${trimmed}`;
+}
+
+function clamp(value: number, minimum: number, maximum: number) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function pointerPosition(
+  image: HTMLImageElement,
+  clientX: number,
+  clientY: number,
+  pressed: boolean,
+): ViewerPointer | null {
+  const bounds = image.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0 || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+  const displayX = clamp(clientX - bounds.left, 0, bounds.width);
+  const displayY = clamp(clientY - bounds.top, 0, bounds.height);
+  const relativeX = displayX / bounds.width;
+  const relativeY = displayY / bounds.height;
+  return {
+    displayX,
+    displayY,
+    relativeX,
+    relativeY,
+    remoteX: Math.round(relativeX * image.naturalWidth),
+    remoteY: Math.round(relativeY * image.naturalHeight),
+    pressed,
+  };
+}
+
+function mouseInput(
+  event: "mouseMoved" | "mousePressed" | "mouseReleased",
+  point: ViewerPointer,
+  button: "none" | "left",
+) {
+  return {
+    action: "input",
+    command: {
+      kind: "mouse",
+      event,
+      x: point.remoteX,
+      y: point.remoteY,
+      button,
+      buttons: event === "mouseReleased" ? 0 : button === "left" ? 1 : 0,
+      ...(event === "mousePressed" || event === "mouseReleased" ? { clickCount: 1 } : {}),
+    },
+  };
 }
 
 function wait(milliseconds: number, signal: AbortSignal) {
@@ -66,9 +127,10 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   const [address, setAddress] = useState("about:blank");
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [compactOverlay, setCompactOverlay] = useState(false);
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [metrics, setMetrics] = useState<ViewerMetrics | null>(null);
-  const [pointer, setPointer] = useState<{ x: number; y: number } | null>(null);
+  const [pointer, setPointer] = useState<ViewerPointer | null>(null);
   const [pointerTrail, setPointerTrail] = useState<ComputerStep[]>([]);
   const imageRef = useRef<HTMLImageElement>(null);
   const frameUrlRef = useRef<string | null>(null);
@@ -78,9 +140,17 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   const humanControlRef = useRef(false);
   const addressEditingRef = useRef(false);
   const lastPointerSentAtRef = useRef(0);
+  const heldPointerRef = useRef<HeldViewerPointer | null>(null);
+  const inputQueueRef = useRef<Promise<void>>(Promise.resolve());
   const frameTimesRef = useRef<number[]>([]);
   const lastMetricsAtRef = useRef(0);
   const pendingPaintRef = useRef<number | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined" && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
 
   const replaceFrame = useCallback((blob: Blob) => {
     const next = URL.createObjectURL(blob);
@@ -92,7 +162,6 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
   useEffect(() => () => {
     if (pendingPaintRef.current !== null) window.cancelAnimationFrame(pendingPaintRef.current);
     if (frameUrlRef.current) URL.revokeObjectURL(frameUrlRef.current);
-    if (humanControlRef.current) void controlBrowser("release").catch(() => undefined);
   }, []);
 
   useEffect(() => { viewerTokenRef.current = viewerToken; }, [viewerToken]);
@@ -275,55 +344,152 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     await runViewerCommand({ action: "history", direction });
   };
 
-  const clickFrame = async (event: MouseEvent<HTMLImageElement>) => {
-    const image = imageRef.current;
-    if (!image || !threadId) return;
-    const bounds = image.getBoundingClientRect();
-    const x = Math.round((event.clientX - bounds.left) * image.naturalWidth / bounds.width);
-    const y = Math.round((event.clientY - bounds.top) * image.naturalHeight / bounds.height);
-    const relativeX = (event.clientX - bounds.left) / bounds.width;
-    const relativeY = (event.clientY - bounds.top) / bounds.height;
-    setPointer({ x: relativeX, y: relativeY });
-    setPointerTrail((current) => [...current, {
-      id: `human-${Date.now()}`,
-      action: "click",
-      target: "Clic manual",
-      x: relativeX * 100,
-      y: relativeY * 100,
-    }].slice(-3));
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    try {
-      for (const pointerEvent of ["mousePressed", "mouseReleased"] as const) {
-        await sendBrowserViewerCommand(threadId, token.token, {
-          action: "input",
-          command: { kind: "mouse", event: pointerEvent, x, y, button: "left", clickCount: 1 },
-        });
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido enviar el clic.");
+  const enqueueViewerInput = useCallback((
+    command: Record<string, unknown>,
+    failureMessage: string,
+    acquireControl = true,
+    reportError = true,
+  ) => {
+    const operation = inputQueueRef.current.then(async () => {
+      if (!threadId) return;
+      const token = acquireControl
+        ? await ensureControl()
+        : humanControlRef.current && viewerTokenControlsRef.current
+          ? viewerTokenRef.current
+          : null;
+      if (!token) return;
+      await sendBrowserViewerCommand(threadId, token.token, command);
+    });
+    const settled = operation.catch((reason: unknown) => {
+      if (reportError) setError(reason instanceof Error ? reason.message : failureMessage);
+    });
+    inputQueueRef.current = settled;
+    return settled;
+  }, [ensureControl, threadId]);
+
+  const releaseHeldPointer = useCallback((options: {
+    pointerId?: number;
+    point?: ViewerPointer | null;
+    cancelled?: boolean;
+    updateUi?: boolean;
+    reportError?: boolean;
+  } = {}) => {
+    const held = heldPointerRef.current;
+    if (!held || (options.pointerId !== undefined && held.pointerId !== options.pointerId)) {
+      return inputQueueRef.current;
     }
+    const last = options.point ?? held.last;
+    const released = { ...last, pressed: false };
+    heldPointerRef.current = null;
+    if (options.updateUi !== false) setPointer(released);
+    if (!options.cancelled) {
+      const dragged = Math.hypot(
+        released.displayX - held.start.displayX,
+        released.displayY - held.start.displayY,
+      ) > 3;
+      setPointerTrail((current) => [...current, {
+        id: `human-${Date.now()}-${held.pointerId}`,
+        action: dragged ? "drag" : "click",
+        target: dragged ? "Arrastre manual" : "Clic manual",
+        x: released.relativeX * 100,
+        y: released.relativeY * 100,
+      }].slice(-3));
+    }
+    return enqueueViewerInput(
+      mouseInput("mouseReleased", released, "left"),
+      "No se ha podido soltar el puntero.",
+      true,
+      options.reportError,
+    );
+  }, [enqueueViewerInput]);
+
+  const relinquishControl = useCallback(async () => {
+    await releaseHeldPointer({ cancelled: true, updateUi: false, reportError: false });
+    await inputQueueRef.current;
+    const pendingTakeover = takeoverPromiseRef.current;
+    if (pendingTakeover) {
+      await pendingTakeover.catch(() => undefined);
+    }
+    await inputQueueRef.current;
+
+    // Decide only after pending acquisition/input work has settled. Clearing the
+    // refs before the request also makes overlapping cleanup paths idempotent.
+    const controlled = humanControlRef.current || viewerTokenControlsRef.current;
+    humanControlRef.current = false;
+    viewerTokenControlsRef.current = false;
+    if (!controlled) return null;
+    return controlBrowser("release").catch(() => null);
+  }, [releaseHeldPointer]);
+
+  useEffect(() => () => {
+    void relinquishControl();
+  }, [relinquishControl]);
+
+  useEffect(() => {
+    if (open) return;
+    const clearPointer = window.setTimeout(() => setPointer(null), 0);
+    void relinquishControl();
+    return () => window.clearTimeout(clearPointer);
+  }, [open, relinquishControl]);
+
+  const pressFrame = (event: PointerEvent<HTMLImageElement>) => {
+    if (!event.isPrimary || event.button !== 0 || heldPointerRef.current) return;
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, true);
+    if (!point) return;
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    heldPointerRef.current = { pointerId: event.pointerId, start: point, last: point };
+    lastPointerSentAtRef.current = 0;
+    setError(null);
+    setPointer(point);
+    void enqueueViewerInput(
+      mouseInput("mousePressed", point, "left"),
+      "No se ha podido presionar el puntero.",
+    );
   };
 
   const moveFrame = (event: PointerEvent<HTMLImageElement>) => {
-    if (!threadId || !humanControlRef.current || !viewerTokenRef.current || !viewerTokenControlsRef.current) return;
-    const image = imageRef.current;
-    if (!image) return;
-    const bounds = image.getBoundingClientRect();
-    const relativeX = (event.clientX - bounds.left) / bounds.width;
-    const relativeY = (event.clientY - bounds.top) / bounds.height;
-    setPointer({ x: relativeX, y: relativeY });
-    const now = Date.now();
+    if (!event.isPrimary) return;
+    const held = heldPointerRef.current;
+    if (held && held.pointerId !== event.pointerId) return;
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, Boolean(held));
+    if (!point) return;
+    setPointer(point);
+    if (held) held.last = point;
+
+    const now = performance.now();
     if (now - lastPointerSentAtRef.current < 80) return;
     lastPointerSentAtRef.current = now;
-    void sendBrowserViewerCommand(threadId, viewerTokenRef.current.token, {
-      action: "input",
-      command: {
-        kind: "mouse", event: "mouseMoved",
-        x: Math.round(relativeX * image.naturalWidth),
-        y: Math.round(relativeY * image.naturalHeight), button: "none",
-      },
-    }).catch(() => undefined);
+    void enqueueViewerInput(
+      mouseInput("mouseMoved", point, held ? "left" : "none"),
+      "No se ha podido mover el puntero.",
+      Boolean(held),
+    );
+  };
+
+  const releaseFrame = (event: PointerEvent<HTMLImageElement>) => {
+    const held = heldPointerRef.current;
+    if (!held || held.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, false);
+    void releaseHeldPointer({ pointerId: event.pointerId, point });
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const cancelFrame = (event: PointerEvent<HTMLImageElement>) => {
+    const held = heldPointerRef.current;
+    if (!held || held.pointerId !== event.pointerId) return;
+    void releaseHeldPointer({ pointerId: event.pointerId, cancelled: true });
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const loseFrameCapture = (event: PointerEvent<HTMLImageElement>) => {
+    void releaseHeldPointer({ pointerId: event.pointerId, cancelled: true });
   };
 
   const scrollFrame = async (event: WheelEvent<HTMLImageElement>) => {
@@ -331,9 +497,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const image = imageRef.current;
     if (!image || !threadId) return;
     const bounds = image.getBoundingClientRect();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    await sendBrowserViewerCommand(threadId, token.token, {
+    await enqueueViewerInput({
       action: "input",
       command: {
         kind: "mouse", event: "mouseWheel",
@@ -343,30 +507,22 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
         deltaX: Math.max(-100_000, Math.min(100_000, event.deltaX)),
         deltaY: Math.max(-100_000, Math.min(100_000, event.deltaY)),
       },
-    }).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "No se ha podido desplazar la página.");
-    });
+    }, "No se ha podido desplazar la página.");
   };
 
   const keyFrame = async (event: KeyboardEvent<HTMLImageElement>) => {
     if (!threadId || event.key.length > 128) return;
     event.preventDefault();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
     const modifiers = (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) |
       (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
-    try {
-      for (const keyEvent of ["keyDown", "keyUp"] as const) {
-        await sendBrowserViewerCommand(threadId, token.token, {
-          action: "input",
-          command: {
-            kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
-            ...(keyEvent === "keyDown" && event.key.length === 1 ? { text: event.key } : {}),
-          },
-        });
-      }
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "No se ha podido escribir en la página.");
+    for (const keyEvent of ["keyDown", "keyUp"] as const) {
+      await enqueueViewerInput({
+        action: "input",
+        command: {
+          kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
+          ...(keyEvent === "keyDown" && event.key.length === 1 ? { text: event.key } : {}),
+        },
+      }, "No se ha podido escribir en la página.");
     }
   };
 
@@ -374,38 +530,55 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
     const text = event.clipboardData.getData("text").slice(0, 4_096);
     if (!text || !threadId) return;
     event.preventDefault();
-    const token = await ensureControl().catch(() => null);
-    if (!token) return;
-    await sendBrowserViewerCommand(threadId, token.token, {
+    await enqueueViewerInput({
       action: "input", command: { kind: "key", event: "char", key: "Unidentified", text },
-    }).catch((reason: unknown) => {
-      setError(reason instanceof Error ? reason.message : "No se ha podido pegar el texto.");
-    });
+    }, "No se ha podido pegar el texto.");
   };
 
-  const closePanel = async () => {
-    humanControlRef.current = false;
-    if (status?.state.lifecycle === "human-control") {
-      const released = await controlBrowser("release").catch(() => null);
-      if (released) setStatus(released);
-    }
+  const closePanel = () => {
+    void relinquishControl();
+    const returnFocusTarget = returnFocusRef.current;
     setFullscreen(false);
     setPointer(null);
     setPointerTrail([]);
     onClose();
+    window.requestAnimationFrame(() => {
+      if (returnFocusTarget?.isConnected) returnFocusTarget.focus({ preventScroll: true });
+    });
   };
 
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia("(max-width: 1279px)");
+    const sync = () => setCompactOverlay(query.matches);
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
+
+  const panelRef = useModalFocus<HTMLElement>(
+    open && compactOverlay,
+    closePanel,
+    closeButtonRef,
+    returnFocusRef,
+  );
+
   const live = connection === "live";
-  const humanControl = status?.state.lifecycle === "human-control";
   const indicator = live
     ? metrics ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
     : connection === "reconnecting" ? "Reconectando" : "Conectando";
 
   return (
     <aside
+      ref={panelRef}
       data-side-window="browser"
       className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
       aria-label="Navegador"
+      aria-hidden={!open ? "true" : undefined}
+      aria-modal={open && compactOverlay ? "true" : undefined}
+      role={open && compactOverlay ? "dialog" : undefined}
+      tabIndex={open && compactOverlay ? -1 : undefined}
+      inert={!open ? true : undefined}
     >
       <header className="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--border)] bg-[var(--surface-raised)] px-2">
         <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
@@ -423,7 +596,7 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
         <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
           className={`mx-1 size-2 shrink-0 rounded-full ${live ? "bg-[var(--positive)]" : connection === "reconnecting" ? "bg-[var(--warning)] motion-safe:animate-pulse" : "bg-[var(--text-subtle)] motion-safe:animate-pulse"}`} role="status" />
         <button type="button" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
-        <button type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={() => void closePanel()}><X size={15} /></button>
+        <button ref={closeButtonRef} type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={closePanel}><X size={15} /></button>
       </header>
 
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9e9e7]">
@@ -432,17 +605,25 @@ export function BrowserPanel({ threadId, open, onClose, initialStatus = null }: 
             url={navigation.url}
             steps={pointerTrail}
             activeIndex={pointerTrail.length - 1}
-            cursor={humanControl && pointer ? { x: pointer.x * 100, y: pointer.y * 100 } : null}
+            cursor={pointer ? {
+              x: pointer.displayX,
+              y: pointer.displayY,
+              coordinateSpace: "pixel",
+              pressed: pointer.pressed,
+            } : null}
             showChrome={false}
             showStatus={false}
             className="inline-flex max-h-full w-auto max-w-full rounded-none border-0 bg-transparent dark:bg-transparent"
             viewportClassName="inline-flex min-h-0 max-h-full max-w-full border-0"
           >
             <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
-              onClick={(event) => void clickFrame(event)} onPointerMove={moveFrame}
+              draggable={false} onDragStart={(event) => event.preventDefault()}
+              onPointerDown={pressFrame} onPointerMove={moveFrame} onPointerUp={releaseFrame}
+              onPointerCancel={cancelFrame} onLostPointerCapture={loseFrameCapture}
+              onPointerLeave={() => { if (!heldPointerRef.current) setPointer(null); }}
               onWheel={(event) => void scrollFrame(event)} onKeyDown={(event) => void keyFrame(event)}
               onPaste={(event) => void pasteFrame(event)}
-              className="max-h-full max-w-full bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]" />
+              className={`${pointer ? "cursor-none" : ""} max-h-full max-w-full touch-none select-none bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]`} />
           </ComputerUse>
         ) : (
           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>

@@ -105,7 +105,7 @@ afterEach(async () => {
 });
 
 describe("LocalFileMemoryService", () => {
-  it("injects only confirmed governed memory for the current project and removes deleted memory", async () => {
+  it("injects only active governed memory for the current project and honors deletion plus restoration", async () => {
     const { config, service, contextA, contextB } = await fixture();
     const projectId = "00000000-0000-4000-8000-000000000011";
     const governed = new FileMemoryProposalStore({ config });
@@ -123,8 +123,10 @@ describe("LocalFileMemoryService", () => {
     const employeeB = await service.buildPromptSnapshot({ ...contextB, projectId }, { maxItems: 20, maxCharacters: 12_000 });
     expect(employeeB.memoryIds).toContain(companyMemory.memoryId);
     expect(employeeB.memoryIds).not.toContain(memory.memoryId);
-    await governed.delete(context, { memoryId: memory.memoryId, explicit: true, expectedRevision: 1, allowCompanyScope: false });
+    const deleted = await governed.delete(context, { memoryId: memory.memoryId, explicit: true, expectedRevision: 1, allowCompanyScope: false });
     expect((await service.buildPromptSnapshot(context, { maxItems: 20, maxCharacters: 12_000 })).memoryIds).not.toContain(memory.memoryId);
+    await governed.restore(context, { memoryId: memory.memoryId, explicit: true, expectedRevision: deleted.revision, allowCompanyScope: false });
+    expect((await service.buildPromptSnapshot(context, { maxItems: 20, maxCharacters: 12_000 })).memoryIds).toContain(memory.memoryId);
   });
 
   it("reads stable company context, indexed knowledge and only the authenticated employee profile", async () => {
