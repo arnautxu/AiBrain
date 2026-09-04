@@ -4,6 +4,31 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 
 test("plus, chat drop and paste keep image attachments in the unsent draft", async ({ page, baseURL }) => {
+  await page.route("**/api/runtime/status**", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({
+      tenantId: "example-lab-dev",
+      projectId: null,
+      projectName: "Example Laboratory",
+      mode: "demo",
+      codex: "disabled",
+      isolated: false,
+      ready: true,
+      authMode: null,
+      planType: null,
+      processWarm: true,
+      rateLimit: null,
+      usage: null,
+      workspaceName: "workspace",
+      model: null,
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      models: [],
+      skills: [],
+      capabilities: { webSearch: false, imageInput: true, imageGeneration: false },
+    }),
+  }));
   const login = await page.request.post("/api/auth/login", { headers: { Origin: new URL(baseURL!).origin }, data: { userId: "example-user" } });
   expect(login.status()).toBe(200);
   await page.goto("/");
@@ -44,6 +69,14 @@ test("plus, chat drop and paste keep image attachments in the unsent draft", asy
   await expect(page.getByText("Destino oficial")).toHaveCount(0);
   await composer.getByRole("button", { name: "Quitar drop.png" }).click();
   await expect(composer.getByRole("img", { name: "Vista previa de drop.png" })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mobileSelector = page.getByLabel("Seleccionar archivos para adjuntar");
+  await expect(mobileSelector).toBeAttached();
+  await expect(mobileSelector).toBeEnabled();
+  await mobileSelector.setInputFiles({ name: "mobile-selector.png", mimeType: "image/png", buffer: png });
+  await expect(composer.getByRole("img", { name: "Vista previa de mobile-selector.png" })).toBeVisible();
+  expect(sends).toBe(0);
+  expect(publications).toBe(0);
   if (process.env.AIBRAIN_FILES_EVIDENCE_DIR) {
     const evidence = process.env.AIBRAIN_FILES_EVIDENCE_DIR;
     await mkdir(evidence, { recursive: true });
@@ -51,7 +84,6 @@ test("plus, chat drop and paste keep image attachments in the unsent draft", asy
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
     await page.screenshot({ path: path.join(evidence, "draft-desktop-dark.png") });
-    await page.setViewportSize({ width: 390, height: 844 });
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({ path: path.join(evidence, "draft-mobile-dark.png") });
     await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();

@@ -110,7 +110,13 @@ type BrowserServiceState = {
   config: Readonly<InstallationConfig>;
   registry: BrowserRuntimeRegistry;
   tokens: BrowserGatewayTokenService;
-  viewerStreams: Map<string, AbortController>;
+  viewerStreams: Map<string, ViewerStreamLease | AbortController>;
+};
+
+type ViewerStreamLease = {
+  controller: AbortController;
+  burstUntil: number;
+  wake: (() => void) | null;
 };
 
 const browserGlobal = globalThis as typeof globalThis & {
@@ -157,7 +163,10 @@ async function serviceState(): Promise<BrowserServiceState> {
   const initialize = (async () => {
     const replaced = browserGlobal.__aibrainBrowserRuntimeService;
     if (replaced) {
-      for (const controller of replaced.viewerStreams?.values() ?? []) controller.abort();
+      for (const stream of replaced.viewerStreams?.values() ?? []) {
+        if (stream instanceof AbortController) stream.abort();
+        else stream.controller.abort();
+      }
       replaced.viewerStreams?.clear();
       await replaced.registry.close();
     }
@@ -442,17 +451,27 @@ export type BrowserFrameStreamEvent = Readonly<{
   data: Uint8Array;
 }>;
 
-function waitForNextFrame(milliseconds: number, signal: AbortSignal) {
+function waitForNextFrame(milliseconds: number, stream: ViewerStreamLease) {
+  const signal = stream.controller.signal;
   if (signal.aborted || milliseconds <= 0) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const timer = setTimeout(finish, milliseconds);
     function finish() {
       clearTimeout(timer);
       signal.removeEventListener("abort", finish);
+      if (stream.wake === finish) stream.wake = null;
       resolve();
     }
+    stream.wake = finish;
     signal.addEventListener("abort", finish, { once: true });
   });
+}
+
+function wakeViewerStream(state: BrowserServiceState, userId: string, threadId: string, burstMs: number) {
+  const stream = state.viewerStreams.get(`${userId}:${threadId}`);
+  if (!stream || stream instanceof AbortController) return;
+  stream.burstUntil = Math.max(stream.burstUntil, Date.now() + burstMs);
+  stream.wake?.();
 }
 
 /**
@@ -467,19 +486,23 @@ export async function* streamBrowserFrames(input: {
   token: string;
   signal: AbortSignal;
   frameIntervalMs?: number;
+  idleFrameIntervalMs?: number;
   heartbeatIntervalMs?: number;
   maximumDurationMs?: number;
 }): AsyncGenerator<BrowserFrameStreamEvent> {
   const state = await authorizeGateway({ ...input, capability: "view" });
   const streamKey = `${input.userId}:${input.threadId}`;
   const streamController = new AbortController();
+  const stream: ViewerStreamLease = { controller: streamController, burstUntil: Date.now() + 1_500, wake: null };
   const previousStream = state.viewerStreams.get(streamKey);
-  state.viewerStreams.set(streamKey, streamController);
-  previousStream?.abort();
+  state.viewerStreams.set(streamKey, stream);
+  if (previousStream instanceof AbortController) previousStream.abort();
+  else previousStream?.controller.abort();
   const detach = () => streamController.abort();
   input.signal.addEventListener("abort", detach, { once: true });
   if (input.signal.aborted) detach();
   const frameIntervalMs = Math.max(100, Math.min(1_000, input.frameIntervalMs ?? 100));
+  const idleFrameIntervalMs = Math.max(frameIntervalMs, Math.min(2_000, input.idleFrameIntervalMs ?? 500));
   const heartbeatIntervalMs = Math.max(1_000, Math.min(10_000, input.heartbeatIntervalMs ?? 2_500));
   const maximumDurationMs = Math.max(1_000, Math.min(25_000, input.maximumDurationMs ?? 20_000));
   const deadline = Date.now() + maximumDurationMs;
@@ -529,16 +552,14 @@ export async function* streamBrowserFrames(input: {
           data: new Uint8Array(0),
         });
       }
-      await waitForNextFrame(
-        frameIntervalMs - (Date.now() - captureStartedAt),
-        streamController.signal,
-      );
+      const targetIntervalMs = Date.now() < stream.burstUntil ? frameIntervalMs : idleFrameIntervalMs;
+      await waitForNextFrame(targetIntervalMs - (Date.now() - captureStartedAt), stream);
     }
   } catch (error) {
     if (!streamController.signal.aborted) throw error;
   } finally {
     input.signal.removeEventListener("abort", detach);
-    if (state.viewerStreams.get(streamKey) === streamController) {
+    if (state.viewerStreams.get(streamKey) === stream) {
       state.viewerStreams.delete(streamKey);
     }
   }
@@ -610,6 +631,12 @@ export async function sendBrowserViewerCommand(input: {
     }
     if (command.action !== "inputs") actions.push(command);
   } finally {
+    wakeViewerStream(
+      state,
+      input.userId,
+      input.threadId,
+      command.action === "navigate" ? 5_000 : command.action === "history" ? 3_000 : 1_500,
+    );
     // Preserve the confirmed prefix even if a later batch input has an uncertain
     // result. Audit carries no text or coordinates and never replays a mutation.
     for (const command of actions) {

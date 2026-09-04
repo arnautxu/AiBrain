@@ -890,11 +890,11 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "done" });
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
-      item: expect.objectContaining({ label: "Preparant el context", status: "running" }),
+      item: expect.objectContaining({ label: "Preparando el contexto", status: "running" }),
     }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
-      item: expect.objectContaining({ label: "Preparant el resum del raonament" }),
+      item: expect.objectContaining({ label: "Preparando el resumen del razonamiento" }),
     }));
     expect(events).toContainEqual(expect.objectContaining({
       type: "activity",
@@ -905,6 +905,7 @@ describe("worker Codex turn", () => {
       item: expect.objectContaining({ kind: "reasoning", detail: "Resum final verificat" }),
     }));
     expect(events.filter((event) => event.type === "content")).toEqual([]);
+    expect(JSON.stringify(events)).not.toMatch(/Preparant (?:el context|l.assistent|el resum)|Assistent preparat|L.assistent|Esperant activitat de l.assistent/u);
     expect(JSON.stringify(events)).not.toMatch(/private reasoning must not be exposed|\*\*|Codex|AiBrain|\/var\/lib|company-qa|fc71a2c4/iu);
     expect(mocked.maintenanceReleases).toBe(1);
   });
@@ -1144,7 +1145,7 @@ describe("worker Codex turn", () => {
       type: "activity",
       item: expect.objectContaining({
         id: "runtime-turn-recovery",
-        label: "Torn recuperat",
+        label: "Tarea recuperada",
         status: "complete",
       }),
     }));

@@ -1,6 +1,6 @@
 # Browser interaction transport
 
-The authenticated browser panel uses bounded HTTP input requests and a changed-frame PNG stream. The default capture interval is 100 ms (at most 10 changed frames per second); it is not a full remote desktop or a 60 FPS browser. The 20-second stream lifetime stays below the short-lived viewer token lifetime. It is a renewal boundary, not a fixed delay before accepting input.
+The authenticated browser panel uses bounded HTTP input requests and a changed-frame PNG stream. Capture is adaptive: deliberate input wakes the stream immediately and opens a 100 ms burst (at most 10 changed frames per second), while an idle page falls back to 500 ms captures so unchanged PNG encoding does not continuously compete with input. It is not a full remote desktop or a 60 FPS browser. The 20-second stream lifetime stays below the short-lived viewer token lifetime. It is a renewal boundary, not a fixed delay before accepting input.
 
 ## Input and paint behavior
 
@@ -9,6 +9,8 @@ The authenticated browser panel uses bounded HTTP input requests and a changed-f
 - Unsent adjacent pointer moves keep the latest position. Unsent adjacent wheel events accumulate their deltas, including line/page unit conversion. Keys, click transitions and navigation are ordering barriers. Already dispatched events are never replaced.
 - URL/history controls display a pending state immediately. This is feedback, not evidence of remote paint completion.
 - Stream EOF renews the viewer token and lets the React effect open exactly one replacement stream. Responses prohibit cache/transformation and request identity encoding; the existing proxy-buffering opt-out remains.
+- Keyboard ownership follows the last deliberately used surface. A viewport pointer event claims the remote keyboard lane even when native automation leaves DOM focus on the outer address field; focusing browser chrome releases it. This keeps address editing local and sends subsequent viewport keys/paste exactly once.
+- Automatic presentation waits for a completed browser tool result, and the connection indicator becomes live only after the first streamed image has loaded. Tool-start activity alone is not viewer readiness.
 - A newly committing Chrome target can temporarily lack a screenshot surface. That read retries briefly without destroying the target or replaying navigation. Screenshot and input operations retain the exclusive CDP lane; concurrent capture was rejected after real-Chromium races.
 
 ## State and authorization
