@@ -35,6 +35,34 @@ const hasToolchain = [tools.soffice, tools.pdfinfo, tools.pdftoppm, tools.pdftot
 const runFullMatrix = hasToolchain && process.env.AIBRAIN_REAL_DOCUMENT_MATRIX === "1";
 const roots: string[] = [];
 
+it.skipIf(!hasToolchain || !tools.qpdf)("repairs the exact legacy hello-world PDF without changing source bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-legacy-pdf-"));
+  roots.push(root);
+  const data = await readFile(path.join(process.cwd(), "tests/fixtures/legacy-recoverable.pdf"));
+  expect(data.length).toBe(435);
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
+  const stagingRoot = path.join(root, "staging");
+  const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+    threadId: "11111111-1111-4111-8111-111111111111",
+    uploadId: "22222222-2222-4222-8222-222222222222",
+    validated: validateUploadedDocument({ fileName: "hello-world.pdf", declaredMimeType: "application/pdf", data }),
+    data,
+  });
+  const previews = new DocumentPreviewService({ stagingRoot, previewRoot: path.join(root, "previews"), lockManager: locks, tools, requireQpdf: true });
+  const preview = await previews.create(staged);
+  expect(preview).toMatchObject({ status: "ready", pages: 1 });
+  const normalized = await previews.readFile(staged.threadId, staged.uploadId, "document.pdf");
+  expect(normalized.equals(data)).toBe(false);
+  expect((await readFile(path.join(stagingRoot, staged.relativePath))).equals(data)).toBe(true);
+  const pdfPath = path.join(root, "normalized.pdf");
+  await writeFile(pdfPath, normalized, { mode: 0o600 });
+  await run(tools.qpdf!, ["--check", pdfPath], { timeout: 15_000 });
+  const extracted = await run(tools.pdftotext, [pdfPath, "-"], { timeout: 15_000 });
+  expect(extracted.stdout.toLowerCase()).toContain("hello world");
+  expect((await previews.readFile(staged.threadId, staged.uploadId, "page-1.png")).subarray(0, 8))
+    .toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+});
+
 function isolatedLibreOfficeProfile(root: string, name: string): string {
   return `-env:UserInstallation=file://${path.join(root, name)}`;
 }

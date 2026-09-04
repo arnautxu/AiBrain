@@ -182,6 +182,19 @@ describe("workspace file preview route", () => {
     expect(malformed.status).toBe(415);
   });
 
+  it("repairs the private legacy PDF preview while downloading the exact original", async () => {
+    const original = Buffer.from("%PDF-1.4\nlegacy source without xref\n%%EOF\n");
+    mocks.readRegularFileWithin.mockResolvedValue(original);
+    const preview = await GET(request("hello-world.pdf", true), { params: Promise.resolve({ projectId }) });
+    expect(preview.status).toBe(200);
+    expect(await preview.text()).toBe("%PDF-1.7\nconverted");
+    expect(mocks.prepareWorkspaceDocumentPreview).toHaveBeenCalledWith(expect.objectContaining({ data: original, relativePath: "hello-world.pdf" }));
+    mocks.prepareWorkspaceDocumentPreview.mockClear();
+    const download = await GET(request("hello-world.pdf", true, true), { params: Promise.resolve({ projectId }) });
+    expect(Buffer.from(await download.arrayBuffer()).equals(original)).toBe(true);
+    expect(mocks.prepareWorkspaceDocumentPreview).not.toHaveBeenCalled();
+  });
+
   it("validates Office files and serves a converted private PDF representation instead of binary text", async () => {
     const docx = officeZip("word/document.xml");
     mocks.readRegularFileWithin.mockResolvedValue(docx);

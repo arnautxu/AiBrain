@@ -423,6 +423,16 @@ export class DocumentPreviewService {
             pdfPath = path.join(work, "input.pdf");
           }
           if (this.tools.qpdf) {
+            if (document.kind === "pdf") {
+              // Recover structural warnings into a separate representation.
+              // Fatal parsing errors still fail; the resulting file must pass
+              // a strict check below. The staged/workspace source is untouched.
+              const normalizedPdfPath = path.join(work, "normalized.pdf");
+              await this.runner.run(this.tools.qpdf, ["--warning-exit-0", pdfPath, normalizedPdfPath], {
+                cwd: work, env: environment, timeoutMs: 15_000, signal: options.signal,
+              });
+              pdfPath = normalizedPdfPath;
+            }
             await this.runner.run(this.tools.qpdf, ["--check", pdfPath], {
               cwd: work, env: environment, timeoutMs: 15_000, signal: options.signal,
             });
