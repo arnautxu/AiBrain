@@ -8,6 +8,7 @@ import type {
   BrowserFrame,
   BrowserInputCommand,
   BrowserViewerHistoryAction,
+  BrowserViewerControlBinding,
   InteractiveManagedBrowserRuntime,
   ManagedBrowserRuntime,
 } from "@/runtime/browser/types";
@@ -120,6 +121,9 @@ export class BrowserRuntimeRegistry {
   private readonly entries = new Map<string, Entry>();
   private readonly owners = new WeakMap<object, string>();
   private closed = false;
+  private readonly viewerOwners = new Map<string, BrowserViewerControlBinding>();
+  private readonly viewerControlTails = new Map<string, Promise<void>>();
+  private readonly viewerControlPending = new Map<string, number>();
 
   constructor(options: BrowserRuntimeRegistryOptions) {
     this.store = options.store;
@@ -170,6 +174,48 @@ export class BrowserRuntimeRegistry {
     await this.recoverExpired(userId);
     const handle = this.requireHandle(userId);
     return this.store.heartbeat(userId, handle.browserSessionId, controller);
+  }
+
+  /** Fences late attachment cleanup, including cleanup after a newer takeover. */
+  async controlViewer(userId: string, action: "takeover" | "release" | "heartbeat", binding: BrowserViewerControlBinding) {
+    validateWorkerUserId(userId);
+    validateBrowserThreadId(binding.attachmentId);
+    validateBrowserThreadId(binding.browserSessionId);
+    const pending = this.viewerControlPending.get(userId) ?? 0;
+    if (pending >= 32) throw new BrowserRegistryBackpressureError(250);
+    this.viewerControlPending.set(userId, pending + 1);
+    const previous = this.viewerControlTails.get(userId) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const tail = previous.catch(() => undefined).then(() => gate);
+    this.viewerControlTails.set(userId, tail);
+    await previous.catch(() => undefined);
+    try {
+      const current = await this.recoverExpired(userId);
+      const owner = this.viewerOwners.get(userId);
+      if (current.browserSessionId !== binding.browserSessionId ||
+        (action !== "takeover" && (owner?.attachmentId !== binding.attachmentId ||
+          owner.browserSessionId !== binding.browserSessionId))) {
+        // Stale cleanup is an idempotent no-op, never a release of a successor.
+        if (action === "release") return current;
+        throw new Error("Browser control attachment is no longer current.");
+      }
+      if (action === "takeover") {
+        const controlled = await this.takeOver(userId);
+        this.viewerOwners.set(userId, binding);
+        return controlled;
+      }
+      if (action === "heartbeat") return await this.heartbeat(userId, "human");
+      const ready = await this.releaseTakeover(userId);
+      this.viewerOwners.delete(userId);
+      return ready;
+    } finally {
+      release();
+      const remaining = (this.viewerControlPending.get(userId) ?? 1) - 1;
+      if (remaining === 0) this.viewerControlPending.delete(userId);
+      else this.viewerControlPending.set(userId, remaining);
+      if (this.viewerControlTails.get(userId) === tail) this.viewerControlTails.delete(userId);
+    }
   }
 
   async takeOver(userId: string) {
@@ -499,6 +545,7 @@ export class BrowserRuntimeRegistry {
       await this.store.markDegraded(userId, handle.browserSessionId).catch(() => undefined);
       throw error;
     } finally {
+      this.viewerOwners.delete(userId);
       entry.runtime = null;
       entry.handle = null;
     }

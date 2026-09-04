@@ -102,6 +102,110 @@ afterEach(() => {
 });
 
 describe("BrowserPanel", () => {
+  it("keeps rapid click, exact typing, paste and scroll ordered while takeover is pending", async () => {
+    let takeOver!: (value: unknown) => void;
+    browser.control.mockImplementation((action: string) => action === "takeover"
+      ? new Promise((resolve) => { takeOver = resolve; })
+      : Promise.resolve(readyStatus));
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    Object.defineProperties(image, {
+      naturalWidth: { value: 1440 }, naturalHeight: { value: 900 },
+      setPointerCapture: { value: vi.fn() }, releasePointerCapture: { value: vi.fn() },
+      hasPointerCapture: { value: () => true },
+    });
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 720, bottom: 450, width: 720, height: 450,
+      toJSON: () => ({}),
+    });
+    fireEvent.pointerDown(image, { pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: 20 });
+    fireEvent.pointerUp(image, { pointerId: 1, isPrimary: true, button: 0, clientX: 10, clientY: 20 });
+    fireEvent.keyDown(image, { key: "H", code: "KeyH", shiftKey: true });
+    fireEvent.keyDown(image, { key: "i", code: "KeyI" });
+    fireEvent.paste(image, { clipboardData: { getData: () => " català 👋" } });
+    fireEvent.wheel(image, { clientX: 10, clientY: 20, deltaY: 137 });
+    await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
+    expect(browser.send).not.toHaveBeenCalled();
+    await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(8));
+    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    expect(commands.map((command) => command.event)).toEqual([
+      "mousePressed", "mouseReleased", "keyDown", "keyUp", "keyDown", "keyUp", "char", "mouseWheel",
+    ]);
+    expect(commands.filter((command) => command.text).map((command) => command.text).join("")).toBe("Hi català 👋");
+    expect(commands[7].deltaY).toBe(137);
+    expect(image).toHaveFocus();
+  });
+
+  it("does not send queued input into either thread after switching during takeover", async () => {
+    let takeOver!: (value: unknown) => void;
+    browser.control.mockImplementation((action: string) => action === "takeover"
+      ? new Promise((resolve) => { takeOver = resolve; })
+      : Promise.resolve(readyStatus));
+    const view = render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.control).toHaveBeenCalledTimes(1));
+    const otherThread = "0198b9f0-6631-7000-8000-000000000613";
+    view.rerender(<BrowserPanel threadId={otherThread} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    expect(screen.queryByAltText("Vista actual del navegador privado")).not.toBeInTheDocument();
+    await act(async () => takeOver({ ...readyStatus, state: { ...readyStatus.state, lifecycle: "human-control", controller: "human" } }));
+    await screen.findByAltText("Vista actual del navegador privado");
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(browser.issue.mock.calls.at(-1)?.[0]).toBe(otherThread);
+    expect(browser.control).toHaveBeenCalledWith("release", undefined, browser.control.mock.calls[0][2]);
+  });
+
+  it("never retries an uncertain input or dispatches the dependent queued text", async () => {
+    let rejectInput!: (reason: Error) => void;
+    browser.send.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectInput = reject; }));
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(1));
+    await act(async () => rejectInput(new Error("Resultado indeterminado")));
+    expect(browser.send).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Revisa la página|indeterminado/);
+  });
+
+  it("renews aged control tokens before new input without replaying mutations", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    const issued = browser.issue.mock.calls.length;
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 26_000);
+    fireEvent.keyDown(image, { key: "b", code: "KeyB" });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(4));
+    expect(browser.issue.mock.calls.length).toBeGreaterThan(issued);
+  });
+
+  it("does not carry pending text across a rotated browser session", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    browser.issue.mockResolvedValue({ token: "rotated-token", browserSessionId: "0198b9f0-6631-7000-8000-000000000614" });
+    fireEvent.keyDown(image, { key: "a", code: "KeyA" });
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("La sesión ha cambiado"));
+    expect(browser.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps shortcuts out of text and routes local paste exactly once", async () => {
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.keyDown(image, { key: "a", code: "KeyA", ctrlKey: true });
+    fireEvent.keyDown(image, { key: "v", code: "KeyV", ctrlKey: true });
+    fireEvent.paste(image, { clipboardData: { getData: () => "exact paste" } });
+    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(3));
+    const commands = browser.send.mock.calls.map((call) => call[2].command);
+    expect(commands.map((command) => command.event)).toEqual(["keyDown", "keyUp", "char"]);
+    expect(commands[0]).toMatchObject({ key: "a", modifiers: 2 });
+    expect(commands[0].text).toBeUndefined();
+    expect(commands[2].text).toBe("exact paste");
+  });
+
   it("uses a minimal browser header and keeps the rest for the direct viewport", async () => {
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     expect(screen.getByText("Navegador")).toBeInTheDocument();
@@ -154,7 +258,7 @@ describe("BrowserPanel", () => {
     expect(cursor).toHaveStyle({ transform: "translate3d(540px, 315px, 0) scale(1)" });
     expect(releasePointerCapture).toHaveBeenCalledWith(7);
 
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover"));
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
     await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(3));
     expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual([
       "mousePressed", "mouseMoved", "mouseReleased",
@@ -171,7 +275,8 @@ describe("BrowserPanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Cerrar navegador" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release"));
+    expect(browser.control).toHaveBeenCalledWith("release", undefined,
+      expect.objectContaining({ browserSessionId: SESSION_ID }));
     expect(browser.control).not.toHaveBeenCalledWith("stop");
     view.rerender(<BrowserPanel threadId={THREAD_ID} open={false} onClose={onClose} initialStatus={readyStatus} />);
     view.rerender(<BrowserPanel threadId={THREAD_ID} open onClose={onClose} initialStatus={readyStatus} />);
@@ -209,10 +314,10 @@ describe("BrowserPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cerrar navegador" }));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(browser.send).toHaveBeenCalledTimes(2);
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release"));
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
   });
 
-  it("releases a held pointer before relinquishing browser control on close", async () => {
+  it("cancels a held pointer before its queued press dispatches on close", async () => {
     const onClose = vi.fn();
     render(<BrowserPanel threadId={THREAD_ID} open onClose={onClose} initialStatus={readyStatus} />);
     const image = await screen.findByAltText("Vista actual del navegador privado");
@@ -232,14 +337,9 @@ describe("BrowserPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cerrar navegador" }));
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
-    await waitFor(() => expect(browser.send).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release"));
-    expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual(["mousePressed", "mouseReleased"]);
-    const releaseControlIndex = browser.control.mock.calls.findIndex(([action]) => action === "release");
-    expect(releaseControlIndex).toBeGreaterThanOrEqual(0);
-    expect(browser.send.mock.invocationCallOrder[1]).toBeLessThan(
-      browser.control.mock.invocationCallOrder[releaseControlIndex] as number,
-    );
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(browser.control).not.toHaveBeenCalledWith("takeover", undefined,
+      expect.objectContaining({ browserSessionId: SESSION_ID }));
   });
 
   it("releases control after a takeover that resolves during unmount", async () => {
@@ -270,23 +370,18 @@ describe("BrowserPanel", () => {
     });
 
     fireEvent.pointerDown(image, { pointerId: 13, isPrimary: true, button: 0, clientX: 240, clientY: 180 });
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover"));
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
     view.unmount();
-    expect(browser.control).not.toHaveBeenCalledWith("release");
+    expect(browser.control).not.toHaveBeenCalledWith("release", undefined, expect.objectContaining({ browserSessionId: SESSION_ID }));
 
     await act(async () => { resolveTakeover(humanStatus); });
 
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release"));
-    expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual([
-      "mousePressed", "mouseReleased",
-    ]);
-    const releaseControlIndex = browser.control.mock.calls.findIndex(([action]) => action === "release");
-    expect(browser.send.mock.invocationCallOrder[1]).toBeLessThan(
-      browser.control.mock.invocationCallOrder[releaseControlIndex] as number,
-    );
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(browser.control).toHaveBeenCalledWith("release", undefined, browser.control.mock.calls[0][2]);
   });
 
-  it("closes immediately while a pending takeover drains and releases in the background", async () => {
+  it("closes immediately and cancels pending pointer input while scoped takeover releases in the background", async () => {
     vi.stubGlobal("matchMedia", matchMediaStub(true));
     let resolveTakeover!: (value: unknown) => void;
     const humanStatus = {
@@ -318,23 +413,18 @@ describe("BrowserPanel", () => {
     });
 
     fireEvent.pointerDown(image, { pointerId: 17, isPrimary: true, button: 0, clientX: 240, clientY: 180 });
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover"));
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("takeover", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
     fireEvent.click(screen.getByRole("button", { name: "Cerrar navegador" }));
 
     expect(onClose).toHaveBeenCalledOnce();
     expect(document.querySelector('[data-side-window="browser"]')).toHaveAttribute("aria-hidden", "true");
-    expect(browser.control).not.toHaveBeenCalledWith("release");
+    expect(browser.control).not.toHaveBeenCalledWith("release", undefined, expect.objectContaining({ browserSessionId: SESSION_ID }));
 
     await act(async () => { resolveTakeover(humanStatus); });
 
-    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release"));
-    expect(browser.send.mock.calls.map((call) => call[2].command.event)).toEqual([
-      "mousePressed", "mouseReleased",
-    ]);
-    const releaseControlIndex = browser.control.mock.calls.findIndex(([action]) => action === "release");
-    expect(browser.send.mock.invocationCallOrder[1]).toBeLessThan(
-      browser.control.mock.invocationCallOrder[releaseControlIndex] as number,
-    );
+    await waitFor(() => expect(browser.control).toHaveBeenCalledWith("release", undefined, expect.objectContaining({ browserSessionId: SESSION_ID })));
+    expect(browser.send).not.toHaveBeenCalled();
+    expect(browser.control).toHaveBeenCalledWith("release", undefined, browser.control.mock.calls[0][2]);
   });
 
   it("acts as a compact modal, traps focus, closes with Escape, and returns focus", async () => {
@@ -373,8 +463,11 @@ describe("BrowserPanel", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     await waitFor(() => expect(opener).toHaveFocus());
-    expect(dialog).toHaveAttribute("aria-hidden", "true");
-    expect(dialog).toHaveAttribute("inert");
+    // Closing retires the attachment rather than retaining its DOM and tokens.
+    expect(dialog).not.toBeInTheDocument();
+    const closedPanel = document.querySelector('[data-side-window="browser"]');
+    expect(closedPanel).toHaveAttribute("aria-hidden", "true");
+    expect(closedPanel).toHaveAttribute("inert");
     opener.remove();
   });
 

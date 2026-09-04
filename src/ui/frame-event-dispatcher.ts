@@ -20,8 +20,6 @@ const browserScheduler: FrameScheduler = {
 
 /** A backgrounded or congested tab must not hold visible text indefinitely. */
 export const CHAT_DELTA_MAX_BATCH_WAIT_MS = 48;
-export const CHAT_DELTA_REVEAL_TARGET_FRAMES = 16;
-export const CHAT_DELTA_IMMEDIATE_CHARACTERS = 12;
 
 export function createChatEventFrameDispatcher(
   onEvent: (event: ChatStreamEvent) => void,
@@ -29,7 +27,6 @@ export function createChatEventFrameDispatcher(
   options: FrameDispatcherOptions = {},
 ) {
   let pendingDelta = "";
-  let revealCharactersPerFrame = 0;
   let frame: number | null = null;
   let fallback: ReturnType<typeof setTimeout> | null = null;
   let firstDeltaApplied = false;
@@ -48,65 +45,33 @@ export function createChatEventFrameDispatcher(
     options.onEventApplied?.(event);
   };
 
-  const takeVisibleDelta = () => {
-    const characters = Array.from(pendingDelta);
-    if (characters.length <= CHAT_DELTA_IMMEDIATE_CHARACTERS) {
-      pendingDelta = "";
-      revealCharactersPerFrame = 0;
-      return characters.join("");
-    }
-    revealCharactersPerFrame = Math.max(
-      revealCharactersPerFrame,
-      Math.ceil(characters.length / CHAT_DELTA_REVEAL_TARGET_FRAMES),
-    );
-    const count = Math.min(characters.length, revealCharactersPerFrame);
-    const value = characters.slice(0, count).join("");
-    pendingDelta = characters.slice(count).join("");
-    if (!pendingDelta) revealCharactersPerFrame = 0;
-    return value;
-  };
-
-  const flushFrame = () => {
-    cancelScheduledFlush();
-    if (!pendingDelta || closed) return;
-    const value = takeVisibleDelta();
-    applyDelta(value);
-    if (pendingDelta) scheduleFlush();
-  };
-
   const flushAll = () => {
     cancelScheduledFlush();
     if (!pendingDelta || closed) return;
     const value = pendingDelta;
     pendingDelta = "";
-    revealCharactersPerFrame = 0;
     applyDelta(value);
   };
 
   const scheduleFlush = () => {
     if (frame !== null) return;
-    // A 30 fps text cadence is perceptually continuous while leaving every
-    // alternate browser frame free for Markdown layout, scroll anchoring and
-    // input. Updating at token-rate or 60 fps made long answers monopolize the
-    // main thread on slower devices.
-    frame = scheduler.request(() => {
-      frame = scheduler.request(flushFrame);
-    });
-    fallback = scheduler.setTimeout?.(flushFrame, CHAT_DELTA_MAX_BATCH_WAIT_MS) ?? null;
+    // Coalesce arrivals within one paint opportunity, never pace or subdivide
+    // provider text. The fallback also drains the entire batch in hidden tabs.
+    frame = scheduler.request(flushAll);
+    fallback = scheduler.setTimeout?.(flushAll, CHAT_DELTA_MAX_BATCH_WAIT_MS) ?? null;
   };
 
   return {
     dispatch(event: ChatStreamEvent) {
       if (closed) return;
       if (event.type === "delta") {
+        if (!event.value) return;
         // Apply the first non-empty delta synchronously. React still commits it
         // on its normal paint boundary, while the user avoids paying an extra
         // animation frame before the response can become visible.
         if (!firstDeltaApplied && !pendingDelta && frame === null && event.value) {
           firstDeltaApplied = true;
-          pendingDelta = event.value;
-          applyDelta(takeVisibleDelta());
-          if (pendingDelta) scheduleFlush();
+          applyDelta(event.value);
           return;
         }
         pendingDelta += event.value;

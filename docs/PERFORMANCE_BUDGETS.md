@@ -57,14 +57,26 @@ scroll height on each replacement.
 The current local candidate keeps whole-answer sanitization authoritative but
 emits only the proven-safe suffix as a `delta` while the public value remains a
 monotonic extension. A non-monotonic sanitizer result still uses an exact
-`content` replacement. The browser reveals large provider chunks through an
-adaptive 30 fps queue, memoizes completed Markdown blocks, keeps only the live
+`content` replacement. The browser applies the first nonempty chunk immediately
+in full, then batches subsequent chunks in full at the next rAF or a 48 ms
+fallback, with exact flush before non-delta/terminal events and close. It
+memoizes completed Markdown blocks, keeps only the live
 tail lightweight and follows the bottom without a synchronous `scrollHeight`
 read. The exact full Markdown surface is restored at terminal state. This is
 validated locally only; the 2026-09-01 live numbers are a deployed baseline,
 not acceptance of this candidate.
 
 ## Metric definitions and budgets
+
+The R2 worker publishes the sanitized complete lexical prefix of each arrival,
+including document turns; the trailing unfinished token stays private until it
+can be sanitized or the item completes. Distinct authoritative final items
+replace previous answers rather than concatenate. Structured terminal snapshots
+stop client reattachment. Projection batches validate envelopes/events first,
+then the accumulated message at the atomic-write boundary (64-delta fixture:
+66 to 3 complete-message validations). These are operation-count/correctness
+results, not provider-speed measurements. The local evidence and caveats are in
+[MELSO_R2_F_20260904.md](MELSO_R2_F_20260904.md).
 
 Remote/model-dependent budgets are comparative: measure AiBrain and ChatGPT
 Work on the same Mac, network, account/model and prompt set. AiBrain passes when
@@ -82,7 +94,7 @@ a controlled benchmark.
 | Accepted activity | successful chat response acceptance → `Solicitud aceptada` paint | **< 1,000 ms** | validated locally | Client telemetry schema 2 records both the accepted timestamp and its next paint opportunity. The accepted callback fires once across reattachment. |
 | App Server first delta | server admission immediately before runtime work → first non-empty agent delta accepted | comparative budget | validated locally | Private `codex.turn_metrics.serverFirstDeltaMs` is measured at the server notification boundary. This is not visible TTFT. `src/runtime/turn-telemetry.test.ts` fixes the clock and verifies the calculation. |
 | Visible TTFT | send intent → first agent text painted | comparative budget | validated locally | The first non-empty delta is applied synchronously and measured at the next rAF, avoiding the previous extra-frame delay. This is a paint proxy, not model latency; never substitute the server first delta. |
-| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | validated locally | Safe monotonic answer growth is emitted as suffix deltas. Small deltas stay immediate; large provider chunks drain adaptively at 30 fps with a 48 ms fallback. A terminal event flushes the exact remaining suffix before completion, and reconnect projection replaces the partial message instead of appending it twice. |
+| Streaming cadence | paint timestamps for consecutive non-empty agent deltas | p95 inter-paint gap ≤ reference + allowance; zero reordering/duplicates | validated locally | Safe monotonic answer growth is emitted as suffix deltas. The first nonempty chunk is applied immediately in full; subsequent chunks batch in full at the next rAF or 48 ms fallback, without artificial reveal pacing. Non-delta/terminal events and close flush the exact pending suffix first; reconnect projection replaces the partial message instead of appending it twice. |
 | Total turn latency | send intent → terminal state painted and persisted | comparative budget; persisted terminal state must match UI | implemented | The client records terminal `done`/`error`/`stopped` after rAF; `codex.turn_metrics.totalMs` remains server elapsed. Persisted-state correlation is still a live acceptance requirement. |
 | Reconnect latency | disconnect observed → durable snapshot caught up to latest delivered sequence | p95 ≤ 1,000 ms on loopback; comparative live | implemented | Idempotent replay starts a client reconnect span; the next applied durable snapshot is measured after rAF. `codex.turn_lifecycle` remains separate server lifecycle evidence; live catch-up timing is pending. |
 | Tool latency | App Server item start → terminal tool outcome, split into queue/runtime/projection/paint | overhead p95 ≤ 250 ms excluding remote tool execution | implemented | `codex.tool_phase` records queue and execution duration with bounded tool kind and opaque correlation only. Browser owner must still preserve `indeterminate`; visible paint remains client-side. |
@@ -107,7 +119,7 @@ from these numbers.
 | First delta applied before a frame | no | yes |
 | First delta arrival → paint proxy | 32 ms | 16 ms |
 | Maximum wait when rAF is unavailable | unbounded | 48 ms |
-| 10,000 subsequent deltas | one accumulated frame event | adaptive reveal queue plus exact terminal flush |
+| 10,000 subsequent deltas | one accumulated frame event | historical adaptive reveal queue plus exact terminal flush (superseded on 2026-09-04 by full next-frame batching) |
 | Duplicate/reordered content after reconnect snapshot | regression asserted only by event types | final projection equals snapshot exactly |
 
 The current controlled run records three paint opportunities, a 48 ms p95/max
@@ -321,8 +333,9 @@ error detail or secret. It is not exposed as a per-message control; the focal
 browser test attaches its numeric benchmark JSON only to that local test run.
 This change adds no API route, analytics POST, shared storage or server logger.
 
-The first delta is applied immediately; subsequent deltas use a 30 fps reveal
-queue with a 48 ms fallback. The measurement then schedules rAF. The resulting
+The first nonempty chunk is applied immediately in full; subsequent chunks are
+batched in full at the next rAF or 48 ms fallback. Non-delta/terminal events and
+close flush pending text exactly first. The measurement then schedules rAF. The resulting
 timestamp is a controlled local proxy for a paint opportunity. The Chromium
 initial-feedback test is real-browser evidence for the local shell only;
 authenticated Arnall validation remains required before claiming live provider

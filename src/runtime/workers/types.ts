@@ -76,6 +76,10 @@ export interface ManagedWorkerRuntime {
   readonly transport: AppServerTransport;
   start(): Promise<void>;
   health(): Promise<WorkerControllerHealth>;
+  /** Completion fences in-progress startup from creating later processes or transports.
+   * A registry deadline is not cancellation; stop owns that cancellation.
+   * Reject if cleanup cannot be proved so the registry retains ownership.
+   */
   stop(): Promise<void>;
 }
 

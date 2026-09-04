@@ -120,7 +120,7 @@ describe("authenticated browser runtime routes", () => {
     };
     const response = await route.POST(request("/api/runtime/browser", { action: "start" }));
     expect(response.status).toBe(200);
-    expect(browser.control).toHaveBeenCalledWith("browser-lab", USER_A, "start");
+    expect(browser.control).toHaveBeenCalledWith("browser-lab", USER_A, "start", undefined);
 
     const rejected = await route.POST(request("/api/runtime/browser", {
       action: "stop",

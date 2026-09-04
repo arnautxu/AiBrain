@@ -8,8 +8,23 @@ import {
 const THREAD_ID = "0198b9f0-6631-7000-8000-000000000691";
 
 describe("browser HTTP contracts", () => {
+  it("accepts Unicode clipboard text including joiners and line breaks without accepting controls", () => {
+    const command = { kind: "key", event: "char", key: "Unidentified", text: "Català ñ 日本語 👩🏽‍💻\nnext\tcell" };
+    expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "input", command })?.action).toBe("input");
+    for (const text of ["\0", "\u001b", "\ud800", "x".repeat(4097)]) {
+      expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "input", command: { ...command, text } })).toBeNull();
+    }
+  });
+
   it("accepts only exact lifecycle and token requests", () => {
     expect(parseBrowserControlRequest({ action: "takeover" })).toEqual({ action: "takeover" });
+    const binding = {
+      attachmentId: "0198b9f0-6631-7000-8000-000000000692",
+      browserSessionId: "0198b9f0-6631-7000-8000-000000000693",
+    };
+    expect(parseBrowserControlRequest({ action: "takeover", binding })).toEqual({ action: "takeover", binding });
+    expect(parseBrowserControlRequest({ action: "release", binding: { ...binding, extra: true } })).toBeNull();
+    expect(parseBrowserControlRequest({ action: "start", binding })).toBeNull();
     expect(parseBrowserControlRequest({ action: "takeover", userId: "foreign" })).toBeNull();
     expect(parseBrowserGatewayTokenRequest({
       threadId: THREAD_ID,

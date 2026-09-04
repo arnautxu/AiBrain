@@ -257,12 +257,17 @@ export class WebSocketAppServerTransport implements AppServerTransport {
       throw new TransportClosedError("Transport is closed.");
     }
     if (!this.connectWaiter) this.connectWaiter = deferred<void>();
+    const waiter = this.connectWaiter;
+    // close can reject this while journal I/O is still pending. Attach now,
+    // then return the same waiter; never dereference a cleared/replaced one.
+    void waiter.promise.catch(() => undefined);
     if (!this.cursorLoaded) {
       this.cursor = await this.journal.loadCursor();
       this.cursorLoaded = true;
     }
+    if (this.closeRequested) throw new TransportClosedError("Transport is closed.");
     if (!this.opening && !this.reconnectTimer) void this.openConnection();
-    return this.connectWaiter.promise;
+    return waiter.promise;
   }
 
   private async loadDurableDeliveryBacklog() {
@@ -473,6 +478,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
   };
 
   private async handleFrame(frame: WorkerServerFrame) {
+    if (this.closeRequested) return;
     this.lastMessageAt = new Date(this.now()).toISOString();
     if (frame.type === "ready") {
       if (this.state !== "connecting" && this.state !== "reconnecting") {
@@ -481,6 +487,7 @@ export class WebSocketAppServerTransport implements AppServerTransport {
       if (this.readyTimer) clearTimeout(this.readyTimer);
       this.readyTimer = null;
       await this.loadDurableDeliveryBacklog();
+      if (this.closeRequested) return;
       this.state = "connected";
       this.reconnectAttempt = 0;
       this.pendingReconnectFloorMs = 0;

@@ -115,6 +115,7 @@ type ThreadPage = {
   readonly targetId: string;
   readonly sessionId: string;
   readonly downloadsPath: string;
+  heldMouse: { x: number; y: number } | null;
   readonly downloads: Map<string, Readonly<{
     fileName: string;
     projectionId: Promise<string | null>;
@@ -397,6 +398,19 @@ function validateInput(command: BrowserInputCommand) {
   }
 }
 
+function virtualKeyCode(key: string, code?: string) {
+  const editing: Record<string, number> = {
+    Backspace: 8, Tab: 9, Enter: 13, Escape: 27, " ": 32,
+    PageUp: 33, PageDown: 34, End: 35, Home: 36,
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+    Insert: 45, Delete: 46,
+  };
+  if (Object.hasOwn(editing, key)) return editing[key];
+  if (code && /^Key[A-Z]$/u.test(code)) return code.charCodeAt(3);
+  if (code && /^Digit[0-9]$/u.test(code)) return code.charCodeAt(5);
+  return /^[A-Za-z0-9]$/u.test(key) ? key.toUpperCase().charCodeAt(0) : 0;
+}
+
 function validateThreadId(threadId: string) {
   if (!THREAD_ID_PATTERN.test(threadId)) {
     throw new ChromeRuntimeError(
@@ -455,6 +469,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private stderrTail = "";
   private running = false;
   private takenOver = false;
+  private controlGeneration = 0;
   private browserVersion: string | null = null;
   private downloadQuarantine: string | null = null;
   private egressProxyUrl: string | null = null;
@@ -664,7 +679,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       const current = await this.navigationStateForPage(page);
       await this.persistNavigation(page, current.url);
       return current;
-    });
+    }, false);
   }
 
   async agentNavigate(threadId: string, url: string) {
@@ -686,7 +701,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       }
       navigatedPage = page;
       return response;
-    });
+    }, false);
     if (result.errorText && !result.isDownload) {
       throw new ChromeRuntimeError("CHROME_NAVIGATION_FAILED", boundedErrorText(result.errorText));
     }
@@ -735,10 +750,19 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   async dispatchInput(threadId: string, command: BrowserInputCommand) {
     this.assertHumanControl();
     validateInput(command);
+    const controlGeneration = this.controlGeneration;
     await this.withThreadPageRecovery(threadId, async (page) => {
       this.assertHumanControl();
+      if (controlGeneration !== this.controlGeneration) {
+        throw new ChromeRuntimeError("CHROME_INPUT_REJECTED", "Browser controller changed before input dispatch.");
+      }
       const browser = this.requireBrowser();
       if (command.kind === "mouse") {
+        // Record before dispatch: a lost response cannot prove the press failed.
+        if ((command.event === "mousePressed" && command.button === "left") ||
+          (command.event === "mouseMoved" && page.heldMouse)) {
+          page.heldMouse = { x: command.x, y: command.y };
+        }
         await browser.send("Input.dispatchMouseEvent", {
           type: command.event,
           x: command.x,
@@ -750,8 +774,15 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
           deltaY: command.deltaY ?? 0,
         }, { sessionId: page.sessionId });
         if (command.event === "mouseReleased" && command.button === "left") {
+          page.heldMouse = null;
           this.recordPointer(threadId, command.x, command.y);
         }
+        return;
+      }
+      // Clipboard/IME text is not a single keyboard character. CDP rejects
+      // multi-codepoint text on dispatchKeyEvent; insertText preserves it once.
+      if (command.event === "char") {
+        await browser.send("Input.insertText", { text: command.text ?? "" }, { sessionId: page.sessionId });
         return;
       }
       await browser.send("Input.dispatchKeyEvent", {
@@ -760,8 +791,9 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         code: command.code ?? "",
         text: command.text ?? "",
         modifiers: command.modifiers ?? 0,
+        windowsVirtualKeyCode: virtualKeyCode(command.key, command.code),
       }, { sessionId: page.sessionId });
-    });
+    }, false);
   }
 
   async readPage(threadId: string): Promise<BrowserPageSnapshot> {
@@ -1252,11 +1284,30 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
 
   async takeOver() {
     if (!this.running) throw new ChromeRuntimeError("CHROME_NOT_RUNNING", "Chrome runtime is not running.");
-    this.takenOver = true;
+    this.controlGeneration += 1;
+    this.takenOver = false;
+    await this.withExclusiveBrowserOperation(async () => {
+      await this.resetHeldMouse();
+      this.takenOver = true;
+    });
   }
 
   async releaseTakeover() {
+    this.controlGeneration += 1;
     this.takenOver = false;
+    await this.withExclusiveBrowserOperation(() => this.resetHeldMouse());
+  }
+
+  private async resetHeldMouse() {
+    for (const page of this.threadPages.values()) {
+      if (!page.heldMouse || page.closed) continue;
+      // This controller boundary shares the input lane. No successor is active
+      // until the owned page's possibly-held button has been acknowledged up.
+      await this.requireBrowser().send("Input.dispatchMouseEvent", {
+        type: "mouseReleased", ...page.heldMouse, button: "left", buttons: 0, clickCount: 1,
+      }, { sessionId: page.sessionId });
+      page.heldMouse = null;
+    }
   }
 
   async stop() {
@@ -1471,12 +1522,16 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private async withThreadPageRecovery<Result>(
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
+    replayOnStale = true,
   ): Promise<Result> {
     return this.withExclusiveBrowserOperation(async () => {
       const page = await this.requireThreadPage(threadId);
       try {
         return await operation(page);
       } catch (error) {
+        // Input/navigation may already have affected the page before the stale
+        // response (including a subsequent readback). Never dispatch it twice.
+        if (!replayOnStale) throw error;
         if (!isRecoverableThreadSessionError(error)) throw error;
         if (this.threadPages.get(threadId) === page) {
           this.threadPages.delete(threadId);
@@ -1532,26 +1587,36 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   }
 
   private async waitForReadablePage(page: ThreadPage, assertController: () => void) {
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      assertController();
-      const evaluated = await this.requireBrowser().send<{
-        result?: { value?: unknown };
-        exceptionDetails?: unknown;
-      }>("Runtime.evaluate", {
-        expression: `(() => ({
-          readyState: document.readyState,
-          textLength: (document.body?.innerText ?? "").length,
-          linkCount: document.querySelectorAll("a[href]").length,
-        }))()`,
-        returnByValue: true,
-        awaitPromise: false,
-        userGesture: false,
-      }, { sessionId: page.sessionId });
-      const value = evaluated.result?.value;
-      if (!isRecord(value) || typeof value.readyState !== "string") return;
-      if (attempt >= 5 && value.readyState === "complete" &&
-        Number(value.textLength) >= 20 && Number(value.linkCount) >= 1) return;
-      await wait(100);
+    assertController();
+    // Wait in the owned document, not by repeatedly reading all its text and
+    // links. Blank pages, forms and canvas applications are valid documents.
+    const evaluated = await this.requireBrowser().send<{
+      result?: { value?: unknown };
+      exceptionDetails?: unknown;
+    }>("Runtime.evaluate", {
+      expression: `new Promise((resolve) => {
+        if (document.readyState !== "loading") {
+          resolve({ readyState: document.readyState });
+          return;
+        }
+        let timer;
+        const finish = () => {
+          clearTimeout(timer);
+          document.removeEventListener("DOMContentLoaded", finish);
+          resolve({ readyState: document.readyState });
+        };
+        document.addEventListener("DOMContentLoaded", finish, { once: true });
+        timer = setTimeout(finish, 4000);
+      })`,
+      returnByValue: true,
+      awaitPromise: true,
+      userGesture: false,
+    }, { sessionId: page.sessionId });
+    assertController();
+    const value = evaluated.result?.value;
+    if (evaluated.exceptionDetails || !isRecord(value) ||
+      (value.readyState !== "interactive" && value.readyState !== "complete")) {
+      throw new ChromeRuntimeError("CHROME_DOCUMENT_NOT_READY", "Browser document did not become readable.");
     }
   }
 
@@ -1600,6 +1665,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         targetId,
         sessionId,
         downloadsPath,
+        heldMouse: null,
         downloads: new Map(),
         fetchUnsubscribe: null,
         authUnsubscribe: null,

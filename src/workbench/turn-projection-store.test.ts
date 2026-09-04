@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 import type { ChatMessage } from "@/lib/chat-contract";
+import * as chatContract from "@/lib/chat-contract";
 import type { AppServerEvent } from "@/runtime/transport";
 import { ResourceLockManager } from "@/storage";
 import { FileWorkbenchStore } from "@/workbench/filesystem-store";
@@ -66,7 +67,69 @@ describe("turn projection store", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("validates a large transcript once per compacted batch, not per delta", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    const initial = assistant(id);
+    initial.content = "History ".repeat(10_000);
+    await projections.initialize(thread, initial);
+    const validation = vi.spyOn(chatContract, "isChatMessage");
+    const events = Array.from({ length: 64 }, (_, index) => ({
+      envelope: envelope(index + 1), projectionKey: `delta:${index}`,
+      event: { type: "delta" as const, value: "chunk " },
+    }));
+    const result = await projections.applyTransportEvents(thread, id, events);
+    expect(result.projection.message.content).toBe(initial.content + "chunk ".repeat(64));
+    expect(validation.mock.calls.length).toBe(3);
+  });
+
+  it("rejects masked intermediate snapshot bindings without changing disk or cursor", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    const initial = assistant(id);
+    await projections.initialize(thread, initial);
+    for (const patch of [
+      { id: "00000000-0000-4000-8000-000000000083" },
+      { role: "user" as const },
+      { createdAt: "2026-08-28T00:00:00.001Z" },
+      { createdAt: "2026-08-27T00:00:00.001+00:00" },
+    ]) {
+      const before = await projections.read(thread, id);
+      await expect(projections.applyTransportEvents(thread, id, [
+        { envelope: envelope(1), projectionKey: "delta", event: { type: "delta", value: "valid" } },
+        { envelope: envelope(2), projectionKey: "snapshot", event: { type: "snapshot", message: { ...initial, ...patch } } },
+        { envelope: envelope(3), projectionKey: "restore", event: { type: "snapshot", message: initial } },
+      ])).rejects.toThrow();
+      expect(await projections.read(thread, id)).toEqual(before);
+      await expect(projections.applyLocalEvent(thread, id,
+        { type: "snapshot", message: { ...initial, ...patch } })).rejects.toThrow();
+      expect(await projections.read(thread, id)).toEqual(before);
+    }
+    const valid = await projections.applyTransportEvents(thread, id, [
+      { envelope: envelope(1), projectionKey: "snapshot", event: { type: "snapshot", message: { ...initial, content: "valid" } } },
+    ]);
+    expect(valid.projection.lastTransportSequence).toBe(1);
+    expect(valid.projection.message.content).toBe("valid");
+  });
+
+  it("rejects malformed intermediate envelopes and oversized key sets without partial persistence", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    await projections.initialize(thread, assistant(id));
+    const events = Array.from({ length: 33 }, (_, index) => ({ envelope: envelope(1),
+      projectionKey: `delta:${index}`, event: { type: "delta" as const, value: "chunk " } }));
+    await expect(projections.applyTransportEvents(thread, id, events)).rejects.toThrow(/límit/u);
+    await expect(projections.applyTransportEvents(thread, id, [
+      { ...events[0], envelope: envelope(0.5) }, { ...events[1], envelope: envelope(2) },
+    ])).rejects.toThrow(/vàlid/u);
+    expect((await projections.read(thread, id))?.message.content).toBe("");
   });
 
   it("projects transport events exactly once and recovers message plus runtime token", async () => {
