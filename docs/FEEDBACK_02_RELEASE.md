@@ -101,3 +101,11 @@ The release manager now recreates and health-waits the immutable egress gateway
 first, then starts the remaining services. The existing shared deadline,
 validation and automatic rollback are unchanged. The release-manager regression
 requires this two-stage order for both promotion and rollback.
+
+Arnau's incorporated UI head also exposed a separate deterministic CI issue:
+the sidebar E2E required an exact intermediate animation sample after an
+80-millisecond sleep. Busy runners could still read the initial 260-pixel width,
+and reduced-motion clients may legitimately skip intermediate frames. The test
+now waits for the observable departure from the expanded width, then retains
+the existing collapsed state, final 52-pixel width and focus assertions. No
+sidebar product behavior or timing budget changed.
