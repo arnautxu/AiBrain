@@ -1,6 +1,8 @@
 import { expect, test as base, type Page } from "@playwright/test";
 import { createServer, request as httpRequest } from "node:http";
+import { connect as connectTcp } from "node:net";
 import { readFile } from "node:fs/promises";
+import type { Duplex } from "node:stream";
 import { generatedPngFixture } from "../helpers/png-fixture";
 
 const artifactId = "018f5f68-4a6e-7abc-8def-0123456789aa";
@@ -16,6 +18,8 @@ const test = base.extend<{ imageServer: { url: string; requests: Array<{ downloa
     if (!baseURL) throw new Error("baseURL required");
     const png = generatedPngFixture();
     const requests: Array<{ download: boolean; authenticated: boolean }> = [];
+    const upgradedSockets = new Set<Duplex>();
+    const upstreamOrigin = new URL(baseURL);
     const server = createServer(async (request, response) => {
       const url = new URL(request.url ?? "/", baseURL);
       if (url.pathname.endsWith(`/artifacts/${artifactId}`)) {
@@ -45,11 +49,37 @@ const test = base.extend<{ imageServer: { url: string; requests: Array<{ downloa
       upstream.on("error", () => { response.writeHead(502); response.end(); });
       request.pipe(upstream);
     });
+    // The workbench readiness stream and Next development transport both use
+    // WebSockets. Keep the proxy a faithful same-origin surface so readiness
+    // is real rather than bypassed for this WebKit-only download fixture.
+    server.on("upgrade", (request, socket, head) => {
+      const upstream = connectTcp(Number(upstreamOrigin.port), upstreamOrigin.hostname, () => {
+        const headers: string[] = [];
+        for (let index = 0; index < request.rawHeaders.length; index += 2) {
+          if (request.rawHeaders[index]?.toLowerCase() === "host") continue;
+          headers.push(`${request.rawHeaders[index]}: ${request.rawHeaders[index + 1]}`);
+        }
+        headers.push(`Host: ${upstreamOrigin.host}`);
+        upstream.write(`${request.method} ${request.url} HTTP/${request.httpVersion}\r\n${headers.join("\r\n")}\r\n\r\n`);
+        if (head.byteLength > 0) upstream.write(head);
+        socket.pipe(upstream).pipe(socket);
+      });
+      upgradedSockets.add(socket);
+      upgradedSockets.add(upstream);
+      socket.once("close", () => upgradedSockets.delete(socket));
+      upstream.once("close", () => upgradedSockets.delete(upstream));
+      upstream.on("error", () => socket.destroy());
+      socket.on("error", () => upstream.destroy());
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const address = server.address();
     if (!address || typeof address === "string") throw new Error("fixture address missing");
     try { await provideImageServer({ url: `http://127.0.0.1:${address.port}`, requests }); }
-    finally { server.closeAllConnections(); await new Promise<void>((resolve) => server.close(() => resolve())); }
+    finally {
+      for (const socket of upgradedSockets) socket.destroy();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   },
 });
 
