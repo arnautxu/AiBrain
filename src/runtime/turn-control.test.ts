@@ -13,6 +13,7 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
 }));
 
 import { cancelPendingWorkerTurn, executeTurnControl, TurnControlError } from "@/runtime/turn-control";
+import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 
 const identity = {
   installationId: "qa-company",
@@ -144,6 +145,44 @@ describe("turn control", () => {
       assistantMessageId,
       true,
     );
+  });
+
+  it("accepts a confirmed interrupt response that arrives after the primary RPC deadline", async () => {
+    mocked.cancel.mockClear();
+    const persisted: unknown[] = [];
+    const request = vi.fn(async (
+      _method: string,
+      _params: unknown,
+      purpose: string,
+      _timeout: number,
+      beforeResolve: (value: unknown) => Promise<void>,
+    ) => {
+      const lateResponse = Promise.resolve().then(async () => {
+        await beforeResolve({});
+        return {};
+      });
+      throw new AppServerRequestTimeoutError("turn/interrupt", purpose, 10_000, lateResponse);
+    });
+    const control: TurnControlRequest = {
+      action: "stop",
+      threadId: "00000000-0000-4000-8000-000000000021",
+      assistantMessageId,
+      clientRequestId,
+    };
+    await expect(executeTurnControl(
+      { request } as never,
+      identity,
+      control,
+      async (event) => { persisted.push(event); },
+    )).resolves.toEqual({
+      action: "stop",
+      runtimeTurnId: identity.runtimeTurnId,
+      activeRunnerCancelled: true,
+    });
+    expect(persisted).toMatchObject([
+      { type: "activity", item: { id: `stop:${clientRequestId}`, status: "stopped" } },
+      { type: "stopped" },
+    ]);
   });
 
   it("records only a pending request before App Server has assigned a runtime turn id", async () => {

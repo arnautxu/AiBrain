@@ -2,6 +2,7 @@ import "server-only";
 
 import type { ActivityItem, ChatStreamEvent, TurnControlRequest } from "@/lib/chat-contract";
 import type { JsonValue } from "@/runtime/transport";
+import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import {
   cancelWorkerTurnLocally,
   requestPendingWorkerTurnCancellation,
@@ -127,12 +128,33 @@ export async function executeTurnControl(
     return { action: request.action, runtimeTurnId: identity.runtimeTurnId } as const;
   }
 
-  await client.request("turn/interrupt", {
-    threadId: identity.runtimeThreadId,
-    turnId: identity.runtimeTurnId,
-  }, `turn-interrupt:${request.clientRequestId}`, 10_000, async (_value: JsonValue) => {
-    await persistAcceptedStop(request, persistAccepted);
-  });
+  try {
+    await client.request("turn/interrupt", {
+      threadId: identity.runtimeThreadId,
+      turnId: identity.runtimeTurnId,
+    }, `turn-interrupt:${request.clientRequestId}`, 10_000, async (_value: JsonValue) => {
+      await persistAcceptedStop(request, persistAccepted);
+    });
+  } catch (error) {
+    if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "turn/interrupt" || !error.lateResponse) {
+      throw error;
+    }
+    // A busy turn can acknowledge the request before returning the RPC reply.
+    // Keep the HTTP control request pending for one bounded late-response
+    // window so a confirmed interruption does not surface as a false error.
+    let lateDeadline: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        error.lateResponse,
+        new Promise<never>((_resolve, reject) => {
+          lateDeadline = setTimeout(() => reject(error), 20_000);
+          lateDeadline.unref?.();
+        }),
+      ]);
+    } finally {
+      if (lateDeadline) clearTimeout(lateDeadline);
+    }
+  }
   const activeRunnerCancelled = cancelWorkerTurnLocally(
     identity.userId,
     identity.runtimeThreadId,
