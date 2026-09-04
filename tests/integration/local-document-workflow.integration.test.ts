@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import JSZip from "jszip";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
+import type { InstallationConfig } from "@/config/installation-schema";
 import type { ResolvedPermissions } from "@/permissions";
 
 const USER_A = "0198b9f0-6631-7000-8000-000000000901";
@@ -85,6 +86,7 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
   let projectId: string;
   let projectWorkspace: string;
   let receiptRoot: string;
+  let installation: InstallationConfig;
   let route: typeof import("@/app/api/projects/[projectId]/files/route");
   const previousEnvironment = new Map<string, string | undefined>();
   const generated = new Map<string, { path: string; size: number; sha256: string }>();
@@ -141,7 +143,7 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
       import("@/workbench/store"),
       import("@/runtime/workers/provisioner"),
     ]);
-    const installation = await loadInstallationConfig();
+    installation = await loadInstallationConfig();
     const provisioner = new UserProvisioner(installation);
     await provisioner.provision({ userId: USER_A, email: session(USER_A).user.email, displayName: "User A" });
     await provisioner.provision({ userId: USER_B, email: session(USER_B).user.email, displayName: "User B" });
@@ -181,6 +183,7 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
         })),
       },
     }, {
+      installation,
       installationId: INSTALLATION_ID,
       userId: USER_A,
       projectId,
@@ -188,6 +191,7 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
       receiptRoot,
       runtimeThreadId: "runtime-thread",
       runtimeTurnId: "runtime-turn",
+      sourceThreadId: "0198b9f0-6631-7000-8000-000000000910",
       sourceTurnId: "0198b9f0-6631-7000-8000-000000000911",
       permissions: permissions(USER_A, projectId),
     });

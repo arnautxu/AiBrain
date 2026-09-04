@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { isUuid } from "@/workbench/types";
-import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { contentDisposition, libraryResourceErrorResponse } from "@/library/http";
 import { resolveProjectLibraryResource } from "@/library/server-resource-access";
+import { isPng } from "@/runtime/generated-image-artifacts";
 
 export const runtime = "nodejs";
 
@@ -32,29 +31,32 @@ export async function GET(
       resourceId: artifactId,
       projectId,
     });
-    const roots = deriveWorkerRoots(resource.installation, resource.location.storageOwnerId);
-    const projectWorkspace = await resolveWorkerOwnedPath(
-      roots.workspace,
-      path.posix.join("projects", resource.access.project.id),
-    );
-    const expectedPath = `.aibrain/artifacts/${artifactId}.png`;
-    if (resource.location.relativePath !== expectedPath || resource.location.mediaType !== "image/png") {
+    const expectedPath = `generated-image-artifacts/${artifactId}.png`;
+    if (resource.location.relativePath !== expectedPath || resource.location.mediaType !== "image/png" ||
+        !/^[^/\\\u0000-\u001f\u007f]+\.png$/u.test(resource.location.fileName)) {
       return NextResponse.json({ error: "Artefacte no trobat." }, { status: 404 });
     }
-    const contents = await readRegularFileWithin(projectWorkspace, expectedPath, 20_000_000);
+    const contents = await readRegularFileWithin(
+      resource.installation.paths.dataRoot,
+      expectedPath,
+      20_000_000,
+    );
     if (contents.byteLength !== resource.location.size ||
-        createHash("sha256").update(contents).digest("hex") !== resource.location.sha256) {
+        createHash("sha256").update(contents).digest("hex") !== resource.location.sha256 ||
+        !isPng(contents)) {
       return NextResponse.json({ error: "El artefacto ya no coincide con su registro." }, { status: 409 });
     }
     const fileName = resource.location.fileName;
     return new Response(contents, {
       headers: {
         "Content-Type": "image/png",
+        "Content-Length": String(contents.byteLength),
         "Cache-Control": "private, no-store",
         "Content-Disposition": contentDisposition(
           fileName,
           searchParams.get("download") === "1" ? "attachment" : "inline",
         ),
+        "Cross-Origin-Resource-Policy": "same-origin",
         "X-Content-Type-Options": "nosniff",
       },
     });

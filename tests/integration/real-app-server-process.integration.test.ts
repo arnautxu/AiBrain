@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
@@ -14,11 +14,15 @@ import type {
   WorkerLaunchContext,
   WorkerRuntimeHandle,
 } from "@/runtime/workers/types";
+import { persistGeneratedImageArtifact } from "@/runtime/generated-image-artifacts";
 
 const REAL_PROCESS_ENABLED = process.env.AIBRAIN_REAL_CODEX_APP_SERVER === "1";
 const CODEX_BIN = process.env.AIBRAIN_REAL_CODEX_BIN?.trim() || "";
 const AUTH_SOURCE = process.env.AIBRAIN_REAL_CODEX_AUTH_SOURCE?.trim() || "";
 const USER_ID = "11111111-1111-4111-8111-111111111111";
+const PROJECT_ID = "11111111-1111-4111-8111-111111111112";
+const THREAD_ID = "11111111-1111-4111-8111-111111111113";
+const MESSAGE_ID = "11111111-1111-4111-8111-111111111114";
 const roots: string[] = [];
 
 afterAll(async () => {
@@ -141,4 +145,117 @@ describe.skipIf(!REAL_PROCESS_ENABLED)("real Codex App Server process acceptance
     await restarted.client.close();
     await restarted.runtime.stop();
   }, 30_000);
+
+  it("generates and persists real PNG bytes through the App Server image item", async () => {
+    expect(CODEX_BIN).not.toBe("");
+    const workerContext = await context();
+    const started = await startClient(workerContext);
+    try {
+      await expect(started.client.capabilities()).resolves.toMatchObject({ imageGeneration: true });
+      const threadResult = await started.client.request("thread/start", {
+        cwd: workerContext.workspace,
+        approvalPolicy: "never",
+        dynamicTools: [],
+        ephemeral: true,
+        serviceName: "aibrain_image_delivery_acceptance",
+      }, `real-image-thread:${THREAD_ID}`, 60_000);
+      const runtimeThreadId = threadResult && typeof threadResult === "object" &&
+        "thread" in threadResult && threadResult.thread && typeof threadResult.thread === "object" &&
+        "id" in threadResult.thread && typeof threadResult.thread.id === "string"
+        ? threadResult.thread.id
+        : null;
+      expect(runtimeThreadId).toBeTruthy();
+
+      let imageItem: Record<string, unknown> | null = null;
+      let resolveCompleted!: () => void;
+      let rejectCompleted!: (error: Error) => void;
+      const completed = new Promise<void>((resolve, reject) => {
+        resolveCompleted = resolve;
+        rejectCompleted = reject;
+      });
+      const registration = started.client.router.registerTurn(runtimeThreadId!, MESSAGE_ID, {
+        onNotification(notification) {
+          if (notification.method === "item/completed" && notification.params.item.type === "imageGeneration") {
+            imageItem = notification.params.item as unknown as Record<string, unknown>;
+          }
+          if (notification.method === "turn/completed") resolveCompleted();
+        },
+        onServerRequest() {
+          return {};
+        },
+        onFailure(error) {
+          rejectCompleted(error);
+        },
+      });
+      try {
+        await started.client.request("turn/start", {
+          threadId: runtimeThreadId,
+          clientUserMessageId: MESSAGE_ID,
+          input: [{
+            type: "text",
+            text: "Genera una imagen PNG sencilla: un círculo azul centrado sobre fondo blanco. Usa la herramienta de generación de imágenes.",
+            text_elements: [],
+          }],
+          cwd: workerContext.workspace,
+          approvalPolicy: "never",
+          summary: "concise",
+        }, `real-image-turn:${MESSAGE_ID}`, 60_000, (result) => {
+          if (!result || typeof result !== "object" || !("turn" in result) || !result.turn ||
+              typeof result.turn !== "object" || !("id" in result.turn) || typeof result.turn.id !== "string") {
+            throw new Error("Real image turn did not return an id.");
+          }
+          registration.bindRuntimeTurn(result.turn.id);
+        });
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([
+            completed,
+            new Promise<never>((_resolve, reject) => {
+              timeout = setTimeout(() => reject(new Error("Real image generation timed out.")), 240_000);
+            }),
+          ]);
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
+      } finally {
+        registration.dispose();
+      }
+
+      expect(imageItem).not.toBeNull();
+      const isolatedRoot = path.resolve(workerContext.workspace, "../../..");
+      const projectWorkspace = path.join(workerContext.workspace, "projects", PROJECT_ID);
+      const dataRoot = path.join(isolatedRoot, "data");
+      await Promise.all([
+        mkdir(projectWorkspace, { recursive: true, mode: 0o700 }),
+        mkdir(dataRoot, { recursive: true, mode: 0o700 }),
+      ]);
+      const installation = {
+        installationId: "real-image-qa",
+        paths: {
+          dataRoot,
+          usersRoot: path.join(isolatedRoot, "users"),
+          companyContextRoot: path.join(dataRoot, "company"),
+          sourceReadRoot: path.join(isolatedRoot, "source-ro"),
+          publishWriteRoot: path.join(isolatedRoot, "publish-rw"),
+          backupsRoot: path.join(dataRoot, "backups"),
+        },
+      };
+      const artifact = await persistGeneratedImageArtifact(imageItem!, {
+        installation,
+        projectWorkspace,
+        projectId: PROJECT_ID,
+        threadId: THREAD_ID,
+        messageId: MESSAGE_ID,
+        storageOwnerId: USER_ID,
+      });
+      expect(artifact?.name).toMatch(/^[^.]+[.]png$/u);
+      expect(artifact?.name).not.toContain(".png.json");
+      const bytes = await readFile(path.join(dataRoot, `generated-image-artifacts/${artifact?.id}.png`));
+      expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+      expect(bytes.byteLength).toBeGreaterThan(1_000);
+    } finally {
+      await started.client.close();
+      await started.runtime.stop();
+    }
+  }, 300_000);
 });

@@ -35,7 +35,17 @@ export default defineConfig({
     {
       name: "chromium-desktop",
       use: { ...devices["Desktop Chrome"], viewport: { width: 1440, height: 900 } },
-      testIgnore: ["**/visual/**", "**/visual-matrix/**", "**/accessibility/**"],
+      testIgnore: [
+        "**/visual/**",
+        "**/visual-matrix/**",
+        "**/accessibility/**",
+        "**/image-delivery-webkit.spec.ts",
+      ],
+    },
+    {
+      name: "webkit-iphone",
+      testMatch: ["**/image-delivery-webkit.spec.ts"],
+      use: { ...devices["iPhone 13"], browserName: "webkit" },
     },
     {
       name: "visual-desktop",

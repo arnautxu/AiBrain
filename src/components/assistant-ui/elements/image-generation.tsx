@@ -50,7 +50,7 @@ export function ImageGeneration({
               sizes="(max-width: 640px) 100vw, 420px"
               src={src}
               alt={alt ?? prompt}
-              className="object-cover"
+              className="object-contain"
             />
           </a>
         ) : (

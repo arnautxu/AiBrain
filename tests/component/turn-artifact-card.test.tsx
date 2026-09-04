@@ -82,8 +82,11 @@ describe("TurnArtifactCard", () => {
     }} />);
 
     expect(document.querySelector("[data-slot='image-generation']")).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Un diagrama verificable" })).toHaveAttribute("src", "/api/projects/project/artifacts/image");
-    expect(screen.getByRole("link", { name: "Descargar diagrama.png" })).toHaveAttribute("href", "/api/projects/project/artifacts/image");
+    const image = screen.getByRole("img", { name: "Un diagrama verificable" });
+    expect(image).toHaveAttribute("src", "/api/projects/project/artifacts/image");
+    expect(image).toHaveClass("object-contain");
+    expect(image).not.toHaveClass("object-cover");
+    expect(screen.getByRole("link", { name: "Descargar diagrama.png" })).toHaveAttribute("href", "/api/projects/project/artifacts/image?download=1");
     expect(screen.queryByRole("button", { name: "Volver a generar la imagen" })).not.toBeInTheDocument();
   });
 

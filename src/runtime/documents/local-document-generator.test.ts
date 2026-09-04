@@ -1,7 +1,9 @@
 import JSZip from "jszip";
+import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
+import { generatedPngFixture } from "../../../tests/helpers/png-fixture";
 
 describe("local document generator", () => {
   it.each([
@@ -41,6 +43,28 @@ describe("local document generator", () => {
     await expect(pptxZip.file("ppt/slides/slide1.xml")!.async("text")).resolves.toContain("Impacto medible");
   });
 
+  it("embeds the PNG itself on one A4 PDF page without a text layer", async () => {
+    const generated = await generateLocalDocument({
+      format: "pdf",
+      title: "Imagen generada",
+      content: "Esta descripción no debe convertirse en contenido del PDF.",
+      sourcePng: generatedPngFixture(80, 60),
+    });
+    const document = await PDFDocument.load(generated.data);
+    const pages = document.getPages();
+    const resources = pages[0]!.node.Resources()!;
+    const xObjects = document.context.lookup(resources.get(PDFName.of("XObject")), PDFDict);
+    const fonts = document.context.lookup(resources.get(PDFName.of("Font")), PDFDict);
+
+    expect(generated.pages).toBe(1);
+    expect(pages).toHaveLength(1);
+    expect(pages[0]!.getWidth()).toBeCloseTo(595.28, 2);
+    expect(pages[0]!.getHeight()).toBeCloseTo(841.89, 2);
+    expect(xObjects.keys().length).toBeGreaterThan(0);
+    expect(fonts.keys()).toHaveLength(0);
+    expect(generated.data.includes(Buffer.from("Esta descripción"))).toBe(false);
+  });
+
   it("rejects empty output requests and malformed spreadsheet data", async () => {
     await expect(generateLocalDocument({ format: "pdf", title: "Informe", content: "" })).rejects.toMatchObject({
       code: "LOCAL_DOCUMENT_INPUT_INVALID",
@@ -51,5 +75,11 @@ describe("local document generator", () => {
       content: "Datos",
       rows: [[Number.NaN]],
     })).rejects.toMatchObject({ code: "LOCAL_DOCUMENT_ROWS_INVALID" });
+    await expect(generateLocalDocument({
+      format: "pdf",
+      title: "Imagen",
+      content: "",
+      sourcePng: Buffer.from("not-a-png"),
+    })).rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SOURCE_IMAGE_INVALID" });
   });
 });

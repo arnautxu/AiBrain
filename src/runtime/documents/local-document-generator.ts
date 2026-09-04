@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import JSZip from "jszip";
+import { PDFDocument } from "pdf-lib";
 
 export type LocalDocumentFormat = "pdf" | "docx" | "pptx" | "xlsx";
 export type LocalDocumentCell = string | number | boolean | null;
@@ -9,6 +10,7 @@ export type LocalDocumentInput = Readonly<{
   title: string;
   content: string;
   rows?: readonly (readonly LocalDocumentCell[])[];
+  sourcePng?: Uint8Array;
 }>;
 
 export type GeneratedLocalDocument = Readonly<{
@@ -30,6 +32,11 @@ const MAX_CONTENT_BYTES = 200_000;
 const MAX_ROWS = 2_000;
 const MAX_COLUMNS = 100;
 const MAX_CELL_BYTES = 16_000;
+const MAX_SOURCE_IMAGE_BYTES = 20_000_000;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+const A4_WIDTH_POINTS = 595.28;
+const A4_HEIGHT_POINTS = 841.89;
+const A4_IMAGE_MARGIN_POINTS = 36;
 
 export class LocalDocumentGenerationError extends Error {
   constructor(readonly code: string, message: string) {
@@ -64,7 +71,21 @@ function normalizedInput(input: LocalDocumentInput) {
     throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_FORMAT_INVALID", "Document format is not supported.");
   }
   const title = cleanText(input.title, 500, "title");
-  const content = cleanText(input.content, MAX_CONTENT_BYTES, "content");
+  const sourcePng = input.sourcePng === undefined ? undefined : Buffer.from(input.sourcePng);
+  if (sourcePng !== undefined && (
+    input.format !== "pdf" ||
+    sourcePng.byteLength < 64 ||
+    sourcePng.byteLength > MAX_SOURCE_IMAGE_BYTES ||
+    !sourcePng.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE)
+  )) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SOURCE_IMAGE_INVALID", "Source image must be a valid PNG for PDF generation.");
+  }
+  const content = sourcePng
+    ? input.content.replace(/\r\n?/gu, "\n").replace(/\0/gu, "").trim()
+    : cleanText(input.content, MAX_CONTENT_BYTES, "content");
+  if (Buffer.byteLength(content, "utf8") > MAX_CONTENT_BYTES) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_INPUT_INVALID", "content is too large.");
+  }
   if (input.rows !== undefined) {
     if (!Array.isArray(input.rows) || input.rows.length === 0 || input.rows.length > MAX_ROWS) {
       throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_ROWS_INVALID", "Spreadsheet rows are invalid.");
@@ -86,7 +107,7 @@ function normalizedInput(input: LocalDocumentInput) {
       }
     }
   }
-  return { format: input.format, title, content, rows: input.rows };
+  return { format: input.format, title, content, rows: input.rows, sourcePng };
 }
 
 async function zipBytes(files: Record<string, string>) {
@@ -252,7 +273,7 @@ function wrapLines(title: string, content: string) {
   return result;
 }
 
-function pdfBytes(title: string, content: string) {
+function textPdfBytes(title: string, content: string) {
   const lines = wrapLines(title, content);
   const pages = Math.max(1, Math.ceil(lines.length / 44));
   const objects: Buffer[] = [];
@@ -292,12 +313,42 @@ function pdfBytes(title: string, content: string) {
   return { data: Buffer.concat(chunks), pages };
 }
 
+async function imagePdfBytes(title: string, sourcePng: Uint8Array) {
+  try {
+    const document = await PDFDocument.create();
+    document.setTitle(title);
+    document.setCreator("AiBrain");
+    document.setProducer("AiBrain Document Generator");
+    const image = await document.embedPng(sourcePng);
+    const page = document.addPage([A4_WIDTH_POINTS, A4_HEIGHT_POINTS]);
+    const maximumWidth = A4_WIDTH_POINTS - (A4_IMAGE_MARGIN_POINTS * 2);
+    const maximumHeight = A4_HEIGHT_POINTS - (A4_IMAGE_MARGIN_POINTS * 2);
+    const scale = Math.min(maximumWidth / image.width, maximumHeight / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    page.drawImage(image, {
+      x: (A4_WIDTH_POINTS - width) / 2,
+      y: (A4_HEIGHT_POINTS - height) / 2,
+      width,
+      height,
+    });
+    return { data: Buffer.from(await document.save()), pages: 1 };
+  } catch (error) {
+    throw new LocalDocumentGenerationError(
+      "LOCAL_DOCUMENT_SOURCE_IMAGE_INVALID",
+      error instanceof Error && error.message ? "Source PNG cannot be embedded safely." : "Source PNG is invalid.",
+    );
+  }
+}
+
 export async function generateLocalDocument(input: LocalDocumentInput): Promise<GeneratedLocalDocument> {
   const normalized = normalizedInput(input);
   let data: Buffer;
   let pages: number | null = null;
   if (normalized.format === "pdf") {
-    const generated = pdfBytes(normalized.title, normalized.content);
+    const generated = normalized.sourcePng
+      ? await imagePdfBytes(normalized.title, normalized.sourcePng)
+      : textPdfBytes(normalized.title, normalized.content);
     data = generated.data;
     pages = generated.pages;
   } else if (normalized.format === "docx") {

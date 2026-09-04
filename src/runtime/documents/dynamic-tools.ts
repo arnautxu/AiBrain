@@ -4,9 +4,11 @@ import path from "node:path";
 import type { DynamicToolCallParams } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
 import type { DynamicToolCallResponse } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
 import type { DynamicToolSpec } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
+import type { InstallationConfig } from "@/config/installation-schema";
 import type { DocumentArtifact } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
 import { validateUploadedDocument } from "@/documents/upload-validation";
+import { resourceLocationIndexForInstallation } from "@/library/server-resource-access";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile } from "@/storage";
 import {
@@ -15,6 +17,7 @@ import {
   type LocalDocumentFormat,
 } from "@/runtime/documents/local-document-generator";
 import { generatedDocumentArtifactId } from "@/runtime/generated-document-artifacts";
+import { generatedImageArtifactId, isPng } from "@/runtime/generated-image-artifacts";
 
 export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
 
@@ -94,6 +97,21 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
         additionalProperties: false,
       },
     },
+    {
+      type: "function",
+      name: "image_to_pdf",
+      description: "Create a one-page A4 PDF containing a completed generated PNG. Pass the opaque image item id from that image generation; never pass or reveal a server or workspace path.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sourceImageItemId: { type: "string", minLength: 1, maxLength: 256 },
+          fileName: { type: "string", minLength: 1, maxLength: 160 },
+          title: { type: "string", minLength: 1, maxLength: 500 },
+        },
+        required: ["sourceImageItemId", "fileName", "title"],
+        additionalProperties: false,
+      },
+    },
   ],
 }]);
 
@@ -110,6 +128,7 @@ type CreateArguments = Readonly<{
   title: string;
   content: string;
   rows?: readonly (readonly LocalDocumentCell[])[];
+  sourceImageItemId?: string;
 }>;
 
 type Receipt = Readonly<{
@@ -151,6 +170,7 @@ export type LocalDocumentDynamicToolResult = Readonly<{
 }>;
 
 export type LocalDocumentDynamicToolContext = Readonly<{
+  installation: Pick<InstallationConfig, "installationId" | "paths">;
   installationId: string;
   userId: string;
   projectId: string;
@@ -158,6 +178,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   receiptRoot: string;
   runtimeThreadId: string;
   runtimeTurnId: string;
+  sourceThreadId: string;
   sourceTurnId: string;
   permissions: ResolvedPermissions;
   now?: () => Date;
@@ -213,6 +234,25 @@ function parseArguments(value: unknown): CreateArguments {
   };
 }
 
+function parseImageToPdfArguments(value: unknown): CreateArguments {
+  if (!isRecord(value)) {
+    throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Image PDF arguments must be an object.");
+  }
+  exactKeys(value, ["sourceImageItemId", "fileName", "title"]);
+  if (typeof value.sourceImageItemId !== "string" || !OPAQUE_ID_PATTERN.test(value.sourceImageItemId) ||
+      typeof value.fileName !== "string" || !FILE_NAME_PATTERN.test(value.fileName) || value.fileName === "." || value.fileName === ".." ||
+      path.extname(value.fileName).toLocaleLowerCase() !== ".pdf" || typeof value.title !== "string") {
+    throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Image PDF arguments are invalid.");
+  }
+  return {
+    format: "pdf",
+    fileName: value.fileName.normalize("NFC"),
+    title: value.title,
+    content: "",
+    sourceImageItemId: value.sourceImageItemId,
+  };
+}
+
 function parseBatchArguments(value: unknown) {
   if (!isRecord(value)) {
     throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Document batch arguments must be an object.");
@@ -242,6 +282,7 @@ function canonicalInput(input: CreateArguments) {
     title: input.title,
     content: input.content,
     rows: input.rows ?? null,
+    sourceImageItemId: input.sourceImageItemId ?? null,
   });
 }
 
@@ -362,6 +403,48 @@ async function secureDirectory(workspace: string) {
   return documents;
 }
 
+async function sourcePngFor(input: CreateArguments, context: LocalDocumentDynamicToolContext) {
+  const sourceImageItemId = input.sourceImageItemId;
+  if (!sourceImageItemId) return undefined;
+  try {
+    const index = resourceLocationIndexForInstallation(context.installation);
+    const matches = (await index.listForProjects(new Set([context.projectId]), "generated-image"))
+      .filter((candidate) => candidate.threadId === context.sourceThreadId &&
+        candidate.storageOwnerId === context.userId && candidate.messageId !== null &&
+        generatedImageArtifactId(candidate.messageId, sourceImageItemId) === candidate.resourceId);
+    // App Server item ids are opaque. Re-deriving each indexed artifact id
+    // from its original assistant message preserves that opacity while making
+    // same-thread references survive later turns. Ambiguity fails closed.
+    if (matches.length !== 1) throw new Error("Generated image reference is missing or ambiguous.");
+    const location = matches[0]!;
+    const artifactId = location.resourceId;
+    const expectedPath = `generated-image-artifacts/${artifactId}.png`;
+    if (location.mediaType !== "image/png" || location.relativePath !== expectedPath ||
+        !/^[^/\\\u0000-\u001f\u007f]+\.png$/u.test(location.fileName)) {
+      throw new Error("Generated image binding mismatch.");
+    }
+    const contents = await readRegularFileWithin(context.installation.paths.dataRoot, expectedPath, 20_000_000);
+    if (contents.byteLength !== location.size ||
+        createHash("sha256").update(contents).digest("hex") !== location.sha256 || !isPng(contents)) {
+      throw new Error("Generated image integrity mismatch.");
+    }
+    const validated = validateUploadedDocument({
+      fileName: location.fileName,
+      declaredMimeType: location.mediaType,
+      data: contents,
+    });
+    if (validated.kind !== "image" || validated.mediaType !== "image/png") {
+      throw new Error("Generated image is not a PNG.");
+    }
+    return contents;
+  } catch {
+    throw new LocalDocumentDynamicToolError(
+      "LOCAL_DOCUMENT_SOURCE_IMAGE_INVALID",
+      "No se ha podido localizar y verificar la imagen PNG generada en esta conversación.",
+    );
+  }
+}
+
 async function availableTarget(documents: string, fileName: string) {
   const extension = path.extname(fileName);
   const stem = path.basename(fileName, extension);
@@ -475,7 +558,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || params.tool !== "create") {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -483,7 +566,9 @@ async function handleSingleLocalDocumentDynamicToolCall(
         throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool identity is invalid.");
       }
     }
-    if (!UUID_PATTERN.test(context.userId) || !UUID_PATTERN.test(context.projectId) || !UUID_PATTERN.test(context.sourceTurnId) ||
+    if (context.installation.installationId !== context.installationId ||
+        !UUID_PATTERN.test(context.userId) || !UUID_PATTERN.test(context.projectId) ||
+        !UUID_PATTERN.test(context.sourceThreadId) || !UUID_PATTERN.test(context.sourceTurnId) ||
         params.threadId !== context.runtimeThreadId || params.turnId !== context.runtimeTurnId ||
         context.permissions.installationId !== context.installationId || context.permissions.userId !== context.userId ||
         context.permissions.projectId !== context.projectId) {
@@ -492,7 +577,9 @@ async function handleSingleLocalDocumentDynamicToolCall(
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
     }
-    const input = parseArguments(params.arguments);
+    const input = params.tool === "image_to_pdf"
+      ? parseImageToPdfArguments(params.arguments)
+      : parseArguments(params.arguments);
     const inputFingerprint = createHash("sha256").update(canonicalInput(input)).digest("hex");
     const receiptName = receiptNameFor(params.callId);
     const receiptPath = path.join(context.receiptRoot, receiptName);
@@ -522,7 +609,14 @@ async function handleSingleLocalDocumentDynamicToolCall(
         return { response: responseFor(existing), artifacts: [artifactFromReceipt(existing, context.projectId, context.sourceTurnId)] };
       }
       const documents = await secureDirectory(context.projectWorkspace);
-      const generated = await generateLocalDocument(input);
+      const sourcePng = await sourcePngFor(input, context);
+      const generated = await generateLocalDocument({
+        format: input.format,
+        title: input.title,
+        content: input.content,
+        rows: input.rows,
+        sourcePng,
+      });
       validateUploadedDocument({ fileName: input.fileName, declaredMimeType: generated.mimeType, data: generated.data });
       const selected = await availableTarget(documents, input.fileName);
       let written = false;
@@ -604,7 +698,9 @@ export async function handleLocalDocumentDynamicToolCall(
         throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool identity is invalid.");
       }
     }
-    if (!UUID_PATTERN.test(context.userId) || !UUID_PATTERN.test(context.projectId) ||
+    if (context.installation.installationId !== context.installationId ||
+        !UUID_PATTERN.test(context.userId) || !UUID_PATTERN.test(context.projectId) ||
+        !UUID_PATTERN.test(context.sourceThreadId) ||
         !UUID_PATTERN.test(context.sourceTurnId) || params.threadId !== context.runtimeThreadId ||
         params.turnId !== context.runtimeTurnId || context.permissions.installationId !== context.installationId ||
         context.permissions.userId !== context.userId || context.permissions.projectId !== context.projectId) {

@@ -418,7 +418,9 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
   if (!isRecord(value) || typeof value.id !== "string" || !/^[0-9a-f-]{36}$/i.test(value.id) ||
     typeof value.name !== "string" || !value.name.trim() || value.name.length > 120) return false;
   if (value.type === "image") {
-    return typeof value.url === "string" && value.url.startsWith("/api/projects/") &&
+    return /^[^/\\\u0000-\u001f\u007f]+\.png$/u.test(value.name) &&
+      typeof value.url === "string" &&
+      new RegExp(`^/api/projects/[0-9a-f-]{36}/artifacts/${value.id}$`, "iu").test(value.url) &&
       (value.prompt === null || typeof value.prompt === "string");
   }
   if (value.type === "document") {
