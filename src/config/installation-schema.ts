@@ -1,3 +1,4 @@
+import { isComposioToolkitConfig, type ComposioToolkitConfig } from "@/connectors/composio-config";
 import path from "node:path";
 
 export const INSTALLATION_CONFIG_SCHEMA_VERSION = 1 as const;
@@ -44,6 +45,7 @@ export type OutlookConnectorConfig = {
 
 export type InstallationConnectors = {
   codexManagedAppAction?: CodexManagedAppActionConfig;
+  composio?: { toolkits: ComposioToolkitConfig[] };
   gmail?: GmailConnectorConfig;
   outlook?: OutlookConnectorConfig;
 };
@@ -103,7 +105,7 @@ const PATH_KEYS = [
   "backupsRoot",
 ] as const;
 
-const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook"] as const;
+const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook", "composio"] as const;
 const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
 const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
 const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -446,11 +448,21 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       }
     }
   }
-  if (!codexManagedAppAction && !gmail && !outlook) {
+  let composio: InstallationConnectors["composio"];
+  if (value.composio !== undefined) {
+    const candidate = value.composio;
+    if (!isRecord(candidate) || Object.keys(candidate).join() !== "toolkits" ||
+        !Array.isArray(candidate.toolkits) || candidate.toolkits.length > 40 ||
+        !candidate.toolkits.every(isComposioToolkitConfig) ||
+        new Set(candidate.toolkits.map(t => t.slug.replaceAll("_", "-"))).size !== candidate.toolkits.length) {
+      issues.push({ path: "$.connectors.composio", message: "requiere toolkits revisados, auth config, scopes y herramientas de lectura con versión fija" });
+    } else composio = { toolkits: candidate.toolkits };
+  }
+  if (!codexManagedAppAction && !gmail && !outlook && !composio) {
     issues.push({ path: "$.connectors", message: "debe configurar al menos un conector" });
     return undefined;
   }
-  return { ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
+  return { ...(composio ? { composio } : {}), ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
 }
 
 function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {
@@ -486,6 +498,13 @@ function freezeInstallationConfig(config: InstallationConfig): Readonly<Installa
     }
     if (config.connectors.gmail) Object.freeze(config.connectors.gmail);
     if (config.connectors.outlook) Object.freeze(config.connectors.outlook);
+    if (config.connectors.composio) {
+      for (const toolkit of config.connectors.composio.toolkits) {
+        toolkit.readTools.forEach(Object.freeze);
+        Object.freeze(toolkit.readTools); Object.freeze(toolkit.scopes); Object.freeze(toolkit);
+      }
+      Object.freeze(config.connectors.composio.toolkits); Object.freeze(config.connectors.composio);
+    }
     Object.freeze(config.connectors);
   }
   if (config.catalog) {

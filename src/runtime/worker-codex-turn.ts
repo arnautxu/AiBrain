@@ -1,3 +1,4 @@
+import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "@/runtime/composio-dynamic-tools";
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
@@ -989,6 +990,7 @@ export async function runWorkerCodexTurn(
               ...(enterpriseDocumentNetwork ? COMPANY_FILES_DYNAMIC_TOOLS : []),
               ...GMAIL_DYNAMIC_TOOLS,
               ...OUTLOOK_DYNAMIC_TOOLS,
+              ...(runtime.config.connectors?.composio?.toolkits.length ? COMPOSIO_DYNAMIC_TOOLS : []),
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
             ],
             ephemeral: false,
@@ -1706,6 +1708,13 @@ export async function runWorkerCodexTurn(
               },
               runtimeThreadId: threadId,
               runtimeTurnId,
+            }) as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === COMPOSIO_NAMESPACE) {
+            return await handleComposioTool(request.params as never, {
+              config: runtime.config, installationId, userId: authenticatedUserId,
+              runtimeThreadId: threadId, runtimeTurnId,
+              selectedIds: selectedConnectorMentions.map(({ resource }) => resource.id),
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_GMAIL_TOOL_NAMESPACE) {

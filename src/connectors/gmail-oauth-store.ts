@@ -109,9 +109,10 @@ export function gmailOAuthEncryptionKey(encoded: string | undefined) {
 export class FileGmailOAuthStateStore {
   private readonly root: string;
   private readonly locks: ResourceLockManager;
-  constructor(private readonly config: Readonly<InstallationConfig>, private readonly now: () => number = Date.now) {
-    this.root = path.join(path.resolve(config.paths.dataRoot), "connectors", "gmail", "oauth-states");
-    this.locks = new ResourceLockManager({ rootDirectory: path.join(path.resolve(config.paths.dataRoot), "connectors", "gmail", "locks") });
+  constructor(private readonly config: Readonly<InstallationConfig>, private readonly now: () => number = Date.now, namespace = "gmail") {
+    if (!/^[a-z][a-z0-9-]{0,62}$/.test(namespace)) throw new GmailOAuthStoreError("OAUTH_NAMESPACE_INVALID", "Invalid OAuth namespace.");
+    this.root = path.join(path.resolve(config.paths.dataRoot), "connectors", namespace, "oauth-states");
+    this.locks = new ResourceLockManager({ rootDirectory: path.join(path.resolve(config.paths.dataRoot), "connectors", namespace, "locks") });
   }
   private statePath(stateHash: string) { if (!HASH.test(stateHash)) throw new GmailOAuthStoreError("GMAIL_OAUTH_STATE_INVALID", "OAuth state is invalid."); return path.join(this.root, `${stateHash}.json`); }
   async create(userId: string, redirectUri: string) {
