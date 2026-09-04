@@ -149,8 +149,11 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
-  it("publishes safe prefixes between delayed chunks and replaces a prior final item", async () => {
-    const root = await mkdtemp(path.join(tmpdir(), "aibrain-r2-stream-"));
+  it.each(["ordinary", "private", "legacy"])("publishes safe prefixes and keeps explicit final over legacy (%s)", async (mode) => {
+    const privateRoot = mode === "private";
+    const phase = mode === "legacy" ? undefined : "final_answer";
+    const root = await mkdtemp(path.join(tmpdir(), privateRoot
+      ? 'aibrain "QA_PRIVATE_MARKER" stream-' : "aibrain-r2-stream-"));
     let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
     const events: Array<{ type: string; value?: string }> = [];
     const observations: string[] = [];
@@ -177,18 +180,22 @@ describe("worker Codex turn", () => {
           const result = method === "thread/start" ? { thread: { id: "r2-thread" } } : { turn: { id: "r2-turn" } };
           await beforeResolve?.(result as never, envelope() as never);
           if (method === "turn/start") queueMicrotask(() => { void (async () => {
-            await notify("item/started", { id: "first", type: "agentMessage", phase: "final_answer", text: "" });
-            await notify("item/agentMessage/delta", { itemId: "first", delta: "Primera palabra" });
+            await notify("item/started", { id: "first", type: "agentMessage", phase, text: "" });
+            const chunks = privateRoot ? [...`Archivo ${root}/informe.pdf`] : ["Primera palabra"];
+            for (const delta of chunks) await notify("item/agentMessage/delta", { itemId: "first", delta });
             observations.push(text());
             await new Promise((resolve) => setTimeout(resolve, 15));
             await notify("item/agentMessage/delta", { itemId: "first", delta: " segunda palabra" });
             observations.push(text());
-            await notify("item/completed", { id: "first", type: "agentMessage", phase: "final_answer", text: "Primera palabra segunda palabra." });
-            await notify("item/started", { id: "replacement", type: "agentMessage", phase: "final_answer", text: "" });
+            await notify("item/completed", { id: "first", type: "agentMessage", phase, text: "Primera palabra segunda palabra." });
+            await notify("item/started", { id: "replacement", type: "agentMessage", phase, text: "" });
             await notify("item/agentMessage/delta", { itemId: "replacement", delta: "Respuesta corregida. " });
             observations.push(text());
-            await notify("item/completed", { id: "replacement", type: "agentMessage", phase: "final_answer", text: "Respuesta corregida." });
-            await notify("item/agentMessage/delta", { itemId: "unclassified", delta: "Unclassified trailing message" });
+            // Missing completion metadata must not erase a known explicit phase.
+            await notify("item/completed", { id: "replacement", type: "agentMessage", ...(privateRoot ? {} : { phase }), text: "Respuesta corregida." });
+            await notify("item/started", { id: "unclassified", type: "agentMessage", text: "" });
+            await notify("item/agentMessage/delta", { itemId: "unclassified", delta: "Unclassified trailing message " });
+            await notify("item/completed", { id: "unclassified", type: "agentMessage", text: "Unclassified trailing message" });
             await handlers.onNotification({ method: "turn/completed", params: { threadId: "r2-thread",
               turn: { id: "r2-turn", status: "completed", items: [], error: null } } }, envelope());
           })(); });
@@ -201,10 +208,14 @@ describe("worker Codex turn", () => {
       workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
     }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
     async (event) => { events.push(event); });
-    expect(observations).toEqual(["Primera ", "Primera palabra segunda ", "Respuesta corregida. "]);
-    expect(text()).toBe("Respuesta corregida.");
+    expect(observations).toEqual(privateRoot
+      ? ["Archivo ", "Archivo ./informe.pdf segunda ", "Respuesta corregida. "]
+      : ["Primera ", "Primera palabra segunda ", "Respuesta corregida. "]);
+    expect(text()).toBe(mode === "legacy" ? "Unclassified trailing message" : "Respuesta corregida.");
     expect(events.filter((event) => event.type === "content" || event.type === "delta")
-      .some((event) => event.value?.includes("Unclassified"))).toBe(false);
+      .some((event) => event.value?.includes("Unclassified"))).toBe(mode === "legacy");
+    expect(events.filter((event) => event.type === "content" || event.type === "delta")
+      .map((event) => event.value).join("")).not.toContain("QA_PRIVATE_MARKER");
   });
 
   beforeEach(() => {
@@ -235,7 +246,7 @@ describe("worker Codex turn", () => {
   });
 
   it("creates four local formats in one tool call, projects one card per file and closes with no private path", async () => {
-    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-document-batch-"));
+    const userRoot = await mkdtemp(path.join(tmpdir(), 'aibrain "QA_PRIVATE_MARKER" document-batch-'));
     const workspace = path.join(userRoot, "workspace");
     const staging = path.join(userRoot, "staging");
     await import("node:fs/promises").then(async ({ mkdir }) => {
@@ -429,6 +440,8 @@ describe("worker Codex turn", () => {
     const finalContent = events.filter((event) => event.type === "delta");
     expect(finalContent.map((event) => event.value).join("")).toBe("Listo: ./documents/hello-world.pdf");
     expect(finalContent[0]).toEqual({ type: "delta", value: "Listo: " });
+    expect(events.filter((event) => event.type === "content" || event.type === "delta")
+      .map((event) => event.value).join("")).not.toContain("QA_PRIVATE_MARKER");
     expect(JSON.stringify(events)).not.toContain(userRoot);
     expect(events).toContainEqual({ type: "done" });
     expect(calls).toEqual(["thread/start", "turn/start"]);
@@ -1343,6 +1356,7 @@ describe("worker Codex turn", () => {
                 { type: "userMessage", id: "item-user", clientId: userMessageId, content: [] },
                 { type: "agentMessage", id: "item-commentary", text: "Recovered public progress", phase: "commentary" },
                 { type: "agentMessage", id: "item-agent", text: "Recovered answer", phase: "final_answer" },
+                { type: "agentMessage", id: "item-legacy", text: "Unclassified trailing message" },
               ],
             }],
           },
@@ -1389,6 +1403,7 @@ describe("worker Codex turn", () => {
     expect(events).toContainEqual({ type: "runtimeTurn", turnId: "runtime-turn-recovered" });
     expect(events).toContainEqual({ type: "content", value: "Recovered answer" });
     expect(events).not.toContainEqual({ type: "content", value: "Recovered public progress" });
+    expect(events).not.toContainEqual({ type: "content", value: "Unclassified trailing message" });
     expect(events).toContainEqual({
       type: "activity",
       item: expect.objectContaining({ id: "item-commentary", kind: "reasoning", detail: "Recovered public progress" }),

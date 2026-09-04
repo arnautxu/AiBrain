@@ -2,6 +2,7 @@ import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy"
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
 import type { ServerNotification } from "../../contracts/codex/0.149.1/types/ServerNotification";
 import type { ServerRequest } from "../../contracts/codex/0.149.1/types/ServerRequest";
 import type {
@@ -207,16 +208,6 @@ function turnTerminalTimeouts() {
 
 function productSafeRuntimeMessage(message: string) {
   return publicActivityText(message, 2_000) ?? "El servicio no ha podido completar esta operación.";
-}
-
-function privateWorkspaceSafeText(value: string, roots: readonly string[]) {
-  const rootSanitized = [...new Set(roots.filter((root) => path.isAbsolute(root)))]
-    .sort((left, right) => right.length - left.length)
-    .reduce((text, root) => text.replaceAll(root, "."), value);
-  return rootSanitized.replace(
-    /\/var\/lib\/aibrain\/data\/users\/[^/\s"'<>]+\/workspace(?=\/|\s|$)/giu,
-    ".",
-  );
 }
 
 async function awaitLateAppServerResponse(
@@ -589,7 +580,8 @@ export async function runWorkerCodexTurn(
     projection?: WorkerTurnProjection,
   ) => {
     commentaryText.set(itemId, rawText.slice(0, 24_000));
-    const detail = publicActivityText(status === "running" ? completePublicTextPrefix(rawText) : rawText);
+    const safeText = privateWorkspaceSafeText(rawText, [projectWorkspace, runtime.handle.roots.workspace]);
+    const detail = publicActivityText(status === "running" ? completePublicTextPrefix(safeText) : safeText);
     if (!detail) return;
     await upsertActivity({
       id: itemId,
@@ -606,10 +598,14 @@ export async function runWorkerCodexTurn(
   ) => {
     const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
     finalAnswerText.set(itemId, rawValue);
-    const completePrefix = completePublicTextPrefix(rawValue);
+    if (agentMessagePhases.get(itemId) !== "final_answer" &&
+        [...agentMessagePhases.values()].includes("final_answer")) return;
+    const completePrefix = completePublicTextPrefix(
+      privateWorkspaceSafeText(rawValue, [projectWorkspace, runtime.handle.roots.workspace]),
+    );
     if (!completePrefix) return;
     const publicValue = publicAssistantText(
-      privateWorkspaceSafeText(completePrefix, [projectWorkspace, runtime.handle.roots.workspace]),
+      completePrefix,
       assistantName,
     );
     if (!publicValue || (publishedFinalItemId === itemId && publishedFinalText === publicValue)) return;
@@ -627,11 +623,13 @@ export async function runWorkerCodexTurn(
     value: string,
     projection?: WorkerTurnProjection,
   ) => {
+    finalAnswerText.set(itemId, value.slice(0, 128_000));
+    if (agentMessagePhases.get(itemId) !== "final_answer" &&
+        [...agentMessagePhases.values()].includes("final_answer")) return;
     const publicValue = publicAssistantText(
       privateWorkspaceSafeText(value, [projectWorkspace, runtime.handle.roots.workspace]),
       assistantName,
     );
-    finalAnswerText.set(itemId, value.slice(0, 128_000));
     if (publishedFinalItemId !== itemId || publishedFinalText !== publicValue) {
       const previousValue = publishedFinalText;
       const sameItem = publishedFinalItemId === null || publishedFinalItemId === itemId;
@@ -1408,7 +1406,7 @@ export async function runWorkerCodexTurn(
             const itemId = params.item.id;
             const phase = params.item.phase === "commentary" || params.item.phase === "final_answer"
               ? params.item.phase
-              : null;
+              : agentMessagePhases.get(itemId) ?? null;
             agentMessagePhases.set(itemId, phase);
             const buffered = pendingAgentText.get(itemId) ?? "";
             pendingAgentText.delete(itemId);
