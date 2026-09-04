@@ -152,11 +152,10 @@ cleanup_ghcr_credentials() {
 }
 
 verify_current_main() {
-  local revision="$1" token="$2" remote_sha
-  # Token goes through stdin, never argv, a durable file, or diagnostic output.
-  [[ "$token" =~ ^[A-Za-z0-9_]+$ ]] || fail "deployment token has invalid characters"
-  remote_sha="$(printf 'header = "Authorization: Bearer %s"\n' "$token" | \
-    curl --config - --fail --silent --show-error --connect-timeout 10 --max-time 20 \
+  local revision="$1" remote_sha
+  # Main is public. Keep the package pull credential scoped to GHCR and out of
+  # the GitHub API request entirely; a failed/rate-limited read still fails shut.
+  remote_sha="$(curl --fail --silent --show-error --connect-timeout 10 --max-time 20 \
       -H 'Accept: application/vnd.github+json' \
       'https://api.github.com/repos/arnautxu/AiBrain/git/ref/heads/main' | jq -er '.object.sha')" \
     || fail "cannot verify current GitHub main; promotion refused"
@@ -170,7 +169,7 @@ pull_ghcr_images() {
   [[ "$ghcr_user" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]] || fail "GHCR username is invalid"
   IFS= read -r ghcr_token || [[ -n "$ghcr_token" ]] || fail "GHCR pull token was not supplied"
   [[ -n "$ghcr_token" ]] || fail "GHCR pull token was empty"
-  verify_current_main "$revision" "$ghcr_token"
+  verify_current_main "$revision"
   umask 077
   ghcr_docker_config="$(mktemp -d "${RELEASE_ROOT}/.ghcr-docker.XXXXXX")"
   trap cleanup_ghcr_credentials EXIT
@@ -179,7 +178,7 @@ pull_ghcr_images() {
   docker --config "$ghcr_docker_config" pull "$egress_image" >/dev/null
   # This runs under deploy.lock, AFTER slow image pulls and before any service
   # mutation. A concurrent main push invalidates this candidate, not user work.
-  verify_current_main "$revision" "$ghcr_token"
+  verify_current_main "$revision"
   unset ghcr_token
 }
 
