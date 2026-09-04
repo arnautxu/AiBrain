@@ -104,12 +104,16 @@ export function TurnArtifactCard({ artifact, onPreviewDocument, onOpenBrowser }:
     );
   }
   return <ImageGeneration
+    key={artifact.url}
+    name={artifact.name}
     prompt={artifact.prompt ?? artifact.name}
     generating={false}
     src={artifact.url}
     alt={artifact.prompt ?? artifact.name}
     downloadUrl={`${artifact.url}?download=1`}
     downloadName={artifact.name}
-    className="w-full max-w-[420px]"
+    width={artifact.width}
+    height={artifact.height}
+    className="w-full max-w-[640px]"
   />;
 }

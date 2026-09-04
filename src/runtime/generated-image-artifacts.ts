@@ -274,5 +274,8 @@ export async function persistGeneratedImageArtifact(
     name: fileName,
     url: `/api/projects/${context.projectId}/artifacts/${artifactId}`,
     prompt: typeof item.revisedPrompt === "string" ? item.revisedPrompt : null,
+    // Contents have already passed PNG structure, dimensions and integrity checks.
+    width: contents.readUInt32BE(16),
+    height: contents.readUInt32BE(20),
   };
 }

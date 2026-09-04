@@ -22,6 +22,15 @@ registered owner, path, MIME type, size, SHA-256 and PNG structure, and returns
 same-origin resource policy headers. `?download=1` is the only download query
 and returns `Content-Disposition: attachment` with one `.png` suffix.
 
+New image events also carry optional `width` and `height` together, read from
+the already validated PNG IHDR. Older persisted events without dimensions
+remain readable. The UI reserves a bounded frame from these dimensions and
+uses the loaded image's natural dimensions for its label; no dimensions are
+invented from the prompt. Extremely tall or wide images remain contained.
+Preview loading/failure and retry are client display states. Retrying remounts
+the same authenticated image URL, without a query parameter, generation call,
+or new turn. A ready preview exposes explicit enlargement and PNG download.
+
 The final PNG lives under the installation's private data root, which is not
 mounted into the Codex worker. The generic workspace-file route also rejects
 internal `.aibrain` paths left by older flows. Generated-image URLs contain only

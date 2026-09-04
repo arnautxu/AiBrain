@@ -262,12 +262,15 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "type", "name", "url", "prompt"],
+      "dependentRequired": { "width": ["height"], "height": ["width"] },
       "properties": {
         "id": { "$ref": "#/$defs/Uuid" },
         "type": { "const": "image" },
         "name": { "type": "string", "maxLength": 120 },
         "url": { "type": "string", "pattern": "^/api/projects/" },
-        "prompt": { "type": ["string", "null"] }
+        "prompt": { "type": ["string", "null"] },
+        "width": { "type": "integer", "minimum": 1, "maximum": 8192 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 8192 }
       }
     },
     "ChatMessage": {

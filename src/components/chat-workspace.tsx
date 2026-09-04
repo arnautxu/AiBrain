@@ -543,12 +543,12 @@ export function ChatWorkspace({
     mention.canRead && mention.status === "connected" &&
     (mention.id.toLocaleLowerCase("es") === "gmail" || mention.label.toLocaleLowerCase("es") === "gmail"));
   const suggestions = useMemo(
-    () => landingSuggestions(project, companyName, { gmailAuthorized }),
-    [companyName, gmailAuthorized, project],
+    () => landingSuggestions(project, companyName, { gmailAuthorized, imageGeneration }),
+    [companyName, gmailAuthorized, imageGeneration, project],
   );
   const noProject = !project || standaloneConversation;
   const firstName = userName.trim().split(/\s+/)[0] || "ahí";
-  const landingHeadline = noProject
+  const landingHeadline = imageGeneration ? "¿Qué imagen quieres crear?" : noProject
     ? `¿En qué te puedo ayudar, ${firstName}?`
     : `¿Cómo puedo ayudarte en ${project.name}?`;
   const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
@@ -872,7 +872,7 @@ export function ChatWorkspace({
               aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
               autoFocus={!hasMessages}
               className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] md:text-[14px] ${hasMessages ? "min-h-8" : "min-h-12"}`}
-              placeholder={`Escribe a ${placeholderName}…`}
+              placeholder={imageGeneration ? "Describe la imagen que quieres crear…" : `Escribe a ${placeholderName}…`}
               rows={1}
               defaultValue={prompt}
               onChange={(event) => { onPromptChange(event.target.value); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
@@ -1007,7 +1007,10 @@ export function ChatWorkspace({
           </div>
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-7 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
             {suggestions.map((suggestion) => (
-              <button key={suggestion.id} type="button" className="touch-target block min-h-11 w-full rounded-xl px-4 py-2 text-left text-[13px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={() => onSend(suggestion.prompt)}>
+              <button key={suggestion.id} type="button" disabled={sending} className="touch-target block min-h-11 w-full rounded-xl px-4 py-2 text-left text-[13px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:opacity-40" onClick={() => {
+                onPromptChange(prompt.trim() ? `${prompt.trimEnd()}\n\n${suggestion.prompt}` : suggestion.prompt);
+                requestAnimationFrame(() => composerRef.current?.focus());
+              }}>
                 <span className="font-medium text-[var(--text)]">{suggestion.label}</span>
                 <span className="ml-2 text-[var(--text-muted)]">{suggestion.prompt}</span>
               </button>
