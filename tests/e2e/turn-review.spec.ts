@@ -81,7 +81,13 @@ test("plan, command, diff and approval decisions consume the typed turn contract
   );
   await page.getByRole("button", { name: /src\/resultado\.ts/ }).click();
   await expect(page.getByText("export const resultado = 'listo';")).toBeVisible();
-  await expect(page.getByText("Cambios preparados", { exact: true })).toBeVisible();
+  const reviewButton = assistantTurn.getByRole("button", { name: "Abrir cambios y resultados" });
+  await expect(reviewButton).toBeVisible();
+  await reviewButton.click();
+  const reviewPanel = page.locator('aside[aria-label="Cambios y resultados del turno"]');
+  await expect(reviewPanel).toBeVisible();
+  await reviewPanel.getByRole("button", { name: "Cerrar cambios y resultados" }).click();
+  await expect(reviewPanel).toBeHidden();
 
   const commandApproval = page.getByRole("group", { name: "Aprobación: Ejecutar comprobación" });
   await commandApproval.getByRole("button", { name: "Permitir", exact: true }).click();
