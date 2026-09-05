@@ -37,7 +37,7 @@ async function fixture(installationId = "company-alpha") {
       `AIBRAIN_EGRESS_WORKER_TOKEN=${"b".repeat(96)}`,
       `AIBRAIN_EGRESS_SERVER_TOKEN=${"c".repeat(96)}`,
       `AIBRAIN_EGRESS_HEALTH_TOKEN=${"e".repeat(96)}`,
-      "AIBRAIN_EGRESS_WORKER_HOSTS=api.openai.com",
+      "AIBRAIN_EGRESS_WORKER_HOSTS=api.openai.com,auth.openai.com,chatgpt.com",
       "AIBRAIN_EGRESS_SUPABASE_ORIGIN=https://project-ref.supabase.co",
       "",
     ].join("\n"), { mode: 0o600 }),
@@ -127,5 +127,35 @@ describe("Hetzner host preflight", () => {
     const misplacedSecret = await fixture();
     await writeFile(misplacedSecret.envFile, `${await readFile(misplacedSecret.envFile, "utf8")}AIBRAIN_SESSION_SECRET=must-not-live-here\n`);
     await expect(run(misplacedSecret.envFile)).rejects.toThrow();
+  });
+
+  it("rejects worker egress missing a required OpenAI runtime or refresh host", async () => {
+    const missingAuth = await fixture();
+    const missingAuthPath = path.join(missingAuth.configRoot, "egress.env");
+    await writeFile(
+      missingAuthPath,
+      (await readFile(missingAuthPath, "utf8")).replace(
+        "api.openai.com,auth.openai.com,chatgpt.com",
+        "api.openai.com,chatgpt.com",
+      ),
+      { mode: 0o600 },
+    );
+    await expect(run(missingAuth.envFile)).rejects.toMatchObject({
+      stderr: expect.stringContaining("missing required OpenAI hosts: auth.openai.com"),
+    });
+
+    const missingApi = await fixture();
+    const missingApiPath = path.join(missingApi.configRoot, "egress.env");
+    await writeFile(
+      missingApiPath,
+      (await readFile(missingApiPath, "utf8")).replace(
+        "api.openai.com,auth.openai.com,chatgpt.com",
+        "auth.openai.com,chatgpt.com",
+      ),
+      { mode: 0o600 },
+    );
+    await expect(run(missingApi.envFile)).rejects.toMatchObject({
+      stderr: expect.stringContaining("missing required OpenAI hosts: api.openai.com"),
+    });
   });
 });

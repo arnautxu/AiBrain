@@ -374,6 +374,11 @@ for (const key of [
   "AIBRAIN_EGRESS_WORKER_HOSTS",
   "AIBRAIN_EGRESS_SUPABASE_ORIGIN",
 ]) requireMatch(egressEnv, new RegExp(`^${key}=`, "mu"), `egress env example is missing ${key}`);
+requireMatch(
+  egressEnv,
+  /^AIBRAIN_EGRESS_WORKER_HOSTS=api\.openai\.com,auth\.openai\.com,chatgpt\.com$/mu,
+  "egress env example must include the exact proven Codex runtime and authentication hosts",
+);
 forbidMatch(compose, /^\s*(?:HTTP_PROXY|HTTPS_PROXY|ALL_PROXY)\s*:/mu, "Compose broadly injects proxy credentials instead of channel-specific runtime wiring");
 requireMatch(rdpVerifier, /\/usr\/bin\/xfreerdp3/u, "RDP verifier does not pin the FreeRDP binary");
 requireMatch(rdpVerifier, /\/args-from:file:/u, "RDP verifier exposes credentials through normal process arguments");

@@ -9,6 +9,7 @@ const LABEL_PRODUCT = "com.graphikai.aibrain.product";
 const LABEL_INSTALLATION = "com.graphikai.aibrain.installation";
 const IMMUTABLE_IMAGE = /^[a-z0-9][a-z0-9./:_-]*@sha256:[0-9a-f]{64}$/u;
 const CHANNEL_TOKEN = /^[A-Za-z0-9_-]{32,256}$/u;
+const REQUIRED_OPENAI_WORKER_HOSTS = ["api.openai.com", "auth.openai.com"];
 
 function fail(message) {
   process.stderr.write(`AiBrain host preflight failed: ${message}\n`);
@@ -210,6 +211,10 @@ const workerHosts = required(egressPolicy, "AIBRAIN_EGRESS_WORKER_HOSTS").split(
 if (workerHosts.some((host) => !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(host) ||
     host.includes("..") || host === "localhost" || host.endsWith(".localhost"))) {
   fail("worker egress hosts must be exact normalized DNS hostnames");
+}
+const missingOpenAiWorkerHosts = REQUIRED_OPENAI_WORKER_HOSTS.filter((host) => !workerHosts.includes(host));
+if (missingOpenAiWorkerHosts.length > 0) {
+  fail(`worker egress is missing required OpenAI hosts: ${missingOpenAiWorkerHosts.join(",")}`);
 }
 let supabaseOrigin;
 try {
