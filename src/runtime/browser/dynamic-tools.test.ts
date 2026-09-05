@@ -192,6 +192,36 @@ describe("closed browser dynamic tools", () => {
     expect(serializedAudit).toContain(FINGERPRINT);
   });
 
+  it("persists and returns capability discovery through the real call store", async () => {
+    const { userRoot, approvalStore } = await fixture();
+    const callStore = new BrowserToolCallStore({ userRoot });
+    const execute = vi.fn(async () => ({
+      schemaVersion: 1,
+      agentTools: ["capabilities", "open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"],
+      viewerControls: ["url", "back", "forward", "reload", "continuous-scroll", "fullscreen"],
+      notes: {
+        fullscreen: "Fullscreen is a viewer control available to the employee, not an agent page mutation.",
+        history: "Back, forward and reload are visible viewer controls; open provides agent URL navigation.",
+      },
+    }));
+
+    const response = await handleBrowserDynamicToolCall(
+      request("capabilities", {}),
+      context(approvalStore, execute, [], { callStore }),
+    );
+
+    expect(response).toMatchObject({
+      success: true,
+      contentItems: [{ type: "inputText", text: expect.stringContaining('"viewerControls"') }],
+    });
+    expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+      command: { action: "capabilities" },
+    }));
+    await expect(callStore.readAudit()).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ tool: "capabilities", status: "completed" }) }),
+    ]));
+  });
+
   it("opens, scrolls, navigates by click and types ordinary text without approval", async () => {
     const { approvalStore } = await fixture();
     const execute = vi.fn(async ({ command }: ExecutedBrowserCommand) => ({ action: command.action }));

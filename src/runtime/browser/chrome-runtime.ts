@@ -639,7 +639,13 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       // yield the lane after a short budget and let navigation/input proceed.
       // The late read may refresh the cache; mutations are never replayed.
       return Promise.race([
-        pending,
+        pending.catch((error) => {
+          // A timed-out compositor read does not prove that Chrome, its target
+          // or the private CDP pipe failed. Keep the last validated frame so a
+          // viewer attachment does not rotate the live browser session.
+          if (error instanceof CdpClientError && error.code === "CDP_COMMAND_TIMEOUT") return latest;
+          throw error;
+        }),
         wait(this.captureYieldAfterMs).then(() => latest),
       ]);
     });

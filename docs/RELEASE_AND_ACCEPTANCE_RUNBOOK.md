@@ -144,8 +144,9 @@ On the host, read back without exposing secrets:
 
 All current values must equal the candidate. Then capture HTTP 200 JSON from
 `/api/health/live` and `/api/health/ready`. Every required readiness check and
-component must pass. The public payload currently omits revision, so it cannot
-replace host release-state and OCI-label readback.
+component must pass. The liveness payload exposes the validated full
+`AIBRAIN_REVISION` (or `null` when absent/invalid) as a bounded deployment
+readback, but it cannot replace host release-state and OCI-label readback.
 
 Before accepting the packet, create the private `release:identity` preparation
 artifact from the recorded values:
