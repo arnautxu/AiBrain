@@ -502,6 +502,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   private operationTail: Promise<void> = Promise.resolve();
   private activeOperations = 0;
   private queuedOperations = 0;
+  private readonly captureYieldWaiters = new Set<() => void>();
 
   private recordPointer(threadId: string, x: number, y: number) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
@@ -656,17 +657,22 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       // seconds after a confirmed frame exists. Keep one capture in flight,
       // yield the lane after a short budget and let navigation/input proceed.
       // The late read may refresh the cache; mutations are never replayed.
-      return Promise.race([
-        pending.catch((error) => {
-          // A timed-out compositor read does not prove that Chrome, its target
-          // or the private CDP pipe failed. Keep the last validated frame so a
-          // viewer attachment does not rotate the live browser session.
-          if (error instanceof CdpClientError && error.code === "CDP_COMMAND_TIMEOUT") return latest;
-          throw error;
-        }),
-        wait(this.captureYieldAfterMs).then(() => latest),
-      ]);
-    });
+      const yieldSignal = this.captureYieldSignal();
+      try {
+        return await Promise.race([
+          pending.catch((error) => {
+            // A timed-out compositor read does not prove that Chrome, its target
+            // or the private CDP pipe failed. Keep the last validated frame so a
+            // viewer attachment does not rotate the live browser session.
+            if (error instanceof CdpClientError && error.code === "CDP_COMMAND_TIMEOUT") return latest;
+            throw error;
+          }),
+          yieldSignal.promise.then(() => latest),
+        ]);
+      } finally {
+        yieldSignal.cancel();
+      }
+    }, true, false);
     return Object.freeze({
       schemaVersion: 1,
       mediaType: "image/png",
@@ -1437,6 +1443,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     if (!this.running) throw new ChromeRuntimeError("CHROME_NOT_RUNNING", "Chrome runtime is not running.");
     this.controlGeneration += 1;
     this.takenOver = false;
+    this.preemptRepeatCaptures();
     await this.withExclusiveBrowserOperation(async () => {
       await this.resetHeldMouse();
       this.takenOver = true;
@@ -1446,6 +1453,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   async releaseTakeover() {
     this.controlGeneration += 1;
     this.takenOver = false;
+    this.preemptRepeatCaptures();
     await this.withExclusiveBrowserOperation(() => this.resetHeldMouse());
   }
 
@@ -1674,7 +1682,9 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     threadId: string,
     operation: (page: ThreadPage) => Promise<Result>,
     replayOnStale = true,
+    preemptRepeatCapture = true,
   ): Promise<Result> {
+    if (preemptRepeatCapture) this.preemptRepeatCaptures();
     return this.withExclusiveBrowserOperation(async () => {
       const page = await this.requireThreadPage(threadId);
       try {
@@ -1716,6 +1726,28 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       this.activeOperations -= 1;
       release();
     }
+  }
+
+  private captureYieldSignal() {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let finish!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      finish = () => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        this.captureYieldWaiters.delete(finish);
+        resolve();
+      };
+      timer = setTimeout(finish, this.captureYieldAfterMs);
+      this.captureYieldWaiters.add(finish);
+    });
+    return Object.freeze({ promise, cancel: finish });
+  }
+
+  private preemptRepeatCaptures() {
+    for (const finish of [...this.captureYieldWaiters]) finish();
   }
 
   private async captureScreenshot(page: ThreadPage) {
