@@ -1,0 +1,42 @@
+[Unit]
+Description=Bounded allowlisted Arnall host storage cleanup
+Wants=network-online.target
+After=network-online.target docker.service
+ConditionPathExists=/etc/aibrain/company-qa/release-state.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/aibrain-arnall-storage-cleanup --execute
+SuccessExitStatus=75
+TimeoutStartSec=330
+TimeoutStopSec=10
+KillMode=control-group
+Nice=19
+IOSchedulingClass=idle
+CPUQuota=10%
+MemoryMax=256M
+TasksMax=64
+LogsDirectory=aibrain
+StandardOutput=append:/var/log/aibrain/arnall-storage-cleanup.log
+StandardError=append:/var/log/aibrain/arnall-storage-cleanup.log
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=/opt/aibrain-company-qa/quarantine
+ReadWritePaths=/opt/aibrain-company-qa/failed-releases
+ReadWritePaths=/opt/aibrain-company-qa/incoming
+ReadWritePaths=/run/lock
