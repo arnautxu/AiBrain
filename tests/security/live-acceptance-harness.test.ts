@@ -135,6 +135,10 @@ async function fixture() {
         const target = args.at(-1);
         const image = target === "a".repeat(12) || target === appImage ? appImage : gatewayImage;
         if (args.includes("{{.Config.Image}}")) return image;
+        if (args.includes("{{json .Config.Env}}")) return JSON.stringify([
+          `AIBRAIN_REVISION=${releaseSha}`,
+          "NODE_ENV=production",
+        ]);
         if (args.some((arg) => arg.includes("org.opencontainers.image.revision"))) return releaseSha;
         if (args.includes("{{json .RepoDigests}}")) return JSON.stringify([image]);
         throw new Error(`Unexpected Docker command: ${args.join(" ")}`);
