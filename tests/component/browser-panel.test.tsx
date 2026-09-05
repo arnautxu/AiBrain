@@ -3,6 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "@/components/browser-panel";
+import { BROWSER_RUNTIME_CAPABILITIES } from "@/runtime/browser/capabilities";
 
 const THREAD_ID = "0198b9f0-6631-7000-8000-000000000611";
 const SESSION_ID = "0198b9f0-6631-7000-8000-000000000612";
@@ -102,6 +103,14 @@ afterEach(() => {
 });
 
 describe("BrowserPanel", () => {
+  it("renders the exact viewer controls announced to the runtime", async () => {
+    const view = render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    await screen.findByAltText("Vista actual del navegador privado");
+    const rendered = [...view.container.querySelectorAll<HTMLElement>("[data-browser-capability]")]
+      .map((element) => element.dataset.browserCapability);
+    expect(rendered.sort()).toEqual([...BROWSER_RUNTIME_CAPABILITIES.viewerControls].sort());
+  });
+
   it("keeps rapid click, exact typing, paste and scroll ordered while takeover is pending", async () => {
     let takeOver!: (value: unknown) => void;
     browser.control.mockImplementation((action: string) => action === "takeover"

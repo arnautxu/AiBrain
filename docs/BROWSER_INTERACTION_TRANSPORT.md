@@ -12,7 +12,7 @@ The authenticated browser panel uses bounded HTTP input requests and a changed-f
 - Stream EOF renews the viewer token and lets the React effect open exactly one replacement stream. Responses prohibit cache/transformation and request identity encoding; the existing proxy-buffering opt-out remains.
 - Keyboard ownership follows the last deliberately used surface. A viewport pointer event claims the remote keyboard lane even when native automation leaves DOM focus on the outer address field; focusing browser chrome releases it. This keeps address editing local and sends subsequent viewport keys/paste exactly once.
 - Automatic presentation waits for a completed browser tool result, and the connection indicator becomes live only after the first streamed image has loaded. Tool-start activity alone is not viewer readiness.
-- A newly committing Chrome target can temporarily lack a screenshot surface. That read retries briefly without destroying the target or replaying navigation. Screenshot and input operations retain the exclusive CDP lane; concurrent capture was rejected after real-Chromium races.
+- A newly committing Chrome target can temporarily lack a screenshot surface. That read retries briefly without destroying the target or replaying navigation. Screenshot and input operations normally retain the exclusive CDP lane; after one confirmed frame exists, a repeat capture that exceeds 500 ms yields that lane with the last confirmed frame while exactly one compositor read remains pending. This bounds capture-induced control delay without replaying navigation, scroll or input, and `optimizeForSpeed` reduces PNG encoding latency.
 
 ## State and authorization
 
@@ -24,7 +24,9 @@ The gateway uses an existing runtime handle instead of running a full start/heal
 
 The focused tests cover batch boundaries, uncertain-prefix stopping, private-thread routing, lease expiry, symlink rejection, stream renewal, ordering and input backpressure. Opt-in real Chromium tests cover navigation, progressive paint while a slow response remains open, Unicode paste/keys, held-pointer text selection, release rejection, user-private profiles/downloads and pinned public egress.
 
-The no-loopback focal fixture also exercises the `graphikai.com` sequence through URL navigation, bounded footer scroll, pointer-local wheel, FAQ press/release and a final healthy-session readback. It validates the UI/runtime contract without claiming the public page itself was exercised; the opt-in real Chromium integration remains authoritative for that gate.
+The no-loopback focal fixture also exercises the `graphikai.com` sequence through URL navigation, bounded footer scroll, pointer-local wheel, FAQ press/release and a final healthy-session readback. A stalled-repeat-capture fixture proves URL navigation and two continuous scroll inputs complete in under 500 ms without releasing the synthetic capture or replaying an action. It validates the UI/runtime contract without claiming the public page itself was exercised; the opt-in real Chromium integration remains authoritative for that gate.
+
+Browser capability discovery is versioned from the same inventory as the dynamic tool namespace. It explicitly distinguishes agent tools from the visible employee viewer controls: URL, back, forward, reload, continuous scroll and fullscreen. Fullscreen remains a local viewer control rather than an agent page mutation.
 
 Run real Chromium only under the shared release QA mutex on the constrained workstation. `AIBRAIN_REAL_CHROME_TEST=1 npm run test:browser:real` enables the real suite. `AIBRAIN_BROWSER_STORE_EVIDENCE=/tmp/browser-store-evidence.json` enables the small local filesystem lease-check measurement in `browser.test.ts`. These measurements do not include the production gateway or UI paint.
 
