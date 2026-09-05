@@ -40,3 +40,4 @@ ReadWritePaths=/opt/aibrain-company-qa/quarantine
 ReadWritePaths=/opt/aibrain-company-qa/failed-releases
 ReadWritePaths=/opt/aibrain-company-qa/incoming
 ReadWritePaths=/run/lock
+ReadWritePaths=/var/log/aibrain

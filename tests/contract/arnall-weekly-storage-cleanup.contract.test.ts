@@ -56,6 +56,7 @@ describe("Arnall weekly host cleanup contract", () => {
     expect(service).toContain("CPUQuota=10%");
     expect(service).toContain("ProtectSystem=strict");
     expect(service).toContain("StandardOutput=append:/var/log/aibrain/arnall-storage-cleanup.log");
+    expect(service).toContain("ReadWritePaths=/var/log/aibrain");
   });
 
   it("schedules exactly 04:00 Europe/Madrid on Saturdays", async () => {
