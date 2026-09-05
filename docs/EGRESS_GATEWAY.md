@@ -125,3 +125,21 @@ Riesgo operativo restante: los hosts legítimos de OpenAI/Supabase y sus rangos
 globales pueden cambiar. El diseño falla cerrado; la validación real de la
 suscripción y del proyecto Supabase sigue siendo una tarea QA con credenciales,
 no un motivo para ampliar a wildcards o devolver salida directa a `app`.
+
+## Registro P0 R5-10 — refresh de autenticación OpenAI (2026-09-05)
+
+El incidente se reprodujo en producción sin modificarla: los workers Codex
+mostraban `Logged in using ChatGPT` y conservaban su `auth.json`, pero el proxy
+obligatorio devolvía HTTP 403 al `CONNECT auth.openai.com:443`. La política
+instalada incluía `api.openai.com` y `chatgpt.com`, no el destino exacto usado
+para refrescar la autenticación. La presencia de credenciales locales no prueba
+que el runtime pueda renovarlas a través del gateway.
+
+El candidato R5-10 añade `auth.openai.com` a la plantilla junto a los endpoints
+exactos ya observados, sin wildcard. El host preflight falla cerrado si faltan
+`api.openai.com` o `auth.openai.com`; una regresión cubre ambas omisiones y el
+validador de infraestructura fija la lista de la plantilla. No se han leído ni
+modificado credenciales, configuración instalada o producción. La corrección
+queda validada localmente cuando pasen las pruebas focales; actualización del
+`egress.env` real, reinicio del sidecar y replay autenticado son gates de
+producción separados y requieren autorización explícita.
