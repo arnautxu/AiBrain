@@ -42,6 +42,17 @@ describe("browser HTTP contracts", () => {
       .toEqual({ threadId: THREAD_ID, action: "history", direction: "back" });
     expect(parseBrowserViewerCommand({ threadId: THREAD_ID, action: "history", direction: "evaluate" })).toBeNull();
     expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID, action: "viewport", viewport: { width: 1_280, height: 720 },
+    })).toEqual({
+      threadId: THREAD_ID, action: "viewport", viewport: { width: 1_280, height: 720 },
+    });
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID, action: "viewport", viewport: { width: 319, height: 720 },
+    })).toBeNull();
+    expect(parseBrowserViewerCommand({
+      threadId: THREAD_ID, action: "viewport", viewport: { width: 1_280, height: 720, scale: 2 },
+    })).toBeNull();
+    expect(parseBrowserViewerCommand({
       threadId: THREAD_ID,
       action: "input",
       command: { kind: "mouse", event: "mousePressed", x: 12, y: 24, button: "left", buttons: 1 },

@@ -106,9 +106,16 @@ export type BrowserViewerNavigationState = Readonly<{
   url: string;
   canGoBack: boolean;
   canGoForward: boolean;
+  phase: "idle" | "loading" | "complete" | "error";
+  sequence: number;
 }>;
 
 export type BrowserViewerHistoryAction = "back" | "forward" | "reload";
+
+export type BrowserViewport = Readonly<{
+  width: number;
+  height: number;
+}>;
 
 export type BrowserViewerControlBinding = Readonly<{
   attachmentId: string;
@@ -167,6 +174,7 @@ export interface InteractiveManagedBrowserRuntime extends ManagedBrowserRuntime 
   navigate(threadId: string, url: string): Promise<void>;
   viewerNavigationState(threadId: string): Promise<BrowserViewerNavigationState>;
   navigateHistory(threadId: string, action: BrowserViewerHistoryAction): Promise<BrowserViewerNavigationState>;
+  resizeViewport(threadId: string, viewport: BrowserViewport): Promise<BrowserViewerNavigationState>;
   dispatchInput(threadId: string, command: BrowserInputCommand): Promise<void>;
   readPage(threadId: string): Promise<BrowserPageSnapshot>;
   listTabs(threadId: string): Promise<readonly BrowserTabSnapshot[]>;

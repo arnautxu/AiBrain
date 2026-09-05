@@ -22,6 +22,7 @@ import type {
   BrowserRuntimeHealth,
   BrowserViewerHistoryAction,
   BrowserViewerNavigationState,
+  BrowserViewport,
 } from "@/runtime/browser/types";
 import {
   CdpClientError,
@@ -125,12 +126,17 @@ type ThreadPage = {
   fetchUnsubscribe: (() => void) | null;
   authUnsubscribe: (() => void) | null;
   navigationUnsubscribe: (() => void) | null;
+  navigationLifecycleUnsubscribes: Array<() => void>;
   downloadUnsubscribes: Array<() => void>;
   interceptedRequests: number;
   documentGeneration: number;
   documentVersion: string;
   latestScreenshot: Readonly<{ data: string; capturedAt: number }> | null;
   screenshotInFlight: Promise<Readonly<{ data: string; capturedAt: number }>> | null;
+  viewport: BrowserViewport;
+  mainFrameId: string | null;
+  navigationPhase: BrowserViewerNavigationState["phase"];
+  navigationSequence: number;
   closed: boolean;
 };
 
@@ -499,17 +505,29 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
 
   private recordPointer(threadId: string, x: number, y: number) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const viewport = this.threadPages.get(threadId)?.viewport ?? {
+      width: BROWSER_VIEWPORT_WIDTH,
+      height: BROWSER_VIEWPORT_HEIGHT,
+    };
     this.pointerSequence += 1;
     const point = Object.freeze({
       id: `${this.now()}-${this.pointerSequence}`,
-      x: Math.max(0, Math.min(100, (x / BROWSER_VIEWPORT_WIDTH) * 100)),
-      y: Math.max(0, Math.min(100, (y / BROWSER_VIEWPORT_HEIGHT) * 100)),
+      x: Math.max(0, Math.min(100, (x / viewport.width) * 100)),
+      y: Math.max(0, Math.min(100, (y / viewport.height) * 100)),
     });
     const current = this.pointerTrails.get(threadId) ?? [];
     this.pointerTrails.set(
       threadId,
       Object.freeze([...current, point].slice(-MAX_POINTER_TRAIL_POINTS)),
     );
+  }
+
+  private beginNavigation(page: ThreadPage, deliberate = false) {
+    // A deliberate command is a new navigation even when it interrupts a page
+    // that is still loading. Lifecycle events for that same command must not
+    // advance the sequence a second time.
+    if (deliberate || page.navigationPhase !== "loading") page.navigationSequence += 1;
+    page.navigationPhase = "loading";
   }
 
   constructor(context: BrowserRuntimeContext, options: ChromeCdpRuntimeOptions = {}) {
@@ -683,22 +701,60 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       this.assertHumanControl();
       const browser = this.requireBrowser();
       if (action === "reload") {
-        await browser.send("Page.reload", { ignoreCache: false }, { sessionId: page.sessionId });
+        this.beginNavigation(page, true);
+        try {
+          await browser.send("Page.reload", { ignoreCache: false }, { sessionId: page.sessionId });
+        } catch (error) {
+          page.navigationPhase = "error";
+          throw error;
+        }
         this.pointerTrails.delete(threadId);
       } else {
         const history = await this.navigationHistory(page);
         const targetIndex = history.currentIndex + (action === "back" ? -1 : 1);
         const target = history.entries[targetIndex];
-        if (!target) return this.navigationStateFromHistory(history);
+        if (!target) return this.navigationStateFromHistory(history, page);
         const destination = validateBrowserNavigationUrl(target.url);
         await this.networkPolicy.assertAllowed(destination);
         this.assertHumanControl();
-        await browser.send("Page.navigateToHistoryEntry", { entryId: target.id }, { sessionId: page.sessionId });
+        this.beginNavigation(page, true);
+        try {
+          await browser.send("Page.navigateToHistoryEntry", { entryId: target.id }, { sessionId: page.sessionId });
+        } catch (error) {
+          page.navigationPhase = "error";
+          throw error;
+        }
         this.pointerTrails.delete(threadId);
       }
       const current = await this.navigationStateForPage(page);
       await this.persistNavigation(page, current.url);
       return current;
+    }, false);
+  }
+
+  async resizeViewport(threadId: string, viewport: BrowserViewport): Promise<BrowserViewerNavigationState> {
+    if (!Number.isSafeInteger(viewport.width) || viewport.width < 320 || viewport.width > 3_840 ||
+      !Number.isSafeInteger(viewport.height) || viewport.height < 240 || viewport.height > 2_160) {
+      throw new ChromeRuntimeError("CHROME_VIEWPORT_INVALID", "Browser viewport dimensions are outside the supported range.");
+    }
+    return this.withThreadPageRecovery(threadId, async (page) => {
+      if (page.heldMouse) {
+        throw new ChromeRuntimeError("CHROME_VIEWPORT_BUSY", "Browser viewport cannot resize during a pointer gesture.");
+      }
+      if (page.viewport.width !== viewport.width || page.viewport.height !== viewport.height) {
+        await this.requireBrowser().send("Emulation.setDeviceMetricsOverride", {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: 1,
+          mobile: false,
+          screenWidth: viewport.width,
+          screenHeight: viewport.height,
+        }, { sessionId: page.sessionId });
+        page.viewport = Object.freeze({ ...viewport });
+        page.latestScreenshot = null;
+        this.pointerTrails.delete(threadId);
+      }
+      return this.navigationStateForPage(page);
     }, false);
   }
 
@@ -713,12 +769,22 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     let navigatedPage: ThreadPage | null = null;
     const result = await this.withThreadPageRecovery(threadId, async (page) => {
       assertController();
-      const response = await this.requireBrowser().send<{ errorText?: string; isDownload?: boolean }>("Page.navigate", {
-        url: destination,
-      }, { sessionId: page.sessionId });
+      this.beginNavigation(page, true);
+      let response: { errorText?: string; isDownload?: boolean; loaderId?: string };
+      try {
+        response = await this.requireBrowser().send("Page.navigate", {
+          url: destination,
+        }, { sessionId: page.sessionId });
+      } catch (error) {
+        page.navigationPhase = "error";
+        throw error;
+      }
       if (waitForDocument && !response.errorText && !response.isDownload) {
         await this.waitForReadablePage(page, assertController);
+        page.navigationPhase = "complete";
       }
+      if (response.errorText && !response.isDownload) page.navigationPhase = "error";
+      else if (response.isDownload || !response.loaderId) page.navigationPhase = "complete";
       navigatedPage = page;
       return response;
     }, false);
@@ -751,7 +817,10 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     return { currentIndex: result.currentIndex as number, entries };
   }
 
-  private navigationStateFromHistory(history: Awaited<ReturnType<ChromeCdpRuntime["navigationHistory"]>>) {
+  private navigationStateFromHistory(
+    history: Awaited<ReturnType<ChromeCdpRuntime["navigationHistory"]>>,
+    page: ThreadPage,
+  ) {
     const current = history.entries[history.currentIndex];
     if (!current) {
       throw new ChromeRuntimeError("CHROME_PAGE_STATE_INVALID", "Chrome did not report the current navigation entry.");
@@ -760,11 +829,13 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       url: current.url,
       canGoBack: history.currentIndex > 0,
       canGoForward: history.currentIndex + 1 < history.entries.length,
+      phase: page.navigationPhase,
+      sequence: page.navigationSequence,
     });
   }
 
   private async navigationStateForPage(page: ThreadPage) {
-    return this.navigationStateFromHistory(await this.navigationHistory(page));
+    return this.navigationStateFromHistory(await this.navigationHistory(page), page);
   }
 
   async dispatchInput(threadId: string, command: BrowserInputCommand) {
@@ -1776,12 +1847,17 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         fetchUnsubscribe: null,
         authUnsubscribe: null,
         navigationUnsubscribe: null,
+        navigationLifecycleUnsubscribes: [],
         downloadUnsubscribes: [],
         interceptedRequests: 0,
         documentGeneration: 1,
         documentVersion: browserEvidenceHash({ targetId, sessionId, restoredUrl, generation: 1 }),
         latestScreenshot: null,
         screenshotInFlight: null,
+        viewport: Object.freeze({ width: BROWSER_VIEWPORT_WIDTH, height: BROWSER_VIEWPORT_HEIGHT }),
+        mainFrameId: null,
+        navigationPhase: "complete",
+        navigationSequence: 0,
         closed: false,
       };
       await browser.send("Page.enable", {}, { sessionId });
@@ -1800,6 +1876,20 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       page.navigationUnsubscribe = browser.on("Page.frameNavigated", (params) => {
         this.queueNavigationPersistence(page as ThreadPage, params);
       }, { sessionId });
+      page.navigationLifecycleUnsubscribes.push(
+        browser.on("Page.frameStartedLoading", (params) => {
+          const value = isRecord(params) ? params : null;
+          if (!value || typeof value.frameId !== "string") return;
+          if (page?.mainFrameId === null) page.mainFrameId = value.frameId;
+          if (page?.mainFrameId !== value.frameId) return;
+          this.beginNavigation(page);
+        }, { sessionId }),
+        browser.on("Page.frameStoppedLoading", (params) => {
+          const value = isRecord(params) ? params : null;
+          if (!value || typeof value.frameId !== "string" || page?.mainFrameId !== value.frameId) return;
+          page.navigationPhase = "complete";
+        }, { sessionId }),
+      );
       page.downloadUnsubscribes.push(
         browser.on("Page.downloadWillBegin", (params) => {
           this.registerDownload(page as ThreadPage, params);
@@ -1835,6 +1925,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       page?.fetchUnsubscribe?.();
       page?.authUnsubscribe?.();
       page?.navigationUnsubscribe?.();
+      page?.navigationLifecycleUnsubscribes.forEach((unsubscribe) => unsubscribe());
       for (const unsubscribe of page?.downloadUnsubscribes ?? []) unsubscribe();
       if (browser.isOpen) {
         if (sessionId) {
@@ -1910,6 +2001,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     if (page.closed || !isRecord(value) || !isRecord(value.frame)) return;
     const frame = value.frame;
     if (frame.parentId !== undefined || typeof frame.url !== "string") return;
+    if (typeof frame.id === "string") page.mainFrameId = frame.id;
     let url: string;
     try {
       url = validateBrowserNavigationUrl(frame.url);
@@ -1945,6 +2037,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     page.authUnsubscribe = null;
     page.navigationUnsubscribe?.();
     page.navigationUnsubscribe = null;
+    for (const unsubscribe of page.navigationLifecycleUnsubscribes.splice(0)) unsubscribe();
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
     const guids = [...page.downloads.keys()];
     page.downloads.clear();
@@ -2365,6 +2458,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     page.authUnsubscribe = null;
     page.navigationUnsubscribe?.();
     page.navigationUnsubscribe = null;
+    for (const unsubscribe of page.navigationLifecycleUnsubscribes.splice(0)) unsubscribe();
     for (const unsubscribe of page.downloadUnsubscribes.splice(0)) unsubscribe();
     const activeDownloads = [...page.downloads.entries()];
     if (browser?.isOpen) {

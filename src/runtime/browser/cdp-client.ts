@@ -11,6 +11,7 @@ export const PRIVATE_CDP_METHODS = [
   "DOM.getDocument",
   "DOM.querySelector",
   "DOM.scrollIntoViewIfNeeded",
+  "Emulation.setDeviceMetricsOverride",
   "Fetch.continueRequest",
   "Fetch.continueWithAuth",
   "Fetch.disable",

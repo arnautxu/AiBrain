@@ -1,6 +1,7 @@
 import type {
   BrowserGatewayCapability,
   BrowserInputCommand,
+  BrowserViewport,
   BrowserViewerHistoryAction,
   BrowserViewerControlBinding,
 } from "@/runtime/browser/types";
@@ -19,6 +20,7 @@ export type BrowserGatewayTokenRequest = Readonly<{
 export type BrowserViewerCommand =
   | Readonly<{ threadId: string; action: "navigate"; url: string }>
   | Readonly<{ threadId: string; action: "history"; direction: BrowserViewerHistoryAction }>
+  | Readonly<{ threadId: string; action: "viewport"; viewport: BrowserViewport }>
   | Readonly<{ threadId: string; action: "input"; command: BrowserInputCommand }>
   | Readonly<{ threadId: string; action: "inputs"; commands: BrowserInputCommand[] }>;
 
@@ -144,6 +146,20 @@ export function parseBrowserViewerCommand(value: unknown): BrowserViewerCommand 
       action: "history",
       direction: history.direction as BrowserViewerHistoryAction,
     };
+  }
+  const viewportRequest = exactRecord(value, ["threadId", "action", "viewport"]);
+  if (viewportRequest?.action === "viewport" && canonicalUuid(viewportRequest.threadId)) {
+    const viewport = exactRecord(viewportRequest.viewport, ["width", "height"]);
+    if (viewport && Number.isSafeInteger(viewport.width) && Number.isSafeInteger(viewport.height) &&
+      (viewport.width as number) >= 320 && (viewport.width as number) <= 3_840 &&
+      (viewport.height as number) >= 240 && (viewport.height as number) <= 2_160) {
+      return {
+        threadId: viewportRequest.threadId,
+        action: "viewport",
+        viewport: { width: viewport.width as number, height: viewport.height as number },
+      };
+    }
+    return null;
   }
   const batch = exactRecord(value, ["threadId", "action", "commands"]);
   if (batch?.action === "inputs") {

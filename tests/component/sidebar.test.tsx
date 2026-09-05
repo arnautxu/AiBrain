@@ -198,6 +198,10 @@ describe("Sidebar", () => {
     expect(within(standaloneChats).getByRole("button", { name: "Recordatorio personal" })).toBeInTheDocument();
     expect(within(standaloneChats).queryByText("Plan semanal")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Contraer Operaciones" })).toHaveClass("sidebar-project-disclosure");
+    const operationsHeader = screen.getAllByTestId("sidebar-project-header")
+      .find((header) => within(header).queryByRole("button", { name: "Operaciones" }));
+    expect(operationsHeader).toBeDefined();
+    expect(operationsHeader).not.toContainElement(operationsChats);
 
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación en Operaciones" }));
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación independiente" }));

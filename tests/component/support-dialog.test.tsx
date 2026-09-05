@@ -26,6 +26,9 @@ describe("SupportDialog", () => {
 
     const opener = screen.getByRole("button", { name: "Abrir ayuda" });
     fireEvent.click(opener);
+    const dialog = screen.getByRole("dialog", { name: "Ayuda y feedback" });
+    expect(dialog).toHaveClass("flex", "overflow-hidden");
+    expect(dialog.querySelector("form")).toHaveClass("min-h-0", "overflow-y-auto");
     fireEvent.click(screen.getByRole("button", { name: "Bug" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Descripción" }), {
       target: { value: "El panel no responde" },

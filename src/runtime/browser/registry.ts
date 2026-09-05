@@ -324,6 +324,17 @@ export class BrowserRuntimeRegistry {
     return runtime.navigateHistory(threadId, action);
   }
 
+  async resizeViewport(userId: string, threadId: string, viewport: { width: number; height: number }) {
+    validateBrowserThreadId(threadId);
+    const runtime = this.requireInteractiveRuntime(userId);
+    const state = await this.recoverExpired(userId);
+    this.assertCurrentSession(userId, state);
+    if (state.lifecycle !== "ready" && state.lifecycle !== "human-control") {
+      throw new Error("Browser viewer is unavailable in the current lifecycle state.");
+    }
+    return runtime.resizeViewport(threadId, viewport);
+  }
+
   async readPage(userId: string, threadId: string) {
     validateBrowserThreadId(threadId);
     const runtime = this.requireAgentRuntime(userId);

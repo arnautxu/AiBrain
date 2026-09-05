@@ -675,11 +675,12 @@ export async function sendBrowserViewerCommand(input: {
   command:
     | { action: "navigate"; url: string }
     | { action: "history"; direction: BrowserViewerHistoryAction }
+    | { action: "viewport"; viewport: { width: number; height: number } }
     | { action: "input"; command: BrowserInputCommand }
     | { action: "inputs"; commands: BrowserInputCommand[] };
 }) {
-  const state = await authorizeGateway({ ...input, capability: "control" });
   const command = input.command;
+  const state = await authorizeGateway({ ...input, capability: command.action === "viewport" ? "view" : "control" });
   let navigationState: BrowserViewerNavigationState | undefined;
   const actions: Array<Exclude<typeof command, { action: "inputs" }>> = [];
   try {
@@ -700,6 +701,14 @@ export async function sendBrowserViewerCommand(input: {
         signal: input.signal,
         operation: () => state.registry.navigateHistory(input.userId, input.threadId, command.direction),
       });
+    } else if (command.action === "viewport") {
+      navigationState = await executeViewerOperation({
+        registry: state.registry,
+        userId: input.userId,
+        signal: input.signal,
+        recoverOnCancellation: false,
+        operation: () => state.registry.resizeViewport(input.userId, input.threadId, command.viewport),
+      });
     } else {
       await executeViewerOperation({
         registry: state.registry,
@@ -710,8 +719,21 @@ export async function sendBrowserViewerCommand(input: {
             (entry) => actions.push({ action: "input", command: entry }))
           : state.registry.dispatchInput(input.userId, input.threadId, command.command),
       });
+      const commands = command.action === "inputs" ? command.commands : [command.command];
+      const canStartNavigation = commands.some((entry) =>
+        (entry.kind === "mouse" && entry.event === "mouseReleased") ||
+        (entry.kind === "key" && entry.event === "keyUp" && entry.key === "Enter"));
+      if (canStartNavigation) {
+        navigationState = await executeViewerOperation({
+          registry: state.registry,
+          userId: input.userId,
+          signal: input.signal,
+          recoverOnCancellation: false,
+          operation: () => state.registry.viewerNavigationState(input.userId, input.threadId),
+        });
+      }
     }
-    if (command.action !== "inputs") actions.push(command);
+    if (command.action !== "inputs" && command.action !== "viewport") actions.push(command);
   } finally {
     wakeViewerStream(
       state,
@@ -726,6 +748,8 @@ export async function sendBrowserViewerCommand(input: {
         ? "open"
         : command.action === "history"
           ? "open"
+          : command.action === "viewport"
+            ? null
           : command.command.event === "mouseWheel"
             ? "scroll"
             : command.command.event === "mouseReleased"

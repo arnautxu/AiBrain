@@ -156,7 +156,7 @@ class FakeCdpClient implements CdpClientLike {
         this.targetHistoryIndexes.set(targetId, history.length - 1);
         this.targetUrls.set(targetId, url);
       }
-      return {} as Result;
+      return { frameId: `frame-${scopedSessionId}`, loaderId: `loader-${this.commands.length}` } as Result;
     }
     if (method === "Page.getNavigationHistory" && scopedSessionId) {
       const targetId = this.sessionTargets.get(scopedSessionId) as string;
@@ -794,6 +794,9 @@ describe("ChromeCdpRuntime private pipe", () => {
       ? runtime.navigate(THREAD_A, "https://example.test/one-mutation")
       : runtime.navigateHistory(THREAD_A, "reload"))
       .rejects.toMatchObject({ code: "CDP_COMMAND_FAILED" });
+    if (action === "navigate") {
+      await expect(runtime.viewerNavigationState(THREAD_A)).resolves.toMatchObject({ phase: "error", sequence: 1 });
+    }
     expect(client.commands.slice(before).filter(({ method }) => method === (action === "navigate" ? "Page.navigate" : "Page.reload")))
       .toHaveLength(1);
     await runtime.stop();
@@ -1110,11 +1113,15 @@ describe("ChromeCdpRuntime private pipe", () => {
       url: "https://example.test/two",
       canGoBack: true,
       canGoForward: false,
+      phase: "loading",
+      sequence: 2,
     });
     await expect(runtime.navigateHistory(THREAD_A, "back")).resolves.toEqual({
       url: "https://example.test/one",
       canGoBack: true,
       canGoForward: true,
+      phase: "loading",
+      sequence: 3,
     });
     await expect(runtime.navigateHistory(THREAD_A, "forward")).resolves.toMatchObject({
       url: "https://example.test/two",
@@ -1122,6 +1129,16 @@ describe("ChromeCdpRuntime private pipe", () => {
     await expect(runtime.navigateHistory(THREAD_A, "reload")).resolves.toMatchObject({
       url: "https://example.test/two",
     });
+    await expect(runtime.resizeViewport(THREAD_A, { width: 1_280, height: 720 })).resolves.toMatchObject({
+      url: "https://example.test/two",
+      sequence: 5,
+    });
+    expect(client.commands.filter(({ method }) => method === "Emulation.setDeviceMetricsOverride"))
+      .toEqual([expect.objectContaining({
+        params: expect.objectContaining({ width: 1_280, height: 720, deviceScaleFactor: 1, mobile: false }),
+      })]);
+    await expect(runtime.resizeViewport(THREAD_A, { width: 319, height: 720 }))
+      .rejects.toMatchObject({ code: "CHROME_VIEWPORT_INVALID" });
     expect(client.commands.filter(({ method }) => method === "Page.navigateToHistoryEntry")).toHaveLength(2);
     expect(client.commands.filter(({ method }) => method === "Page.reload")).toHaveLength(1);
     await runtime.stop();
