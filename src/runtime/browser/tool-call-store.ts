@@ -21,9 +21,9 @@ import {
   recoverAtomicJsonFile,
   type StorageSchema,
 } from "@/storage";
+import { BROWSER_RUNTIME_CAPABILITIES } from "@/runtime/browser/capabilities";
 
 const OPAQUE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
-const TOOL_PATTERN = /^(open|read|screenshot|scroll|click|type|tabs|downloads)$/u;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const MAX_AUDIT_EVENTS = 100_000;
 const DEFAULT_MAX_RECORDS = 100_000;
@@ -89,6 +89,10 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[], 
   if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
     context.fail("keys do not match the browser tool response contract");
   }
+}
+
+function expectBrowserTool(value: unknown, context: ValidationContext) {
+  return expectOneOf(value, BROWSER_RUNTIME_CAPABILITIES.agentTools, context);
 }
 
 function parseResponse(value: unknown, context: ValidationContext): DynamicToolCallResponse {
@@ -174,7 +178,7 @@ const browserToolCallRecordV2Schema = defineVersionedSchema<BrowserToolCallRecor
       threadId: expectString(record.threadId, context.at("threadId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
       turnId: expectString(record.turnId, context.at("turnId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
       callId: expectString(record.callId, context.at("callId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
-      tool: expectString(record.tool, context.at("tool"), { minLength: 1, maxLength: 32, pattern: TOOL_PATTERN }),
+      tool: expectBrowserTool(record.tool, context.at("tool")),
       argumentsHash: expectString(record.argumentsHash, context.at("argumentsHash"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
       permissionFingerprint: expectString(record.permissionFingerprint, context.at("permissionFingerprint"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
       status: expectOneOf(record.status, ["pending", "executing", "completed", "indeterminate"] as const, context.at("status")),
@@ -271,7 +275,7 @@ const browserToolCallRecordV1Schema = defineVersionedSchema<LegacyBrowserToolCal
       threadId: expectString(record.threadId, context.at("threadId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
       turnId: expectString(record.turnId, context.at("turnId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
       callId: expectString(record.callId, context.at("callId"), { minLength: 1, maxLength: 256, pattern: OPAQUE_ID_PATTERN }),
-      tool: expectString(record.tool, context.at("tool"), { minLength: 1, maxLength: 32, pattern: TOOL_PATTERN }),
+      tool: expectBrowserTool(record.tool, context.at("tool")),
       argumentsHash: expectString(record.argumentsHash, context.at("argumentsHash"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
       permissionFingerprint: expectString(record.permissionFingerprint, context.at("permissionFingerprint"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
       status: expectOneOf(record.status, ["pending", "executing", "completed"] as const, context.at("status")),
@@ -335,7 +339,7 @@ const browserToolAuditEventSchema: StorageSchema<BrowserToolAuditEvent> = {
       return {
         schemaVersion: 2,
         callIdentityHash: expectString(legacy.callIdentityHash, legacyContext.at("callIdentityHash"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
-        tool: expectString(legacy.tool, legacyContext.at("tool"), { minLength: 1, maxLength: 32, pattern: TOOL_PATTERN }),
+        tool: expectBrowserTool(legacy.tool, legacyContext.at("tool")),
         status,
         success,
         permissionFingerprint: expectString(legacy.permissionFingerprint, legacyContext.at("permissionFingerprint"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
@@ -361,7 +365,7 @@ const browserToolAuditEventSchema: StorageSchema<BrowserToolAuditEvent> = {
     return {
       schemaVersion: expectLiteral(record.schemaVersion, 2, context.at("schemaVersion")),
       callIdentityHash: expectString(record.callIdentityHash, context.at("callIdentityHash"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),
-      tool: expectString(record.tool, context.at("tool"), { minLength: 1, maxLength: 32, pattern: TOOL_PATTERN }),
+      tool: expectBrowserTool(record.tool, context.at("tool")),
       status,
       success,
       permissionFingerprint: expectString(record.permissionFingerprint, context.at("permissionFingerprint"), { minLength: 64, maxLength: 64, pattern: SHA256_PATTERN }),

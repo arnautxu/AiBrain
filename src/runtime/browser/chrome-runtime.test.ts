@@ -897,6 +897,35 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
+  it("keeps a confirmed viewer frame and live target when a repeat compositor capture times out", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+      allowPrivateNetwork: true,
+      captureYieldAfterMs: 10,
+    });
+    await runtime.start();
+    const confirmed = await runtime.captureFrame(THREAD_A);
+    const target = runtime.targetIdFor(THREAD_A);
+    client.failNext("Page.captureScreenshot", new CdpClientError(
+      "CDP_COMMAND_TIMEOUT",
+      "CDP command Page.captureScreenshot timed out.",
+    ));
+
+    await expect(runtime.captureFrame(THREAD_A)).resolves.toEqual(confirmed);
+    expect(runtime.targetIdFor(THREAD_A)).toBe(target);
+    await expect(runtime.viewerNavigationState(THREAD_A)).resolves.toMatchObject({ url: "about:blank" });
+    await expect(runtime.captureFrame(THREAD_A)).resolves.toMatchObject({ mediaType: "image/png" });
+    expect(runtime.targetIdFor(THREAD_A)).toBe(target);
+    await runtime.stop();
+  });
+
   it("retries a transient screenshot on the same target so read selectors stay valid", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();

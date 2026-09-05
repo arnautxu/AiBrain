@@ -1580,10 +1580,17 @@ parte del cliente UI.
 {
   "schemaVersion": 1,
   "status": "live",
+  "revision": "fdae78a93e2648f16edca127f77285d5d6be5b46",
   "processStartedAt": "2026-08-27T09:00:00.000Z",
   "checkedAt": "2026-08-27T10:00:00.000Z"
 }
 ```
+
+`revision` refleja `AIBRAIN_REVISION` solo cuando contiene un SHA Git completo
+de 40 caracteres hexadecimales; una configuración ausente o inválida devuelve
+`null` y nunca se refleja texto arbitrario. Es un readback público acotado del
+proceso HTTP, no sustituye la correlación privada de estado de release, digests
+OCI y contenedores en ejecución.
 
 Para readiness de usuario/proyecto, usar `/api/runtime/status`.
 
