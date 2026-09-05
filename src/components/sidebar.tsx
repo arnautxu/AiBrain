@@ -408,13 +408,16 @@ export function Sidebar({
                 const access = workbenchProjectAccess(project);
                 const active = project.id === activeProjectId;
                 const menuOpen = projectMenuId === project.id;
-                const projectThreadsOpen = disclosure.isOpen(`project:${project.id}`, active);
                 const allActiveProjectThreads = threads.filter((thread) => thread.projectId === project.id && thread.status === "active");
                 const activeProjectThreads = allActiveProjectThreads.filter((thread) => !thread.pinned).sort(byPriority);
                 const projectActivities = threads
                   .filter((thread) => thread.projectId === project.id && thread.status === "active")
                   .map((thread) => threadActivityById[thread.id])
                   .filter((activity): activity is ThreadActivity => Boolean(activity));
+                const needsVisibility = projectActivities.some((activity) =>
+                  activity.state === "running" || activity.state === "needs_attention" ||
+                  activity.state === "failed" || activity.unreadCount > 0);
+                const projectThreadsOpen = disclosure.isOpen(`project:${project.id}`, active || needsVisibility);
                 return (
                   <SidebarMenuItem key={project.id} className={`${menuOpen ? "z-40" : ""}`}>
                     <div data-testid="sidebar-project-header" className="group/project relative">
