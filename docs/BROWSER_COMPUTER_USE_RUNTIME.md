@@ -175,6 +175,11 @@ user's auto-updating desktop Chrome. `AIBRAIN_CHROME_EXECUTABLE` selects the ser
 executable. `AIBRAIN_BROWSER_GATEWAY_SECRET` must be a dedicated secret of at
 least 32 bytes.
 
+`AIBRAIN_CHROME_LANGUAGE` accepts one BCP 47 language tag. The product defaults
+to `en-US`; a company installation such as Arnall can set `es-ES`. Chrome uses
+that setting for its UI language and language preferences, while country or
+region inferred by a website from the server IP remains a separate signal.
+
 ## Operational browser boundary
 
 The agent receives only the closed browser tool namespace and sensitive
@@ -260,6 +265,7 @@ processes. Point it at a pinned Chrome for Testing/Chromium build:
 ```bash
 AIBRAIN_CHROME_EXECUTABLE=/opt/aibrain/chrome/chrome \
 AIBRAIN_CHROME_EXPECTED_VERSION=152.0.7977.64 \
+AIBRAIN_CHROME_LANGUAGE=en-US \
 npm run test:browser:real
 ```
 

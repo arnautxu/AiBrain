@@ -99,6 +99,7 @@ type RuntimeDependencies = {
 export type ChromeCdpRuntimeOptions = RuntimeDependencies & {
   executablePath?: string;
   expectedVersion?: string;
+  language?: string;
   startupTimeoutMs?: number;
   commandTimeoutMs?: number;
   shutdownTimeoutMs?: number;
@@ -109,7 +110,7 @@ export type ChromeCdpRuntimeOptions = RuntimeDependencies & {
 
 export type ChromeBrowserRuntimeFactoryOptions = Pick<
   ChromeCdpRuntimeOptions,
-  "allowPrivateNetwork" | "executablePath" | "expectedVersion" | "startupTimeoutMs" |
+  "allowPrivateNetwork" | "executablePath" | "expectedVersion" | "language" | "startupTimeoutMs" |
   "maxThreadTargets"
 >;
 
@@ -280,7 +281,29 @@ function normalizePrivateProxyUrl(value: string | null) {
   return parsed.origin;
 }
 
-export function buildChromeArguments(context: BrowserRuntimeContext, egressProxyUrl: string | null) {
+export function resolveChromeLanguage(value: string | undefined) {
+  const requested = value?.trim() || "en-US";
+  if (requested.length > 35 || /[\u0000-\u0020\u007f]/u.test(requested)) {
+    throw new ChromeRuntimeError("CHROME_LANGUAGE_INVALID", "Chrome language must be a single valid BCP 47 tag.");
+  }
+  try {
+    const canonical = Intl.getCanonicalLocales(requested);
+    if (canonical.length !== 1) throw new RangeError("Expected one locale.");
+    return canonical[0] as string;
+  } catch (error) {
+    throw new ChromeRuntimeError(
+      "CHROME_LANGUAGE_INVALID",
+      "Chrome language must be a single valid BCP 47 tag.",
+      { cause: error },
+    );
+  }
+}
+
+export function buildChromeArguments(
+  context: BrowserRuntimeContext,
+  egressProxyUrl: string | null,
+  language?: string,
+) {
   const proxyUrl = normalizePrivateProxyUrl(egressProxyUrl);
   const args = [
     "--headless=new",
@@ -300,6 +323,7 @@ export function buildChromeArguments(context: BrowserRuntimeContext, egressProxy
     "--password-store=basic",
     "--use-mock-keychain",
     "--force-device-scale-factor=1",
+    `--lang=${resolveChromeLanguage(language)}`,
     `--window-size=${BROWSER_VIEWPORT_WIDTH},${BROWSER_VIEWPORT_HEIGHT}`,
   ];
   if (proxyUrl) {
@@ -453,6 +477,7 @@ async function wait(milliseconds: number) {
 export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   readonly context: BrowserRuntimeContext;
   readonly expectedVersion: string | undefined;
+  readonly language: string;
   readonly startupTimeoutMs: number;
   readonly commandTimeoutMs: number;
   readonly shutdownTimeoutMs: number;
@@ -541,6 +566,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     this.expectedVersion = validateExpectedVersion(
       options.expectedVersion ?? process.env.AIBRAIN_CHROME_EXPECTED_VERSION,
     );
+    this.language = resolveChromeLanguage(options.language ?? process.env.AIBRAIN_CHROME_LANGUAGE);
     this.startupTimeoutMs = positiveInteger("startupTimeoutMs", options.startupTimeoutMs ?? 20_000, 60_000);
     this.commandTimeoutMs = positiveInteger("commandTimeoutMs", options.commandTimeoutMs ?? 10_000, 60_000);
     this.shutdownTimeoutMs = positiveInteger("shutdownTimeoutMs", options.shutdownTimeoutMs ?? 3_000, 30_000);
@@ -1519,7 +1545,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     try {
       const proxyUrl = this.egressProxy ? await this.egressProxy.start() : null;
       this.egressProxyUrl = proxyUrl;
-      const args = buildChromeArguments(this.context, proxyUrl);
+      const args = buildChromeArguments(this.context, proxyUrl, this.language);
       const version = await this.launchPipeWithBackoff(executable, args, environment);
       if (this.expectedVersion && version !== this.expectedVersion) {
         throw new ChromeRuntimeError(
@@ -2523,6 +2549,7 @@ export class ChromeBrowserRuntimeFactory implements BrowserRuntimeFactory {
 
   constructor(options: ChromeBrowserRuntimeFactoryOptions = {}) {
     validateExpectedVersion(options.expectedVersion ?? process.env.AIBRAIN_CHROME_EXPECTED_VERSION);
+    resolveChromeLanguage(options.language ?? process.env.AIBRAIN_CHROME_LANGUAGE);
     if (options.allowPrivateNetwork) {
       new BrowserNetworkPolicy({ allowPrivateNetwork: true });
     }
