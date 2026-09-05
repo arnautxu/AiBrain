@@ -1,0 +1,10 @@
+/var/log/aibrain/arnall-storage-cleanup.log {
+    weekly
+    rotate 8
+    maxsize 1M
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0600 root root
+}

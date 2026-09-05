@@ -1,0 +1,12 @@
+[Unit]
+Description=Clean allowlisted Arnall storage each Saturday at 04:00 Europe/Madrid
+
+[Timer]
+OnCalendar=Sat *-*-* 04:00:00 Europe/Madrid
+AccuracySec=1s
+RandomizedDelaySec=0
+Persistent=true
+Unit=aibrain-arnall-storage-cleanup.service
+
+[Install]
+WantedBy=timers.target
