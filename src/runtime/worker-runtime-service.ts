@@ -67,6 +67,7 @@ export class WorkerAppServerClient {
   private initialized: Promise<void> | null = null;
   private readonly loadedThreads = new Map<string, boolean>();
   private account: CodexConnection | null = null;
+  private accountRefresh: Promise<CodexConnection> | null = null;
   private cachedConnection: CodexConnection | null = null;
   private cachedConnectionCwd: string | null = null;
   private cachedAt = 0;
@@ -236,6 +237,25 @@ export class WorkerAppServerClient {
   async connectionSummary(): Promise<CodexConnection> {
     await this.initialize();
     if (!this.account) throw new Error("Codex did not return account state.");
+    // Codex can transiently report a null account while a freshly provisioned
+    // worker is opening an otherwise valid, private ChatGPT session. Do not
+    // pin that cold-start result for the lifetime of the worker: perform one
+    // coalesced re-read for this caller. A genuinely disconnected account
+    // remains fail-closed, and later HTTP retries stay externally bounded.
+    if (!this.account.connected) {
+      this.accountRefresh ??= this.router.request(randomRequest(
+        "account/read",
+        { refreshToken: false },
+        "account-recheck",
+      ), 10_000).then((result) => {
+        const account = parseAccount(result);
+        this.account = account;
+        return account;
+      }).finally(() => {
+        this.accountRefresh = null;
+      });
+      await this.accountRefresh;
+    }
     return {
       ...this.account,
       processWarm: true,
