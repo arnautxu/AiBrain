@@ -1207,19 +1207,20 @@ button:disabled {
   animation: activity-text-shimmer 1.8s linear infinite;
 }
 
+/* AICSS Streaming Text: follow incoming text without replaying stored answers. */
 .t-stream-caret {
   display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin: 0 0 -0.12em 0.2em;
-  border-radius: 999px;
-  background: var(--text-muted);
-  animation: stream-caret-pulse 1s ease-in-out infinite;
+  width: 8px;
+  height: 1.05em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--text);
+  animation: stream-caret-pulse 1s step-end infinite;
 }
 
 @keyframes stream-caret-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  50% { opacity: 0; }
 }
 
 .message-enter {
