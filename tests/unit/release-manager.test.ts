@@ -46,6 +46,10 @@ function installationConfigInput(brand: string) {
         { id: "graphikai-company-context", label: "GraphikAI company context" },
       ],
     },
+    connectors: {
+      gmail: { enabled: true },
+      outlook: { enabled: true },
+    },
   }, null, 2)}\n`;
 }
 
@@ -530,6 +534,17 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     const dockerCalls = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(dockerCalls.some((args) => args.includes("up"))).toBe(false);
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
+  });
+
+  it("rejects unreviewed connector configuration before container mutation", async () => {
+    const files = await fixture();
+    const unsafe = JSON.parse(installationConfigInput("Unsafe connector"));
+    unsafe.connectors.gmail.clientSecret = "must-never-be-versioned";
+    await writeFile(files.installationConfig, `${JSON.stringify(unsafe, null, 2)}\n`);
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INSTALLATION_CONFIG_INVALID") });
+    const dockerCalls = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    expect(dockerCalls.some((args) => args.includes("up"))).toBe(false);
   });
 
   it("rejects Compose that connects an external BGreenly resource", async () => {

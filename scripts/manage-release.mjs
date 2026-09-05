@@ -21,6 +21,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
+import { fileURLToPath } from "node:url";
 import process from "node:process";
 import { load as parseYaml } from "js-yaml";
 
@@ -280,7 +281,7 @@ function assertTargetEnvironment(current, target, options) {
 const INSTALLATION_ROOT_KEYS = [
   "schemaVersion", "installationId", "companyName", "companySlug", "publicUrl", "branding", "paths",
 ];
-const INSTALLATION_OPTIONAL_ROOT_KEYS = ["catalog"];
+const INSTALLATION_OPTIONAL_ROOT_KEYS = ["catalog", "connectors"];
 const INSTALLATION_BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"];
 const INSTALLATION_PATHS = Object.freeze({
   dataRoot: "/var/lib/aibrain/data",
@@ -320,6 +321,25 @@ function validInstallationCatalog(value) {
   return true;
 }
 
+function validInstallationConnectors(value) {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length === 0 || keys.some((key) => key !== "gmail" && key !== "outlook")) return false;
+  if (value.gmail !== undefined && !exactObjectKeys(value.gmail, ["enabled"])) return false;
+  if (value.gmail !== undefined && typeof value.gmail.enabled !== "boolean") return false;
+  if (value.outlook !== undefined) {
+    const outlookKeys = Object.keys(value.outlook ?? {});
+    if (!value.outlook || typeof value.outlook !== "object" || Array.isArray(value.outlook)
+      || outlookKeys.some((key) => key !== "enabled" && key !== "tenantId")
+      || !outlookKeys.includes("enabled") || typeof value.outlook.enabled !== "boolean") return false;
+    if (value.outlook.tenantId !== undefined
+      && (typeof value.outlook.tenantId !== "string"
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value.outlook.tenantId))) return false;
+  }
+  return true;
+}
+
 function validConfigString(value, maximumLength) {
   return typeof value === "string" && value.length > 0 && value.length <= maximumLength
     && value.trim() === value && !/\p{C}/u.test(value);
@@ -353,6 +373,7 @@ function validateVersionedInstallationConfig(contents, installationId) {
     || !validPublicAssetPath(branding?.faviconPath)
     || !/^#[0-9a-fA-F]{6}$/u.test(branding.accentColor)
     || !validInstallationCatalog(value.catalog)
+    || !validInstallationConnectors(value.connectors)
     || Object.entries(INSTALLATION_PATHS).some(([key, expected]) => paths[key] !== expected)) {
     throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig does not match the installation schema and fixed container paths.");
   }
@@ -1585,7 +1606,7 @@ function execute(options) {
 }
 
 function advisoryLockInvocation(options, argv) {
-  const script = realpathSync(new URL(import.meta.url).pathname);
+  const script = realpathSync(fileURLToPath(import.meta.url));
   const lockFile = `${options.stateFile}.advisory`;
   if (existsSync(lockFile)) {
     const metadata = lstatSync(lockFile);
@@ -1641,7 +1662,7 @@ function runCli(argv) {
 
 export { ReleaseError, execute, parseArguments, runCli };
 
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try {
     runCli(process.argv.slice(2));
   } catch (error) {

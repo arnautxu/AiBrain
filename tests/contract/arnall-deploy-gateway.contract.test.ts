@@ -48,6 +48,19 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).toContain("egress image is not the approved GHCR repository and digest");
   });
 
+  it("fails closed on the real OpenAI auth renewal route before and after promotion", async () => {
+    const gateway = await readFile(gatewayPath, "utf8");
+    const deployment = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
+    const firstProbe = gateway.indexOf('verify_openai_auth_egress "${STATE_FILE}.active.compose.yaml"');
+    const secondProbe = gateway.indexOf('verify_openai_auth_egress "${STATE_FILE}.active.compose.yaml"', firstProbe + 1);
+    expect(gateway).toContain('require_root_owned_file "${OPS_ROOT}/probe-openai-auth-egress.mjs"');
+    expect(gateway).toContain("OPENAI_AUTH_EGRESS_OK connect=200 tls=authorized endpoint=405");
+    expect(gateway).toContain("OpenAI auth renewal endpoint failed DNS, CONNECT or TLS preflight");
+    expect(firstProbe).toBeGreaterThan(-1);
+    expect(firstProbe).toBeLessThan(deployment);
+    expect(secondProbe).toBeGreaterThan(deployment);
+  });
+
   it("adds post-deploy readbacks after health validation, with separate fail-closed sources", async () => {
     const gateway = await readFile(gatewayPath, "utf8");
     const deployment = gateway.indexOf('node "${OPS_ROOT}/manage-release.mjs"');
