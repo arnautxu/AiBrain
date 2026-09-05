@@ -145,6 +145,10 @@ test("a pinned chat persists once across mobile and desktop sidebars", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
+  await page.getByRole("button", { name: /^Nueva conversación en / }).first().click();
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Conversación para fijar");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   const projectThread = page.locator('button[data-testid="sidebar-project-thread"]').first();
   await expect(projectThread).toBeVisible();
   const threadAction = projectThread.locator("xpath=..").getByRole("button", { name: /^Acciones de / });
