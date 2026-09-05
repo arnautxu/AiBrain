@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Brain,
@@ -50,6 +50,48 @@ function sourceIcon(kind: ProjectSource["kind"]) {
 }
 
 export function ProjectPanel({ project, open, onClose, onSave, access: accessOverride, returnFocusRef }: ProjectPanelProps) {
+  const [busy, setBusy] = useState(false);
+  const [formVersion, setFormVersion] = useState(0);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const closeAndReset = () => {
+    setFormVersion((current) => current + 1);
+    onClose();
+  };
+  const modalRef = useModalFocus<HTMLDivElement>(open, () => {
+    if (!busy) closeAndReset();
+  }, closeButtonRef, returnFocusRef);
+
+  return <AnimatePresence initial={false}>{open ? (
+    <OverlayPresenceLayer key="project-panel" origin="right" rootRef={modalRef} tabIndex={-1} className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && closeAndReset()}>
+      {(surfaceMotion) => <motion.aside {...surfaceMotion} className="workspace-panel flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
+        <ProjectPanelContent
+          key={`${formVersion}:${project?.id ?? "no-project"}:${project?.updatedAt ?? "initial"}`}
+          project={project}
+          onClose={closeAndReset}
+          onSave={onSave}
+          access={accessOverride}
+          busy={busy}
+          setBusy={setBusy}
+          closeButtonRef={closeButtonRef}
+        />
+      </motion.aside>}
+    </OverlayPresenceLayer>
+  ) : null}</AnimatePresence>;
+}
+
+function ProjectPanelContent({
+  project,
+  onClose,
+  onSave,
+  access: accessOverride,
+  busy,
+  setBusy,
+  closeButtonRef,
+}: Omit<ProjectPanelProps, "open" | "returnFocusRef"> & {
+  busy: boolean;
+  setBusy: Dispatch<SetStateAction<boolean>>;
+  closeButtonRef: RefObject<HTMLButtonElement | null>;
+}) {
   const [tab, setTab] = useState<Tab>("context");
   const [instructions, setInstructions] = useState(project?.instructions ?? "");
   const [memoryNotes, setMemoryNotes] = useState(project?.memory.notes ?? "");
@@ -60,30 +102,11 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
   const [sourceName, setSourceName] = useState("");
   const [memberEmail, setMemberEmail] = useState("");
   const [memberRole, setMemberRole] = useState<ProjectMemberRole>("viewer");
-  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
   const access = accessOverride ?? workbenchProjectAccess(project);
   const canEdit = access.canEdit;
   const canManage = access.canManage;
-  const modalRef = useModalFocus<HTMLDivElement>(open, () => {
-    if (!busy) onClose();
-  }, closeButtonRef, returnFocusRef);
-
-  // The panel stays mounted while users switch projects. Refresh every field
-  // from the selected server projection so desktop and mobile never edit the
-  // previous project's draft by accident.
-  useEffect(() => {
-    if (!open || !project) return;
-    setTab("context");
-    setInstructions(project.instructions);
-    setMemoryNotes(project.memory.notes);
-    setSources(project.sources);
-    setVisibility(project.sharing.visibility);
-    setMembers(project.sharing.members);
-    setSourceValue(""); setSourceName(""); setMemberEmail(""); setNotice(null);
-  }, [open, project]);
 
   const save = async () => {
     if (!project || !canEdit) return;
@@ -164,9 +187,7 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
     setNotice("Acceso registrado localmente. La aplicación todavía no envía invitaciones por correo.");
   };
 
-  return <AnimatePresence initial={false}>{open ? (
-    <OverlayPresenceLayer key="project-panel" origin="right" rootRef={modalRef} tabIndex={-1} className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
-      {(surfaceMotion) => <motion.aside {...surfaceMotion} className="workspace-panel flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
+  return <>
         <header className="safe-area-panel-header workspace-panel-header flex items-center gap-3 border-b border-[var(--border-subtle)]">
           <span className="grid size-9 place-items-center rounded-xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><Brain size={18} /></span>
           <div className="min-w-0 flex-1"><h2 className="workspace-panel-title truncate">{project?.name ?? "Proyecto"}</h2><p className="workspace-panel-subtitle">{canEdit ? "Contexto compartido por todas sus conversaciones" : "Consulta del contexto compartido · solo lectura"}</p></div>
@@ -217,7 +238,5 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
         </div>
 
         <footer className="safe-area-panel-footer border-t border-[var(--border-subtle)] pt-4"><div className="flex items-center gap-3"><p className="min-w-0 flex-1 text-[10px] text-[var(--text-muted)]" aria-live="polite">{notice ?? (!canEdit ? "No puedes modificar este proyecto." : !canManage ? "Puedes editar el contexto y las fuentes; la compartición corresponde al propietario." : null)}</p>{canEdit ? <button type="button" disabled={busy || !project} className="flex min-h-10 items-center gap-2 rounded-xl bg-[var(--brain-accent)] px-4 text-[12px] font-semibold text-[var(--brain-contrast)] disabled:opacity-50" onClick={() => void save()}>{busy ? <SpinnerGap size={14} className="animate-spin" /> : null}Guardar cambios</button> : null}</div></footer>
-      </motion.aside>}
-    </OverlayPresenceLayer>
-  ) : null}</AnimatePresence>;
+  </>;
 }

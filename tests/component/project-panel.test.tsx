@@ -92,6 +92,21 @@ describe("ProjectPanel", () => {
     expect(screen.getByRole("textbox", { name: "Instrucciones del proyecto" })).toHaveValue("Proyecto B");
   });
 
+  it("discards an unsaved draft when the panel is closed and reopened", async () => {
+    render(<ProjectPanelHarness />);
+    const opener = screen.getByRole("button", { name: "Abrir ajustes" });
+    fireEvent.click(opener);
+    fireEvent.change(screen.getByRole("textbox", { name: "Instrucciones del proyecto" }), {
+      target: { value: "Borrador sin guardar" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Configurar proyecto" })).not.toBeInTheDocument());
+    fireEvent.click(opener);
+
+    expect(screen.getByRole("textbox", { name: "Instrucciones del proyecto" })).toHaveValue("");
+  });
+
   it("renders a viewer project as a fully readable but non-mutable surface", () => {
     const viewerProject: WorkbenchProject = {
       ...project,
