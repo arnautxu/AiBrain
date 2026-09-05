@@ -54,6 +54,7 @@ class FakeTransport implements AppServerTransport {
   constructor(
     private readonly alreadyInitialized = false,
     private readonly accountResults: JsonValue[] = [],
+    private readonly rejectProactiveRefresh = false,
   ) {}
 
   block(method: string) {
@@ -88,7 +89,9 @@ class FakeTransport implements AppServerTransport {
     const result = (() => {
       switch (message.rpc.method) {
         case "initialize": return { userAgent: "codex-test" };
-        case "account/read": return this.accountResults.shift()
+        case "account/read":
+          if (this.rejectProactiveRefresh && (message.rpc.params as { refreshToken?: boolean })?.refreshToken) return { account: null, requiresOpenaiAuth: true };
+          return this.accountResults.shift()
           ?? { account: { type: "chatgpt", planType: "team" } };
         case "model/list": return {
           data: [{
@@ -338,6 +341,17 @@ describe("worker App Server client", () => {
     await client.close();
   });
 
+  it("keeps a valid account connected when proactive renewal would reject a reused refresh token", async () => {
+    const transport = new FakeTransport(false, [], true);
+    const client = new WorkerAppServerClient(handle(transport));
+    await expect(client.connectionSummary()).resolves.toMatchObject({ connected: true });
+    await expect(client.connectionSummary()).resolves.toMatchObject({ connected: true });
+    const reads = transport.sent.filter((item) => item.kind === "rpc-request" && item.rpc.method === "account/read");
+    expect(reads).toHaveLength(1);
+    expect(reads[0]).toMatchObject({ rpc: { params: { refreshToken: false } } });
+    await client.close();
+  });
+
   it("reports the verified account without waiting for the optional catalog", async () => {
     const transport = new FakeTransport();
     const client = new WorkerAppServerClient(handle(transport));
@@ -379,8 +393,8 @@ describe("worker App Server client", () => {
     expect(transport.sent.filter((item) =>
       item.kind === "rpc-request" && item.rpc.method === "account/read",
     ).map((item) => item.kind === "rpc-request" ? item.rpc.params : null)).toEqual([
-      { refreshToken: true },
-      { refreshToken: true },
+      { refreshToken: false },
+      { refreshToken: false },
     ]);
     await client.close();
   });

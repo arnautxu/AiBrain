@@ -124,9 +124,12 @@ export class WorkerAppServerClient {
     if (initializedHere) {
       await this.router.notify({ method: "initialized" }, `initialized:${randomUUID()}`);
     }
+    // Readiness must not proactively rotate credentials. Codex owns normal
+    // refresh during authenticated work; forcing it here can invalidate a
+    // still-usable shared-QA session when its refresh token was already rotated.
     this.account = parseAccount(await this.router.request(randomRequest(
       "account/read",
-      { refreshToken: true },
+      { refreshToken: false },
       "account-read",
     ), 10_000));
   }
@@ -248,7 +251,7 @@ export class WorkerAppServerClient {
         this.accountRecheckAttempted = true;
         this.accountRefresh = this.router.request(randomRequest(
           "account/read",
-          { refreshToken: true },
+          { refreshToken: false },
           "account-recheck",
         ), 10_000).then((result) => {
           const account = parseAccount(result);

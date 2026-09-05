@@ -35,3 +35,17 @@ Cada cierre debe incluir causa raíz, commit, versión desplegada, prueba en la 
 ## Reglas de entrega
 
 Preservar cambios de Arnau mediante fetch antes de integrar y antes de push. Sin force push. Agrupar publicación para ahorrar Actions. Máximo cuatro tareas locales adicionales, preferiblemente coordinador y dos trabajadores, una prueba pesada a la vez. Sin goals. Comprobar uso y respetar el mínimo del 20% restante si sigue aplicando. Pruebas finales sobre arnall.graphikai.com con evidencia del resultado visible; declarar lo no comprobado. Incorporar este registro al repositorio y mantenerlo sincronizado con este enlace de seguimiento.
+
+### R5-10 — readiness forcing proactive renewal (2026-09-06)
+
+The 0.149.1 `GetAccountParams` contract defines `refreshToken: true` as a
+proactive renewal. A same-environment production diagnostic returned a ChatGPT
+account with `false`, but returned `account: null` and `refresh_token_reused`
+with `true`, while the access token remained valid until September 15.
+Readiness initialization and its bounded cold-start recheck now use `false`;
+normal authenticated work remains responsible for provider-managed renewal.
+This restores account discovery without copying credentials or bypassing
+provider authorization. It does not solve shared-QA credential rotation:
+renewal reconciliation/per-user identity remains a separate unresolved issue.
+The focused regression models a valid account whose proactive renewal fails.
+Deployment and an authenticated real turn must be verified separately.
