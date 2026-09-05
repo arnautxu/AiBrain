@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailsPanel } from "@/components/details-panel";
+import reasoningStyles from "@/components/assistant-ui/elements/thinking-reasoning.module.css";
 import { TurnActivity } from "@/components/turn-activity";
 import type { ChatMessage } from "@/lib/chat-contract";
 
@@ -76,7 +77,7 @@ describe("turn activity and Review", () => {
 
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveTextContent("Preparando cambios en src/components/turn-activity.tsx");
-    expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
+    expect(trigger.querySelector(`.${reasoningStyles.shimmer}`)).toBeInTheDocument();
     expect(screen.getByText("Identificando el alcance exacto")).toBeInTheDocument();
     expect(screen.queryByText("Contexto preparado")).not.toBeInTheDocument();
     expect(screen.queryByText(/Primer text 30508 ms/)).not.toBeInTheDocument();
@@ -98,7 +99,7 @@ describe("turn activity and Review", () => {
     trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveTextContent("En curso: Validando el proyecto");
-    expect(trigger.querySelector(".thinking-steps-shimmer")).toBeInTheDocument();
+    expect(trigger.querySelector(`.${reasoningStyles.shimmer}`)).toBeInTheDocument();
 
     rerender(<TurnActivity
       message={{
@@ -118,7 +119,7 @@ describe("turn activity and Review", () => {
     trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
     expect(trigger).toHaveAttribute("aria-expanded", "false");
     expect(trigger).toHaveTextContent("Ha trabajado durante 0m 46s");
-    expect(trigger.querySelector(".thinking-steps-shimmer")).not.toBeInTheDocument();
+    expect(trigger.querySelector(`.${reasoningStyles.shimmer}`)).not.toBeInTheDocument();
     expect(screen.getByText("Identificando el alcance exacto")).not.toBeVisible();
     fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
