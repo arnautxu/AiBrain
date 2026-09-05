@@ -19,6 +19,7 @@ import {
 } from "@/runtime/browser/registry";
 import { BrowserSessionStore } from "@/runtime/browser/state-store";
 import type {
+  BrowserFrame,
   BrowserGatewayCapability,
   BrowserInputCommand,
   BrowserPointerTrailPoint,
@@ -452,19 +453,125 @@ export type BrowserFrameStreamEvent = Readonly<{
   data: Uint8Array;
 }>;
 
-function waitForNextFrame(milliseconds: number, stream: ViewerStreamLease) {
+type BrowserFrameEventSource = Readonly<{
+  signal: AbortSignal;
+  capture(): Promise<BrowserFrame>;
+  wait(milliseconds: number, signal?: AbortSignal): Promise<void>;
+  burstActive(): boolean;
+  now(): number;
+  frameIntervalMs: number;
+  idleFrameIntervalMs: number;
+  heartbeatIntervalMs: number;
+  maximumDurationMs: number;
+}>;
+
+/**
+ * Keeps transport liveness independent from image production. A compositor
+ * read may be slow while the authenticated viewer and Chrome target remain
+ * healthy, so cheap heartbeat records continue without starting more captures.
+ */
+export async function* streamBrowserFrameEvents(
+  input: BrowserFrameEventSource,
+): AsyncGenerator<BrowserFrameStreamEvent> {
+  const deadline = input.now() + input.maximumDurationMs;
+  let sequence = 0;
+  let lastDigest: string | null = null;
+  let lastPointerSignature: string | null = null;
+  let lastPointerTrail: readonly BrowserPointerTrailPoint[] = Object.freeze([]);
+  let lastEmissionAt = input.now();
+  while (!input.signal.aborted && input.now() < deadline) {
+    const captureStartedAt = input.now();
+    const capture = input.capture().then(
+      (frame) => ({ kind: "frame" as const, frame }),
+      (error: unknown) => ({ kind: "error" as const, error }),
+    );
+    let frame: BrowserFrame | null = null;
+    while (!input.signal.aborted && input.now() < deadline && !frame) {
+      const now = input.now();
+      const waitMs = Math.max(0, Math.min(
+        deadline - now,
+        (lastEmissionAt + input.heartbeatIntervalMs) - now,
+      ));
+      const timerController = new AbortController();
+      const outcome = await Promise.race([
+        capture,
+        input.wait(waitMs, timerController.signal).then(() => ({ kind: "timer" as const })),
+      ]);
+      timerController.abort();
+      if (outcome.kind === "error") throw outcome.error;
+      if (outcome.kind === "frame") {
+        frame = outcome.frame;
+        break;
+      }
+      const heartbeatAt = input.now();
+      if (input.signal.aborted || heartbeatAt >= deadline) return;
+      if (heartbeatAt - lastEmissionAt >= input.heartbeatIntervalMs) {
+        lastEmissionAt = heartbeatAt;
+        yield Object.freeze({
+          kind: "heartbeat" as const,
+          sequence,
+          capturedAt: new Date(heartbeatAt).toISOString(),
+          captureDurationMs: 0,
+          mediaType: null,
+          pointerTrail: lastPointerTrail,
+          data: new Uint8Array(0),
+        });
+      }
+    }
+    if (!frame || input.signal.aborted) return;
+    const data = Buffer.from(frame.dataBase64, "base64");
+    const digest = createHash("sha256").update(data).digest("hex");
+    const pointerTrail = frame.pointerTrail ?? Object.freeze([]);
+    const pointerSignature = JSON.stringify(pointerTrail);
+    const captureDurationMs = Math.max(0, input.now() - captureStartedAt);
+    lastPointerTrail = pointerTrail;
+    if (digest !== lastDigest || pointerSignature !== lastPointerSignature) {
+      sequence += 1;
+      lastDigest = digest;
+      lastPointerSignature = pointerSignature;
+      lastEmissionAt = input.now();
+      yield Object.freeze({
+        kind: "frame" as const,
+        sequence,
+        capturedAt: frame.capturedAt,
+        captureDurationMs,
+        mediaType: frame.mediaType,
+        pointerTrail,
+        data: new Uint8Array(data),
+      });
+    } else if (input.now() - lastEmissionAt >= input.heartbeatIntervalMs) {
+      const heartbeatAt = input.now();
+      lastEmissionAt = heartbeatAt;
+      yield Object.freeze({
+        kind: "heartbeat" as const,
+        sequence,
+        capturedAt: new Date(heartbeatAt).toISOString(),
+        captureDurationMs: 0,
+        mediaType: null,
+        pointerTrail,
+        data: new Uint8Array(0),
+      });
+    }
+    const targetIntervalMs = input.burstActive() ? input.frameIntervalMs : input.idleFrameIntervalMs;
+    await input.wait(targetIntervalMs - (input.now() - captureStartedAt));
+  }
+}
+
+function waitForNextFrame(milliseconds: number, stream: ViewerStreamLease, localSignal?: AbortSignal) {
   const signal = stream.controller.signal;
-  if (signal.aborted || milliseconds <= 0) return Promise.resolve();
+  if (signal.aborted || localSignal?.aborted || milliseconds <= 0) return Promise.resolve();
   return new Promise<void>((resolve) => {
     const timer = setTimeout(finish, milliseconds);
     function finish() {
       clearTimeout(timer);
       signal.removeEventListener("abort", finish);
+      localSignal?.removeEventListener("abort", finish);
       if (stream.wake === finish) stream.wake = null;
       resolve();
     }
     stream.wake = finish;
     signal.addEventListener("abort", finish, { once: true });
+    localSignal?.addEventListener("abort", finish, { once: true });
   });
 }
 
@@ -506,59 +613,33 @@ export async function* streamBrowserFrames(input: {
   const idleFrameIntervalMs = Math.max(frameIntervalMs, Math.min(2_000, input.idleFrameIntervalMs ?? 500));
   const heartbeatIntervalMs = Math.max(1_000, Math.min(10_000, input.heartbeatIntervalMs ?? 2_500));
   const maximumDurationMs = Math.max(1_000, Math.min(25_000, input.maximumDurationMs ?? 20_000));
-  const deadline = Date.now() + maximumDurationMs;
-  let sequence = 0;
-  let lastDigest: string | null = null;
-  let lastPointerSignature: string | null = null;
-  let lastEmissionAt = 0;
   try {
-    while (!streamController.signal.aborted && Date.now() < deadline) {
-      const captureStartedAt = Date.now();
-      const frame = await executeViewerOperation({
+    const events = streamBrowserFrameEvents({
+      signal: streamController.signal,
+      capture: () => executeViewerOperation({
         registry: state.registry,
         userId: input.userId,
         signal: streamController.signal,
         recoverOnCancellation: false,
         operation: () => state.registry.captureFrame(input.userId, input.threadId),
-      });
-      if (streamController.signal.aborted) break;
-      const data = Buffer.from(frame.dataBase64, "base64");
-      const digest = createHash("sha256").update(data).digest("hex");
-      const pointerTrail = frame.pointerTrail ?? Object.freeze([]);
-      const pointerSignature = JSON.stringify(pointerTrail);
-      const captureDurationMs = Math.max(0, Date.now() - captureStartedAt);
-      if (digest !== lastDigest || pointerSignature !== lastPointerSignature) {
-        sequence += 1;
-        lastDigest = digest;
-        lastPointerSignature = pointerSignature;
-        lastEmissionAt = Date.now();
-        yield Object.freeze({
-          kind: "frame" as const,
-          sequence,
-          capturedAt: frame.capturedAt,
-          captureDurationMs,
-          mediaType: frame.mediaType,
-          pointerTrail,
-          data: new Uint8Array(data),
-        });
-      } else if (Date.now() - lastEmissionAt >= heartbeatIntervalMs) {
-        lastEmissionAt = Date.now();
-        yield Object.freeze({
-          kind: "heartbeat" as const,
-          sequence,
-          capturedAt: new Date().toISOString(),
-          captureDurationMs,
-          mediaType: null,
-          pointerTrail,
-          data: new Uint8Array(0),
-        });
-      }
-      const targetIntervalMs = Date.now() < stream.burstUntil ? frameIntervalMs : idleFrameIntervalMs;
-      await waitForNextFrame(targetIntervalMs - (Date.now() - captureStartedAt), stream);
+      }),
+      wait: (milliseconds, signal) => waitForNextFrame(milliseconds, stream, signal),
+      burstActive: () => Date.now() < stream.burstUntil,
+      now: Date.now,
+      frameIntervalMs,
+      idleFrameIntervalMs,
+      heartbeatIntervalMs,
+      maximumDurationMs,
+    });
+    for await (const event of events) {
+      yield event;
     }
   } catch (error) {
     if (!streamController.signal.aborted) throw error;
   } finally {
+    // A bounded EOF must retire its pending compositor read. Cancellation is
+    // attachment-local and explicitly does not restart or fence Chrome.
+    streamController.abort();
     input.signal.removeEventListener("abort", detach);
     if (state.viewerStreams.get(streamKey) === stream) {
       state.viewerStreams.delete(streamKey);

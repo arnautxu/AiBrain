@@ -34,6 +34,8 @@ describe("Arnall deployment gateway contract", () => {
     expect(gateway).not.toContain("docker build ");
     expect(gateway).not.toContain("docker push ");
     expect(gateway).not.toContain("git archive");
+    const compose = await readFile(path.join(process.cwd(), "infra", "hetzner", "compose.yaml"), "utf8");
+    expect(compose).toContain('AIBRAIN_REVISION: "${AIBRAIN_REVISION:?set AIBRAIN_REVISION to the exact git commit}"');
   });
 
   it("keeps GHCR credentials in a temporary Docker config and rejects other image repositories", async () => {

@@ -24,6 +24,7 @@ services:
       TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
       AIBRAIN_EGRESS_PROXY_URL: http://egress-gateway:8080
       AIBRAIN_RUNTIME_INSTANCE: app
+      AIBRAIN_REVISION: "${AIBRAIN_REVISION:?set AIBRAIN_REVISION to the exact git commit}"
       AIBRAIN_AUTOMATION_WORKER_ENABLED: "${AIBRAIN_AUTOMATION_WORKER_ENABLED:-true}"
     labels:
       com.graphikai.aibrain.product: aibrain

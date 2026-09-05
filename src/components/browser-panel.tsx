@@ -140,6 +140,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const [compactOverlay, setCompactOverlay] = useState(false);
   const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting">("connecting");
   const [metrics, setMetrics] = useState<ViewerMetrics | null>(null);
+  const [frameIdle, setFrameIdle] = useState(false);
   const [pointer, setPointer] = useState<ViewerPointer | null>(null);
   const [pointerTrail, setPointerTrail] = useState<ComputerStep[]>([]);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -305,11 +306,16 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const run = async () => {
       while (!controller.signal.aborted) {
         try {
-          setConnection(reconnectAttempt === 0 ? "connecting" : "reconnecting");
+          setConnection(frameUrlRef.current ? "live" : reconnectAttempt === 0 ? "connecting" : "reconnecting");
           const response = await openBrowserFrameStream(threadId, viewerToken.token, controller.signal);
           await consumeBrowserFrameStream(response, (record) => {
-            if (record.metadata.kind === "heartbeat") return;
+            if (record.metadata.kind === "heartbeat") {
+              if (frameUrlRef.current) setConnection("live");
+              setFrameIdle(true);
+              return;
+            }
             reconnectAttempt = 0;
+            setFrameIdle(false);
             setPointerTrail((record.metadata.pointerTrail ?? []).map((point) => ({
               ...point,
               action: "click",
@@ -336,8 +342,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             });
           }, controller.signal);
           if (controller.signal.aborted) return;
-          reconnectAttempt += 1;
-          setConnection("reconnecting");
+          // Bounded stream EOF is a planned token-renewal boundary, not a
+          // browser disconnect. Keep the confirmed frame live during renewal.
           await renewViewerToken(humanControlRef.current, controller.signal);
           return; // The token state starts exactly one replacement effect/stream.
         } catch (reason) {
@@ -609,7 +615,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
 
   const live = connection === "live";
   const indicator = navigating ? "Cargando página…" : live
-    ? metrics ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
+    ? metrics && !frameIdle ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
     : connection === "reconnecting" ? "Reconectando" : "Conectando";
 
   return (

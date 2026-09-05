@@ -542,6 +542,48 @@ describe("BrowserPanel", () => {
     expect(browser.issue.mock.calls.length).toBeGreaterThan(1);
     expect(browser.send).not.toHaveBeenCalled();
   });
+
+  it("keeps a static page connected across heartbeats and planned stream renewal", async () => {
+    let releaseIdle!: () => void;
+    const frameRecord = {
+      metadata: {
+        version: 1, kind: "frame", sequence: 1,
+        capturedAt: new Date().toISOString(), captureDurationMs: 20, mediaType: "image/png",
+        pointerTrail: [],
+      },
+      data: new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    };
+    const heartbeatRecord = {
+      metadata: {
+        version: 1, kind: "heartbeat", sequence: 1,
+        capturedAt: new Date().toISOString(), captureDurationMs: 0, mediaType: null,
+        pointerTrail: [],
+      },
+      data: new Uint8Array(0),
+    };
+    browser.consume.mockReset()
+      .mockImplementationOnce(async (_response, onRecord: (record: unknown) => Promise<void>) => {
+        await onRecord(frameRecord);
+        await new Promise<void>((resolve) => { releaseIdle = resolve; });
+        await onRecord(heartbeatRecord);
+      })
+      .mockImplementationOnce(async (_response, onRecord: (record: unknown) => Promise<void>) => {
+        await onRecord(heartbeatRecord);
+        await new Promise<void>(() => undefined);
+      });
+
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    fireEvent.load(image);
+    expect(screen.getByRole("status", { name: /FPS|Conectado/u })).toBeInTheDocument();
+
+    await act(async () => releaseIdle());
+    await waitFor(() => expect(browser.openStream).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("status", { name: "Conectado" })).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Reconectando" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: /0\.0 FPS/u })).not.toBeInTheDocument();
+    expect(browser.send).not.toHaveBeenCalled();
+  });
   it("combines a waiting wheel burst without moving it past a keyboard barrier", async () => {
     let takeOver!: (value: unknown) => void;
     browser.control.mockImplementation((action: string) => action === "takeover"

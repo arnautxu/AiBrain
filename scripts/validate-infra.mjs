@@ -113,6 +113,7 @@ requireMatch(dockerfile, /CODEX_APPROVAL_POLICY=never/u, "Docker image does not 
 requireMatch(dockerfile, /AIBRAIN_BROWSER_INTERACTIVE_APPROVALS=disabled/u, "Docker image does not disable interactive browser approvals");
 forbidMatch(dockerfile, /CODEX_APPROVAL_POLICY=on-request/u, "Docker image re-enables interactive Codex approvals");
 requireMatch(compose, /app:[\s\S]*CODEX_APPROVAL_POLICY: never[\s\S]*AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled/u, "App does not disable interactive browser and Codex approvals");
+requireMatch(compose, /app:[\s\S]*AIBRAIN_REVISION: "\$\{AIBRAIN_REVISION:\?set AIBRAIN_REVISION to the exact git commit\}"[\s\S]*?\n  automation-worker:/u, "App does not receive the exact promoted revision");
 requireMatch(compose, /automation-worker:[\s\S]*CODEX_APPROVAL_POLICY: never[\s\S]*AIBRAIN_BROWSER_INTERACTIVE_APPROVALS: disabled/u, "Automation worker does not disable interactive browser and Codex approvals");
 forbidMatch(compose, /CODEX_APPROVAL_POLICY: on-request/u, "Compose re-enables interactive Codex approvals");
 requireMatch(dockerfile, /AIBRAIN_CHROME_BIN=\/usr\/local\/bin\/aibrain-chrome/u, "Chrome does not default to the employee sandbox launcher");
