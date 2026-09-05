@@ -442,6 +442,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.start();
     expect(spawnedArgs).toContain("--remote-debugging-pipe");
     expect(spawnedArgs).toContain("--disable-quic");
+    expect(spawnedArgs).toContain("--lang=en-US");
     expect(spawnedArgs).toContain("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
     expect(spawnedArgs).toContain("--proxy-bypass-list=<-loopback>");
     const proxyArgument = spawnedArgs.find((argument) => argument.startsWith("--proxy-server="));
@@ -1240,6 +1241,7 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(args).toContain("--disable-quic");
     expect(args).toContain("--force-webrtc-ip-handling-policy=disable_non_proxied_udp");
     expect(args).toContain("--force-device-scale-factor=1");
+    expect(args).toContain("--lang=en-US");
     expect(args).toContain("--proxy-server=http://127.0.0.1:49152");
     expect(args).toContain("--proxy-bypass-list=<-loopback>");
     expect(args.some((argument) => argument.includes("remote-debugging-port"))).toBe(false);
@@ -1247,6 +1249,9 @@ describe("ChromeCdpRuntime private pipe", () => {
     expect(args).not.toContain("--no-sandbox");
     expect(() => buildChromeArguments(context, "http://localhost:49152"))
       .toThrowError(expect.objectContaining({ code: "CHROME_PROXY_URL_INVALID" }));
+    expect(buildChromeArguments(context, null, "es-es")).toContain("--lang=es-ES");
+    expect(() => buildChromeArguments(context, null, "es ES"))
+      .toThrowError(expect.objectContaining({ code: "CHROME_LANGUAGE_INVALID" }));
     const privateOverrideArgs = buildChromeArguments(context, null);
     expect(privateOverrideArgs).toContain("--disable-quic");
     expect(privateOverrideArgs.some((argument) => argument.startsWith("--proxy-server="))).toBe(false);
