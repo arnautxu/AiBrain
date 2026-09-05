@@ -9,13 +9,17 @@ const candidateSha = "a".repeat(40);
 const appImage = `registry.example.test/aibrain@sha256:${"b".repeat(64)}`;
 const gatewayImage = `registry.example.test/aibrain-gateway@sha256:${"c".repeat(64)}`;
 
-function commandAdapter(overrides: Partial<{ appRevision: string; gatewayRevision: string; appImage: string; gatewayImage: string }> = {}): CommandAdapter {
+function commandAdapter(overrides: Partial<{ appRevision: string; gatewayRevision: string; runtimeRevision: string; appImage: string; gatewayImage: string }> = {}): CommandAdapter {
   return {
     run: async (args) => {
       const target = args.at(-1);
       const app = target === "a".repeat(12) || target === appImage;
       const image = app ? (overrides.appImage ?? appImage) : (overrides.gatewayImage ?? gatewayImage);
       if (args.includes("{{.Config.Image}}")) return image;
+      if (args.includes("{{json .Config.Env}}")) return JSON.stringify([
+        `AIBRAIN_REVISION=${overrides.runtimeRevision ?? candidateSha}`,
+        "NODE_ENV=production",
+      ]);
       if (args.some((arg) => arg.includes("org.opencontainers.image.revision"))) {
         return app ? (overrides.appRevision ?? candidateSha) : (overrides.gatewayRevision ?? candidateSha);
       }
@@ -114,5 +118,10 @@ describe("release readback collectors", () => {
       candidateSha, ...files, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12),
       command: commandAdapter({ appRevision: "e".repeat(40) }),
     })).rejects.toThrow("Running container image or revision does not match release state.");
+
+    await expect(collectReleaseReadbacks({
+      candidateSha, ...files, appContainer: "a".repeat(12), gatewayContainer: "b".repeat(12),
+      command: commandAdapter({ runtimeRevision: "e".repeat(40) }),
+    })).rejects.toThrow("Application runtime revision does not match the candidate.");
   });
 });

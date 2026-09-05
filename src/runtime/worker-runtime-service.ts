@@ -243,20 +243,25 @@ export class WorkerAppServerClient {
     // pin that cold-start result for the lifetime of the worker: perform one
     // coalesced re-read for this caller. A genuinely disconnected account
     // remains fail-closed, and later HTTP retries stay externally bounded.
-    if (!this.account.connected && !this.accountRecheckAttempted) {
-      this.accountRecheckAttempted = true;
-      this.accountRefresh ??= this.router.request(randomRequest(
-        "account/read",
-        { refreshToken: true },
-        "account-recheck",
-      ), 10_000).then((result) => {
-        const account = parseAccount(result);
-        this.account = account;
-        return account;
-      }).finally(() => {
-        this.accountRefresh = null;
-      });
-      await this.accountRefresh;
+    if (!this.account.connected) {
+      if (!this.accountRefresh && !this.accountRecheckAttempted) {
+        this.accountRecheckAttempted = true;
+        this.accountRefresh = this.router.request(randomRequest(
+          "account/read",
+          { refreshToken: true },
+          "account-recheck",
+        ), 10_000).then((result) => {
+          const account = parseAccount(result);
+          this.account = account;
+          return account;
+        }).finally(() => {
+          this.accountRefresh = null;
+        });
+      }
+      // A concurrent summary that arrives after the once-per-generation flag
+      // was set must still await the in-flight read instead of leaking the
+      // transient disconnected snapshot.
+      if (this.accountRefresh) await this.accountRefresh;
     }
     return {
       ...this.account,

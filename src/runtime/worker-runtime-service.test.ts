@@ -385,6 +385,34 @@ describe("worker App Server client", () => {
     await client.close();
   });
 
+  it("coalesces concurrent cold-start account summaries onto the bounded recheck", async () => {
+    const transport = new FakeTransport(false, [
+      { account: null },
+      { account: { type: "chatgpt", planType: "team" } },
+    ]);
+    const client = new WorkerAppServerClient(handle(transport));
+    await client.initialize();
+    const release = transport.block("account/read");
+    const first = client.connectionSummary();
+    await vi.waitFor(() => expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read",
+    )).toHaveLength(2));
+    const second = client.connectionSummary();
+    let secondSettled = false;
+    void second.finally(() => { secondSettled = true; });
+    await Promise.resolve();
+    expect(secondSettled).toBe(false);
+    release();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ connected: true, authMode: "chatgpt" }),
+      expect.objectContaining({ connected: true, authMode: "chatgpt" }),
+    ]);
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read",
+    )).toHaveLength(2);
+    await client.close();
+  });
+
   it("fails closed after one bounded account recheck", async () => {
     const transport = new FakeTransport(false, [
       { account: null },
