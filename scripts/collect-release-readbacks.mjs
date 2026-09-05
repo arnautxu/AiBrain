@@ -144,6 +144,24 @@ async function inspectContainer(adapter, container, expectedImage, candidateSha)
     }
     return { revision, provenance: sha256(JSON.stringify({ imageArgs, image, revisionArgs, revision })) };
 }
+async function inspectAppRuntimeRevision(adapter, container, candidateSha) {
+    const environmentArgs = ["inspect", "--format", "{{json .Config.Env}}", container];
+    const environmentText = await command(adapter, environmentArgs, "Application runtime environment inspection");
+    let environment;
+    try {
+        environment = JSON.parse(environmentText);
+    }
+    catch {
+        throw new Error("Application runtime environment inspection did not return JSON.");
+    }
+    const revisions = Array.isArray(environment)
+        ? environment.filter((item) => typeof item === "string" && item.startsWith("AIBRAIN_REVISION="))
+        : [];
+    if (revisions.length !== 1 || revisions[0] !== `AIBRAIN_REVISION=${candidateSha}`) {
+        throw new Error("Application runtime revision does not match the candidate.");
+    }
+    return { revision: candidateSha, provenance: sha256(JSON.stringify({ environmentArgs, revisions })) };
+}
 async function inspectImage(adapter, image, candidateSha) {
     const digestsArgs = ["image", "inspect", "--format", "{{json .RepoDigests}}", image];
     const revisionArgs = ["image", "inspect", "--format", "{{index .Config.Labels \"org.opencontainers.image.revision\"}}", image];
@@ -190,6 +208,7 @@ export async function collectReleaseReadbacks(input) {
         inspectImage(input.command, state.current.image, input.candidateSha),
         inspectImage(input.command, state.current.egressImage, input.candidateSha),
     ]);
+    const appEnvironment = await inspectAppRuntimeRevision(input.command, input.appContainer, input.candidateSha);
     if (appRuntime.revision !== gatewayRuntime.revision || appImage.revision !== gatewayImage.revision) {
         throw new Error("Runtime or OCI revisions are not mutually consistent.");
     }
@@ -220,7 +239,7 @@ export async function collectReleaseReadbacks(input) {
         },
         {
             route: "release:runtime-readback", artifactPath: "release-runtime-readback.json",
-            value: { schemaVersion: 1, kind: "aibrain-release-runtime-readback", source: "runtime", deploySha: state.current.revision, runtimeSha: appRuntime.revision, appOciRevision: appRuntime.revision, gatewayOciRevision: gatewayRuntime.revision, capturedAt: at, provenance: provenance("docker-command", sha256(`${appRuntime.provenance}:${gatewayRuntime.provenance}`)) },
+            value: { schemaVersion: 1, kind: "aibrain-release-runtime-readback", source: "runtime", deploySha: state.current.revision, runtimeSha: appEnvironment.revision, appOciRevision: appRuntime.revision, gatewayOciRevision: gatewayRuntime.revision, capturedAt: at, provenance: provenance("docker-command", sha256(`${appRuntime.provenance}:${gatewayRuntime.provenance}:${appEnvironment.provenance}`)) },
         },
         {
             route: "release:app-oci-inspect", artifactPath: "release-app-oci-inspect.json",
