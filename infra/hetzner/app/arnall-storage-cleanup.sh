@@ -334,7 +334,9 @@ main() {
   verify_health
   verify_current_runtime
   free_after="$(df --block-size=1 --output=avail / | tail -1 | tr -d ' ')"
-  ((free_after > free_before)) && freed=$((free_after - free_before))
+  if [[ "$mode" == "execute" ]] && ((free_after > free_before)); then
+    freed=$((free_after - free_before))
+  fi
   log "ARNALL_STORAGE_CLEANUP_COMPLETE mode=$mode free_bytes_before=$free_before free_bytes_after=$free_after bytes_freed=$freed directory_logical_bytes=$directory_bytes image_logical_bytes=$image_bytes directories_removed=$directories_removed containers_removed=$containers_removed images_removed=$images_removed"
 }
 

@@ -15,6 +15,7 @@ describe("Arnall weekly host cleanup contract", () => {
     expect(source).toContain('mode="dry-run"');
     expect(source).toContain('--execute) mode="execute"');
     expect(source).toContain('[[ "$mode" == "execute" ]]');
+    expect(source).toContain('if [[ "$mode" == "execute" ]] && ((free_after > free_before)); then');
   });
 
   it("has a fixed Arnall allowlist and no broad prune or volume deletion", async () => {
