@@ -73,7 +73,7 @@ Ejemplo de error:
 | `GET`, `POST` | `/api/runtime/browser` | Estado y lifecycle del browser privado del usuario |
 | `POST` | `/api/runtime/browser/token` | Token corto y ligado a sesión para el viewer |
 | `GET` | `/api/runtime/browser/viewer/frame` | Frame PNG privado |
-| `POST` | `/api/runtime/browser/viewer/input` | Navegación y input durante takeover humano |
+| `POST` | `/api/runtime/browser/viewer/input` | Viewport acotado; navegación e input durante takeover humano |
 | `GET` | `/api/health/live` | Liveness del proceso, sin autenticación |
 | `GET` | `/api/health/ready` | Readiness de roots, capacidad y aislamiento del host |
 
@@ -1344,7 +1344,39 @@ La captura está permitida en `ready` y `human-control`. La UI puede hacer polli
 
 ### 14.4 Navegación y Computer Use humano
 
-`POST /api/runtime/browser/viewer/input`, con `Authorization: Bearer <token-con-control>`. Solo se acepta durante takeover humano activo.
+`POST /api/runtime/browser/viewer/input`. Navegación, historial, teclado y ratón
+requieren `Authorization: Bearer <token-con-control>` y takeover humano activo.
+El ajuste interno `action: "viewport"` requiere un token con `view` y se acepta
+en `ready` o `human-control`; no toma control, no ejecuta JavaScript arbitrario
+y solo aplica dimensiones enteras entre 320–3840 por 240–2160 mediante el CDP
+privado. El tamaño queda ligado al target del thread y se vuelve a medir tras
+rotar la sesión del browser.
+
+Estado de navegación del viewer:
+
+```ts
+type BrowserViewerNavigationState = {
+  url: string;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  phase: "idle" | "loading" | "complete" | "error";
+  sequence: number;
+};
+```
+
+`sequence` avanza en cada navegación deliberada y en una navegación iniciada
+por la página. La UI descarta muestras de secuencias anteriores y no permite
+que un `loading` tardío reemplace un estado terminal de la misma secuencia.
+
+Viewport:
+
+```json
+{
+  "threadId": "0198b9f0-6631-7000-8000-000000000302",
+  "action": "viewport",
+  "viewport": { "width": 1280, "height": 720 }
+}
+```
 
 Navegación:
 

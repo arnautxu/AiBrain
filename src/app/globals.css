@@ -460,6 +460,11 @@ button:disabled {
   font-size: 0.875rem;
 }
 
+.workspace-panel.support-dialog-panel {
+  border-radius: 22px;
+  overflow: hidden;
+}
+
 .workspace-panel [class*="text-[8px]"],
 .workspace-panel [class*="text-[9px]"] {
   font-size: 0.75rem;

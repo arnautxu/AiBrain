@@ -43,6 +43,8 @@ export type BrowserViewerNavigationState = {
   url: string;
   canGoBack: boolean;
   canGoForward: boolean;
+  phase: "idle" | "loading" | "complete" | "error";
+  sequence: number;
 };
 export type BrowserViewerHistoryAction = "back" | "forward" | "reload";
 
@@ -197,7 +199,10 @@ export async function readBrowserFrame(threadId: string, token: string, signal?:
 function parseNavigationState(value: unknown): BrowserViewerNavigationState | null {
   const body = record(value);
   if (!body || typeof body.url !== "string" || body.url.length < 1 || body.url.length > 8_192 ||
-    typeof body.canGoBack !== "boolean" || typeof body.canGoForward !== "boolean") return null;
+    typeof body.canGoBack !== "boolean" || typeof body.canGoForward !== "boolean" ||
+    !(body.phase === undefined || body.phase === "idle" || body.phase === "loading" ||
+      body.phase === "complete" || body.phase === "error") ||
+    !(body.sequence === undefined || (Number.isSafeInteger(body.sequence) && Number(body.sequence) >= 0))) return null;
   try {
     if (body.url !== "about:blank") {
       const parsed = new URL(body.url);
@@ -210,6 +215,8 @@ function parseNavigationState(value: unknown): BrowserViewerNavigationState | nu
     url: body.url,
     canGoBack: body.canGoBack,
     canGoForward: body.canGoForward,
+    phase: body.phase as BrowserViewerNavigationState["phase"] | undefined ?? "complete",
+    sequence: body.sequence === undefined ? 0 : Number(body.sequence),
   };
 }
 

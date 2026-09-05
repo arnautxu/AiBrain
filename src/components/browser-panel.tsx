@@ -34,6 +34,8 @@ import {
 import { useModalFocus } from "@/ui/use-modal-focus";
 
 type ViewerMetrics = Readonly<{ fps: number; latencyMs: number; captureMs: number }>;
+type NavigationProgress = "idle" | "loading" | "complete" | "error";
+type ViewerViewport = Readonly<{ width: number; height: number }>;
 type ViewerPointer = Readonly<{
   displayX: number;
   displayY: number;
@@ -64,9 +66,12 @@ function pointerPosition(
   clientX: number,
   clientY: number,
   pressed: boolean,
+  remoteViewport?: ViewerViewport,
 ): ViewerPointer | null {
   const bounds = image.getBoundingClientRect();
-  if (bounds.width <= 0 || bounds.height <= 0 || image.naturalWidth <= 0 || image.naturalHeight <= 0) return null;
+  const remoteWidth = remoteViewport?.width ?? image.naturalWidth;
+  const remoteHeight = remoteViewport?.height ?? image.naturalHeight;
+  if (bounds.width <= 0 || bounds.height <= 0 || remoteWidth <= 0 || remoteHeight <= 0) return null;
   const displayX = clamp(clientX - bounds.left, 0, bounds.width);
   const displayY = clamp(clientY - bounds.top, 0, bounds.height);
   const relativeX = displayX / bounds.width;
@@ -76,8 +81,8 @@ function pointerPosition(
     displayY,
     relativeX,
     relativeY,
-    remoteX: Math.round(relativeX * image.naturalWidth),
-    remoteY: Math.round(relativeY * image.naturalHeight),
+    remoteX: Math.round(relativeX * remoteWidth),
+    remoteY: Math.round(relativeY * remoteHeight),
     pressed,
   };
 }
@@ -130,11 +135,11 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const [status, setStatus] = useState<BrowserUiStatus | null>(initialStatus);
   const [viewerToken, setViewerToken] = useState<BrowserViewerToken | null>(null);
   const [navigation, setNavigation] = useState<BrowserViewerNavigationState>({
-    url: "about:blank", canGoBack: false, canGoForward: false,
+    url: "about:blank", canGoBack: false, canGoForward: false, phase: "complete", sequence: 0,
   });
   const [frameUrl, setFrameUrl] = useState<string | null>(null);
   const [address, setAddress] = useState("about:blank");
-  const [navigating, setNavigating] = useState(false);
+  const [navigationProgress, setNavigationProgress] = useState<NavigationProgress>("idle");
   const [error, setError] = useState<string | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const [compactOverlay, setCompactOverlay] = useState(false);
@@ -144,6 +149,11 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   const [pointer, setPointer] = useState<ViewerPointer | null>(null);
   const [pointerTrail, setPointerTrail] = useState<ComputerStep[]>([]);
   const imageRef = useRef<HTMLImageElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const remoteViewportRef = useRef<ViewerViewport>({ width: 1_440, height: 900 });
+  const measuredViewportRef = useRef<ViewerViewport | null>(null);
+  const navigationSequenceRef = useRef(0);
+  const navigationPhaseRef = useRef<BrowserViewerNavigationState["phase"]>("complete");
   const frameUrlRef = useRef<string | null>(null);
   const viewerTokenRef = useRef<BrowserViewerToken | null>(null);
   const viewerTokenControlsRef = useRef(false);
@@ -201,6 +211,45 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
 
   useEffect(() => { viewerTokenRef.current = viewerToken; }, [viewerToken]);
   useEffect(() => { humanControlRef.current = status?.state.lifecycle === "human-control"; }, [status?.state.lifecycle]);
+
+  useEffect(() => {
+    // A recovered Chrome process starts with its default viewport and a fresh
+    // navigation sequence. Force the next observer sample to configure it and
+    // never compare the new sequence with the retired browser session.
+    measuredViewportRef.current = null;
+    remoteViewportRef.current = { width: 1_440, height: 900 };
+    navigationSequenceRef.current = 0;
+    navigationPhaseRef.current = "complete";
+  }, [status?.state.browserSessionId]);
+
+  const applyNavigation = useCallback((next: BrowserViewerNavigationState) => {
+    const sequence = Number.isSafeInteger(next.sequence) ? next.sequence : 0;
+    const phase = next.phase ?? "complete";
+    const currentSequence = navigationSequenceRef.current;
+    const currentPhase = navigationPhaseRef.current;
+    if (sequence < currentSequence || (sequence === currentSequence &&
+      (currentPhase === "complete" || currentPhase === "error") && phase === "loading")) return;
+    const normalized = { ...next, phase, sequence };
+    const advanced = sequence > currentSequence;
+    setNavigation(normalized);
+    navigationSequenceRef.current = sequence;
+    navigationPhaseRef.current = phase;
+    setNavigationProgress((current) => {
+      if (phase === "loading") return "loading";
+      if (phase === "error") return "error";
+      return current === "loading" || advanced ? "complete" : current;
+    });
+    if (!addressEditingRef.current) setAddress(normalized.url);
+  }, []);
+
+  useEffect(() => {
+    if (navigationProgress !== "complete" && navigationProgress !== "error") return;
+    const timer = window.setTimeout(
+      () => setNavigationProgress("idle"),
+      navigationProgress === "error" ? 1_200 : 360,
+    );
+    return () => window.clearTimeout(timer);
+  }, [navigationProgress]);
 
   const refreshStatus = useCallback(async (signal?: AbortSignal) => {
     const next = await readBrowserStatus(signal);
@@ -289,14 +338,13 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const controller = new AbortController();
     const updateNavigation = () => {
       void readBrowserNavigationState(threadId, viewerToken.token, controller.signal).then((next) => {
-        setNavigation(next);
-        if (!addressEditingRef.current) setAddress(next.url);
+        applyNavigation(next);
       }).catch(() => undefined);
     };
     updateNavigation();
     const interval = window.setInterval(updateNavigation, 1_500);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [open, threadId, viewerToken]);
+  }, [applyNavigation, open, threadId, viewerToken]);
 
   useEffect(() => {
     if (!open || !threadId || !viewerToken) return;
@@ -379,6 +427,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     acquireControl = true,
     coalesceKey?: string,
     beforeDispatch?: () => void,
+    onFailure?: () => void,
+    afterDispatch?: (next: BrowserViewerNavigationState | null) => void,
   ) => {
     if (!threadId || !open || !attachmentRef.current) return null;
     if (commands.some((command) => command.action !== "input" ||
@@ -388,9 +438,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       return await inputQueueRef.current.enqueue(async (assertCurrent) => {
         const token = acquireControl
           ? await ensureControl()
-          : controlBindingRef.current && humanControlRef.current && viewerTokenControlsRef.current
-            ? viewerTokenRef.current
-            : null;
+          : viewerTokenRef.current;
         assertCurrent();
         if (!token) return null;
         if (token.browserSessionId !== status?.state.browserSessionId) {
@@ -410,36 +458,82 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         }
         assertCurrent();
         if (next) {
-          setNavigation(next);
-          if (!addressEditingRef.current) setAddress(next.url);
+          applyNavigation(next);
         }
+        afterDispatch?.(next);
         return next;
       }, coalesceKey);
     } catch (reason) {
       // Renew on the next deliberate input, never retry a possibly dispatched mutation.
-      viewerTokenControlsRef.current = false;
+      if (acquireControl) viewerTokenControlsRef.current = false;
+      onFailure?.();
       if (attachmentRef.current) setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
       return null;
     }
-  }, [ensureControl, open, status?.state.browserSessionId, threadId]);
+  }, [applyNavigation, ensureControl, open, status?.state.browserSessionId, threadId]);
 
   const navigate = async () => {
-    setNavigating(true);
-    try { await runViewerCommands([{ action: "navigate", url: normalizedAddress(address) }]); }
-    finally { setNavigating(false); }
+    setNavigationProgress("loading");
+    let failed = false;
+    const next = await runViewerCommands(
+      [{ action: "navigate", url: normalizedAddress(address) }],
+      true,
+      undefined,
+      undefined,
+      () => { failed = true; setNavigationProgress("error"); },
+    );
+    if (!failed && !next) setNavigationProgress("complete");
   };
 
   const navigateHistory = async (direction: BrowserViewerHistoryAction) => {
-    setNavigating(true);
-    try { await runViewerCommands([{ action: "history", direction }]); }
-    finally { setNavigating(false); }
+    setNavigationProgress("loading");
+    let failed = false;
+    const next = await runViewerCommands(
+      [{ action: "history", direction }], true, undefined, undefined,
+      () => { failed = true; setNavigationProgress("error"); },
+    );
+    if (!failed && !next) setNavigationProgress("complete");
   };
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!open || !threadId || !viewerToken || !viewport || typeof ResizeObserver === "undefined") return;
+    let frame: number | null = null;
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (!rect) return;
+      const next = {
+        width: clamp(Math.round(rect.width), 320, 3_840),
+        height: clamp(Math.round(rect.height), 240, 2_160),
+      };
+      const previous = measuredViewportRef.current;
+      if (previous?.width === next.width && previous.height === next.height) return;
+      measuredViewportRef.current = next;
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = null;
+        void runViewerCommands(
+          [{ action: "viewport", viewport: next }], false, "viewport", undefined, undefined,
+          (state) => {
+            if (!state) return;
+            remoteViewportRef.current = next;
+          },
+        );
+      });
+    });
+    observer.observe(viewport);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [open, runViewerCommands, threadId, viewerToken]);
 
   const releaseHeldPointer = useCallback((options: {
     pointerId?: number;
     point?: ViewerPointer | null;
     cancelled?: boolean;
     updateUi?: boolean;
+    onFailure?: () => void;
   } = {}) => {
     const held = heldPointerRef.current;
     if (!held || (options.pointerId !== undefined && held.pointerId !== options.pointerId)) {
@@ -462,12 +556,14 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         y: released.relativeY * 100,
       }].slice(-3));
     }
-    return runViewerCommands([mouseInput("mouseReleased", released, "left")]);
+    return runViewerCommands(
+      [mouseInput("mouseReleased", released, "left")], true, undefined, undefined, options.onFailure,
+    );
   }, [runViewerCommands]);
 
   const pressFrame = (event: PointerEvent<HTMLImageElement>) => {
     if (!event.isPrimary || event.button !== 0 || heldPointerRef.current) return;
-    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, true);
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, true, remoteViewportRef.current);
     if (!point) return;
     event.preventDefault();
     event.currentTarget.focus({ preventScroll: true });
@@ -489,7 +585,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     if (!event.isPrimary) return;
     const held = heldPointerRef.current;
     if (held && held.pointerId !== event.pointerId) return;
-    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, Boolean(held));
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, Boolean(held), remoteViewportRef.current);
     if (!point) return;
     setPointer(point);
     if (held) held.last = point;
@@ -504,8 +600,20 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const held = heldPointerRef.current;
     if (!held || held.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, false);
-    void releaseHeldPointer({ pointerId: event.pointerId, point });
+    const point = pointerPosition(event.currentTarget, event.clientX, event.clientY, false, remoteViewportRef.current);
+    const dragged = point ? Math.hypot(
+      point.displayX - held.start.displayX,
+      point.displayY - held.start.displayY,
+    ) > 3 : false;
+    if (!dragged) setNavigationProgress("loading");
+    let failed = false;
+    void releaseHeldPointer({
+      pointerId: event.pointerId,
+      point,
+      onFailure: !dragged ? () => { failed = true; setNavigationProgress("error"); } : undefined,
+    }).then((next) => {
+      if (!dragged && !failed && !next) setNavigationProgress("complete");
+    });
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
@@ -528,7 +636,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     event.preventDefault();
     const image = imageRef.current;
     if (!image || !threadId) return;
-    const point = pointerPosition(image, event.clientX, event.clientY, false);
+    const point = pointerPosition(image, event.clientX, event.clientY, false, remoteViewportRef.current);
     if (!point) return;
     // Browsers report wheel deltas in pixels, lines or pages. Preserve total
     // movement while one HTTP request is pending instead of replaying a backlog.
@@ -560,16 +668,20 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     // Let the local browser deliver clipboard text through onPaste.
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "v") return;
     event.preventDefault();
+    const mayNavigate = event.key === "Enter";
+    if (mayNavigate) setNavigationProgress("loading");
+    let failed = false;
     const modifiers = (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) |
       (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0);
-    await runViewerCommands(["keyDown", "keyUp"].map((keyEvent) => ({
+    const next = await runViewerCommands(["keyDown", "keyUp"].map((keyEvent) => ({
       action: "input",
       command: {
         kind: "key", event: keyEvent, key: event.key, code: event.code, modifiers,
         ...(keyEvent === "keyDown" && event.key.length === 1 &&
           !event.ctrlKey && !event.metaKey && !event.altKey ? { text: event.key } : {}),
       },
-    })));
+    })), true, undefined, undefined, mayNavigate ? () => { failed = true; setNavigationProgress("error"); } : undefined);
+    if (mayNavigate && !failed && !next) setNavigationProgress("complete");
   };
 
   const pasteFrame = async (event: ClipboardEvent<HTMLElement>) => {
@@ -614,7 +726,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   );
 
   const live = connection === "live";
-  const indicator = navigating ? "Cargando página…" : live
+  const indicator = navigationProgress === "loading" ? "Cargando página…" : live
     ? metrics && !frameIdle ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
     : connection === "reconnecting" ? "Reconectando" : "Conectando";
 
@@ -624,7 +736,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       data-side-window="browser"
       className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
       aria-label="Navegador"
-      aria-busy={navigating}
+      aria-busy={navigationProgress === "loading"}
       aria-hidden={!open ? "true" : undefined}
       aria-modal={open && compactOverlay ? "true" : undefined}
       role={open && compactOverlay ? "dialog" : undefined}
@@ -645,14 +757,23 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
         <button data-browser-capability="back" type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
         <button data-browser-capability="forward" type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
-        <button data-browser-capability="reload" type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigating ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
-        <form data-browser-capability="url" className="mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
+        <button data-browser-capability="reload" type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigationProgress === "loading" ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
+        <form data-browser-capability="url" className="relative mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <label className="sr-only" htmlFor="browser-address">Dirección web</label>
           <input id="browser-address" type="text" inputMode="url" spellCheck={false}
             className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)] focus:text-left"
             value={address} onChange={(event) => setAddress(event.target.value)}
             onFocus={() => { addressEditingRef.current = true; viewportOwnsKeyboardRef.current = false; }}
             onBlur={() => { addressEditingRef.current = false; }} />
+          <div
+            data-testid="browser-navigation-progress"
+            data-state={navigationProgress}
+            role={navigationProgress === "loading" ? "progressbar" : undefined}
+            aria-label={navigationProgress === "loading" ? "Cargando página" : undefined}
+            className={`pointer-events-none absolute inset-x-2 -bottom-[5px] h-0.5 overflow-hidden rounded-full transition-opacity ${navigationProgress === "idle" ? "opacity-0" : "opacity-100"}`}
+          >
+            <span className={`block h-full origin-left rounded-full transition-[width,background-color] duration-300 ${navigationProgress === "loading" ? "w-2/3 motion-safe:animate-pulse bg-[var(--brain-accent)]" : navigationProgress === "error" ? "w-full bg-[var(--danger)]" : "w-full bg-[var(--positive)]"}`} />
+          </div>
         </form>
         <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
           className={`mx-1 size-2 shrink-0 rounded-full ${live ? "bg-[var(--positive)]" : connection === "reconnecting" ? "bg-[var(--warning)] motion-safe:animate-pulse" : "bg-[var(--text-subtle)] motion-safe:animate-pulse"}`} role="status" />
@@ -660,7 +781,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         <button ref={closeButtonRef} type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={closePanel}><X size={15} /></button>
       </header>
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-[#e9e9e7]">
+      <div ref={viewportRef} data-testid="browser-viewport" className="relative flex min-h-0 flex-1 overflow-hidden bg-white">
         {frameUrl ? (
           <ComputerUse
             url={navigation.url}
@@ -674,8 +795,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             } : null}
             showChrome={false}
             showStatus={false}
-            className="inline-flex max-h-full w-auto max-w-full rounded-none border-0 bg-transparent dark:bg-transparent"
-            viewportClassName="inline-flex min-h-0 max-h-full max-w-full border-0"
+            className="h-full w-full max-w-none rounded-none border-0 bg-transparent dark:bg-transparent"
+            viewportClassName="h-full min-h-0 w-full border-0"
           >
             <img data-browser-capability="continuous-scroll" ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
               draggable={false} onDragStart={(event) => event.preventDefault()}
@@ -685,7 +806,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
               onPointerCancel={cancelFrame} onLostPointerCapture={loseFrameCapture}
               onPointerLeave={() => { if (!heldPointerRef.current) setPointer(null); }}
               onWheel={(event) => void scrollFrame(event)}
-              className={`${pointer ? "cursor-none" : ""} max-h-full max-w-full touch-none select-none bg-white object-contain outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]`} />
+              className={`${pointer ? "cursor-none" : ""} h-full w-full touch-none select-none bg-white object-fill outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]`} />
           </ComputerUse>
         ) : (
           <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>

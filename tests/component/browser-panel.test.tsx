@@ -276,6 +276,48 @@ describe("BrowserPanel", () => {
     expect(trail?.querySelector("svg")).toHaveStyle({ left: "25%", top: "40%" });
   });
 
+  it("sizes Chrome to the visible panel and maps input through the acknowledged viewport", async () => {
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe(target: Element) {
+        this.callback([{ target, contentRect: { width: 800, height: 600 } } as ResizeObserverEntry], this);
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("ResizeObserver", TestResizeObserver);
+    browser.send.mockImplementation(async (_threadId, _token, command) => command.action === "viewport"
+      ? { url: "https://example.test/current", canGoBack: true, canGoForward: false, phase: "complete", sequence: 0 }
+      : null);
+
+    render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
+    const image = await screen.findByAltText("Vista actual del navegador privado");
+    await waitFor(() => expect(browser.send).toHaveBeenCalledWith(
+      THREAD_ID,
+      "private-viewer-token",
+      { action: "viewport", viewport: { width: 800, height: 600 } },
+    ));
+    expect(browser.control).not.toHaveBeenCalledWith("takeover", expect.anything(), expect.anything());
+
+    vi.spyOn(image, "getBoundingClientRect").mockReturnValue({
+      x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300,
+      toJSON: () => ({}),
+    });
+    Object.defineProperties(image, {
+      setPointerCapture: { value: vi.fn() }, releasePointerCapture: { value: vi.fn() },
+      hasPointerCapture: { value: () => true },
+    });
+    fireEvent.pointerDown(image, { pointerId: 41, isPrimary: true, button: 0, clientX: 200, clientY: 150 });
+    fireEvent.pointerUp(image, { pointerId: 41, isPrimary: true, button: 0, clientX: 200, clientY: 150 });
+    await waitFor(() => {
+      const inputs = browser.send.mock.calls
+        .map((call) => call[2])
+        .filter((command) => command.action === "input");
+      expect(inputs).toHaveLength(2);
+      expect(inputs.map((command) => [command.command.x, command.command.y])).toEqual([[400, 300], [400, 300]]);
+    });
+  });
+
   it("does not announce a live viewer before the first real frame finishes loading", async () => {
     render(<BrowserPanel threadId={THREAD_ID} open onClose={vi.fn()} initialStatus={readyStatus} />);
     const image = await screen.findByAltText("Vista actual del navegador privado");
