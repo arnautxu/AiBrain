@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
+    const voiceProbe = { requests: 0, stoppedTracks: 0 };
     class MockRecognition {
       continuous = false;
       interimResults = false;
@@ -27,6 +28,18 @@ test.beforeEach(async ({ page }) => {
     Object.defineProperty(window, "SpeechRecognition", { configurable: true, value: MockRecognition });
     Object.defineProperty(window, "SpeechSynthesisUtterance", { configurable: true, value: MockUtterance });
     Object.defineProperty(window, "speechSynthesis", { configurable: true, value: { speak() {}, cancel() {}, speaking: false } });
+    Object.defineProperty(window, "__voiceProbe", { configurable: true, value: voiceProbe });
+    Object.defineProperty(navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        async getUserMedia(constraints: MediaStreamConstraints) {
+          voiceProbe.requests += constraints.audio ? 1 : 0;
+          return {
+            getTracks: () => [{ stop: () => { voiceProbe.stoppedTracks += 1; } }],
+          };
+        },
+      },
+    });
   });
   await page.goto("/login");
   await page.getByRole("button", { name: /Alex|Taylor/ }).click();
@@ -40,6 +53,7 @@ test("voice dictation requires consent and leaves text editable without sending"
   await expect(page.getByRole("dialog", { name: "Permiso para dictar" })).toContainText("nunca enviará");
   await page.getByRole("button", { name: "Activar dictado" }).click();
   await expect(textarea).toHaveValue("Prepara un resumen de ventas");
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, "__voiceProbe"))).toEqual({ requests: 1, stoppedTracks: 1 });
   await expect(page.locator("article.flex.justify-end")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
 });
