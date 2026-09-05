@@ -1,7 +1,7 @@
 "use client";
 
 import { Bug, Lightbulb, Question, SpinnerGap, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { SupportKind } from "@/support/contracts";
 import { useModalFocus } from "@/ui/use-modal-focus";
 
@@ -20,12 +20,35 @@ export function SupportDialog({ open, projectId, threadId, returnFocusRef, onClo
 }) {
   const [kind, setKind] = useState<SupportKind>("help");
   const [description, setDescription] = useState("");
+
+  if (!open) return null;
+  return <OpenSupportDialog
+    kind={kind}
+    setKind={setKind}
+    description={description}
+    setDescription={setDescription}
+    projectId={projectId}
+    threadId={threadId}
+    returnFocusRef={returnFocusRef}
+    onClose={onClose}
+  />;
+}
+
+function OpenSupportDialog({ kind, setKind, description, setDescription, projectId, threadId, returnFocusRef, onClose }: {
+  kind: SupportKind;
+  setKind: Dispatch<SetStateAction<SupportKind>>;
+  description: string;
+  setDescription: Dispatch<SetStateAction<string>>;
+  projectId: string | null;
+  threadId: string | null;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  onClose: () => void;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sentId, setSentId] = useState<string | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useModalFocus<HTMLDivElement>(open, () => !busy && onClose(), closeRef, returnFocusRef);
-  useEffect(() => { if (open) { setError(null); setSentId(null); } }, [open]);
+  const dialogRef = useModalFocus<HTMLDivElement>(true, () => !busy && onClose(), closeRef, returnFocusRef);
 
   const submit = async () => {
     if (!description.trim() || busy) return;
@@ -52,7 +75,6 @@ export function SupportDialog({ open, projectId, threadId, returnFocusRef, onClo
     finally { setBusy(false); }
   };
 
-  if (!open) return null;
   return <div className="workspace-overlay fixed inset-0 z-[70] grid place-items-center p-4" onMouseDown={(event) => event.target === event.currentTarget && !busy && onClose()}>
     <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="support-title" className="workspace-panel w-full max-w-xl rounded-[22px] border border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-lg)] outline-none">
       <header className="workspace-panel-header flex items-center border-b border-[var(--border-subtle)] px-5"><div className="min-w-0 flex-1"><h2 id="support-title" className="workspace-panel-title">Ayuda y feedback</h2><p className="workspace-panel-subtitle mt-0.5">Se guarda primero; el aviso al equipo nunca bloquea el envío.</p></div><button ref={closeRef} type="button" aria-label="Cerrar" className="touch-target grid size-10 place-items-center rounded-full hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button></header>
