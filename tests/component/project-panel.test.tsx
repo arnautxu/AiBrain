@@ -41,6 +41,28 @@ function ProjectPanelHarness() {
   );
 }
 
+function PersistingEditorPanelHarness() {
+  const [currentProject, setCurrentProject] = useState<WorkbenchProject>({
+    ...project,
+    access: { role: "editor", canEdit: true, canManage: false },
+  });
+  return (
+    <ProjectPanel
+      project={currentProject}
+      open
+      onClose={vi.fn()}
+      onSave={async (patch) => {
+        setCurrentProject((current) => ({
+          ...current,
+          ...patch,
+          updatedAt: "2026-08-30T09:00:00.000Z",
+        }));
+        return true;
+      }}
+    />
+  );
+}
+
 afterEach(cleanup);
 
 describe("ProjectPanel", () => {
@@ -151,5 +173,18 @@ describe("ProjectPanel", () => {
     const patch = onSave.mock.calls[0]?.[0];
     expect(patch).toMatchObject({ instructions: "Contexto actualizado por el editor." });
     expect(patch).not.toHaveProperty("sharing");
+  });
+
+  it("keeps the active settings tab and confirmation after a persisted editor save", async () => {
+    render(<PersistingEditorPanelHarness />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Instrucciones del proyecto" }), {
+      target: { value: "Contexto persistido por el editor." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Personas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+
+    await waitFor(() => expect(screen.getByText("Proyecto actualizado.")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Personas" })).toHaveAttribute("aria-current", "page");
   });
 });

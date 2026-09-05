@@ -65,7 +65,7 @@ export function ProjectPanel({ project, open, onClose, onSave, access: accessOve
     <OverlayPresenceLayer key="project-panel" origin="right" rootRef={modalRef} tabIndex={-1} className="workspace-overlay fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true" aria-label="Configurar proyecto" onMouseDown={(event) => event.target === event.currentTarget && !busy && closeAndReset()}>
       {(surfaceMotion) => <motion.aside {...surfaceMotion} className="workspace-panel flex h-full w-full max-w-[540px] flex-col border-l border-[var(--border)] bg-[var(--surface-raised)] shadow-[var(--shadow-popover)]">
         <ProjectPanelContent
-          key={`${formVersion}:${project?.id ?? "no-project"}:${project?.updatedAt ?? "initial"}`}
+          key={`${formVersion}:${project?.id ?? "no-project"}`}
           project={project}
           onClose={closeAndReset}
           onSave={onSave}
