@@ -53,6 +53,7 @@ install -m 0644 infra/hetzner/systemd/aibrain-arnall-storage-cleanup.timer \
   /etc/systemd/system/aibrain-arnall-storage-cleanup.timer
 install -m 0644 infra/hetzner/systemd/aibrain-arnall-storage-cleanup.logrotate \
   /etc/logrotate.d/aibrain-arnall-storage-cleanup
+install -d -m 0700 -o root -g root /var/log/aibrain
 systemd-analyze verify /etc/systemd/system/aibrain-arnall-storage-cleanup.service \
   /etc/systemd/system/aibrain-arnall-storage-cleanup.timer
 systemd-analyze calendar 'Sat *-*-* 04:00:00 Europe/Madrid'
