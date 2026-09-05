@@ -51,7 +51,10 @@ class FakeTransport implements AppServerTransport {
   sequence = 0;
   private readonly blockedMethods = new Map<string, Promise<void>>();
 
-  constructor(private readonly alreadyInitialized = false) {}
+  constructor(
+    private readonly alreadyInitialized = false,
+    private readonly accountResults: JsonValue[] = [],
+  ) {}
 
   block(method: string) {
     let release!: () => void;
@@ -85,7 +88,8 @@ class FakeTransport implements AppServerTransport {
     const result = (() => {
       switch (message.rpc.method) {
         case "initialize": return { userAgent: "codex-test" };
-        case "account/read": return { account: { type: "chatgpt", planType: "team" } };
+        case "account/read": return this.accountResults.shift()
+          ?? { account: { type: "chatgpt", planType: "team" } };
         case "model/list": return {
           data: [{
             model: "gpt-test",
@@ -354,6 +358,38 @@ describe("worker App Server client", () => {
         "account/usage/read",
       ].includes(item.rpc.method),
     )).toHaveLength(0);
+    await client.close();
+  });
+
+  it("rechecks one transiently missing cold-start account without relogin", async () => {
+    const transport = new FakeTransport(false, [
+      { account: null },
+      { account: { type: "chatgpt", planType: "team" } },
+    ]);
+    const client = new WorkerAppServerClient(handle(transport));
+
+    await expect(client.connectionSummary()).resolves.toMatchObject({
+      connected: true,
+      authMode: "chatgpt",
+      planType: "team",
+    });
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read",
+    )).toHaveLength(2);
+    await client.close();
+  });
+
+  it("fails closed after one bounded account recheck", async () => {
+    const transport = new FakeTransport(false, [
+      { account: null },
+      { account: null },
+    ]);
+    const client = new WorkerAppServerClient(handle(transport));
+
+    await expect(client.connectionSummary()).resolves.toMatchObject({ connected: false });
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read",
+    )).toHaveLength(2);
     await client.close();
   });
 

@@ -80,6 +80,13 @@ empty company-file searches disclose their limited coverage even after a
 successful refresh. See the document-sync runbook for the observed source
 boundary and incident evidence; production acceptance remains separate.
 
+The 2026-09-05 Arnall restart acceptance also exposed a distinct cold-worker
+account race: App Server could return a transient null `account/read` while the
+same private `CODEX_HOME` was already logged in. The candidate now performs one
+coalesced, non-refreshing account re-read before remaining fail-closed. This is
+bounded recovery only; it neither retries indefinitely nor performs a relogin,
+and still requires authenticated live acceptance on the deployed candidate.
+
 The user's subsequent source-scope correction authorizes read access across
 the server, not just selected folders. The candidate adds live drive discovery,
 directory browsing, bounded filename search and fresh document reads through
