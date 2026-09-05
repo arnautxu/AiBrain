@@ -25,17 +25,18 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
   const button = "touch-target min-h-10 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-40";
   const activeValue = activeCell ? values.get(activeCell) ?? "" : "Selecciona una celda";
   const selectSheet = (index: number) => { setSelected(index); setRowPage(0); setColumnPage(0); setActiveCell(null); };
-  return <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[#f6f8f7] text-[#17201b] shadow-[var(--shadow-sm)]">
+  return <div className="flex h-full min-h-0 w-full max-w-full flex-col overflow-hidden rounded-xl border border-[var(--border)] bg-[#f6f8f7] text-[#17201b] shadow-[var(--shadow-sm)]">
     <div className="shrink-0 bg-[#176b46] px-4 py-2.5 text-white">
       <div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-[12px] font-semibold">Libro de trabajo</p><p className="text-[10px] text-white/70">Vista protegida · solo lectura</p></div><span className="rounded-full bg-white/12 px-2.5 py-1 text-[10px] font-medium">Guardado</span></div>
     </div>
-    <div className="flex shrink-0 items-center gap-2 border-b border-[#cbd6cf] bg-white px-2 py-1.5">
-      <label className="sr-only">Hoja
-        <select aria-label="Hoja del libro" value={selected} onChange={(event) => selectSheet(Number(event.target.value))}>
+    <div className="flex min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b border-[#cbd6cf] bg-white px-2 py-1.5">
+      <label className="flex min-w-0 shrink items-center gap-1.5 text-[10px] font-medium text-[#536158]">
+        <span className="hidden sm:inline">Hoja</span>
+        <select aria-label="Hoja del libro" className="h-7 min-w-0 max-w-36 rounded border border-[#cbd6cf] bg-white px-1.5 text-[11px] font-medium text-[#17201b] outline-none focus-visible:ring-2 focus-visible:ring-[#18864b]" value={selected} onChange={(event) => selectSheet(Number(event.target.value))}>
           {preview.sheets.map((item, index) => <option key={index} value={index}>{item.name}{item.hidden ? " (oculta en el original)" : ""}</option>)}
         </select>
       </label>
-      <div className="grid h-7 w-14 place-items-center rounded border border-[#cbd6cf] bg-[#f5f7f5] text-[11px] font-semibold">{activeCell ?? "A1"}</div>
+      <div className="grid h-7 w-14 shrink-0 place-items-center rounded border border-[#cbd6cf] bg-[#f5f7f5] text-[11px] font-semibold">{activeCell ?? "A1"}</div>
       <div className="min-w-0 flex-1 truncate rounded border border-[#cbd6cf] bg-white px-2 py-1 text-[11px]" aria-live="polite">{activeValue}</div>
     </div>
     {preview.truncated ? <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">Vista parcial por tamaño. Confirma el resto antes de sacar conclusiones.</p> : null}

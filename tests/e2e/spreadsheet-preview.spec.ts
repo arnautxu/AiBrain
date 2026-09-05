@@ -22,10 +22,27 @@ for (const width of [1440, 390]) {
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Mostra els horaris.");
     await page.getByRole("button", { name: "Enviar mensaje" }).click();
     await page.getByRole("button", { name: "Ver hojas del libro" }).click();
+    const preview = page.getByLabel("Vista previa de Horaris.xlsm");
+    const sheetPicker = page.getByRole("combobox", { name: "Hoja del libro" });
+    await expect(preview).toBeVisible();
+    await expect(sheetPicker).toBeVisible();
     await expect(page.getByRole("cell", { name: "09:00" })).toBeVisible();
     await expect(page.getByText(/macros desactivadas/)).toBeVisible();
+    await expect.poll(() => preview.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.left >= 0 && bounds.top >= 0 && bounds.right <= document.documentElement.clientWidth &&
+        bounds.bottom <= document.documentElement.clientHeight && document.documentElement.scrollWidth <= window.innerWidth;
+    })).toBe(true);
     await page.screenshot({ path: `test-results/spreadsheet-${width}.png` });
-    await page.getByRole("combobox", { name: "Hoja del libro" }).selectOption("1");
+    await page.getByRole("button", { name: "Pantalla completa" }).click();
+    await expect(page.getByRole("button", { name: "Salir de pantalla completa" })).toBeVisible();
+    await expect.poll(() => preview.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return Math.abs(bounds.left) < 1 && Math.abs(bounds.top) < 1 &&
+        Math.abs(bounds.width - window.innerWidth) < 1 && Math.abs(bounds.height - window.innerHeight) < 1;
+    })).toBe(true);
+    await page.getByRole("button", { name: "Salir de pantalla completa" }).click();
+    await sheetPicker.selectOption("1");
     await expect(page.getByRole("cell", { name: "10:30" })).toBeVisible();
     await page.getByRole("button", { name: "Cerrar vista previa" }).click();
     await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeVisible();
