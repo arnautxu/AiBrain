@@ -44,7 +44,14 @@ describe("worker egress environment", () => {
       HTTP_PROXY: expect.any(String),
       HTTPS_PROXY: expect.any(String),
       ALL_PROXY: expect.any(String),
+      no_proxy: "127.0.0.1,localhost,::1",
+      http_proxy: expect.any(String),
+      https_proxy: expect.any(String),
+      all_proxy: expect.any(String),
     });
+    expect(environment.http_proxy).toBe(environment.HTTP_PROXY);
+    expect(environment.https_proxy).toBe(environment.HTTPS_PROXY);
+    expect(environment.all_proxy).toBe(environment.ALL_PROXY);
     const proxy = new URL(environment.HTTPS_PROXY);
     expect(proxy).toMatchObject({
       protocol: "http:",

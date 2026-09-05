@@ -80,11 +80,19 @@ export function workerEgressEnvironment(
   url.username = "aibrain";
   url.password = token;
   const authenticatedProxy = url.toString();
+  const noProxy = "127.0.0.1,localhost,::1";
   return Object.freeze({
     HTTP_PROXY: authenticatedProxy,
     HTTPS_PROXY: authenticatedProxy,
     ALL_PROXY: authenticatedProxy,
-    NO_PROXY: "127.0.0.1,localhost,::1",
+    NO_PROXY: noProxy,
+    // reqwest (used by Codex for ChatGPT token renewal) reads the lowercase
+    // forms. Keep both spellings so browser/Node tools and the App Server use
+    // the same authenticated, allowlisted worker channel.
+    http_proxy: authenticatedProxy,
+    https_proxy: authenticatedProxy,
+    all_proxy: authenticatedProxy,
+    no_proxy: noProxy,
   });
 }
 

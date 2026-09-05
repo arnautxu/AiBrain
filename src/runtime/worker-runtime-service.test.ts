@@ -376,6 +376,12 @@ describe("worker App Server client", () => {
     expect(transport.sent.filter((item) =>
       item.kind === "rpc-request" && item.rpc.method === "account/read",
     )).toHaveLength(2);
+    expect(transport.sent.filter((item) =>
+      item.kind === "rpc-request" && item.rpc.method === "account/read",
+    ).map((item) => item.kind === "rpc-request" ? item.rpc.params : null)).toEqual([
+      { refreshToken: true },
+      { refreshToken: true },
+    ]);
     await client.close();
   });
 
@@ -386,6 +392,7 @@ describe("worker App Server client", () => {
     ]);
     const client = new WorkerAppServerClient(handle(transport));
 
+    await expect(client.connectionSummary()).resolves.toMatchObject({ connected: false });
     await expect(client.connectionSummary()).resolves.toMatchObject({ connected: false });
     expect(transport.sent.filter((item) =>
       item.kind === "rpc-request" && item.rpc.method === "account/read",

@@ -80,12 +80,20 @@ empty company-file searches disclose their limited coverage even after a
 successful refresh. See the document-sync runbook for the observed source
 boundary and incident evidence; production acceptance remains separate.
 
-The 2026-09-05 Arnall restart acceptance also exposed a distinct cold-worker
-account race: App Server could return a transient null `account/read` while the
-same private `CODEX_HOME` was already logged in. The candidate now performs one
-coalesced, non-refreshing account re-read before remaining fail-closed. This is
-bounded recovery only; it neither retries indefinitely nor performs a relogin,
-and still requires authenticated live acceptance on the deployed candidate.
+The 2026-09-05 Arnall restart acceptance also exposed a distinct authentication
+renewal failure. The private `CODEX_HOME` still reported a ChatGPT login, but its
+access token had expired and the shared-QA source still held a refresh token
+that another isolated copy had already rotated. Production evidence separated
+that credential-version problem from egress: the allowlisted OAuth endpoint was
+reachable, and the rejected renewal returned `refresh_token_reused`. The source
+was reconciled from the already-renewed private QA copy with reversible 0600
+backups; no interactive relogin was required. The candidate now lets
+`account/read` perform normal refresh, exports both standard proxy-variable
+spellings required by the Codex network client, and performs at most one
+coalesced account re-read per worker generation before remaining fail-closed.
+Shared-QA credential reconciliation remains an explicit internal-QA operation,
+not a production identity model; per-employee identity or the enterprise API is
+still required before product cutover.
 
 The user's subsequent source-scope correction authorizes read access across
 the server, not just selected folders. The candidate adds live drive discovery,
