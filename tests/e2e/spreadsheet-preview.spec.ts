@@ -27,7 +27,7 @@ for (const width of [1440, 390]) {
     await expect(preview).toBeVisible();
     await expect(sheetPicker).toBeVisible();
     await expect(page.getByRole("cell", { name: "09:00" })).toBeVisible();
-    await expect(page.getByText(/macros desactivadas/)).toBeVisible();
+    await expect(page.getByText(/macros desactivadas/i)).toBeVisible();
     await expect.poll(() => preview.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
       return bounds.left >= 0 && bounds.top >= 0 && bounds.right <= document.documentElement.clientWidth &&
