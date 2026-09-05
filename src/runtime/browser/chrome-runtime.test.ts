@@ -10,6 +10,7 @@ import type { BrowserRuntimeContext } from "@/runtime/browser/types";
 import { BrowserNetworkPolicy } from "@/runtime/browser/network-policy";
 import {
   buildChromeArguments,
+  chromeAcceptLanguageHeader,
   ChromeBrowserRuntimeFactory,
   ChromeCdpRuntime,
   ChromeRuntimeError,
@@ -326,6 +327,38 @@ afterEach(async () => {
 });
 
 describe("ChromeCdpRuntime private pipe", () => {
+  it("applies the configured language to headers and navigator before navigation", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      language: "es-es",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+    });
+    try {
+      await runtime.start();
+      await runtime.agentNavigate(THREAD_A, "https://example.test/");
+      const navigateIndex = client.commands.findIndex(({ method }) => method === "Page.navigate");
+      expect(client.commands.findIndex(({ method }) => method === "Network.setExtraHTTPHeaders"))
+        .toBeLessThan(navigateIndex);
+      expect(client.commands).toContainEqual(expect.objectContaining({
+        method: "Network.setExtraHTTPHeaders",
+        params: { headers: { "Accept-Language": "es-ES,es;q=0.9" } },
+      }));
+      expect(client.commands).toContainEqual(expect.objectContaining({
+        method: "Emulation.setLocaleOverride",
+        params: { locale: "es-ES" },
+      }));
+      expect(chromeAcceptLanguageHeader("en-us")).toBe("en-US,en;q=0.9");
+    } finally {
+      await runtime.stop();
+    }
+  });
+
   it("keeps the graphikai footer scroll and FAQ click on the live session without CDP wheel dispatch", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
