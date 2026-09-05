@@ -21,6 +21,7 @@ export function ToolTimeline({ open, onOpenChange, streaming, label, indicator, 
       <ThinkingStepsHeader
         aria-label={`${open ? "Ocultar" : "Mostrar"} el proceso de trabajo`}
         aria-live="polite"
+        data-streaming={streaming}
         indicator={indicator}
         labelClassName={streaming ? styles.shimmer : styles.label}
         className={`${styles.header} max-w-full ${complete ? "codex-thinking-summary-complete" : ""}`}
