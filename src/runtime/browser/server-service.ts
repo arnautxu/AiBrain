@@ -36,6 +36,7 @@ import {
   type BrowserInformedApprovalEvidence,
 } from "@/runtime/browser/action-evidence";
 import { BrowserActionHistoryStore } from "@/runtime/browser/action-history";
+import { browserRuntimeCapabilityInventory } from "@/runtime/browser/capabilities";
 
 export class BrowserServiceError extends Error {
   constructor(
@@ -672,6 +673,7 @@ export async function sendBrowserViewerCommand(input: {
 }
 
 export type BrowserAgentCommand =
+  | { action: "capabilities" }
   | { action: "open"; url: string }
   | { action: "read" }
   | { action: "screenshot" }
@@ -780,6 +782,9 @@ export async function executeBrowserAgentCommand(input: {
   expectedResource?: BrowserActionResourceSnapshot;
   signal?: AbortSignal;
 }) {
+  if (input.command.action === "capabilities") {
+    return browserRuntimeCapabilityInventory();
+  }
   const registry = await agentRegistry(input);
   if (isBrowserMutation(input.command)) {
     const command = input.command;

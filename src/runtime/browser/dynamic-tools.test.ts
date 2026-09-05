@@ -157,7 +157,7 @@ describe("closed browser dynamic tools", () => {
       name: "aibrain_browser",
     });
     expect((BROWSER_DYNAMIC_TOOLS[0] as { tools: Array<{ name: string }> }).tools.map(({ name }) => name))
-      .toEqual(["open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
+      .toEqual(["capabilities", "open", "read", "screenshot", "scroll", "click", "type", "tabs", "downloads"]);
     expect(BROWSER_DYNAMIC_TOOLS[0]?.description).toContain("without interactive approval");
   });
 

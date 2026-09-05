@@ -637,10 +637,10 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           if (event.target instanceof HTMLElement) viewportOwnsKeyboardRef.current = false;
         }}>
         <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
-        <button type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
-        <button type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
-        <button type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigating ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
-        <form className="mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
+        <button data-browser-capability="back" type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
+        <button data-browser-capability="forward" type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
+        <button data-browser-capability="reload" type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigating ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
+        <form data-browser-capability="url" className="mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
           <label className="sr-only" htmlFor="browser-address">Dirección web</label>
           <input id="browser-address" type="text" inputMode="url" spellCheck={false}
             className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)] focus:text-left"
@@ -650,7 +650,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         </form>
         <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
           className={`mx-1 size-2 shrink-0 rounded-full ${live ? "bg-[var(--positive)]" : connection === "reconnecting" ? "bg-[var(--warning)] motion-safe:animate-pulse" : "bg-[var(--text-subtle)] motion-safe:animate-pulse"}`} role="status" />
-        <button type="button" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
+        <button data-browser-capability="fullscreen" type="button" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
         <button ref={closeButtonRef} type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={closePanel}><X size={15} /></button>
       </header>
 
@@ -671,7 +671,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             className="inline-flex max-h-full w-auto max-w-full rounded-none border-0 bg-transparent dark:bg-transparent"
             viewportClassName="inline-flex min-h-0 max-h-full max-w-full border-0"
           >
-            <img ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
+            <img data-browser-capability="continuous-scroll" ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
               draggable={false} onDragStart={(event) => event.preventDefault()}
               onFocus={() => { viewportOwnsKeyboardRef.current = true; }}
               onLoad={() => setConnection("live")}

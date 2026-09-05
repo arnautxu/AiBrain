@@ -854,6 +854,49 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
+  it("lets navigation and continuous scroll pass a stalled repeat capture without replaying either action", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+      allowPrivateNetwork: true,
+      captureYieldAfterMs: 10,
+    });
+    await runtime.start();
+    await runtime.captureFrame(THREAD_A);
+    const captureBlock = client.blockNext("Page.captureScreenshot");
+    const repeatedFrame = runtime.captureFrame(THREAD_A);
+    await captureBlock.started;
+
+    const controlStartedAt = performance.now();
+    await runtime.takeOver();
+    await expect(runtime.navigate(THREAD_A, "https://example.test/fast-control")).resolves.toBeUndefined();
+    await expect(runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseWheel", x: 720, y: 700, deltaX: 0, deltaY: 900,
+    })).resolves.toBeUndefined();
+    await expect(runtime.dispatchInput(THREAD_A, {
+      kind: "mouse", event: "mouseWheel", x: 720, y: 700, deltaX: 0, deltaY: 900,
+    })).resolves.toBeUndefined();
+    await expect(repeatedFrame).resolves.toMatchObject({ mediaType: "image/png" });
+    expect(performance.now() - controlStartedAt).toBeLessThan(500);
+
+    expect(client.commands.filter(({ method }) => method === "Page.navigate")).toHaveLength(1);
+    expect(client.commands.filter(({ method, params }) =>
+      method === "Runtime.evaluate" && String(params.expression).includes("document.elementFromPoint")))
+      .toHaveLength(2);
+    expect(client.commands.filter(({ method }) => method === "Page.captureScreenshot")).toHaveLength(2);
+    const versionChecks = client.commands.filter(({ method }) => method === "Browser.getVersion").length;
+    await expect(runtime.health()).resolves.toMatchObject({ healthy: true });
+    expect(client.commands.filter(({ method }) => method === "Browser.getVersion")).toHaveLength(versionChecks);
+    captureBlock.release();
+    await runtime.stop();
+  });
+
   it("retries a transient screenshot on the same target so read selectors stay valid", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();

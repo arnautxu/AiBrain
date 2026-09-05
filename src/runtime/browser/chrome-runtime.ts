@@ -53,6 +53,7 @@ const MAX_PAGE_LINK_HREF_CHARS = 1_200;
 const MAX_SELECTOR_BYTES = 1_000;
 const MAX_TYPE_TEXT_BYTES = 32_000;
 const MAX_LISTED_DOWNLOADS = 100;
+const DEFAULT_CAPTURE_YIELD_AFTER_MS = 500;
 
 export class ChromeRuntimeError extends Error {
   constructor(readonly code: string, message: string, options: { cause?: unknown } = {}) {
@@ -100,6 +101,7 @@ export type ChromeCdpRuntimeOptions = RuntimeDependencies & {
   startupTimeoutMs?: number;
   commandTimeoutMs?: number;
   shutdownTimeoutMs?: number;
+  captureYieldAfterMs?: number;
   maxThreadTargets?: number;
   allowPrivateNetwork?: boolean;
 };
@@ -127,6 +129,8 @@ type ThreadPage = {
   interceptedRequests: number;
   documentGeneration: number;
   documentVersion: string;
+  latestScreenshot: Readonly<{ data: string; capturedAt: number }> | null;
+  screenshotInFlight: Promise<Readonly<{ data: string; capturedAt: number }>> | null;
   closed: boolean;
 };
 
@@ -446,6 +450,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   readonly startupTimeoutMs: number;
   readonly commandTimeoutMs: number;
   readonly shutdownTimeoutMs: number;
+  readonly captureYieldAfterMs: number;
   readonly maxThreadTargets: number;
   private readonly configuredExecutable: string | undefined;
   private readonly spawnProcess: NonNullable<RuntimeDependencies["spawnProcess"]>;
@@ -520,6 +525,11 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
     this.startupTimeoutMs = positiveInteger("startupTimeoutMs", options.startupTimeoutMs ?? 20_000, 60_000);
     this.commandTimeoutMs = positiveInteger("commandTimeoutMs", options.commandTimeoutMs ?? 10_000, 60_000);
     this.shutdownTimeoutMs = positiveInteger("shutdownTimeoutMs", options.shutdownTimeoutMs ?? 3_000, 30_000);
+    this.captureYieldAfterMs = positiveInteger(
+      "captureYieldAfterMs",
+      options.captureYieldAfterMs ?? DEFAULT_CAPTURE_YIELD_AFTER_MS,
+      2_000,
+    );
     this.maxThreadTargets = positiveInteger("maxThreadTargets", options.maxThreadTargets ?? 32, 512);
     this.spawnProcess = options.spawnProcess ?? ((executable, args, spawnOptions) =>
       spawn(executable, [...args], spawnOptions) as ChromeProcess);
@@ -594,7 +604,8 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       // Page navigation and frame capture share one inherited CDP pipe. A
       // status poll must not inject another command while that pipe is busy or
       // mistake normal page work for a dead browser and fence the live session.
-      if (this.activeOperations > 0 || this.queuedOperations > 0) {
+      if (this.activeOperations > 0 || this.queuedOperations > 0 ||
+        [...this.threadPages.values()].some((page) => page.screenshotInFlight !== null)) {
         return {
           healthy: true,
           detail: this.egressProxy
@@ -619,20 +630,24 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
   }
 
   async captureFrame(threadId: string): Promise<BrowserFrame> {
-    const result = await this.withThreadPageRecovery(threadId, (page) => this.captureScreenshot(page));
-    if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
-      throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
-    }
-    const bytes = Buffer.from(result.data, "base64");
-    if (bytes.byteLength < PNG_SIGNATURE.byteLength || bytes.byteLength > MAX_SCREENSHOT_BYTES ||
-      !bytes.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE)) {
-      throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome screenshot is not a bounded PNG.");
-    }
+    const result = await this.withThreadPageRecovery(threadId, async (page) => {
+      const latest = page.latestScreenshot;
+      const pending = page.screenshotInFlight ?? this.startScreenshotCapture(page);
+      if (!latest) return pending;
+      // A slow compositor read must not hold the only mutation lane for
+      // seconds after a confirmed frame exists. Keep one capture in flight,
+      // yield the lane after a short budget and let navigation/input proceed.
+      // The late read may refresh the cache; mutations are never replayed.
+      return Promise.race([
+        pending,
+        wait(this.captureYieldAfterMs).then(() => latest),
+      ]);
+    });
     return Object.freeze({
       schemaVersion: 1,
       mediaType: "image/png",
       dataBase64: result.data,
-      capturedAt: new Date(this.now()).toISOString(),
+      capturedAt: new Date(result.capturedAt).toISOString(),
       pointerTrail: this.pointerTrails.get(threadId) ?? Object.freeze([]),
     });
   }
@@ -1634,6 +1649,7 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
           format: "png",
           fromSurface: true,
           captureBeyondViewport: false,
+          optimizeForSpeed: true,
         }, { sessionId: page.sessionId });
       } catch (error) {
         if (!(error instanceof CdpClientError) || error.code !== "CDP_COMMAND_FAILED") throw error;
@@ -1646,6 +1662,28 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       }
     }
     throw lastError;
+  }
+
+  private startScreenshotCapture(page: ThreadPage) {
+    const captureStartedAt = this.now();
+    const pending = this.captureScreenshot(page).then((result) => {
+      if (typeof result.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/u.test(result.data)) {
+        throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome returned an invalid screenshot.");
+      }
+      const bytes = Buffer.from(result.data, "base64");
+      if (bytes.byteLength < PNG_SIGNATURE.byteLength || bytes.byteLength > MAX_SCREENSHOT_BYTES ||
+        !bytes.subarray(0, PNG_SIGNATURE.byteLength).equals(PNG_SIGNATURE)) {
+        throw new ChromeRuntimeError("CHROME_SCREENSHOT_INVALID", "Chrome screenshot is not a bounded PNG.");
+      }
+      const screenshot = Object.freeze({ data: result.data, capturedAt: captureStartedAt });
+      if (!page.closed) page.latestScreenshot = screenshot;
+      return screenshot;
+    });
+    page.screenshotInFlight = pending;
+    void pending.finally(() => {
+      if (page.screenshotInFlight === pending) page.screenshotInFlight = null;
+    }).catch(() => undefined);
+    return pending;
   }
 
   private async waitForReadablePage(page: ThreadPage, assertController: () => void) {
@@ -1736,6 +1774,8 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
         interceptedRequests: 0,
         documentGeneration: 1,
         documentVersion: browserEvidenceHash({ targetId, sessionId, restoredUrl, generation: 1 }),
+        latestScreenshot: null,
+        screenshotInFlight: null,
         closed: false,
       };
       await browser.send("Page.enable", {}, { sessionId });
