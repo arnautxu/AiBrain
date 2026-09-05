@@ -322,6 +322,17 @@ verify_public_health() {
   curl --fail --silent --show-error --max-time 20 https://arnall.graphikai.com/api/health/ready >/dev/null
 }
 
+verify_openai_auth_egress() {
+  local compose_file="$1" app_container output
+  require_root_owned_file "${OPS_ROOT}/probe-openai-auth-egress.mjs"
+  app_container="$(docker compose --env-file "$ACTIVE_ENV" -f "$compose_file" ps -q app)"
+  [[ "$app_container" =~ ^[a-f0-9]{12,64}$ ]] || fail "application container is unavailable for OpenAI auth egress preflight"
+  output="$(docker exec -i "$app_container" node --input-type=module - < "${OPS_ROOT}/probe-openai-auth-egress.mjs")" \
+    || fail "OpenAI auth renewal endpoint failed DNS, CONNECT or TLS preflight"
+  [[ "$output" == "OPENAI_AUTH_EGRESS_OK connect=200 tls=authorized endpoint=405" ]] \
+    || fail "OpenAI auth renewal endpoint returned an unexpected sanitized result"
+}
+
 prepare_arnall_branding_config() {
   local source="$1" target="$2"
   jq -e 'if .companySlug != "arnall" then error("not the Arnall installation") else
@@ -366,6 +377,7 @@ deploy_ghcr_release() {
   fi
 
   pull_ghcr_images "$app_image" "$egress_image" "$ghcr_user" "$revision"
+  verify_openai_auth_egress "${STATE_FILE}.active.compose.yaml"
   # Stage a target config: editing ACTIVE_CONFIG here would violate the
   # release manager's drift check and lose transactional rollback of branding.
   target_config="$(mktemp "${CONFIG_DIR}/installation.target-${short_revision}.XXXXXX")"
@@ -393,6 +405,7 @@ deploy_ghcr_release() {
   runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml" \
     || fail "deployed runtime permits interactive browser approvals"
   verify_public_health
+  verify_openai_auth_egress "${STATE_FILE}.active.compose.yaml"
   cleanup_inactive_aibrain_images
   cleanup_legacy_release_directories
 
