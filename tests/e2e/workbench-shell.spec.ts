@@ -26,10 +26,13 @@ async function expectSidebarContentGuide(page: Page) {
     page.getByRole("navigation", { name: "Navegación principal" }).getByRole("button", { name: "Nueva conversación" }),
     page.getByTestId("sidebar-chats-label"),
     page.getByTestId("sidebar-projects-label"),
-    page.getByTestId("sidebar-project-row").first(),
-    page.getByTestId("sidebar-project-thread").first(),
   ];
   for (const row of rows) await expect.poll(() => contentStartX(row)).toBeCloseTo(guide, 0);
+  await expect.poll(() => contentStartX(page.getByTestId("sidebar-project-row").first())).toBeGreaterThan(guide + 16);
+  await expect.poll(() => contentStartX(page.getByTestId("sidebar-project-thread").first())).toBeGreaterThan(guide + 16);
+  const projects = await page.getByTestId("sidebar-projects-label").boundingBox();
+  const recents = await page.getByTestId("sidebar-chats-label").boundingBox();
+  expect(projects!.y).toBeLessThan(recents!.y);
 }
 
 test("the employee shell exposes work, not implementation details", async ({ page }) => {
@@ -52,7 +55,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(page.getByText(/Control plane|Supabase|Codex conectado|Runtime|tenant|owner|member/i)).toHaveCount(0);
 
   const projectButton = page.getByRole("button", { name: primaryProject, exact: true });
-  await projectButton.hover({ position: { x: 20, y: 20 } });
+  await projectButton.hover({ position: { x: 80, y: 16 } });
   const projectActions = page.getByRole("button", { name: `Acciones de ${primaryProject}` });
   await projectActions.click();
   await expect(page.getByRole("menuitem", { name: "Renombrar" })).toBeVisible();

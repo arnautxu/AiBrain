@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import sidebarStyles from "@/components/sidebar.module.css";
 import { Sidebar } from "@/components/sidebar";
 import type { AuthSession } from "@/auth/types";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
@@ -62,7 +63,7 @@ function thread(id: string, projectId: string, title: string): WorkbenchThread {
   };
 }
 
-function renderSidebar(running = false, pinnedIds: string[] = []) {
+function renderSidebar(running = false, pinnedIds: string[] = [], extraThreads: WorkbenchThread[] = []) {
   const onNewThread = vi.fn();
   const onSelectThread = vi.fn();
   const onThreadAction = vi.fn();
@@ -77,6 +78,7 @@ function renderSidebar(running = false, pinnedIds: string[] = []) {
     thread("thread-plan", operations.id, "Plan semanal"),
     thread("thread-roadmap", product.id, "Roadmap"),
     thread("thread-personal", standalone.id, "Recordatorio personal"),
+    ...extraThreads,
   ];
   const orderedThreads = [
     ...pinnedIds.map((id) => allThreads.find((candidate) => candidate.id === id)).filter((candidate): candidate is WorkbenchThread => Boolean(candidate)),
@@ -113,11 +115,29 @@ function renderSidebar(running = false, pinnedIds: string[] = []) {
   return { onNewThread, onSelectThread, onThreadAction, onOpenAutomations, onOpenCommandPalette, onOpenCustomization };
 }
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); window.localStorage.clear(); });
 
 describe("Sidebar", () => {
+  it("remembers manual project disclosure across remounts", () => {
+    renderSidebar();
+    expect(screen.queryByRole("button", { name: "Roadmap" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expandir Producto" }));
+    cleanup();
+    renderSidebar();
+    expect(screen.getByRole("button", { name: "Roadmap" })).toBeInTheDocument();
+  });
+
+  it("limits recent conversations and reveals the rest without removing them", () => {
+    renderSidebar(false, [], Array.from({ length: 12 }, (_, i) => thread(`extra-${i}`, "project-standalone", `Recent ${i}`)));
+    const list = screen.getByRole("region", { name: "Conversaciones recientes" });
+    expect(within(list).queryByRole("button", { name: "Recent 11" })).not.toBeInTheDocument();
+    fireEvent.click(within(list).getByRole("button", { name: "Ver más conversaciones" }));
+    expect(within(list).getByRole("button", { name: "Recent 11" })).toBeInTheDocument();
+  });
+
   it("keeps navigation and new chats enabled while the selected chat works", () => {
     const { onNewThread, onSelectThread } = renderSidebar(true);
+    fireEvent.click(screen.getByRole("button", { name: "Expandir Producto" }));
     const otherChat = screen.getByRole("button", { name: "Roadmap" });
     const newChat = screen.getByRole("button", { name: "Nueva conversación en Operaciones" });
     expect(otherChat).toBeEnabled();
@@ -189,8 +209,9 @@ describe("Sidebar", () => {
   it("nests every project chat below its project and keeps standalone chats separate", () => {
     const { onNewThread } = renderSidebar();
     const operationsChats = screen.getByLabelText("Chats de Operaciones");
+    fireEvent.click(screen.getByRole("button", { name: "Expandir Producto" }));
     const productChats = screen.getByLabelText("Chats de Producto");
-    const standaloneChats = screen.getByRole("region", { name: "Chats" });
+    const standaloneChats = screen.getByRole("region", { name: "Conversaciones recientes" });
 
     expect(within(operationsChats).getByRole("button", { name: "Plan semanal" })).toBeInTheDocument();
     expect(within(operationsChats).queryByText("Roadmap")).not.toBeInTheDocument();
@@ -212,9 +233,10 @@ describe("Sidebar", () => {
   it("shows pinned chats once above projects and chats in their durable order", () => {
     const { onThreadAction } = renderSidebar(false, ["thread-personal", "thread-plan"]);
     const pinned = screen.getByRole("region", { name: "Anclados" });
-    const chats = screen.getByRole("region", { name: "Chats" });
+    const chats = screen.getByRole("region", { name: "Conversaciones recientes" });
     const projects = screen.getByRole("region", { name: "Proyectos" });
 
+    expect(projects.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(pinned.compareDocumentPosition(chats) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(pinned.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const firstPinned = within(pinned).getByRole("button", { name: "Recordatorio personal" });
@@ -235,21 +257,14 @@ describe("Sidebar", () => {
     );
   });
 
-  it("uses one left content guide without indenting projects or their chats", () => {
+  it("gives projects and nested conversations distinct visual levels", () => {
     renderSidebar();
-
     expect(screen.getByTestId("sidebar-brand")).toHaveClass("px-2");
-    expect(screen.getByTestId("sidebar-chats-label")).toHaveClass("px-2");
-    expect(screen.getByTestId("sidebar-projects-label")).toHaveClass("px-2");
-    expect(within(screen.getByRole("navigation", { name: "Navegación principal" })).getByRole("button", { name: "Nueva conversación" })).toHaveClass("pl-2");
+    expect(screen.getByTestId("sidebar-projects-label")).toHaveClass(sidebarStyles.sectionLabel);
     for (const row of screen.getAllByTestId("sidebar-project-row")) {
-      expect(row).toHaveClass("pl-2");
-      expect(row).not.toHaveClass("pl-7");
+      expect(row).toHaveClass(sidebarStyles.projectRow);
     }
-    for (const row of screen.getAllByTestId("sidebar-project-thread")) {
-      expect(row).toHaveClass("px-2");
-      expect(row.parentElement?.parentElement?.parentElement).not.toHaveClass("ml-5");
-    }
+    expect(screen.getByLabelText("Chats de Operaciones")).toHaveClass(sidebarStyles.projectChildren);
   });
 
   it("shows only one contextual action trigger and manages menu focus", () => {
