@@ -147,10 +147,12 @@ test("a pinned chat persists once across mobile and desktop sidebars", async ({ 
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
   const projectThread = page.locator('button[data-testid="sidebar-project-thread"]').first();
   await expect(projectThread).toBeVisible();
-  const title = (await projectThread.textContent())?.trim();
-  expect(title).toBeTruthy();
+  const threadAction = projectThread.locator("xpath=..").getByRole("button", { name: /^Acciones de / });
+  const actionLabel = await threadAction.getAttribute("aria-label");
+  expect(actionLabel).toMatch(/^Acciones de .+/);
+  const title = actionLabel!.slice("Acciones de ".length);
 
-  await projectThread.locator("xpath=..").getByRole("button", { name: `Acciones de ${title}` }).click();
+  await threadAction.click();
   await page.getByRole("menuitem", { name: "Fijar" }).click();
   const pinned = page.getByRole("region", { name: "Anclados" });
   await expect(pinned).toBeVisible();

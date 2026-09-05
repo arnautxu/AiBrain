@@ -554,7 +554,7 @@ export function BrainApp({
   const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.${session.user.id}.workbench.preview.v1`;
-  const selectionKey = `aibrain.${session.tenant.id}.selection.v1`;
+  const selectionKey = `aibrain.${session.tenant.id}.${session.user.id}.selection.v1`;
   const composerDraftsKey = `aibrain.${session.tenant.id}.${session.user.id}.composer-drafts.v1`;
   const threadReadKey = `aibrain.${session.tenant.id}.${session.user.id}.thread-read.v1`;
   const taskCenterKey = `aibrain.${session.tenant.id}.${session.user.id}.task-center.v1`;

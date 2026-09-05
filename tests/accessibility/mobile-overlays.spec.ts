@@ -3,6 +3,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
 const tenantId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations" : "studio";
+const demoUserId = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "operations-user" : "example-user";
 const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
 const browserArtifact = {
@@ -255,8 +256,8 @@ test("mobile viewer projects expose an accessible read-only history and context 
     localStorage.setItem(key, JSON.stringify(snapshot));
     localStorage.setItem(selectionKey, JSON.stringify(selection));
   }, {
-    key: `aibrain.${tenantId}.workbench.preview.v1`,
-    selectionKey: `aibrain.${tenantId}.selection.v1`,
+    key: `aibrain.${tenantId}.${demoUserId}.workbench.preview.v1`,
+    selectionKey: `aibrain.${tenantId}.${demoUserId}.selection.v1`,
     snapshot: {
       persistence: "browser-preview",
       projects: [{

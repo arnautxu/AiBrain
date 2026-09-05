@@ -273,7 +273,7 @@ async function verifyViewerSurface(page: Page, mobile: boolean) {
   const dialog = page.getByRole("dialog", { name: "Configurar proyecto" });
   await expect(dialog.getByText(/Tienes acceso de solo lectura/)).toBeVisible();
   await expect(dialog.getByRole("textbox", { name: "Instrucciones del proyecto" })).toHaveAttribute("readonly");
-  await expect(dialog.getByRole("switch", { name: "Activar memoria del proyecto" })).toBeDisabled();
+  await expect(dialog.getByRole("switch", { name: "Activar memoria del proyecto" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Guardar cambios" })).toHaveCount(0);
   await dialog.getByRole("button", { name: "Personas" }).click();
   await expect(dialog.getByRole("combobox", { name: "Visibilidad del proyecto" })).toBeDisabled();
