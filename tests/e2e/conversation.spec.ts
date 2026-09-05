@@ -307,8 +307,8 @@ test("the existing chat route streams a complete turn and persists it in preview
   const liveActivity = page.getByTestId("turn-thinking-steps").last();
   const liveActivityTrigger = page.getByRole("button", { name: "Ocultar el proceso de trabajo" }).last();
   await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "true");
-  const streamingLabel = liveActivityTrigger.locator(".thinking-steps-shimmer");
-  await expect(streamingLabel).toHaveText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
+  await expect(liveActivityTrigger).toHaveAttribute("data-streaming", "true");
+  await expect(liveActivityTrigger).toContainText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
   await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
@@ -316,7 +316,7 @@ test("the existing chat route streams a complete turn and persists it in preview
   const completedActivityTrigger = page.getByRole("button", { name: "Mostrar el proceso de trabajo" }).last();
   await expect(completedActivityTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(completedActivityTrigger).toContainText(/Ha trabajado durante \d+m \d+s/);
-  await expect(completedActivityTrigger.locator(".thinking-steps-shimmer")).toHaveCount(0);
+  await expect(completedActivityTrigger).toHaveAttribute("data-streaming", "false");
   await completedActivityTrigger.click();
   await expect(page.getByRole("button", { name: "Ocultar el proceso de trabajo" }).last()).toHaveAttribute("aria-expanded", "true");
   await expect(completedActivity.getByText("Analizando la petición", { exact: true })).toBeVisible();
