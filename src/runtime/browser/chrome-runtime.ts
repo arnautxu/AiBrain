@@ -299,6 +299,12 @@ export function resolveChromeLanguage(value: string | undefined) {
   }
 }
 
+export function chromeAcceptLanguageHeader(language: string) {
+  const canonical = resolveChromeLanguage(language);
+  const base = canonical.split("-")[0] as string;
+  return base === canonical ? canonical : `${canonical},${base};q=0.9`;
+}
+
 export function buildChromeArguments(
   context: BrowserRuntimeContext,
   egressProxyUrl: string | null,
@@ -1922,6 +1928,16 @@ export class ChromeCdpRuntime implements ApprovalBoundManagedBrowserRuntime {
       await browser.send("Network.enable", {
         maxTotalBufferSize: 1_048_576,
         maxResourceBufferSize: 262_144,
+      }, { sessionId });
+      // A persisted Chrome profile can keep an older `intl.selected_languages`
+      // value even when the installation changes `--lang`. Bind both the HTTP
+      // header and navigator locale to the reviewed installation language for
+      // every private target before its first real navigation.
+      await browser.send("Network.setExtraHTTPHeaders", {
+        headers: { "Accept-Language": chromeAcceptLanguageHeader(this.language) },
+      }, { sessionId });
+      await browser.send("Emulation.setLocaleOverride", {
+        locale: this.language,
       }, { sessionId });
       page.fetchUnsubscribe = browser.on("Fetch.requestPaused", (params) => {
         this.queueInterceptedRequest(page as ThreadPage, params);
