@@ -94,6 +94,7 @@
     "POST /api/runtime/browser/token": "JsonObject",
     "POST /api/runtime/browser/viewer/input": "JsonObject",
     "POST /api/runtime/turns/control": "JsonObject",
+    "POST /api/support": "JsonObject",
     "POST /api/threads/{threadId}/documents": "DocumentUploadResponse",
     "POST /api/threads/{threadId}/documents/{uploadId}/versions/{versionId}/restore": "JsonObject",
     "POST /api/threads/{threadId}/branch": "JsonObject",
