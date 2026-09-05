@@ -900,6 +900,64 @@ describe("ChromeCdpRuntime private pipe", () => {
     await runtime.stop();
   });
 
+  it("preempts a stalled repeat capture as soon as deliberate human control arrives", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+      allowPrivateNetwork: true,
+    });
+    await runtime.start();
+    await runtime.captureFrame(THREAD_A);
+    const captureBlock = client.blockNext("Page.captureScreenshot");
+    const repeatedFrame = runtime.captureFrame(THREAD_A);
+    await captureBlock.started;
+
+    const startedAt = performance.now();
+    await runtime.takeOver();
+    const controlQueueMs = performance.now() - startedAt;
+
+    expect(controlQueueMs).toBeLessThan(150);
+    await expect(repeatedFrame).resolves.toMatchObject({ mediaType: "image/png" });
+    captureBlock.release();
+    await runtime.stop();
+  });
+
+  it("preempts a stalled repeat capture for input under an existing human controller", async () => {
+    const { context } = await contextFixture();
+    const child = new FakeChromeProcess();
+    const client = new FakeCdpClient(() => child.exit());
+    const runtime = new ChromeCdpRuntime(context, {
+      executablePath: "/bin/sh",
+      expectedVersion: "140.0.0.0",
+      spawnProcess: () => child,
+      connectCdpPipe: () => client,
+      networkPolicy: publicNetworkPolicy(),
+      allowPrivateNetwork: true,
+    });
+    await runtime.start();
+    await runtime.takeOver();
+    await runtime.captureFrame(THREAD_A);
+    const captureBlock = client.blockNext("Page.captureScreenshot");
+    const repeatedFrame = runtime.captureFrame(THREAD_A);
+    await captureBlock.started;
+
+    const startedAt = performance.now();
+    await runtime.dispatchInput(THREAD_A, { kind: "key", event: "keyDown", key: "a", text: "a" });
+    const inputQueueMs = performance.now() - startedAt;
+
+    expect(inputQueueMs).toBeLessThan(150);
+    expect(client.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(1);
+    await expect(repeatedFrame).resolves.toMatchObject({ mediaType: "image/png" });
+    captureBlock.release();
+    await runtime.stop();
+  });
+
   it("keeps a confirmed viewer frame and live target when a repeat compositor capture times out", async () => {
     const { context } = await contextFixture();
     const child = new FakeChromeProcess();
