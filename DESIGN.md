@@ -105,9 +105,13 @@ les preferències de contrast o transparència reduïda activen el fons opac.
 El camp de missatge comparteix el vidre (58% de superfície, blur de 28 px)
 amb reflexos de vora, sense degradat decoratiu.
 El canvas principal es manté neutre. El color viu només sota el vidre del
-sidebar desktop: tres camps curts i descentrats de blau gel, pervinca i blau
-fred, difuminats pel material. En fosc són tinta/navy; els controls i el
-contingut mantenen els tokens neutres, i el drawer mòbil no canvia.
+sidebar desktop: una ona dithered baixa de 180 px al peu, en navy/blau gel,
+amb fade superior i una làmina fina de vidre perquè el patró es conservi.
+El perfil queda per sobre, amb fons llegible. El shader Paper Dithering usa
+`wave`, `8x8`, píxel 3 i velocitat 0,6; es carrega diferit i es desmunta
+fora de pantalla, en plegar el sidebar o ocultar la pestanya. Amb moviment
+reduït és estàtic; amb transparència reduïda/contrast forçat o al mòbil no
+es carrega WebGL. Els controls mantenen els tokens neutres.
 Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
 la geometria edge-to-edge existent.
 
