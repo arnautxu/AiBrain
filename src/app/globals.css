@@ -6,7 +6,7 @@
 :root {
   color-scheme: light;
   --installation-accent: #315ee7;
-  --mineral-black: #0a0a0a;
+  --mineral-black: #181816;
   --mineral-white: #ffffff;
   --mineral-soft: #f7f7f5;
   --mineral-secondary: #575752;
@@ -79,14 +79,14 @@
   --sidebar: #000000;
   --header: var(--surface);
   --user-message: var(--surface-muted);
-  --user-message-text: var(--mineral-white);
+  --user-message-text: var(--text);
   --send-button: var(--mineral-white);
   --send-button-text: var(--mineral-black);
   --active: var(--mineral-white);
   --active-text: var(--mineral-black);
   --accent-contrast: var(--mineral-black);
   --overlay: rgba(0, 0, 0, 0.64);
-  --text: var(--mineral-white);
+  --text: #f5f5f2;
   --text-secondary: var(--mineral-secondary);
   --text-muted: var(--mineral-secondary);
   --text-subtle: var(--mineral-secondary);
@@ -124,13 +124,13 @@
     --sidebar: #000000;
     --header: var(--surface);
     --user-message: var(--surface-muted);
-    --user-message-text: var(--mineral-white);
+    --user-message-text: var(--text);
     --send-button: var(--mineral-white);
     --send-button-text: var(--mineral-black);
     --active: var(--mineral-white);
     --active-text: var(--mineral-black);
     --accent-contrast: var(--mineral-black);
-    --text: var(--mineral-white);
+    --text: #f5f5f2;
     --text-secondary: var(--mineral-secondary);
     --text-muted: var(--mineral-secondary);
     --text-subtle: var(--mineral-secondary);
