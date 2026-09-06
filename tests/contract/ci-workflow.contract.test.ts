@@ -1,10 +1,89 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createRequire } from "node:module";
+import { spawnSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
 
 const workflowPath = path.join(process.cwd(), ".github", "workflows", "backend-ci.yml");
+type Job = {
+  name: string;
+  needs?: string | string[];
+  if?: string;
+  "continue-on-error"?: boolean;
+  strategy?: { "fail-fast": boolean; matrix: { shard?: number[]; include?: { command: string }[] } };
+  steps: { run?: string; if?: string; "continue-on-error"?: boolean; env?: Record<string, string>; with?: Record<string, unknown> }[];
+};
+const yaml = createRequire(import.meta.url)("js-yaml") as { load(source: string): { jobs: Record<string, Job> } };
+
+async function readJobs() {
+  return yaml.load(await readFile(workflowPath, "utf8")).jobs;
+}
 
 describe("backend CI contract", () => {
+  it("runs three complete Vitest shards independently of the non-test quality checks", async () => {
+    const jobs = await readJobs();
+    const build = jobs["quality-build"];
+    const tests = jobs["quality-tests"];
+    expect(tests.strategy).toEqual({ "fail-fast": false, matrix: { shard: [1, 2, 3] } });
+    expect(tests.steps.filter((step) => step.run?.startsWith("npm test"))).toEqual([
+      { name: "Unit, integration and contract test shard", run: "npm test -- --shard=${{ matrix.shard }}/3" },
+    ]);
+    for (const job of [build, tests]) {
+      expect(job.needs).toBeUndefined();
+      expect(job.if).toBeUndefined();
+      expect(job["continue-on-error"]).toBeUndefined();
+      expect(job.steps.every((step) => !step.if && !step["continue-on-error"])).toBe(true);
+      expect(job.steps.some((step) => step.run === "npm ci")).toBe(true);
+      expect(job.steps.some((step) => step.with?.cache === "npm" && step.with["cache-dependency-path"] === "package-lock.json")).toBe(true);
+    }
+    const commands = build.steps.map((step) => step.run ?? "").join("\n");
+    for (const command of ["npm run contracts:verify", "npm run typecheck", "npm run lint", "test_rdp*.py", "test_knowledge*.py", "--require-hashes", "npm run build:automation-worker", "npm run build", "npm run infra:validate", "bash -n infra/hetzner/app/deploy-arnall-main.sh"]) {
+      expect(commands).toContain(command);
+    }
+    expect(commands).not.toContain("npm test");
+  });
+
+  it("retains the required check and fails closed for every non-success dependency result", async () => {
+    const gate = (await readJobs()).quality;
+    expect(gate.name).toBe("Types, lint, contracts, tests and build");
+    expect(gate.needs).toEqual(["quality-build", "quality-tests"]);
+    expect(gate.if).toBe("always()");
+    expect(gate["continue-on-error"]).toBeUndefined();
+    expect(gate.steps).toHaveLength(1);
+    const step = gate.steps[0];
+    expect(step.if).toBeUndefined();
+    expect(step["continue-on-error"]).toBeUndefined();
+    expect(step.env).toEqual({ BUILD_RESULT: "${{ needs.quality-build.result }}", TESTS_RESULT: "${{ needs.quality-tests.result }}" });
+    expect(step.run).toBeTruthy();
+    for (const build of ["success", "failure", "cancelled", "skipped", ""]) {
+      for (const tests of ["success", "failure", "cancelled", "skipped", ""]) {
+        const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
+          env: { ...process.env, BUILD_RESULT: build, TESTS_RESULT: tests },
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.status === 0, `build=${build}, tests=${tests}`).toBe(build === "success" && tests === "success");
+      }
+    }
+  });
+
+  it("preserves the independent E2E partition and publication caches", async () => {
+    const jobs = await readJobs();
+    expect(jobs["e2e-suites"].needs).toBeUndefined();
+    expect(jobs["e2e-suites"].strategy?.["fail-fast"]).toBe(false);
+    expect(jobs["e2e-suites"].strategy?.matrix.include?.map((entry) => entry.command)).toEqual([
+      "npm run test:e2e:backend",
+      "npx playwright test --project=chromium-desktop --shard=1/2",
+      "npx playwright test --project=chromium-desktop --shard=2/2",
+      "npx playwright test --project=webkit-iphone",
+    ]);
+    expect(jobs.e2e.needs).toBe("e2e-suites");
+    expect(jobs.e2e.if).toBe("always()");
+    const publish = await readFile(path.join(process.cwd(), ".github/workflows/publish-ghcr.yml"), "utf8");
+    expect(publish).toContain("cache-from:");
+    expect(publish).toContain("cache-to:");
+    expect(publish).toContain(":buildcache");
+  });
+
   it("keeps every required deterministic gate in the protected workflow", async () => {
     const workflow = await readFile(workflowPath, "utf8");
     for (const command of [

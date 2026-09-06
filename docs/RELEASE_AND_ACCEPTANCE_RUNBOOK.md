@@ -126,6 +126,17 @@ and the transactional host operation is never interrupted halfway through.
 
 ### CI execution and build caches
 
+The `Types, lint, contracts, tests and build` check remains the required
+aggregate gate. Its independent `quality-build` runner executes types, lint,
+generated contracts, both Python boundary suites, the automation-worker build,
+the production build and infrastructure validation. In parallel, three
+`quality-tests` runners execute `npm test -- --shard=1/3`, `2/3` and `3/3`.
+Vitest configuration, test selection and the single-worker setting are unchanged;
+the shards partition the entire existing suite. Matrix fail-fast is disabled so
+one failing shard does not cancel the others. The aggregate uses `always()` and
+requires both dependency results to equal `success`: failure, cancellation,
+skipping or a missing result cannot make the required check green.
+
 The `Filesystem and restart E2E` check aggregates four isolated runners: the
 complete HTTP/backend suite, two disjoint Chromium shards and the iPhone WebKit
 project. All four must succeed, including when a suite fails, is cancelled or
@@ -145,7 +156,8 @@ validated SHA. A cache miss performs a full build. Cache write failures fail
 publication and cannot trigger deployment.
 
 Compare successful runs for the same workflow layout when measuring savings:
-record total CI time, the slowest E2E shard, quality-job time, Publish time and
+record total CI time, the slowest E2E shard, the slowest Vitest shard,
+quality-build time, aggregate-gate time, Publish time and
 Deploy time separately. The first publication populates caches; later builds
 show their benefit. More isolated runners can increase billed runner minutes
 even when elapsed time falls. No observed speedup is claimed before CI and a
