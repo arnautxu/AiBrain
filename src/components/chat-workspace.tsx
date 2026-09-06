@@ -53,6 +53,7 @@ import { managedAppActionKey } from "@/ui/codex-managed-app-ui";
 import type { ConnectorMention } from "@/connectors/mentions-contract";
 import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
 import { restoreRequestDocument } from "@/ui/restore-request-documents";
+import { readerScrolledAway } from "@/ui/reader-scroll-intent";
 
 type ChatWorkspaceProps = {
   manifest: BrainManifest;
@@ -459,7 +460,7 @@ export function ChatWorkspace({
   onOpenBrowser,
   readOnly = false,
 }: ChatWorkspaceProps) {
-  const { scrollRef, contentRef, scrollToBottom, stopScroll, isAtBottom } = useStickToBottom({
+  const { scrollRef, contentRef, scrollToBottom, stopScroll, isAtBottom, state: scrollState } = useStickToBottom({
     initial: "instant",
     resize: "instant",
   });
@@ -809,10 +810,10 @@ export function ChatWorkspace({
         onScrollCapture={(event) => {
           if (event.target !== event.currentTarget) return;
           const element = event.currentTarget;
-          // The hook defers escape detection and ignores it during a resize.
-          // With instant following, a scroll away from the bottom is a reader
-          // escape: stop synchronously before a queued resize frame can win.
-          if (element.scrollHeight - element.scrollTop - element.clientHeight >= 96) stopScroll();
+          // Stop upward reader movement before a queued resize-follow frame
+          // can win, but never mistake the hook's own scroll or downward
+          // layout adjustment for an intentional escape from following.
+          if (readerScrolledAway(element, scrollState)) stopScroll();
         }}
       >
         {!hydrated ? (
