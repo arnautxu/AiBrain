@@ -49,7 +49,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
       return { x: rect.x, y: rect.y, bottom: rect.bottom, radius: getComputedStyle(element).borderRadius };
     });
     if (name === "desktop") {
-      expect(panelGeometry).toEqual({ x: 12, y: 12, bottom: viewport.height - 12, radius: "24px" });
+      expect(panelGeometry).toEqual({ x: 12, y: 12, bottom: viewport.height - 12, radius: "20px" });
     } else {
       expect(panelGeometry.x).toBe(0);
       expect(panelGeometry.y).toBe(0);
