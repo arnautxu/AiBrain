@@ -49,7 +49,7 @@ export function RadialGlowButton({
             var(--rg-color-4) var(--rg-stop-4),
             var(--rg-color-5) var(--rg-stop-5)
           );
-          
+
           position: relative;
           min-width: 160px;
           min-height: 51px;
@@ -67,7 +67,7 @@ export function RadialGlowButton({
           overflow: hidden;
           -webkit-font-smoothing: antialiased;
           -webkit-tap-highlight-color: transparent;
-          transition: 
+          transition:
             --rg-pos-x .75s, --rg-pos-y .75s,
             --rg-spread-x .75s, --rg-spread-y .75s,
             --rg-color-1 .75s, --rg-color-2 .75s, --rg-color-3 .75s, --rg-color-4 .75s, --rg-color-5 .75s,
@@ -181,7 +181,7 @@ export function RadialGlowButton({
           .rg-button .rg-shine span, .rg-button .rg-shine span::before { animation: none; }
         }
       `}</style>
-      
+
       <button className={cn("rg-button", className)} type="button" {...props}>
         <span className="rg-shine" aria-hidden="true">
           <span></span>
