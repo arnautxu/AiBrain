@@ -6,30 +6,36 @@
 :root {
   color-scheme: light;
   --installation-accent: #315ee7;
+  --mineral-black: #0a0a0a;
+  --mineral-white: #ffffff;
+  --mineral-soft: #f7f7f5;
+  --mineral-secondary: #575752;
   --canvas: #ffffff;
   --surface: #ffffff;
   --surface-raised: #ffffff;
-  --surface-muted: #f4f4f4;
-  --surface-hover: #ececec;
-  --surface-selected: #e7e7e7;
-  --sidebar: #f9f9f9;
+  --surface-muted: var(--mineral-soft);
+  --surface-hover: color-mix(in srgb, var(--mineral-black) 5%, var(--mineral-white));
+  --surface-selected: color-mix(in srgb, var(--mineral-black) 9%, var(--mineral-white));
+  --sidebar: var(--mineral-soft);
   --header: var(--surface);
-  --user-message: #f1f1f1;
-  --user-message-text: #171717;
-  --send-button: #1f1f1f;
-  --send-button-text: #ffffff;
+  --user-message: var(--mineral-black);
+  --user-message-text: var(--mineral-white);
+  --send-button: var(--mineral-black);
+  --send-button-text: var(--mineral-white);
+  --active: var(--mineral-black);
+  --active-text: var(--mineral-white);
   --page: var(--canvas);
   --overlay: rgba(20, 20, 18, 0.38);
-  --text: #0d0d0d;
-  --text-secondary: #5d5d5d;
-  --text-muted: #737373;
-  --text-subtle: #686868;
+  --text: var(--mineral-black);
+  --text-secondary: var(--mineral-secondary);
+  --text-muted: var(--mineral-secondary);
+  --text-subtle: var(--mineral-secondary);
   --border: rgba(0, 0, 0, 0.10);
   --border-subtle: rgba(0, 0, 0, 0.05);
   --border-strong: rgba(0, 0, 0, 0.14);
   --accent: var(--text);
   --accent-soft: var(--surface-muted);
-  --accent-contrast: #ffffff;
+  --accent-contrast: var(--mineral-white);
   --focus: color-mix(in srgb, var(--text) 68%, var(--surface));
   --positive: #3f7450;
   --positive-soft: #edf6ef;
@@ -60,26 +66,33 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+  --mineral-black: #000000;
+  --mineral-white: #ffffff;
+  --mineral-soft: #0a0a0a;
+  --mineral-secondary: #b8b8b2;
   --canvas: #000000;
   --surface: #000000;
-  --surface-raised: #1f1f1f;
-  --surface-muted: #262626;
-  --surface-hover: #2d2d2d;
-  --surface-selected: #333333;
+  --surface-raised: var(--mineral-soft);
+  --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
+  --surface-hover: color-mix(in srgb, var(--mineral-white) 11%, var(--mineral-black));
+  --surface-selected: color-mix(in srgb, var(--mineral-white) 15%, var(--mineral-black));
   --sidebar: #000000;
   --header: var(--surface);
-  --user-message: #2f2f2f;
-  --user-message-text: #f2f2f2;
-  --send-button: #f3f3f3;
-  --send-button-text: #171717;
+  --user-message: var(--mineral-white);
+  --user-message-text: var(--mineral-black);
+  --send-button: var(--mineral-white);
+  --send-button-text: var(--mineral-black);
+  --active: var(--mineral-white);
+  --active-text: var(--mineral-black);
+  --accent-contrast: var(--mineral-black);
   --overlay: rgba(0, 0, 0, 0.64);
-  --text: #f1f0ec;
-  --text-secondary: #b2afa8;
-  --text-muted: #b2afa8;
-  --text-subtle: #aaa7a0;
-  --border: #343431;
-  --border-subtle: #2b2b29;
-  --border-strong: #4a4945;
+  --text: var(--mineral-white);
+  --text-secondary: var(--mineral-secondary);
+  --text-muted: var(--mineral-secondary);
+  --text-subtle: var(--mineral-secondary);
+  --border: rgba(255, 255, 255, 0.16);
+  --border-subtle: rgba(255, 255, 255, 0.09);
+  --border-strong: rgba(255, 255, 255, 0.26);
   --accent-soft: var(--surface-muted);
   --focus: color-mix(in srgb, var(--text) 68%, var(--surface));
   --positive: #7ab089;
@@ -98,25 +111,32 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
     color-scheme: dark;
+    --mineral-black: #000000;
+    --mineral-white: #ffffff;
+    --mineral-soft: #0a0a0a;
+    --mineral-secondary: #b8b8b2;
     --canvas: #000000;
     --surface: #000000;
-    --surface-raised: #1f1f1f;
-    --surface-muted: #262626;
-    --surface-hover: #2d2d2d;
-    --surface-selected: #333333;
+    --surface-raised: var(--mineral-soft);
+    --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
+    --surface-hover: color-mix(in srgb, var(--mineral-white) 11%, var(--mineral-black));
+    --surface-selected: color-mix(in srgb, var(--mineral-white) 15%, var(--mineral-black));
     --sidebar: #000000;
     --header: var(--surface);
-    --user-message: #2f2f2f;
-    --user-message-text: #f2f2f2;
-    --send-button: #f3f3f3;
-    --send-button-text: #171717;
-    --text: #f1f0ec;
-    --text-secondary: #b2afa8;
-    --text-muted: #b2afa8;
-    --text-subtle: #aaa7a0;
-    --border: #343431;
-    --border-subtle: #2b2b29;
-    --border-strong: #4a4945;
+    --user-message: var(--mineral-white);
+    --user-message-text: var(--mineral-black);
+    --send-button: var(--mineral-white);
+    --send-button-text: var(--mineral-black);
+    --active: var(--mineral-white);
+    --active-text: var(--mineral-black);
+    --accent-contrast: var(--mineral-black);
+    --text: var(--mineral-white);
+    --text-secondary: var(--mineral-secondary);
+    --text-muted: var(--mineral-secondary);
+    --text-subtle: var(--mineral-secondary);
+    --border: rgba(255, 255, 255, 0.16);
+    --border-subtle: rgba(255, 255, 255, 0.09);
+    --border-strong: rgba(255, 255, 255, 0.26);
   }
 }
 
@@ -133,7 +153,7 @@ body {
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
   font-size: 0.8125rem;
   line-height: 1.5;
   font-optical-sizing: auto;
@@ -220,7 +240,7 @@ button:disabled {
   max-width: 14rem;
   color: var(--text);
   font-size: 0.8125rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.015em;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -501,7 +521,7 @@ button:disabled {
 
 .workspace-panel-title {
   font-size: 1rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: -0.015em;
 }
 
@@ -532,7 +552,7 @@ button:disabled {
 
 .sidebar-section-label {
   font-size: 0.6875rem;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.01em;
 }
 
@@ -617,7 +637,7 @@ button:disabled {
   background: var(--brain-accent-soft);
   color: var(--brain-accent-on-soft);
   font-size: 0.6875rem;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .guided-trace-step > strong {
@@ -874,7 +894,7 @@ button:disabled {
 .markdown-body h4 {
   margin: 1.35rem 0 0.55rem;
   color: var(--text);
-  font-weight: 650;
+  font-weight: 600;
   line-height: 1.25;
   letter-spacing: -0.02em;
 }
@@ -903,7 +923,7 @@ button:disabled {
 }
 
 .markdown-body blockquote {
-  border-left: 3px solid var(--border-strong);
+  border-left: 1px solid var(--border-strong);
   padding-left: 1rem;
   color: var(--text-muted);
 }
@@ -941,7 +961,7 @@ button:disabled {
 .markdown-body th {
   background: var(--surface-muted);
   color: var(--text-secondary);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .markdown-body tr:last-child td { border-bottom: 0; }

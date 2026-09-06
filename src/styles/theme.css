@@ -17,8 +17,8 @@
    * → color/...).
    * --------------------------------------------------------------------------*/
   --color-slate-200:   #ebeff5;
-  --color-neutral-100: #f7f7f7;
-  --color-neutral-200: #ebebeb;
+  --color-neutral-100: #f7f7f5;
+  --color-neutral-200: #e9e9e6;
   --color-neutral-925: #121212;
   --color-blue-400:    #3392ff;
 
@@ -47,9 +47,10 @@
   /* ----- Typography ----------------------------------------------------------
    * Use the platform UI face for native metrics, optical sizing and legibility.
    * --------------------------------------------------------------------------*/
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif,
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif,
                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
                "Noto Color Emoji";
+  --font-weight-bold: 600;
 
   /* Monospace ramp for code blocks. Geist Mono is loaded via next/font in
    * app/layout.tsx and exposed as --font-geist-mono. */
