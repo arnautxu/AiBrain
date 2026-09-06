@@ -100,15 +100,14 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 
 El sidebar d'escriptori és una superfície flotant: marge exterior de 12 px,
 radi continu de 20 px, doble vora especular i ombra de contacte/direccional.
-El material té una opacitat del 52% i blur de 28 px sobre variacions neutres;
+El material té una opacitat del 52% i blur de 28 px sobre variacions suaus;
 les preferències de contrast o transparència reduïda activen el fons opac.
 El camp de missatge comparteix el vidre (58% de superfície, blur de 28 px)
-amb reflexos de vora, sense degradat decoratiu. El fons del sidebar només
-manté una variació neutra molt suau, sense bandes ni taques múltiples.
-El canvas d'escriptori es dissol d'esquerra a dreta: blau gel `#c8dcf0`
-cap a blanc al 55% en clar; blau tinta `#142d48` cap a negre en fosc.
-Aquest tint queda limitat al fons; els controls mantenen el grafit neutre.
-La capçalera i el dock deixen passar aquest fons continu, sense blocs opacs.
+amb reflexos de vora, sense degradat decoratiu.
+El canvas principal es manté neutre. El color viu només sota el vidre del
+sidebar desktop: tres camps curts i descentrats de blau gel, pervinca i blau
+fred, difuminats pel material. En fosc són tinta/navy; els controls i el
+contingut mantenen els tokens neutres, i el drawer mòbil no canvia.
 Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
 la geometria edge-to-edge existent.
 
