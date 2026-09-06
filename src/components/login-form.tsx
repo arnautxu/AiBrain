@@ -12,6 +12,7 @@ import type { AuthMode, DemoAccount } from "@/auth/types";
 import { BrandMark, Button, TextField, ThemeToggle } from "@/components/ui/primitives";
 import { customAccentTokens } from "@/config/brain";
 import type { PublicInstallationBranding } from "@/config/installation-branding";
+import { DecryptedText } from "@/components/ui/decrypted-text";
 
 type LoginStyle = CSSProperties & {
   "--brain-accent-light": string;
@@ -42,6 +43,7 @@ export function LoginForm({
   const [passwordChangeRequired, setPasswordChangeRequired] = useState(false);
   const [recovering, setRecovering] = useState(false);
   const [sent, setSent] = useState(false);
+  const [entering, setEntering] = useState(false);
   const style = useMemo<LoginStyle>(() => {
     const accent = customAccentTokens(branding.accentColor) ?? customAccentTokens("#315ee7")!;
     return {
@@ -72,6 +74,7 @@ export function LoginForm({
             : "No se ha podido iniciar la sesión.",
         );
       }
+      setEntering(true);
       router.replace("/");
       router.refresh();
     } catch (currentError) {
@@ -110,6 +113,7 @@ export function LoginForm({
         setPasswordChangeRequired(true);
         return;
       }
+      setEntering(true);
       router.replace("/");
       router.refresh();
     } catch (currentError) {
@@ -145,6 +149,7 @@ export function LoginForm({
             : "No se ha podido cambiar la contraseña.",
         );
       }
+      setEntering(true);
       router.replace("/");
       router.refresh();
     } catch (currentError) {
@@ -183,6 +188,17 @@ export function LoginForm({
 
   const isDemo = mode === "demo";
   const isSupabase = mode === "supabase";
+
+  // The validated login owns this screen until navigation unmounts it.
+  // No timer postpones access, and failed/challenge responses never enter it.
+  if (entering) return (
+    <main data-testid="login-transition" role="status" aria-live="polite"
+      className="fixed inset-0 z-50 grid min-h-[100dvh] place-items-center bg-white px-6 text-[#181816]">
+      <p className="text-center text-[clamp(20px,3vw,30px)] font-medium tracking-[-0.035em]">
+        <DecryptedText text="Carregant Arnall AI" />
+      </p>
+    </main>
+  );
 
   return (
     <main style={style} className="auth-brand-surface relative flex min-h-[100dvh] bg-[var(--canvas)] px-5 py-20 text-[var(--text)] sm:px-8">
