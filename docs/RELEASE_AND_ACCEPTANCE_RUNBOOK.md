@@ -109,8 +109,8 @@ Only the release coordinator performs these actions, after authorization:
    fast-forward policy; never force-push;
 3. push the exact reviewed `main` SHA once;
 4. verify the GitHub `Backend CI` run is for that exact SHA;
-5. require all four jobs: quality, filesystem/restart E2E, real document matrix
-   and clean immutable container builds;
+5. require all four checks: quality, filesystem/restart E2E (including every
+   underlying suite), real document matrix and clean immutable container builds;
 6. if CI fails, do not deploy and do not weaken a gate merely to obtain green.
 
 The deployment workflow in
@@ -123,6 +123,33 @@ limited to documentation. Publish uses the `publish-ghcr-main` group and may
 cancel a superseded image build when a newer `main` revision arrives. Deploy
 uses the `deploy-arnall-main` group with cancellation disabled: releases queue
 and the transactional host operation is never interrupted halfway through.
+
+### CI execution and build caches
+
+The `Filesystem and restart E2E` check aggregates four isolated runners: the
+complete HTTP/backend suite, two disjoint Chromium shards and the iPhone WebKit
+project. All four must succeed, including when a suite fails, is cancelled or
+is skipped. Each runner retains the existing single-worker settings, retry
+policy and test selection. The backend never installs browsers; browser shards
+install only their selected runtime. `npm run test:e2e` remains available for
+sequential local acceptance.
+
+Node test jobs cache npm downloads keyed by `package-lock.json` and still run
+`npm ci`. Backend CI continues to build and exercise clean containers with
+`--pull --no-cache`. After all CI checks pass, Publish reuses registry build
+caches in the app and gateway repositories under separate `:buildcache` tags.
+Only the existing trusted main publication job writes those caches. They are
+mutable acceleration data, never release identities or deployment inputs;
+release.json still records the newly published immutable digests for the
+validated SHA. A cache miss performs a full build. Cache write failures fail
+publication and cannot trigger deployment.
+
+Compare successful runs for the same workflow layout when measuring savings:
+record total CI time, the slowest E2E shard, quality-job time, Publish time and
+Deploy time separately. The first publication populates caches; later builds
+show their benefit. More isolated runners can increase billed runner minutes
+even when elapsed time falls. No observed speedup is claimed before CI and a
+subsequent warm-cache publication have actually run.
 
 ## 6. Immutable deployment readback
 
