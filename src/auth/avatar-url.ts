@@ -1,7 +1,8 @@
 const MAX_AVATAR_URL_LENGTH = 2_048;
 
-/** Display-only identity data: accept only non-credentialed HTTPS URLs. */
+/** Display-only identity data: approved bundled artwork or safe HTTPS URLs. */
 export function validatedAvatarUrl(value: unknown): string | null {
+  if (value === "/branding/arnall/profile-pig.png") return value;
   if (typeof value !== "string" || value.length === 0 || value.length > MAX_AVATAR_URL_LENGTH) return null;
   try {
     const url = new URL(value);

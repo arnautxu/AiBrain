@@ -492,7 +492,14 @@ export function Sidebar({
 
         </div>
 
-        <div ref={profileMenuRef} className={`${styles.account} relative shrink-0 p-2`}>
+        <div ref={profileMenuRef} className={`${styles.account} relative shrink-0 p-2`} onKeyDown={(event) => {
+          // Escape can arrive before the next-frame focus enters the menu.
+          if (event.key === "Escape" && profileMenuOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeProfileMenuAndRestore();
+          }
+        }}>
           {profileMenuOpen ? (
 	            <div id="sidebar-profile-menu" role="menu" aria-label="Cuenta y preferencias" className="menu-enter absolute inset-x-2 bottom-[calc(100%-2px)] z-30 origin-bottom rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1.5 shadow-[var(--shadow-popover)]" onKeyDown={onProfileMenuKeyDown}>
               <p className="truncate px-3 py-2.5 text-[12px] font-semibold text-[var(--text)]" role="presentation">{session.user.name}</p>
@@ -501,9 +508,9 @@ export function Sidebar({
 	              <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-2.5 rounded-[14px] px-3 text-[12px] font-medium text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void fetch("/api/auth/logout", { method: "POST" }).then((response) => { if (response.ok) router.push("/login"); })}><SignOut size={16} />Cerrar sesión</button>
             </div>
           ) : null}
-	          <button ref={profileButtonRef} aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-haspopup="menu" aria-expanded={profileMenuOpen} aria-controls={profileMenuOpen ? "sidebar-profile-menu" : undefined} className={`touch-target flex min-h-11 w-full items-center gap-2.5 rounded-[14px] px-3 py-2.5 text-left transition ${profileMenuOpen ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); if (profileMenuOpen) setHelpOpen(false); setProfileMenuOpen((open) => !open); }}>
-            <UserAvatar name={session.user.name} avatarUrl={session.user.avatarUrl ?? null} className="size-5" />
-            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[12px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
+	          <button ref={profileButtonRef} aria-label={`${session.user.name}. Abrir menú de cuenta`} aria-haspopup="menu" aria-expanded={profileMenuOpen} aria-controls={profileMenuOpen ? "sidebar-profile-menu" : undefined} className={`${styles.profileCard} touch-target flex w-full items-center gap-3 px-3 py-3 text-left`} onClick={() => { setProjectMenuId(null); setThreadMenuId(null); if (profileMenuOpen) setHelpOpen(false); setProfileMenuOpen((open) => !open); }}>
+            <UserAvatar name={session.user.name} avatarUrl={session.user.avatarUrl ?? null} className="size-9" />
+            <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-semibold leading-[17px] text-[var(--text)]">{session.user.name}</span><span className="mt-0.5 block truncate text-[12px] leading-[17px] text-[var(--text-subtle)]">{branding.companyName}</span></span>
           </button>
         </div>
         </div>

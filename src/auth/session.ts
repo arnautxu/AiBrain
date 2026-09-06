@@ -12,6 +12,7 @@ import {
 import type { AuthMode, AuthSession } from "@/auth/types";
 import { getDemoAccount, getTenantDefinition } from "@/config/tenants";
 import { readSupabasePublicConfig } from "@/lib/supabase/config";
+import { profileAvatarOverride } from "@/auth/profile-avatar";
 
 const DEMO_SESSION_COOKIE = "aibrain_demo_session";
 const DEMO_SESSION_SECONDS = 12 * 60 * 60;
@@ -128,7 +129,8 @@ async function getLocalSession(sessionId: string): Promise<AuthSession | null> {
       id: user.userId,
       name: user.displayName,
       email: user.email,
-      avatarUrl: await users.readAvatarUrl(user.userId),
+      avatarUrl: profileAvatarOverride(installation.companySlug, user.email, installation.publicUrl)
+        ?? await users.readAvatarUrl(user.userId),
     },
     tenant: {
       id: installation.installationId,
