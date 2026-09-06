@@ -407,6 +407,16 @@ button:disabled {
   z-index: 1;
 }
 
+.workbench-main > .landing-stars {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: transparent;
+  opacity: 0.65;
+  pointer-events: none;
+  contain: paint;
+}
+
 .composer-shadow {
   background: var(--surface);
   border-color: color-mix(in srgb, var(--text) 12%, transparent);
@@ -468,13 +478,13 @@ button:disabled {
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-:root[data-theme="dark"] .composer-submit[aria-label="Enviar mensaje"] {
+:root[data-theme="dark"] .composer-submit:not(.rg-button)[aria-label="Enviar mensaje"] {
   background: #ffffff;
   color: #161616;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .composer-submit[aria-label="Enviar mensaje"] {
+  :root:not([data-theme]) .composer-submit:not(.rg-button)[aria-label="Enviar mensaje"] {
     background: #ffffff;
     color: #161616;
   }
