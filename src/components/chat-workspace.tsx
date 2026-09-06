@@ -24,6 +24,7 @@ import {
 import { ChatAttachmentImage } from "@/components/chat-attachment-image";
 import { StarsBackground } from "@/components/animate-ui/components/backgrounds/stars";
 import { RadialGlowButton } from "@/components/ui/radial-glow-button";
+import { MorphicNavbar, SectionPreview, type WorkbenchSection } from "@/components/ui/morphic-navbar";
 import NextImage from "next/image";
 import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -471,6 +472,10 @@ export function ChatWorkspace({
   const composerMenuRef = useRef<HTMLDivElement>(null);
   const connectorCatalogRef = useRef<HTMLDivElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
+  const selectionKey = `${project?.id ?? ""}:${thread?.id ?? ""}`;
+  const [sectionSelection, setSectionSelection] = useState<{ key: string; section: WorkbenchSection }>({ key: selectionKey, section: "chat" });
+  const activeSection = sectionSelection.key === selectionKey ? sectionSelection.section : "chat";
+  const selectSection = (section: WorkbenchSection) => setSectionSelection({ key: selectionKey, section });
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const fileReadingRef = useRef(false);
   const [fileReading, setFileReading] = useState(false);
@@ -763,7 +768,7 @@ export function ChatWorkspace({
   };
 
   const { dragActive, dropProps } = useComposerFileDrop({
-    enabled: (canAttachImages || canAttachDocuments) && !readOnly && !sending && !documentUploading && !fileReading,
+    enabled: activeSection === "chat" && (canAttachImages || canAttachDocuments) && !readOnly && !sending && !documentUploading && !fileReading,
     selection: `${project?.id}:${thread?.id}`,
     onFiles: (files) => { void addFiles(files); },
     onNotice: onComposerNotice,
@@ -774,7 +779,7 @@ export function ChatWorkspace({
   };
 
   return (
-    <main {...dropProps} aria-busy={!hydrated} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+    <main {...dropProps} aria-busy={!hydrated} data-section={activeSection} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       {hydrated && !thread && !sending && !readOnly ? <StarsBackground
         aria-hidden="true"
         className="landing-stars pointer-events-none"
@@ -782,8 +787,8 @@ export function ChatWorkspace({
         pointerEvents={false}
         speed={100}
       /> : null}
-      <header data-testid="mobile-app-header" className="mobile-app-header flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
-        <div className="flex min-w-0 items-center gap-2">
+      <header data-testid="mobile-app-header" className="mobile-app-header workbench-navigation shrink-0 items-center px-2 md:px-3">
+        <div className="workbench-navigation-context flex min-w-0 items-center gap-2">
           <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
             <SidebarSimple size={17} />
           </button>
@@ -792,7 +797,11 @@ export function ChatWorkspace({
             {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold leading-4 text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
           </div>
         </div>
+        <MorphicNavbar value={activeSection} onChange={selectSection} />
+        <div aria-hidden="true" className="workbench-navigation-balance" />
       </header>
+
+      {activeSection !== "chat" ? <SectionPreview section={activeSection} onBack={() => selectSection("chat")} /> : null}
 
       <div
         ref={scrollRef}
