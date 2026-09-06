@@ -327,7 +327,9 @@ export function Sidebar({
         data-context-menu-open={contextMenuOpen ? "true" : "false"}
         className={`${styles.panel} fixed inset-y-0 left-0 z-40 flex w-[min(280px,88vw)] flex-col overflow-hidden bg-[var(--sidebar)] pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] transition-[transform,visibility] duration-200 md:relative md:inset-auto md:flex md:translate-x-0 md:pb-0 md:pt-0 md:transition-[width] ${desktopOpen ? "md:w-[260px]" : "md:w-[52px]"} ${mobileOpen ? "visible translate-x-0 pointer-events-auto" : "invisible -translate-x-full pointer-events-none md:visible md:pointer-events-auto"}`}
       >
-        <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
+        <div aria-hidden="true" className={styles.texture} />
+        <div aria-hidden="true" className={styles.glass} />
+        <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label="Navegación compacta" data-testid="workbench-sidebar-rail" className={`${styles.rail} absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <button ref={railOpenButtonRef} aria-label="Mostrar barra lateral" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { onOpenDesktop(); requestAnimationFrame(() => desktopCloseButtonRef.current?.focus()); }}><SidebarSimple size={19} /></button>
           <div className="mt-2 flex flex-col items-center gap-1">
             <button disabled={!standaloneProject || busy} aria-label="Nueva conversación" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] disabled:opacity-35" onClick={() => onNewThread()}><NotePencil size={18} /></button>
@@ -338,7 +340,7 @@ export function Sidebar({
             <button aria-label={`${session.user.name}. Mostrar cuenta`} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onOpenDesktop}><UserAvatar name={session.user.name} avatarUrl={session.user.avatarUrl ?? null} className="size-6" /></button>
           </div>
         </div>
-        <div aria-hidden={!(desktopOpen || mobileOpen)} inert={!(desktopOpen || mobileOpen) ? true : undefined} className={`flex h-full w-[min(280px,88vw)] shrink-0 flex-col transition-opacity duration-150 md:w-[260px] ${desktopOpen ? "md:opacity-100" : "md:pointer-events-none md:opacity-0"}`}>
+        <div aria-hidden={!(desktopOpen || mobileOpen)} inert={!(desktopOpen || mobileOpen) ? true : undefined} className={`${styles.content} flex h-full w-[min(280px,88vw)] shrink-0 flex-col transition-opacity duration-150 md:w-[260px] ${desktopOpen ? "md:opacity-100" : "md:pointer-events-none md:opacity-0"}`}>
 	        <div className="flex h-16 shrink-0 items-center justify-between gap-1 px-3">
 	          <div data-testid="sidebar-brand" className="flex h-10 min-w-0 flex-1 items-center gap-2.5 overflow-hidden px-2"><BrandMark branding={branding} /><span className="min-w-0 flex-1 truncate text-[14px] font-semibold tracking-[-.01em] text-[var(--text)]">{branding.productName}</span></div>
           <div className="flex shrink-0 items-center gap-0.5">

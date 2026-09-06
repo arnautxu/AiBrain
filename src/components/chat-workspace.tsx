@@ -328,7 +328,7 @@ function AssistantMessage({
           announce={message.status === "streaming"}
           showActions={false}
           className="mt-4 max-w-[76ch]"
-          contentClassName="text-[14px] leading-[23px] text-[var(--text)]"
+          contentClassName="text-[length:var(--font-reading)] leading-6 text-[var(--text)]"
         >
           <MarkdownMessage streaming={message.status === "streaming"}>{publicContent}</MarkdownMessage>
         </StreamingResponse>
@@ -374,7 +374,7 @@ function UserMessage({ message, threadId, onRequestPublication, onEdit, readOnly
   return (
     <article className="message-enter group flex justify-end">
       <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
-      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[14px] leading-[23px] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
+      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:var(--font-reading)] leading-6 text-[var(--user-message-text)] [overflow-wrap:anywhere]">
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (

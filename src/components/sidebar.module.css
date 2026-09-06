@@ -1,5 +1,55 @@
 .panel {
-  box-shadow: inset -1px 0 0 var(--border-subtle);
+  isolation: isolate;
+  background: var(--sidebar);
+  border-right: 1px solid var(--border);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--surface-raised) 70%, transparent),
+    4px 0 20px rgb(0 0 0 / 3%);
+}
+
+/* The texture sits UNDER the glass, outside the animated menu scopes.
+   Neither layer receives input, changes row measurements, or animates blur. */
+.texture,
+.glass {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.texture {
+  z-index: 0;
+  background: repeating-radial-gradient(ellipse at 8% 108%,
+    transparent 0 18px,
+    color-mix(in srgb, var(--text) 14%, transparent) 19px 20px,
+    transparent 22px 36px);
+  mask-image: linear-gradient(to bottom, transparent 35%, #000 100%);
+}
+
+.glass {
+  z-index: 1;
+  /* Opaque first: browsers without backdrop-filter keep readable chrome. */
+  background: var(--sidebar);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--surface-raised) 80%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--surface-raised) 85%, transparent);
+}
+
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: linear-gradient(165deg,
+      color-mix(in srgb, var(--sidebar) 88%, transparent),
+      color-mix(in srgb, var(--sidebar) 52%, transparent));
+    -webkit-backdrop-filter: blur(5px) saturate(0);
+    backdrop-filter: blur(5px) saturate(0);
+  }
+}
+
+.content {
+  position: relative;
+  z-index: 2;
+}
+
+.panel .rail {
+  z-index: 3;
+  background: transparent;
 }
 
 .newConversation {
@@ -28,15 +78,6 @@
   color: var(--text);
 }
 
-.threadRow[aria-current="page"] {
-  background: var(--surface-selected);
-  box-shadow: var(--shadow-sm);
-}
-
-.threadRow[aria-current="page"] > span:first-of-type {
-  font-weight: 600;
-}
-
 .projectRow[data-active="true"] > svg {
   color: var(--text);
 }
@@ -52,10 +93,10 @@
 }
 
 .section { margin-top: 20px; }
-.panel .sectionLabel { font-size: 11px; font-weight: 600; letter-spacing: .025em; color: var(--text-secondary); }
+.panel .sectionLabel { font-size: var(--font-caption); font-weight: 500; letter-spacing: 0; color: var(--text-secondary); }
 .search { color: var(--text-secondary); min-height: 36px; }
 .shortcut { margin-left: auto; font: inherit; font-size: 11px; color: var(--text-subtle); }
-.projectRow { padding-left: 32px; padding-right: 88px; font-weight: 550; }
+.projectRow { padding-left: 32px; padding-right: 88px; font-weight: 500; }
 .projectRow[data-project-active="true"] { color: var(--text); }
 .disclosure { position: absolute; left: 0; top: 0; bottom: 0; z-index: 20; width: 28px; display: grid; place-items: center; color: var(--text-secondary); }
 .disclosure:focus-visible { outline: 2px solid var(--focus-ring); border-radius: 6px; }
@@ -67,56 +108,65 @@
   .panel :global(.sidebar-item-action) { opacity: 1; }
 }
 
-/* Three surface levels: tinted shell, raised controls, accented selection. */
-.panel {
-  --sidebar-accent: var(--installation-accent, #315ee7);
-  background: linear-gradient(165deg,
-    color-mix(in srgb, var(--surface-raised) 92%, var(--sidebar-accent)) 0%,
-    color-mix(in srgb, var(--surface-raised) 96%, var(--text)) 65%);
-  border-right: 1px solid var(--border);
-  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--surface-raised) 70%, transparent),
-    5px 0 22px rgb(0 0 0 / 5%);
-}
+/* Mineral Quiet: a single inverse primary action, neutral navigation. */
 .panel .newConversation {
   min-height: 42px;
   margin-bottom: 9px;
-  border: 1px solid color-mix(in srgb, var(--sidebar-accent) 82%, black);
+  border: 1px solid var(--send-button);
   border-radius: 12px;
-  background: linear-gradient(180deg, var(--sidebar-accent), color-mix(in srgb, var(--sidebar-accent) 80%, #111827));
-  color: #fff;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 22%), 0 3px 7px rgb(0 0 0 / 15%), 0 1px 2px rgb(0 0 0 / 10%);
+  background: var(--send-button);
+  color: var(--send-button-text);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%), 0 2px 4px rgb(0 0 0 / 8%);
 }
-.panel .newConversation > svg { color: #fff; }
+.panel .newConversation > svg { color: inherit; }
 .panel .newConversation:not(:disabled):hover {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--sidebar-accent) 90%, white), var(--sidebar-accent));
+  background: color-mix(in srgb, var(--send-button) 88%, var(--send-button-text));
 }
 .panel .newConversation:not(:disabled):active { box-shadow: inset 0 2px 4px rgb(0 0 0 / 18%); }
 .panel .search {
   min-height: 36px;
   margin-bottom: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 10px;
-  background: color-mix(in srgb, var(--surface-raised) 85%, transparent);
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 4%);
+  background: transparent;
+  box-shadow: none;
 }
 .panel .shortcut { border: 1px solid var(--border-subtle); border-radius: 4px; padding: 1px 4px; }
-.panel .sectionLabel { color: var(--text-secondary); font-weight: 650; }
 .panel .projectRow[data-project-active="true"] {
-  background: color-mix(in srgb, var(--sidebar-accent) 7%, transparent);
   border-radius: 10px;
 }
-.panel .projectRow > svg { color: color-mix(in srgb, var(--sidebar-accent) 72%, var(--text)); }
-.panel .projectChildren { border-left-color: color-mix(in srgb, var(--sidebar-accent) 26%, var(--border)); }
+.panel .projectRow > svg { color: var(--text-secondary); }
+.panel .projectChildren { border-left-color: var(--border); }
 .panel .threadRow[aria-current="page"] {
   border-radius: 9px;
-  background: color-mix(in srgb, var(--sidebar-accent) 12%, var(--surface-raised));
-  color: var(--text);
-  box-shadow: inset 3px 0 0 var(--sidebar-accent), inset 0 0 0 1px color-mix(in srgb, var(--sidebar-accent) 18%, transparent), 0 2px 5px rgb(0 0 0 / 8%);
+  background: var(--send-button);
+  color: var(--send-button-text);
+  box-shadow: none;
+}
+
+/* Keep the existing traveling spring overlays visible. Menu-managed rows
+   use their measured active layer; plain nested chat rows keep their fill. */
+.panel :global(.bg-active) {
+  background: var(--send-button);
+}
+.panel :global(.bg-hover) {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.panel :global([data-sidebar="menu"]):has(> :global([role="presentation"] .bg-active))
+  > :global([data-sidebar="menu-item"]) > :global([data-sidebar="menu-button"][aria-current="page"]) {
+  background: transparent;
+}
+.panel :global([data-sidebar="menu-button"][aria-current="page"]),
+.panel .threadRow[aria-current="page"] {
+  --foreground: var(--send-button-text);
+  --muted-foreground: var(--send-button-text);
+  --notification-accent: var(--send-button-text);
+  color: var(--send-button-text);
 }
 .panel .account {
-  background: color-mix(in srgb, var(--surface-raised) 65%, transparent);
+  background: transparent;
   border-top: 1px solid var(--border);
-  box-shadow: 0 -5px 16px rgb(0 0 0 / 3%);
+  box-shadow: none;
 }
 @media (prefers-contrast: more) {
   .panel { border-right-color: var(--text-secondary); }
@@ -130,12 +180,35 @@
 .panel .newConversation span { color: inherit; }
 .panel .projectRow { padding-right: 44px; }
 .panel .projectRow span { color: var(--text-secondary); }
-.panel .projectRow[data-project-active="true"] span,
-.panel .threadRow[aria-current="page"] span { color: var(--text); }
+.panel .projectRow[data-project-active="true"] span { color: var(--text); }
+.panel .threadRow[aria-current="page"] span,
+.panel .projectRow[aria-current="page"] span,
+.panel .projectRow[aria-current="page"] > svg { color: var(--send-button-text); }
+.panel :global(.group\/thread):has(.threadRow[aria-current="page"]) > :global(.sidebar-item-action),
+.panel :global(.group\/project):has(.projectRow[aria-current="page"]) > button:not(.projectRow) {
+  color: var(--send-button-text);
+}
 @media (hover: hover) and (pointer: fine) {
   .panel :global(.group\/project):hover .projectRow,
   .panel :global(.group\/project):focus-within .projectRow { padding-right: 88px; }
 }
 @media (forced-colors: active) {
   .panel .threadRow[aria-current="page"] span { color: HighlightText; }
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .texture { display: none; }
+  .glass {
+    background: var(--sidebar);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .glass { background: Canvas; }
+  .panel :global(.bg-active) { background: Highlight; }
+  .panel :global(.bg-hover) { background: transparent; }
+  .panel :global([aria-current="page"]) { color: HighlightText; }
 }
