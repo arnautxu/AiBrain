@@ -17,12 +17,10 @@
 
 .texture {
   z-index: 0;
-  background: repeating-radial-gradient(ellipse at 8% 108%,
-    transparent 0 18px,
-    color-mix(in srgb, var(--text) 14%, transparent) 19px 20px,
-    transparent 22px 36px);
-  mask-image: linear-gradient(to bottom, transparent 35%, #000 100%);
+  background: var(--canvas);
 }
+
+.wave { display: none; }
 
 .glass {
   z-index: 1;
@@ -85,23 +83,39 @@
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .panel { background: transparent; }
 
-    /* Short overlapping color fields live only beneath the desktop glass.
-       Their off-center ellipses avoid a painted linear stripe. */
-    .texture {
-      background:
-        radial-gradient(ellipse 240px 170px at -12% 24%, var(--glass-ice), transparent 95%),
-        radial-gradient(ellipse 250px 180px at 105% 51%, var(--glass-periwinkle), transparent 95%),
-        radial-gradient(ellipse 240px 160px at 5% 79%, var(--glass-cool), transparent 95%),
-        var(--canvas);
-      mask-image: none;
-    }
-
     .glass {
       background: color-mix(in srgb, var(--canvas) 52%, transparent);
       -webkit-backdrop-filter: blur(28px) saturate(1.1);
       backdrop-filter: blur(28px) saturate(1.1);
     }
   }
+
+  /* The wave is inside the island, below the account/content, with its own
+     thin glass glaze so the 3px dithering survives the main 28px backdrop. */
+  .wave {
+    display: block;
+    position: absolute;
+    inset: auto 0 0;
+    height: 220px;
+    z-index: 1;
+    overflow: hidden;
+    pointer-events: none;
+    contain: layout paint;
+    mask-image: linear-gradient(to bottom, transparent, #000 32%);
+  }
+
+  .wave::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: color-mix(in srgb, var(--canvas) 28%, transparent);
+    -webkit-backdrop-filter: blur(0.45px) saturate(1.08);
+    backdrop-filter: blur(0.45px) saturate(1.08);
+  }
+
+  .panel .content .account { background: color-mix(in srgb, var(--canvas) 88%, transparent); }
+  .wave[data-motion="off"] { visibility: hidden; }
 }
 
 .panel .rail {
@@ -254,7 +268,7 @@
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
-  .texture { display: none; }
+  .texture, .wave { display: none; }
   .panel::after { display: none; }
   .glass {
     background: var(--sidebar);
@@ -266,6 +280,7 @@
 
 @media (forced-colors: active) {
   .glass { background: Canvas; }
+  .panel .content .account { background: Canvas; }
   .panel :global(.bg-active) { background: Highlight; }
   .panel :global(.bg-hover) { background: transparent; }
   .panel :global([aria-current="page"]) { color: HighlightText; }
