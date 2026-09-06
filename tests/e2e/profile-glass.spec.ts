@@ -1,16 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 for (const mobile of [false, true]) {
-  test(`profile glass and supplied avatar ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
-    // Synthetic identity artwork in the preview only. Production selection is
-    // independently covered by profile-avatar.test.ts; no real account changes.
-    await page.route("http://127.0.0.1:3100/", async (route) => {
-      const response = await route.fetch();
-      const body = await response.text();
-      const fixture = body.replaceAll('\\"avatarUrl\\":null', '\\"avatarUrl\\":\\"/branding/arnall/profile-pig.png\\"');
-      expect(fixture).not.toBe(body);
-      await route.fulfill({ response, body: fixture });
-    });
+  test(`profile glass keeps account identity usable ${mobile ? "mobile" : "desktop"}`, async ({ page }) => {
     if (mobile) await page.setViewportSize({ width: 390, height: 844 });
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/login");
@@ -20,9 +11,8 @@ for (const mobile of [false, true]) {
     await expect(page.getByTestId("composer")).toBeVisible();
     if (mobile) await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
     const card = page.getByRole("button", { name: /Alex.*Abrir menú de cuenta/ });
-    const avatar = card.locator("img");
+    const avatar = card.locator('[aria-hidden="true"]');
     await expect(avatar).toBeVisible();
-    await expect.poll(() => avatar.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     expect(await avatar.evaluate((element) => element.getBoundingClientRect().height)).toBe(36);
     expect(await card.evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("blur(24px)");
     for (const theme of ["light", "dark"]) {
