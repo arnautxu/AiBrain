@@ -22,6 +22,8 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { ChatAttachmentImage } from "@/components/chat-attachment-image";
+import { StarsBackground } from "@/components/animate-ui/components/backgrounds/stars";
+import { RadialGlowButton } from "@/components/ui/radial-glow-button";
 import NextImage from "next/image";
 import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -773,6 +775,13 @@ export function ChatWorkspace({
 
   return (
     <main {...dropProps} aria-busy={!hydrated} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+      {hydrated && !thread && !sending && !readOnly ? <StarsBackground
+        aria-hidden="true"
+        className="landing-stars pointer-events-none"
+        starColor="var(--text-secondary)"
+        pointerEvents={false}
+        speed={100}
+      /> : null}
       <header data-testid="mobile-app-header" className="mobile-app-header flex h-[52px] shrink-0 items-center justify-between bg-[var(--header)] px-2 md:px-3">
         <div className="flex min-w-0 items-center gap-2">
           <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
@@ -1044,7 +1053,8 @@ export function ChatWorkspace({
                   onChange={onPromptChange}
                   onNotice={onComposerNotice}
                 />
-                <button
+                <RadialGlowButton
+                  active={!thread && !sending && !readOnly}
                   aria-label={queueingMessage ? "Añadir mensaje a la cola" : sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
                   aria-busy={(!queueingMessage && stopping) || undefined}
                   className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
@@ -1062,7 +1072,7 @@ export function ChatWorkspace({
                   <span key={queueingMessage ? "queue" : sending ? "stop" : "send"} className="composer-submit-icon" aria-hidden="true">
                     {queueingMessage ? <ArrowUp size={13} weight="bold" /> : sending ? <Stop size={11} weight="fill" /> : <ArrowUp size={13} weight="bold" />}
                   </span>
-                </button>
+                </RadialGlowButton>
               </div>
             </div>
           </div>

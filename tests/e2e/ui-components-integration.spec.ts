@@ -10,6 +10,15 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await page.goto("/login");
     await page.getByRole("button", { name: /Alex/ }).click();
     await expect(page.getByTestId("composer")).toBeVisible();
+    await expect(page.locator('[data-slot="stars-background"]')).toHaveAttribute("data-motion", "static");
+    const send = page.getByRole("button", { name: "Enviar mensaje", exact: true });
+    await expect(send).toHaveClass(/rg-button/);
+    await expect(send).toBeDisabled();
+    await page.getByTestId("composer").locator("textarea").fill("Prova visual del botó");
+    await expect(send).toBeEnabled();
+    await send.focus();
+    expect(await send.evaluate((element) => getComputedStyle(element).backgroundImage)).toContain("radial-gradient");
+    await page.screenshot({ path: `.impeccable/review/landing-stars-${name}.png`, fullPage: true });
     expect(await page.getByTestId("composer").evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("blur(28px)");
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((key) => key.endsWith(".workbench.preview.v1"))!;
@@ -32,6 +41,8 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
       localStorage.setItem(`${prefix}selection.v1`, JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: id } }));
     });
     await page.reload();
+    await expect(page.locator('[data-slot="stars-background"]')).toHaveCount(0);
+    await expect(page.locator(".rg-button")).toHaveCount(0);
     await expect(page.locator('[data-slot="day-separator"]')).toBeVisible();
     await page.getByRole("button", { name: "Mostrar el proceso de trabajo" }).click();
     await page.getByText("Fuentes", { exact: true }).click();
