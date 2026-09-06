@@ -56,6 +56,20 @@ La primera ejecución también crea `<companyContextRoot>/PERMISSIONS.md` con un
 
 El command no crea el usuario remoto, no cambia suscripciones, no toca Supabase product data y no realiza ninguna acción sobre NAS, DNS o producción.
 
+## Imagen de perfil aprobada
+
+`config/profile-artwork.json` contiene únicamente asignaciones visuales aprobadas
+por el usuario, por `companySlug` y email exacto normalizado. La resolución se
+realiza server-side sobre la identidad local ya autenticada y devuelve la ruta
+del asset aprobado en el mismo origen HTTPS de la instalación. No altera identidad, permisos,
+credenciales ni metadatos del proveedor. Sin coincidencia se conserva el avatar
+existente; si no hay imagen válida, se muestran las iniciales. El registro y su
+asset deben viajar juntos en la versión; añadirlos localmente no actualiza la
+instalación publicada. Los assets incluidos son públicos y no deben contener
+información privada. La asignación del porquet a `arnau@graphikai.com` se basa
+en el correo facilitado por el usuario, pendiente de verificación en su sesión
+real tras una futura publicación.
+
 ## Baja, reactivación y recuperación
 
 Cada mutación exige un `requestId` UUID estable. La baja marca el perfil como deshabilitado, revoca todas sus cookies locales y detiene únicamente su worker y browser. La reactivación vuelve a habilitar el perfil. La recuperación lo habilita, revoca las sesiones existentes, detiene sus runtimes y crea el marcador de cambio inicial de contraseña si todavía no existe. Repetir el mismo comando devuelve el receipt guardado sin repetir efectos; reutilizar el `requestId` para otro usuario o acción falla con conflicto.

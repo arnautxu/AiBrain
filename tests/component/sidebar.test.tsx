@@ -181,6 +181,15 @@ describe("Sidebar", () => {
     expect(account).toHaveFocus();
   });
 
+  it("closes the account menu when Escape arrives before focus enters it", async () => {
+    renderSidebar();
+    const account = screen.getByRole("button", { name: /Abrir menú de cuenta/ });
+    fireEvent.click(account);
+    fireEvent.keyDown(account, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Cuenta y preferencias" })).not.toBeInTheDocument();
+    await waitFor(() => expect(account).toHaveFocus());
+  });
+
   it("keeps the brand informational and gives account menus complete keyboard navigation", async () => {
     const { onNewThread, onOpenCustomization } = renderSidebar();
     const brand = screen.getByTestId("sidebar-brand");
