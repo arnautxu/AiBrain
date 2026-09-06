@@ -96,7 +96,7 @@
     display: block;
     position: absolute;
     inset: auto 0 0;
-    height: 180px;
+    height: 220px;
     z-index: 1;
     overflow: hidden;
     pointer-events: none;

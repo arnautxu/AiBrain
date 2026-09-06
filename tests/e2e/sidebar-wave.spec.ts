@@ -20,7 +20,7 @@ test("desktop wave is bounded, themed, accessible and stops with its surface", a
     const canvas = element.querySelector("canvas")!;
     return { height: rect.height, width: rect.width, pixels: canvas.width * canvas.height, pointerEvents: getComputedStyle(element).pointerEvents };
   });
-  expect(geometry.height).toBe(180);
+  expect(geometry.height).toBe(220);
   expect(geometry.width).toBeLessThanOrEqual(260);
   expect(geometry.pixels).toBeGreaterThan(0);
   expect(geometry.pixels).toBeLessThanOrEqual(121000);
