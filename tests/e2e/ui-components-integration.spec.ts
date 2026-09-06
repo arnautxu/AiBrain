@@ -44,6 +44,16 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     if (name === "mobile") await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
     const sidebar = page.getByTestId("workbench-sidebar");
     await expect(sidebar).toBeVisible();
+    const panelGeometry = await sidebar.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, bottom: rect.bottom, radius: getComputedStyle(element).borderRadius };
+    });
+    if (name === "desktop") {
+      expect(panelGeometry).toEqual({ x: 12, y: 12, bottom: viewport.height - 12, radius: "24px" });
+    } else {
+      expect(panelGeometry.x).toBe(0);
+      expect(panelGeometry.y).toBe(0);
+    }
     const newConversation = sidebar.getByRole("button", { name: "Nueva conversación", exact: true });
     expect(await newConversation.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
     await page.evaluate(() => document.fonts.ready);
