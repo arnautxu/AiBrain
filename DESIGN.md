@@ -99,7 +99,9 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 ## Superfícies i color
 
 El sidebar d'escriptori és una superfície flotant: marge exterior de 12 px,
-radi continu de 24 px, vora perifèrica i ombra de contacte/direccional.
+radi continu de 20 px, doble vora especular i ombra de contacte/direccional.
+El material té una opacitat del 52% i blur de 28 px sobre variacions neutres;
+les preferències de contrast o transparència reduïda activen el fons opac.
 Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
 la geometria edge-to-edge existent.
 
