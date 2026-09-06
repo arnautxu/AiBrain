@@ -52,6 +52,8 @@ jobs:
         with:
           context: .
           target: runtime
+          cache-from: type=registry,ref=${{ env.APP_REPOSITORY }}:buildcache
+          cache-to: type=registry,ref=${{ env.APP_REPOSITORY }}:buildcache,mode=max
           push: true
           build-args: AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}
           tags: ${{ env.APP_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
@@ -64,6 +66,8 @@ jobs:
         with:
           context: .
           target: egress-gateway
+          cache-from: type=registry,ref=${{ env.EGRESS_REPOSITORY }}:buildcache
+          cache-to: type=registry,ref=${{ env.EGRESS_REPOSITORY }}:buildcache,mode=max
           push: true
           build-args: AIBRAIN_REVISION=${{ github.event.workflow_run.head_sha }}
           tags: ${{ env.EGRESS_REPOSITORY }}:${{ github.event.workflow_run.head_sha }}
