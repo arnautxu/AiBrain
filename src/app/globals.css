@@ -18,8 +18,8 @@
   --surface-selected: color-mix(in srgb, var(--mineral-black) 9%, var(--mineral-white));
   --sidebar: var(--mineral-soft);
   --header: var(--surface);
-  --user-message: var(--mineral-black);
-  --user-message-text: var(--mineral-white);
+  --user-message: var(--mineral-soft);
+  --user-message-text: var(--mineral-black);
   --send-button: var(--mineral-black);
   --send-button-text: var(--mineral-white);
   --active: var(--mineral-black);
@@ -78,8 +78,8 @@
   --surface-selected: color-mix(in srgb, var(--mineral-white) 15%, var(--mineral-black));
   --sidebar: #000000;
   --header: var(--surface);
-  --user-message: var(--mineral-white);
-  --user-message-text: var(--mineral-black);
+  --user-message: var(--surface-muted);
+  --user-message-text: var(--mineral-white);
   --send-button: var(--mineral-white);
   --send-button-text: var(--mineral-black);
   --active: var(--mineral-white);
@@ -123,8 +123,8 @@
     --surface-selected: color-mix(in srgb, var(--mineral-white) 15%, var(--mineral-black));
     --sidebar: #000000;
     --header: var(--surface);
-    --user-message: var(--mineral-white);
-    --user-message-text: var(--mineral-black);
+    --user-message: var(--surface-muted);
+    --user-message-text: var(--mineral-white);
     --send-button: var(--mineral-white);
     --send-button-text: var(--mineral-black);
     --active: var(--mineral-white);

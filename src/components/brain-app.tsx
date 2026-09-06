@@ -1157,10 +1157,10 @@ export function BrainApp({
   const style = useMemo<BrainStyle>(() => {
     return {
       "--brain-accent": "var(--text)",
-      "--brain-accent-strong": "#3b3b3b",
+      "--brain-accent-strong": "var(--text)",
       "--brain-accent-on-soft": "var(--text-secondary)",
       "--brain-accent-soft": "var(--surface-muted)",
-      "--notification-accent": "#2563eb",
+      "--notification-accent": "var(--text)",
       "--brain-contrast": "var(--surface)",
       "--brain-radius": cornerTokens[preferences.corners],
     };

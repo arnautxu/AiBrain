@@ -46,8 +46,17 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await expect(sidebar).toBeVisible();
     const newConversation = sidebar.getByRole("button", { name: "Nueva conversación", exact: true });
     expect(await newConversation.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
+    await page.evaluate(() => document.fonts.ready);
+    expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily)).toContain("Poppins");
     if (name === "mobile") await page.screenshot({ path: ".impeccable/review/integrated-mobile-sidebar.png", fullPage: true });
     await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+    // Primary surfaces invert in dark mode; a literal text-white would
+    // make the governed action unreadable even though its handler still works.
+    const approvalColors = await page.getByRole("button", { name: "Permitir", exact: true }).evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { foreground: style.color, background: style.backgroundColor };
+    });
+    expect(approvalColors.foreground).not.toBe(approvalColors.background);
     await page.screenshot({ path: `.impeccable/review/integrated-${name}-dark.png`, fullPage: true });
     expect(pageErrors).toEqual([]);
   });

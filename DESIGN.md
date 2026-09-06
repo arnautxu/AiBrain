@@ -110,8 +110,8 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 - Els components consumeixen `--surface`, `--text`, `--text-secondary`,
   `--border`, `--danger` i els altres tokens semàntics, no opacitats arbitràries
   sobre el foreground. Els valors foscos viuen a `:root[data-theme="dark"]`.
-- Les accions actives utilitzen `--active` i `--active-text`: negre sobre blanc
-  en clar i blanc sobre negre en fosc. Els estats previs que encara necessiten
+- Les accions actives utilitzen `--active` i `--active-text`: fons negre amb text
+  blanc en clar i fons blanc amb text negre en fosc. Els estats previs que encara necessiten
   un fons neutre poden consumir `--surface-selected` sense perdre llegibilitat.
 - L'accent de `InstallationConfig` continua disponible per a identitat i
   configuració white-label, però no tenyeix decorativament el workbench.
@@ -124,7 +124,7 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 ## Tipografia
 
 Poppins és la veu de producte i es carrega amb `next/font` en pesos 400, 500 i
-600, sense peticions de font al navegador ni salt de layout. El pes 600 també
+600, servida localment amb fallback mètric per limitar salts de layout. El pes 600 també
 resol els usos històrics de «bold» per evitar síntesi d'un 700 no carregat.
 Geist Mono queda reservada a codi, ordres i identificadors. La rampa completa
 de components viu a `src/styles/typography.css`.
@@ -133,7 +133,7 @@ de components viu a `src/styles/typography.css`.
 | --- | --- | --- |
 | Pregunta inicial | 24 / 32 px | Un títol centrat, pes 500 |
 | Secció o nom de resultat | 14 px | Pes 500–600 |
-| Resposta de l'assistent | 14 / 23 px | Lectura de conversa |
+| Resposta de l'assistent i missatge d'usuari | 16 / 24 px | Lectura de conversa |
 | Navegació i secundari | 13 px | `--font-secondary`, `text-body-2-*` |
 | Metadades i etiquetes | 12 px | `--font-caption`, `text-caption-1-*` |
 | Entrada tàctil | 16 / 24 px | Evitar zoom involuntari en focus |
@@ -155,9 +155,16 @@ aconseguir més densitat. La densitat compacta modifica espai, no jerarquia.
   les superfícies que ja consumeixen `--brain-radius`.
 - Ritme base de 4/8 px, agrupacions de 12/16 px i separacions de 24/32 px.
 - El sidebar és un material liquid glass sobre una textura neutra molt subtil:
-  translúcid només quan hi ha contingut real a sota, amb blur, una vora lluminosa
+  translúcid sobre el patró inferior, amb blur, una vora lluminosa
   fina i fallback sòlid per `prefers-reduced-transparency`. No s'apilen dues
   superfícies translúcides.
+- La textura queda a la part inferior, sota el vidre i fora dels menús animats;
+  cap capa decorativa intercepta clics. El rail, el drawer, els springs de hover
+  i focus, els desplegables i les preferències persistides conserven el comportament.
+  L'èmfasi dels controls usa un crossfade 500/600 en la mateixa caixa perquè Poppins
+  no té un eix variable de pes. Es respecta moviment reduït.
+- El missatge d'usuari conserva una superfície neutra; la inversió blanc/negre
+  es reserva a les accions primàries i la selecció del sidebar.
 - Profunditat moderada per a composer i capes flotants; estat actiu per inversió
   blanc/negre, vores i espai. No afegir ombres a totes les files.
 

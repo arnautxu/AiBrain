@@ -45,7 +45,7 @@
   --color-accent-950: var(--color-blue-950);
 
   /* ----- Typography ----------------------------------------------------------
-   * Use the platform UI face for native metrics, optical sizing and legibility.
+   * Poppins is self-hosted by next/font, with metric-adjusted system fallbacks.
    * --------------------------------------------------------------------------*/
   --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif,
                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
