@@ -2,59 +2,53 @@
 name: AiBrain
 description: Un entorn de treball guiat, tranquil i verificable sobre Codex.
 colors:
-  graphite: "#171717"
-  graphite-soft: "#e7e7e7"
+  black: "#0a0a0a"
   white: "#ffffff"
   canvas: "#ffffff"
   work-surface: "#ffffff"
-  sidebar-surface: "#f9f9f9"
-  ink: "#0d0d0d"
-  text-secondary: "#5d5d5d"
-  text-muted: "#737373"
-  text-subtle: "#686868"
+  soft-surface: "#f7f7f5"
+  sidebar-surface: "#f7f7f5"
+  ink: "#0a0a0a"
+  text-secondary: "#575752"
   border: "rgba(0, 0, 0, 0.10)"
   success: "#3f7450"
   warning: "#846224"
   error: "#934d3d"
-  blue: "#315ee7"
-  blue-soft: "#e9efff"
-  violet: "#7656d8"
-  violet-soft: "#f0ebff"
 typography:
   display:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "32px"
     fontWeight: 600
     lineHeight: 1.375
     letterSpacing: "-0.025em"
   headline:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "24px"
     fontWeight: 500
     lineHeight: 1.333
     letterSpacing: "-0.025em"
   title:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.5
   body:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "14px"
     fontWeight: 400
     lineHeight: 1.643
   secondary:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.5
   label:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "12px"
     fontWeight: 500
     lineHeight: 1.5
   reading:
-    fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+    fontFamily: "Poppins, ui-sans-serif, system-ui, sans-serif"
     fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.5
@@ -85,41 +79,55 @@ spacing:
 
 # Design System: AiBrain
 
-Actualitzat el 2026-09-04 a partir de `src/app/globals.css`,
+Actualitzat el 2026-09-06 a partir de `src/app/globals.css`,
 `src/styles/typography.css`, `src/styles/theme.css` i els components del workbench.
-Aquest document descriu la identitat actual; no prescriu tornar a la paleta,
-Geist sans o la densitat de versions anteriors.
+Aquest document descriu la direcció **Mineral Quiet**: una interfície gairebé
+binària, amb Poppins, jerarquia forta i profunditat material continguda.
 
 ## Intenció
 
 **Mode: Operate.** L'empleat descriu una feina, aporta documents i revisa el
-resultat. L'aplicació és discreta, clara i recuperable. La jerarquia comença
-per la petició i el resultat; models, runtime, ordres i permisos detallats
-pertanyen a controls contextuals o superfícies administratives.
+resultat. L'aplicació és calmada, precisa i recuperable. El blanc i el negre
+ordenen l'acció; l'espai, el pes tipogràfic i el material creen profunditat
+sense construir una escala de grisos ornamental. La jerarquia comença per la
+petició i el resultat; models, runtime, ordres i permisos detallats pertanyen a
+controls contextuals o superfícies administratives.
 
 La marca, el nom i els assets provenen d'`InstallationConfig`. La configuració
 no permet exposar dades o controls aliens al rol de l'usuari.
 
 ## Superfícies i color
 
-- Clar: canvas i superfície principal blancs; sidebar `#f9f9f9`, selecció
-  `#e7e7e7`, text principal `#0d0d0d`.
-- Fosc: canvas `#000000`, superfície elevada `#1f1f1f`, superfície secundària
-  `#262626`, text principal `#f1f0ec`, text secundari `#b2afa8`.
+- Clar: canvas i superfície principal `#ffffff`; `#f7f7f5` és l'única zona
+  clara alternativa i s'utilitza per separar regions grans, especialment la
+  navegació. El text i les accions primàries són `#0a0a0a`.
+- Fosc: canvas i superfície principal `#000000`; `#0a0a0a` queda reservat a
+  superfícies elevades. Els estats de hover i selecció es deriven de blanc amb
+  transparència, no d'una nova escala de grisos.
+- `#575752` en clar i `#b8b8b2` en fosc són l'únic neutre secundari. Els tokens
+  històrics `--text-secondary`, `--text-muted` i `--text-subtle` l'aliasen per
+  compatibilitat i mantenen contrast de lectura en text petit.
 - Els components consumeixen `--surface`, `--text`, `--text-secondary`,
   `--border`, `--danger` i els altres tokens semàntics, no opacitats arbitràries
   sobre el foreground. Els valors foscos viuen a `:root[data-theme="dark"]`.
-- Les accions del workbench són de grafit; l'accent de la instal·lació serveix
-  per a la identitat. No s'afegeixen blau i violeta com a decoració simultània.
+- Les accions actives utilitzen `--active` i `--active-text`: negre sobre blanc
+  en clar i blanc sobre negre en fosc. Els estats previs que encara necessiten
+  un fons neutre poden consumir `--surface-selected` sense perdre llegibilitat.
+- L'accent de `InstallationConfig` continua disponible per a identitat i
+  configuració white-label, però no tenyeix decorativament el workbench.
 - Verd, ambre i terracota comuniquen estat amb text; mai només amb color.
+- Les vores deriven del negre o blanc amb alpha. Les ombres són escasses,
+  direccionals i exclusives de capes que realment floten.
 - La lectura normal exigeix contrast mínim 4,5:1 sobre el fons efectiu,
   incloent descripcions, placeholders i contingut desplegat en tots dos temes.
 
 ## Tipografia
 
-La família sans segueix la plataforma: SF a Apple i Segoe UI a Windows, amb
-fallback sans-serif. Geist Mono queda reservada a codi, ordres i identificadors.
-La rampa completa de components viu a `src/styles/typography.css`.
+Poppins és la veu de producte i es carrega amb `next/font` en pesos 400, 500 i
+600, sense peticions de font al navegador ni salt de layout. El pes 600 també
+resol els usos històrics de «bold» per evitar síntesi d'un 700 no carregat.
+Geist Mono queda reservada a codi, ordres i identificadors. La rampa completa
+de components viu a `src/styles/typography.css`.
 
 | Ús | Mida habitual | Aplicació |
 | --- | --- | --- |
@@ -146,8 +154,12 @@ aconseguir més densitat. La densitat compacta modifica espai, no jerarquia.
   8–12 px i resultats de 12–16 px. El radi configurable continua governant
   les superfícies que ja consumeixen `--brain-radius`.
 - Ritme base de 4/8 px, agrupacions de 12/16 px i separacions de 24/32 px.
-- Profunditat moderada per a composer i capes flotants; estat actiu per to,
-  vores i espai. No afegir ombres a totes les files.
+- El sidebar és un material liquid glass sobre una textura neutra molt subtil:
+  translúcid només quan hi ha contingut real a sota, amb blur, una vora lluminosa
+  fina i fallback sòlid per `prefers-reduced-transparency`. No s'apilen dues
+  superfícies translúcides.
+- Profunditat moderada per a composer i capes flotants; estat actiu per inversió
+  blanc/negre, vores i espai. No afegir ombres a totes les files.
 
 ## Patrons del flux
 
