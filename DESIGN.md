@@ -2,13 +2,13 @@
 name: AiBrain
 description: Un entorn de treball guiat, tranquil i verificable sobre Codex.
 colors:
-  black: "#0a0a0a"
+  black: "#181816"
   white: "#ffffff"
   canvas: "#ffffff"
   work-surface: "#ffffff"
   soft-surface: "#f7f7f5"
   sidebar-surface: "#f7f7f5"
-  ink: "#0a0a0a"
+  ink: "#181816"
   text-secondary: "#575752"
   border: "rgba(0, 0, 0, 0.10)"
   success: "#3f7450"
@@ -100,10 +100,11 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 
 - Clar: canvas i superfície principal `#ffffff`; `#f7f7f5` és l'única zona
   clara alternativa i s'utilitza per separar regions grans, especialment la
-  navegació. El text i les accions primàries són `#0a0a0a`.
+  navegació. El text i les accions primàries són grafit càlid mat `#181816`.
 - Fosc: canvas i superfície principal `#000000`; `#0a0a0a` queda reservat a
   superfícies elevades. Els estats de hover i selecció es deriven de blanc amb
-  transparència, no d'una nova escala de grisos.
+  transparència, no d'una nova escala de grisos. El text principal i els missatges
+  utilitzen `#f5f5f2`; el blanc pur es reserva als controls actius de màxim contrast.
 - `#575752` en clar i `#b8b8b2` en fosc són l'únic neutre secundari. Els tokens
   històrics `--text-secondary`, `--text-muted` i `--text-subtle` l'aliasen per
   compatibilitat i mantenen contrast de lectura en text petit.
