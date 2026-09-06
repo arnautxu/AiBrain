@@ -11,7 +11,7 @@
   --mineral-soft: #f7f7f5;
   --mineral-secondary: #575752;
   --canvas: #ffffff;
-  --workspace-edge: #f1f1ef;
+  --workspace-edge: #dcdcd8;
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-muted: var(--mineral-soft);
@@ -72,7 +72,7 @@
   --mineral-soft: #0a0a0a;
   --mineral-secondary: #b8b8b2;
   --canvas: #000000;
-  --workspace-edge: #0b0b0a;
+  --workspace-edge: #242422;
   --surface: #000000;
   --surface-raised: var(--mineral-soft);
   --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
@@ -118,7 +118,7 @@
     --mineral-soft: #0a0a0a;
     --mineral-secondary: #b8b8b2;
     --canvas: #000000;
-    --workspace-edge: #0b0b0a;
+    --workspace-edge: #242422;
     --surface: #000000;
     --surface-raised: var(--mineral-soft);
     --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
@@ -389,7 +389,7 @@ button:disabled {
 
 @media (min-width: 768px) {
   .workbench-shell {
-    background: linear-gradient(90deg, var(--workspace-edge), var(--canvas) 55%);
+    background: linear-gradient(90deg, var(--workspace-edge) 0%, var(--canvas) 72%);
   }
 
   .workbench-shell > .workbench-main,
