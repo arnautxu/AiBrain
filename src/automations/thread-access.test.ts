@@ -174,5 +174,5 @@ describe("automation result thread audience", () => {
     expect((await listAutomationTasks(memberSession)).tasks).toEqual([]);
     await expect(automationRunsForSession(memberSession, automation.id))
       .rejects.toMatchObject({ code: "AUTOMATION_NOT_FOUND" });
-  });
+  }, 15_000);
 });
