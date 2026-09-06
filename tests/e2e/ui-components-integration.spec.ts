@@ -10,6 +10,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await page.goto("/login");
     await page.getByRole("button", { name: /Alex/ }).click();
     await expect(page.getByTestId("composer")).toBeVisible();
+    expect(await page.getByTestId("composer").evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("blur(28px)");
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((key) => key.endsWith(".workbench.preview.v1"))!;
       const snapshot = JSON.parse(localStorage.getItem(key)!);
