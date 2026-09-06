@@ -2225,7 +2225,7 @@ export function BrainApp({
         : "border-[var(--border)] bg-[var(--surface-raised)] text-[var(--text-secondary)]";
 
   return (
-    <div style={style} className="flex h-[100dvh] overflow-hidden bg-[var(--page)] font-sans text-[var(--text)]">
+    <div style={style} className="workbench-shell flex h-[100dvh] overflow-hidden bg-[var(--page)] font-sans text-[var(--text)]">
       <Sidebar
         branding={branding}
         session={session}

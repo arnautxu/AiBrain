@@ -90,7 +90,7 @@
     .texture {
       background:
         radial-gradient(ellipse 240px 460px at -30% 65%, color-mix(in srgb, var(--text) 18%, transparent), transparent 90%),
-        var(--canvas);
+        var(--workspace-edge);
       mask-image: none;
     }
 
