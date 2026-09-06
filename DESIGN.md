@@ -98,6 +98,11 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 
 ## Superfícies i color
 
+El sidebar d'escriptori és una superfície flotant: marge exterior de 12 px,
+radi continu de 24 px, vora perifèrica i ombra de contacte/direccional.
+Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
+la geometria edge-to-edge existent.
+
 - Clar: canvas i superfície principal `#ffffff`; `#f7f7f5` és l'única zona
   clara alternativa i s'utilitza per separar regions grans, especialment la
   navegació. El text i les accions primàries són grafit càlid mat `#181816`.
