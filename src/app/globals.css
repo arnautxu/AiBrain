@@ -11,7 +11,9 @@
   --mineral-soft: #f7f7f5;
   --mineral-secondary: #575752;
   --canvas: #ffffff;
-  --workspace-edge: #c8dcf0;
+  --glass-ice: #92bee2;
+  --glass-periwinkle: #b2ace0;
+  --glass-cool: #9bcbdd;
   --surface: #ffffff;
   --surface-raised: #ffffff;
   --surface-muted: var(--mineral-soft);
@@ -72,7 +74,9 @@
   --mineral-soft: #0a0a0a;
   --mineral-secondary: #b8b8b2;
   --canvas: #000000;
-  --workspace-edge: #142d48;
+  --glass-ice: #224d71;
+  --glass-periwinkle: #3c386b;
+  --glass-cool: #1d5267;
   --surface: #000000;
   --surface-raised: var(--mineral-soft);
   --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
@@ -118,7 +122,9 @@
     --mineral-soft: #0a0a0a;
     --mineral-secondary: #b8b8b2;
     --canvas: #000000;
-    --workspace-edge: #142d48;
+    --glass-ice: #224d71;
+    --glass-periwinkle: #3c386b;
+    --glass-cool: #1d5267;
     --surface: #000000;
     --surface-raised: var(--mineral-soft);
     --surface-muted: color-mix(in srgb, var(--mineral-white) 8%, var(--mineral-black));
@@ -385,18 +391,6 @@ button:disabled {
 .ui-text-field:focus {
   border-color: var(--focus);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 18%, transparent);
-}
-
-@media (min-width: 768px) {
-  .workbench-shell {
-    background: linear-gradient(90deg, var(--workspace-edge) 0%, var(--canvas) 55%);
-  }
-
-  .workbench-shell > .workbench-main,
-  .workbench-shell .mobile-app-header,
-  .workbench-shell .mobile-composer-dock {
-    background: transparent;
-  }
 }
 
 .workbench-main::before {

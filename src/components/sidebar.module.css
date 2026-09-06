@@ -85,12 +85,14 @@
   @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .panel { background: transparent; }
 
-    /* Broad neutral folds provide an actual substrate for the blur.
-       Keep the variation below the material, never over the text. */
+    /* Short overlapping color fields live only beneath the desktop glass.
+       Their off-center ellipses avoid a painted linear stripe. */
     .texture {
       background:
-        radial-gradient(ellipse 240px 460px at -30% 65%, color-mix(in srgb, var(--text) 18%, transparent), transparent 90%),
-        var(--workspace-edge);
+        radial-gradient(ellipse 240px 170px at -12% 24%, var(--glass-ice), transparent 95%),
+        radial-gradient(ellipse 250px 180px at 105% 51%, var(--glass-periwinkle), transparent 95%),
+        radial-gradient(ellipse 240px 160px at 5% 79%, var(--glass-cool), transparent 95%),
+        var(--canvas);
       mask-image: none;
     }
 
