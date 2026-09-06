@@ -245,7 +245,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByRole("heading", { name: "Informe final" })).toHaveLength(1);
     expect(screen.getByText("Evidencia verificada").closest("li")).toBeInTheDocument();
     expect(screen.getByText("He comprobado la fuente autorizada.")).not.toBeVisible();
-    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[14px]");
+    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[length:var(--font-reading)]", "leading-6");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "conversation");
     expect(screen.getByTestId("composer")).toHaveClass("composer-compact");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "false");
