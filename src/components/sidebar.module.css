@@ -89,10 +89,7 @@
        Keep the variation below the material, never over the text. */
     .texture {
       background:
-        radial-gradient(ellipse 170px 240px at -15% 35%, color-mix(in srgb, var(--text) 42%, transparent), transparent 85%),
-        radial-gradient(ellipse 130px 300px at 115% 73%, color-mix(in srgb, var(--text) 34%, transparent), transparent 85%),
-        repeating-linear-gradient(128deg, transparent 0 85px,
-          color-mix(in srgb, var(--text) 12%, transparent) 120px, transparent 175px),
+        radial-gradient(ellipse 240px 460px at -30% 65%, color-mix(in srgb, var(--text) 18%, transparent), transparent 90%),
         var(--canvas);
       mask-image: none;
     }
