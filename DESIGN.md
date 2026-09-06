@@ -105,8 +105,9 @@ les preferències de contrast o transparència reduïda activen el fons opac.
 El camp de missatge comparteix el vidre (58% de superfície, blur de 28 px)
 amb reflexos de vora, sense degradat decoratiu. El fons del sidebar només
 manté una variació neutra molt suau, sense bandes ni taques múltiples.
-El canvas d'escriptori es dissol d'esquerra a dreta: perla `#dcdcd8`
-cap a blanc al 72% en clar; grafit `#242422` cap a negre en fosc.
+El canvas d'escriptori es dissol d'esquerra a dreta: blau gel `#c8dcf0`
+cap a blanc al 55% en clar; blau tinta `#142d48` cap a negre en fosc.
+Aquest tint queda limitat al fons; els controls mantenen el grafit neutre.
 La capçalera i el dock deixen passar aquest fons continu, sense blocs opacs.
 Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
 la geometria edge-to-edge existent.
