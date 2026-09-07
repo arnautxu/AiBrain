@@ -93,6 +93,57 @@ afterEach(async () => {
 });
 
 describe("FileUsageStore", () => {
+  it.each([1, 19, 20, 21, 99, 100, 101, 100_000])("keeps exact percentile ranks for %i records", (count) => {
+    const records = Array.from({ length: count }, (_, index) => turn({
+      durationMs: count - index,
+      firstTextMs: null,
+      tokenUsage: null,
+    }));
+    expect(aggregateTurnUsage(records)).toEqual({
+      turns: count, completedTurns: count, errorTurns: 0, stoppedTurns: 0,
+      activeDays: 1, totalDurationMs: count * (count + 1) / 2,
+      averageDurationMs: Math.round((count + 1) / 2), p95DurationMs: Math.ceil(count * 0.95),
+      averageFirstTextMs: null, p95FirstTextMs: null, turnsWithTokenData: 0,
+      tokens: { totalTokens: 0, inputTokens: 0, cachedInputTokens: 0,
+        cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+    });
+  });
+
+  it("keeps empty and missing measurements distinct from measured zero", () => {
+    expect(aggregateTurnUsage([])).toMatchObject({
+      turns: 0, activeDays: 0, totalDurationMs: 0,
+      averageDurationMs: null, p95DurationMs: null,
+      averageFirstTextMs: null, p95FirstTextMs: null, turnsWithTokenData: 0,
+      tokens: { totalTokens: 0 },
+    });
+    expect(aggregateTurnUsage([turn({ durationMs: 0, firstTextMs: 0 })])).toMatchObject({
+      averageDurationMs: 0, p95DurationMs: 0,
+      averageFirstTextMs: 0, p95FirstTextMs: 0,
+    });
+    expect(aggregateTurnUsage([turn({ firstTextMs: null })])).toMatchObject({
+      averageFirstTextMs: null, p95FirstTextMs: null,
+    });
+  });
+
+  it("preserves nearest-rank percentiles, status counts and input order", () => {
+    const records = Object.freeze(Array.from({ length: 20 }, (_, index) => Object.freeze(turn({
+      durationMs: 20 - index,
+      firstTextMs: index % 2 === 0 ? index : null,
+      status: index < 7 ? "completed" : index < 13 ? "error" : "stopped",
+      startedAt: index < 10 ? "2026-08-27T09:59:55.000Z" : "2026-08-28T09:59:55.000Z",
+      tokenUsage: index % 2 === 0 ? turn().tokenUsage : null,
+    }))));
+    const before = JSON.stringify(records);
+    expect(aggregateTurnUsage(records)).toEqual({
+      turns: 20, completedTurns: 7, errorTurns: 6, stoppedTurns: 7,
+      activeDays: 2, totalDurationMs: 210, averageDurationMs: 11, p95DurationMs: 19,
+      averageFirstTextMs: 9, p95FirstTextMs: 18, turnsWithTokenData: 10,
+      tokens: { totalTokens: 1000, inputTokens: 700, cachedInputTokens: 200,
+        cacheWriteInputTokens: 0, outputTokens: 300, reasoningOutputTokens: 100 },
+    });
+    expect(JSON.stringify(records)).toBe(before);
+  });
+
   it("records each turn exactly once and isolates personal reads", async () => {
     const { store } = await fixture();
     expect(await store.recordTurn(turn())).not.toBeNull();
@@ -108,6 +159,12 @@ describe("FileUsageStore", () => {
     expect(await store.listTurns(USER_ONE)).toHaveLength(1);
     expect(await store.listTurns(USER_TWO)).toHaveLength(1);
     expect(await store.listTurns()).toHaveLength(2);
+    expect(aggregateTurnUsage(await store.listTurns(USER_ONE))).toEqual(aggregateTurnUsage([turn()]));
+    expect(aggregateTurnUsage(await store.listTurns(USER_TWO))).toMatchObject({
+      turns: 1, completedTurns: 0, errorTurns: 1, turnsWithTokenData: 0,
+    });
+    expect(aggregateTurnUsage(await store.listTurns("00000000-0000-4000-8000-000000000003")))
+      .toEqual(aggregateTurnUsage([]));
     expect((await readFile(store.turnJournalPath, "utf8")).trim().split("\n")).toHaveLength(2);
   });
 

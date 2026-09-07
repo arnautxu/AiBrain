@@ -56,14 +56,9 @@ async function ensurePrivateDirectory(directory: string) {
 
 function percentile(values: number[], ratio: number) {
   if (values.length === 0) return null;
-  const sorted = values.toSorted((left, right) => left - right);
+  // Callers supply private scratch arrays, so sorting needs no second copy.
+  const sorted = values.sort((left, right) => left - right);
   return sorted[Math.max(0, Math.ceil(sorted.length * ratio) - 1)] ?? null;
-}
-
-function average(values: number[]) {
-  return values.length === 0
-    ? null
-    : Math.round(values.reduce((total, value) => total + value, 0) / values.length);
 }
 
 function addTokens(total: TokenUsageBreakdown, next: TokenUsageBreakdown) {
@@ -76,23 +71,44 @@ function addTokens(total: TokenUsageBreakdown, next: TokenUsageBreakdown) {
 }
 
 export function aggregateTurnUsage(records: readonly TurnUsageRecord[]): UsageAggregate {
-  const durations = records.map((record) => record.durationMs);
-  const firstText = records.flatMap((record) => record.firstTextMs === null ? [] : [record.firstTextMs]);
-  const tokenRecords = records.flatMap((record) => record.tokenUsage ? [record.tokenUsage] : []);
+  const durations: number[] = [];
+  const firstText: number[] = [];
+  const activeDays = new Set<string>();
   const tokens = { ...zeroTokenUsage };
-  for (const item of tokenRecords) addTokens(tokens, item);
+  let completedTurns = 0;
+  let errorTurns = 0;
+  let stoppedTurns = 0;
+  let totalDurationMs = 0;
+  let totalFirstTextMs = 0;
+  let turnsWithTokenData = 0;
+  for (const record of records) {
+    durations.push(record.durationMs);
+    totalDurationMs += record.durationMs;
+    if (record.firstTextMs !== null) {
+      firstText.push(record.firstTextMs);
+      totalFirstTextMs += record.firstTextMs;
+    }
+    if (record.tokenUsage) {
+      addTokens(tokens, record.tokenUsage);
+      turnsWithTokenData += 1;
+    }
+    if (record.status === "completed") completedTurns += 1;
+    else if (record.status === "error") errorTurns += 1;
+    else if (record.status === "stopped") stoppedTurns += 1;
+    activeDays.add(record.startedAt.slice(0, 10));
+  }
   return {
     turns: records.length,
-    completedTurns: records.filter((record) => record.status === "completed").length,
-    errorTurns: records.filter((record) => record.status === "error").length,
-    stoppedTurns: records.filter((record) => record.status === "stopped").length,
-    activeDays: new Set(records.map((record) => record.startedAt.slice(0, 10))).size,
-    totalDurationMs: durations.reduce((total, duration) => total + duration, 0),
-    averageDurationMs: average(durations),
+    completedTurns,
+    errorTurns,
+    stoppedTurns,
+    activeDays: activeDays.size,
+    totalDurationMs,
+    averageDurationMs: records.length === 0 ? null : Math.round(totalDurationMs / records.length),
     p95DurationMs: percentile(durations, 0.95),
-    averageFirstTextMs: average(firstText),
+    averageFirstTextMs: firstText.length === 0 ? null : Math.round(totalFirstTextMs / firstText.length),
     p95FirstTextMs: percentile(firstText, 0.95),
-    turnsWithTokenData: tokenRecords.length,
+    turnsWithTokenData,
     tokens,
   };
 }
