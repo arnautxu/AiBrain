@@ -219,8 +219,14 @@ class Handler(socketserver.StreamRequestHandler):
             result = self.server.dispatch(value)
             elapsed = round((time.monotonic() - started) * 1000)
             result.update(requestId=value["requestId"], installationId=value["installationId"], connectionId=value["connectionId"])
-            self.wfile.write((json.dumps(result, ensure_ascii=False) + "\n").encode())
-            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"], "elapsedMs": elapsed, "error": result.get("error"), "transportDiagnostic": result.get('transportDiagnostic')}), flush=True)
+            delivered = True
+            try:
+                self.wfile.write((json.dumps(result, ensure_ascii=False) + "\n").encode())
+            except OSError:
+                delivered = False
+            # A client/app restart must not erase evidence of the completed source
+            # operation merely because its socket was already closed.
+            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"], "elapsedMs": elapsed, "error": result.get("error"), "transportDiagnostic": result.get('transportDiagnostic'), "delivered": delivered}), flush=True)
         except (ValueError, OSError):
             pass
 

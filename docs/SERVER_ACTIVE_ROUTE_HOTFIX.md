@@ -93,3 +93,77 @@ one request ID with sourceWaitMs/sessionStartMs/readbackMs and no duplicate sour
 execution. UI shortcuts can use existing queries `server:/C/Arnall/Compres` and
 `server:/C/Arnall/Vendes`, configured only for Arnall and checked through the
 normal endpoint. Keep access to other authorized roots rather than hiding them.
+
+## Post-installation evidence and next bounded change
+
+The release owner installed4fc4d5b's three files; independent hash readback
+matched broker f9cd58e4d241e49526559f85c6e67467ba2b3b43cf1a0f2d995de24f5ceb0e4d,
+files4d7f0ce24747a02f67ad1d2a00d91ca178ee00bf54c79b6bd75770326d91f379 and
+folder39606385ddf1111f175752e02a4a257f7ffb55174e3f39b1aeb299706ff7d4d9.
+Backup: `/usr/local/lib/aibrain/server-files/pre-4fc4d5b-20260907`.
+
+Real C listing after retry succeeded18:34:18Z, request
+ab6f4d3c-a7c0-4003-beaa-986466f80b4b, total19,181ms: source wait0,
+startup16,020ms, readback2,801ms. A subsequent folder request
+6103164b-5ef8-43d9-aae1-5b3ce7da07f8 failed18:36:03Z after63,987ms:
+source wait4,253ms, startup12,672ms, readback46,924ms with
+`RDP_READBACK_TIMEOUT`. Another simultaneous root request was refused by the
+broker's one-operation slot. Priority now lets a queued source operation proceed;
+it does not fix unreliable nonce/clipboard delivery or all concurrent callers.
+
+The follow-up candidate adds a second response sink to the **same execution**:
+nonce-bound JSON written atomically with CreateNew into this invocation's
+private redirected Hetzner job. Clipboard remains supported when redirection is
+unavailable. A clipboard subprocess timeout no longer discards a file response.
+Only owner-private regular single-link files ≤256KiB matching the current nonce
+are accepted. No operation is resent, no Windows disk is written, and no
+persistent bridge is activated. This candidate changes `rdp-access.py` and
+`rdp-server-files.py` together; do not install only one. The broker also logs source completion when an app restart has already closed
+the response socket, with delivered=false and no sensitive payload. Include
+rdp-server-files-broker.py in this installation. This follow-up is **not
+installed or live-tested** under the later no-deploy instruction.
+
+64 RDP/Server tests passed, including6 new readback cases and disconnected-client logging; generated browse/copy
+PowerShell parsed successfully using PowerShell7.6.5. Windows PowerShell5 live
+acceptance is still required after the coordinator installs the reviewed files.
+
+## Recent conversation: distinct continuity evidence
+
+App thread63bc3cb6-fdb0-4bd1-abdc-82a16e6e393f, assistant message
+787040b4-4a6c-40ef-8439-dabb325d2348, runtime turn
+01a07d28-4f7a-7e60-9607-a97570d729b6:
+
+- First tool query `server:/` completed from metadata.
+- Second `live:server:/C/` completed18:37:14.149Z with real C metadata.
+- Third `live:server:/Y/`, call exec-2fbe5460-43b4-47bf-8b53-bc22c1959168,
+  remains `running` in the persisted projection.
+- Projection stopped at sequence21580, updated18:37:15.203Z; both gateway/client
+  journals contain later events through21631 and a waiting commentary completed
+  at18:37:27.549Z. No matching terminal `turn/completed` was found in that journal.
+- Release ea80913 was promoted18:37:19.751Z. The timing establishes an interrupted
+  consumer/projection around restart, not a complete causal proof of every UI
+  failure. No history, token or stored turn was reset.
+- «Fuentes1» expands to `image.png — Archivo adjunto`. It is not empty, but it is
+  the user's uploaded screenshot, not a verified Windows document citation.
+
+Continuity/recovery owner should inspect
+`src/runtime/workers/local-gateway-runtime.ts`,
+`src/runtime/worker-codex-turn.ts`,
+`src/workbench/turn-projection-store.ts` and the preserved per-user app transport
+journal for the pending tool reply and terminal projection. Do not replay
+arbitrary side effects or attribute this to the microphone. The successful C
+partial tool result is preserved; a complete recovered answer is not accepted.
+
+## Fresh business-root evidence, metadata only
+
+Authorized app API checks on live ea80913:
+
+- C:\Arnall at18:52:35.882Z: exactly Compres and Vendes, no pagination/limit;
+  total36,350ms (source1,251ms, startup24,704ms, readback9,890ms).
+- Y:\ at18:53:17.338Z: first page49 visible entries, limited with offset50 next
+  page. Actual directories include COMPRES, COMPTABILITAT, ERP and FACTURES
+  PROVEIDORS2022–2026. Total19,000ms (source0, startup16,112ms, readback2,295ms).
+
+These results establish real directory names. They do not establish each
+folder's function or that Y contains every useful document. No document content
+was opened, file executed, source changed or extension-based hiding applied.
