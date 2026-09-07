@@ -20,6 +20,8 @@ export async function browseServerForSession(session: AuthSession, projectId: st
   const network = new EnterpriseDocumentNetwork(config);
   const roots = await network.rootsForTurn({ userId: session.user.id, projectId, permissions });
   if (signal?.aborted) return { available: false, error: "SERVER_BROWSE_CANCELLED" };
+  if (query === "home") return await new ServerDocumentFiles(network).navigation(roots)
+    ?? { available: false, warning: "No tienes acceso al servidor en este proyecto." };
   // An HTTP disconnect must not orphan the Windows operation and make a reopen
   // start a competing session. Every subscriber has independently passed ACLs.
   // Include resolved roots so a permissions change cannot reuse an older grant.

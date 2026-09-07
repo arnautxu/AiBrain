@@ -36,6 +36,40 @@ export class ServerDocumentFiles {
   constructor(private readonly network: EnterpriseDocumentNetwork,
     private readonly options: { ownerUid?: number; timeoutMs?: number; signal?: AbortSignal } = {}) {}
 
+  /** Navigation is trusted per-installation configuration, never a cached live listing. */
+  async navigation(roots: readonly EnterpriseDocumentRoot[]): Promise<ServerResult | null> {
+    await this.network.validateSyncRoots(roots);
+    if (!roots.some(root => root.scope === "company" && root.scopeId === null)) return null;
+    const directory = path.join(this.network.config.paths.dataRoot, "locks", "server-files");
+    try {
+      const owner = this.options.ownerUid ?? 0;
+      const info = await lstat(directory);
+      if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== owner || (info.mode & 0o022) || await realpath(directory) !== path.resolve(directory)) return unavailable();
+      const entries = (await readdir(directory)).filter(name => /^[a-z0-9][a-z0-9-]{0,62}\.json$/.test(name)).sort();
+      if (entries.length > 8) return unavailable();
+      const results: Array<{ path: string; name: string; kind: "directory"; size: number; modifiedAt: null }> = [];
+      for (const entry of entries) {
+        const connection = entry.slice(0, -5);
+        const metadata = await lstat(path.join(directory, entry));
+        if (metadata.uid !== owner || (metadata.mode & 0o022)) return unavailable();
+        const descriptor: unknown = JSON.parse((await readRegularFileWithin(directory, entry, 4096)).toString("utf8"));
+        if (!record(descriptor) || descriptor.schemaVersion !== 1 || descriptor.connectionId !== connection ||
+            descriptor.installationId !== this.network.config.installationId || descriptor.scope !== "company" || descriptor.mode !== "read-only") return unavailable();
+        if (descriptor.entryPoints === undefined) continue;
+        if (!Array.isArray(descriptor.entryPoints) || descriptor.entryPoints.length > 8) return unavailable();
+        for (const item of descriptor.entryPoints) {
+          if (!record(item) || typeof item.label !== "string" || !item.label.trim() || item.label.length > 60 || /\p{C}/u.test(item.label) ||
+              typeof item.path !== "string" || item.path.length > 200 || item.path.includes("?") || !item.path.startsWith(`server-${connection}/`)) return unavailable();
+          validatePath(item.path);
+          if (!results.some(result => result.path === item.path)) results.push({ path: item.path, name: item.label, kind: "directory", size: 0, modifiedAt: null });
+        }
+      }
+      return { available: true, navigation: true, sourceChecked: false, results, checkedAt: null, nextQuery: null, limited: false };
+    } catch (error) {
+      return record(error) && error.code === "ENOENT" ? null : unavailable();
+    }
+  }
+
   async search(roots: readonly EnterpriseDocumentRoot[], query: string, limit = 50, fresh = false) {
     if (!query.trim() || query.length > 200 || /\p{C}/u.test(query) || !Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid server query");
     const normalized = /^[A-Za-z]:[\\/]/.test(query)
