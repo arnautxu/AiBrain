@@ -118,3 +118,12 @@ were restored afterwards. The live Escape check discovered focus returning to
 BODY when the opening menu item unmounted; explicit stable trigger references
 now return to the + button or the landing Server button. This final wiring has a
 regression test and requires its own deployed readback.
+
+## Optional private transport follow-up
+
+Shared, installation-bound opt-in broker integration and its offline tests are
+now versioned; see [SERVER_PRIVATE_TRANSPORT.md](SERVER_PRIVATE_TRANSPORT.md).
+The default transport remains unchanged. Live activation, Windows-specific
+copy/recovery tests, selected work roots, 2–4 QA identities and performance
+acceptance remain pending. No new Windows session or deployment was performed
+for this follow-up. Account names do not establish dedicated/read-only identity.
