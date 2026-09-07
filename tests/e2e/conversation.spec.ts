@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test, type Page } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
@@ -64,7 +65,7 @@ test("the composer grows, accepts dropped images, stops a stream and recovers af
   await expect(page.getByText("informe.png")).toHaveCount(1);
 
   await page.waitForTimeout(250);
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(page.locator("article.flex.justify-end").filter({ hasText: "Primera línea" })).toBeVisible();
   await expect(page.getByText("Respuesta detenida.")).toBeVisible();
 });
@@ -322,7 +323,7 @@ test("the existing chat route streams a complete turn and persists it in preview
   await expect(completedActivity.getByText("Analizando la petición", { exact: true })).toBeVisible();
 
   await page.waitForTimeout(250);
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(page.locator("article.flex.justify-end").filter({ hasText: "Resume este contenido sintético" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible();
 });
@@ -366,7 +367,7 @@ test("a long recovered conversation keeps the reader in control of scroll", asyn
       threadByProject: { [project.id]: threadId },
     }));
   });
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(page.getByText("Respuesta 40:", { exact: false })).toBeVisible();
 
   const scroller = page.locator(".workbench-main > .scrollbar-thin");
@@ -461,7 +462,7 @@ for (const detachDuringResize of [false, true]) {
       const prefix = previewKey.slice(0, -"workbench.preview.v1".length);
       localStorage.setItem(`${prefix}selection.v1`, JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: threadId } }));
     });
-    await page.reload();
+    await reloadAndReopenConversation(page);
 
     await page.getByRole("textbox", { name: "Mensaje" }).fill("Continúa sin mover mi lectura.");
     await page.getByRole("button", { name: "Enviar mensaje" }).click();

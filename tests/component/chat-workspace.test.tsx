@@ -289,6 +289,21 @@ describe("chat workspace simplificado", () => {
     expect(onPromptChange).toHaveBeenLastCalledWith("Borrador escrito durante la carga");
   });
 
+  it("anchors Tools below its trigger and returns keyboard focus there", async () => {
+    renderWorkspace(null, null, {
+      connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true }],
+    });
+    const trigger = screen.getByRole("button", { name: "Tools", exact: true });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ left: 120, right: 180, top: 200, bottom: 244, width: 60, height: 44, x: 120, y: 200, toJSON: () => ({}) });
+    fireEvent.click(trigger);
+    const popup = screen.getByRole("listbox", { name: "Catálogo de conectores" }).parentElement!;
+    expect(popup.style.top).toBe("250px");
+    expect(popup.style.left).toBe("120px");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
+  });
+
   it("shows only the authorized connector autocomplete and binds a selected @ source", () => {
     const onPromptChange = vi.fn();
     const onConnectorMentionIdsChange = vi.fn();

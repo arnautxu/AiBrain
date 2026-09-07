@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
@@ -38,7 +39,7 @@ test("a delayed high-frequency stream stays interactive, ordered and duplicate-f
   await expect(page.getByText(/dato-238 dato-239 dato-240/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0);
 
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(page.getByRole("heading", { name: "Resultado de rendimiento" })).toHaveCount(1);
   await expect(page.getByText(/dato-238 dato-239 dato-240/)).toHaveCount(1);
 });

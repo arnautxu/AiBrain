@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test } from "@playwright/test";
 import { establishDemoSession } from "../helpers/playwright-auth";
 
@@ -34,7 +35,7 @@ for (const available of [true, false]) {
       localStorage.setItem(key, JSON.stringify(snapshot));
       localStorage.setItem(key.slice(0, -"workbench.preview.v1".length) + "selection.v1", JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: threadId } }));
     }, { threadId, attachment });
-    await page.reload();
+    await reloadAndReopenConversation(page);
     await page.getByRole("button", { name: "Editar solicitud" }).click();
     const composer = page.getByRole("textbox", { name: "Mensaje" });
     await expect(composer).toHaveValue("Revisa el informe original.");

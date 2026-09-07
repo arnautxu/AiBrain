@@ -706,18 +706,13 @@ export function BrainApp({
       ? loadPreviewSnapshot(previewKey, initialWorkbench)
       : initialWorkbench;
     const savedSelection = loadSelection(selectionKey);
-    const preferredProject = snapshot.projects.find((project) =>
-      project.id === savedSelection.activeProjectId && project.status === "active");
-    const project = preferredProject ?? firstActiveProject(snapshot.projects);
-    const preferredThreadId = project ? savedSelection.threadByProject[project.id] : null;
-    const preferredThread = snapshot.threads.find((thread) =>
-      thread.id === preferredThreadId && thread.projectId === project?.id && thread.status === "active");
-    const thread = project ? preferredThread ?? firstActiveThread(snapshot.threads, project.id) : null;
+    const project = newThreadDestination(snapshot.projects);
 
     setProjects(snapshot.projects);
     setThreads(snapshot.threads);
+    // A fresh page starts at home; saved selections only help explicit navigation.
     setActiveProjectId(project?.id ?? null);
-    setActiveThreadId(thread?.id ?? null);
+    setActiveThreadId(null);
     try {
       const saved = JSON.parse(localStorage.getItem(serverDraftsKey) ?? "{}");
       if (saved && typeof saved === "object" && !Array.isArray(saved)) setServerDrafts(Object.fromEntries(Object.entries(saved).filter(([, v]) => isServerReferenceList(v)).slice(-100)) as Record<string, ServerReference[]>);
@@ -727,8 +722,8 @@ export function BrainApp({
       if (saved && typeof saved === "object" && !Array.isArray(saved)) setConnectorDrafts(Object.fromEntries(Object.entries(saved).filter(([key, ids]) => key.length < 300 && Array.isArray(ids) && ids.length <= 20 && ids.every(id => typeof id === "string" && /^[a-z][a-z0-9.:_-]{0,150}$/.test(id))).slice(-100)));
     } catch { /* A malformed browser draft grants no authority. */ }
     const storedDrafts = parseComposerDrafts(localStorage.getItem(composerDraftsKey));
-    const restoredPrompt = storedDrafts[composerDraftKey(project?.id ?? null, thread?.id ?? null)] || "";
-    activeSelectionRef.current = { projectId: project?.id ?? null, threadId: thread?.id ?? null };
+    const restoredPrompt = storedDrafts[composerDraftKey(project?.id ?? null, null)] || "";
+    activeSelectionRef.current = { projectId: project?.id ?? null, threadId: null };
     composerDraftsRef.current = storedDrafts;
     promptRef.current = restoredPrompt;
     setComposerDrafts(storedDrafts);
@@ -740,7 +735,6 @@ export function BrainApp({
       setTaskCenterPayload(taskCenter);
     }
     threadByProjectRef.current = savedSelection.threadByProject;
-    if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
   }, [connectorDraftsKey, serverDraftsKey, composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
 
