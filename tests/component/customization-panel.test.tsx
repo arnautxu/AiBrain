@@ -113,12 +113,12 @@ describe("CustomizationPanel", () => {
     const snapshot = settings(false);
     snapshot.connectors = [{
       ...snapshot.connectors[0],
-      id: "composio-google-workspace",
-      label: "Google Workspace",
+      id: "composio-googlecalendar",
+      label: "Google Calendar",
       status: "connected",
       accountEmail: "arnau@example.com",
-      connectUrl: "/api/connectors/composio/google-workspace/connect",
-      disconnectUrl: "/api/connectors/composio/google-workspace/disconnect",
+      connectUrl: "/api/connectors/composio/googlecalendar/connect",
+      disconnectUrl: "/api/connectors/composio/googlecalendar/disconnect",
       connectionVersion: 2,
     }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === "/api/settings"
@@ -127,9 +127,9 @@ describe("CustomizationPanel", () => {
 
     render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
 
-    expect(await screen.findByText(/Servicios: Gmail, Google Calendar, Google Drive/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Reconectar Google Workspace" })).toHaveAttribute("href", "/api/connectors/composio/google-workspace/connect");
-    expect(screen.getByRole("button", { name: "Desconectar Google Workspace" })).toBeInTheDocument();
+    expect(await screen.findByText(/Servicios: Google Calendar/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Reconectar Google Calendar" })).toHaveAttribute("href", "/api/connectors/composio/googlecalendar/connect");
+    expect(screen.getByRole("button", { name: "Desconectar Google Calendar" })).toBeInTheDocument();
   });
 
   it("keeps archived projects and conversations in settings and restores them explicitly", async () => {
