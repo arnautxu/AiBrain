@@ -860,6 +860,7 @@ button:disabled {
 }
 
 .composer-landing {
+  z-index: 2;
   min-height: 124px;
   padding: 10px;
 }
@@ -1622,6 +1623,7 @@ button:disabled {
 /* Landing-only companion strip; conversation composer layout is unchanged. */
 .landing-band {
   position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   flex-wrap: wrap;

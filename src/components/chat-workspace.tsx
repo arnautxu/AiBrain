@@ -468,6 +468,7 @@ export function ChatWorkspace({
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const composerDraftAdoptedRef = useRef(false);
   const composerShellRef = useRef<HTMLDivElement>(null);
+  const landingBandRef = useRef<HTMLDivElement>(null);
   const composerMeasurementRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const composerAddButtonRef = useRef<HTMLButtonElement>(null);
@@ -683,7 +684,7 @@ export function ChatWorkspace({
   useEffect(() => {
     if (!composerMenuOpen && !composerPickerOpen && !mentionOpen && !connectorCatalogOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
-      if (composerShellRef.current?.contains(event.target as Node)) return;
+      if (composerShellRef.current?.contains(event.target as Node) || landingBandRef.current?.contains(event.target as Node)) return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
       setMentionOpen(false);
@@ -887,8 +888,8 @@ export function ChatWorkspace({
             className="mb-2 max-w-none"
           /> : null}
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
-          <div ref={composerShellRef}>
           <div
+            ref={composerShellRef}
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
@@ -1073,7 +1074,7 @@ export function ChatWorkspace({
               </div>
             </div>
           </div>
-          {!hasMessages ? <div className="landing-band" aria-label="Opciones para empezar">
+          {!hasMessages ? <div ref={landingBandRef} className="landing-band" aria-label="Opciones para empezar">
             <div className="landing-project"><FolderOpen size={15} aria-hidden="true" />
                 {!hasMessages ? (
                   <ComposerPicker
@@ -1098,7 +1099,6 @@ export function ChatWorkspace({
               requestAnimationFrame(() => composerRef.current?.focus());
             }} />
           </div> : null}
-          </div>
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
             <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
               onPromptChange(prompt ? `${prompt}\n\n${text}` : text);
