@@ -153,7 +153,10 @@ describe("Sidebar", () => {
     const navigation = screen.getByRole("navigation", { name: "Navegación principal" });
 
     expect(within(navigation).getByRole("button", { name: /Nueva conversación/ })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+    const search = within(screen.getByTestId("sidebar-header")).getByRole("button", { name: "Buscar" });
+    expect(search).toHaveAttribute("title", "Buscar");
+    expect(within(navigation).queryByRole("button", { name: "Buscar" })).not.toBeInTheDocument();
+    fireEvent.click(search);
     fireEvent.click(within(navigation).getByRole("button", { name: "Automatizaciones" }));
     expect(onOpenCommandPalette).toHaveBeenCalledOnce();
     expect(onOpenAutomations).toHaveBeenCalledOnce();

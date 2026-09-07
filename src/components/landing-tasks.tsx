@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { CalendarBlank, CaretRight, ListChecks, Presentation, Table } from "@phosphor-icons/react";
 import type { LandingSuggestion } from "@/lib/landing-suggestions";
@@ -49,7 +50,7 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
           if (!inMenu) openerRef.current = event.currentTarget;
           setSchedule(task); setOpen(true);
         } else choose(task.prompt);
-      }}><Icon size={17} aria-hidden="true" /><span>{task.label}</span>{task.children ? <CaretRight size={12} aria-hidden="true" /> : null}</button>;
+      }}>{task.iconPath ? <Image unoptimized src={task.iconPath} alt="" width={20} height={20} className="size-5 shrink-0 object-contain" /> : <Icon size={17} aria-hidden="true" />}<span>{task.label}</span>{task.children ? <CaretRight size={12} aria-hidden="true" /> : null}</button>;
   });
   return <div ref={rootRef} className={`landing-tasks landing-tasks-${variant}`}>
     {variant !== "suggestions" ? <button type="button" disabled={disabled} role={variant === "embedded" ? "menuitem" : undefined} tabIndex={variant === "embedded" ? -1 : undefined} className="landing-band-item" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
@@ -57,7 +58,7 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
       onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />Tareas programadas</button> : items}
     {open ? <div ref={menuRef} id={id} role="menu" aria-label={schedule ? "Horarios del equipo" : "Tareas programadas"} className="landing-task-menu" onKeyDown={(event) => { event.stopPropagation(); onKeyDown(event); }}>
       {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" onClick={() => setSchedule(null)}>Volver a las tareas</button> : null}
-        {schedule.children?.map((child) => <button key={child.id} type="button" role="menuitem" disabled={disabled} className="landing-task-item" onClick={() => choose(child.prompt)}>{child.label}</button>)}</> : items}
+        {schedule.children?.map((child) => <button key={child.id} type="button" role="menuitem" disabled={disabled} className="landing-task-item" onClick={() => choose(child.prompt)}>{schedule.iconPath ? <Image unoptimized src={schedule.iconPath} alt="" width={20} height={20} className="size-5 shrink-0 object-contain" /> : null}{child.label}</button>)}</> : items}
     </div> : null}
   </div>;
 }
