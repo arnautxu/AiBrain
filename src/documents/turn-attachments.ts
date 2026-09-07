@@ -1,7 +1,7 @@
 import path from "node:path";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import type { UserInput } from "../../contracts/codex/0.149.1/types/v2/UserInput";
+import type { UserInput } from "../../contracts/codex/0.153.4/types/v2/UserInput";
 import type { ChatAttachment } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
 import {

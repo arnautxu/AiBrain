@@ -375,6 +375,7 @@ describe("AppServerRpcRouter", () => {
         method: "item/commandExecution/requestApproval",
         id: "approval-a",
         params: {
+          kind: "command",
           threadId: "thread-a",
           turnId: "turn-a",
           itemId: "item-a",
@@ -643,6 +644,7 @@ describe("AppServerRpcRouter", () => {
         method: "item/commandExecution/requestApproval",
         id: "approval-pending",
         params: {
+          kind: "command",
           threadId: "thread-approval",
           turnId: "turn-approval",
           itemId: "item-approval",

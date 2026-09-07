@@ -27,7 +27,7 @@ This avoids acknowledging an approval response merely because it reached an
 operating-system pipe.
 
 The JSON-RPC payload types and runtime validators come from the generated Codex
-`0.149.1` bindings and JSON Schemas in `contracts/codex/0.149.1`. Unknown
+`0.153.4` bindings and JSON Schemas in `contracts/codex/0.153.4`. Unknown
 envelope fields, unknown methods, malformed or method-incompatible params,
 non-JSON payloads, sequence gaps and binary WebSocket frames fail closed.
 
@@ -55,7 +55,7 @@ bundling it into an API-route chunk can substitute framework WebSocket code and
 prevent the loopback client from connecting even though the gateway listener
 is healthy.
 
-Codex App Server `0.149.1` marks its WebSocket listener experimental and
+Codex App Server `0.153.4` marks its WebSocket listener experimental and
 unsupported for production. The raw listener also does not provide AiBrain's
 durable `eventId` replay or `clientRequestId` acceptance contract. Those
 guarantees belong to the private worker gateway envelope implemented here;

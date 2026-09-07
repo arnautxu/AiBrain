@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 const repositoryRoot = path.resolve(import.meta.dirname, "../..");
-const pinnedVersion = "0.149.1";
+const pinnedVersion = "0.153.4";
 
 describe("pinned Codex App Server contract", () => {
   it("pins the worker binary to the generated contract version", async () => {

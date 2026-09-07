@@ -551,7 +551,7 @@ describe("WebSocketAppServerTransport contract", () => {
       clientRequestId: "invalid-request",
       kind: "rpc-request",
       rpc: { method: "thread/read", id: "invalid-request", params: {} },
-    } as AppServerRequest)).rejects.toThrow("Codex 0.149.1 schema");
+    } as AppServerRequest)).rejects.toThrow("Codex 0.153.4 schema");
     await transport.close();
   });
 });

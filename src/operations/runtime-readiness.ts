@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import type { ReadinessComponentProbe, ReadinessComponentResult } from "@/operations/readiness";
 
 const execFileAsync = promisify(execFile);
-const EXACT_CODEX_VERSION = "0.149.1";
+const EXACT_CODEX_VERSION = "0.153.4";
 const CHROME_VERSION = /^\d+\.\d+\.\d+\.\d+$/u;
 
 type RuntimeReadinessDependencies = Readonly<{

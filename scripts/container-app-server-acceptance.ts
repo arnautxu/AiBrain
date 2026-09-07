@@ -6,7 +6,7 @@ import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gatewa
 import type { ManagedWorkerRuntime, WorkerLaunchContext } from "@/runtime/workers/types";
 
 const ACCEPTANCE_TIMEOUT_MS = 20_000;
-const EXPECTED_CODEX_VERSION = "0.149.1";
+const EXPECTED_CODEX_VERSION = "0.153.4";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));

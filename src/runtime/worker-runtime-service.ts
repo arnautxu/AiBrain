@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRequest";
+import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
 import type { InstallationConfig } from "@/config/installation-schema";
 import { FileLocalUserStore } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";

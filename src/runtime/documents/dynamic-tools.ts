@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
-import type { DynamicToolCallParams } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
-import type { DynamicToolCallResponse } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
-import type { DynamicToolSpec } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
+import type { DynamicToolCallParams } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallResponse";
+import type { DynamicToolSpec } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolSpec";
 import type { InstallationConfig } from "@/config/installation-schema";
 import type { DocumentArtifact } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";

@@ -6,7 +6,7 @@ import {
 } from "@/connectors/codex-managed-app-provider";
 import type { ConnectorHealthStatus, ConnectorPrincipal, CredentialBinding } from "@/connectors/contracts";
 import type { InstallationConfig } from "@/config/installation-schema";
-import type { McpAuthStatus } from "../../contracts/codex/0.149.1/types/v2/McpAuthStatus";
+import type { McpAuthStatus } from "../../contracts/codex/0.153.4/types/v2/McpAuthStatus";
 
 export type ConnectorPreflightCheck = {
   ok: boolean;

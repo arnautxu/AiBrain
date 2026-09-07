@@ -1,5 +1,5 @@
-import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRequest";
-import type { McpServerToolCallParams } from "../../contracts/codex/0.149.1/types/v2/McpServerToolCallParams";
+import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
+import type { McpServerToolCallParams } from "../../contracts/codex/0.153.4/types/v2/McpServerToolCallParams";
 import type { CatalogPrincipal, CatalogState } from "@/catalog/contracts";
 import { allowsCatalogOperation, catalogResourceForMcpTool, visibleCatalogResources } from "@/catalog/resolver";
 

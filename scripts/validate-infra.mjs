@@ -86,7 +86,7 @@ forbidMatch(arnallDeployWorkflow, /CI_RUN_ID: \$\{\{ github\.event\.workflow_run
 requireMatch(arnallDeployWorkflow, /GHCR_PULL_TOKEN: \$\{\{ github\.token \}\}/u, "Arnall deployment does not use its temporary package token for the pull");
 requireMatch(arnallDeployWorkflow, /StrictHostKeyChecking=yes[\s\S]*UserKnownHostsFile=/u, "Arnall deployment does not pin the SSH host identity");
 
-requireMatch(dockerfile, /@openai\/codex@0\.149\.1/u, "Dockerfile does not pin the approved Codex version");
+requireMatch(dockerfile, /@openai\/codex@0\.153\.4/u, "Dockerfile does not pin the approved Codex version");
 forbidMatch(dockerfile, /ARG CODEX_VERSION/u, "Dockerfile permits the App Server contract version to be overridden");
 requireMatch(dockerfile, /ARG NODE_IMAGE=node:24\.18\.1-bookworm-slim@sha256:[0-9a-f]{64}/u, "Dockerfile does not pin the reviewed Node 24 runtime digest");
 requireMatch(dockerfile, /ARG DEBIAN_SNAPSHOT=\d{8}T\d{6}Z/u, "Dockerfile does not pin an immutable Debian snapshot");
