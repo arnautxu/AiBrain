@@ -9,6 +9,11 @@ Un healthcheck verde con una imagen antigua no se acepta.
 
 ## Publicación GHCR y promoción Arnall
 
+La descarga APT de la imagen usa tres reintentos y un timeout HTTPS de 30
+segundos para tolerar errores transitorios del servidor de snapshots. Conserva
+el snapshot fijado y la verificación de paquetes; si se agotan los intentos,
+la construcción falla y no se publica ni se promueve la revisión.
+
 `Backend CI` conserva todos los gates. Solo un `workflow_run` exitoso de un
 push a `main` publica `ghcr.io/arnautxu/aibrain:<SHA>` y
 `ghcr.io/arnautxu/aibrain-egress:<SHA>`. El workflow guarda los dos digests en
