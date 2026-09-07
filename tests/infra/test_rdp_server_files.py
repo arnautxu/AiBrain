@@ -220,5 +220,68 @@ class ServerFileTests(unittest.TestCase):
         self.assertNotIn('credentials.env', unit)
         self.assertNotIn('enterprise-documents', unit)
 
+class InteractiveAdmissionTests(unittest.TestCase):
+    def test_busy_source_waits_then_executes_windows_exactly_once(self):
+        import fcntl
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            access = {'readRoots': ['C:\\'], 'target': 'ts'}
+            class FakeSession:
+                calls = 0
+                def __init__(self, *args): pass
+                def __enter__(self): return self
+                def __exit__(self, *args): pass
+                def execute(self, command, nonce, timeout):
+                    self.calls += 1
+                    return {'ok': True, 'entries': [], 'nonce': nonce}
+            session = FakeSession()
+            with patch.object(files.rdp, 'load_config', return_value=({}, {}, access, root)), patch.object(files.rdp, 'RdpSession', return_value=session), patch.object(files.fcntl, 'flock', side_effect=[BlockingIOError(), BlockingIOError(), None]) as acquire, patch.object(files.time, 'sleep'):
+                result = files.browse({'connectionConfig': 'x', 'accessManifest': 'y'}, {'mode': 'drives', 'limit': 50}, lock_wait_seconds=1)
+            self.assertEqual(acquire.call_count, 3)
+            self.assertEqual(session.calls, 1)
+            self.assertEqual(result['transportDiagnostic']['phase'], 'complete')
+
+    def test_default_background_admission_stays_nonblocking(self):
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(files.rdp, 'load_config', return_value=({}, {}, {'readRoots': ['C:\\'], 'target': 'ts'}, Path(root))), patch.object(files.fcntl, 'flock', side_effect=BlockingIOError()), patch.object(files.rdp, 'RdpSession') as session:
+                with self.assertRaises(BlockingIOError) as error:
+                    files.browse({'connectionConfig': 'x', 'accessManifest': 'y'}, {'mode': 'drives', 'limit': 50})
+                session.assert_not_called()
+                self.assertEqual(error.exception.server_file_diagnostic['phase'], 'source_lock')
+
+    def test_interactive_read_retries_only_refused_admission(self):
+        with patch.object(broker.sync, 'rdp_call', side_effect=[BlockingIOError(), {'ok': True}]) as call, patch.object(broker.time, 'sleep'):
+            self.assertTrue(broker.interactive_read_call({}, 'copy', 'C:\\Work\\a.txt')['ok'])
+            self.assertEqual(call.call_count, 2)
+            self.assertEqual(call.call_args.kwargs, {'attempts': 1})
+        with patch.object(broker.sync, 'rdp_call', side_effect=ValueError('RDP_OPERATION_FAILED')) as call:
+            with self.assertRaises(ValueError):
+                broker.interactive_read_call({}, 'copy', 'C:\\Work\\a.txt')
+            call.assert_called_once()
+
+    def test_interactive_read_admission_is_bounded(self):
+        with patch.object(broker.sync, 'rdp_call', side_effect=BlockingIOError()) as call, patch.object(broker.time, 'monotonic', side_effect=[0, 56]):
+            with self.assertRaises(BlockingIOError):
+                broker.interactive_read_call({}, 'copy', 'C:\\Work\\a.txt')
+            call.assert_called_once()
+
+    def test_nonce_timeout_has_sanitized_phase_without_command_or_source(self):
+        class FakeSession:
+            def __init__(self, *args): pass
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def execute(self, *args, **kwargs):
+                raise ValueError('No matching RDP readback; source access was not confirmed')
+        with tempfile.TemporaryDirectory() as root:
+            with patch.object(files.rdp, 'load_config', return_value=({}, {}, {'readRoots': ['C:\\'], 'target': 'ts'}, Path(root))), patch.object(files.rdp, 'RdpSession', FakeSession):
+                with self.assertRaises(ValueError) as error:
+                    files.browse({'connectionConfig': 'x', 'accessManifest': 'y'}, {'mode': 'drives', 'limit': 50})
+            diagnostic = error.exception.server_file_diagnostic
+            self.assertEqual(diagnostic['phase'], 'readback')
+            self.assertEqual(diagnostic['cause'], 'RDP_READBACK_TIMEOUT')
+            self.assertEqual(set(diagnostic), {'phase', 'timingsMs', 'cause'})
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -62,6 +62,26 @@ def validate_request(value, manifest):
         return False
 
 
+def interactive_browse(manifest, request):
+    # Wait for admission while the background worker can observe our demand.
+    # This never retries an operation that has reached Windows.
+    return files.browse(manifest, request, lock_wait_seconds=55)
+
+
+def interactive_read_call(manifest, operation, source, attempts=1):
+    sync.require(attempts == 1, "INVALID_INTERACTIVE_ATTEMPTS")
+    deadline = time.monotonic() + 55
+    while True:
+        try:
+            return sync.rdp_call(manifest, operation, source, attempts=1)
+        except BlockingIOError:
+            # The legacy CLI refused its source lock before creating a session.
+            # Only this admission refusal is eligible for another attempt.
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(min(.25, max(0, deadline - time.monotonic())))
+
+
 def execute(manifest, value, cached_only=False):
     sync.require(validate_request(value, manifest), "INVALID_SERVER_FILE_REQUEST")
     # Revalidate publication ownership before every operation, not just startup.
@@ -72,7 +92,7 @@ def execute(manifest, value, cached_only=False):
             if cached_only:
                 return None
             with folder_module().interactive_access(manifest, catalogue=False):
-                return {**files.search(manifest, **value['input']), 'sourceChecked': True, 'lookupMode': 'live'}
+                return {**files.search(manifest, **value['input'], run=interactive_browse), 'sourceChecked': True, 'lookupMode': 'live'}
         if value['operation'] == 'inventory':
             if cached_only:
                 result = server_map.folder_inventory(manifest, files=files, **value['input'])
@@ -94,14 +114,17 @@ def execute(manifest, value, cached_only=False):
         if cached_only:
             return None
         with folder_module().interactive_access(manifest, catalogue=False):
-            return files.read(manifest, **value["input"])
+            return files.read(manifest, **value["input"], call=interactive_read_call)
     except Exception as error:
+        diagnostic = getattr(error, 'server_file_diagnostic', None)
         code = 'SERVER_FILES_BUSY' if isinstance(error, BlockingIOError) else str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
-        if code not in {"SERVER_FILES_BUSY", "WINDOWS_PATH_UNAVAILABLE", "SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
+        if diagnostic and diagnostic.get('cause') == 'RDP_READBACK_TIMEOUT':
+            code = 'SERVER_FILES_TIMEOUT'
+        if code not in {"SERVER_FILES_TIMEOUT", "SERVER_FILES_BUSY", "WINDOWS_PATH_UNAVAILABLE", "SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
             code = "SERVER_FILES_UNAVAILABLE"
         warnings = {'SERVER_FILES_BUSY': 'La conexión está ocupada. Reintenta la consulta concreta; no significa que la carpeta no exista.',
                     'WINDOWS_PATH_UNAVAILABLE': 'Windows no ha permitido consultar esta ruta concreta. No acredita una caída del servidor ni ausencia global. Comprueba las carpetas observadas en el padre.'}
-        return {"available": False, "error": code, "warning": warnings.get(code, "No se ha podido consultar esta ubicación. No demuestra que no exista; no se ha modificado el servidor.")}
+        return {"available": False, "error": code, **({'transportDiagnostic': diagnostic} if diagnostic else {}), "warning": warnings.get(code, "No se ha podido consultar esta ubicación. No demuestra que no exista; no se ha modificado el servidor.")}
 
 
 class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
@@ -175,7 +198,7 @@ class Handler(socketserver.StreamRequestHandler):
             elapsed = round((time.monotonic() - started) * 1000)
             result.update(requestId=value["requestId"], installationId=value["installationId"], connectionId=value["connectionId"])
             self.wfile.write((json.dumps(result, ensure_ascii=False) + "\n").encode())
-            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"], "elapsedMs": elapsed, "error": result.get("error")}), flush=True)
+            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"], "elapsedMs": elapsed, "error": result.get("error"), "transportDiagnostic": result.get('transportDiagnostic')}), flush=True)
         except (ValueError, OSError):
             pass
 

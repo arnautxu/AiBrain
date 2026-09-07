@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import time
 import urllib.parse
 
 spec = importlib.util.spec_from_file_location("rdp_sync", Path(__file__).with_name("rdp-sync.py"))
@@ -89,22 +90,45 @@ $r=@{ok=$true;entries=@($out);truncated=$partial;denied=$denied;nextOffset=$next
     return command
 
 
-def browse(manifest, request):
+def browse(manifest, request, lock_wait_seconds=0):
     config, credentials, access, destination = rdp.load_config(manifest["connectionConfig"], manifest["accessManifest"])
     if request.get("source"):
         rdp.select_root(request["source"], access["readRoots"])
     nonce = secrets.token_hex(16)
     program = command(request, access, nonce)
-    with (destination / ".operator.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        job = destination / (dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + nonce[:12])
-        job.mkdir(mode=0o700)
-        with rdp.RdpSession(config, credentials, access["target"], job) as session:
-            result = session.execute(program, nonce, timeout=45)
-        result["recordedAt"] = sync.now()
-        sync.atomic_json(job / "receipt.json", result)
-        rdp.require(result.get("ok") is True, "WINDOWS_PATH_UNAVAILABLE")
-    return result
+    rdp.require(type(lock_wait_seconds) in (int, float) and 0 <= lock_wait_seconds <= 55, "INVALID_SOURCE_WAIT")
+    timings, phase = {}, 'source_lock'
+    started = time.monotonic()
+    try:
+        with (destination / ".operator.lock").open("a") as lock:
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() - started >= lock_wait_seconds:
+                        raise
+                    time.sleep(min(.25, max(0, lock_wait_seconds - (time.monotonic() - started))))
+            timings['sourceWaitMs'] = round((time.monotonic() - started) * 1000)
+            job = destination / (dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ-") + nonce[:12])
+            job.mkdir(mode=0o700)
+            phase, started = 'session_start', time.monotonic()
+            with rdp.RdpSession(config, credentials, access["target"], job) as session:
+                timings['sessionStartMs'] = round((time.monotonic() - started) * 1000)
+                phase, started = 'readback', time.monotonic()
+                result = session.execute(program, nonce, timeout=45)
+                timings['readbackMs'] = round((time.monotonic() - started) * 1000)
+            result['transportDiagnostic'] = {'phase': 'complete', 'timingsMs': timings}
+            result["recordedAt"] = sync.now()
+            sync.atomic_json(job / "receipt.json", result)
+            rdp.require(result.get("ok") is True, "WINDOWS_PATH_UNAVAILABLE")
+        return result
+    except Exception as error:
+        timings[{'source_lock': 'sourceWaitMs', 'session_start': 'sessionStartMs', 'readback': 'readbackMs'}[phase]] = round((time.monotonic() - started) * 1000)
+        cause = 'SOURCE_BUSY' if isinstance(error, BlockingIOError) else 'RDP_READBACK_TIMEOUT' if isinstance(error, ValueError) and str(error) == 'No matching RDP readback; source access was not confirmed' else 'RDP_OPERATION_FAILED'
+        # Fixed enums and timings only: never paths, clipboard, commands or credentials.
+        error.server_file_diagnostic = {'phase': phase, 'timingsMs': timings, 'cause': cause}
+        raise
 
 
 def search(manifest, query, limit, run=browse):
@@ -130,6 +154,7 @@ def search(manifest, query, limit, run=browse):
     if type(result.get("nextOffset")) is int and request["mode"] == "list":
         next_query = "server:/" + virtual_path(manifest["connectionId"], request["source"]).split("/", 1)[1] + "?offset=" + str(result["nextOffset"])
     return {"available": True, "checkedAt": result["recordedAt"], "results": entries,
+            **({'transportDiagnostic': result['transportDiagnostic']} if 'transportDiagnostic' in result else {}),
             "truncated": bool(result.get("truncated")), "nextQuery": next_query,
             "limited": bool(result.get("truncated") or result.get("denied") or filtered),
             "warning": "La búsqueda recursiva es limitada; navega por server:/ y las carpetas para comprobar una ubicación concreta. No interpretes un resultado vacío como ausencia en todo el servidor." if request["mode"] == "search" else None}
