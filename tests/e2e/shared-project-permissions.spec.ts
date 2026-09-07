@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test, type Page } from "@playwright/test";
 import type {
   ProjectMemberRole,
@@ -174,7 +175,7 @@ async function seedSharedSnapshot(page: Page, role: "viewer" | "editor") {
       threadByProject: { [nextSnapshot.projects[0].id]: nextSnapshot.threads[0].id },
     }));
   }, snapshot);
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(page.getByRole("heading", { name: "Historial compartido" })).toBeVisible();
 }
 

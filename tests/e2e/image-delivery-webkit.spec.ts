@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test as base, type Page } from "@playwright/test";
 import { createServer, request as httpRequest } from "node:http";
 import { connect as connectTcp } from "node:net";
@@ -160,7 +161,7 @@ test("an authenticated PNG remains visible and downloadable after reload in iPho
     }));
   }, { id: artifactId, name: artifactName, prompt: artifactPrompt });
 
-  await page.reload();
+  await reloadAndReopenConversation(page);
   const image = page.getByRole("img", { name: artifactPrompt });
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => ({
@@ -170,7 +171,7 @@ test("an authenticated PNG remains visible and downloadable after reload in iPho
   }))).toMatchObject({ complete: true, naturalHeight: 32, naturalWidth: 32 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
-  await page.reload();
+  await reloadAndReopenConversation(page);
   await expect(image).toBeVisible();
   await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(32);
   expect(artifactRequests.filter((request) => !request.download)).toHaveLength(2);

@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test, type Page } from "@playwright/test";
 import { establishDemoSession } from "../helpers/playwright-auth";
 import { generatedPngFixture } from "../helpers/png-fixture";
@@ -22,7 +23,7 @@ async function seedImage(page: Page, width = 96, height = 64) {
     localStorage.setItem(key, JSON.stringify(snapshot));
     localStorage.setItem(key.slice(0, -"workbench.preview.v1".length) + "selection.v1", JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: threadId } }));
   }, { id: artifactId, prompt: imagePrompt, width, height });
-  await page.reload();
+  await reloadAndReopenConversation(page);
 }
 
 for (const failure of [401, 403, 404, 503]) {
@@ -45,7 +46,7 @@ for (const failure of [401, 403, 404, 503]) {
     await expect(page.getByText("Cargando imagen…")).toHaveCount(0);
     expect(reads).toBe(2);
     expect(turns).toBe(0);
-    await page.reload();
+    await reloadAndReopenConversation(page);
     await expect(page.getByRole("link", { name: "Descargar prueba.png" })).toBeVisible();
     expect(turns).toBe(0);
   });

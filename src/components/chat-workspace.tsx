@@ -496,6 +496,7 @@ export function ChatWorkspace({
   const composerAddButtonRef = useRef<HTMLButtonElement>(null);
   const composerMenuRef = useRef<HTMLDivElement>(null);
   const connectorCatalogRef = useRef<HTMLDivElement>(null);
+  const connectorTriggerRef = useRef<HTMLButtonElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const fileReadingRef = useRef(false);
@@ -717,7 +718,8 @@ export function ChatWorkspace({
     return () => cancelAnimationFrame(frame);
   }, [connectorCatalogOpen]);
 
-  const openAuthorizedConnectors = () => {
+  const openAuthorizedConnectors = (trigger: HTMLButtonElement | null) => {
+    connectorTriggerRef.current = trigger;
     if (connectorMentions.length === 0) {
       onComposerNotice(t("No hay conectores habilitados en tu catálogo."));
       setComposerMenuOpen(false);
@@ -774,7 +776,8 @@ export function ChatWorkspace({
       setMentionOpen(false);
       setConnectorCatalogOpen(false);
       requestAnimationFrame(() => {
-        if (returnToAddButton) composerAddButtonRef.current?.focus();
+        if (connectorCatalogOpen) connectorTriggerRef.current?.focus();
+        else if (returnToAddButton) composerAddButtonRef.current?.focus();
         else composerRef.current?.focus({ preventScroll: true });
       });
     };
@@ -981,7 +984,7 @@ export function ChatWorkspace({
               <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label={t("Añadir al mensaje")} className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />{t("Adjuntar archivos")}</button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">{t("Crear imagen")}</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />{t("Tools")}</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => openAuthorizedConnectors(composerAddButtonRef.current)}><At size={17} />{t("Tools")}</button>
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />{t("Server")}</button>
                 <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="embedded" disabled={sending} onSelect={(text) => {
                   onPromptChange(text);
@@ -1079,7 +1082,7 @@ export function ChatWorkspace({
             {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label={t("Conectores disponibles")} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
               {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores autorizados que coincidan.")}</p>}
             </div></ConnectorPopover> : null}
-            {connectorCatalogOpen ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label={t("Catálogo de conectores")} aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
+            {connectorCatalogOpen ? <ConnectorPopover anchor={connectorTriggerRef} triggerAligned><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label={t("Catálogo de conectores")} aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
                 setCatalogActiveIndex((current) => nextEnabledConnectorIndex(connectorMentions, current, event.key === "ArrowDown" ? 1 : -1));
@@ -1177,7 +1180,7 @@ export function ChatWorkspace({
 
             </div>
             <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />{t("Server")}</button>
-            <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />{t("Tools")}</button>
+            <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={(event) => { setComposerPickerOpen(null); if (connectorCatalogOpen) setConnectorCatalogOpen(false); else openAuthorizedConnectors(event.currentTarget); }}><At size={15} aria-hidden="true" />{t("Tools")}</button>
             <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="menu" disabled={sending} onSelect={(text) => {
               onPromptChange(text);
               requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
