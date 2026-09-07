@@ -220,7 +220,7 @@ function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
 }
 
 function isStrictChatMessage(value: unknown): value is ChatMessage {
-  if (!hasExactKeys(value, MESSAGE_KEYS, ["sources", "toolResults", "durationMs", "serverReferences"]) || !isChatMessage(value)) return false;
+  if (!hasExactKeys(value, MESSAGE_KEYS, ["sources", "toolResults", "durationMs", "serverReferences", "connectorMentions"]) || !isChatMessage(value)) return false;
   if (!isUuid(value.id)) return false;
   if (!isCanonicalIsoDate(value.createdAt)) return false;
   if (!value.activity.every((item) =>
@@ -1080,7 +1080,8 @@ export class FileWorkbenchStore {
           existingUser?.role === "user" && existingAssistant?.role === "assistant" &&
           existingUser.content === userMessage.content &&
           JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments) &&
-          JSON.stringify(existingUser.serverReferences ?? []) === JSON.stringify(userMessage.serverReferences ?? [])
+          JSON.stringify(existingUser.serverReferences ?? []) === JSON.stringify(userMessage.serverReferences ?? []) &&
+          JSON.stringify(existingUser.connectorMentions ?? []) === JSON.stringify(userMessage.connectorMentions ?? [])
         ) {
           if (
             options.retryExistingFailure === true &&

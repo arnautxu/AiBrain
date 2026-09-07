@@ -34,8 +34,8 @@ describe("CustomizationPanel", () => {
     snapshot.connectors = [{ ...snapshot.connectors[0], id: "composio-gmail" }];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === "/api/settings" ? snapshot : usage("personal"))));
     render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
-    expect(await screen.findByText(/abre un chat nuevo y selecciónalas con @/)).toBeInTheDocument();
-    expect(screen.getByText(status === "failed" ? /No se completó la conexión/ : /Has vuelto de autorizar la cuenta/)).toBeInTheDocument();
+    expect(await screen.findByText(/Conecta tus apps para usarlas con @/)).toBeInTheDocument();
+    expect(screen.getByText(status === "failed" ? /No se completó la conexión/ : /estado verificado de tus conexiones/)).toBeInTheDocument();
     expect(screen.queryByText("Conectado")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Conectar Gmail" })).toBeInTheDocument();
   });
@@ -127,7 +127,7 @@ describe("CustomizationPanel", () => {
 
     render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="connectors" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
 
-    expect(await screen.findByText(/Servicios: Google Calendar/)).toBeInTheDocument();
+    expect(await screen.findByText(/Consulta tus calendarios y eventos/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reconectar Google Calendar" })).toHaveAttribute("href", "/api/connectors/composio/googlecalendar/connect");
     expect(screen.getByRole("button", { name: "Desconectar Google Calendar" })).toBeInTheDocument();
   });

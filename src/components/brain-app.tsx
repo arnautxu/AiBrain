@@ -577,7 +577,10 @@ export function BrainApp({
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [connectorMentions, setConnectorMentions] = useState<ConnectorMention[]>([]);
-  const [selectedConnectorMentionIds, setSelectedConnectorMentionIds] = useState<string[]>([]);
+  const connectorDraftsKey = `${composerDraftsKey}.connectors`;
+  const [connectorDrafts, setConnectorDrafts] = useState<Record<string, string[]>>({});
+  const selectedConnectorMentionIds = useMemo(() => connectorDrafts[composerDraftKey(activeProjectId, activeThreadId)] ?? [], [connectorDrafts, activeProjectId, activeThreadId]);
+  const setSelectedConnectorMentionIds = (ids: string[]) => setConnectorDrafts(current => ({ ...current, [composerDraftKey(activeProjectId, activeThreadId)]: ids }));
   const [attachments, setAttachments] = useState<ChatInputAttachment[]>([]);
   const [documents, setDocuments] = useState<StagedComposerDocument[]>([]);
   const [publications, setPublications] = useState<DocumentPublicationDraft[]>([]);
@@ -717,6 +720,10 @@ export function BrainApp({
       const saved = JSON.parse(localStorage.getItem(serverDraftsKey) ?? "{}");
       if (saved && typeof saved === "object" && !Array.isArray(saved)) setServerDrafts(Object.fromEntries(Object.entries(saved).filter(([, v]) => isServerReferenceList(v)).slice(-100)) as Record<string, ServerReference[]>);
     } catch { /* A corrupt draft never grants source access. */ }
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(connectorDraftsKey) ?? "{}");
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) setConnectorDrafts(Object.fromEntries(Object.entries(saved).filter(([key, ids]) => key.length < 300 && Array.isArray(ids) && ids.length <= 20 && ids.every(id => typeof id === "string" && /^[a-z][a-z0-9.:_-]{0,150}$/.test(id))).slice(-100)));
+    } catch { /* A malformed browser draft grants no authority. */ }
     const storedDrafts = parseComposerDrafts(localStorage.getItem(composerDraftsKey));
     const restoredPrompt = storedDrafts[composerDraftKey(project?.id ?? null, thread?.id ?? null)] || "";
     activeSelectionRef.current = { projectId: project?.id ?? null, threadId: thread?.id ?? null };
@@ -733,7 +740,7 @@ export function BrainApp({
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
-  }, [serverDraftsKey, composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
+  }, [connectorDraftsKey, serverDraftsKey, composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -767,9 +774,7 @@ export function BrainApp({
     return () => controller.abort();
   }, [hydrated, initialWorkbench.persistence]);
 
-  useEffect(() => {
-    setSelectedConnectorMentionIds((current) => current.filter((id) => connectorMentions.some((mention) => mention.id === id && mention.canRead)));
-  }, [connectorMentions]);
+
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
@@ -841,6 +846,9 @@ export function BrainApp({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [hydrated]);
+  useEffect(() => {
+    if (hydrated) localStorage.setItem(connectorDraftsKey, JSON.stringify(connectorDrafts));
+  }, [hydrated, connectorDrafts, connectorDraftsKey]);
   useEffect(() => {
     if (hydrated) localStorage.setItem(serverDraftsKey, JSON.stringify(serverDrafts));
   }, [hydrated, serverDrafts, serverDraftsKey]);
@@ -1496,6 +1504,7 @@ export function BrainApp({
         "complete",
         startedAt.toISOString(),
       );
+      if (selectedConnectorMentionIds.length) userMessage.connectorMentions = selectedConnectorMentionIds;
       if (selectedServerReferences.length) userMessage.serverReferences = selectedServerReferences;
       const readyDocuments = documents.filter((document) => document.status === "ready");
       userMessage.attachments = [
@@ -1557,7 +1566,11 @@ export function BrainApp({
         setPendingRuntimeContext(null);
         setAttachments([]);
         setDocuments([]);
-        setSelectedConnectorMentionIds([]);
+        setConnectorDrafts(current => {
+          const next = { ...current };
+          if (next[selectionDraftKey] === selectedConnectorMentionIds) delete next[selectionDraftKey];
+          return next;
+        });
         setImageGeneration(false);
       }
 

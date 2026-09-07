@@ -46,6 +46,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
   const resources = visibleCatalogResources(state, principal)
     .filter((resource): resource is CatalogResource & { kind: "app" | "connector" | "mcp" } => resource.kind !== "skill")
     .sort((left, right) => left.label.localeCompare(right.label, "es"));
+  const connectUrls = new Map<string, string | null>();
   const health = new Map<string, { status: string; statusCode: string | null }>();
   if (session) {
     const capabilities = await Promise.all([
@@ -55,6 +56,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
       outlookCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
     ]).then((groups) => groups.flat());
     for (const connector of capabilities) {
+      if ("connectUrl" in connector) connectUrls.set(connector.connectorId, connector.connectUrl as string | null);
       health.set(connector.connectorId, { status: connector.status, statusCode: connector.statusCode });
     }
   } else {
@@ -79,7 +81,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
       }
     }
   }
-  return { resources, mentions: resources.map((resource) => projectConnectorMention(resource, health)) };
+  return { resources, mentions: resources.map((resource) => ({ ...projectConnectorMention(resource, health), connectUrl: connectUrls.get(resource.connectorId ?? resource.id) ?? null })) };
 }
 
 export async function connectorMentionsForSession(session: AuthSession) {

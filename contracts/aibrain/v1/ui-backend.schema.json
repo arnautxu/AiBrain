@@ -300,6 +300,7 @@
         "plan": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } },
         "approvals": { "type": "array", "items": { "$ref": "#/$defs/ApprovalItem" } },
         "diff": { "type": "string" },
+        "connectorMentions": { "type": "array", "maxItems": 20, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$" } },
         "serverReferences": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/ServerReference" } },
         "attachments": { "type": "array", "items": { "$ref": "#/$defs/ChatAttachment" } },
         "artifacts": { "type": "array", "items": { "$ref": "#/$defs/GeneratedArtifact" } },

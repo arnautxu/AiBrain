@@ -1,5 +1,9 @@
 "use client";
 
+import { ConnectorPopover } from "@/components/connector-popover";
+import { ConnectorLogo } from "@/components/connector-logo";
+import { connectorPresentation } from "@/connectors/presentation";
+import { mentionQueryAt, mentionTextParts } from "@/ui/connector-mention-text";
 import { ServerPicker } from "@/components/server-picker";
 import type { ServerReference } from "@/documents/server-reference-contract";
 
@@ -137,7 +141,7 @@ function nextEnabledConnectorIndex(
   if (!options.length) return 0;
   for (let step = 1; step <= options.length; step += 1) {
     const index = (current + direction * step + options.length) % options.length;
-    if (options[index]?.canRead) return index;
+    if (options[index]?.canRead || options[index]?.connectUrl) return index;
   }
   return Math.max(0, Math.min(current, options.length - 1));
 }
@@ -327,7 +331,7 @@ function AssistantMessage({
       ) : null}
 
       {message.status === "streaming" && !message.content && !hasExecution ? (
-        <div className="flex items-center gap-2 py-1 text-[16px] leading-5 text-[var(--text-muted)]" role="status">
+        <div className="flex items-center gap-2 py-1 text-[15px] leading-5 text-[var(--text-muted)]" role="status">
           <ThinkingOrb state="working" size={20} aria-hidden="true" />
           <span className="activity-shimmer">{liveStatus}…</span>
         </div>
@@ -337,7 +341,7 @@ function AssistantMessage({
           announce={message.status === "streaming"}
           showActions={false}
           className="mt-4 max-w-[76ch]"
-          contentClassName="text-[length:var(--font-reading)] leading-6 text-[var(--text)]"
+          contentClassName="text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--text)]"
         >
           <MarkdownMessage streaming={message.status === "streaming"}>{publicContent}</MarkdownMessage>
         </StreamingResponse>
@@ -377,13 +381,13 @@ function AssistantMessage({
   );
 }
 
-function UserMessage({ message, threadId, onRequestPublication, onEdit, readOnly = false }: { message: ChatMessage; threadId: string; onRequestPublication?: (attachment: ChatAttachment) => void; onEdit: (content: string) => void; readOnly?: boolean }) {
+function UserMessage({ message, connectorMentions, threadId, onRequestPublication, onEdit, readOnly = false }: { message: ChatMessage; connectorMentions: ConnectorMention[]; threadId: string; onRequestPublication?: (attachment: ChatAttachment) => void; onEdit: (content: string) => void; readOnly?: boolean }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.content);
   return (
     <article className="message-enter group flex justify-end">
       <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
-      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:var(--font-reading)] leading-6 text-[var(--user-message-text)] [overflow-wrap:anywhere]">
+      <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
         {message.serverReferences?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.serverReferences.map(ref => <span className="rounded bg-[var(--surface-raised)]/70 px-2 py-1 text-xs text-[var(--text)]" key={ref.path} title={ref.path}>Server · {ref.name}</span>)}</div> : null}
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
@@ -405,7 +409,7 @@ function UserMessage({ message, threadId, onRequestPublication, onEdit, readOnly
               <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--send-button)] px-3 py-1.5 font-semibold text-[var(--send-button-text)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
             </div>
           </div>
-        ) : <div>{message.content}</div>}
+        ) : <div className="whitespace-pre-wrap">{mentionTextParts(message.content, connectorMentions.filter(m => message.connectorMentions?.includes(m.id))).map((part, index) => part.id ? <span key={index} className="rounded bg-[var(--surface-selected)] text-[var(--text)]"><span className="inline-flex align-middle"><ConnectorLogo id={part.id} size={14} /></span>{part.text.slice(1)}</span> : part.text)}</div>}
       </div>
       {!readOnly && !editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label="Editar mensaje y crear una rama" title="Editar mensaje" onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
       </div>
@@ -473,6 +477,11 @@ export function ChatWorkspace({
     resize: "instant",
   });
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const mentionOverlayRef = useRef<HTMLDivElement>(null);
+  const [composerCaret, setComposerCaret] = useState(prompt.length);
+  const [composing, setComposing] = useState(false);
+  const composerCaretRef = useRef(prompt.length);
+  const composerSelectionEndRef = useRef(prompt.length);
   const composerDraftAdoptedRef = useRef(false);
   const composerShellRef = useRef<HTMLDivElement>(null);
   const landingBandRef = useRef<HTMLDivElement>(null);
@@ -533,10 +542,11 @@ export function ChatWorkspace({
       onPromptChange(request.content);
       onDocumentsChange(restored);
       onServerReferencesChange?.(request.serverReferences ?? []);
+      onConnectorMentionIdsChange(request.connectorMentions ?? []);
       onComposerNotice(restored.some((document) => document.status === "error")
         ? "Solicitud recuperada. Vuelve a adjuntar los archivos no disponibles o quítalos antes de enviar."
         : "Solicitud recuperada para revisar. No se ha enviado nada.", "status");
-      requestAnimationFrame(() => composerRef.current?.focus());
+      requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
     } catch {
       if (selection === attachmentSelectionRef.current) onComposerNotice("No se ha podido recuperar la solicitud. Vuelve a intentarlo.");
     } finally {
@@ -563,7 +573,11 @@ export function ChatWorkspace({
 
   useEffect(() => {
     if (!hydrated || thread?.messages.length) return;
-    const frame = requestAnimationFrame(() => composerRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (document.querySelector('[role="dialog"], [aria-modal="true"]') || (active && active !== document.body && active !== composerRef.current)) return;
+      composerRef.current?.focus({ preventScroll: true });
+    });
     return () => cancelAnimationFrame(frame);
   }, [hydrated, thread?.id, thread?.messages.length]);
 
@@ -571,6 +585,9 @@ export function ChatWorkspace({
     const textarea = composerRef.current;
     const measurement = composerMeasurementRef.current;
     if (!textarea || !measurement) return;
+    const style = getComputedStyle(textarea);
+    for (const key of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "padding"] as const) measurement.style[key] = style[key];
+    measurement.style.width = `${textarea.clientWidth}px`;
     const minHeight = thread?.messages.length ? 32 : 48;
     const nextHeight = Math.min(Math.max(measurement.scrollHeight, minHeight), 192);
     textarea.style.height = `${nextHeight}px`;
@@ -628,19 +645,55 @@ export function ChatWorkspace({
     ? `¿En qué te puedo ayudar, ${firstName}?`
     : `¿Cómo puedo ayudarte en ${project.name}?`;
   const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
-  const mentionMatch = prompt.match(/(?:^|\s)@([^\s@]*)$/u);
-  const mentionQuery = mentionMatch?.[1]?.toLocaleLowerCase("es") ?? null;
-  const mentionOptions = useMemo(() => mentionQuery === null ? [] : connectorMentions
-    .filter((mention) => mention.canRead && mention.status === "connected" &&
-      (mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery)))
-    .slice(0, 8), [connectorMentions, mentionQuery]);
+  const mentionMatch = composing ? null : mentionQueryAt(prompt, composerCaret);
+  const mentionQuery = mentionMatch?.query ?? null;
+  const mentionOptions = mentionQuery === null ? [] : connectorMentions
+    .filter((mention) => mention.label.toLocaleLowerCase("es").includes(mentionQuery) || mention.id.includes(mentionQuery));
   const selectedMentions = useMemo(() => connectorMentions.filter((mention) => selectedConnectorMentionIds.includes(mention.id)), [connectorMentions, selectedConnectorMentionIds]);
+  const mentionParts = useMemo(() => mentionTextParts(prompt, selectedMentions), [prompt, selectedMentions]);
+  const hasInlineMentions = mentionParts.some(part => part.id);
+  const syncCaret = (textarea: HTMLTextAreaElement) => {
+    composerCaretRef.current = textarea.selectionStart;
+    composerSelectionEndRef.current = textarea.selectionEnd;
+    setComposerCaret(textarea.selectionStart);
+  };
+  const changeComposerText = (text: string) => {
+    onPromptChange(text);
+    const retained = new Set(mentionTextParts(text, selectedMentions).flatMap(part => part.id ? [part.id] : []));
+    const ids = selectedConnectorMentionIds.filter(id => retained.has(id));
+    if (ids.length !== selectedConnectorMentionIds.length) onConnectorMentionIdsChange(ids);
+  };
+  // Native textarea owns caret, selection, undo, clipboard and IME. Its decorative
+  // overlay has exactly the same metrics; no contenteditable serialization.
+  useLayoutEffect(() => {
+    const textarea = composerRef.current, overlay = mentionOverlayRef.current;
+    if (!textarea || !overlay) return;
+    const sync = () => {
+      const style = getComputedStyle(textarea);
+      for (const key of ["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "textAlign", "tabSize"] as const) overlay.style[key] = style[key];
+      overlay.style.width = `${textarea.clientWidth}px`;
+      overlay.style.height = `${textarea.clientHeight}px`;
+      overlay.style.left = `${textarea.offsetLeft}px`;
+      overlay.style.top = `${textarea.offsetTop}px`;
+      overlay.scrollTop = textarea.scrollTop;
+    };
+    sync();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(sync);
+    observer?.observe(textarea);
+    window.addEventListener("resize", sync);
+    return () => { observer?.disconnect(); window.removeEventListener("resize", sync); };
+  }, [prompt, hasInlineMentions, composerFocused, composerMultiline]);
   const runningMessage = thread?.messages.findLast((message) => message.role === "user")?.content ?? "Respuesta en curso";
   const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
   const visibleMentionActiveIndex = Math.min(mentionActiveIndex, Math.max(mentionOptions.length - 1, 0));
   const activeMentionOption = mentionOptions[visibleMentionActiveIndex] ?? null;
   const visibleCatalogActiveIndex = Math.min(catalogActiveIndex, Math.max(connectorMentions.length - 1, 0));
   const activeCatalogOption = connectorMentions[visibleCatalogActiveIndex] ?? null;
+  useEffect(() => {
+    const scope = mentionOpen ? "mention" : connectorCatalogOpen ? "catalog" : null;
+    const option = mentionOpen ? activeMentionOption : activeCatalogOption;
+    if (scope && option) document.getElementById(connectorOptionId(scope, option.id))?.scrollIntoView?.({ block: "nearest" });
+  }, [mentionOpen, connectorCatalogOpen, activeMentionOption, activeCatalogOption]);
 
   useEffect(() => {
     if (!composerMenuOpen) return;
@@ -672,27 +725,34 @@ export function ChatWorkspace({
     setConnectorCatalogOpen(true);
   };
 
-  const selectConnectorMention = (mention: ConnectorMention) => {
-    if (!mention.canRead || !mentionMatch) return;
-    const atIndex = prompt.lastIndexOf(`@${mentionMatch[1]}`);
-    onPromptChange(`${prompt.slice(0, atIndex)}@${mention.label} ${prompt.slice(atIndex + mentionMatch[0].trimStart().length)}`);
+  const connectMention = (mention: ConnectorMention) => {
+    if (mention.connectUrl?.startsWith("/api/connectors/") && !mention.connectUrl.startsWith("//")) window.location.assign(mention.connectUrl);
+  };
+  const insertMention = (mention: ConnectorMention, start: number, end: number) => {
+    if (!mention.canRead) { connectMention(mention); return; }
+    const prefix = prompt.slice(0, start);
+    const token = `${prefix && !/\s$/u.test(prefix) ? " " : ""}@${mention.label} `;
+    onPromptChange(`${prefix}${token}${prompt.slice(end)}`);
     if (!selectedConnectorMentionIds.includes(mention.id)) onConnectorMentionIdsChange([...selectedConnectorMentionIds, mention.id]);
     setMentionOpen(false);
-    requestAnimationFrame(() => composerRef.current?.focus());
-  };
-
-  const selectCatalogConnector = (mention: ConnectorMention) => {
-    if (!mention.canRead) return;
-    onPromptChange(`${prompt}${prompt && !/\s$/u.test(prompt) ? " " : ""}@${mention.label} `);
-    if (!selectedConnectorMentionIds.includes(mention.id)) onConnectorMentionIdsChange([...selectedConnectorMentionIds, mention.id]);
     setConnectorCatalogOpen(false);
-    requestAnimationFrame(() => composerRef.current?.focus());
+    requestAnimationFrame(() => {
+      const textarea = composerRef.current;
+      if (!textarea) return;
+      textarea.focus();
+      textarea.setSelectionRange(start + token.length, start + token.length);
+      syncCaret(textarea);
+    });
   };
+  const selectConnectorMention = (mention: ConnectorMention) => {
+    if (mentionMatch) insertMention(mention, mentionMatch.start, mentionMatch.end);
+  };
+  const selectCatalogConnector = (mention: ConnectorMention) => insertMention(mention, composerCaretRef.current, composerSelectionEndRef.current);
 
   useEffect(() => {
     if (!composerMenuOpen && !composerPickerOpen && !mentionOpen && !connectorCatalogOpen) return;
     const closeOnOutside = (event: PointerEvent) => {
-      if (composerShellRef.current?.contains(event.target as Node) || landingBandRef.current?.contains(event.target as Node)) return;
+      if (composerShellRef.current?.contains(event.target as Node) || landingBandRef.current?.contains(event.target as Node) || (event.target instanceof Element && event.target.closest("[data-connector-popover]"))) return;
       setComposerMenuOpen(false);
       setComposerPickerOpen(null);
       setMentionOpen(false);
@@ -709,7 +769,7 @@ export function ChatWorkspace({
       setConnectorCatalogOpen(false);
       requestAnimationFrame(() => {
         if (returnToAddButton) composerAddButtonRef.current?.focus();
-        else composerRef.current?.focus();
+        else composerRef.current?.focus({ preventScroll: true });
       });
     };
     document.addEventListener("pointerdown", closeOnOutside);
@@ -835,7 +895,7 @@ export function ChatWorkspace({
               {thread?.messages.map((message, index) => (
                 <div key={message.id} id={`message-${message.id}`} className="scroll-mt-8">
                   <DaySeparator date={message.createdAt} previousDate={thread.messages[index - 1]?.createdAt} />
-                  {message.role === "user" ? <UserMessage message={message} threadId={thread.id} onRequestPublication={onRequestPublication && thread.messages[index + 1]?.role === "assistant" ? (attachment) => onRequestPublication(attachment, thread.messages[index + 1]!.id) : undefined} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
+                  {message.role === "user" ? <UserMessage message={message} connectorMentions={connectorMentions} threadId={thread.id} onRequestPublication={onRequestPublication && thread.messages[index + 1]?.role === "assistant" ? (attachment) => onRequestPublication(attachment, thread.messages[index + 1]!.id) : undefined} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
                       assistantName={assistantName}
@@ -899,7 +959,7 @@ export function ChatWorkspace({
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !serverReferences.length && !selectedMentions.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !serverReferences.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
             onPaste={(event) => {
               if (!event.clipboardData.files.length) return;
               event.preventDefault();
@@ -921,7 +981,7 @@ export function ChatWorkspace({
                 <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="embedded" disabled={sending} onSelect={(text) => {
                   onPromptChange(text);
                   setComposerMenuOpen(false);
-                  requestAnimationFrame(() => composerRef.current?.focus());
+                  requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
                 }} />
               </div>
             ) : null}
@@ -946,9 +1006,6 @@ export function ChatWorkspace({
                 ))}
               </div>
             ) : null}
-            {selectedMentions.length ? <div className="flex flex-wrap gap-1.5 px-2 pt-1" aria-label="Conectores seleccionados">
-              {selectedMentions.map((mention) => <span key={mention.id} className="flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><At size={11} />{mention.label}<button type="button" aria-label={`Quitar ${mention.label}`} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)]" onClick={() => onConnectorMentionIdsChange(selectedConnectorMentionIds.filter((id) => id !== mention.id))}><X size={10} /></button></span>)}
-            </div> : null}
             {imageGeneration ? <div className="flex px-2 pt-1" aria-label="Generación de imágenes activada">
               <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
             </div> : null}
@@ -960,20 +1017,28 @@ export function ChatWorkspace({
             >
               {`${prompt}\u200b`}
             </div>
+            {hasInlineMentions ? <div ref={mentionOverlayRef} aria-hidden="true" className="composer-mention-overlay pointer-events-none absolute overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--text)]">{mentionParts.map((part, index) => part.id ? <span key={index} className="rounded bg-[var(--surface-selected)] text-[var(--brain-accent)]"><span className="relative text-transparent">@<span className="absolute inset-0 flex items-center justify-center"><ConnectorLogo id={part.id} size={13} /></span></span>{part.text.slice(1)}</span> : part.text)}{"\u200b"}</div> : null}
             <textarea
               ref={composerRef}
               aria-label="Mensaje"
               aria-autocomplete="list"
               aria-controls={mentionOpen ? "connector-mention-options" : undefined}
               aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
-              autoFocus={!hasMessages}
+              autoFocus={false}
               className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] md:text-[14px] ${hasMessages ? "min-h-8" : "min-h-12"}`}
+              style={{ fontSize: 16, ...(hasInlineMentions ? { color: "transparent", caretColor: "var(--text)" } : {}) }}
               placeholder={imageGeneration ? "Describe la imagen que quieres crear…" : `Escribe a ${placeholderName}…`}
               rows={1}
               defaultValue={prompt}
-              onChange={(event) => { onPromptChange(event.target.value); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(/(?:^|\s)@[^\s@]*$/u.test(event.target.value)); }}
+              onChange={(event) => { changeComposerText(event.target.value); syncCaret(event.target); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(Boolean(mentionQueryAt(event.target.value, event.target.selectionStart))); }}
+              onSelect={(event) => syncCaret(event.currentTarget)}
+              onClick={(event) => { syncCaret(event.currentTarget); setMentionOpen(Boolean(mentionQueryAt(event.currentTarget.value, event.currentTarget.selectionStart))); }}
+              onScroll={(event) => { if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = event.currentTarget.scrollTop; }}
+              onCompositionStart={() => { setComposing(true); setMentionOpen(false); }}
+              onCompositionEnd={(event) => { setComposing(false); syncCaret(event.currentTarget); }}
               onBlur={() => setMentionOpen(false)}
               onKeyDown={(event) => {
+                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
                 if (mentionOpen) {
                   if (event.key === "ArrowDown" && mentionOptions.length) {
                     event.preventDefault();
@@ -1006,19 +1071,19 @@ export function ChatWorkspace({
                 }
               }}
             />
-            {mentionOpen && mentionQuery !== null ? <div id="connector-mention-options" role="listbox" aria-label="Conectores disponibles" className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`}>
-              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={!mention.canRead || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "requiere inicio de sesión" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
-            </div> : null}
-            {connectorCatalogOpen ? <div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label="Catálogo de conectores" aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className={`absolute inset-x-2 z-30 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={(event) => {
+            {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label="Conectores disponibles" className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
+              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "Conectar" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
+            </div></ConnectorPopover> : null}
+            {connectorCatalogOpen ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label="Catálogo de conectores" aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
                 setCatalogActiveIndex((current) => nextEnabledConnectorIndex(connectorMentions, current, event.key === "ArrowDown" ? 1 : -1));
               } else if (event.key === "Home" || event.key === "End") {
                 event.preventDefault();
                 const ordered = event.key === "Home" ? connectorMentions : [...connectorMentions].reverse();
-                const target = ordered.find((mention) => mention.canRead);
+                const target = ordered.find((mention) => mention.canRead || mention.connectUrl);
                 if (target) setCatalogActiveIndex(connectorMentions.indexOf(target));
-              } else if (event.key === "Enter" && activeCatalogOption?.canRead) {
+              } else if (event.key === "Enter" && activeCatalogOption) {
                 event.preventDefault();
                 selectCatalogConnector(activeCatalogOption);
               } else if (event.key === "Escape") {
@@ -1032,8 +1097,8 @@ export function ChatWorkspace({
                 requestAnimationFrame(() => (event.shiftKey ? composerRef.current : composerAddButtonRef.current)?.focus());
               }
             }}>
-              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={!mention.canRead || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => mention.canRead && setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><At size={14} /><span className="min-w-0 flex-1 truncate font-medium">{mention.label}</span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "conecta la cuenta en Ajustes" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>)}
-            </div> : null}
+              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "Conectar" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>)}
+            </div></ConnectorPopover> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button ref={composerAddButtonRef} aria-label="Añadir al mensaje" aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
@@ -1110,13 +1175,13 @@ export function ChatWorkspace({
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
             <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
               onPromptChange(text);
-              requestAnimationFrame(() => composerRef.current?.focus());
+              requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
             }} />
           </div> : null}
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
             <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
               onPromptChange(text);
-              requestAnimationFrame(() => composerRef.current?.focus());
+              requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
             }} />
           </div> : null}
         </div>

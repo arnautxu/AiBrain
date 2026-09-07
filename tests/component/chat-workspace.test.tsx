@@ -245,7 +245,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByRole("heading", { name: "Informe final" })).toHaveLength(1);
     expect(screen.getByText("Evidencia verificada").closest("li")).toBeInTheDocument();
     expect(screen.getByText("He comprobado la fuente autorizada.")).not.toBeVisible();
-    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[length:var(--font-reading)]", "leading-6");
+    expect(screen.getByRole("heading", { name: "Informe final" }).closest(".markdown-body")?.parentElement).toHaveClass("text-[length:calc(var(--font-reading)-1px)]", "leading-[23px]");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "conversation");
     expect(screen.getByTestId("composer")).toHaveClass("composer-compact");
     expect(screen.getByTestId("composer")).toHaveAttribute("data-focused", "false");
@@ -305,7 +305,7 @@ describe("chat workspace simplificado", () => {
     fireEvent.change(composer, { target: { value: "Busca @" } });
     expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Gmail");
     expect(screen.getByRole("listbox", { name: "Conectores disponibles" })).toHaveTextContent("Outlook");
-    expect(screen.queryByText("CRM Ejecutivo")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /CRM Ejecutivo/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("option", { name: /Gmail/ }));
     expect(onConnectorMentionIdsChange).toHaveBeenCalledWith(["gmail"]);
     expect(onPromptChange).toHaveBeenLastCalledWith("Busca @Gmail ");
@@ -362,7 +362,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("listbox", { name: "Conectores disponibles" })).not.toBeInTheDocument();
   });
 
-  it("keeps the landing focused on its editable destination and honest suggestions", () => {
+  it("keeps the landing focused on its editable destination and honest suggestions", async () => {
     renderWorkspace();
 
     expect(screen.getByTestId("composer")).toHaveAttribute("data-layout", "landing");
@@ -372,7 +372,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getAllByText("Operaciones Arnall").length).toBeGreaterThan(0);
     expect(screen.getByRole("heading", { name: "¿Cómo puedo ayudarte en Operaciones Arnall?" })).toBeInTheDocument();
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");
-    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveFocus();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveFocus());
     expect(screen.queryByText("Trabajar")).not.toBeInTheDocument();
     expect(screen.getByText("Prepárame una presentación")).toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
@@ -498,7 +498,7 @@ describe("chat workspace simplificado", () => {
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Server" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Tareas programadas" }));
+    fireEvent.click(screen.getByRole("button", { name: "Tareas recurrentes" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Trabajemos en los horarios/ }));
     expect(screen.getByRole("menuitem", { name: "Revisar cambios de horarios" })).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
@@ -517,7 +517,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByRole("menuitem", { name: "Server" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Tools" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tareas programadas" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tareas recurrentes" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Prepárame una presentación" }));
     expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Prepárame una presentación sobre…");
     expect(screen.getByRole("button", { name: "Quitar reference.png" })).toBeInTheDocument();
