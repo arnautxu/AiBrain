@@ -220,7 +220,10 @@ class MapTests(unittest.TestCase):
              patch.object(demand.fcntl, 'flock', side_effect=AssertionError('Live browsing must not acquire the catalogue lock')):
             with demand.interactive_access(self.manifest, catalogue=False):
                 self.assertTrue(demand.inventory.demand_pending(operator))
-        self.assertFalse(demand.inventory.demand_pending(operator))
+        self.assertTrue(demand.inventory.demand_pending(operator))
+        import time
+        with patch.object(demand.inventory.time, 'time', return_value=time.time()+16):
+            self.assertFalse(demand.inventory.demand_pending(operator))
 
     def test_schedule_has_only_metadata_source_operations(self):
         unit = (INFRA / 'aibrain-arnall-knowledge-inventory.service').read_text()
