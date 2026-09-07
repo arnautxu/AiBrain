@@ -26,7 +26,10 @@ even in existing conversations retaining the older tool schema.
 
 References use connection + encoded Windows path; they are stable across
 refresh and content edits, but NOT across rename/move. A moved/deleted reference
-fails visibly and must be selected again. Windows file IDs/volume IDs are not
+is reported as a partial limitation and must be selected again; other valid
+references and the prompt remain usable. Unsupported content formats are
+reported explicitly, with selection-time metadata clearly marked as unverified
+current state, and binaries are never executed. Windows file IDs/volume IDs are not
 currently exposed. Selection captures size/mtime; the actual turn records the
 fresh SHA-256 and source time in its input and labels changes since selection.
 Multipart reads must keep the same hash. Metadata is not a content version.
@@ -67,7 +70,7 @@ deleted. Older application search/read/inventory behavior is preserved.
 - Desktop/mobile: open from band and +, navigate, refresh, select file/folder,
   preserve prompt, remove chip, reload draft, change conversation without leaks.
 - Persist/restart message references; changed-reference retry is a conflict.
-- Fresh file version reaches turn input; unavailable/deleted file fails closed;
+- Fresh file version reaches turn input; unavailable/deleted content is withheld and reported without aborting valid references;
   folder selection does not recursively read content.
 - Production: exact app SHA + active host broker + authenticated browse/select.
   A real external-update test requires an operator to edit a disposable Windows
@@ -107,3 +110,5 @@ No paid tier, card or premium tool is authorized.
 
 Sources: https://composio.dev/pricing and
 https://docs.composio.dev/docs/authentication/controlling-scopes.
+
+Current investigation and separate acceptance gaps: [SERVER_RELIABILITY_20260907.md](SERVER_RELIABILITY_20260907.md).
