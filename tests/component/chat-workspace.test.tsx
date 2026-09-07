@@ -299,7 +299,7 @@ describe("chat workspace simplificado", () => {
     const popup = screen.getByRole("listbox", { name: "Catálogo de conectores" }).parentElement!;
     expect(popup.style.top).toBe("250px");
     expect(popup.style.left).toBe("120px");
-    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Catálogo de conectores" }), { key: "Escape" });
     await waitFor(() => expect(trigger).toHaveFocus());
     expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
   });
