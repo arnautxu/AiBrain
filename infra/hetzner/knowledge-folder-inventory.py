@@ -85,7 +85,9 @@ def interactive_access(manifest, catalogue=True):
     finally:
         if fd is not None:
             os.close(fd)
-        mapping.atomic_text(operator / 'interactive-until', '0')
+        # Leave a short navigation window so the next click is not immediately
+        # overtaken by another inventory page. Expiry resumes background work.
+        mapping.atomic_text(operator / 'interactive-until', str(time.time() + 15) if not catalogue else '0')
 
 
 def execute(manifest, path, offset=0):
