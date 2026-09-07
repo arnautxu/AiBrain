@@ -83,8 +83,8 @@ $dr=@(Get-PSDrive -PSProvider FileSystem|Where-Object{$_.Name-match '^[A-Za-z]$'
         script += r"""$q=New-Object 'Collections.Generic.Queue[string]';foreach($b in $d.roots){if($dr.Name-contains$b.Substring(0,1)){$q.Enqueue($b)}};$clock=[Diagnostics.Stopwatch]::StartNew();$n=0;$seen=0;while($q.Count-and$out.Count-lt$d.limit-and$n-lt500-and$seen-lt20000-and$clock.Elapsed.TotalSeconds-lt15){$p=$q.Dequeue();$n++;try{$p=Safe $p;$a=@(Get-ChildItem -Force -LiteralPath $p|Select-Object -First 10001);if($a.Count-gt10000){$partial=$true};foreach($i in $a){$seen++;if($i.Attributes-band[IO.FileAttributes]::ReparsePoint){continue};if($i.Name.IndexOf($d.query,[StringComparison]::OrdinalIgnoreCase)-ge0){$out+=Entry $i};if($i.PSIsContainer){$q.Enqueue($i.FullName)};if($out.Count-ge$d.limit-or$seen-ge20000){$partial=$true;break}}}catch{$denied++}};if($q.Count){$partial=$true}"""
     script += r""";
 $r=@{ok=$true;entries=@($out);truncated=$partial;denied=$denied;nextOffset=$next}
-}catch{$r=@{ok=$false;error='WINDOWS_PATH_UNAVAILABLE'}};$r.nonce=$d.nonce;$j=$r|ConvertTo-Json -Depth 5 -Compress;Set-Clipboard -Value $j
-"""
+}catch{$r=@{ok=$false;error='WINDOWS_PATH_UNAVAILABLE'}};$r.nonce=$d.nonce;$j=$r|ConvertTo-Json -Depth 5 -Compress;
+""" + rdp.publish_readback(nonce)
     command = "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + base64.b64encode(script.encode("utf-16le")).decode()
     rdp.require(len(command) <= 7800, "SERVER_QUERY_TOO_LARGE")
     return command
@@ -118,7 +118,7 @@ def browse(manifest, request, lock_wait_seconds=0):
                 phase, started = 'readback', time.monotonic()
                 result = session.execute(program, nonce, timeout=45)
                 timings['readbackMs'] = round((time.monotonic() - started) * 1000)
-            result['transportDiagnostic'] = {'phase': 'complete', 'timingsMs': timings}
+            result['transportDiagnostic'] = {'phase': 'complete', 'timingsMs': timings, **({'readbackTransport': result['readbackTransport']} if result.get('readbackTransport') in ('redirected-file', 'clipboard') else {})}
             result["recordedAt"] = sync.now()
             sync.atomic_json(job / "receipt.json", result)
             rdp.require(result.get("ok") is True, "WINDOWS_PATH_UNAVAILABLE")
