@@ -3,7 +3,7 @@ import { useLayoutEffect, useState, type ReactNode, type RefObject } from "react
 import { createPortal } from "react-dom";
 
 /** Position relative to the native caret, constrained to the visual viewport. */
-export function ConnectorPopover({ anchor, caret = 0, centerMobile = false, triggerAligned = false, children }: { anchor: RefObject<HTMLElement | null>; caret?: number; centerMobile?: boolean; triggerAligned?: boolean; children: ReactNode }) {
+export function ConnectorPopover({ anchor, caret = 0, centerMobile = false, triggerAligned = false, avoidOverlapWith, children }: { anchor: RefObject<HTMLElement | null>; caret?: number; centerMobile?: boolean; triggerAligned?: boolean; avoidOverlapWith?: RefObject<HTMLElement | null>; children: ReactNode }) {
   const [position, setPosition] = useState<{ left: number; top: number; width: number; maxHeight: number; transform?: string } | null>(null);
   useLayoutEffect(() => {
     const update = () => {
@@ -22,16 +22,19 @@ export function ConnectorPopover({ anchor, caret = 0, centerMobile = false, trig
       const viewport = window.visualViewport;
       const startY = viewport?.offsetTop ?? 0, height = viewport?.height ?? window.innerHeight;
       const startX = viewport?.offsetLeft ?? 0, width = viewport?.width ?? window.innerWidth;
-      const below = startY + height - point.bottom - 16, above = point.top - startY - 16;
-      const down = below >= Math.min(triggerAligned ? 160 : 300, above);
-      const maxHeight = Math.max(64, Math.min(320, down ? below : above));
+      const aboveEdge = triggerAligned && avoidOverlapWith?.current
+        ? Math.min(point.top, avoidOverlapWith.current.getBoundingClientRect().top)
+        : point.top;
+      const below = startY + height - point.bottom - 16, above = aboveEdge - startY - 16;
+      const down = triggerAligned ? below >= 64 || below >= above : below >= Math.min(300, above);
+      const maxHeight = Math.max(triggerAligned ? 0 : 64, Math.min(320, down ? below : above));
       const popupWidth = Math.min(440, width - 24);
-      setPosition({ left: centerMobile && width < 640 ? startX + (width - popupWidth) / 2 : Math.max(startX + 12, Math.min(point.left, startX + width - popupWidth - 12)), top: down ? point.bottom + 6 : triggerAligned ? point.top - 6 : Math.max(startY + 12, point.top - maxHeight - 6), width: popupWidth, maxHeight, transform: triggerAligned && !down ? "translateY(-100%)" : undefined });
+      setPosition({ left: centerMobile && width < 640 ? startX + (width - popupWidth) / 2 : Math.max(startX + 12, Math.min(point.left, startX + width - popupWidth - 12)), top: down ? point.bottom + 6 : triggerAligned ? aboveEdge - 6 : Math.max(startY + 12, point.top - maxHeight - 6), width: popupWidth, maxHeight, transform: triggerAligned && !down ? "translateY(-100%)" : undefined });
     };
     update();
     window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
     window.visualViewport?.addEventListener("resize", update);
     return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); window.visualViewport?.removeEventListener("resize", update); };
-  }, [anchor, caret, centerMobile, triggerAligned]);
+  }, [anchor, caret, centerMobile, triggerAligned, avoidOverlapWith]);
   return position ? createPortal(<div data-connector-popover style={{ position: "fixed", zIndex: 45, ...position }} className="connector-popover overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)]">{children}</div>, document.body) : null;
 }
