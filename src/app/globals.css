@@ -1687,6 +1687,9 @@ button:disabled {
 .landing-tasks-suggestions .landing-task-menu { left: 0; right: auto; }
 @media (max-width: 639px) {
   .landing-band { margin-inline: 0; padding-inline: 4px; gap: 0 1px; }
+  .landing-project { flex: 0 1 90px; }
+  .landing-project > svg { display: none; }
+  .landing-band > .landing-tasks { flex-shrink: 0; }
   .landing-band .composer-picker-button { max-width: 100%; min-height: 44px; padding-inline: 4px; gap: 3px; }
   .landing-band-item { gap: 4px; padding-inline: 5px; }
   .landing-band .composer-destination { min-width: 0; width: 100%; }
