@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "installationId": "company-qa",
+  "connectionId": "arnall",
+  "entryPoints": [
+    {"label": "Compres · C", "path": "server-arnall/C/Arnall/Compres"},
+    {"label": "Vendes · C", "path": "server-arnall/C/Arnall/Vendes"},
+    {"label": "Compres · Y", "path": "server-arnall/Y/COMPRES"},
+    {"label": "Comptabilitat", "path": "server-arnall/Y/COMPTABILITAT"},
+    {"label": "ERP", "path": "server-arnall/Y/ERP"},
+    {"label": "Factures proveïdors 2026", "path": "server-arnall/Y/FACTURES%20PROVEIDORS%202026"}
+  ]
+}

@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 import uuid
+import unicodedata
 
 spec = importlib.util.spec_from_file_location("server_files", Path(__file__).with_name("rdp-server-files.py"))
 files = importlib.util.module_from_spec(spec)
@@ -203,11 +204,33 @@ class Handler(socketserver.StreamRequestHandler):
             pass
 
 
+def navigation_entries(path, manifest):
+    if path is None:
+        return []
+    value = json.loads(files.rdp.private_file(path).read_text())
+    sync.require(isinstance(value, dict) and set(value) == {'schemaVersion', 'installationId', 'connectionId', 'entryPoints'} and value['schemaVersion'] == 1, 'INVALID_SERVER_NAVIGATION')
+    sync.require(all(value[k] == manifest[k] for k in ('installationId', 'connectionId')), 'WRONG_SERVER_NAVIGATION_INSTALLATION')
+    entries = value['entryPoints']
+    sync.require(isinstance(entries, list) and len(entries) <= 8, 'INVALID_SERVER_NAVIGATION')
+    seen = set()
+    for item in entries:
+        sync.require(isinstance(item, dict) and set(item) == {'label', 'path'} and isinstance(item['label'], str)
+                     and 0 < len(item['label'].strip()) <= 60 and not any(unicodedata.category(c).startswith('C') for c in item['label'])
+                     and isinstance(item['path'], str) and len(item['path']) <= 200 and '?' not in item['path'], 'INVALID_SERVER_NAVIGATION')
+        source, _ = files.source_path(manifest['connectionId'], item['path'])
+        files.rdp.select_root(source, manifest['sourceRoots'])
+        sync.require(item['path'] not in seen, 'DUPLICATE_SERVER_NAVIGATION')
+        seen.add(item['path'])
+    sync.require(len(json.dumps(entries, ensure_ascii=False).encode()) <= 3500, 'SERVER_NAVIGATION_TOO_LARGE')
+    return entries
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--cached-only", action="store_true")
+    parser.add_argument("--navigation-config", help="Root-private, installation-bound work-folder shortcuts")
     args = parser.parse_args()
     sync.require(os.geteuid() == 0, "HOST_OPERATOR_REQUIRED")
     os.umask(0o077)
@@ -225,7 +248,8 @@ def main():
     os.chown(directory, 0, manifest["appGid"])
     descriptor = directory / (manifest["connectionId"] + ".json")
     sync.atomic_json(descriptor, {"schemaVersion": 1, "connectionId": manifest["connectionId"],
-                                "installationId": manifest["installationId"], "scope": "company", "mode": "read-only"})
+                                "installationId": manifest["installationId"], "scope": "company", "mode": "read-only",
+                                "entryPoints": navigation_entries(args.navigation_config, manifest)})
     os.chown(descriptor, 0, manifest["appGid"])
     os.chmod(descriptor, 0o440)
     address = directory / (manifest["connectionId"] + ".sock")
