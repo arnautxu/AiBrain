@@ -91,3 +91,30 @@ against the installed originals, preserve private backups, and wait for no
 active broker readers before replacing only these two files and restarting
 only aibrain-arnall-server-files. Inventory/sync services and their separate
 module copies remain untouched. Rollback restores those two backups.
+
+## UI and executable acceptance on the first app correction
+
+App3057eb79 passed CI34140116630, Publish34140543331 and Deploy34140753073;
+live revision readback matched. With the host correction41bd4208 installed,
+the actual app UID read returned SERVER_FORMAT_NOT_READABLE in78ms, request
+352c4424-e071-48f9-85a5-3f4579986cfa, without RDP. A new branch in David's
+existing test conversation completed a safe executable-reference answer in46s,
+explaining unsupported binary content and selection metadata without inventing
+function or executing the file. This is one-user acceptance, not2–4 users.
+
+The old conversation retry instead returned "no rollout found for thread id".
+No runtime/workbench file is changed in these fixes. Code inspection shows
+runtime identity is persisted after thread/start, before serverReferenceInputs;
+previous unsupported-reference failure can therefore leave an identity before
+any successful model turn materializes a rollout. This is a probable independent
+recovery defect, not confirmed loss of conversation history. No history/token was
+reset or deleted. Hand off worker-codex-turn.ts resume error classification and
+unmaterialized-thread recovery; require evidence before any replay.
+
+Rendered checks passed at1920px desktop and390x844 mobile in light and dark.
+On mobile, measured backdrop is x0/y0/390x844 and its parent is BODY; dialog is
+x12/y210.25/366x423.5. Tab/Shift-Tab stay inside. Dark-theme emulation and viewport
+were restored afterwards. The live Escape check discovered focus returning to
+BODY when the opening menu item unmounted; explicit stable trigger references
+now return to the + button or the landing Server button. This final wiring has a
+regression test and requires its own deployed readback.

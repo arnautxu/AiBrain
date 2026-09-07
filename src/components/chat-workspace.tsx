@@ -491,6 +491,7 @@ export function ChatWorkspace({
     return () => { attachmentSelectionRef.current += 1; };
   }, [project?.id, thread?.id]);
   const serverSelectionKey = `${project?.id ?? ""}:${thread?.id ?? ""}`;
+  const serverReturnFocusRef = useRef<HTMLButtonElement>(null);
   const [serverOpenKey, setServerOpenKey] = useState<string | null>(null);
   const serverOpen = serverOpenKey === serverSelectionKey;
   const [mentionOpen, setMentionOpen] = useState(false);
@@ -916,7 +917,7 @@ export function ChatWorkspace({
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Tools</button>
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />Server</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />Server</button>
                 <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="embedded" disabled={sending} onSelect={(text) => {
                   onPromptChange(text);
                   setComposerMenuOpen(false);
@@ -924,7 +925,7 @@ export function ChatWorkspace({
                 }} />
               </div>
             ) : null}
-            {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} /> : null}
+            {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} returnFocus={serverReturnFocusRef} /> : null}
             {serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label="Referencias Server">{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={`Quitar referencia ${item.name}`} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
             {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
@@ -1105,7 +1106,7 @@ export function ChatWorkspace({
                 ) : null}
 
             </div>
-            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={() => setServerOpenKey(serverSelectionKey)}><FileIcon size={15} aria-hidden="true" />Server</button>
+            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />Server</button>
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
             <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
               onPromptChange(text);

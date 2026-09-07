@@ -38,3 +38,12 @@ it("escapes a transformed composer, labels drives and restores focus when closed
   expect(screen.getByRole("dialog").getAttribute("aria-modal")).toBe("true");
   view.unmount(); expect(document.activeElement).toBe(trigger); trigger.remove();
 });
+
+it("returns focus to a stable trigger when the opening menu item has unmounted", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply([])));
+  const trigger = document.createElement("button"); document.body.append(trigger);
+  const menuItem = document.createElement("button"); document.body.append(menuItem); menuItem.focus();
+  const view = render(<ServerPicker projectId="project" selected={[]} onSelect={vi.fn()} onClose={vi.fn()} returnFocus={{current:trigger}}/>);
+  await screen.findByRole("dialog"); menuItem.remove(); view.unmount();
+  expect(document.activeElement).toBe(trigger); trigger.remove();
+});
