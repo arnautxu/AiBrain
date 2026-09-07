@@ -304,6 +304,21 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
   });
 
+  it("keeps a short-screen Tools fallback clear of the writing area", () => {
+    renderWorkspace(null, null, {
+      connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true }],
+    });
+    const rect = (top: number, height: number) => ({ left: 120, right: 180, top, bottom: top + height, width: 60, height, x: 120, y: top, toJSON: () => ({}) });
+    const trigger = screen.getByRole("button", { name: "Tools" });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect(window.innerHeight - 44, 44));
+    vi.spyOn(screen.getByTestId("composer"), "getBoundingClientRect").mockReturnValue(rect(200, 120));
+    fireEvent.click(trigger);
+    const popup = screen.getByRole("listbox", { name: "Catálogo de conectores" }).parentElement!;
+    expect(popup.style.top).toBe("194px");
+    expect(popup.style.transform).toBe("translateY(-100%)");
+    expect(popup.style.maxHeight).toBe("184px");
+  });
+
   it("shows only the authorized connector autocomplete and binds a selected @ source", () => {
     const onPromptChange = vi.fn();
     const onConnectorMentionIdsChange = vi.fn();
