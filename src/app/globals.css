@@ -1690,3 +1690,8 @@ button:disabled {
   .landing-tasks-menu { margin-left: 0; }
   .landing-task-menu { max-height: 220px; }
 }
+
+/* Keep nested templates inside the composer menu on narrow screens and chats. */
+.landing-tasks-embedded > .landing-band-item { width: 100%; min-height: 44px; padding: 10px 12px; gap: 12px; justify-content: flex-start; font-size: 13px; }
+.landing-tasks-embedded .landing-task-menu { position: relative; top: auto; right: auto; width: 100%; max-width: none; box-shadow: none; }
+#composer-add-menu { max-height: min(480px, 55dvh); overflow-y: auto; }

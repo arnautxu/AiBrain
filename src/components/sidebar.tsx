@@ -361,7 +361,7 @@ export function Sidebar({
             </SidebarMenuItem>
             <SidebarMenuItem>
               <SidebarMenuButton icon={MagnifyingGlass} className={styles.search} render={<button aria-label="Buscar" onClick={(event) => onOpenCommandPalette(event.currentTarget)} />}>
-                Buscar… <kbd className={styles.shortcut} aria-hidden="true">⌘ K</kbd>
+                Buscar…
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
