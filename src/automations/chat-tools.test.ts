@@ -3,8 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthSession } from "@/auth/types";
-import type { DynamicToolCallParams } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
-import type { JsonValue } from "../../contracts/codex/0.149.1/types/serde_json/JsonValue";
+import type { DynamicToolCallParams } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
+import type { JsonValue } from "../../contracts/codex/0.153.4/types/serde_json/JsonValue";
 
 vi.mock("server-only", () => ({}));
 

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, realpath } from "node:fs/promises";
 import path from "node:path";
-import type { DynamicToolCallParams } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
-import type { DynamicToolCallResponse } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
-import type { DynamicToolSpec } from "../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
+import type { DynamicToolCallParams } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallResponse";
+import type { DynamicToolSpec } from "../../contracts/codex/0.153.4/types/v2/DynamicToolSpec";
 import type { MemoryPromptSnapshot, MemoryService } from "@/memory";
 import type { FileMemoryProposalStore } from "@/memory/proposal-store";
 import type { InstallationConfig } from "@/config/installation-schema";

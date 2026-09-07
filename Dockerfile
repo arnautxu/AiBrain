@@ -57,7 +57,7 @@ ENV NODE_ENV=production \
     AIBRAIN_PDFTOPPM_BIN=/usr/local/bin/aibrain-pdftoppm \
     AIBRAIN_PDFTOTEXT_BIN=/usr/local/bin/aibrain-pdftotext \
     AIBRAIN_QPDF_BIN=/usr/local/bin/aibrain-qpdf \
-    AIBRAIN_CODEX_EXPECTED_VERSION=0.149.1 \
+    AIBRAIN_CODEX_EXPECTED_VERSION=0.153.4 \
     AIBRAIN_INTERNAL_AGENT_CONTEXT_ROOT=/usr/local/share/aibrain/internal-agent-context \
     HOME=/var/lib/aibrain/data/app-home \
     XDG_CACHE_HOME=/var/lib/aibrain/data/server/xdg/cache \
@@ -101,7 +101,7 @@ RUN printf '%s\n' \
     restic \
     tini \
   && rm -rf /var/lib/apt/lists/* \
-  && npm install --global --omit=dev "@openai/codex@0.149.1" "tsx@4.20.6" \
+  && npm install --global --omit=dev "@openai/codex@0.153.4" "tsx@4.20.6" \
   && mv /usr/local/bin/codex /usr/local/bin/codex-real \
   && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx \
   && groupadd --system --gid "${AIBRAIN_GID}" aibrain \

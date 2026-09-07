@@ -18,7 +18,7 @@ describe("runtime readiness probes", () => {
     const probes = runtimeReadinessProbes(environment, {
       async executable() { return true; },
       async version(executable) {
-        return executable.endsWith("codex-real") ? "codex-cli 0.149.1" : "Chromium 140.0.0.0";
+        return executable.endsWith("codex-real") ? "codex-cli 0.153.4" : "Chromium 140.0.0.0";
       },
     });
     const controller = new AbortController();
@@ -54,7 +54,7 @@ describe("runtime readiness probes", () => {
     }, {
       async executable() { return true; },
       async version(executable) {
-        return executable.endsWith("codex-real") ? "codex-cli 0.149.1" : "Chromium 140.0.0.0";
+        return executable.endsWith("codex-real") ? "codex-cli 0.153.4" : "Chromium 140.0.0.0";
       },
     });
     const controller = new AbortController();

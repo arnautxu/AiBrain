@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
-import type { DynamicToolCallResponse } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
+import type { DynamicToolCallResponse } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallResponse";
 import {
   assertBrowserApprovalEvidence,
   type BrowserActionResourceSnapshot,

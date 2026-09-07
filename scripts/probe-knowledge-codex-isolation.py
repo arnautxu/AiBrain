@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 import threading
 
-EXPECTED_VERSION='codex-cli 0.149.1'
+EXPECTED_VERSION='codex-cli 0.153.4'
 
 
 def probe(binary,model):

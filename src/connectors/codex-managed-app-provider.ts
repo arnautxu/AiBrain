@@ -9,8 +9,8 @@ import {
   type CredentialBinding,
 } from "@/connectors/contracts";
 import type { ConnectorCredentialProvider, RegisteredConnector } from "@/connectors/registry";
-import type { McpServerToolCallParams } from "../../contracts/codex/0.149.1/types/v2/McpServerToolCallParams";
-import type { ListMcpServerStatusParams } from "../../contracts/codex/0.149.1/types/v2/ListMcpServerStatusParams";
+import type { McpServerToolCallParams } from "../../contracts/codex/0.153.4/types/v2/McpServerToolCallParams";
+import type { ListMcpServerStatusParams } from "../../contracts/codex/0.153.4/types/v2/ListMcpServerStatusParams";
 
 export const CODEX_MANAGED_APP_CONNECTOR_ID = "codex-managed-app";
 export const CODEX_MANAGED_APP_READ_SCOPE = "app.installed.read";

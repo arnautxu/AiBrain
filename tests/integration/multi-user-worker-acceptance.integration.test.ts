@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ClientRequest } from "../../contracts/codex/0.149.1/types/ClientRequest";
+import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
 import {
   AppServerRpcRouter,
   FileTransportEventJournal,

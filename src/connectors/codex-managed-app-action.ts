@@ -12,7 +12,7 @@ import {
 import { ConnectorError, type ConnectorAuthorizationSnapshot, type ConnectorPrincipal } from "@/connectors/contracts";
 import type { CodexManagedAppActionConfig } from "@/config/installation-schema";
 import type { ApprovalItem } from "@/lib/chat-contract";
-import type { JsonValue } from "../../contracts/codex/0.149.1/types/serde_json/JsonValue";
+import type { JsonValue } from "../../contracts/codex/0.153.4/types/serde_json/JsonValue";
 import {
   FileApprovalStore,
   type ApprovalLocator,

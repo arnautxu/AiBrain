@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 
-const version = "0.149.1";
+const version = "0.153.4";
 const generationTimeoutMs = 360_000;
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
 const checkedRoot = path.join(repositoryRoot, "contracts", "codex", version);

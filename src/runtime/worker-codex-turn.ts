@@ -5,8 +5,8 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
-import type { ServerNotification } from "../../contracts/codex/0.149.1/types/ServerNotification";
-import type { ServerRequest } from "../../contracts/codex/0.149.1/types/ServerRequest";
+import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
+import type { ServerRequest } from "../../contracts/codex/0.153.4/types/ServerRequest";
 import type {
   ActivityItem,
   ChatRequest,

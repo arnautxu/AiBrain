@@ -260,7 +260,7 @@ jobs:
             --mount "type=bind,src=${RUNNER_TEMP}/aibrain-ci-publish,dst=/srv/aibrain/publish-rw" \
             --env NODE_ENV=production \
             --env CODEX_BIN=/usr/local/bin/aibrain-codex-worker \
-            --env AIBRAIN_CODEX_EXPECTED_VERSION=0.149.1 \
+            --env AIBRAIN_CODEX_EXPECTED_VERSION=0.153.4 \
             --env AIBRAIN_INSTALLATION_CONFIG=/etc/aibrain/installation.json \
             --env AIBRAIN_EGRESS_PROXY_URL=http://127.0.0.1:9 \
             --env AIBRAIN_EGRESS_WORKER_TOKEN=container_ci_worker_token_000000000000000000 \

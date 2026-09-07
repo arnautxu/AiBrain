@@ -8,7 +8,7 @@ import {
 } from "@/connectors/codex-managed-app-provider";
 import type { CodexManagedAppPreflightDependencies } from "@/connectors/preflight";
 import { loadInstallationConfig } from "@/config/installation";
-import type { McpAuthStatus } from "../../contracts/codex/0.149.1/types/v2/McpAuthStatus";
+import type { McpAuthStatus } from "../../contracts/codex/0.153.4/types/v2/McpAuthStatus";
 import { workerAppServerForUser } from "@/runtime/worker-runtime-service";
 
 function isMcpAuthStatus(value: unknown): value is McpAuthStatus {

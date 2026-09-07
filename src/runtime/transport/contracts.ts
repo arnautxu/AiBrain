@@ -1,8 +1,8 @@
-import type { ClientNotification } from "../../../contracts/codex/0.149.1/types/ClientNotification";
-import type { ClientRequest } from "../../../contracts/codex/0.149.1/types/ClientRequest";
-import type { RequestId } from "../../../contracts/codex/0.149.1/types/RequestId";
-import type { ServerNotification } from "../../../contracts/codex/0.149.1/types/ServerNotification";
-import type { ServerRequest } from "../../../contracts/codex/0.149.1/types/ServerRequest";
+import type { ClientNotification } from "../../../contracts/codex/0.153.4/types/ClientNotification";
+import type { ClientRequest } from "../../../contracts/codex/0.153.4/types/ClientRequest";
+import type { RequestId } from "../../../contracts/codex/0.153.4/types/RequestId";
+import type { ServerNotification } from "../../../contracts/codex/0.153.4/types/ServerNotification";
+import type { ServerRequest } from "../../../contracts/codex/0.153.4/types/ServerRequest";
 
 export const APP_SERVER_TRANSPORT_PROTOCOL_VERSION = 1 as const;
 

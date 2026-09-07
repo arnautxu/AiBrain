@@ -1,9 +1,9 @@
 import "server-only";
 
-import type { DynamicToolCallParams } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
-import type { DynamicToolCallResponse } from "../../contracts/codex/0.149.1/types/v2/DynamicToolCallResponse";
-import type { DynamicToolSpec } from "../../contracts/codex/0.149.1/types/v2/DynamicToolSpec";
-import type { JsonValue } from "../../contracts/codex/0.149.1/types/serde_json/JsonValue";
+import type { DynamicToolCallParams } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallResponse } from "../../contracts/codex/0.153.4/types/v2/DynamicToolCallResponse";
+import type { DynamicToolSpec } from "../../contracts/codex/0.153.4/types/v2/DynamicToolSpec";
+import type { JsonValue } from "../../contracts/codex/0.153.4/types/serde_json/JsonValue";
 import type { AuthSession } from "@/auth/types";
 import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, isRecord, isValidTimeZone, parseAutomationInput } from "@/automations/contracts";
 import { FileAutomationProposalStore } from "@/automations/chat-proposal-store";

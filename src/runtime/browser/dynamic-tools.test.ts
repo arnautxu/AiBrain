@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { DynamicToolCallParams } from "../../../contracts/codex/0.149.1/types/v2/DynamicToolCallParams";
+import type { DynamicToolCallParams } from "../../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams";
 import type { ApprovalItem } from "@/lib/chat-contract";
 import type { ResolvedPermissions } from "@/permissions";
 import {

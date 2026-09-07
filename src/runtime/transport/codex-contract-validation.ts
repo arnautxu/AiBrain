@@ -1,8 +1,8 @@
 import Ajv, { type ErrorObject, type ValidateFunction } from "ajv";
-import clientNotificationSchema from "../../../contracts/codex/0.149.1/schema/ClientNotification.json";
-import clientRequestSchema from "../../../contracts/codex/0.149.1/schema/ClientRequest.json";
-import serverNotificationSchema from "../../../contracts/codex/0.149.1/schema/ServerNotification.json";
-import serverRequestSchema from "../../../contracts/codex/0.149.1/schema/ServerRequest.json";
+import clientNotificationSchema from "../../../contracts/codex/0.153.4/schema/ClientNotification.json";
+import clientRequestSchema from "../../../contracts/codex/0.153.4/schema/ClientRequest.json";
+import serverNotificationSchema from "../../../contracts/codex/0.153.4/schema/ServerNotification.json";
+import serverRequestSchema from "../../../contracts/codex/0.153.4/schema/ServerRequest.json";
 
 export class CodexContractValidationError extends Error {
   readonly code = "TRANSPORT_CODEX_CONTRACT_INVALID";
@@ -33,7 +33,7 @@ function assertContract(
 ): void {
   if (!validate(value)) {
     throw new CodexContractValidationError(
-      `${contractName} violates the pinned Codex 0.149.1 schema: ${summarize(validate.errors)}`,
+      `${contractName} violates the pinned Codex 0.153.4 schema: ${summarize(validate.errors)}`,
     );
   }
 }
