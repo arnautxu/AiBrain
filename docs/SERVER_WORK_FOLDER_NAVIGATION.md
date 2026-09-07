@@ -45,3 +45,14 @@ Expanded real UI and persisted source agree: “Fuente 1: image.png — Archivo 
 - TypeScript `tsc --noEmit` passed.
 - Diff whitespace check passed.
 - Production acceptance of these changes remains pending; no CI, publication or deployment result is claimed.
+
+## Coordinator recovery correction
+
+An authenticated idempotent reattach reproduced a separate projection failure:
+`issueThreadToken` renews expiry/signature on resume, while the projection required
+byte equality with its earlier token. The store now permits rotation only after
+verifying both signatures, installation, user, runtime thread and toolset revision.
+Different identities, changed toolsets and tampered tokens remain rejected. The
+existing conversation's partial evidence remains intact; no tool effect is replayed
+by this token comparison. Post-release recovery and complete-answer acceptance
+remain separate from the tested storage correction.

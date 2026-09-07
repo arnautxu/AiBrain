@@ -7,6 +7,7 @@ import {
   type ChatMessage,
   type ChatStreamEvent,
 } from "@/lib/chat-contract";
+import { readThreadTokenContext } from "@/runtime/thread-token";
 import type { AppServerEvent } from "@/runtime/transport";
 import {
   atomicWriteJson,
@@ -437,7 +438,13 @@ export class FileTurnProjectionStore {
       const projection = await this.readUnlocked(identity.filePath);
       if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
       if (projection.runtimeThreadToken && projection.runtimeThreadToken !== token) {
-        throw new WorkbenchPersistenceError("El runtime thread del torn ha canviat de forma insegura.");
+        // Reissued signed tokens have a new expiry/signature on every resume.
+        // Rotation is safe only for the same verified tenant/user/thread/toolset.
+        const previous = readThreadTokenContext(projection.runtimeThreadToken, projection.installationId, projection.userId);
+        const next = readThreadTokenContext(token, projection.installationId, projection.userId);
+        if (!previous || !next || previous.threadId !== next.threadId || previous.toolsetRevision !== next.toolsetRevision) {
+          throw new WorkbenchPersistenceError("El runtime thread del torn ha canviat de forma insegura.");
+        }
       }
       if (projection.runtimeThreadToken === token) return projection;
       const next = turnProjectionSchema.parse({
