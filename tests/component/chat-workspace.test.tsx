@@ -293,7 +293,7 @@ describe("chat workspace simplificado", () => {
     renderWorkspace(null, null, {
       connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true }],
     });
-    const trigger = screen.getByRole("button", { name: "Tools", exact: true });
+    const trigger = screen.getByRole("button", { name: "Tools" });
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ left: 120, right: 180, top: 200, bottom: 244, width: 60, height: 44, x: 120, y: 200, toJSON: () => ({}) });
     fireEvent.click(trigger);
     const popup = screen.getByRole("listbox", { name: "Catálogo de conectores" }).parentElement!;
