@@ -12,7 +12,7 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const projectId = url.searchParams.get("projectId") ?? "";
   const query = url.searchParams.get("query") ?? "server:/";
-  if (!/^[0-9a-f-]{36}$/.test(projectId) || !query.startsWith("server:/") || query.length > 200) {
+  if (!/^[0-9a-f-]{36}$/.test(projectId) || (query !== "home" && !query.startsWith("server:/")) || query.length > 200) {
     return NextResponse.json({ error: "Ubicación no válida." }, { status: 400, headers });
   }
   try {

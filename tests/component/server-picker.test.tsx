@@ -47,3 +47,33 @@ it("returns focus to a stable trigger when the opening menu item has unmounted",
   await screen.findByRole("dialog"); menuItem.remove(); view.unmount();
   expect(document.activeElement).toBe(trigger); trigger.remove();
 });
+
+it("opens work-folder shortcuts without calling them live files and keeps all drives reachable", async () => {
+  const home = { ok: true, json: async () => ({ available: true, navigation: true, sourceChecked: false, checkedAt: null, results: [{ ...folder, name: "Compres" }], nextQuery: null }) };
+  const fetcher = vi.fn().mockResolvedValueOnce(home).mockResolvedValueOnce(reply([{ ...folder, path: "server-arnall/C/", name: "C" }, { ...folder, path: "server-arnall/Y/", name: "Y" }]));
+  vi.stubGlobal("fetch", fetcher);
+  render(<ServerPicker projectId="project" selected={[]} onSelect={vi.fn()} onClose={vi.fn()}/>);
+  await screen.findByText("Compres");
+  expect(fetcher.mock.calls[0][0]).toContain("query=home");
+  expect(screen.queryByLabelText("Adjuntar Compres")).toBeNull();
+  expect(screen.queryByText(/Consultado:/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Explorar unidades" }));
+  await screen.findByText("Unidad C:");
+  expect(screen.getByText("Unidad Y:")).toBeTruthy();
+  expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+});
+
+it("reads a selected work folder fresh and can select/deselect a supported file", async () => {
+  const home = { ok: true, json: async () => ({ available: true, navigation: true, sourceChecked: false, checkedAt: null, results: [folder], nextQuery: null }) };
+  const fetcher = vi.fn().mockResolvedValueOnce(home).mockResolvedValueOnce(reply([{ ...folder, name: "test.txt", path: "server-arnall/Y/QA/test.txt", kind: "file" }]));
+  vi.stubGlobal("fetch", fetcher);
+  const select = vi.fn();
+  render(<ServerPicker projectId="project" selected={[]} onSelect={select} onClose={vi.fn()}/>);
+  fireEvent.click(await screen.findByRole("button", { name: "Abrir QA" }));
+  const checkbox = await screen.findByLabelText("Adjuntar test.txt");
+  fireEvent.click(checkbox);
+  expect(screen.getByRole("button", { name: "Adjuntar referencias" }).hasAttribute("disabled")).toBe(false);
+  fireEvent.click(checkbox);
+  expect(screen.getByRole("button", { name: "Adjuntar referencias" }).hasAttribute("disabled")).toBe(true);
+  expect(select).not.toHaveBeenCalled();
+});

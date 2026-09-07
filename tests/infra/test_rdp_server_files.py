@@ -301,5 +301,22 @@ class InteractiveAdmissionTests(unittest.TestCase):
             self.assertEqual(set(diagnostic), {'phase', 'timingsMs', 'cause'})
 
 
+class ServerNavigationTests(unittest.TestCase):
+    def test_root_config_binds_shortcuts_to_existing_installation_connection_and_roots(self):
+        import json
+        manifest = {'installationId': 'test', 'connectionId': 'arnall', 'sourceRoots': ['C:\\Arnall']}
+        value = {'schemaVersion': 1, 'installationId': 'test', 'connectionId': 'arnall', 'entryPoints': [{'label': 'Compres', 'path': 'server-arnall/C/Arnall/Compres'}]}
+        with tempfile.TemporaryDirectory() as root:
+            p = Path(root) / 'navigation.json'
+            with patch.object(broker.files.rdp, 'private_file', return_value=p):
+                p.write_text(json.dumps(value))
+                self.assertEqual(broker.navigation_entries(p, manifest), value['entryPoints'])
+                for bad in [{**value, 'installationId': 'other'}, {**value, 'entryPoints': [{'label': 'Foreign', 'path': 'server-arnall/Y/Other'}]}, {**value, 'entryPoints': value['entryPoints'] * 2}]:
+                    p.write_text(json.dumps(bad))
+                    with self.assertRaises(ValueError):
+                        broker.navigation_entries(p, manifest)
+        self.assertEqual(broker.navigation_entries(None, manifest), [])
+
+
 if __name__ == '__main__':
     unittest.main()

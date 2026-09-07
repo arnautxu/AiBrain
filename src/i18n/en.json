@@ -1283,5 +1283,16 @@
   "Chrome: abre el icono de controles junto a la dirección → Configuración del sitio → Micrófono → Permitir. Safari: revisa los permisos de este sitio. Si ya está permitido, revisa el acceso al micrófono del navegador en los ajustes de privacidad del sistema. En móvil puedes usar el dictado del teclado.": "Chrome: open the controls icon beside the address → Site settings → Microphone → Allow. Safari: check permissions for this website. If already allowed, check your browser’s microphone access in system privacy settings. On mobile, you can use keyboard dictation.",
   "Solo propietario y administradores pueden acceder al centro de": "Only the owner and administrators can access the administration center for",
   "Fuente {p0}: {p1}": "Source {p0}: {p1}",
-  "Escribe a {name}…": "Message {name}…"
+  "Escribe a {name}…": "Message {name}…",
+  "Carpetas de trabajo": "Work folders",
+  "Actualizar carpetas de trabajo": "Refresh work folders",
+  "Cargando carpetas de trabajo…": "Loading work folders…",
+  "Explora las unidades para ver las carpetas disponibles.": "Browse the drives to see available folders.",
+  "Abre una carpeta para consultar sus archivos.": "Open a folder to view its files.",
+  " · listado parcial": " · partial listing",
+  "Explorar unidades": "Browse drives",
+  "Abrir {name}": "Open {name}",
+  "Seleccionar {name}": "Select {name}",
+  "Adjuntar {name}": "Attach {name}",
+  "Unidad {name}:": "Drive {name}:"
 }
