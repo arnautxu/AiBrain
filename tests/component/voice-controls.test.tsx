@@ -63,6 +63,7 @@ afterEach(() => {
   Reflect.deleteProperty(window, "SpeechRecognition");
   Reflect.deleteProperty(window, "webkitSpeechRecognition");
   Reflect.deleteProperty(window, "speechSynthesis");
+  Reflect.deleteProperty(document, "permissionsPolicy");
 });
 
 describe("VoiceDictationControl", () => {
@@ -107,7 +108,7 @@ describe("VoiceDictationControl", () => {
     await waitFor(() => expect(recognition).toBeDefined());
     act(() => recognition.onerror?.(Object.assign(new Event("error"), { error: "network" })));
     expect(onNotice).toHaveBeenCalledWith("El servicio de voz del navegador no está disponible ahora mismo.", "error");
-    await waitFor(() => expect(screen.getByRole("button", { name: "Dictar mensaje" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Entendido" })).toHaveFocus());
   });
 
   it("restores the original prompt when dictation is cancelled", async () => {
@@ -153,9 +154,34 @@ describe("VoiceDictationControl", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
 
     await waitFor(() => expect(onNotice).toHaveBeenCalledWith(
-      expect.stringMatching(/denegado el micrófono/i), "error",
+      expect.stringMatching(/autorizado el micrófono/i), "error",
     ));
     expect(recognition).toBeUndefined();
+  });
+
+  it("shows a policy blocker without asking for device access", async () => {
+    localStorage.setItem("aibrain.voice.dictation-consent.v1", "accepted");
+    Object.defineProperty(document, "permissionsPolicy", { configurable: true, value: { allowsFeature: () => false } });
+    render(<VoiceDictationControl value="Draft" disabled={false} onChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
+    expect(await screen.findByRole("dialog", { name: "Revisar el micrófono" })).toHaveTextContent("página está bloqueando");
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(recognition).toBeUndefined();
+  });
+
+  it("offers site and system recovery and retries only from a new gesture", async () => {
+    localStorage.setItem("aibrain.voice.dictation-consent.v1", "accepted");
+    getUserMedia.mockRejectedValueOnce(new DOMException("denied", "NotAllowedError"));
+    const onChange = vi.fn();
+    render(<VoiceDictationControl value="Draft" disabled={false} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Dictar mensaje" }));
+    expect(await screen.findByRole("dialog", { name: "Revisar el micrófono" })).toHaveTextContent("Configuración del sitio");
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Volver a solicitar permiso" }));
+    await waitFor(() => expect(recognition).toBeDefined());
+    expect(getUserMedia).toHaveBeenCalledTimes(2);
+    expect(stopMicrophoneTrack).toHaveBeenCalledOnce();
   });
 
   it("requires HTTPS before requesting or starting the microphone", async () => {

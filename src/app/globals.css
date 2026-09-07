@@ -1634,7 +1634,8 @@ button:disabled {
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
-.landing-project { display: flex; align-items: center; min-width: 0; flex: 1 1 0; }
+.landing-project { display: flex; align-items: center; min-width: 0; flex: 0 1 auto; }
+.landing-band > .landing-tasks { margin-left: auto; }
 .landing-band .composer-destination { flex-shrink: 1; overflow: visible; }
 .landing-band .composer-picker-button { max-width: 190px; font-size: 12px; }
 .landing-band-item {

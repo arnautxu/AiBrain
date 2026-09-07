@@ -7,7 +7,8 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
   test(`shared composer and task collision ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
     await page.emulateMedia({ colorScheme: theme });
-    await page.goto("/login");
+    const response = await page.goto("/login");
+    expect(response?.headers()["permissions-policy"]).toContain("microphone=(self)");
     await page.getByRole("button", { name: /Alex/ }).click();
     await page.waitForURL(/\/$/);
     const input = page.getByRole("textbox", { name: "Mensaje", exact: true });
@@ -20,6 +21,8 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     expect(Math.abs(a!.width - b!.width)).toBeLessThanOrEqual(1);
     const controls = await band.locator('button[aria-label="Destino de la conversación"], button.landing-band-item').evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { top: r.top, left: r.left, right: r.right, height: r.height }; }));
     expect(controls.length).toBe(4);
+    expect(controls[1].left - controls[0].right).toBeLessThan(24);
+    expect(controls[2].left - controls[1].right).toBeLessThan(24);
     expect(Math.max(...controls.map(r => r.top)) - Math.min(...controls.map(r => r.top))).toBeLessThan(3);
     for (const r of controls) { expect(r.left).toBeGreaterThanOrEqual(0); expect(r.right).toBeLessThanOrEqual(width); expect(r.height).toBeGreaterThanOrEqual(44); }
     await input.fill("Borrador que se reemplaza.");
@@ -33,6 +36,12 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     await page.screenshot({ path: `.impeccable/review/connector-tasks-${width}-${theme}.png` });
     await page.getByRole("menuitem", { name: /Trabajemos en los horarios/ }).click();
     await expect(page.getByRole("menu", { name: "Horarios del equipo" })).toBeVisible();
+    const back = page.getByRole("menuitem", { name: "Volver a las tareas", exact: true });
+    await expect(back.locator("svg")).toHaveCount(1);
+    await expect(back).toHaveText("");
+    await back.click();
+    await expect(menu).toBeVisible();
+    await page.getByRole("menuitem", { name: /Trabajemos en los horarios/ }).click();
     const child = await popup.boundingBox();
     expect(child!.x).toBeGreaterThanOrEqual(11); expect(child!.x + child!.width).toBeLessThanOrEqual(width - 11);
     await page.getByRole("menuitem", { name: "Revisar cambios de horarios", exact: true }).click();
