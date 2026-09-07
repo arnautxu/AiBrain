@@ -5,7 +5,10 @@ import { installationForLibraryResource } from "@/library/server-resource-access
 import { resolveProjectAccess } from "@/workbench/shared-access";
 import { resolveServerTurnPermissions } from "@/runtime/permission-turn";
 import { EnterpriseDocumentNetwork } from "./enterprise-document-network";
+import { ServerBrowseInflight } from "./server-browse-inflight";
 import { ServerDocumentFiles } from "./server-files";
+
+const inFlight = new ServerBrowseInflight();
 
 export async function browseServerForSession(session: AuthSession, projectId: string, query: string, signal?: AbortSignal) {
   const config = await installationForLibraryResource(session);
@@ -16,7 +19,12 @@ export async function browseServerForSession(session: AuthSession, projectId: st
   });
   const network = new EnterpriseDocumentNetwork(config);
   const roots = await network.rootsForTurn({ userId: session.user.id, projectId, permissions });
-  const result = await new ServerDocumentFiles(network, { signal }).search(roots, query, 50, true);
+  if (signal?.aborted) return { available: false, error: "SERVER_BROWSE_CANCELLED" };
+  // An HTTP disconnect must not orphan the Windows operation and make a reopen
+  // start a competing session. Every subscriber has independently passed ACLs.
+  // Include resolved roots so a permissions change cannot reuse an older grant.
+  const key = JSON.stringify([config.installationId, session.user.id, projectId, roots, query]);
+  const result = await inFlight.run(key, () => new ServerDocumentFiles(network).search(roots, query, 50, true));
   if (result?.available && Array.isArray(result.results)) {
     return { ...result, results: result.results.map(entry => {
       const item = entry as Record<string, unknown>;

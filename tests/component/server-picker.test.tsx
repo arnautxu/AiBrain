@@ -27,3 +27,14 @@ it("does not present cached results as a live folder", async () => {
   await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
   expect(screen.queryByText("QA")).toBeNull();
 });
+
+it("escapes a transformed composer, labels drives and restores focus when closed", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(reply([{ ...folder, path: "server-arnall/C/", name: "C" }])));
+  const trigger = document.createElement("button"); document.body.append(trigger); trigger.focus();
+  const view = render(<div style={{ transform: "translateY(1px)" }}><ServerPicker projectId="project" selected={[]} onSelect={vi.fn()} onClose={vi.fn()}/></div>);
+  await screen.findByText("Unidad C:");
+  expect(screen.getByTestId("server-backdrop").parentElement).toBe(document.body);
+  expect(screen.queryByLabelText("Adjuntar C")).toBeNull();
+  expect(screen.getByRole("dialog").getAttribute("aria-modal")).toBe("true");
+  view.unmount(); expect(document.activeElement).toBe(trigger); trigger.remove();
+});

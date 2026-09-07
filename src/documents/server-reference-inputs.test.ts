@@ -21,11 +21,25 @@ describe("selected server references", () => {
     expect(read).not.toHaveBeenCalled();
   });
   it("fails closed for withdrawn or unreadable files and malformed references", async () => {
-    await expect(serverReferenceInputs([file], roots, { read: vi.fn().mockResolvedValue({ available: false }), search: vi.fn() })).rejects.toThrow("Windows");
+    const partial = await serverReferenceInputs([file], roots, { read: vi.fn().mockResolvedValue({ available: false }), search: vi.fn() });
+    expect(partial[0].text).toContain("SERVER_FILES_UNAVAILABLE");
     for (const path of ["server-other/../Y/x", "server-arnall/Y/%2e%2e/x", "server-arnall/Y/a%2fb", "server-arnall/Y/a:stream", "server-arnall/Y/QA.txt?part=2"]) {
       expect(isServerReferenceList([{ ...file, path }])).toBe(false);
     }
     expect(isServerReferenceList([file, file])).toBe(false);
     expect(isServerReferenceList([{ ...file, write: true }])).toBe(false);
   });
+});
+
+it("keeps valid references after a failed or unsupported one and handles thrown transport failures", async () => {
+  const exe = { ...file, name: "PreusVenda.exe", path: "server-arnall/Y/PreusVenda.exe" };
+  const read = vi.fn().mockResolvedValueOnce({ available: false, error: "SERVER_FORMAT_NOT_READABLE" })
+    .mockRejectedValueOnce(new Error("private transport detail"))
+    .mockResolvedValueOnce({ available: true, content: "valid document", sha256: "a".repeat(64) });
+  const result = await serverReferenceInputs([exe, { ...file, path: "server-arnall/Y/gone.txt" }, file], roots, { read, search: vi.fn() });
+  expect(result).toHaveLength(3);
+  expect(result[0].text).toContain("SERVER_FORMAT_NOT_READABLE");
+  expect(result[0].text).toContain("No ejecutes binarios");
+  expect(result[1].text).not.toContain("private transport detail");
+  expect(result[2].text).toContain("valid document");
 });
