@@ -53,3 +53,41 @@ external-change/readback and 2→4 user tests. Need confirmed business roots bef
 hiding any potentially useful location. A new private direct transport or
 Windows resident service would need a concrete approved plan; no ports, firewall,
 credentials, ACLs or persistent Windows services have been changed.
+
+## Additional live evidence and scoped host correction
+
+The lock holders were identified by PID/module/start time, without killing or
+altering them: knowledge-map.py held inventory.lock while rebuilding the local
+map; rdp-access.py was a child of the scheduled rdp-sync.py holding operator.lock.
+These are legitimate jobs, not abandoned lockfiles. Live browse/read do not use
+the catalogue; their broker now requests background yielding without acquiring
+the catalogue lock. The existing exclusive Windows source lock remains intact.
+Unsupported read formats are classified in the bounded lookup lane before any
+RDP or catalogue wait, with publication ownership and request validation intact.
+Broker request logs add elapsedMs and an allowlisted error code beside requestId,
+never paths, prompts, credentials or file contents.
+
+A bounded follow-up read-only probe acquired the actual source lock in0.523s,
+opened RDP in35.901s and listed C:/Arnall in5.854s and Y:/ in2.800s in the same
+session. C:/Arnall contains Compres and Vendes. Y:/ returned a partial50-entry
+page with business folders. A separate metadata-only probe waited22.682s for
+the source lock and35.695s for startup. Win32_LogicalDisk reports both C: and Y:
+as DriveType3 (local fixed disks), ProviderName null; Y: label is Disc2.
+
+The latter probe read only file/version metadata for the user-selected
+C:/Arnall/Vendes/PreusVenda.exe:121281818bytes, version1.0.0.0,
+modified2026-05-20T12:49:38.9324970Z, empty product name and file description.
+It was never executed or exported. No function is inferred from its name.
+
+These are small diagnostic samples, not production cold/warm p50/p95. The
+warm2.8–5.85s measurements reuse a diagnostic session; the deployed app does not
+currently keep that session alive across folder clicks. The~1s warm/few-seconds
+cold objective remains unmet. True2–4 user acceptance and external fixture
+refresh remain blocked on authorized QA identities/fixture. Root selection was
+asked explicitly; no Windows roots or ACLs have been changed.
+
+Host rollout must verify baseline broker272484b4... and folder helper4ccb8630...
+against the installed originals, preserve private backups, and wait for no
+active broker readers before replacing only these two files and restarting
+only aibrain-arnall-server-files. Inventory/sync services and their separate
+module copies remain untouched. Rollback restores those two backups.

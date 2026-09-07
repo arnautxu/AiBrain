@@ -51,18 +51,24 @@ def fill(store, manifest, scan, source, run):
 
 
 @contextmanager
-def interactive_access(manifest):
+def interactive_access(manifest, catalogue=True):
     target = mapping.map_root(manifest)
     operator = target.parent / 'operator'
     # Installations without a metadata worker retain the existing source route.
     if not (operator / 'inventory.lock').exists():
         yield operator
         return
+    # Live browse/read never consume the metadata catalogue. They need the
+    # RDP source lock, acquired by their reader, but must not wait for a local
+    # map rebuild. Inventory mutation retains its catalogue lock below.
     # The background worker yields after its current page, never by interrupting
     # Windows or the app. Expiry also handles a killed broker child safely.
     mapping.atomic_text(operator / 'interactive-until', str(time.time() + 200))
     fd = None
     try:
+        if not catalogue:
+            yield operator
+            return
         lock = operator / 'inventory.lock'
         mapping.private(lock)
         fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)
