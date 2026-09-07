@@ -79,7 +79,11 @@ RUN printf '%s\n' \
     "deb https://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT}/ bookworm-security main" \
     > /etc/apt/sources.list \
   && rm -f /etc/apt/sources.list.d/debian.sources \
-  && printf '%s\n' 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99snapshot \
+  && printf '%s\n' \
+    'Acquire::Check-Valid-Until "false";' \
+    'Acquire::Retries "3";' \
+    'Acquire::https::Timeout "30";' \
+    > /etc/apt/apt.conf.d/99snapshot \
   && apt-get update \
   && export DEBIAN_FRONTEND=noninteractive \
   && apt-get upgrade -y \
