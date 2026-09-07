@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { Microphone, SpeakerHigh, Stop, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from "react";
@@ -153,6 +154,7 @@ export function VoiceDictationControl({
   onChange: (value: string) => void;
   onNotice?: (message: string, kind: VoiceNoticeKind) => void;
 }) {
+  const t = useUiText();
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const startingValueRef = useRef("");
   const finalTranscriptRef = useRef("");
@@ -196,7 +198,7 @@ export function VoiceDictationControl({
     processingTimerRef.current = window.setTimeout(() => {
       setState("idle");
       processingTimerRef.current = null;
-      onNotice?.("Dictado añadido. Revísalo y edítalo antes de enviar.", "success");
+      onNotice?.(t("Dictado añadido. Revísalo y edítalo antes de enviar."), "success");
       requestAnimationFrame(() => triggerRef.current?.focus());
     }, 350);
   };
@@ -219,7 +221,7 @@ export function VoiceDictationControl({
     finalTranscriptRef.current = "";
     const attempt = ++startAttemptRef.current;
     if (window.isSecureContext === false || !navigator.mediaDevices?.getUserMedia) {
-      const message = "El micrófono necesita una conexión HTTPS y un navegador compatible.";
+      const message = t("El micrófono necesita una conexión HTTPS y un navegador compatible.");
       setError(message);
       setState("error");
       setFallbackOpen(true);
@@ -230,7 +232,7 @@ export function VoiceDictationControl({
     const policyDocument = document as Document & { permissionsPolicy?: { allowsFeature: (feature: string) => boolean }; featurePolicy?: { allowsFeature: (feature: string) => boolean } };
     const policy = policyDocument.permissionsPolicy ?? policyDocument.featurePolicy;
     if (policy && !policy.allowsFeature("microphone")) {
-      const message = "Esta página está bloqueando el micrófono. Recarga la página; si persiste, contacta con el administrador de la aplicación.";
+      const message = t("Esta página está bloqueando el micrófono. Recarga la página; si persiste, contacta con el administrador de la aplicación.");
       setError(message); setState("error"); setFallbackOpen(true);
       onNotice?.(message, "error");
       return;
@@ -242,7 +244,7 @@ export function VoiceDictationControl({
     } catch (reason) {
       if (attempt !== startAttemptRef.current) return;
       setPermissionHelp(reason instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(reason.name));
-      const message = microphonePermissionError(reason);
+      const message = t(microphonePermissionError(reason));
       setError(message);
       setState("error");
       setFallbackOpen(true);
@@ -275,7 +277,7 @@ export function VoiceDictationControl({
     recognition.onerror = (event) => {
       if (cancelledRef.current) return;
       setPermissionHelp(event.error === "not-allowed");
-      const message = recognitionError(event.error);
+      const message = t(recognitionError(event.error));
       failedRef.current = true;
       setError(message);
       setState("error");
@@ -293,7 +295,7 @@ export function VoiceDictationControl({
       recognition.start();
     } catch {
       recognitionRef.current = null;
-      const message = "El micrófono ya está en uso o no ha podido iniciarse.";
+      const message = t("El micrófono ya está en uso o no ha podido iniciarse.");
       setError(message);
       setState("error");
       setFallbackOpen(true);
@@ -332,7 +334,7 @@ export function VoiceDictationControl({
     onChange(startingValueRef.current);
     setState("idle");
     setError(null);
-    onNotice?.("Dictado cancelado. No se ha enviado nada.", "status");
+    onNotice?.(t("Dictado cancelado. No se ha enviado nada."), "status");
     requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
@@ -340,20 +342,19 @@ export function VoiceDictationControl({
   return (
     <div className="relative shrink-0">
       {state === "listening" ? (
-        <div className="flex items-center gap-1" role="group" aria-label="Dictado activo">
+        <div className="flex items-center gap-1" role="group" aria-label={t("Dictado activo")}>
           <span className="hidden items-center gap-1 text-[10px] font-medium text-[var(--danger)] sm:flex" role="status">
-            <span className="size-1.5 animate-pulse rounded-full bg-[var(--danger)] motion-reduce:animate-none" />Escuchando
-          </span>
-          <button ref={stopButtonRef} type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!rounded-full" aria-label="Terminar dictado" title="Terminar dictado" onClick={stop}><Stop size={12} weight="fill" /></button>
-          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full" aria-label="Cancelar dictado" title="Cancelar y descartar dictado" onClick={cancel}><X size={14} /></button>
+            <span className="size-1.5 animate-pulse rounded-full bg-[var(--danger)] motion-reduce:animate-none" />{t("Escuchando")}{" "}</span>
+          <button ref={stopButtonRef} type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl text-[var(--danger)] sm:!rounded-full" aria-label={t("Terminar dictado")} title={t("Terminar dictado")} onClick={stop}><Stop size={12} weight="fill" /></button>
+          <button type="button" className="composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full" aria-label={t("Cancelar dictado")} title={t("Cancelar y descartar dictado")} onClick={cancel}><X size={14} /></button>
         </div>
       ) : (
         <button
           ref={triggerRef}
           type="button"
           className={`composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${state === "error" ? "text-[var(--danger)]" : ""}`}
-          aria-label={state === "requesting" ? "Esperando permiso del micrófono" : state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
-          title={state === "requesting" ? "Esperando permiso del micrófono" : state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
+          aria-label={state === "requesting" ? t("Esperando permiso del micrófono") : state === "processing" ? t("Procesando dictado") : t("Dictar mensaje")}
+          title={state === "requesting" ? t("Esperando permiso del micrófono") : state === "processing" ? t("Procesando dictado") : t("Dictar mensaje")}
           aria-haspopup="dialog"
           aria-expanded={consentOpen || fallbackOpen}
           disabled={disabled || state === "processing" || state === "requesting"}
@@ -364,23 +365,23 @@ export function VoiceDictationControl({
       )}
 
       {consentOpen ? (
-        <div ref={dictationDialogRef} role="dialog" aria-label="Permiso para dictar" tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
-          <p className="text-[12px] font-semibold text-[var(--text)]">Usar el micrófono para dictar</p>
-          <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">El navegador procesa tu voz con su propio servicio y añadirá el texto al mensaje. La aplicación no recibe audio ni lo guarda, y nunca enviará el mensaje automáticamente.</p>
+        <div ref={dictationDialogRef} role="dialog" aria-label={t("Permiso para dictar")} tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
+          <p className="text-[12px] font-semibold text-[var(--text)]">{t("Usar el micrófono para dictar")}</p>
+          <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">{t("El navegador procesa tu voz con su propio servicio y añadirá el texto al mensaje. La aplicación no recibe audio ni lo guarda, y nunca enviará el mensaje automáticamente.")}</p>
           <div className="mt-3 flex justify-end gap-2">
-            <button ref={consentDeclineRef} type="button" className="min-h-10 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>Ahora no</button>
-            <button type="button" className="min-h-10 rounded-full bg-[var(--brain-accent)] px-4 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={confirmConsent}>Activar dictado</button>
+            <button ref={consentDeclineRef} type="button" className="min-h-10 rounded-full px-3 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>{t("Ahora no")}</button>
+            <button type="button" className="min-h-10 rounded-full bg-[var(--brain-accent)] px-4 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={confirmConsent}>{t("Activar dictado")}</button>
           </div>
         </div>
       ) : null}
 
-      {state === "requesting" ? <p role="status" className="sr-only">{"Responde a la solicitud de permiso del navegador para continuar."}</p> : null}
+      {state === "requesting" ? <p role="status" className="sr-only">{t("Responde a la solicitud de permiso del navegador para continuar.")}</p> : null}
 
       {fallbackOpen ? (
-        <div ref={dictationDialogRef} role="dialog" aria-label={error ? "Revisar el micrófono" : "Dictado no disponible"} tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
-          <p className="text-[12px] font-semibold text-[var(--text)]">{error ? "Revisar el micrófono" : "Dictado no disponible"}</p>
-          {error ? <><p role="alert" className="mt-2 text-[12px] leading-5">{error}</p>{permissionHelp ? <p className="mt-2 text-[11px] leading-4 text-[var(--text-subtle)]">{"Chrome: abre el icono de controles junto a la dirección → Configuración del sitio → Micrófono → Permitir. Safari: revisa los permisos de este sitio. Si ya está permitido, revisa el acceso al micrófono del navegador en los ajustes de privacidad del sistema. En móvil puedes usar el dictado del teclado."}</p> : null}<button type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold" onClick={() => void start()}>{permissionHelp ? "Volver a solicitar permiso" : "Reintentar dictado"}</button></> : <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">Este navegador no ofrece dictado. Escribe o pega el texto en el mensaje. Esta instalación tampoco publica una transcripción de archivos de audio, así que no la simulamos.</p>}
-          <button ref={fallbackDismissRef} type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>Entendido</button>
+        <div ref={dictationDialogRef} role="dialog" aria-label={error ? t("Revisar el micrófono") : t("Dictado no disponible")} tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
+          <p className="text-[12px] font-semibold text-[var(--text)]">{error ? t("Revisar el micrófono") : t("Dictado no disponible")}</p>
+          {error ? <><p role="alert" className="mt-2 text-[12px] leading-5">{error}</p>{permissionHelp ? <p className="mt-2 text-[11px] leading-4 text-[var(--text-subtle)]">{t("Chrome: abre el icono de controles junto a la dirección → Configuración del sitio → Micrófono → Permitir. Safari: revisa los permisos de este sitio. Si ya está permitido, revisa el acceso al micrófono del navegador en los ajustes de privacidad del sistema. En móvil puedes usar el dictado del teclado.")}</p> : null}<button type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold" onClick={() => void start()}>{permissionHelp ? t("Volver a solicitar permiso") : t("Reintentar dictado")}</button></> : <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">{t("Este navegador no ofrece dictado. Escribe o pega el texto en el mensaje. Esta instalación tampoco publica una transcripción de archivos de audio, así que no la simulamos.")}</p>}
+          <button ref={fallbackDismissRef} type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>{t("Entendido")}</button>
         </div>
       ) : null}
 
@@ -392,6 +393,7 @@ export function VoiceDictationControl({
 const READ_RATES = [0.75, 1, 1.25, 1.5] as const;
 
 export function ReadAloudControl({ text, language = "es-ES" }: { text: string; language?: string }) {
+  const t = useUiText();
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const rateSelectRef = useRef<HTMLSelectElement>(null);
@@ -443,17 +445,16 @@ export function ReadAloudControl({ text, language = "es-ES" }: { text: string; l
   if (!supported) return null;
   return (
     <div className="relative">
-      <button ref={triggerRef} type="button" title={speaking ? "Detener lectura" : "Leer en voz alta"} aria-label={speaking ? "Detener lectura" : "Leer en voz alta"} aria-expanded={open} aria-haspopup="dialog" className={`result-action ${speaking ? "text-[var(--brain-accent)]" : ""}`} onClick={() => speaking ? stop() : setOpen((current) => !current)}>{speaking ? <Stop size={13} weight="fill" /> : <SpeakerHigh size={14} />}</button>
+      <button ref={triggerRef} type="button" title={speaking ? t("Detener lectura") : t("Leer en voz alta")} aria-label={speaking ? t("Detener lectura") : t("Leer en voz alta")} aria-expanded={open} aria-haspopup="dialog" className={`result-action ${speaking ? "text-[var(--brain-accent)]" : ""}`} onClick={() => speaking ? stop() : setOpen((current) => !current)}>{speaking ? <Stop size={13} weight="fill" /> : <SpeakerHigh size={14} />}</button>
       {open ? (
-        <div ref={readDialogRef} role="dialog" aria-label="Lectura en voz alta" tabIndex={-1} className="menu-enter absolute bottom-full left-0 z-30 mb-2 w-56 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-popover)]">
-          <p className="text-[11px] font-semibold text-[var(--text)]">Leer esta respuesta</p>
-          <label className="mt-2 block text-[10px] text-[var(--text-subtle)]">Velocidad
-            <select ref={rateSelectRef} aria-label="Velocidad de lectura" className="mt-1 min-h-10 w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-[var(--text)]" value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); localStorage.setItem(READ_RATE_KEY, String(next)); }}>
+        <div ref={readDialogRef} role="dialog" aria-label={t("Lectura en voz alta")} tabIndex={-1} className="menu-enter absolute bottom-full left-0 z-30 mb-2 w-56 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3 shadow-[var(--shadow-popover)]">
+          <p className="text-[11px] font-semibold text-[var(--text)]">{t("Leer esta respuesta")}</p>
+          <label className="mt-2 block text-[10px] text-[var(--text-subtle)]">{t("Velocidad")}{" "}<select ref={rateSelectRef} aria-label={t("Velocidad de lectura")} className="mt-1 min-h-10 w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface)] px-2 text-[11px] text-[var(--text)]" value={rate} onChange={(event) => { const next = Number(event.target.value); setRate(next); localStorage.setItem(READ_RATE_KEY, String(next)); }}>
               {READ_RATES.map((option) => <option key={option} value={option}>{option === 1 ? "Normal" : `${option}×`}</option>)}
             </select>
           </label>
-          <p className="mt-2 text-[9px] leading-3 text-[var(--text-subtle)]">La voz se genera en tu navegador. La velocidad queda guardada solo en este dispositivo.</p>
-          <button type="button" className="mt-3 min-h-10 w-full rounded-full bg-[var(--brain-accent)] px-3 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={read}>Reproducir</button>
+          <p className="mt-2 text-[9px] leading-3 text-[var(--text-subtle)]">{t("La voz se genera en tu navegador. La velocidad queda guardada solo en este dispositivo.")}</p>
+          <button type="button" className="mt-3 min-h-10 w-full rounded-full bg-[var(--brain-accent)] px-3 text-[11px] font-semibold text-[var(--brain-contrast)]" onClick={read}>{t("Reproducir")}</button>
         </div>
       ) : null}
     </div>

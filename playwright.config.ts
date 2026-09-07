@@ -75,7 +75,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `AIBRAIN_INSTALLATION_CONFIG=${JSON.stringify(installationConfig)} VERCEL_ENV=preview AIBRAIN_AUTH_MODE=demo AIBRAIN_ENABLE_PREVIEW_DEMO=1 CHAT_RUNTIME=demo npm run dev -- --hostname 127.0.0.1 --port ${port}`,
+    command: `node scripts/prepare-playwright-language.mjs ${JSON.stringify(installationConfig)} && AIBRAIN_INSTALLATION_CONFIG=${JSON.stringify(installationConfig)} VERCEL_ENV=preview AIBRAIN_AUTH_MODE=demo AIBRAIN_ENABLE_PREVIEW_DEMO=1 CHAT_RUNTIME=demo npm run dev -- --hostname 127.0.0.1 --port ${port}`,
     url: `${baseURL}/login`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ManagedAppActionControl } from "@/components/managed-app-action-control";
 import type { ChatMessage } from "@/lib/chat-contract";

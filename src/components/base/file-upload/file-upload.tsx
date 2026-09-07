@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -121,6 +122,7 @@ export function FileUpload({
   renderFileIcon,
   className,
 }: FileUploadProps) {
+  const t = useUiText();
   const [phase, setPhase] = useState<UploadPhase>("idle");
   const [progress, setProgress] = useState(0);
   const [file, setFile] = useState<File | null>(null);
@@ -151,12 +153,12 @@ export function FileUpload({
   const startUpload = (nextFile: File) => {
     const extension = extensionFor(nextFile.name);
     if (!allowedExtensions.map((value) => value.toLowerCase()).includes(extension)) {
-      setRejection(`Solo se admiten archivos ${allowedExtensions.map((value) => value.toUpperCase()).join(", ")}`);
+      setRejection(t("Solo se admiten archivos {p0}", { p0: allowedExtensions.map((value) => value.toUpperCase()).join(", ") }));
       timers.current.push(setTimeout(() => setRejection(null), 2600));
       return;
     }
     if (nextFile.size > maxBytes) {
-      setRejection(`El archivo supera el límite de ${formatFileSize(maxBytes)}`);
+      setRejection(t("El archivo supera el límite de {p0}", { p0: formatFileSize(maxBytes) }));
       timers.current.push(setTimeout(() => setRejection(null), 2600));
       return;
     }
@@ -202,7 +204,7 @@ export function FileUpload({
       ref={boxRef}
       role="button"
       tabIndex={busy ? -1 : 0}
-      aria-label="Adjuntar un archivo"
+      aria-label={t("Adjuntar un archivo")}
       onClick={() => !busy && inputRef.current?.click()}
       onKeyDown={(event) => {
         if (!busy && (event.key === "Enter" || event.key === " ")) {
@@ -319,12 +321,12 @@ export function FileUpload({
           >
             {rejection ?? (
               <>
-                Arrastra un archivo o <span className="text-accent-500">selecciónalo</span>
+                {" "}{t("Arrastra un archivo o")}{" "}<span className="text-accent-500">{t("selecciónalo")}</span>
               </>
             )}
           </p>
           <p className="t-stagger-line t-stagger-line--3 text-body-2-regular text-text-tertiary">
-            {allowedLabel} (max {formatFileSize(maxBytes)})
+            {allowedLabel} {" "}{t("(max")}{" "}{formatFileSize(maxBytes)})
           </p>
         </div>
       </div>
@@ -349,7 +351,7 @@ export function FileUpload({
               staggerLine(uploadingLine),
             )}
           >
-            Adjuntando {file ? formatFileSize(file.size) : ""}
+            {" "}{t("Adjuntando")}{" "}{file ? formatFileSize(file.size) : ""}
             ...
           </p>
           <p
@@ -358,8 +360,7 @@ export function FileUpload({
               staggerLine(completeLine),
             )}
           >
-            Archivo adjuntado
-          </p>
+            {" "}{t("Archivo adjuntado")}{" "}</p>
         </div>
       </div>
     </div>

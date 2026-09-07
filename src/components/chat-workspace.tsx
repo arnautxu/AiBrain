@@ -1,4 +1,5 @@
 "use client";
+import { useUiLocale, useUiText } from "@/i18n/provider";
 
 import { ConnectorPopover } from "@/components/connector-popover";
 import { ConnectorLogo } from "@/components/connector-logo";
@@ -255,6 +256,7 @@ function ComposerPicker({
 }
 
 function ResultActions({ content }: { content: string }) {
+  const t = useUiText();
   const [copied, setCopied] = useState(false);
   const copyResult = async () => {
     try {
@@ -276,7 +278,7 @@ function ResultActions({ content }: { content: string }) {
   };
   return (
     <div className="mt-3 flex flex-wrap items-center gap-0.5 text-[var(--text-muted)]">
-      <button type="button" title="Copiar" aria-label="Copiar" className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[12px]">Copiado</span> : null}</button>
+      <button type="button" title={t("Copiar")} aria-label={t("Copiar")} className="result-action" onClick={() => void copyResult()}><Copy size={14} />{copied ? <span className="ml-1 text-[12px]">{t("Copiado")}</span> : null}</button>
     </div>
   );
 }
@@ -320,8 +322,9 @@ function AssistantMessage({
   restoreDisabled?: boolean;
   readOnly?: boolean;
 }) {
+  const t = useUiText();
   const hasExecution = hasRelevantWorkProcess(message);
-  const liveStatus = currentTurnStatusLabel(message) ?? "Enviando solicitud";
+  const liveStatus = currentTurnStatusLabel(message, t) ?? t("Enviando solicitud");
   const publicContent = publicAssistantText(message.content, assistantName);
 
   return (
@@ -353,16 +356,16 @@ function AssistantMessage({
         <div className="mt-3 flex max-w-xl items-start gap-2 rounded-[var(--brain-radius)] border border-[var(--danger)] bg-[var(--danger-soft)] px-3 py-2.5 text-[12px] text-[var(--danger)]" role="alert">
           <WarningCircle size={15} className="mt-0.5 shrink-0" />
           <div className="min-w-0">
-            <p>No se ha podido completar esta respuesta.</p>
+            <p>{t("No se ha podido completar esta respuesta.")}</p>
             {!readOnly && onRestoreRequest ? <>
-              <p className="mt-1">Revisa la solicitud y los resultados parciales antes de volver a enviarla.</p>
-              <button type="button" disabled={restoreDisabled} className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 py-2 font-medium disabled:opacity-40" onClick={onRestoreRequest}>Editar solicitud</button>
+              <p className="mt-1">{t("Revisa la solicitud y los resultados parciales antes de volver a enviarla.")}</p>
+              <button type="button" disabled={restoreDisabled} className="touch-target mt-2 min-h-9 rounded-lg border border-current px-3 py-2 font-medium disabled:opacity-40" onClick={onRestoreRequest}>{t("Editar solicitud")}</button>
             </> : null}
           </div>
         </div>
       ) : null}
 
-      {message.status === "stopped" ? <p className="mt-3 text-[12px] text-[var(--text-muted)]">Respuesta detenida.</p> : null}
+      {message.status === "stopped" ? <p className="mt-3 text-[12px] text-[var(--text-muted)]">{t("Respuesta detenida.")}</p> : null}
 
       {message.artifacts.length ? (
         <div className={`mt-4 grid min-w-0 grid-cols-1 gap-3 ${message.artifacts.length > 1 && message.artifacts.every((artifact) => artifact.type === "image") ? "sm:grid-cols-2" : ""}`}>
@@ -382,36 +385,37 @@ function AssistantMessage({
 }
 
 function UserMessage({ message, connectorMentions, threadId, onRequestPublication, onEdit, readOnly = false }: { message: ChatMessage; connectorMentions: ConnectorMention[]; threadId: string; onRequestPublication?: (attachment: ChatAttachment) => void; onEdit: (content: string) => void; readOnly?: boolean }) {
+  const t = useUiText();
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(message.content);
   return (
     <article className="message-enter group flex justify-end">
       <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
       <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--user-message-text)] [overflow-wrap:anywhere]">
-        {message.serverReferences?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.serverReferences.map(ref => <span className="rounded bg-[var(--surface-raised)]/70 px-2 py-1 text-xs text-[var(--text)]" key={ref.path} title={ref.path}>Server · {ref.name}</span>)}</div> : null}
+        {message.serverReferences?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.serverReferences.map(ref => <span className="rounded bg-[var(--surface-raised)]/70 px-2 py-1 text-xs text-[var(--text)]" key={ref.path} title={ref.path}>{t("Server ·")}{" "}{ref.name}</span>)}</div> : null}
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
               <span key={attachment.id} className="flex max-w-52 items-center gap-1.5 rounded-md bg-[var(--surface-raised)]/70 px-2 py-1 text-[12px] text-[var(--text)]">
                 {attachment.mimeType.startsWith("image/") ? <ChatAttachmentImage attachment={attachment} threadId={threadId} /> : <FileIcon size={11} />}
                 <span className="truncate">{attachment.name}</span>
-                {!readOnly && onRequestPublication ? <button type="button" aria-label={`Preparar publicación de ${attachment.name}`} title="Publicar como documento oficial" onClick={() => onRequestPublication(attachment)} className="touch-target shrink-0 rounded p-1 hover:bg-[var(--surface-hover)]"><Plus size={12} /></button> : null}
+                {!readOnly && onRequestPublication ? <button type="button" aria-label={t("Preparar publicación de {p0}", { p0: attachment.name })} title={t("Publicar como documento oficial")} onClick={() => onRequestPublication(attachment)} className="touch-target shrink-0 rounded p-1 hover:bg-[var(--surface-hover)]"><Plus size={12} /></button> : null}
               </span>
             ))}
           </div>
         ) : null}
         {editing ? (
           <div>
-            <label className="sr-only" htmlFor={`edit-${message.id}`}>Editar mensaje</label>
+            <label className="sr-only" htmlFor={`edit-${message.id}`}>{t("Editar mensaje")}</label>
             <textarea id={`edit-${message.id}`} autoFocus value={value} maxLength={32_000} rows={Math.min(8, Math.max(2, value.split("\n").length))} className="w-full min-w-0 resize-y bg-transparent outline-none [overflow-wrap:anywhere]" onChange={(event) => setValue(event.target.value)} />
             <div className="mt-2 flex justify-end gap-2 text-[12px]">
-              <button type="button" className="rounded-full px-3 py-1.5 hover:bg-black/5" onClick={() => { setValue(message.content); setEditing(false); }}>Cancelar</button>
-              <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--send-button)] px-3 py-1.5 font-semibold text-[var(--send-button-text)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>Enviar edición</button>
+              <button type="button" className="rounded-full px-3 py-1.5 hover:bg-black/5" onClick={() => { setValue(message.content); setEditing(false); }}>{t("Cancelar")}</button>
+              <button type="button" disabled={!value.trim() || value.trim() === message.content.trim()} className="rounded-full bg-[var(--send-button)] px-3 py-1.5 font-semibold text-[var(--send-button-text)] disabled:opacity-40" onClick={() => { onEdit(value.trim()); setEditing(false); }}>{t("Enviar edición")}</button>
             </div>
           </div>
         ) : <div className="whitespace-pre-wrap">{mentionTextParts(message.content, connectorMentions.filter(m => message.connectorMentions?.includes(m.id))).map((part, index) => part.id ? <span key={index} className="rounded bg-[var(--surface-selected)] text-[var(--text)]"><span className="inline-flex align-middle"><ConnectorLogo id={part.id} size={14} /></span>{part.text.slice(1)}</span> : part.text)}</div>}
       </div>
-      {!readOnly && !editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label="Editar mensaje y crear una rama" title="Editar mensaje" onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
+      {!readOnly && !editing && message.attachments.length === 0 ? <div className="mt-1 flex justify-end opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"><button type="button" className="result-action" aria-label={t("Editar mensaje y crear una rama")} title={t("Editar mensaje")} onClick={() => setEditing(true)}><PencilSimple size={14} /></button></div> : null}
       </div>
     </article>
   );
@@ -472,6 +476,8 @@ export function ChatWorkspace({
   onOpenBrowser,
   readOnly = false,
 }: ChatWorkspaceProps) {
+  const t = useUiText();
+  const locale = useUiLocale();
   const { scrollRef, contentRef, scrollToBottom, stopScroll, isAtBottom, state: scrollState } = useStickToBottom({
     initial: "instant",
     resize: "instant",
@@ -523,7 +529,7 @@ export function ChatWorkspace({
   const restoreFailedRequest = async (request: ChatMessage) => {
     if (!thread || readOnly || sending || documentUploading || restoreControllerRef.current) return;
     if (prompt.trim() || attachments.length || documents.length || serverReferences.length) {
-      onComposerNotice("Conserva o vacía el borrador actual antes de recuperar otra solicitud.");
+      onComposerNotice(t("Conserva o vacía el borrador actual antes de recuperar otra solicitud."));
       return;
     }
     const selection = attachmentSelectionRef.current;
@@ -536,7 +542,7 @@ export function ChatWorkspace({
       if (controller.signal.aborted || selection !== attachmentSelectionRef.current) return;
       const current = currentDraftRef.current;
       if (current.prompt.trim() || current.attachments.length || current.documents.length || current.serverReferences.length) {
-        onComposerNotice("Tu borrador actual se ha conservado. Vacíalo antes de recuperar otra solicitud.");
+        onComposerNotice(t("Tu borrador actual se ha conservado. Vacíalo antes de recuperar otra solicitud."));
         return;
       }
       onPromptChange(request.content);
@@ -544,11 +550,11 @@ export function ChatWorkspace({
       onServerReferencesChange?.(request.serverReferences ?? []);
       onConnectorMentionIdsChange(request.connectorMentions ?? []);
       onComposerNotice(restored.some((document) => document.status === "error")
-        ? "Solicitud recuperada. Vuelve a adjuntar los archivos no disponibles o quítalos antes de enviar."
-        : "Solicitud recuperada para revisar. No se ha enviado nada.", "status");
+        ? t("Solicitud recuperada. Vuelve a adjuntar los archivos no disponibles o quítalos antes de enviar.")
+        : t("Solicitud recuperada para revisar. No se ha enviado nada."), "status");
       requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
     } catch {
-      if (selection === attachmentSelectionRef.current) onComposerNotice("No se ha podido recuperar la solicitud. Vuelve a intentarlo.");
+      if (selection === attachmentSelectionRef.current) onComposerNotice(t("No se ha podido recuperar la solicitud. Vuelve a intentarlo."));
     } finally {
       window.clearTimeout(timeout);
       if (restoreControllerRef.current === controller) {
@@ -630,20 +636,20 @@ export function ChatWorkspace({
     .filter((candidate) => candidate.status === "active")
     .map((candidate) => ({
       value: candidate.id,
-      label: isStandaloneProject(candidate) ? "Sin proyecto" : candidate.name,
-    })), [projects]);
+      label: isStandaloneProject(candidate) ? t("Sin proyecto") : candidate.name,
+    })), [projects, t]);
   const gmailAuthorized = connectorMentions.some((mention) =>
     mention.canRead && mention.status === "connected" &&
     (mention.id.toLocaleLowerCase("es") === "gmail" || mention.label.toLocaleLowerCase("es") === "gmail"));
   const suggestions = useMemo(
-    () => landingSuggestions(project, companyName, { gmailAuthorized, imageGeneration }),
-    [companyName, gmailAuthorized, imageGeneration, project],
+    () => landingSuggestions(project, companyName, { gmailAuthorized, imageGeneration }, t),
+    [companyName, gmailAuthorized, imageGeneration, project, t],
   );
   const noProject = !project || standaloneConversation;
-  const firstName = userName.trim().split(/\s+/)[0] || "ahí";
-  const landingHeadline = imageGeneration ? "¿Qué imagen quieres crear?" : noProject
-    ? `¿En qué te puedo ayudar, ${firstName}?`
-    : `¿Cómo puedo ayudarte en ${project.name}?`;
+  const firstName = userName.trim().split(/\s+/)[0] || t("ahí");
+  const landingHeadline = imageGeneration ? t("¿Qué imagen quieres crear?") : noProject
+    ? t("¿En qué te puedo ayudar, {p0}?", { p0: firstName })
+    : t("¿Cómo puedo ayudarte en {p0}?", { p0: project.name });
   const placeholderName = assistantName.trim().replace(/\bbrain\b/giu, "AI") || "AI";
   const mentionMatch = composing ? null : mentionQueryAt(prompt, composerCaret);
   const mentionQuery = mentionMatch?.query ?? null;
@@ -683,7 +689,7 @@ export function ChatWorkspace({
     window.addEventListener("resize", sync);
     return () => { observer?.disconnect(); window.removeEventListener("resize", sync); };
   }, [prompt, hasInlineMentions, composerFocused, composerMultiline]);
-  const runningMessage = thread?.messages.findLast((message) => message.role === "user")?.content ?? "Respuesta en curso";
+  const runningMessage = thread?.messages.findLast((message) => message.role === "user")?.content ?? t("Respuesta en curso");
   const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
   const visibleMentionActiveIndex = Math.min(mentionActiveIndex, Math.max(mentionOptions.length - 1, 0));
   const activeMentionOption = mentionOptions[visibleMentionActiveIndex] ?? null;
@@ -713,7 +719,7 @@ export function ChatWorkspace({
 
   const openAuthorizedConnectors = () => {
     if (connectorMentions.length === 0) {
-      onComposerNotice("No hay conectores habilitados en tu catálogo.");
+      onComposerNotice(t("No hay conectores habilitados en tu catálogo."));
       setComposerMenuOpen(false);
       requestAnimationFrame(() => composerAddButtonRef.current?.focus());
       return;
@@ -785,15 +791,15 @@ export function ChatWorkspace({
     const selection = attachmentSelectionRef.current;
     const available = Math.max(0, 3 - attachments.length);
     const selected = Array.from(files).slice(0, available);
-    if (files.length > available) onComposerNotice("Puedes adjuntar un máximo de 3 imágenes por mensaje.");
+    if (files.length > available) onComposerNotice(t("Puedes adjuntar un máximo de 3 imágenes por mensaje."));
     const next: ChatInputAttachment[] = [];
     for (const file of selected) {
       if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
-        onComposerNotice(`${file.name} no es una imagen compatible.`);
+        onComposerNotice(t("{p0} no es una imagen compatible.", { p0: file.name }));
         continue;
       }
       if (file.size > 2_000_000) {
-        onComposerNotice(`${file.name} supera el límite de 2 MB.`);
+        onComposerNotice(t("{p0} supera el límite de 2 MB.", { p0: file.name }));
         continue;
       }
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -803,7 +809,7 @@ export function ChatWorkspace({
         reader.readAsDataURL(file);
       }).catch(() => "");
       if (!dataUrl) {
-        onComposerNotice(`No se ha podido leer ${file.name}.`);
+        onComposerNotice(t("No se ha podido leer {p0}.", { p0: file.name }));
         continue;
       }
       next.push({ id: crypto.randomUUID(), name: file.name, mimeType: file.type, size: file.size, dataUrl });
@@ -826,7 +832,7 @@ export function ChatWorkspace({
       } else if (canAttachDocuments) {
         documentFiles.push(file);
       } else {
-        onComposerNotice(`${file.name} no es compatible con el servicio actual.`);
+        onComposerNotice(t("{p0} no es compatible con el servicio actual.", { p0: file.name }));
       }
     }
     if (images.length) await addImages(images);
@@ -860,7 +866,7 @@ export function ChatWorkspace({
       /> : null}
       <header data-testid="mobile-app-header" className="mobile-app-header workbench-navigation shrink-0 items-center px-2 md:px-3">
         <div className="workbench-navigation-context flex min-w-0 items-center gap-2">
-          <button aria-label="Mostrar u ocultar la barra lateral" aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
+          <button aria-label={t("Mostrar u ocultar la barra lateral")} aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>
             <SidebarSimple size={17} />
           </button>
           <div data-testid="project-breadcrumb" className="min-w-0 px-1 py-1 text-left">
@@ -924,13 +930,12 @@ export function ChatWorkspace({
             </div>
             <div className="h-8" aria-hidden="true" />
           </div>
-        ) : <section className={`chat-empty-state mx-auto min-h-full w-full ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label="Conversación vacía" />}
+        ) : <section className={`chat-empty-state mx-auto min-h-full w-full ${composerEngaged ? "chat-empty-state-engaged" : ""}`} aria-label={t("Conversación vacía")} />}
       </div>
 
       {readOnly ? (
         <div className="shrink-0 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-center text-[11px] font-medium text-[var(--text-muted)]" role="status">
-          Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.
-        </div>
+          {" "}{t("Proyecto de solo lectura · puedes consultar el historial y los archivos compartidos.")}{" "}</div>
       ) : <div className={`mobile-composer-dock ${hasMessages ? "relative shrink-0 bg-[var(--surface)]/94 pb-[max(.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-md md:pb-6" : "chat-empty-composer-dock !absolute inset-x-0 z-10"} px-3 md:px-6`}>
         {hasMessages && !isAtBottom ? <div className="mb-2 flex justify-center md:absolute md:left-1/2 md:top-0 md:z-20 md:mb-0 md:-translate-x-1/2 md:-translate-y-full"><button
           type="button"
@@ -941,7 +946,7 @@ export function ChatWorkspace({
           onClick={(event) => {
             if (event.detail === 0) jumpToBottom();
           }}
-        ><ArrowDown size={13} />Volver al final</button></div> : null}
+        ><ArrowDown size={13} />{t("Volver al final")}</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
           {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
           {sending && hasMessages ? <MessageQueue
@@ -950,10 +955,10 @@ export function ChatWorkspace({
             onCancel={onCancelQueuedMessage}
             onStop={queueingMessage ? onStop : undefined}
             stopping={stopping}
-            language={manifest.identity.language}
+            language={locale}
             className="mb-2 max-w-none"
           /> : null}
-          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
+          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />{t("Sin conexión. El historial sigue disponible y no se enviará nada.")}</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Enviando solicitud")}</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Conectando con el servicio…")}</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>{t("El servicio no está disponible. Puedes revisar el historial.")}</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>{t("Reintentar")}</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
@@ -970,15 +975,15 @@ export function ChatWorkspace({
               if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false);
             }}
           >
-            {fileReading ? <p role="status" className="px-3 py-1 text-[11px] text-[var(--text-muted)]">Preparando adjuntos…</p> : null}
-            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--text)]">Suelta los archivos para adjuntarlos</div> : null}
+            {fileReading ? <p role="status" className="px-3 py-1 text-[11px] text-[var(--text-muted)]">{t("Preparando adjuntos…")}</p> : null}
+            {dragActive ? <div className="pointer-events-none absolute inset-1 z-20 grid place-items-center rounded-[var(--brain-radius)] bg-[var(--surface-raised)]/95 text-[12px] font-semibold text-[var(--text)]">{t("Suelta los archivos para adjuntarlos")}</div> : null}
             {composerMenuOpen ? (
-              <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
-                {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
-                {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Tools</button>
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />Server</button>
-                <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="embedded" disabled={sending} onSelect={(text) => {
+              <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label={t("Añadir al mensaje")} className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
+                {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />{t("Adjuntar archivos")}</button> : null}
+                {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">{t("Crear imagen")}</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />{t("Tools")}</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />{t("Server")}</button>
+                <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="embedded" disabled={sending} onSelect={(text) => {
                   onPromptChange(text);
                   setComposerMenuOpen(false);
                   requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
@@ -986,30 +991,30 @@ export function ChatWorkspace({
               </div>
             ) : null}
             {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} returnFocus={serverReturnFocusRef} /> : null}
-            {serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label="Referencias Server">{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={`Quitar referencia ${item.name}`} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
+            {serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label={t("Referencias Server")}>{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={t("Quitar referencia {p0}", { p0: item.name })} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
             {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
                   <div key={attachment.id} className="group/attachment flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-muted)] px-2.5 py-1.5">
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><NextImage unoptimized src={attachment.dataUrl} width={32} height={32} alt={`Vista previa de ${attachment.name}`} className="size-6 object-contain" /></span>
-                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[11px] text-[var(--text-subtle)]">Lista · {Math.ceil(attachment.size / 1024)} KB</span></span>
-                    <button type="button" aria-label={`Quitar ${attachment.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]"><NextImage unoptimized src={attachment.dataUrl} width={32} height={32} alt={t("Vista previa de {p0}", { p0: attachment.name })} className="size-6 object-contain" /></span>
+                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{attachment.name}</span><span className="block text-[11px] text-[var(--text-subtle)]">{t("Lista ·")}{" "}{Math.ceil(attachment.size / 1024)} {" "}{t("KB")}</span></span>
+                    <button type="button" aria-label={t("Quitar {p0}", { p0: attachment.name })} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onAttachmentsChange(attachments.filter((item) => item.id !== attachment.id))}><X size={10} /></button>
                   </div>
                 ))}
                 {documents.map((document) => (
                   <div key={document.uploadId} className={`group/attachment flex min-w-0 max-w-64 shrink-0 items-center gap-2 rounded-lg border px-2.5 py-1.5 ${document.status === "error" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--border)] bg-[var(--surface-muted)]"}`}>
-                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.kind === "image" && document.status === "ready" && document.previewFiles[0] ? <NextImage unoptimized src={document.previewFiles[0].url} width={32} height={32} alt={`Vista previa de ${document.name}`} className="size-6 object-contain" /> : document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
-                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? "Preparando vista previa…" : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? ` · ${document.pages} pág.` : ""}`}</span></span>
-                    {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">Abrir</a> : null}
-                    <button type="button" aria-label={`Quitar ${document.name}`} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
+                    <span className="grid size-6 shrink-0 place-items-center rounded-md bg-[var(--surface-raised)] text-[var(--text-muted)]">{document.kind === "image" && document.status === "ready" && document.previewFiles[0] ? <NextImage unoptimized src={document.previewFiles[0].url} width={32} height={32} alt={t("Vista previa de {p0}", { p0: document.name })} className="size-6 object-contain" /> : document.status === "uploading" ? <SpinnerGap size={12} className="motion-safe:animate-spin" /> : <FileIcon size={12} />}</span>
+                    <span className="min-w-0"><span className="block truncate text-[12px] font-medium text-[var(--text-secondary)]">{document.name}</span><span className={`block truncate text-[11px] ${document.status === "error" ? "text-[var(--danger)]" : "text-[var(--text-subtle)]"}`}>{document.status === "uploading" ? t("Preparando vista previa…") : document.status === "error" ? document.error : `Lista · ${document.kind.toUpperCase()}${document.pages ? t(" · {p0} pág.", { p0: document.pages }) : ""}`}</span></span>
+                    {document.status === "ready" && document.previewFiles[0] ? <a href={document.previewFiles[0].url} target="_blank" rel="noreferrer" className="text-[11px] font-semibold text-[var(--brain-accent)] hover:underline">{t("Abrir")}</a> : null}
+                    <button type="button" aria-label={t("Quitar {p0}", { p0: document.name })} className="touch-target ml-auto grid size-5 shrink-0 place-items-center rounded-md text-[var(--text-subtle)] hover:bg-[var(--surface-raised)] hover:text-[var(--text)]" onClick={() => onDocumentsChange(documents.filter((item) => item.uploadId !== document.uploadId))}><X size={10} /></button>
                   </div>
                 ))}
               </div>
             ) : null}
-            {imageGeneration ? <div className="flex px-2 pt-1" aria-label="Generación de imágenes activada">
-              <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />Crear imagen<button type="button" aria-label="Desactivar generación de imágenes" disabled={sending} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
+            {imageGeneration ? <div className="flex px-2 pt-1" aria-label={t("Generación de imágenes activada")}>
+              <span className="flex items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface-muted)] px-2 py-1 text-[11px] text-[var(--text-secondary)]"><ImagesSquare size={11} />{t("Crear imagen")}<button type="button" aria-label={t("Desactivar generación de imágenes")} disabled={sending} className="touch-target grid place-items-center rounded-full hover:bg-[var(--surface-raised)] disabled:opacity-40" onClick={() => onImageGenerationChange(false)}><X size={10} /></button></span>
             </div> : null}
-            {restoringRequest ? <p className="px-3 py-2 text-xs text-[var(--text-secondary)]" role="status">Recuperando solicitud…</p> : documents.some((document) => document.status === "error") ? <p className="px-3 py-2 text-xs text-[var(--danger)]" role="alert">Hay archivos no disponibles. Vuelve a adjuntarlos o quítalos antes de enviar.</p> : null}
+            {restoringRequest ? <p className="px-3 py-2 text-xs text-[var(--text-secondary)]" role="status">{t("Recuperando solicitud…")}</p> : documents.some((document) => document.status === "error") ? <p className="px-3 py-2 text-xs text-[var(--danger)]" role="alert">{t("Hay archivos no disponibles. Vuelve a adjuntarlos o quítalos antes de enviar.")}</p> : null}
             <div
               ref={composerMeasurementRef}
               aria-hidden="true"
@@ -1020,14 +1025,14 @@ export function ChatWorkspace({
             {hasInlineMentions ? <div ref={mentionOverlayRef} aria-hidden="true" className="composer-mention-overlay pointer-events-none absolute overflow-hidden whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--text)]">{mentionParts.map((part, index) => part.id ? <span key={index} className="rounded bg-[var(--surface-selected)] text-[var(--brain-accent)]"><span className="relative text-transparent">@<span className="absolute inset-0 flex items-center justify-center"><ConnectorLogo id={part.id} size={13} /></span></span>{part.text.slice(1)}</span> : part.text)}{"\u200b"}</div> : null}
             <textarea
               ref={composerRef}
-              aria-label="Mensaje"
+              aria-label={t("Mensaje")}
               aria-autocomplete="list"
               aria-controls={mentionOpen ? "connector-mention-options" : undefined}
               aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
               autoFocus={false}
               className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] md:text-[14px] ${hasMessages ? "min-h-8" : "min-h-12"}`}
               style={{ fontSize: 16, ...(hasInlineMentions ? { color: "transparent", caretColor: "var(--text)" } : {}) }}
-              placeholder={imageGeneration ? "Describe la imagen que quieres crear…" : `Escribe a ${placeholderName}…`}
+              placeholder={imageGeneration ? t("Describe la imagen que quieres crear…") : t("Escribe a {name}…", { name: placeholderName })}
               rows={1}
               defaultValue={prompt}
               onChange={(event) => { changeComposerText(event.target.value); syncCaret(event.target); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(Boolean(mentionQueryAt(event.target.value, event.target.selectionStart))); }}
@@ -1071,10 +1076,10 @@ export function ChatWorkspace({
                 }
               }}
             />
-            {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label="Conectores disponibles" className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
-              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "Conectar" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">No hay conectores autorizados que coincidan.</p>}
+            {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label={t("Conectores disponibles")} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
+              {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores autorizados que coincidan.")}</p>}
             </div></ConnectorPopover> : null}
-            {connectorCatalogOpen ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label="Catálogo de conectores" aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
+            {connectorCatalogOpen ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label={t("Catálogo de conectores")} aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
                 setCatalogActiveIndex((current) => nextEnabledConnectorIndex(connectorMentions, current, event.key === "ArrowDown" ? 1 : -1));
@@ -1097,22 +1102,22 @@ export function ChatWorkspace({
                 requestAnimationFrame(() => (event.shiftKey ? composerRef.current : composerAddButtonRef.current)?.focus());
               }
             }}>
-              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? "conectado · escritura con aprobación" : "conectado" : mention.status === "requires_login" ? "Conectar" : mention.status === "admin_setup_required" ? "falta configuración administrativa" : "no disponible"}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label="Seleccionado" /> : null}</button>)}
+              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
             </div></ConnectorPopover> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
-                <button ref={composerAddButtonRef} aria-label="Añadir al mensaje" aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
+                <button ref={composerAddButtonRef} aria-label={t("Añadir al mensaje")} aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
+                {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label={t("Seleccionar archivos para adjuntar")} className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
                 <ComposerPicker
-                  ariaLabel="Experiencia"
+                  ariaLabel={t("Experiencia")}
                   value={composerExperience}
-                  valueLabel={composerExperience === "fast" ? "Rápido" : composerExperience === "expert" ? "Experto" : "Inteligente"}
+                  valueLabel={composerExperience === "fast" ? t("Rápido") : composerExperience === "expert" ? t("Experto") : t("Inteligente")}
                   options={[
-                    { value: "fast", label: "Rápido", detail: "Resúmenes breves y consultas" },
-                    { value: "smart", label: "Inteligente", detail: "Redacción y planificación diaria" },
-                    { value: "expert", label: "Experto", detail: "Análisis y problemas complejos" },
+                    { value: "fast", label: t("Rápido"), detail: t("Resúmenes breves y consultas") },
+                    { value: "smart", label: t("Inteligente"), detail: t("Redacción y planificación diaria") },
+                    { value: "expert", label: t("Experto"), detail: t("Análisis y problemas complejos") },
                   ]}
                   open={composerPickerOpen === "experience"}
                   placement={hasMessages ? "above" : "below"}
@@ -1126,13 +1131,13 @@ export function ChatWorkspace({
                 <VoiceDictationControl
                   value={prompt}
                   disabled={!project || sending || documentUploading}
-                  language={manifest.identity.language === "ca" ? "ca-ES" : manifest.identity.language === "en" ? "en-US" : "es-ES"}
+                  language={locale === "en" ? "en-US" : "es-ES"}
                   onChange={onPromptChange}
                   onNotice={onComposerNotice}
                 />
                 <RadialGlowButton
                   active={!thread && !sending && !readOnly}
-                  aria-label={queueingMessage ? "Añadir mensaje a la cola" : sending ? (stopping ? "Deteniendo respuesta" : "Detener respuesta") : "Enviar mensaje"}
+                  aria-label={queueingMessage ? t("Añadir mensaje a la cola") : sending ? (stopping ? t("Deteniendo respuesta") : t("Detener respuesta")) : t("Enviar mensaje")}
                   aria-busy={(!queueingMessage && stopping) || undefined}
                   className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
                   disabled={queueingMessage ? !project || !runtimeReady || documentUploading || documentsBlocked : sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading || documentsBlocked}
@@ -1153,13 +1158,13 @@ export function ChatWorkspace({
               </div>
             </div>
           </div>
-          {!hasMessages ? <div ref={landingBandRef} className="landing-band" aria-label="Opciones para empezar">
+          {!hasMessages ? <div ref={landingBandRef} className="landing-band" aria-label={t("Opciones para empezar")}>
             <div className="landing-project"><FolderOpen size={15} aria-hidden="true" />
                 {!hasMessages ? (
                   <ComposerPicker
-                    ariaLabel="Destino de la conversación"
+                    ariaLabel={t("Destino de la conversación")}
                     value={project?.id ?? ""}
-                    valueLabel={noProject ? "Proyecto" : project?.name ?? "Proyecto"}
+                    valueLabel={noProject ? t("Proyecto") : project?.name ?? t("Proyecto")}
                     options={destinationOptions}
                     open={composerPickerOpen === "destination"}
                     placement="below"
@@ -1171,14 +1176,14 @@ export function ChatWorkspace({
                 ) : null}
 
             </div>
-            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />Server</button>
-            <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
-            <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
+            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />{t("Server")}</button>
+            <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />{t("Tools")}</button>
+            <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="menu" disabled={sending} onSelect={(text) => {
               onPromptChange(text);
               requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
             }} />
           </div> : null}
-          {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
+          {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label={t("Sugerencias para empezar")}>
             <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
               onPromptChange(text);
               requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));

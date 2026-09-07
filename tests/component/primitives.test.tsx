@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "../render-spanish";
 import { describe, expect, it } from "vitest";
 import { BrandMark, Button, IconButton } from "@/components/ui/primitives";
 import { resolveUiInstallationBranding } from "@/ui/installation-branding";

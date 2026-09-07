@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowClockwise, ArrowsIn, ArrowsOut, CaretLeft, CaretRight, DownloadSimple, FileDoc, FilePdf, FilePpt, FileText, FileXls, Minus, Plus, WarningCircle, X } from "@phosphor-icons/react";
@@ -25,6 +26,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
   artifact: DocumentArtifact;
   onClose: () => void;
 }) {
+  const t = useUiText();
   const [loaded, setLoaded] = useState(artifact.kind === "text" || artifact.previewFormat === "spreadsheet");
   const [failureReason, setFailureReason] = useState<string | null>(null);
   const [failed, setFailed] = useState(!artifact.previewUrl);
@@ -78,7 +80,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
   return (
     <aside
       ref={panelRef}
-      aria-label={`Vista previa de ${artifact.name}`}
+      aria-label={t("Vista previa de {p0}", { p0: artifact.name })}
       aria-modal={mobileOverlay ? "true" : undefined}
       role={mobileOverlay ? "dialog" : undefined}
       tabIndex={mobileOverlay ? -1 : undefined}
@@ -88,24 +90,24 @@ function DocumentPreviewContent({ artifact, onClose }: {
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{documentIcon(artifact.previewFormat === "spreadsheet" ? "xlsx" : artifact.kind)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13px] font-semibold text-[var(--text)]">{artifact.name}</h2>
-          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? "Excel · vista de datos" : artifact.kind.toUpperCase()} · representación segura · {Math.max(1, Math.ceil(artifact.size / 1024))} KB{artifact.pages ? ` · ${artifact.pages} ${artifact.pages === 1 ? "página" : "páginas"}` : ""}</p>
+          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? t("Excel · vista de datos") : artifact.kind.toUpperCase()} {" "}{t("· representación segura ·")}{" "}{Math.max(1, Math.ceil(artifact.size / 1024))} {" "}{t("KB")}{artifact.pages ? ` · ${artifact.pages} ${artifact.pages === 1 ? t("página") : t("páginas")}` : ""}</p>
         </div>
-        {richPages ? <nav className="hidden items-center gap-1 sm:flex" aria-label="Navegación del documento">
-          <button type="button" disabled={page <= 1} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label="Página anterior" onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={16} /></button>
+        {richPages ? <nav className="hidden items-center gap-1 sm:flex" aria-label={t("Navegación del documento")}>
+          <button type="button" disabled={page <= 1} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Página anterior")} onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={16} /></button>
           <span className="min-w-14 text-center text-[11px] tabular-nums text-[var(--text-secondary)]">{page} / {artifact.pages}</span>
-          <button type="button" disabled={!artifact.pages || page >= artifact.pages} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label="Página siguiente" onClick={() => setPage((current) => Math.min(artifact.pages ?? current, current + 1))}><CaretRight size={16} /></button>
-          <button type="button" disabled={zoom <= 50} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label="Alejar" onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={15} /></button>
+          <button type="button" disabled={!artifact.pages || page >= artifact.pages} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Página siguiente")} onClick={() => setPage((current) => Math.min(artifact.pages ?? current, current + 1))}><CaretRight size={16} /></button>
+          <button type="button" disabled={zoom <= 50} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Alejar")} onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={15} /></button>
           <span className="w-10 text-center text-[10px] tabular-nums text-[var(--text-muted)]">{zoom}%</span>
-          <button type="button" disabled={zoom >= 200} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label="Acercar" onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={15} /></button>
+          <button type="button" disabled={zoom >= 200} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Acercar")} onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={15} /></button>
         </nav> : null}
-        <button type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={17} /> : <ArrowsOut size={17} />}</button>
-        <a href={artifact.url} download={artifact.previewFormat === "spreadsheet" ? `${artifact.name}.preview.json` : artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={artifact.previewFormat === "spreadsheet" ? "Descargar datos de la vista previa" : `Descargar ${artifact.name}`} title="Descargar"><DownloadSimple size={17} /></a>
-        <button ref={closeButtonRef} type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label="Cerrar vista previa" onClick={onClose}><X size={17} /></button>
+        <button type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" aria-label={fullscreen ? t("Salir de pantalla completa") : t("Pantalla completa")} onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={17} /> : <ArrowsOut size={17} />}</button>
+        <a href={artifact.url} download={artifact.previewFormat === "spreadsheet" ? `${artifact.name}.preview.json` : artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={artifact.previewFormat === "spreadsheet" ? t("Descargar datos de la vista previa") : `Descargar ${artifact.name}`} title={t("Descargar")}><DownloadSimple size={17} /></a>
+        <button ref={closeButtonRef} type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={t("Cerrar vista previa")} onClick={onClose}><X size={17} /></button>
       </header>
 
       <div className="relative min-h-0 flex-1 overflow-hidden bg-[var(--surface-muted)] p-2 pb-[max(.5rem,env(safe-area-inset-bottom))] md:p-3 xl:pb-3">
         {!loaded && !failed ? (
-          <div className="absolute inset-2 z-10 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-5 md:inset-3" role="status" aria-label={`Cargando vista previa del ${previewKind}`}>
+          <div className="absolute inset-2 z-10 overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-5 md:inset-3" role="status" aria-label={t("Cargando vista previa del {p0}", { p0: previewKind })}>
             <div className="mx-auto h-full max-w-[520px] animate-pulse rounded-md bg-white p-10 shadow-[var(--shadow-sm)]">
               <div className="h-5 w-2/3 rounded bg-[var(--surface-muted)]" />
               <div className="mt-8 space-y-3"><div className="h-3 rounded bg-[var(--surface-muted)]" /><div className="h-3 rounded bg-[var(--surface-muted)]" /><div className="h-3 w-5/6 rounded bg-[var(--surface-muted)]" /></div>
@@ -114,7 +116,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
         ) : null}
         {failed ? (
           <div className="grid h-full place-items-center rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-8 text-center" role="alert">
-            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No se ha podido mostrar el {previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">{failureReason ?? "Puedes volver a intentarlo o descargar el archivo original."}</p><button type="button" className="touch-target mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />Reintentar</button></div>
+            <div className="max-w-64"><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">{t("No se ha podido mostrar el")}{" "}{previewKind}</p><p className="mt-1.5 text-[12px] leading-5 text-[var(--text-muted)]">{failureReason ?? t("Puedes volver a intentarlo o descargar el archivo original.")}</p><button type="button" className="touch-target mt-4 inline-flex min-h-9 items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[0.98]" onClick={retry}><ArrowClockwise size={14} />{t("Reintentar")}</button></div>
           </div>
         ) : artifact.previewUrl && artifact.previewFormat === "spreadsheet" ? (
           <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} />
@@ -141,13 +143,13 @@ function DocumentPreviewContent({ artifact, onClose }: {
           />
         ) : null}
       </div>
-      {richPages ? <nav className="flex shrink-0 items-center justify-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 sm:hidden" aria-label="Navegación móvil del documento">
-        <button type="button" disabled={page <= 1} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label="Página anterior" onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={17} /></button>
+      {richPages ? <nav className="flex shrink-0 items-center justify-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 sm:hidden" aria-label={t("Navegación móvil del documento")}>
+        <button type="button" disabled={page <= 1} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Página anterior")} onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={17} /></button>
         <span className="min-w-14 text-center text-[11px] tabular-nums">{page} / {artifact.pages}</span>
-        <button type="button" disabled={!artifact.pages || page >= artifact.pages} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label="Página siguiente" onClick={() => setPage((current) => Math.min(artifact.pages ?? current, current + 1))}><CaretRight size={17} /></button>
-        <button type="button" disabled={zoom <= 50} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label="Alejar" onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={16} /></button>
+        <button type="button" disabled={!artifact.pages || page >= artifact.pages} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Página siguiente")} onClick={() => setPage((current) => Math.min(artifact.pages ?? current, current + 1))}><CaretRight size={17} /></button>
+        <button type="button" disabled={zoom <= 50} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Alejar")} onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={16} /></button>
         <span className="w-10 text-center text-[10px] tabular-nums">{zoom}%</span>
-        <button type="button" disabled={zoom >= 200} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label="Acercar" onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={16} /></button>
+        <button type="button" disabled={zoom >= 200} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Acercar")} onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={16} /></button>
       </nav> : null}
     </aside>
   );

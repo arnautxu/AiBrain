@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { BookOpenText, ChevronDown, ExternalLink, Globe2 } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
@@ -228,13 +229,15 @@ export function CitationList({
 
 export function Citations({
   citations,
-  title = "Sources",
+  title: providedTitle,
   open,
   defaultOpen = false,
   onOpenChange,
   idPrefix,
   className,
 }: CitationsProps) {
+  const t = useUiText();
+  const title = providedTitle ?? t("Sources");
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const contentId = `${baseId}-content`;

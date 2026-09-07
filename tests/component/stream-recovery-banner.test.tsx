@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it } from "vitest";
 import { StreamRecoveryBanner } from "@/components/stream-recovery-banner";
 

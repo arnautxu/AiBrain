@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { GovernedMemoryRecord } from "@/memory/proposal-store";
 import { MemoryPanel } from "@/components/memory-panel";

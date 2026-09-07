@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { ConnectorPopover } from "@/components/connector-popover";
 import Image from "next/image";
@@ -13,6 +14,7 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
   disabled: boolean;
   onSelect: (prompt: string) => void;
 }) {
+  const t = useUiText();
   const [open, setOpen] = useState(false);
   const [schedule, setSchedule] = useState<LandingSuggestion | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -56,9 +58,9 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
   return <div ref={rootRef} className={`landing-tasks landing-tasks-${variant}`}>
     {variant !== "suggestions" ? <button type="button" disabled={disabled} role={variant === "embedded" ? "menuitem" : undefined} tabIndex={variant === "embedded" ? -1 : undefined} className="landing-band-item" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={(event) => { openerRef.current = event.currentTarget; setSchedule(null); setOpen(!open); }}
-      onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />Tareas recurrentes</button> : items}
-    {open ? <ConnectorPopover anchor={openerRef} centerMobile><div ref={menuRef} id={id} role="menu" aria-label={schedule ? "Horarios del equipo" : "Tareas recurrentes"} className="max-h-[inherit] overflow-y-auto overscroll-contain" onKeyDown={(event) => { event.stopPropagation(); onKeyDown(event); }}>
-      {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" aria-label="Volver a las tareas" title="Volver a las tareas" onClick={() => setSchedule(null)}><CaretLeft size={12} aria-hidden="true" /></button> : null}
+      onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />{t("Tareas recurrentes")}</button> : items}
+    {open ? <ConnectorPopover anchor={openerRef} centerMobile><div ref={menuRef} id={id} role="menu" aria-label={schedule ? t("Horarios del equipo") : t("Tareas recurrentes")} className="max-h-[inherit] overflow-y-auto overscroll-contain" onKeyDown={(event) => { event.stopPropagation(); onKeyDown(event); }}>
+      {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" aria-label={t("Volver a las tareas")} title={t("Volver a las tareas")} onClick={() => setSchedule(null)}><CaretLeft size={12} aria-hidden="true" /></button> : null}
         {schedule.children?.map((child) => <button key={child.id} type="button" role="menuitem" disabled={disabled} className="landing-task-item" onClick={() => choose(child.prompt)}>{schedule.iconPath ? <Image unoptimized src={schedule.iconPath} alt="" width={20} height={20} className="size-5 shrink-0 object-contain" /> : null}{child.label}</button>)}</> : items}
     </div></ConnectorPopover> : null}
   </div>;

@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 /* eslint-disable @next/next/no-img-element -- authenticated blob URLs cannot be optimized by next/image. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -132,6 +133,7 @@ export function BrowserPanel(props: BrowserPanelProps) {
 }
 
 function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null }: BrowserPanelProps) {
+  const t = useUiText();
   const [status, setStatus] = useState<BrowserUiStatus | null>(initialStatus);
   const [viewerToken, setViewerToken] = useState<BrowserViewerToken | null>(null);
   const [navigation, setNavigation] = useState<BrowserViewerNavigationState>({
@@ -258,20 +260,20 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   }, []);
 
   const renewViewerToken = useCallback(async (control: boolean, signal?: AbortSignal) => {
-    if (!threadId) throw new Error("Abre una conversación antes de iniciar el navegador.");
+    if (!threadId) throw new Error(t("Abre una conversación antes de iniciar el navegador."));
     const requestedAt = Date.now();
     const next = await issueBrowserViewerToken(threadId, control, signal);
-    if (!attachmentRef.current || signal?.aborted) throw new Error("El visor se ha cerrado.");
+    if (!attachmentRef.current || signal?.aborted) throw new Error(t("El visor se ha cerrado."));
     viewerTokenRef.current = next;
     tokenIssuedAtRef.current = requestedAt;
     viewerTokenControlsRef.current = control;
     setViewerToken(next);
     return next;
-  }, [threadId]);
+  }, [threadId, t]);
 
   const ensureControl = useCallback(async () => {
-    if (!threadId) throw new Error("Abre una conversación antes de controlar el navegador.");
-    if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
+    if (!threadId) throw new Error(t("Abre una conversación antes de controlar el navegador."));
+    if (!attachmentRef.current) throw new Error(t("El visor se ha cerrado."));
     if (controlBindingRef.current && humanControlRef.current && viewerTokenRef.current && viewerTokenControlsRef.current &&
       Date.now() - tokenIssuedAtRef.current < 25_000) {
       return viewerTokenRef.current;
@@ -279,17 +281,17 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     if (takeoverPromiseRef.current) return takeoverPromiseRef.current;
     const takeover = (async () => {
       const current = await refreshStatus();
-      if (!attachmentRef.current) throw new Error("El visor se ha cerrado.");
+      if (!attachmentRef.current) throw new Error(t("El visor se ha cerrado."));
       if (!controlBindingRef.current || controlBindingRef.current.browserSessionId !== current.state.browserSessionId ||
         current.state.lifecycle !== "human-control") {
         if ((current.state.lifecycle !== "ready" && current.state.lifecycle !== "human-control") ||
-          !current.state.browserSessionId) throw new Error("La sesión se está reconectando.");
+          !current.state.browserSessionId) throw new Error(t("La sesión se está reconectando."));
         const binding = { attachmentId, browserSessionId: current.state.browserSessionId };
         const controlled = await controlBrowser("takeover", undefined, binding);
         controlBindingRef.current = binding;
         if (!attachmentRef.current) {
           await releaseControl();
-          throw new Error("El visor se ha cerrado.");
+          throw new Error(t("El visor se ha cerrado."));
         }
         setStatus(controlled);
         humanControlRef.current = true;
@@ -302,7 +304,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     } finally {
       if (takeoverPromiseRef.current === takeover) takeoverPromiseRef.current = null;
     }
-  }, [attachmentId, refreshStatus, releaseControl, renewViewerToken, threadId]);
+  }, [attachmentId, refreshStatus, releaseControl, renewViewerToken, threadId, t]);
 
   useEffect(() => {
     if (!open) return;
@@ -313,13 +315,13 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           return controlBrowser("start", controller.signal).then(setStatus);
         }
       }).catch((reason: unknown) => {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido conectar el navegador.");
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : t("No se ha podido conectar el navegador."));
       });
     };
     poll();
     const interval = window.setInterval(poll, 2_000);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [open, refreshStatus, threadId]);
+  }, [open, refreshStatus, threadId, t]);
 
   useEffect(() => {
     if (!open || !threadId || !status?.state.browserSessionId ||
@@ -327,11 +329,11 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       void renewViewerToken(status.state.lifecycle === "human-control", controller.signal).catch((reason: unknown) => {
-        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "No se ha podido abrir el visor.");
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : t("No se ha podido abrir el visor."));
       });
     }, 0);
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [open, renewViewerToken, status?.state.browserSessionId, status?.state.lifecycle, threadId]);
+  }, [open, renewViewerToken, status?.state.browserSessionId, status?.state.lifecycle, threadId, t]);
 
   useEffect(() => {
     if (!open || !threadId || !viewerToken) return;
@@ -367,7 +369,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             setPointerTrail((record.metadata.pointerTrail ?? []).map((point) => ({
               ...point,
               action: "click",
-              target: "Interacción en el navegador",
+              target: t("Interacción en el navegador"),
             })));
             const now = performance.now();
             frameTimesRef.current = [...frameTimesRef.current.filter((value) => now - value <= 2_000), now].slice(-30);
@@ -398,7 +400,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
           if (controller.signal.aborted) return;
           reconnectAttempt += 1;
           setConnection("reconnecting");
-          if (reconnectAttempt >= 4) setError(reason instanceof Error ? reason.message : "La pantalla se está reconectando.");
+          if (reconnectAttempt >= 4) setError(reason instanceof Error ? reason.message : t("La pantalla se está reconectando."));
           await wait(Math.min(2_000, 150 * (2 ** Math.min(reconnectAttempt, 4))), controller.signal);
           try {
             await renewViewerToken(humanControlRef.current, controller.signal);
@@ -411,7 +413,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     };
     void run();
     return () => controller.abort();
-  }, [open, renewViewerToken, replaceFrame, threadId, viewerToken]);
+  }, [open, renewViewerToken, replaceFrame, threadId, viewerToken, t]);
 
   useEffect(() => {
     if (!open || status?.state.lifecycle !== "human-control") return;
@@ -442,7 +444,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         assertCurrent();
         if (!token) return null;
         if (token.browserSessionId !== status?.state.browserSessionId) {
-          throw new Error("La sesión ha cambiado. Revisa la página antes de continuar.");
+          throw new Error(t("La sesión ha cambiado. Revisa la página antes de continuar."));
         }
         beforeDispatch?.();
         let next: BrowserViewerNavigationState | null = null;
@@ -467,10 +469,10 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       // Renew on the next deliberate input, never retry a possibly dispatched mutation.
       if (acquireControl) viewerTokenControlsRef.current = false;
       onFailure?.();
-      if (attachmentRef.current) setError(reason instanceof Error ? reason.message : "No se ha podido controlar el navegador.");
+      if (attachmentRef.current) setError(reason instanceof Error ? reason.message : t("No se ha podido controlar el navegador."));
       return null;
     }
-  }, [applyNavigation, ensureControl, open, status?.state.browserSessionId, threadId]);
+  }, [applyNavigation, ensureControl, open, status?.state.browserSessionId, threadId, t]);
 
   const navigate = async () => {
     setNavigationProgress("loading");
@@ -551,7 +553,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
       setPointerTrail((current) => [...current, {
         id: `human-${Date.now()}-${held.pointerId}`,
         action: dragged ? "drag" : "click",
-        target: dragged ? "Arrastre manual" : "Clic manual",
+        target: dragged ? t("Arrastre manual") : t("Clic manual"),
         x: released.relativeX * 100,
         y: released.relativeY * 100,
       }].slice(-3));
@@ -559,7 +561,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
     return runViewerCommands(
       [mouseInput("mouseReleased", released, "left")], true, undefined, undefined, options.onFailure,
     );
-  }, [runViewerCommands]);
+  }, [runViewerCommands, t]);
 
   const pressFrame = (event: PointerEvent<HTMLImageElement>) => {
     if (!event.isPrimary || event.button !== 0 || heldPointerRef.current) return;
@@ -726,16 +728,16 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
   );
 
   const live = connection === "live";
-  const indicator = navigationProgress === "loading" ? "Cargando página…" : live
-    ? metrics && !frameIdle ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : "Conectado"
-    : connection === "reconnecting" ? "Reconectando" : "Conectando";
+  const indicator = navigationProgress === "loading" ? t("Cargando página…") : live
+    ? metrics && !frameIdle ? `${metrics.fps.toFixed(1)} FPS · ${Math.round(metrics.latencyMs)} ms` : t("Conectado")
+    : connection === "reconnecting" ? t("Reconectando") : t("Conectando");
 
   return (
     <aside
       ref={panelRef}
       data-side-window="browser"
       className={`${fullscreen ? "fixed inset-0 z-50" : "fixed inset-y-0 right-0 z-30 xl:static xl:min-w-[640px] xl:w-[56vw] xl:max-w-[1100px]"} flex w-full flex-col border-l border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-lg)] xl:shadow-none ${open ? "translate-x-0" : "translate-x-full xl:hidden"}`}
-      aria-label="Navegador"
+      aria-label={t("Navegador")}
       aria-busy={navigationProgress === "loading"}
       aria-hidden={!open ? "true" : undefined}
       aria-modal={open && compactOverlay ? "true" : undefined}
@@ -754,12 +756,12 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         onFocusCapture={(event: FocusEvent<HTMLElement>) => {
           if (event.target instanceof HTMLElement) viewportOwnsKeyboardRef.current = false;
         }}>
-        <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">Navegador</span>
-        <button data-browser-capability="back" type="button" aria-label="Atrás" title="Atrás" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
-        <button data-browser-capability="forward" type="button" aria-label="Adelante" title="Adelante" className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
-        <button data-browser-capability="reload" type="button" aria-label="Recargar" title="Recargar" className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigationProgress === "loading" ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
+        <span className="shrink-0 px-1 text-[11px] font-semibold text-[var(--text)]">{t("Navegador")}</span>
+        <button data-browser-capability="back" type="button" aria-label={t("Atrás")} title={t("Atrás")} className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoBack} onClick={() => void navigateHistory("back")}><ArrowLeft size={15} /></button>
+        <button data-browser-capability="forward" type="button" aria-label={t("Adelante")} title={t("Adelante")} className="browser-action size-8 justify-center p-0" disabled={!navigation.canGoForward} onClick={() => void navigateHistory("forward")}><ArrowRight size={15} /></button>
+        <button data-browser-capability="reload" type="button" aria-label={t("Recargar")} title={t("Recargar")} className="browser-action size-8 justify-center p-0" onClick={() => void navigateHistory("reload")}>{navigationProgress === "loading" ? <SpinnerGap size={15} className="motion-safe:animate-spin" /> : <ArrowClockwise size={15} />}</button>
         <form data-browser-capability="url" className="relative mx-1 min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); void navigate(); }}>
-          <label className="sr-only" htmlFor="browser-address">Dirección web</label>
+          <label className="sr-only" htmlFor="browser-address">{t("Dirección web")}</label>
           <input id="browser-address" type="text" inputMode="url" spellCheck={false}
             className="h-8 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 text-center text-[12px] text-[var(--text)] outline-none focus:border-[var(--brain-accent)] focus:text-left"
             value={address} onChange={(event) => setAddress(event.target.value)}
@@ -769,7 +771,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             data-testid="browser-navigation-progress"
             data-state={navigationProgress}
             role={navigationProgress === "loading" ? "progressbar" : undefined}
-            aria-label={navigationProgress === "loading" ? "Cargando página" : undefined}
+            aria-label={navigationProgress === "loading" ? t("Cargando página") : undefined}
             className={`pointer-events-none absolute inset-x-2 -bottom-[5px] h-0.5 overflow-hidden rounded-full transition-opacity ${navigationProgress === "idle" ? "opacity-0" : "opacity-100"}`}
           >
             <span className={`block h-full origin-left rounded-full transition-[width,background-color] duration-300 ${navigationProgress === "loading" ? "w-2/3 motion-safe:animate-pulse bg-[var(--brain-accent)]" : navigationProgress === "error" ? "w-full bg-[var(--danger)]" : "w-full bg-[var(--positive)]"}`} />
@@ -777,8 +779,8 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
         </form>
         <span aria-label={indicator} title={metrics ? `${indicator} · captura ${Math.round(metrics.captureMs)} ms` : indicator}
           className={`mx-1 size-2 shrink-0 rounded-full ${live ? "bg-[var(--positive)]" : connection === "reconnecting" ? "bg-[var(--warning)] motion-safe:animate-pulse" : "bg-[var(--text-subtle)] motion-safe:animate-pulse"}`} role="status" />
-        <button data-browser-capability="fullscreen" type="button" aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
-        <button ref={closeButtonRef} type="button" aria-label="Cerrar navegador" title="Cerrar" className="browser-action size-8 justify-center p-0" onClick={closePanel}><X size={15} /></button>
+        <button data-browser-capability="fullscreen" type="button" aria-label={fullscreen ? t("Salir de pantalla completa") : t("Pantalla completa")} title={fullscreen ? t("Salir de pantalla completa") : t("Pantalla completa")} className="browser-action size-8 justify-center p-0" onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={15} /> : <ArrowsOut size={15} />}</button>
+        <button ref={closeButtonRef} type="button" aria-label={t("Cerrar navegador")} title={t("Cerrar")} className="browser-action size-8 justify-center p-0" onClick={closePanel}><X size={15} /></button>
       </header>
 
       <div ref={viewportRef} data-testid="browser-viewport" className="relative flex min-h-0 flex-1 overflow-hidden bg-white">
@@ -798,7 +800,7 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
             className="h-full w-full max-w-none rounded-none border-0 bg-transparent dark:bg-transparent"
             viewportClassName="h-full min-h-0 w-full border-0"
           >
-            <img data-browser-capability="continuous-scroll" ref={imageRef} src={frameUrl} alt="Vista actual del navegador privado" tabIndex={0}
+            <img data-browser-capability="continuous-scroll" ref={imageRef} src={frameUrl} alt={t("Vista actual del navegador privado")} tabIndex={0}
               draggable={false} onDragStart={(event) => event.preventDefault()}
               onFocus={() => { viewportOwnsKeyboardRef.current = true; }}
               onLoad={() => setConnection("live")}
@@ -809,9 +811,9 @@ function BrowserPanelAttachment({ threadId, open, onClose, initialStatus = null 
               className={`${pointer ? "cursor-none" : ""} h-full w-full touch-none select-none bg-white object-fill outline-none focus:ring-2 focus:ring-inset focus:ring-[var(--brain-accent)]`} />
           </ComputerUse>
         ) : (
-          <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />Conectando…</div>
+          <div className="flex items-center gap-2 text-[12px] text-[var(--text-secondary)]" role="status"><SpinnerGap size={15} className="motion-safe:animate-spin" />{t("Conectando…")}</div>
         )}
-        {error ? <div className="absolute left-1/2 top-3 max-w-[80%] -translate-x-1/2 rounded-full bg-black/70 px-3 py-1.5 text-center text-[11px] text-white" role="alert">{error}</div> : null}
+        {error ? <div className="absolute left-1/2 top-3 max-w-[80%] -translate-x-1/2 rounded-full bg-black/70 px-3 py-1.5 text-center text-[11px] text-white" role="alert">{t(error)}</div> : null}
       </div>
     </aside>
   );

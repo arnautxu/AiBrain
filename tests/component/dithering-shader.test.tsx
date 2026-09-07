@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DitheringShader } from "@/components/ui/dithering-shader";
 

@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useEffect, useMemo, useState } from "react";
 import { ChartBar, SpinnerGap, WarningCircle } from "@phosphor-icons/react";
@@ -18,6 +19,7 @@ function formatNumber(value: number) {
 }
 
 export function SafeVisualizationPreview({ artifactId, title }: { artifactId: string; title: string }) {
+  const t = useUiText();
   const [spec, setSpec] = useState<VisualizationSpec | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -54,13 +56,13 @@ export function SafeVisualizationPreview({ artifactId, title }: { artifactId: st
     return { lower, range: upper - lower || 1 };
   }, [seriesIndex, spec]);
 
-  if (loading) return <div role="status" aria-busy="true" className="flex h-full min-h-64 items-center justify-center gap-2 text-[12px] text-[var(--text-subtle)]"><SpinnerGap size={16} className="motion-safe:animate-spin" />Preparando visualización…</div>;
-  if (failed || !spec) return <div role="alert" className="grid min-h-64 place-items-center px-8 text-center"><div><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[12px] text-[var(--text-secondary)]">No se ha podido abrir esta visualización.</p></div></div>;
+  if (loading) return <div role="status" aria-busy="true" className="flex h-full min-h-64 items-center justify-center gap-2 text-[12px] text-[var(--text-subtle)]"><SpinnerGap size={16} className="motion-safe:animate-spin" />{t("Preparando visualización…")}</div>;
+  if (failed || !spec) return <div role="alert" className="grid min-h-64 place-items-center px-8 text-center"><div><WarningCircle size={24} className="mx-auto text-[var(--danger)]" /><p className="mt-3 text-[12px] text-[var(--text-secondary)]">{t("No se ha podido abrir esta visualización.")}</p></div></div>;
 
   return (
-    <div className="w-full p-4 sm:p-6" aria-label={`Visualización interactiva: ${title}`}>
+    <div className="w-full p-4 sm:p-6" aria-label={t("Visualización interactiva: {p0}", { p0: title })}>
       <div className="flex items-center gap-2"><ChartBar size={18} className="text-[var(--text-secondary)]" /><h4 className="text-[14px] font-semibold text-[var(--text)]">{spec.title}</h4></div>
-      {spec.series.length > 1 ? <div className="mt-4 flex flex-wrap gap-1" role="tablist" aria-label="Series" onKeyDown={(event) => {
+      {spec.series.length > 1 ? <div className="mt-4 flex flex-wrap gap-1" role="tablist" aria-label={t("Series")} onKeyDown={(event) => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
         const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='tab']"));
@@ -84,7 +86,7 @@ export function SafeVisualizationPreview({ artifactId, title }: { artifactId: st
           </button>;
         })}
       </div>
-      <p className="mt-4 text-[12px] leading-5 text-[var(--text-subtle)]">Selecciona una barra para fijar su valor. Los datos proceden de la respuesta indicada.</p>
+      <p className="mt-4 text-[12px] leading-5 text-[var(--text-subtle)]">{t("Selecciona una barra para fijar su valor. Los datos proceden de la respuesta indicada.")}</p>
     </div>
   );
 }

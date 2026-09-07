@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KnowledgeReviewPanel } from "@/components/knowledge-review-panel";
 const projectId = "10000000-0000-4000-8000-000000000001";

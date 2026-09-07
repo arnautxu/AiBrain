@@ -6,6 +6,9 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { loadInstallationConfig } from "@/config/installation";
 import { publicInstallationBranding } from "@/config/installation-branding";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/ui/theme";
+import { translate } from "@/i18n/messages";
+import { installationUiLocale } from "@/i18n/server";
+import { UiLocaleProvider } from "@/i18n/provider";
 import "./globals.css";
 
 const geistMono = Geist_Mono({
@@ -38,7 +41,7 @@ export async function generateMetadata(): Promise<Metadata> {
       default: `${installation.branding.productName} · ${installation.companyName}`,
       template: `%s · ${installation.branding.productName}`,
     },
-    description: `Espacio de trabajo privado de ${installation.companyName}.`,
+    description: translate(await installationUiLocale(), "Espacio de trabajo privado de {company}.", { company: installation.companyName }),
     icons: {
       icon: installation.branding.faviconPath,
     },
@@ -48,19 +51,20 @@ export async function generateMetadata(): Promise<Metadata> {
 export default async function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
+  const locale = await installationUiLocale();
   const branding = publicInstallationBranding(await loadInstallationConfig());
   const installationStyle = { "--installation-accent": branding.accentColor } as CSSProperties;
 
   return (
     <html
-      lang="es"
+      lang={locale}
       data-installation={branding.installationId}
       data-theme="light"
       suppressHydrationWarning
       style={installationStyle}
     >
       <body className={`${poppins.variable} ${geistMono.variable}`}>
-        <ThemeProvider>{children}</ThemeProvider>
+        <UiLocaleProvider locale={locale}><ThemeProvider>{children}</ThemeProvider></UiLocaleProvider>
         <Script id="aibrain-theme" strategy="beforeInteractive">
           {THEME_BOOTSTRAP_SCRIPT}
         </Script>

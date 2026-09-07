@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sidebarStyles from "@/components/sidebar.module.css";
 import { Sidebar } from "@/components/sidebar";

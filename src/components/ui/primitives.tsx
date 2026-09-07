@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import Image from "next/image";
 import type { ButtonHTMLAttributes, HTMLAttributes, InputHTMLAttributes } from "react";
@@ -79,11 +80,12 @@ export function TextField({ className, ...props }: InputHTMLAttributes<HTMLInput
 }
 
 export function ThemeToggle({ className }: { className?: string }) {
+  const t = useUiText();
   const { preference, setPreference } = useTheme();
   const options: Array<{ value: ThemePreference; label: string; icon: React.ReactNode }> = [
-    { value: "system", label: "Tema del sistema", icon: <Desktop size={14} /> },
-    { value: "light", label: "Tema claro", icon: <Sun size={14} /> },
-    { value: "dark", label: "Tema oscuro", icon: <Moon size={14} /> },
+    { value: "system", label: t("Tema del sistema"), icon: <Desktop size={14} /> },
+    { value: "light", label: t("Tema claro"), icon: <Sun size={14} /> },
+    { value: "dark", label: t("Tema oscuro"), icon: <Moon size={14} /> },
   ];
   const activeIndex = options.findIndex((option) => option.value === preference);
   const next = options[(activeIndex + 1) % options.length] ?? options[0];

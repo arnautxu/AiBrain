@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useMemo, useState, type CSSProperties } from "react";
 import {
@@ -34,6 +35,7 @@ export function LoginForm({
   mode: AuthMode;
   remotePreview: boolean;
 }) {
+  const t = useUiText();
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,14 +73,14 @@ export function LoginForm({
           result && typeof result === "object" && "error" in result &&
             typeof result.error === "string"
             ? result.error
-            : "No se ha podido iniciar la sesión.",
+            : t("No se ha podido iniciar la sesión."),
         );
       }
       setEntering(true);
       router.replace("/");
       router.refresh();
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
+      setError(currentError instanceof Error ? currentError.message : t("Error desconocido."));
       setLoading(null);
     }
   }
@@ -99,7 +101,7 @@ export function LoginForm({
           result && typeof result === "object" && "error" in result &&
             typeof result.error === "string"
             ? result.error
-            : "No se ha podido iniciar la sesión.",
+            : t("No se ha podido iniciar la sesión."),
         );
       }
       if (
@@ -117,7 +119,7 @@ export function LoginForm({
       router.replace("/");
       router.refresh();
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
+      setError(currentError instanceof Error ? currentError.message : t("Error desconocido."));
     } finally {
       setLoading(null);
     }
@@ -146,17 +148,17 @@ export function LoginForm({
           result && typeof result === "object" && "error" in result &&
             typeof result.error === "string"
             ? result.error
-            : "No se ha podido cambiar la contraseña.",
+            : t("No se ha podido cambiar la contraseña."),
         );
       }
       setEntering(true);
       router.replace("/");
       router.refresh();
     } catch (currentError) {
-      const message = currentError instanceof Error ? currentError.message : "Error desconocido.";
+      const message = currentError instanceof Error ? currentError.message : t("Error desconocido.");
       if (message === "El canvi de contrasenya ha caducat." || message === "El cambio de contraseña ha caducado.") {
         returnToLogin();
-        setError("El cambio de contraseña ha caducado. Vuelve a iniciar sesión para continuar.");
+        setError(t("El cambio de contraseña ha caducado. Vuelve a iniciar sesión para continuar."));
       } else {
         setError(message);
       }
@@ -176,11 +178,11 @@ export function LoginForm({
         body: JSON.stringify({ email }),
       });
       if (!response.ok) {
-        throw new Error("No se ha podido solicitar la recuperación.");
+        throw new Error(t("No se ha podido solicitar la recuperación."));
       }
       setSent(true);
     } catch (currentError) {
-      setError(currentError instanceof Error ? currentError.message : "Error desconocido.");
+      setError(currentError instanceof Error ? currentError.message : t("Error desconocido."));
     } finally {
       setLoading(null);
     }
@@ -211,14 +213,14 @@ export function LoginForm({
         <div className="text-center">
           <p className="text-[12px] font-medium text-[var(--text-muted)]">{branding.companyName}</p>
           <h1 className="mt-2 text-[30px] font-semibold tracking-[-0.045em] text-[var(--text)]">
-            {passwordChangeRequired ? "Protege tu cuenta" : recovering ? "Recupera el acceso" : "Accede a tu espacio"}
+            {passwordChangeRequired ? t("Protege tu cuenta") : recovering ? t("Recupera el acceso") : t("Accede a tu espacio")}
           </h1>
           <p className="mx-auto mt-3 max-w-[38ch] text-[13px] leading-5 text-[var(--text-muted)]">
             {passwordChangeRequired
-              ? "Crea una contraseña propia antes de entrar por primera vez."
+              ? t("Crea una contraseña propia antes de entrar por primera vez.")
               : recovering
-                ? "Te enviaremos instrucciones sin revelar si la cuenta existe."
-                : "Continúa donde lo dejaste con tus proyectos y conversaciones."}
+                ? t("Te enviaremos instrucciones sin revelar si la cuenta existe.")
+                : t("Continúa donde lo dejaste con tus proyectos y conversaciones.")}
           </p>
         </div>
 
@@ -245,8 +247,7 @@ export function LoginForm({
               ))}
               {accounts.length === 0 ? (
                 <p role="alert" className="rounded-[var(--radius-md)] bg-[var(--warning-soft)] p-4 text-[12px] text-[var(--warning)]">
-                  No hay una cuenta de desarrollo para esta instalación.
-                </p>
+                  {" "}{t("No hay una cuenta de desarrollo para esta instalación.")}{" "}</p>
               ) : null}
             </div>
           ) : null}
@@ -254,7 +255,7 @@ export function LoginForm({
           {isSupabase && !sent && !passwordChangeRequired ? (
             <form className="space-y-3" onSubmit={(event) => void (recovering ? requestRecovery(event) : requestAccess(event))}>
               <label className="block">
-                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Correo del equipo</span>
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Correo del equipo")}</span>
                 <span className="relative block">
                   <EnvelopeSimple aria-hidden size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                   <TextField
@@ -264,7 +265,7 @@ export function LoginForm({
                     maxLength={320}
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    placeholder="tu@empresa.com"
+                    placeholder={t("tu@empresa.com")}
                     className="login-icon-field"
                   />
                 </span>
@@ -272,7 +273,7 @@ export function LoginForm({
 
               {!recovering ? (
                 <label className="block">
-                  <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Contraseña</span>
+                  <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Contraseña")}</span>
                   <span className="relative block">
                     <LockKey aria-hidden size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-subtle)]" />
                     <TextField
@@ -289,7 +290,7 @@ export function LoginForm({
               ) : null}
 
               <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
-                {loading ? "Validando…" : recovering ? "Enviar recuperación" : "Entrar"}
+                {loading ? t("Validando…") : recovering ? t("Enviar recuperación") : t("Entrar")}
               </Button>
               <Button
                 type="button"
@@ -301,7 +302,7 @@ export function LoginForm({
                   setError(null);
                 }}
               >
-                {recovering ? "Volver al inicio de sesión" : "He olvidado la contraseña"}
+                {recovering ? t("Volver al inicio de sesión") : t("He olvidado la contraseña")}
               </Button>
             </form>
           ) : null}
@@ -309,7 +310,7 @@ export function LoginForm({
           {isSupabase && passwordChangeRequired ? (
             <form className="space-y-3" onSubmit={(event) => void changeInitialPassword(event)}>
               <label className="block" htmlFor="initial-password">
-                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Contraseña nueva</span>
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Contraseña nueva")}</span>
                 <TextField
                   id="initial-password"
                   type="password"
@@ -323,7 +324,7 @@ export function LoginForm({
                 />
               </label>
               <label className="block" htmlFor="initial-password-confirmation">
-                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Repite la contraseña</span>
+                <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Repite la contraseña")}</span>
                 <TextField
                   id="initial-password-confirmation"
                   type="password"
@@ -336,9 +337,9 @@ export function LoginForm({
                   aria-describedby="initial-password-requirements"
                 />
               </label>
-              <p id="initial-password-requirements" className="text-[11px] leading-5 text-[var(--text-muted)]">Entre 12 y 128 caracteres, con al menos una letra y un número.</p>
+              <p id="initial-password-requirements" className="text-[11px] leading-5 text-[var(--text-muted)]">{t("Entre 12 y 128 caracteres, con al menos una letra y un número.")}</p>
               <Button type="submit" variant="primary" disabled={loading !== null} className="w-full">
-                {loading ? "Actualizando…" : "Actualizar y entrar"}
+                {loading ? t("Actualizando…") : t("Actualizar y entrar")}
               </Button>
               <Button
                 type="button"
@@ -347,16 +348,15 @@ export function LoginForm({
                 className="w-full"
                 onClick={returnToLogin}
               >
-                Volver al inicio de sesión
-              </Button>
+                {" "}{t("Volver al inicio de sesión")}{" "}</Button>
             </form>
           ) : null}
 
           {isSupabase && sent ? (
             <div role="status" className="ui-surface p-5">
               <span className="grid size-9 place-items-center rounded-[var(--radius-sm)] bg-[var(--positive-soft)] text-[var(--positive)]"><EnvelopeSimple size={17} /></span>
-              <p className="mt-4 text-[13px] font-semibold">Revisa tu correo</p>
-              <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">Si la cuenta existe, recibirás instrucciones para crear una contraseña nueva.</p>
+              <p className="mt-4 text-[13px] font-semibold">{t("Revisa tu correo")}</p>
+              <p className="mt-2 text-[12px] leading-5 text-[var(--text-muted)]">{t("Si la cuenta existe, recibirás instrucciones para crear una contraseña nueva.")}</p>
               <Button
                 type="button"
                 size="sm"
@@ -367,25 +367,23 @@ export function LoginForm({
                   setRecovering(false);
                 }}
               >
-                Volver al inicio
-              </Button>
+                {" "}{t("Volver al inicio")}{" "}</Button>
             </div>
           ) : null}
 
           {mode === "unavailable" ? (
             <p role="alert" className="rounded-[var(--radius-md)] bg-[var(--warning-soft)] p-4 text-[12px] leading-5 text-[var(--warning)]">
-              El acceso no está disponible en este momento. Inténtalo de nuevo más tarde.
-            </p>
+              {" "}{t("El acceso no está disponible en este momento. Inténtalo de nuevo más tarde.")}{" "}</p>
           ) : null}
 
-          {error ? <p role="alert" className="mt-4 rounded-[var(--radius-md)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--danger)]">{error}</p> : null}
+          {error ? <p role="alert" className="mt-4 rounded-[var(--radius-md)] bg-[var(--danger-soft)] p-3 text-[12px] text-[var(--danger)]">{t(error)}</p> : null}
         </div>
 
         <p className="mt-8 flex items-center justify-center gap-1.5 text-center text-[11px] text-[var(--text-subtle)]">
           <LockKey aria-hidden size={12} />
           {isDemo
-            ? remotePreview ? "Preview con datos sintéticos" : "Entorno local con datos sintéticos"
-            : "Acceso privado · sesión local opaca"}
+            ? remotePreview ? t("Preview con datos sintéticos") : t("Entorno local con datos sintéticos")
+            : t("Acceso privado · sesión local opaca")}
         </p>
       </section>
     </main>

@@ -1,4 +1,6 @@
 "use client";
+import { useUiLocale } from "@/i18n/provider";
+import { useUiText } from "@/i18n/provider";
 
 import NextImage from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -198,6 +200,8 @@ export function LibraryPanel({
   onClose: () => void;
   onOpenConversation: (threadId: string, messageId: string) => void;
 }) {
+  const locale = useUiLocale();
+  const t = useUiText();
   const fallbackItems = useMemo(() => buildLibraryItems({ projects, threads }), [projects, threads]);
   const [remoteItems, setRemoteItems] = useState<LibraryItem[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -268,9 +272,9 @@ export function LibraryPanel({
     });
     const body: unknown = await response.json().catch(() => null);
     const parsed = parsedDocumentHistory(body);
-    if (!response.ok || !parsed) throw new Error("No se ha podido cargar el historial versionado.");
+    if (!response.ok || !parsed) throw new Error(t("No se ha podido cargar el historial versionado."));
     return parsed;
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!open || !selectedDocumentIds || !selectedHasHistory) return;
@@ -287,17 +291,17 @@ export function LibraryPanel({
         if (!controller.signal.aborted) setDocumentHistory(history);
       })
       .catch(() => {
-        if (!controller.signal.aborted) setVersionNotice("El original sigue disponible, pero no se ha podido cargar su historial.");
+        if (!controller.signal.aborted) setVersionNotice(t("El original sigue disponible, pero no se ha podido cargar su historial."));
       })
       .finally(() => {
         if (!controller.signal.aborted) setHistoryLoading(false);
       });
     return () => controller.abort();
-  }, [loadDocumentHistory, open, selectedDocumentIds, selectedHasHistory]);
+  }, [loadDocumentHistory, open, selectedDocumentIds, selectedHasHistory, t]);
 
   const replaceHistory = (value: unknown) => {
     const parsed = parsedDocumentHistory(value);
-    if (!parsed) throw new Error("La respuesta del historial no cumple el contrato seguro.");
+    if (!parsed) throw new Error(t("La respuesta del historial no cumple el contrato seguro."));
     setDocumentHistory(parsed);
     return parsed;
   };
@@ -317,12 +321,12 @@ export function LibraryPanel({
       );
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(actionFailure(response.status, "No se ha podido subir la nueva versión."));
+        throw new Error(actionFailure(response.status, t("No se ha podido subir la nueva versión.")));
       }
       replaceHistory(body);
-      setVersionNotice("Nueva versión guardada sin reemplazar el original.");
+      setVersionNotice(t("Nueva versión guardada sin reemplazar el original."));
     } catch (error) {
-      setVersionNotice(error instanceof Error ? error.message : "No se ha podido subir la nueva versión.");
+      setVersionNotice(error instanceof Error ? error.message : t("No se ha podido subir la nueva versión."));
       void loadDocumentHistory(selectedDocumentIds).then(setDocumentHistory).catch(() => undefined);
     } finally {
       setVersionAction(null);
@@ -346,12 +350,12 @@ export function LibraryPanel({
       );
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(actionFailure(response.status, "No se ha podido restaurar la versión."));
+        throw new Error(actionFailure(response.status, t("No se ha podido restaurar la versión.")));
       }
       replaceHistory(body);
-      setVersionNotice(`La versión ${version.number} se ha restaurado como una versión nueva.`);
+      setVersionNotice(t("La versión {p0} se ha restaurado como una versión nueva.", { p0: version.number }));
     } catch (error) {
-      setVersionNotice(error instanceof Error ? error.message : "No se ha podido restaurar la versión.");
+      setVersionNotice(error instanceof Error ? error.message : t("No se ha podido restaurar la versión."));
       void loadDocumentHistory(selectedDocumentIds).then(setDocumentHistory).catch(() => undefined);
     } finally {
       setVersionAction(null);
@@ -381,21 +385,21 @@ export function LibraryPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind,
-          title: kind === "visualization" ? `Visualización · ${titleBase}` : `Sitio interno · ${titleBase}`,
+          title: kind === "visualization" ? t("Visualización · {p0}", { p0: titleBase }) : `Sitio interno · ${titleBase}`,
           threadId: selected.threadId,
           messageId: selected.messageId,
         }),
       });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        setArtifactNotice(actionFailure(response.status, "No se ha podido crear el artefacto."));
+        setArtifactNotice(actionFailure(response.status, t("No se ha podido crear el artefacto.")));
         return;
       }
       const summary = payload && typeof payload === "object" && "summary" in payload ? payload.summary : null;
       const item = upsertAdvancedItem(summary);
-      setArtifactNotice(item ? (kind === "visualization" ? "Visualización creada desde los datos reales de la respuesta." : "Sitio interno creado. Puedes revisarlo antes de publicarlo.") : "Artefacto creado.");
+      setArtifactNotice(item ? (kind === "visualization" ? t("Visualización creada desde los datos reales de la respuesta.") : t("Sitio interno creado. Puedes revisarlo antes de publicarlo.")) : t("Artefacto creado."));
     } catch {
-      setArtifactNotice("No se ha podido conectar con el servicio de artefactos.");
+      setArtifactNotice(t("No se ha podido conectar con el servicio de artefactos."));
     } finally {
       setArtifactAction(null);
     }
@@ -409,14 +413,14 @@ export function LibraryPanel({
       const response = await fetch(`/api/artifacts/${encodeURIComponent(selected.artifactId)}/publish`, { method: "POST" });
       const payload: unknown = await response.json().catch(() => null);
       if (!response.ok) {
-        setArtifactNotice(actionFailure(response.status, "No se ha podido publicar."));
+        setArtifactNotice(actionFailure(response.status, t("No se ha podido publicar.")));
         return;
       }
       const summary = payload && typeof payload === "object" && "summary" in payload ? payload.summary : null;
       upsertAdvancedItem(summary);
-      setArtifactNotice("Snapshot publicado como sitio interno. Sigue protegido por tu sesión de empresa.");
+      setArtifactNotice(t("Snapshot publicado como sitio interno. Sigue protegido por tu sesión de empresa."));
     } catch {
-      setArtifactNotice("No se ha podido conectar con el servicio de publicación.");
+      setArtifactNotice(t("No se ha podido conectar con el servicio de publicación."));
     } finally {
       setArtifactAction(null);
     }
@@ -435,21 +439,21 @@ export function LibraryPanel({
 
   return (
     <div className="workspace-overlay fixed inset-0 z-[75] flex sm:p-5">
-      <button aria-label="Cerrar biblioteca" className="absolute inset-0" onClick={onClose} />
+      <button aria-label={t("Cerrar biblioteca")} className="absolute inset-0" onClick={onClose} />
       <section
         ref={dialogRef}
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="Biblioteca"
+        aria-label={t("Biblioteca")}
         className="workspace-panel panel-enter relative m-auto flex h-full w-full max-w-[1120px] flex-col overflow-hidden bg-[var(--surface-raised)] shadow-[var(--shadow-popover)] sm:h-[min(800px,calc(100dvh-2.5rem))] sm:rounded-[22px] sm:border sm:border-[var(--border-subtle)]"
       >
         <header className="workspace-panel-header flex shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)] sm:px-6 sm:pt-0">
           <div className="min-w-0 flex-1">
-            <h2 className="workspace-panel-title text-[var(--text)]">Biblioteca</h2>
-            <p className="workspace-panel-subtitle mt-0.5 hidden sm:block">Archivos y resultados creados en tus conversaciones.</p>
+            <h2 className="workspace-panel-title text-[var(--text)]">{t("Biblioteca")}</h2>
+            <p className="workspace-panel-subtitle mt-0.5 hidden sm:block">{t("Archivos y resultados creados en tus conversaciones.")}</p>
           </div>
-          <button aria-label="Cerrar biblioteca" className="grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={18} /></button>
+          <button aria-label={t("Cerrar biblioteca")} className="grid size-10 place-items-center rounded-full text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={18} /></button>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col md:flex-row">
@@ -457,24 +461,24 @@ export function LibraryPanel({
             <div className="shrink-0 space-y-3 p-3 sm:p-4">
               <label className="flex h-11 items-center gap-2.5 rounded-[14px] border border-[var(--border)] bg-[var(--surface)] px-3 text-[var(--text-subtle)] focus-within:border-[var(--border-strong)]">
                 <MagnifyingGlass size={16} />
-                <input ref={searchRef} aria-label="Buscar en la biblioteca" className="min-w-0 flex-1 bg-transparent text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]" placeholder="Buscar archivos y resultados" value={query} onChange={(event) => setQuery(event.target.value)} />
+                <input ref={searchRef} aria-label={t("Buscar en la biblioteca")} className="min-w-0 flex-1 bg-transparent text-[14px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)]" placeholder={t("Buscar archivos y resultados")} value={query} onChange={(event) => setQuery(event.target.value)} />
               </label>
-              <div className="scrollbar-thin flex gap-1 overflow-x-auto pb-0.5" aria-label="Filtros de biblioteca">
-                {filterCopy.map((option) => <button key={option.id} type="button" aria-pressed={filter === option.id} className={`touch-target min-h-8 shrink-0 rounded-full px-3 text-[11px] font-medium transition ${filter === option.id ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setFilter(option.id)}>{option.label}</button>)}
+              <div className="scrollbar-thin flex gap-1 overflow-x-auto pb-0.5" aria-label={t("Filtros de biblioteca")}>
+                {filterCopy.map((option) => <button key={option.id} type="button" aria-pressed={filter === option.id} className={`touch-target min-h-8 shrink-0 rounded-full px-3 text-[11px] font-medium transition ${filter === option.id ? "bg-[var(--text)] text-[var(--surface)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"}`} onClick={() => setFilter(option.id)}>{t(option.label ?? "")}</button>)}
               </div>
-              {offlineFallback ? <p className="text-[10px] text-[var(--text-subtle)]" role="status">Mostrando el historial ya cargado en este dispositivo.</p> : null}
+              {offlineFallback ? <p className="text-[10px] text-[var(--text-subtle)]" role="status">{t("Mostrando el historial ya cargado en este dispositivo.")}</p> : null}
             </div>
 
-            <ul aria-label="Elementos de la biblioteca" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3 sm:px-3">
-              {loading && !items.length ? <li role="status" aria-busy="true" className="flex min-h-40 items-center justify-center gap-2 text-[12px] text-[var(--text-subtle)]"><SpinnerGap size={16} className="motion-safe:animate-spin" />Cargando biblioteca…</li> :
+            <ul aria-label={t("Elementos de la biblioteca")} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3 sm:px-3">
+              {loading && !items.length ? <li role="status" aria-busy="true" className="flex min-h-40 items-center justify-center gap-2 text-[12px] text-[var(--text-subtle)]"><SpinnerGap size={16} className="motion-safe:animate-spin" />{t("Cargando biblioteca…")}</li> :
                 visible.length ? visible.map((item) => {
                   const active = item.id === selected?.id;
                   return <li key={item.id}><button type="button" aria-pressed={active} className={`mb-1 flex min-h-[70px] w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition ${active ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"}`} onClick={() => setSelectedId(item.id)}>
                     <span className={`grid size-10 shrink-0 place-items-center rounded-[12px] ${active ? "bg-[var(--surface-raised)] text-[var(--text)]" : "bg-[var(--surface-muted)] text-[var(--text-secondary)]"}`}>{icon(item.type)}</span>
-                    <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-[var(--text)]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[var(--text-subtle)]">{label(item.type)} · {item.projectName}</span></span>
+                    <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-semibold text-[var(--text)]">{item.name}</span><span className="mt-1 block truncate text-[10px] text-[var(--text-subtle)]">{t(label(item.type) ?? "")} · {item.projectName}</span></span>
                     <span className="shrink-0 text-[9px] tabular-nums text-[var(--text-subtle)]">{formatSize(item.size)}</span>
                   </button></li>;
-                }) : <li className="grid min-h-48 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><File size={19} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">No hay resultados</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Prueba otro filtro o busca por nombre, proyecto o conversación.</p></div></li>}
+                }) : <li className="grid min-h-48 place-items-center px-8 text-center"><div className="workspace-empty-state"><span className="mx-auto grid size-11 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><File size={19} /></span><p className="mt-3 text-[13px] font-semibold text-[var(--text)]">{t("No hay resultados")}</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">{t("Prueba otro filtro o busca por nombre, proyecto o conversación.")}</p></div></li>}
             </ul>
           </div>
 
@@ -482,40 +486,40 @@ export function LibraryPanel({
             {selected ? <div className="mx-auto flex min-h-full max-w-xl flex-col">
               <div className="flex items-start gap-3">
                 <span className="grid size-11 shrink-0 place-items-center rounded-[14px] bg-[var(--surface-raised)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]">{icon(selected.type)}</span>
-                <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{effectiveName}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{label(selected.type)} · {formatSize(latestDocumentVersion?.size ?? selected.size) ?? "Tamaño no disponible"}{activeDocumentHistory ? ` · v${latestDocumentVersion?.number}` : ""}{!selectedCanMutate ? " · Solo lectura" : ""}</p></div>
+                <div className="min-w-0 flex-1"><h3 className="break-words text-[16px] font-semibold text-[var(--text)]">{effectiveName}</h3><p className="mt-1 text-[11px] text-[var(--text-subtle)]">{t(label(selected.type) ?? "")} · {formatSize(latestDocumentVersion?.size ?? selected.size) ?? t("Tamaño no disponible")}{activeDocumentHistory ? ` · v${latestDocumentVersion?.number}` : ""}{!selectedCanMutate ? " · Solo lectura" : ""}</p></div>
               </div>
               <div className="mt-5 grid min-h-64 flex-1 place-items-center overflow-hidden rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)]">
-                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && effectivePreviewUrl ? <NextImage unoptimized width={960} height={720} src={effectivePreviewUrl} alt={`Vista previa de ${effectiveName}`} className="max-h-[460px] w-full object-contain" /> : previewIsPdf && effectivePreviewUrl ? <AuthenticatedPdfPreview previewUrl={effectivePreviewUrl} title={`Vista previa de ${effectiveName}`} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : previewIsText && effectivePreviewUrl ? <AuthenticatedTextPreview previewUrl={effectivePreviewUrl} title={`Texto de ${effectiveName}`} /> : effectivePreviewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={`Vista previa de ${effectiveName}`} src={effectivePreviewUrl} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">Vista previa no disponible</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">Puedes descargar el archivo o abrir la conversación donde se creó.</p></div>}
+                {selected.type === "visualization" && selected.artifactId ? <SafeVisualizationPreview artifactId={selected.artifactId} title={selected.name} /> : previewIsImage && effectivePreviewUrl ? <NextImage unoptimized width={960} height={720} src={effectivePreviewUrl} alt={t("Vista previa de {p0}", { p0: effectiveName })} className="max-h-[460px] w-full object-contain" /> : previewIsPdf && effectivePreviewUrl ? <AuthenticatedPdfPreview previewUrl={effectivePreviewUrl} title={t("Vista previa de {p0}", { p0: effectiveName })} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : previewIsText && effectivePreviewUrl ? <AuthenticatedTextPreview previewUrl={effectivePreviewUrl} title={t("Texto de {p0}", { p0: effectiveName })} /> : effectivePreviewUrl ? <iframe sandbox="" referrerPolicy="no-referrer" title={t("Vista previa de {p0}", { p0: effectiveName })} src={effectivePreviewUrl} className="h-[min(460px,42dvh)] min-h-64 w-full bg-white" /> : <div className="px-8 text-center"><span className="mx-auto grid size-14 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]">{icon(selected.type)}</span><p className="mt-4 text-[13px] font-semibold text-[var(--text)]">{t("Vista previa no disponible")}</p><p className="mt-1 text-[11px] leading-5 text-[var(--text-subtle)]">{t("Puedes descargar el archivo o abrir la conversación donde se creó.")}</p></div>}
               </div>
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="touch-target flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />{activeDocumentHistory ? "Descargar versión actual" : "Descargar archivo"}</a> : null}
-                {activeDocumentHistory && selectedCanMutate ? <><input ref={versionInputRef} className="sr-only" type="file" aria-label="Seleccionar una nueva versión" onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNewVersion(file); }} /><button type="button" disabled={versionAction !== null} className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => versionInputRef.current?.click()}><UploadSimple size={14} />{versionAction === "upload" ? "Subiendo…" : "Subir versión editada"}</button></> : null}
-                {selected.downloadZipUrl ? <a href={selected.downloadZipUrl} download className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowDown size={14} />Exportar ZIP</a> : null}
-                {effectivePreviewUrl ? <a href={effectivePreviewUrl} target="_blank" rel="noreferrer" className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowSquareOut size={14} />Abrir representación</a> : null}
-                {selected.artifactId && selectedCanMutate ? <button type="button" disabled={artifactAction !== null} className="touch-target min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => void publishArtifact()}>{artifactAction === "publish" ? "Publicando…" : selected.internalSiteUrl ? "Actualizar sitio interno" : "Publicar sitio interno"}</button> : null}
-                {selected.internalSiteUrl ? <a href={selected.internalSiteUrl} target="_blank" rel="noreferrer" className="touch-target flex min-h-10 items-center gap-2 rounded-full bg-[var(--positive)] px-4 text-[12px] font-semibold text-[var(--positive-contrast)]"><ArrowSquareOut size={14} />Ver sitio interno</a> : null}
-                <button type="button" className="touch-target min-h-10 rounded-full px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>Ver conversación</button>
+                {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="touch-target flex min-h-10 items-center gap-2 rounded-full bg-[var(--text)] px-4 text-[12px] font-semibold text-[var(--surface)]"><ArrowDown size={14} />{activeDocumentHistory ? t("Descargar versión actual") : t("Descargar archivo")}</a> : null}
+                {activeDocumentHistory && selectedCanMutate ? <><input ref={versionInputRef} className="sr-only" type="file" aria-label={t("Seleccionar una nueva versión")} onChange={(event) => { const file = event.target.files?.[0]; if (file) void uploadNewVersion(file); }} /><button type="button" disabled={versionAction !== null} className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => versionInputRef.current?.click()}><UploadSimple size={14} />{versionAction === "upload" ? t("Subiendo…") : t("Subir versión editada")}</button></> : null}
+                {selected.downloadZipUrl ? <a href={selected.downloadZipUrl} download className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowDown size={14} />{t("Exportar ZIP")}</a> : null}
+                {effectivePreviewUrl ? <a href={effectivePreviewUrl} target="_blank" rel="noreferrer" className="touch-target flex min-h-10 items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)]"><ArrowSquareOut size={14} />{t("Abrir representación")}</a> : null}
+                {selected.artifactId && selectedCanMutate ? <button type="button" disabled={artifactAction !== null} className="touch-target min-h-10 rounded-full border border-[var(--border)] bg-[var(--surface-raised)] px-4 text-[12px] font-semibold text-[var(--text)] disabled:opacity-50" onClick={() => void publishArtifact()}>{artifactAction === "publish" ? t("Publicando…") : selected.internalSiteUrl ? t("Actualizar sitio interno") : t("Publicar sitio interno")}</button> : null}
+                {selected.internalSiteUrl ? <a href={selected.internalSiteUrl} target="_blank" rel="noreferrer" className="touch-target flex min-h-10 items-center gap-2 rounded-full bg-[var(--positive)] px-4 text-[12px] font-semibold text-[var(--positive-contrast)]"><ArrowSquareOut size={14} />{t("Ver sitio interno")}</a> : null}
+                <button type="button" className="touch-target min-h-10 rounded-full px-3 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>{t("Ver conversación")}</button>
               </div>
-              {selectedDocumentIds && selectedHasHistory ? <section className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3" aria-label="Historial de versiones del documento">
-                <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-[var(--text)]">Historial de versiones</p>{activeDocumentHistory ? <p className="mt-1 text-[10px] text-[var(--text-subtle)]">{scopeLabel(activeDocumentHistory.scope)} · original conservado · {activeDocumentHistory.versions.length} {activeDocumentHistory.versions.length === 1 ? "versión" : "versiones"}</p> : null}</div>{historyLoading ? <SpinnerGap size={15} className="motion-safe:animate-spin text-[var(--text-subtle)]" aria-label="Cargando historial" /> : null}</div>
+              {selectedDocumentIds && selectedHasHistory ? <section className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3" aria-label={t("Historial de versiones del documento")}>
+                <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold text-[var(--text)]">{t("Historial de versiones")}</p>{activeDocumentHistory ? <p className="mt-1 text-[10px] text-[var(--text-subtle)]">{t(scopeLabel(activeDocumentHistory.scope) ?? "")} {" "}{t("· original conservado ·")}{" "}{activeDocumentHistory.versions.length} {activeDocumentHistory.versions.length === 1 ? t("versión") : t("versiones")}</p> : null}</div>{historyLoading ? <SpinnerGap size={15} className="motion-safe:animate-spin text-[var(--text-subtle)]" aria-label={t("Cargando historial")} /> : null}</div>
                 {activeDocumentHistory ? <ol className="mt-3 space-y-2">{[...activeDocumentHistory.versions].reverse().map((version) => {
                   const latest = version.versionId === activeDocumentHistory.latestVersionId;
-                  return <li key={version.versionId} className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2"><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-[var(--text)]">v{version.number} · {version.fileName}{latest ? " · actual" : ""}</p><p className="mt-0.5 truncate text-[9px] text-[var(--text-subtle)]">{provenanceLabel(version.provenance.type)} · {version.author.name} · {new Date(version.createdAt).toLocaleString("es")}</p></div><a href={version.downloadUrl} download={version.fileName} className="touch-target min-h-8 rounded-full px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">Descargar</a>{!latest && selectedCanMutate ? <button type="button" disabled={versionAction !== null} className="touch-target min-h-8 rounded-full border border-[var(--border)] px-2.5 text-[10px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void restoreVersion(version)}>Restaurar</button> : null}</li>;
+                  return <li key={version.versionId} className="flex flex-wrap items-center gap-2 rounded-xl bg-[var(--surface-muted)] px-3 py-2"><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-medium text-[var(--text)]">{t("v")}{version.number} · {version.fileName}{latest ? t(" · actual") : ""}</p><p className="mt-0.5 truncate text-[9px] text-[var(--text-subtle)]">{t(provenanceLabel(version.provenance.type) ?? "")} · {version.author.name} · {new Date(version.createdAt).toLocaleString(locale)}</p></div><a href={version.downloadUrl} download={version.fileName} className="touch-target min-h-8 rounded-full px-2.5 py-1.5 text-[10px] font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]">{t("Descargar")}</a>{!latest && selectedCanMutate ? <button type="button" disabled={versionAction !== null} className="touch-target min-h-8 rounded-full border border-[var(--border)] px-2.5 text-[10px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void restoreVersion(version)}>{t("Restaurar")}</button> : null}</li>;
                 })}</ol> : null}
-                <p className="mt-3 text-[9px] leading-4 text-[var(--text-subtle)]">Para editar en Word, Excel o PowerPoint, descarga el original, edítalo en tu aplicación y súbelo aquí. El navegador no simula guardado nativo automático.</p>
+                <p className="mt-3 text-[9px] leading-4 text-[var(--text-subtle)]">{t("Para editar en Word, Excel o PowerPoint, descarga el original, edítalo en tu aplicación y súbelo aquí. El navegador no simula guardado nativo automático.")}</p>
               </section> : null}
-              {selected.type === "result" && selectedCanMutate ? <div className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">Crear desde esta respuesta</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">La visualización usa una tabla numérica existente. El sitio interno conserva el contenido y elimina código inseguro.</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={artifactAction !== null} className="touch-target min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("visualization")}>{artifactAction === "visualization" ? "Creando…" : "Crear visualización"}</button><button type="button" disabled={artifactAction !== null} className="touch-target min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("internal-site")}>{artifactAction === "internal-site" ? "Creando…" : "Crear sitio interno"}</button></div></div> : null}
+              {selected.type === "result" && selectedCanMutate ? <div className="mt-4 rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-3"><p className="text-[11px] font-semibold text-[var(--text)]">{t("Crear desde esta respuesta")}</p><p className="mt-1 text-[10px] leading-4 text-[var(--text-subtle)]">{t("La visualización usa una tabla numérica existente. El sitio interno conserva el contenido y elimina código inseguro.")}</p><div className="mt-3 flex flex-wrap gap-2"><button type="button" disabled={artifactAction !== null} className="touch-target min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("visualization")}>{artifactAction === "visualization" ? t("Creando…") : t("Crear visualización")}</button><button type="button" disabled={artifactAction !== null} className="touch-target min-h-9 rounded-full bg-[var(--surface-muted)] px-3 text-[11px] font-medium text-[var(--text)] disabled:opacity-50" onClick={() => void createArtifact("internal-site")}>{artifactAction === "internal-site" ? t("Creando…") : t("Crear sitio interno")}</button></div></div> : null}
               {artifactNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{artifactNotice}</p> : null}
               {selectedHasHistory && versionNotice ? <p className="mt-3 text-[10px] leading-4 text-[var(--text-secondary)]" role="status">{versionNotice}</p> : null}
               <p className="mt-3 truncate text-[10px] text-[var(--text-subtle)]">{selected.projectName} · {selected.threadTitle}</p>
-            </div> : <div className="workspace-empty-state m-auto text-center"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><ImagesSquare size={20} /></span><p className="mt-3 font-semibold text-[var(--text)]">Selecciona un elemento</p><p className="mt-1">Aquí podrás previsualizarlo, descargarlo o volver a la conversación donde se creó.</p></div>}
+            </div> : <div className="workspace-empty-state m-auto text-center"><span className="mx-auto grid size-12 place-items-center rounded-2xl bg-[var(--surface-muted)] text-[var(--text-subtle)]"><ImagesSquare size={20} /></span><p className="mt-3 font-semibold text-[var(--text)]">{t("Selecciona un elemento")}</p><p className="mt-1">{t("Aquí podrás previsualizarlo, descargarlo o volver a la conversación donde se creó.")}</p></div>}
           </div>
         </div>
 
         {selected ? <footer className="flex min-h-14 shrink-0 items-center gap-2 border-t border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 pb-[env(safe-area-inset-bottom)] md:hidden">
           <span className="min-w-0 flex-1 truncate text-[11px] text-[var(--text-secondary)]">{selected.name}</span>
-          <button type="button" className="touch-target min-h-9 rounded-full px-3 text-[11px] font-medium text-[var(--text-secondary)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>Ver chat</button>
-          {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="touch-target flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)]"><ArrowDown size={13} />Descargar</a> : null}
+          <button type="button" className="touch-target min-h-9 rounded-full px-3 text-[11px] font-medium text-[var(--text-secondary)]" onClick={() => onOpenConversation(selected.threadId, selected.messageId)}>{t("Ver chat")}</button>
+          {effectiveDownloadUrl ? <a href={effectiveDownloadUrl} download={effectiveName} className="touch-target flex min-h-9 items-center gap-1.5 rounded-full bg-[var(--text)] px-3 text-[11px] font-semibold text-[var(--surface)]"><ArrowDown size={13} />{t("Descargar")}</a> : null}
         </footer> : null}
       </section>
     </div>

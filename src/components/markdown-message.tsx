@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { memo, useState } from "react";
 import { Check, Copy } from "@phosphor-icons/react";
@@ -6,6 +7,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 function CodeBlock({ language, value }: { language: string | null; value: string }) {
+  const t = useUiText();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     await navigator.clipboard.writeText(value);
@@ -16,7 +18,7 @@ function CodeBlock({ language, value }: { language: string | null; value: string
     <figure className="markdown-code">
       <figcaption>
         <span>{language ?? "texto"}</span>
-        <button type="button" aria-label="Copiar bloque de código" onClick={() => void copy()}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? "Copiado" : "Copiar"}</button>
+        <button type="button" aria-label={t("Copiar bloque de código")} onClick={() => void copy()}>{copied ? <Check size={13} /> : <Copy size={13} />}{copied ? t("Copiado") : t("Copiar")}</button>
       </figcaption>
       <pre><code>{value}</code></pre>
     </figure>

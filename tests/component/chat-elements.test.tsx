@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DaySeparator } from "@/components/assistant-ui/elements/day-separator";
 import { MemoryChips } from "@/components/assistant-ui/elements/memory-chips";

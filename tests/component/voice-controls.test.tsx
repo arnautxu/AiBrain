@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ReadAloudControl, VoiceDictationControl } from "@/components/voice-controls";
 

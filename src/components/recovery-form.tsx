@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
@@ -23,6 +24,7 @@ export function RecoveryForm({
   branding: PublicInstallationBranding;
   proof: { code: string } | { tokenHash: string } | null;
 }) {
+  const t = useUiText();
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
@@ -57,14 +59,14 @@ export function RecoveryForm({
       });
       if (!response.ok) {
         setError(response.status === 410
-          ? "El enlace de recuperación ha caducado. Solicita uno nuevo."
-          : "No se ha podido actualizar la contraseña. Revisa los datos e inténtalo de nuevo.");
+          ? t("El enlace de recuperación ha caducado. Solicita uno nuevo.")
+          : t("No se ha podido actualizar la contraseña. Revisa los datos e inténtalo de nuevo."));
         return;
       }
       router.replace("/");
       router.refresh();
     } catch {
-      setError("No se ha podido conectar. Comprueba tu conexión e inténtalo de nuevo.");
+      setError(t("No se ha podido conectar. Comprueba tu conexión e inténtalo de nuevo."));
     } finally {
       setLoading(false);
     }
@@ -78,24 +80,24 @@ export function RecoveryForm({
       </header>
       <section className="w-full max-w-md rounded-[26px] border border-[var(--border)] bg-[var(--surface-raised)] p-8 shadow-[var(--shadow-lg)]">
         <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--text-subtle)]">{branding.productName}</p>
-        <h1 className="mt-4 text-[28px] font-semibold tracking-[-.045em]">Crea una contraseña nueva</h1>
+        <h1 className="mt-4 text-[28px] font-semibold tracking-[-.045em]">{t("Crea una contraseña nueva")}</h1>
         {!proof ? (
-          <div className="mt-5 rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]"><p role="alert">El enlace de recuperación no es válido o ha caducado.</p><Link href="/login" className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-current px-3 font-semibold">Volver al acceso</Link></div>
+          <div className="mt-5 rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]"><p role="alert">{t("El enlace de recuperación no es válido o ha caducado.")}</p><Link href="/login" className="mt-3 inline-flex min-h-11 items-center rounded-lg border border-current px-3 font-semibold">{t("Volver al acceso")}</Link></div>
         ) : (
           <form onSubmit={(event) => void submit(event)} className="mt-6 space-y-4" aria-busy={loading}>
             <label className="block" htmlFor="recovery-password">
-              <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Contraseña nueva</span>
+              <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Contraseña nueva")}</span>
               <input autoFocus id="recovery-password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={password} onChange={(event) => setPassword(event.target.value)} aria-describedby="recovery-password-requirements" className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-[14px] text-[var(--text)] outline-none focus-visible:border-[var(--focus)] focus-visible:ring-2 focus-visible:ring-[var(--brain-accent-soft)]" />
             </label>
             <label className="block" htmlFor="recovery-password-confirmation">
-              <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">Repite la contraseña</span>
+              <span className="mb-2 block text-[12px] font-medium text-[var(--text-muted)]">{t("Repite la contraseña")}</span>
               <input id="recovery-password-confirmation" type="password" autoComplete="new-password" minLength={12} maxLength={128} required value={confirmation} onChange={(event) => setConfirmation(event.target.value)} aria-describedby="recovery-password-requirements" className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3.5 py-3 text-[14px] text-[var(--text)] outline-none focus-visible:border-[var(--focus)] focus-visible:ring-2 focus-visible:ring-[var(--brain-accent-soft)]" />
             </label>
-            <p id="recovery-password-requirements" className="text-[11px] leading-4 text-[var(--text-subtle)]">Entre 12 y 128 caracteres.</p>
-            <button disabled={loading} className="min-h-11 w-full rounded-xl bg-[var(--brain-accent)] px-4 py-3 text-[12px] font-semibold text-[var(--brain-contrast)] disabled:opacity-55">{loading ? "Actualizando…" : "Actualizar y entrar"}</button>
+            <p id="recovery-password-requirements" className="text-[11px] leading-4 text-[var(--text-subtle)]">{t("Entre 12 y 128 caracteres.")}</p>
+            <button disabled={loading} className="min-h-11 w-full rounded-xl bg-[var(--brain-accent)] px-4 py-3 text-[12px] font-semibold text-[var(--brain-contrast)] disabled:opacity-55">{loading ? t("Actualizando…") : t("Actualizar y entrar")}</button>
           </form>
         )}
-        {error ? <p role="alert" className="mt-4 rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]">{error}</p> : null}
+        {error ? <p role="alert" className="mt-4 rounded-xl bg-[var(--danger-soft)] px-4 py-3 text-[12px] text-[var(--danger)]">{t(error)}</p> : null}
       </section>
     </main>
   );

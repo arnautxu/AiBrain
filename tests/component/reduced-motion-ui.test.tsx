@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { HTMLAttributes, ReactNode } from "react";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface MotionRecord {
