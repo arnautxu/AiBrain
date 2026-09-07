@@ -1098,11 +1098,11 @@ export function ChatWorkspace({
                 event.preventDefault();
                 event.stopPropagation();
                 setConnectorCatalogOpen(false);
-                requestAnimationFrame(() => composerAddButtonRef.current?.focus());
+                requestAnimationFrame(() => connectorTriggerRef.current?.focus());
               } else if (event.key === "Tab") {
                 event.preventDefault();
                 setConnectorCatalogOpen(false);
-                requestAnimationFrame(() => (event.shiftKey ? composerRef.current : composerAddButtonRef.current)?.focus());
+                requestAnimationFrame(() => (event.shiftKey ? composerRef.current : connectorTriggerRef.current)?.focus());
               }
             }}>
               {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
