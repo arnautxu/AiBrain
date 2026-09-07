@@ -49,7 +49,7 @@ for (const width of [1440, 390]) {
     await expect(dialog).toHaveCount(0);
     await page.getByLabel("Quitar referencia QA", { exact: true }).click();
     const request = page.waitForRequest(req => req.url().endsWith("/api/chat") && req.method() === "POST");
-    await composer.press("Enter");
+    await page.getByRole("button", { name: "Enviar mensaje", exact: true }).click();
     const body = (await request).postDataJSON();
     expect(body.options.serverReferences).toEqual([{ ...folder, path: "server-arnall/Y/QA/Version2.txt", name: "Version2.txt", kind: "file", size: 2 }]);
     await expect(page.getByText("Server · Version2.txt", { exact: true })).toBeVisible();
