@@ -59,6 +59,7 @@
     "GET /api/workbench": "WorkbenchResponse",
     "PATCH /api/admin": "JsonObject",
     "PATCH /api/admin/catalog": "JsonObject",
+    "PATCH /api/admin/language": "JsonObject",
     "PATCH /api/automations/{taskId}": "JsonObject",
     "PATCH /api/memory/governed/{memoryId}": "JsonObject",
     "PATCH /api/projects/{projectId}": "JsonObject",
