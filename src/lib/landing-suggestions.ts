@@ -4,6 +4,7 @@ export type LandingSuggestion = {
   id: "presentation" | "spreadsheets" | "schedule" | "presentation-image" | "illustration" | "diagram";
   label: string;
   prompt: string;
+  iconPath?: string;
   children?: { id: string; label: string; prompt: string }[];
 };
 
@@ -24,9 +25,9 @@ export function landingSuggestions(
 /** Fixed editable prompts, never scheduled jobs or automatic actions. */
 export function scheduledPromptTemplates(companyName: string): LandingSuggestion[] {
   return [
-    { id: "presentation", label: "Prepárame una presentación", prompt: "Prepárame una presentación sobre…" },
-    { id: "spreadsheets", label: "Trabajemos con estos Excels", prompt: "Trabajemos con estos Excels. Quiero…" },
-    { id: "schedule", label: `Trabajemos en los horarios del equipo de ${companyName}`, prompt: "", children: [
+    { id: "presentation", iconPath: "/branding/microsoft/powerpoint.svg", label: "Prepárame una presentación", prompt: "Prepárame una presentación sobre…" },
+    { id: "spreadsheets", iconPath: "/branding/microsoft/excel.svg", label: "Trabajemos con estos Excels", prompt: "Trabajemos con estos Excels. Quiero…" },
+    { id: "schedule", iconPath: companyName.trim().toLocaleLowerCase() === "arnall" ? "/branding/arnall/logo.jpg?v=d09bb6bb7e8a" : undefined, label: `Trabajemos en los horarios del equipo de ${companyName}`, prompt: "", children: [
       { id: "whatsapp", label: "Enviar los WhatsApps a los trabajadores", prompt: `Preparemos los WhatsApps con los horarios para los trabajadores de ${companyName}. Quiero revisar los destinatarios y los mensajes antes de enviarlos.` },
       { id: "prepared", label: "Dame los horarios preparados", prompt: `Dame los horarios preparados del equipo de ${companyName} para…` },
       { id: "changes", label: "Revisar cambios de horarios", prompt: `Revisemos los cambios de horarios del equipo de ${companyName} para…` },
