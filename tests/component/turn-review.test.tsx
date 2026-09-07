@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DetailsPanel } from "@/components/details-panel";
 import reasoningStyles from "@/components/assistant-ui/elements/thinking-reasoning.module.css";

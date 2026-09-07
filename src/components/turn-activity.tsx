@@ -1,4 +1,6 @@
 "use client";
+import { spanishUiText, type UiText } from "@/i18n/messages";
+import { useUiText } from "@/i18n/provider";
 
 import { useState } from "react";
 import {
@@ -147,44 +149,44 @@ function ActivityIcon({ item }: { item: ActivityItem }) {
   return <Check {...props} weight="bold" />;
 }
 
-function activityPresentation(item: ActivityItem) {
+function activityPresentation(item: ActivityItem, t: UiText = spanishUiText) {
   const detail = publicActivityText(item.detail) ?? undefined;
   const active = item.status === "running" || item.status === "waiting";
-  const safeLabel = publicActivityText(item.label, 240) ?? "Actividad completada";
+  const safeLabel = publicActivityText(item.label, 240) ?? t("Actividad completada");
   const customLabel = safeLabel && !GENERIC_RUNTIME_LABELS.has(item.label)
-    ? SYSTEM_ACTIVITY_LABELS[item.label] ?? translatedRuntimeLabel(safeLabel)
+    ? (SYSTEM_ACTIVITY_LABELS[item.label] ? t(SYSTEM_ACTIVITY_LABELS[item.label]) : translatedRuntimeLabel(safeLabel))
     : null;
   let title = customLabel;
   let secondaryDetail: string | undefined = detail;
 
   if (!title) {
     if (item.kind === "reasoning") {
-      title = detail || (active ? "Pensando" : "Razonamiento completado");
+      title = detail || (active ? t("Pensando") : t("Razonamiento completado"));
       secondaryDetail = undefined;
     } else if (item.kind === "command") {
       title = publicCommandTitle(item.detail, active);
       secondaryDetail = undefined;
     } else if (item.kind === "file") {
-      title = detail ? `${active ? "Preparando cambios en" : "Cambios preparados en"} ${detail}` : active ? "Editando archivos" : "Cambios preparados";
+      title = detail ? `${active ? t("Preparando cambios en") : t("Cambios preparados en")} ${detail}` : active ? t("Editando archivos") : t("Cambios preparados");
       secondaryDetail = undefined;
     } else if (item.kind === "web") {
-      title = detail ? `${active ? "Buscando" : "Búsqueda completada"}: ${detail}` : active ? "Buscando en la web" : "Información consultada";
+      title = detail ? `${active ? t("Buscando") : t("Búsqueda completada")}: ${detail}` : active ? t("Buscando en la web") : t("Información consultada");
       secondaryDetail = undefined;
     } else if (item.kind === "agent") {
-      title = detail ? `${active ? "Coordinando" : "Coordinación completada"}: ${detail}` : active ? "Coordinando agentes" : "Coordinación completada";
+      title = detail ? `${active ? t("Coordinando") : t("Coordinación completada")}: ${detail}` : active ? t("Coordinando agentes") : t("Coordinación completada");
       secondaryDetail = undefined;
     } else {
       title = {
-        tool: active ? "Usando herramienta" : "Herramienta completada",
-        plan: active ? "Preparando el plan" : "Plan preparado",
-        system: SYSTEM_ACTIVITY_LABELS[item.label] ?? item.label,
+        tool: active ? t("Usando herramienta") : t("Herramienta completada"),
+        plan: active ? t("Preparando el plan") : t("Plan preparado"),
+        system: SYSTEM_ACTIVITY_LABELS[item.label] ? t(SYSTEM_ACTIVITY_LABELS[item.label]) : item.label,
       }[item.kind];
     }
   }
 
-  if (item.status === "failed") title = `No se ha podido completar: ${title}`;
-  if (item.status === "stopped") title = `Paso detenido: ${title}`;
-  if (item.status === "pending") title = `Pendiente: ${title}`;
+  if (item.status === "failed") title = t("No se ha podido completar: {p0}", { p0: title });
+  if (item.status === "stopped") title = t("Paso detenido: {title}", { title });
+  if (item.status === "pending") title = t("Pendiente: {title}", { title });
   return { title, detail: secondaryDetail };
 }
 
@@ -203,18 +205,18 @@ export function hasRelevantWorkProcess(
     Boolean(message.toolResults?.length);
 }
 
-export function currentActivityLabel(relevantActivity: ActivityItem[]) {
+export function currentActivityLabel(relevantActivity: ActivityItem[], t: UiText = spanishUiText) {
   for (let index = relevantActivity.length - 1; index >= 0; index -= 1) {
     const item = relevantActivity[index];
-    if (item.status === "running" || item.status === "waiting") return activityPresentation(item).title;
+    if (item.status === "running" || item.status === "waiting") return activityPresentation(item, t).title;
   }
   const latestItem = relevantActivity.at(-1);
-  return latestItem ? activityPresentation(latestItem).title : "Pensando";
+  return latestItem ? activityPresentation(latestItem, t).title : t("Pensando");
 }
 
 /** One safe, factual status for the collapsed live response surface. */
-export function currentTurnStatusLabel(message: Pick<ChatMessage, "activity">) {
-  return message.activity.length ? currentActivityLabel(message.activity) : null;
+export function currentTurnStatusLabel(message: Pick<ChatMessage, "activity">, t: UiText = spanishUiText) {
+  return message.activity.length ? currentActivityLabel(message.activity, t) : null;
 }
 
 export function TurnActivity({
@@ -229,6 +231,7 @@ export function TurnActivity({
   managedAppAction = null,
   managedAppApprovalKeys = [],
 }: TurnActivityProps) {
+  const t = useUiText();
   const streaming = message.status === "streaming";
   const [manualDisclosure, setManualDisclosure] = useState<{
     status: ChatMessage["status"];
@@ -246,7 +249,7 @@ export function TurnActivity({
     .filter((item) => item.status !== "pending" && isRelevantProcessActivity(item))
     .map((item) => ({
       ...item,
-      label: publicActivityText(item.label, 240) ?? "Actividad",
+      label: publicActivityText(item.label, 240) ?? t("Actividad"),
       ...(item.detail ? { detail: publicActivityText(item.detail) ?? undefined } : {}),
       ...(item.output ? { output: publicToolOutput(item.output) ?? undefined } : {}),
       ...(item.files ? {
@@ -263,14 +266,14 @@ export function TurnActivity({
   if (!hasDetails && !managedAppAction) return null;
   const duration = turnDurationMs(message);
   const executionLabel = message.status === "streaming"
-    ? currentActivityLabel(visibleActivity)
+    ? currentActivityLabel(visibleActivity, t)
     : duration !== null
-      ? `Ha trabajado durante ${formatWorkDuration(duration)}`
+      ? t("Ha trabajado durante {duration}", { duration: formatWorkDuration(duration) })
       : message.status === "stopped"
-        ? "Pensamiento interrumpido"
+        ? t("Pensamiento interrumpido")
         : message.status === "error"
-          ? "Trabajo interrumpido"
-          : "Ha trabajado durante unos segundos";
+          ? t("Trabajo interrumpido")
+          : t("Ha trabajado durante unos segundos");
 
   const activeActivity = [...visibleActivity].reverse().find((item) => item.status === "running" || item.status === "waiting");
   const visibleStepCount = visiblePlan.length + timeline.length;
@@ -301,7 +304,7 @@ export function TurnActivity({
               />
             ))}
 
-            <div role="list" aria-label="Actividad del trabajo">
+            <div role="list" aria-label={t("Actividad del trabajo")}>
               {timeline.map((entry, index) => {
                 const stepIndex = visiblePlan.length + index;
                 if (entry.type === "tool") {
@@ -317,7 +320,7 @@ export function TurnActivity({
                   );
                 }
                 const item = entry.item;
-                const presentation = activityPresentation(item);
+                const presentation = activityPresentation(item, t);
                 return (
                   <div key={entry.key} role="listitem" data-timeline-key={entry.key}>
                     <ThinkingStep
@@ -337,7 +340,7 @@ export function TurnActivity({
                       ) : null}
                       {item.output ? (
                         <details className="mt-2">
-                          <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">Ver salida</summary>
+                          <summary className="w-fit cursor-pointer text-[9px] font-medium text-[var(--text)]">{t("Ver salida")}</summary>
                           <pre tabIndex={0} className="scrollbar-thin mt-2 max-h-32 overflow-auto whitespace-pre-wrap rounded-lg bg-[#222220] px-2.5 py-2 font-mono text-[9px] leading-4 text-[#deddd9]">{publicToolOutput(item.output)}</pre>
                         </details>
                       ) : null}
@@ -361,14 +364,14 @@ export function TurnActivity({
       /> : null}
 
       {message.diff && showDiff ? onOpenReview ? (
-        <button type="button" aria-label="Abrir cambios y resultados" onClick={onOpenReview} className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-left text-[var(--text)]">
+        <button type="button" aria-label={t("Abrir cambios y resultados")} onClick={onOpenReview} className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-left text-[var(--text)]">
           <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
-          <div><p className="text-[10px] font-semibold">Abrir cambios y resultados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Incluidos en este turno</p></div>
+          <div><p className="text-[10px] font-semibold">{t("Abrir cambios y resultados")}</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">{t("Incluidos en este turno")}</p></div>
         </button>
       ) : (
         <section className="flex max-w-[360px] items-start gap-2.5 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text)]">
           <GitDiff size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
-          <div><p className="text-[10px] font-semibold">Cambios preparados</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">Incluidos en este turno</p></div>
+          <div><p className="text-[10px] font-semibold">{t("Cambios preparados")}</p><p className="mt-0.5 text-[9px] leading-4 text-[var(--text-muted)]">{t("Incluidos en este turno")}</p></div>
         </section>
       ) : null}
     </div>

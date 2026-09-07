@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SupportDialog } from "@/components/support-dialog";

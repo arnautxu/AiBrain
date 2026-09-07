@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 // beui.dev/components/agents/streaming-response
 
 import {
@@ -109,6 +110,7 @@ export function StreamingResponse({
   contentClassName,
   actionsClassName,
 }: StreamingResponseProps) {
+  const t = useUiText();
   const reduce = useReducedMotion() ?? false;
   const baseId = useId();
   const [copied, setCopied] = useState(false);
@@ -187,7 +189,7 @@ export function StreamingResponse({
             <div className={cn("flex items-center gap-0.5", actionsClassName)}>
               {canCopy ? (
                 <ResponseAction
-                  label={copied ? "Copied" : "Copy response"}
+                  label={copied ? t("Copied") : t("Copy response")}
                   onClick={handleCopy}
                 >
                   {copied ? (
@@ -198,21 +200,21 @@ export function StreamingResponse({
                 </ResponseAction>
               ) : null}
               {onRetry ? (
-                <ResponseAction label="Retry response" onClick={onRetry}>
+                <ResponseAction label={t("Retry response")} onClick={onRetry}>
                   <RotateCcw className="size-3.5" />
                 </ResponseAction>
               ) : null}
               {complete ? (
                 <>
                   <ResponseAction
-                    label="Helpful"
+                    label={t("Helpful")}
                     active={currentFeedback === "up"}
                     onClick={() => setFeedback("up")}
                   >
                     <ThumbsUp className="size-3.5" />
                   </ResponseAction>
                   <ResponseAction
-                    label="Not helpful"
+                    label={t("Not helpful")}
                     active={currentFeedback === "down"}
                     onClick={() => setFeedback("down")}
                   >

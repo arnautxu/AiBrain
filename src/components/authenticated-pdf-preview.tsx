@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useEffect, useState } from "react";
 
@@ -31,6 +32,7 @@ export function AuthenticatedPdfPreview({
   onLoad?: () => void;
   onError?: (error: Error) => void;
 }) {
+  const t = useUiText();
   const [failure, setFailure] = useState<{ source: string; message: string } | null>(null);
   const [retry, setRetry] = useState(0);
   const [preview, setPreview] = useState<{ source: string; url: string } | null>(null);
@@ -44,7 +46,7 @@ export function AuthenticatedPdfPreview({
       onError?.(new Error(message));
     };
     if (!previewUrl.startsWith("/api/")) {
-      fail("La URL de vista previa no es privada.");
+      fail(t("La URL de vista previa no es privada."));
       return () => controller.abort();
     }
 
@@ -55,11 +57,11 @@ export function AuthenticatedPdfPreview({
       signal: controller.signal,
     })
       .then(async (response) => {
-        if (!response.ok) throw new Error(response.status === 401 ? "La sesión ha caducado. Vuelve a iniciar sesión." : response.status === 404 ? "El archivo no está disponible para esta conversación." : `No se ha podido obtener el PDF privado (HTTP ${response.status}).`);
-        if (!isPdfResponse(response)) throw new Error("La respuesta no es un PDF.");
-        if (!declaredSizeWithinLimit(response, maximumBytes)) throw new Error("El PDF excede el tamaño permitido.");
+        if (!response.ok) throw new Error(response.status === 401 ? t("La sesión ha caducado. Vuelve a iniciar sesión.") : response.status === 404 ? t("El archivo no está disponible para esta conversación.") : t("No se ha podido obtener el PDF privado (HTTP {p0}).", { p0: response.status }));
+        if (!isPdfResponse(response)) throw new Error(t("La respuesta no es un PDF."));
+        if (!declaredSizeWithinLimit(response, maximumBytes)) throw new Error(t("El PDF excede el tamaño permitido."));
         const pdf = await response.blob();
-        if (!pdf.size || pdf.size > maximumBytes) throw new Error("El PDF excede el tamaño permitido.");
+        if (!pdf.size || pdf.size > maximumBytes) throw new Error(t("El PDF excede el tamaño permitido."));
         if (controller.signal.aborted) return;
         currentBlobUrl = URL.createObjectURL(new Blob([pdf], { type: "application/pdf" }));
         setFailure(null);
@@ -67,19 +69,19 @@ export function AuthenticatedPdfPreview({
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
-        fail(error instanceof Error ? error.message : "No se ha podido obtener el PDF privado.");
+        fail(error instanceof Error ? error.message : t("No se ha podido obtener el PDF privado."));
       });
 
     return () => {
       controller.abort();
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [maximumBytes, onError, previewUrl, retry]);
+  }, [maximumBytes, onError, previewUrl, retry, t]);
 
   if (failure?.source === previewUrl && !onError) return (
     <div role="alert" className="p-4 text-sm">
       <p>{failure.message}</p>
-      <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setFailure(null); setPreview(null); setRetry((value) => value + 1); }}>Reintentar</button>
+      <button type="button" className="mt-2 rounded border px-3 py-2" onClick={() => { setFailure(null); setPreview(null); setRetry((value) => value + 1); }}>{t("Reintentar")}</button>
     </div>
   );
   if (!preview || preview.source !== previewUrl) return null;
@@ -91,7 +93,7 @@ export function AuthenticatedPdfPreview({
       className={className}
       onLoad={onLoad}
       onError={() => {
-        const error = new Error("No se ha podido cargar el visor de PDF.");
+        const error = new Error(t("No se ha podido cargar el visor de PDF."));
         setFailure({ source: previewUrl, message: error.message });
         onError?.(error);
       }}

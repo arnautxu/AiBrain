@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import {
   useState,
@@ -308,7 +309,9 @@ interface ThinkingStepsHeaderProps extends HTMLAttributes<HTMLButtonElement> {
 const ThinkingStepsHeader = forwardRef<
   HTMLButtonElement,
   ThinkingStepsHeaderProps
->(({ indicator, labelClassName, children = "Thinking", className, ...props }, ref) => {
+>(({ indicator, labelClassName, children: providedChildren, className, ...props }, ref) => {
+  const t = useUiText();
+  const children = providedChildren ?? t("Thinking");
   const isOpen = useContext(ThinkingStepsOpenContext);
   return (
     <TriggerRow ref={ref} open={isOpen} indicator={indicator} labelClassName={labelClassName} className={className} {...props}>

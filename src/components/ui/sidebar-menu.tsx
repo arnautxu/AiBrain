@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import {
   createContext,
@@ -916,6 +917,7 @@ const SidebarMenuButton = forwardRef<HTMLButtonElement, SidebarMenuButtonProps>(
     },
     ref
   ) => {
+  const t = useUiText();
     const scope = useContext(MenuScopeContext);
     const item = useContext(MenuItemContext);
     const shape = useShape();
@@ -1007,7 +1009,7 @@ const SidebarMenuButton = forwardRef<HTMLButtonElement, SidebarMenuButtonProps>(
           </span>
         )}
         <MenuRowLabel content={content} lit={lit} emphasized={effectiveActive} textClass={textClass} />
-        {status === "unread" && <span className="sr-only">, unread</span>}
+        {status === "unread" && <span className="sr-only">{t(", unread")}</span>}
       </>
     );
 

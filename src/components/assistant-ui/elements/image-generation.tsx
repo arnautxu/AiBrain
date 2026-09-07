@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useState, type ComponentProps } from "react";
 import NextImage from "next/image";
@@ -36,6 +37,7 @@ export function ImageGeneration({
   downloadName?: string;
   onRegenerate?: () => void;
 }) {
+  const t = useUiText();
   const [preview, setPreview] = useState<PreviewState>({ src, status: "loading" });
   const [attempt, setAttempt] = useState(0);
   const status = preview.src === src ? preview.status : "loading";
@@ -46,7 +48,7 @@ export function ImageGeneration({
   const ratio = imageWidth && imageHeight ? imageWidth / imageHeight : 1;
   const frameRatio = Math.min(3, Math.max(1 / 3, ratio));
   const sizeLabel = imageWidth && imageHeight ? `${imageWidth} × ${imageHeight} px` : dimensions;
-  const title = name ?? downloadName ?? "Imagen";
+  const title = name ?? downloadName ?? t("Imagen");
   const ready = Boolean(src) && !generating && status === "ready";
   const failed = Boolean(src) && !generating && status === "error";
 
@@ -59,7 +61,7 @@ export function ImageGeneration({
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-medium text-[var(--text)]" title={title}>{title}</p>
-        {sizeLabel ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">PNG · {sizeLabel}</p> : null}
+        {sizeLabel ? <p className="mt-0.5 text-xs text-[var(--text-secondary)]">{t("PNG ·")}{" "}{sizeLabel}</p> : null}
       </div>
       <div
         data-slot="image-preview"
@@ -68,15 +70,15 @@ export function ImageGeneration({
       >
         {failed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4 text-center text-sm text-[var(--text-secondary)]">
-            <p role="alert">No se ha podido cargar la imagen. Comprueba la conexión y vuelve a intentarlo.</p>
+            <p role="alert">{t("No se ha podido cargar la imagen. Comprueba la conexión y vuelve a intentarlo.")}</p>
             <button type="button" className={imageAction} onClick={() => {
               setPreview({ src, status: "loading" });
               setAttempt((value) => value + 1);
-            }}>Volver a cargar</button>
+            }}>{t("Volver a cargar")}</button>
           </div>
         ) : src && !generating ? (
           <>
-            <a href={src} target="_blank" rel="noreferrer" className="absolute inset-0" aria-label={`Ampliar ${title} (nueva pestaña)`}>
+            <a href={src} target="_blank" rel="noreferrer" className="absolute inset-0" aria-label={t("Ampliar {p0} (nueva pestaña)", { p0: title })}>
               <NextImage
                 key={`${src}:${attempt}`}
                 unoptimized
@@ -89,18 +91,18 @@ export function ImageGeneration({
                 onError={() => setPreview({ src, status: "error" })}
               />
             </a>
-            {status === "loading" ? <span role="status" className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">Cargando imagen…</span> : null}
+            {status === "loading" ? <span role="status" className="pointer-events-none absolute inset-0 grid place-items-center bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]">{t("Cargando imagen…")}</span> : null}
           </>
-        ) : <span role="status" className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-[var(--text-secondary)]">{generating ? "Generando imagen…" : "Imagen no disponible."}</span>}
+        ) : <span role="status" className="absolute inset-0 grid place-items-center p-4 text-center text-sm text-[var(--text-secondary)]">{generating ? t("Generando imagen…") : t("Imagen no disponible.")}</span>}
       </div>
       <details className="min-w-0 text-xs leading-5 text-[var(--text-secondary)]">
-        <summary className="touch-target w-fit cursor-pointer rounded py-2 font-medium">Ver descripción</summary>
+        <summary className="touch-target w-fit cursor-pointer rounded py-2 font-medium">{t("Ver descripción")}</summary>
         <p className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{prompt}</p>
       </details>
       {ready ? <div className="flex min-w-0 flex-wrap gap-2">
-        <a href={src!} target="_blank" rel="noreferrer" aria-label={`Ampliar imagen ${title} (nueva pestaña)`} className={imageAction}><ExpandIcon className="size-3.5" aria-hidden />Ampliar</a>
-        {downloadUrl ? <a href={downloadUrl} download={downloadName} aria-label={downloadName ? `Descargar ${downloadName}` : "Descargar imagen"} className={imageAction}><DownloadIcon className="size-3.5" aria-hidden />Descargar PNG</a> : null}
-        {onRegenerate ? <button type="button" aria-label="Volver a generar la imagen" onClick={onRegenerate} className={imageAction}><RefreshCwIcon className="size-3.5" aria-hidden />Volver a generar</button> : null}
+        <a href={src!} target="_blank" rel="noreferrer" aria-label={t("Ampliar imagen {p0} (nueva pestaña)", { p0: title })} className={imageAction}><ExpandIcon className="size-3.5" aria-hidden />{t("Ampliar")}</a>
+        {downloadUrl ? <a href={downloadUrl} download={downloadName} aria-label={downloadName ? `Descargar ${downloadName}` : t("Descargar imagen")} className={imageAction}><DownloadIcon className="size-3.5" aria-hidden />{t("Descargar PNG")}</a> : null}
+        {onRegenerate ? <button type="button" aria-label={t("Volver a generar la imagen")} onClick={onRegenerate} className={imageAction}><RefreshCwIcon className="size-3.5" aria-hidden />{t("Volver a generar")}</button> : null}
       </div> : null}
     </div>
   );

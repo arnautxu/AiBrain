@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import NextImage from "next/image";
 import { ArrowClockwise, CaretRight, Check, Copy, DownloadSimple, Eye, FileCode, Trash, WarningCircle } from "@phosphor-icons/react";
@@ -62,12 +63,13 @@ const changeCopy: Record<ActivityFileChange["change"], string> = {
 };
 
 export function WorkspaceFilePreview({ projectId, file }: { projectId: string; file: ActivityFileChange }) {
+  const t = useUiText();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<WorkspaceFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const handlePdfError = useCallback(() => setError("No se ha podido cargar la representación privada del documento."), []);
+  const handlePdfError = useCallback(() => setError(t("No se ha podido cargar la representación privada del documento.")), [t]);
 
   const loadPreview = async () => {
     setLoading(true);
@@ -82,7 +84,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
       setPreview(nextPreview);
     } catch (caught) {
       setPreview(null);
-      setError(caught instanceof Error ? caught.message : "No se ha podido cargar la vista previa.");
+      setError(caught instanceof Error ? caught.message : t("No se ha podido cargar la vista previa."));
     } finally {
       setLoading(false);
     }
@@ -106,7 +108,7 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
       <div className="mt-1.5 flex min-w-0 items-center gap-2 rounded-md bg-[var(--surface-muted)] px-2.5 py-2 text-[11px] text-[var(--text-muted)]">
         <Trash size={13} className="shrink-0" />
         <span className="min-w-0 flex-1 truncate font-mono">{file.path}</span>
-        <span className="shrink-0">Eliminado</span>
+        <span className="shrink-0">{t("Eliminado")}</span>
       </div>
     );
   }
@@ -129,36 +131,36 @@ export function WorkspaceFilePreview({ projectId, file }: { projectId: string; f
       {open ? (
         <div className="border-t border-[var(--border-subtle)]">
           {loading ? (
-            <div className="px-3 py-6 text-center text-[11px] text-[var(--text-muted)]" role="status">Cargando el archivo real…</div>
+            <div className="px-3 py-6 text-center text-[11px] text-[var(--text-muted)]" role="status">{t("Cargando el archivo real…")}</div>
           ) : error ? (
             <div className="flex items-center gap-2 px-3 py-3 text-[11px] text-[var(--danger)]" role="alert">
               <WarningCircle size={14} className="shrink-0" />
               <span className="min-w-0 flex-1">{error}</span>
-              <button type="button" className="touch-target grid size-7 shrink-0 place-items-center rounded-md hover:bg-[var(--danger-soft)]" aria-label={`Reintentar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
+              <button type="button" className="touch-target grid size-7 shrink-0 place-items-center rounded-md hover:bg-[var(--danger-soft)]" aria-label={t("Reintentar la vista previa de {p0}", { p0: file.path })} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
             </div>
           ) : preview ? (
             <>
               <header className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--text-muted)]">
                 <span>{preview.language ?? preview.mimeType}</span>
                 <span aria-hidden>·</span>
-                <span>{Math.max(1, Math.ceil(preview.size / 1024))} KB</span>
+                <span>{Math.max(1, Math.ceil(preview.size / 1024))} {" "}{t("KB")}</span>
                 <span className="flex-1" />
                 {preview.content !== null ? (
-                  <button type="button" className="touch-target flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar"}</button>
+                  <button type="button" className="touch-target flex min-h-7 items-center gap-1.5 rounded-md px-2 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => void copyContent()}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? t("Copiado") : t("Copiar")}</button>
                 ) : null}
-                <a href={preview.downloadUrl} download={preview.name} className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title="Descargar original para abrir o editar en escritorio"><DownloadSimple size={13} /></a>
-                <button type="button" className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Actualizar la vista previa de ${file.path}`} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
+                <a href={preview.downloadUrl} download={preview.name} className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={`Descargar ${preview.name}`} title={t("Descargar original para abrir o editar en escritorio")}><DownloadSimple size={13} /></a>
+                <button type="button" className="touch-target grid size-7 place-items-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" aria-label={t("Actualizar la vista previa de {p0}", { p0: file.path })} onClick={() => void loadPreview()}><ArrowClockwise size={13} /></button>
               </header>
               {preview.kind === "text" && preview.content !== null ? (
                 <pre tabIndex={0} className="scrollbar-thin max-h-[420px] overflow-auto whitespace-pre p-4 font-mono text-[12px] leading-5 text-[var(--text)]"><code>{preview.content}</code></pre>
               ) : preview.kind === "image" && preview.previewUrl ? (
                 <div className="bg-[var(--surface-muted)] p-3">
-                  <NextImage unoptimized width={1280} height={960} src={preview.previewUrl} alt={`Vista previa de ${preview.name}`} className="mx-auto max-h-[420px] w-auto rounded-md border border-[var(--border)] bg-white object-contain shadow-[var(--shadow-sm)]" />
+                  <NextImage unoptimized width={1280} height={960} src={preview.previewUrl} alt={t("Vista previa de {p0}", { p0: preview.name })} className="mx-auto max-h-[420px] w-auto rounded-md border border-[var(--border)] bg-white object-contain shadow-[var(--shadow-sm)]" />
                 </div>
               ) : (preview.kind === "pdf" || preview.kind === "office") && preview.previewUrl && preview.previewMimeType === "application/pdf" ? (
                 <AuthenticatedPdfPreview
                   previewUrl={preview.previewUrl}
-                  title={`Vista previa de ${preview.name}`}
+                  title={t("Vista previa de {p0}", { p0: preview.name })}
                   className="h-[420px] w-full bg-white"
                   onError={handlePdfError}
                 />

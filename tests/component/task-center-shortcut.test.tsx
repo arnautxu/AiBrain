@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useTaskCenterShortcut } from "@/components/use-task-center-shortcut";

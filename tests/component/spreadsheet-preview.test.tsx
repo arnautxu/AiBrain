@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { afterEach, expect, it, vi } from "vitest";
 import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { AuthenticatedSpreadsheetPreview, SpreadsheetTable } from "@/components/authenticated-spreadsheet-preview";

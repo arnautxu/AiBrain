@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "../render-spanish";
 import { describe, expect, it } from "vitest";
 import { MarkdownMessage, splitStreamingMarkdown } from "@/components/markdown-message";
 

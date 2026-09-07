@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceAdminSnapshot } from "@/admin/contracts";
 import { AdminCenter } from "@/components/admin-center";
+
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 const snapshot: WorkspaceAdminSnapshot = {
   schemaVersion: 1,

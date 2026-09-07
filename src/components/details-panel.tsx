@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -81,6 +82,7 @@ function DiffCode({ content }: { content: string }) {
 }
 
 export function DetailsPanel({ message, performance = null, open, onClose, onResolveApproval, readOnly = false }: DetailsPanelProps) {
+  const t = useUiText();
   const files = useMemo(() => parseDiff(message?.diff ?? ""), [message?.diff]);
   const [tab, setTab] = useState<"changes" | "activity" | "sources" | "performance">("changes");
   const [activeFile, setActiveFile] = useState(0);
@@ -134,7 +136,7 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
   return (
     <aside
       ref={panelRef}
-      aria-label="Cambios y resultados del turno"
+      aria-label={t("Cambios y resultados del turno")}
       aria-modal={open && mobileOverlay ? "true" : undefined}
       role={open && mobileOverlay ? "dialog" : undefined}
       tabIndex={open && mobileOverlay ? -1 : undefined}
@@ -143,49 +145,49 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
       <header className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3.5">
         <div className="flex min-w-0 items-center gap-2">
           <GitDiff size={15} className="shrink-0 text-[var(--text-secondary)]" />
-          <h2 aria-label="Cambios y resultados del turno" className="truncate text-[13px] font-semibold text-[var(--text)]">Cambios y resultados</h2>
+          <h2 aria-label={t("Cambios y resultados del turno")} className="truncate text-[13px] font-semibold text-[var(--text)]">{t("Cambios y resultados")}</h2>
           {pending > 0 ? <span className="rounded-md bg-[var(--warning-soft)] px-1.5 py-0.5 text-[11px] font-semibold text-[var(--warning)]">{pending} {pending === 1 ? "pendiente" : "pendientes"}</span> : null}
         </div>
-        <button type="button" aria-label="Cerrar cambios y resultados" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={15} /></button>
+        <button type="button" aria-label={t("Cerrar cambios y resultados")} className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={onClose}><X size={15} /></button>
       </header>
 
       <div className="scrollbar-thin flex h-11 shrink-0 items-end gap-1 overflow-x-auto border-b border-[var(--border)] px-3">
         <button type="button" aria-pressed={tab === "changes"} className={`review-tab ${tab === "changes" ? "review-tab-active" : ""}`} onClick={() => setTab("changes")}>
-          Cambios {files.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{files.length}</span> : null}
+          {" "}{t("Cambios")}{" "}{files.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{files.length}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "activity"} className={`review-tab ${tab === "activity" ? "review-tab-active" : ""}`} onClick={() => setTab("activity")}>
-          Actividad {relevantActivityCount ? <span className="tabular-nums text-[11px] text-[var(--text)]">{relevantActivityCount}</span> : null}
+          {" "}{t("Actividad")}{" "}{relevantActivityCount ? <span className="tabular-nums text-[11px] text-[var(--text)]">{relevantActivityCount}</span> : null}
         </button>
         <button type="button" aria-pressed={tab === "sources"} className={`review-tab ${tab === "sources" ? "review-tab-active" : ""}`} onClick={() => setTab("sources")}>
-          Fuentes {message?.sources?.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.sources.length}</span> : null}
+          {" "}{t("Fuentes")}{" "}{message?.sources?.length ? <span className="tabular-nums text-[11px] text-[var(--text)]">{message.sources.length}</span> : null}
         </button>
-        {performance ? <button type="button" aria-pressed={tab === "performance"} className={`review-tab ${tab === "performance" ? "review-tab-active" : ""}`} onClick={() => setTab("performance")}>Rendimiento</button> : null}
+        {performance ? <button type="button" aria-pressed={tab === "performance"} className={`review-tab ${tab === "performance" ? "review-tab-active" : ""}`} onClick={() => setTab("performance")}>{t("Rendimiento")}</button> : null}
       </div>
 
       {!message ? (
         <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
           <div className="max-w-56">
             <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--surface-muted)] text-[var(--text-secondary)]"><ListChecks size={18} /></span>
-            <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Selecciona una respuesta</p>
-            <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">Aquí podrás revisar qué se ha hecho, qué archivos han cambiado y si hay alguna decisión pendiente.</p>
+            <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">{t("Selecciona una respuesta")}</p>
+            <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">{t("Aquí podrás revisar qué se ha hecho, qué archivos han cambiado y si hay alguna decisión pendiente.")}</p>
           </div>
         </div>
       ) : tab === "performance" && performance ? (
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 text-[12px] text-[var(--text)]">
-          <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">Métricas de pintura del cliente</p><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">Sin texto, prompts, tokens, IDs ni errores.</p></div><button type="button" aria-label="Descargar métricas del cliente" title="Descargar métricas del cliente" className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={downloadPerformance}><DownloadSimple size={15} /></button></div>
+          <div className="flex items-center justify-between gap-3"><div><p className="font-semibold">{t("Métricas de pintura del cliente")}</p><p className="mt-1 text-[12px] leading-5 text-[var(--text-muted)]">{t("Sin texto, prompts, tokens, IDs ni errores.")}</p></div><button type="button" aria-label={t("Descargar métricas del cliente")} title={t("Descargar métricas del cliente")} className="touch-target rounded-md p-1.5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={downloadPerformance}><DownloadSimple size={15} /></button></div>
           <dl className="mt-5 grid grid-cols-[1fr_auto] gap-x-4 gap-y-3 text-[12px]">
-            <dt className="text-[var(--text-muted)]">Intento → primer delta pintado</dt><dd className="font-medium tabular-nums">{milliseconds(performance.sendIntentToFirstDeltaPaintMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Cadencia p50 / p95 / máxima</dt><dd className="font-medium tabular-nums">{milliseconds(performance.interPaintP50Ms)} / {milliseconds(performance.interPaintP95Ms)} / {milliseconds(performance.interPaintMaxMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Estado terminal pintado</dt><dd className="font-medium tabular-nums">{performance.terminal ? `${performance.terminal} · ${milliseconds(performance.sendIntentToTerminalPaintMs)}` : "—"}</dd>
-            <dt className="text-[var(--text-muted)]">Reconexión → snapshot/catch-up p95</dt><dd className="font-medium tabular-nums">{milliseconds(performance.reconnectToSnapshotVisibleP95Ms)} / {milliseconds(performance.reconnectToCaughtUpP95Ms)}</dd>
-            <dt className="text-[var(--text-muted)]">Stream abierto / último evento / idle</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.responseOpenedAtMs)} / {milliseconds(performance.transport.lastEventAtMs)} / {milliseconds(performance.transport.idleObservedAtMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Cierre HTTP / recuperación / snapshot</dt><dd className="font-medium tabular-nums">{performance.transport.closeReason ?? "—"} / {performance.transport.recoveryAttempts} / {milliseconds(performance.transport.snapshotObservedAtMs)}</dd>
-            <dt className="text-[var(--text-muted)]">Banner de recuperación</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.bannerShownAtMs)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Intento → primer delta pintado")}</dt><dd className="font-medium tabular-nums">{milliseconds(performance.sendIntentToFirstDeltaPaintMs)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Cadencia p50 / p95 / máxima")}</dt><dd className="font-medium tabular-nums">{milliseconds(performance.interPaintP50Ms)} / {milliseconds(performance.interPaintP95Ms)} / {milliseconds(performance.interPaintMaxMs)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Estado terminal pintado")}</dt><dd className="font-medium tabular-nums">{performance.terminal ? `${performance.terminal} · ${milliseconds(performance.sendIntentToTerminalPaintMs)}` : "—"}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Reconexión → snapshot/catch-up p95")}</dt><dd className="font-medium tabular-nums">{milliseconds(performance.reconnectToSnapshotVisibleP95Ms)} / {milliseconds(performance.reconnectToCaughtUpP95Ms)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Stream abierto / último evento / idle")}</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.responseOpenedAtMs)} / {milliseconds(performance.transport.lastEventAtMs)} / {milliseconds(performance.transport.idleObservedAtMs)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Cierre HTTP / recuperación / snapshot")}</dt><dd className="font-medium tabular-nums">{performance.transport.closeReason ?? "—"} / {performance.transport.recoveryAttempts} / {milliseconds(performance.transport.snapshotObservedAtMs)}</dd>
+            <dt className="text-[var(--text-muted)]">{t("Banner de recuperación")}</dt><dd className="font-medium tabular-nums">{milliseconds(performance.transport.bannerShownAtMs)}</dd>
           </dl>
         </div>
       ) : tab === "sources" ? (
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-3 py-4">
-          <div className="mb-3 flex items-center gap-2 px-1 text-[12px] font-semibold text-[var(--text)]"><Globe size={14} />Fuentes utilizadas</div>
+          <div className="mb-3 flex items-center gap-2 px-1 text-[12px] font-semibold text-[var(--text)]"><Globe size={14} />{t("Fuentes utilizadas")}</div>
           <TurnSourceList sources={message.sources ?? []} />
         </div>
       ) : tab === "changes" ? (
@@ -198,7 +200,7 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
                 <span className="text-[var(--text)]">{files.length} {files.length === 1 ? "archivo" : "archivos"}</span>
               </div>
               <button type="button" className="flex min-h-10 items-center gap-1.5 rounded-md px-2 py-1 text-[12px] font-medium text-[var(--text)] transition hover:bg-[var(--surface-muted)]" onClick={() => void copyDiff()}>
-                {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Copiado" : "Copiar diff"}
+                {copied ? <Check size={12} /> : <Copy size={12} />}{copied ? t("Copiado") : t("Copiar diff")}
               </button>
             </div>
 
@@ -221,9 +223,9 @@ export function DetailsPanel({ message, performance = null, open, onClose, onRes
           <div className="grid min-h-0 flex-1 place-items-center p-7 text-center">
             <div className="max-w-56">
               <span className="mx-auto grid size-10 place-items-center rounded-xl bg-[var(--positive-soft)] text-[var(--positive)]"><ShieldCheck size={18} /></span>
-              <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">Sin cambios en archivos</p>
-              <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">Esta respuesta no ha modificado ningún archivo. Consulta Actividad para ver qué se ha hecho.</p>
-              <button type="button" className="mt-3 min-h-10 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => setTab("activity")}>Abrir Actividad</button>
+              <p className="mt-3 text-[13px] font-semibold text-[var(--text)]">{t("Sin cambios en archivos")}</p>
+              <p className="mt-1.5 text-[12px] leading-5 text-[var(--text-secondary)]">{t("Esta respuesta no ha modificado ningún archivo. Consulta Actividad para ver qué se ha hecho.")}</p>
+              <button type="button" className="mt-3 min-h-10 rounded-lg border border-[var(--border)] bg-[var(--surface-raised)] px-3 py-1.5 text-[12px] font-medium text-[var(--text)] hover:bg-[var(--surface-muted)]" onClick={() => setTab("activity")}>{t("Abrir Actividad")}</button>
             </div>
           </div>
         )

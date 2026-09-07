@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import React from "react";
 import { cn } from "@/lib/utils";
@@ -9,11 +10,13 @@ export interface RadialGlowButtonProps extends React.ButtonHTMLAttributes<HTMLBu
 }
 
 export function RadialGlowButton({
-  children = "Get Extension",
+  children: providedChildren,
   className,
   active = true,
   ...props
 }: RadialGlowButtonProps) {
+  const t = useUiText();
+  const children = providedChildren ?? t("Get Extension");
   if (!active) return <button type="button" className={className} {...props}>{children}</button>;
   return (
     <div className="relative inline-block">

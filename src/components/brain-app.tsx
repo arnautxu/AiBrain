@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
 
@@ -553,6 +554,7 @@ export function BrainApp({
   session: AuthSession;
   initialWorkbench: WorkbenchSnapshot;
 }) {
+  const t = useUiText();
   const defaultPreferences = useMemo(() => preferencesFromManifest(manifest), [manifest]);
   const preferencesKey = `aibrain.${session.tenant.id}.preferences.v3`;
   const previewKey = `aibrain.${session.tenant.id}.${session.user.id}.workbench.preview.v1`;
@@ -986,16 +988,16 @@ export function BrainApp({
     if (!newest) return;
     if (payload.preferences.inApp) {
       setNotice(workbenchNotice(newest.status === "needs_attention"
-        ? `Una tarea necesita tu atención: ${newest.threadTitle}`
+        ? t("Una tarea necesita tu atención: {p0}", { p0: newest.threadTitle })
         : newest.status === "completed"
           ? `Tarea completada: ${newest.threadTitle}`
-          : `Una tarea ha terminado con error: ${newest.threadTitle}`,
+          : t("Una tarea ha terminado con error: {p0}", { p0: newest.threadTitle }),
         newest.status === "completed" ? "success" : newest.status === "failed" ? "error" : "warning"));
     }
     if (payload.preferences.desktop && typeof Notification !== "undefined" && Notification.permission === "granted") {
       const notification = new Notification(
-        newest.status === "needs_attention" ? `${branding.productName} necesita tu atención` :
-          newest.status === "completed" ? `${branding.productName} ha terminado una tarea` : `Una tarea de ${branding.productName} ha fallado`,
+        newest.status === "needs_attention" ? t("{p0} necesita tu atención", { p0: branding.productName }) :
+          newest.status === "completed" ? t("{p0} ha terminado una tarea", { p0: branding.productName }) : t("Una tarea de {p0} ha fallado", { p0: branding.productName }),
         { body: newest.threadTitle, tag: newest.id },
       );
       notification.onclick = () => {
@@ -1004,18 +1006,18 @@ export function BrainApp({
         notification.close();
       };
     }
-  }, [branding.productName]);
+  }, [branding.productName, t]);
 
   const refreshTaskCenter = useCallback(async (notify = true) => {
     const requestGeneration = taskCenterGateRef.current.beginPoll();
     if (requestGeneration === null) return null;
     const response = await fetch("/api/task-center", { cache: "no-store" });
     const value: unknown = await response.json().catch(() => null);
-    if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido actualizar el centro de tareas.");
+    if (!response.ok || !isTaskCenterPayload(value)) throw new Error(t("No se ha podido actualizar el centro de tareas."));
     if (!taskCenterGateRef.current.isCurrent(requestGeneration)) return value;
     applyTaskCenterPayload(value, notify);
     return value;
-  }, [applyTaskCenterPayload]);
+  }, [applyTaskCenterPayload, t]);
 
   const mutateTaskCenter = useCallback(async (body: unknown) => {
     const requestGeneration = taskCenterGateRef.current.beginMutation();
@@ -1027,23 +1029,23 @@ export function BrainApp({
         body: JSON.stringify(body),
       });
       const value: unknown = await response.json().catch(() => null);
-      if (!response.ok || !isTaskCenterPayload(value)) throw new Error("No se ha podido guardar el centro de tareas.");
+      if (!response.ok || !isTaskCenterPayload(value)) throw new Error(t("No se ha podido guardar el centro de tareas."));
       if (!taskCenterGateRef.current.isCurrent(requestGeneration)) return;
       applyTaskCenterPayload(value, false);
     } catch (error) {
-      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido guardar el centro de tareas.", "error"));
+      setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido guardar el centro de tareas."), "error"));
     } finally {
       taskCenterGateRef.current.finishMutation();
       setTaskCenterBusy(false);
     }
-  }, [applyTaskCenterPayload]);
+  }, [applyTaskCenterPayload, t]);
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
     void refreshTaskCenter(false).catch(() => {
-      setNotice(workbenchNotice("El historial de tareas no se ha podido sincronizar. Tus conversaciones siguen disponibles.", "warning"));
+      setNotice(workbenchNotice(t("El historial de tareas no se ha podido sincronizar. Tus conversaciones siguen disponibles."), "warning"));
     });
-  }, [hydrated, initialWorkbench.persistence, refreshTaskCenter]);
+  }, [hydrated, initialWorkbench.persistence, refreshTaskCenter, t]);
 
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence !== "browser-preview") return;
@@ -1235,7 +1237,7 @@ export function BrainApp({
   const startNewThread = useCallback((projectId?: string) => {
     const destination = newThreadDestination(projects, projectId);
     if (!destination) {
-      setNotice(workbenchNotice("No se ha podido preparar el espacio de conversaciones.", "error"));
+      setNotice(workbenchNotice(t("No se ha podido preparar el espacio de conversaciones."), "error"));
       return;
     }
     cancelDocumentUploads();
@@ -1249,7 +1251,7 @@ export function BrainApp({
     setDocuments([]);
     setActiveSideWindow(null);
     setMobileSidebarOpen(false);
-  }, [cancelDocumentUploads, projects, switchComposerSelection]);
+  }, [cancelDocumentUploads, projects, switchComposerSelection, t]);
 
   const changeDocuments = useCallback((next: StagedComposerDocument[]) => {
     for (const [id, controller] of documentUploadControllersRef.current) {
@@ -1261,12 +1263,12 @@ export function BrainApp({
   const addDocuments = useCallback(async (files: File[]) => {
     if (!activeProject || documentUploading || sending) return;
     if (initialWorkbench.persistence !== "filesystem") {
-      setNotice(workbenchNotice("Los documentos reales requieren el runtime privado de la instalación.", "warning"));
+      setNotice(workbenchNotice(t("Los documentos reales requieren el runtime privado de la instalación."), "warning"));
       return;
     }
     const available = Math.max(0, 10 - documents.filter((document) => document.status !== "error").length);
     const selected = files.slice(0, available);
-    if (files.length > available) setNotice(workbenchNotice("Puedes preparar un máximo de 10 documentos por turno.", "warning"));
+    if (files.length > available) setNotice(workbenchNotice(t("Puedes preparar un máximo de 10 documentos por turno."), "warning"));
     if (!selected.length) return;
 
     let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id
@@ -1276,7 +1278,7 @@ export function BrainApp({
     setDocumentUploading(true);
     try {
       if (!thread) {
-        thread = await createThreadRequest(activeProject.id, "Conversación con documentos");
+        thread = await createThreadRequest(activeProject.id, t("Conversación con documentos"));
         setThreads((current) => [thread as WorkbenchThread, ...current]);
         if (documentUploadEpochRef.current !== uploadEpoch) return;
         adoptCurrentComposerThread(activeProject.id, thread.id);
@@ -1315,7 +1317,7 @@ export function BrainApp({
             status: "ready",
           } : document));
         } catch (reason) {
-          const message = reason instanceof Error ? reason.message : "No se ha podido preparar el documento.";
+          const message = reason instanceof Error ? reason.message : t("No se ha podido preparar el documento.");
           setDocuments((current) => current.map((document) => document.uploadId === uploadId
             ? { ...document, status: "error", error: message }
             : document));
@@ -1325,11 +1327,11 @@ export function BrainApp({
         }
       }
     } catch (reason) {
-      if (documentUploadEpochRef.current === uploadEpoch) setNotice(workbenchNotice(reason instanceof Error ? reason.message : "No se ha podido abrir una conversación para el documento.", "error"));
+      if (documentUploadEpochRef.current === uploadEpoch) setNotice(workbenchNotice(reason instanceof Error ? reason.message : t("No se ha podido abrir una conversación para el documento."), "error"));
     } finally {
       if (documentUploadEpochRef.current === uploadEpoch) setDocumentUploading(false);
     }
-  }, [activeProject, activeThread, adoptCurrentComposerThread, documentUploading, documents, initialWorkbench.persistence, sending]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, documentUploading, documents, initialWorkbench.persistence, sending, t]);
 
   const requestDocumentPublication = useCallback((attachment: ChatAttachment, turnId: string) => {
     if (!activeThread) return;
@@ -1363,10 +1365,10 @@ export function BrainApp({
         ...candidate,
         targetRelativePath,
         phase: "error",
-        error: error instanceof Error ? error.message : "No se ha podido preparar la publicación.",
+        error: error instanceof Error ? error.message : t("No se ha podido preparar la publicación."),
       } : candidate));
     }
-  }, [publications]);
+  }, [publications, t]);
 
   const decidePublication = useCallback(async (draftId: string, action: "confirm" | "decline") => {
     const draft = publications.find((candidate) => candidate.id === draftId);
@@ -1391,10 +1393,10 @@ export function BrainApp({
       setPublications((current) => current.map((candidate) => candidate.id === draftId ? {
         ...candidate,
         phase: "awaiting_confirmation",
-        error: error instanceof Error ? error.message : "No se ha podido aplicar la decisión.",
+        error: error instanceof Error ? error.message : t("No se ha podido aplicar la decisión."),
       } : candidate));
     }
-  }, [publications]);
+  }, [publications, t]);
 
   const handleStream = useCallback(async (
     request: (signal: AbortSignal) => Promise<Response>,
@@ -1425,7 +1427,7 @@ export function BrainApp({
             item: {
               id: "client-request-status",
               kind: "system",
-              label: "Solicitud aceptada",
+              label: t("Solicitud aceptada"),
               status: "complete",
             },
           });
@@ -1449,7 +1451,7 @@ export function BrainApp({
       setStreamRecoveryNotice((current) => current?.threadId === threadId &&
         current.assistantMessageId === assistantMessageId ? null : current);
     }
-  }, []);
+  }, [t]);
 
   const sendMessage = useCallback(async (messageOverride?: string, displayMessageOverride?: string) => {
     const visibleContent = (displayMessageOverride ?? messageOverride ?? prompt).trim();
@@ -1521,7 +1523,7 @@ export function BrainApp({
       assistantMessage.activity = [{
         id: "client-request-status",
         kind: "system",
-        label: "Enviando solicitud",
+        label: t("Enviando solicitud"),
         status: "running",
       }];
       const threadId = thread.id;
@@ -1624,12 +1626,12 @@ export function BrainApp({
             ...message,
             status: stopped ? "stopped" : "error",
             ...(!stopped && !message.content
-              ? { content: error instanceof Error ? error.message : "Error desconocido" }
+              ? { content: error instanceof Error ? error.message : t("Error desconocido") }
               : {}),
           }),
         ));
       } else {
-        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear la conversación.", "error"));
+        setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido crear la conversación."), "error"));
       }
     } finally {
       if (thread) {
@@ -1655,7 +1657,7 @@ export function BrainApp({
       }
     }
     return succeeded;
-  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedServerReferences, selectedSkill, sending]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedServerReferences, selectedSkill, sending, t]);
 
   const submitComposerMessage = useCallback((messageOverride?: string, displayMessageOverride?: string) => {
     if (documentUploading || documents.some((document) => document.status !== "ready")) return;
@@ -1664,7 +1666,7 @@ export function BrainApp({
       return;
     }
 
-    if (selectedServerReferences.length) { setNotice(workbenchNotice("Espera a que termine la respuesta para enviar las referencias Server.", "warning")); return; }
+    if (selectedServerReferences.length) { setNotice(workbenchNotice(t("Espera a que termine la respuesta para enviar las referencias Server."), "warning")); return; }
     const displayContent = (displayMessageOverride ?? messageOverride ?? promptRef.current).trim();
     const promptContent = (messageOverride ?? promptRef.current).trim();
     const runtimeContent = (messageOverride ?? (pendingRuntimeContext
@@ -1672,7 +1674,7 @@ export function BrainApp({
       : promptContent)).trim();
     if (!displayContent || !runtimeContent || !activeProject || !activeThread || activeThread.status !== "active") return;
     if (queuedTurns.filter((item) => item.threadId === activeThread.id).length >= MAX_QUEUED_MESSAGES_PER_THREAD) {
-      setNotice(workbenchNotice(`La cola admite hasta ${MAX_QUEUED_MESSAGES_PER_THREAD} mensajes por conversación.`, "warning"));
+      setNotice(workbenchNotice(t("La cola admite hasta {p0} mensajes por conversación.", { p0: MAX_QUEUED_MESSAGES_PER_THREAD }), "warning"));
       return;
     }
 
@@ -1685,7 +1687,7 @@ export function BrainApp({
     }]);
     updateComposerPrompt("");
     setPendingRuntimeContext(null);
-  }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, selectedServerReferences, sendMessage, sending, updateComposerPrompt]);
+  }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, selectedServerReferences, sendMessage, sending, updateComposerPrompt, t]);
 
   useEffect(() => {
     if (sending || actionBusy || documentUploading || dispatchingQueuedTurnId || !activeProject || !activeThread) return;
@@ -1697,10 +1699,10 @@ export function BrainApp({
     setQueuedTurns((current) => current.filter((item) => item.id !== next.id));
     void sendMessage(next.runtimeContent, next.displayContent)
       .then((completed) => {
-        if (!completed) setNotice(workbenchNotice("No se ha podido enviar el siguiente mensaje de la cola.", "error"));
+        if (!completed) setNotice(workbenchNotice(t("No se ha podido enviar el siguiente mensaje de la cola."), "error"));
       })
       .finally(() => setDispatchingQueuedTurnId(null));
-  }, [actionBusy, activeProject, activeThread, dispatchingQueuedTurnId, documentUploading, queuedTurns, sendMessage, sending]);
+  }, [actionBusy, activeProject, activeThread, dispatchingQueuedTurnId, documentUploading, queuedTurns, sendMessage, sending, t]);
 
   useEffect(() => {
     const activeThreadIds = new Set(threads
@@ -1748,14 +1750,14 @@ export function BrainApp({
       if (autoSend && result.draftMessage) {
         setPendingBranchSend({ threadId: result.thread.id, content: result.draftMessage });
       } else {
-        setNotice(workbenchNotice("Rama creada. La conversación original se conserva intacta.", "success"));
+        setNotice(workbenchNotice(t("Rama creada. La conversación original se conserva intacta."), "success"));
       }
     } catch (error) {
-      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear la rama.", "error"));
+      setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido crear la rama."), "error"));
     } finally {
       setActionBusy(false);
     }
-  }, [actionBusy, activeThread, initialWorkbench.persistence, sending, switchComposerSelection]);
+  }, [actionBusy, activeThread, initialWorkbench.persistence, sending, switchComposerSelection, t]);
 
   useEffect(() => {
     if (!pendingBranchSend || pendingBranchSend.threadId !== activeThreadId || sending || actionBusy) return;
@@ -1794,11 +1796,11 @@ export function BrainApp({
         const message = payload && typeof payload === "object" && "error" in payload &&
           typeof payload.error === "string"
           ? payload.error
-          : "No s’ha pogut confirmar l’aturada amb el runtime.";
+          : t("No s’ha pogut confirmar l’aturada amb el runtime.");
         setNotice(workbenchNotice(message, "error"));
       }
     } catch {
-      setNotice(workbenchNotice("S’ha perdut la connexió mentre s’aturava el torn.", "error"));
+      setNotice(workbenchNotice(t("S’ha perdut la connexió mentre s’aturava el torn."), "error"));
     } finally {
       // Keep the stream attached until the runtime confirms stopped/error.
       // Aborting here converted even rejected or pending stops into a false
@@ -1809,7 +1811,7 @@ export function BrainApp({
         return next;
       });
     }
-  }, [activeThread, initialWorkbench.persistence, stoppingThreadIds]);
+  }, [activeThread, initialWorkbench.persistence, stoppingThreadIds, t]);
 
   const resolveApproval = useCallback(async (
     messageId: string,
@@ -1820,7 +1822,7 @@ export function BrainApp({
     const managedAppAction = managedAppActionForApproval(managedAppActions, selectedApproval);
     if (managedAppAction) {
       if (managedAppAction.locator.threadId !== activeThreadId || managedAppAction.locator.turnId !== messageId) {
-        setNotice(workbenchNotice("La acción conectada ya no corresponde a esta conversación.", "warning"));
+        setNotice(workbenchNotice(t("La acción conectada ya no corresponde a esta conversación."), "warning"));
         return;
       }
       const result = await resolveManagedAppAction(fetch, managedAppAction, {
@@ -1829,8 +1831,8 @@ export function BrainApp({
       }, decision);
       if (result.state === "recoverable") {
         setNotice(workbenchNotice(result.stage === "current-thread"
-          ? "Vuelve a la conversación original para resolver esta acción conectada."
-          : "La acción conectada sigue pendiente. Puedes volver a intentarlo.", "warning"));
+          ? t("Vuelve a la conversación original para resolver esta acción conectada.")
+          : t("La acción conectada sigue pendiente. Puedes volver a intentarlo."), "warning"));
         return;
       }
       setManagedAppActions((current) => forgetManagedAppAction(current, selectedApproval));
@@ -1856,7 +1858,7 @@ export function BrainApp({
       }),
     });
     if (!response.ok) {
-      setNotice(workbenchNotice("Esta aprobación ya no está pendiente.", "warning"));
+      setNotice(workbenchNotice(t("Esta aprobación ya no está pendiente."), "warning"));
       return;
     }
     const status = decision === "accept"
@@ -1872,7 +1874,7 @@ export function BrainApp({
           approval.id === selectedApproval.id ? { ...approval, status } : approval),
       }),
     ));
-  }, [activeThreadId, managedAppActions]);
+  }, [activeThreadId, managedAppActions, t]);
 
   const prepareManagedAppAction = useCallback((descriptor: ManagedAppActionDescriptor) => {
     if (!activeThreadId || descriptor.locator.threadId !== activeThreadId ||
@@ -1913,12 +1915,12 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido actualizar el proyecto.", "error"));
+      setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido actualizar el proyecto."), "error"));
       return null;
     } finally {
       setActionBusy(false);
     }
-  }, [activeProjectId, initialWorkbench.persistence, projects, switchComposerSelection, threads]);
+  }, [activeProjectId, initialWorkbench.persistence, projects, switchComposerSelection, threads, t]);
 
   const persistThreadPatch = useCallback(async (
     thread: WorkbenchThread,
@@ -1948,12 +1950,12 @@ export function BrainApp({
       }
       return updated;
     } catch (error) {
-      setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido actualizar la conversación.", "error"));
+      setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido actualizar la conversación."), "error"));
       return null;
     } finally {
       setActionBusy(false);
     }
-  }, [activeThreadId, initialWorkbench.persistence, switchComposerSelection, threads]);
+  }, [activeThreadId, initialWorkbench.persistence, switchComposerSelection, threads, t]);
 
   const submitTextDialog = useCallback(async (value: string) => {
     if (!textDialog) return;
@@ -1970,7 +1972,7 @@ export function BrainApp({
         setSelectedMessageId(null);
         closeTextDialog();
       } catch (error) {
-        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido crear el proyecto.", "error"));
+        setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido crear el proyecto."), "error"));
       } finally {
         setActionBusy(false);
       }
@@ -1981,7 +1983,7 @@ export function BrainApp({
       return;
     }
     if (await persistThreadPatch(textDialog.thread, { title: value })) closeTextDialog();
-  }, [closeTextDialog, initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog]);
+  }, [closeTextDialog, initialWorkbench.persistence, persistProjectPatch, persistThreadPatch, projects, switchComposerSelection, textDialog, t]);
 
   const handleProjectAction = useCallback((project: WorkbenchProject, action: ProjectMenuAction, returnFocus?: HTMLElement | null) => {
     if (action === "settings") {
@@ -1994,7 +1996,7 @@ export function BrainApp({
       thread.projectId === project.id &&
       (threadActivityById[thread.id]?.state === "running" ||
         threadActivityById[thread.id]?.state === "needs_attention"))) {
-      setNotice(workbenchNotice("Detén o resuelve las conversaciones en curso antes de archivar el proyecto.", "warning"));
+      setNotice(workbenchNotice(t("Detén o resuelve las conversaciones en curso antes de archivar el proyecto."), "warning"));
       return;
     }
     if (action === "rename") {
@@ -2006,12 +2008,12 @@ export function BrainApp({
     }
     else if (action === "restore") void persistProjectPatch(project, { status: "active" });
     else void persistProjectPatch(project, { pinned: action === "pin" });
-  }, [beginSidebarOverlay, persistProjectPatch, selectProject, threadActivityById, threads]);
+  }, [beginSidebarOverlay, persistProjectPatch, selectProject, threadActivityById, threads, t]);
 
   const handleThreadAction = useCallback((thread: WorkbenchThread, action: ThreadMenuAction, returnFocus?: HTMLElement | null) => {
     const workState = threadActivityById[thread.id]?.state;
     if (action === "archive" && (workState === "running" || workState === "needs_attention")) {
-      setNotice(workbenchNotice("Detén o resuelve esta conversación antes de archivarla.", "warning"));
+      setNotice(workbenchNotice(t("Detén o resuelve esta conversación antes de archivarla."), "warning"));
       return;
     }
     if (action === "rename") {
@@ -2023,7 +2025,7 @@ export function BrainApp({
     }
     else if (action === "restore") void persistThreadPatch(thread, { status: "active" });
     else void persistThreadPatch(thread, { pinned: action === "pin" });
-  }, [beginSidebarOverlay, persistThreadPatch, threadActivityById]);
+  }, [beginSidebarOverlay, persistThreadPatch, threadActivityById, t]);
 
   const confirmAction = useCallback(async () => {
     if (!confirmDialog) return;
@@ -2040,7 +2042,7 @@ export function BrainApp({
           });
           const result: unknown = await response.json().catch(() => null);
           if (!response.ok || !result || typeof result !== "object" || !("message" in result)) {
-            throw new Error("No se ha podido guardar el estado de la reversión.");
+            throw new Error(t("No se ha podido guardar el estado de la reversión."));
           }
           const updated = result.message as ChatMessage;
           setThreads((current) => updateThreadMessage(current, activeThreadId, target.id, () => updated));
@@ -2049,15 +2051,15 @@ export function BrainApp({
         closeConfirmDialog();
         setActionBusy(false);
         const completed = await sendMessage(
-          `Revierte exclusivamente los cambios de este resultado. Antes de terminar, comprueba el estado final y explica qué se ha restaurado.\n\nCambios originales:\n${target.diff.slice(0, 10_000)}`,
-          "Deshaz los cambios de este resultado y comprueba que todo queda restaurado.",
+          t("Revierte exclusivamente los cambios de este resultado. Antes de terminar, comprueba el estado final y explica qué se ha restaurado.\n\nCambios originales:\n{p0}", { p0: target.diff.slice(0, 10_000) }),
+          t("Deshaz los cambios de este resultado y comprueba que todo queda restaurado."),
         );
         setActionBusy(true);
-        if (!completed) throw new Error("La reversió no s’ha pogut verificar.");
+        if (!completed) throw new Error(t("La reversió no s’ha pogut verificar."));
         await updateState("undo_complete");
-        setNotice(workbenchNotice("Cambios revertidos y verificados. El estado se ha guardado.", "success"));
+        setNotice(workbenchNotice(t("Cambios revertidos y verificados. El estado se ha guardado."), "success"));
       } catch (error) {
-        setNotice(workbenchNotice(error instanceof Error ? error.message : "No se ha podido completar la reversión.", "error"));
+        setNotice(workbenchNotice(error instanceof Error ? error.message : t("No se ha podido completar la reversión."), "error"));
       } finally {
         setActionBusy(false);
       }
@@ -2067,7 +2069,7 @@ export function BrainApp({
       ? await persistProjectPatch(confirmDialog.project, { status: "archived" })
       : await persistThreadPatch(confirmDialog.thread, { status: "archived" });
     if (updated) closeConfirmDialog();
-  }, [activeThreadId, closeConfirmDialog, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage]);
+  }, [activeThreadId, closeConfirmDialog, confirmDialog, persistProjectPatch, persistThreadPatch, sendMessage, t]);
 
   const changePreference = useCallback(
     <Key extends keyof BrainPreferences>(key: Key, value: BrainPreferences[Key]) => {
@@ -2236,19 +2238,19 @@ export function BrainApp({
   ]);
 
   const textDialogCopy = textDialog?.kind === "create-project"
-    ? { title: "Nuevo proyecto", label: "Nombre del proyecto", value: "", submit: "Crear proyecto", maxLength: 80 }
+    ? { title: t("Nuevo proyecto"), label: t("Nombre del proyecto"), value: "", submit: t("Crear proyecto"), maxLength: 80 }
     : textDialog?.kind === "rename-project"
-      ? { title: "Renombrar proyecto", label: "Nombre del proyecto", value: textDialog.project.name, submit: "Guardar", maxLength: 80 }
+      ? { title: t("Renombrar proyecto"), label: t("Nombre del proyecto"), value: textDialog.project.name, submit: t("Guardar"), maxLength: 80 }
       : textDialog?.kind === "rename-thread"
-        ? { title: "Renombrar conversación", label: "Título de la conversación", value: textDialog.thread.title, submit: "Guardar", maxLength: 120 }
+        ? { title: t("Renombrar conversación"), label: t("Título de la conversación"), value: textDialog.thread.title, submit: t("Guardar"), maxLength: 120 }
         : null;
   const noticeLabel = notice?.kind === "error"
     ? "Error"
     : notice?.kind === "warning"
-      ? "Aviso"
+      ? t("Aviso")
       : notice?.kind === "success"
-        ? "Completado"
-        : "Estado";
+        ? t("Completado")
+        : t("Estado");
   const noticeTone = notice?.kind === "error"
     ? "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"
     : notice?.kind === "warning"
@@ -2484,13 +2486,13 @@ export function BrainApp({
 
       <ConfirmDialog
         open={Boolean(confirmDialog)}
-        title={confirmDialog?.kind === "undo-result" ? "¿Quieres deshacer estos cambios?" : confirmDialog?.kind === "archive-project" ? "¿Archivar proyecto?" : "¿Archivar conversación?"}
+        title={confirmDialog?.kind === "undo-result" ? t("¿Quieres deshacer estos cambios?") : confirmDialog?.kind === "archive-project" ? t("¿Archivar proyecto?") : t("¿Archivar conversación?")}
         description={confirmDialog?.kind === "archive-project"
-          ? "El proyecto y sus conversaciones dejarán de aparecer en la vista activa. Podrás restaurarlos desde Configuración > Archivados."
+          ? t("El proyecto y sus conversaciones dejarán de aparecer en la vista activa. Podrás restaurarlos desde Configuración > Archivados.")
           : confirmDialog?.kind === "undo-result"
-            ? "Se revertirán solo los cambios de este resultado, se comprobará el estado final y se conservará el original en el historial."
-            : "La conversación dejará de aparecer en la lista activa. Podrás restaurarla desde Configuración > Archivados."}
-        confirmLabel={confirmDialog?.kind === "undo-result" ? "Sí, deshacer" : "Archivar"}
+            ? t("Se revertirán solo los cambios de este resultado, se comprobará el estado final y se conservará el original en el historial.")
+            : t("La conversación dejará de aparecer en la lista activa. Podrás restaurarla desde Configuración > Archivados.")}
+        confirmLabel={confirmDialog?.kind === "undo-result" ? t("Sí, deshacer") : t("Archivar")}
         busy={actionBusy}
         returnFocusRef={sidebarReturnFocusRef}
         onClose={() => !actionBusy && closeConfirmDialog()}
@@ -2501,7 +2503,7 @@ export function BrainApp({
         <div role={notice.kind === "error" ? "alert" : "status"} aria-live={notice.kind === "error" ? "assertive" : "polite"} aria-atomic="true" className={`fixed right-4 top-4 z-[90] flex max-w-[min(26rem,calc(100%-2rem))] items-center gap-2.5 rounded-xl border px-3 py-2.5 text-[13px] font-medium leading-5 shadow-[var(--shadow-md)] ${noticeTone}`}>
           <span className="size-2 shrink-0 rounded-full bg-current" aria-hidden="true" />
           <span className="min-w-0 flex-1"><span className="sr-only">{noticeLabel}: </span>{notice.message}</span>
-          {!modalSurfaceOpen ? <button type="button" className="touch-target grid size-8 shrink-0 place-items-center rounded-lg text-current opacity-70 transition hover:bg-black/5 hover:opacity-100 active:scale-95 dark:hover:bg-white/10" aria-label={`Cerrar ${noticeLabel.toLocaleLowerCase("es")}`} onClick={() => setNotice(null)}><span aria-hidden="true">×</span></button> : null}
+          {!modalSurfaceOpen ? <button type="button" className="touch-target grid size-8 shrink-0 place-items-center rounded-lg text-current opacity-70 transition hover:bg-black/5 hover:opacity-100 active:scale-95 dark:hover:bg-white/10" aria-label={`Cerrar ${noticeLabel.toLocaleLowerCase("es")}`} onClick={() => setNotice(null)}><span aria-hidden="true">{t("×")}</span></button> : null}
         </div>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import {
   useCallback,
@@ -55,6 +56,7 @@ interface SidebarSheetProps {
 }
 
 function SidebarSheet({ side, open, onClose, children }: SidebarSheetProps) {
+  const t = useUiText();
   const { widthMobile } = useSidebar();
   // Reduced motion drops the slide (the movement) but keeps the scrim's
   // opacity fade — the state change stays legible without the travel.
@@ -124,7 +126,7 @@ function SidebarSheet({ side, open, onClose, children }: SidebarSheetProps) {
         />
 
         <DialogPrimitive.Popup
-          aria-label="Sidebar"
+          aria-label={t("Sidebar")}
           initialFocus={panelRef}
           render={(popupProps) => {
             const { style: baseStyle, ref: baseRef, ...rest } =

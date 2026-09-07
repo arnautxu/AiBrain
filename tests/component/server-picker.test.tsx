@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, expect, it, vi } from "vitest";
 import { ServerPicker } from "@/components/server-picker";
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });

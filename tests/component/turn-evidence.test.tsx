@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolResultList } from "@/components/tool-result-list";
 import { TurnSourceChips, TurnSourceList } from "@/components/turn-sources";

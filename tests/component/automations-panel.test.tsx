@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "../render-spanish";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AUTOMATION_EXECUTION_CONTEXT, type AutomationTaskView } from "@/automations/contracts";
 import { AutomationsPanel } from "@/components/automations-panel";

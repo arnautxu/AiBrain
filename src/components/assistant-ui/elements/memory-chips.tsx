@@ -1,4 +1,5 @@
 "use client";
+import { useUiText } from "@/i18n/provider";
 
 import type { ComponentProps } from "react";
 import { BrainIcon, XIcon } from "lucide-react";
@@ -22,6 +23,7 @@ export function MemoryChips({
   chips: readonly MemoryChip[];
   onForget?: (id: string) => void;
 }) {
+  const t = useUiText();
   if (chips.length === 0) return null;
   const fresh = chips.filter((chip) => chip.change !== "existing").length;
 
@@ -35,7 +37,7 @@ export function MemoryChips({
       <div className="flex items-center gap-1.5">
         <BrainIcon className="text-[var(--text-muted)] size-3.5" />
         <span className={cn(mono, "text-[var(--text-muted)]")}>
-          {fresh > 0 ? `${fresh} memorias guardadas` : "Memoria"}
+          {fresh > 0 ? `${fresh} memorias guardadas` : t("Memoria")}
         </span>
       </div>
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useUiLocale } from "@/i18n/provider";
 import type { ComponentProps } from "react";
 import { ArrowUpIcon, SquareIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -40,7 +41,7 @@ export function MessageQueue({
   onCancel,
   onStop,
   stopping = false,
-  language = "es",
+  language,
   className,
   ...props
 }: Omit<
@@ -54,7 +55,8 @@ export function MessageQueue({
   stopping?: boolean;
   language?: keyof typeof queueCopy;
 }) {
-  const copy = queueCopy[language];
+  const locale = useUiLocale();
+  const copy = queueCopy[language ?? locale];
 
   return (
     <div
