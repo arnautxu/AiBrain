@@ -49,6 +49,10 @@ function installationConfigInput(brand: string) {
     connectors: {
       gmail: { enabled: true },
       outlook: { enabled: true },
+      composio: { toolkits: [{ slug: "gmail", label: "Gmail", authConfigId: "ac_test",
+        scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+        readTools: [{ slug: "GMAIL_GET_PROFILE", version: "20260903_00" }],
+      }] },
     },
   }, null, 2)}\n`;
 }
@@ -545,6 +549,17 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
       .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INSTALLATION_CONFIG_INVALID") });
     const dockerCalls = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     expect(dockerCalls.some((args) => args.includes("up"))).toBe(false);
+  });
+
+  it("rejects unpinned Composio tools before container mutation", async () => {
+    const files = await fixture();
+    const unsafe = JSON.parse(installationConfigInput("Unsafe Composio"));
+    unsafe.connectors.composio.toolkits[0].readTools[0].version = "latest";
+    await writeFile(files.installationConfig, `${JSON.stringify(unsafe)}\n`);
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INSTALLATION_CONFIG_INVALID") });
+    const calls = (await readFile(files.logFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(calls.some(args => args.includes("up"))).toBe(false);
   });
 
   it("rejects Compose that connects an external BGreenly resource", async () => {

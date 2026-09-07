@@ -40,8 +40,10 @@ def validate_request(value, manifest):
         if str(uuid.UUID(value["requestId"])) != value["requestId"] or not isinstance(value["input"], dict):
             return False
         args = value["input"]
-        if value["operation"] == "search" and set(args) == {"query", "limit"}:
+        if value["operation"] in ("search", "browse") and set(args) == {"query", "limit"}:
             request = files.query_request(args["query"], args["limit"])
+            if value["operation"] == "browse" and request["mode"] not in ("drives", "list"):
+                return False
             if request.get("source"):
                 files.rdp.select_root(request["source"], manifest["sourceRoots"])
             return True
@@ -64,6 +66,11 @@ def execute(manifest, value, cached_only=False):
     for audience in manifest["publications"]:
         sync.scope_directory(manifest, audience)
     try:
+        if value['operation'] == 'browse':
+            if cached_only:
+                return None
+            with folder_module().interactive_access(manifest):
+                return {**files.search(manifest, **value['input']), 'sourceChecked': True, 'lookupMode': 'live'}
         if value['operation'] == 'inventory':
             if cached_only:
                 result = server_map.folder_inventory(manifest, files=files, **value['input'])

@@ -116,6 +116,7 @@ export function CustomizationPanel({ productName, open, initialTab = "appearance
 
 function Appearance() { return <section><SectionTitle>Tema</SectionTitle><div className="flex items-center justify-between rounded-[var(--brain-radius)] border border-[var(--border)] bg-[var(--surface)] px-4 py-3"><div><p className="text-[12px] font-semibold">Claro u oscuro</p><p className="mt-1 text-[11px] text-[var(--text-subtle)]">Se guarda en este navegador.</p></div><ThemeToggle /></div></section>; }
 function connectorServices(id: string, label: string) {
+  if (id.startsWith("composio-")) return [label];
   if (id === "gmail") return ["Gmail"];
   if (id === "outlook") return ["Outlook Mail"];
   const normalized = `${id} ${label}`.toLocaleLowerCase();

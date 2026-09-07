@@ -258,13 +258,16 @@ describe("physical egress gateway", () => {
 
     expect((await connectExchange(proxyUrl, "project-ref.supabase.co:443", basic(WORKER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "api.openai.com:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "backend.composio.dev.evil.example:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "backend.composio.dev:80", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(proxyUrl, "backend.composio.dev:443", basic(WORKER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "project-ref.supabase.co:80", basic(SERVER_TOKEN))).status).toBe(403);
     expect((await connectExchange(proxyUrl, "browser.example:8443", bearer(BROWSER_TOKEN), "8.8.8.8")).status).toBe(403);
     expect(lookup).not.toHaveBeenCalled();
     expect(connector).not.toHaveBeenCalled();
   });
 
-  it("allows only the configured Supabase hostname on the server channel", async () => {
+  it("allows configured Supabase and the exact Composio API on the server channel", async () => {
     const echo = createNetServer((socket) => socket.pipe(socket));
     servers.push(echo);
     const echoPort = await listen(echo);
@@ -276,6 +279,8 @@ describe("physical egress gateway", () => {
 
     expect((await connectExchange(proxyUrl, "project-ref.supabase.co:443", basic(SERVER_TOKEN))).status).toBe(200);
     expect(observed).toMatchObject([{ hostname: "project-ref.supabase.co", address: "104.18.38.10", port: 443, channel: "server" }]);
+    expect((await connectExchange(proxyUrl, "backend.composio.dev:443", basic(SERVER_TOKEN))).status).toBe(200);
+    expect(observed[1]).toMatchObject({ hostname: "backend.composio.dev", address: "104.18.38.10", port: 443, channel: "server" });
   });
 
   it("has idempotent lifecycle, loopback health and fail-closed secret validation", async () => {

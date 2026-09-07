@@ -19,7 +19,7 @@ export const COMPANY_FILES_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.fr
   tools: [{
     type: "function",
     name: "search",
-    description: "Find authorized business files in the metadata map, indexed library and local text. To discover drives use server:/, then navigate observed folders. Never invent a year folder: inspect the parent. Names may use Catalan (pressupostos) or Spanish (presupuestos); use observed names and try their equivalents. Known complete folders use the map; unscanned folders use live listing. Follow nextQuery for further pages. To count or classify a folder tree use inventory with its returned server- path; search result counts are not totals. Read knowledge- paths with returned scope/scopeId for indexed source versions. No Windows writes are available.",
+    description: "Find authorized business files in the metadata map, indexed library and local text. To discover drives use server:/, then navigate observed folders. Never invent a year folder: inspect the parent. Names may use Catalan (pressupostos) or Spanish (presupuestos); use observed names and try their equivalents. For a fresh directory listing bypassing the map use query live:server:/ followed by the observed drive/path; continue with live: plus nextQuery. Known complete folders use the map; unscanned folders use live listing. Follow nextQuery for further pages. To count or classify a folder tree use inventory with its returned server- path; search result counts are not totals. Read knowledge- paths with returned scope/scopeId for indexed source versions. No Windows writes are available.",
     inputSchema: {
       type: "object",
       properties: {
@@ -127,6 +127,10 @@ export async function handleCompanyFilesDynamicToolCall(params: DynamicToolCallP
         // either backend; a larger requested page is not a scope violation.
         ...(typeof params.arguments.limit === "number" ? { limit: Math.min(params.arguments.limit, 50) } : {}),
       };
+      if (input.query.startsWith("live:")) {
+        if (!input.query.startsWith("live:server:/") || input.query.length > 200) return failure();
+        return response(await context.serverFiles?.search(context.roots, input.query.slice(5), input.limit ?? 50, true) ?? { available: false });
+      }
       // Older App Server threads retain their original dynamic-tool schema.
       // Route this bounded query through the same inventory authorization.
       if (input.query.startsWith("inventory:")) {

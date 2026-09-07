@@ -554,6 +554,7 @@ export async function POST(request: Request) {
     "complete",
     startedAt.toISOString(),
   );
+  if (body.options.serverReferences?.length) userMessage.serverReferences = body.options.serverReferences;
   userMessage.attachments = body.options.attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment);
   userMessage.attachments.push(...turnDocumentChatAttachments(turnDocuments));
   let assistantMessage = message(

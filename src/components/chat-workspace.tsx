@@ -1,5 +1,8 @@
 "use client";
 
+import { ServerPicker } from "@/components/server-picker";
+import type { ServerReference } from "@/documents/server-reference-contract";
+
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowDown,
@@ -70,6 +73,8 @@ type ChatWorkspaceProps = {
   imageGeneration: boolean;
   connectorMentions: ConnectorMention[];
   selectedConnectorMentionIds: string[];
+  serverReferences?: ServerReference[];
+  onServerReferencesChange?: (items: ServerReference[]) => void;
   attachments: ChatInputAttachment[];
   documents: StagedComposerDocument[];
   publications: DocumentPublicationDraft[];
@@ -379,6 +384,7 @@ function UserMessage({ message, threadId, onRequestPublication, onEdit, readOnly
     <article className="message-enter group flex justify-end">
       <div className="min-w-0 max-w-[86%] md:max-w-[70%]">
       <div className="min-w-0 overflow-hidden rounded-[22px] bg-[var(--user-message)] px-4 py-2.5 text-[length:var(--font-reading)] leading-6 text-[var(--user-message-text)] [overflow-wrap:anywhere]">
+        {message.serverReferences?.length ? <div className="mb-2 flex flex-wrap gap-2">{message.serverReferences.map(ref => <span className="rounded bg-[var(--surface-raised)]/70 px-2 py-1 text-xs text-[var(--text)]" key={ref.path} title={ref.path}>Server · {ref.name}</span>)}</div> : null}
         {message.attachments.length ? (
           <div className="mb-2 flex flex-wrap justify-end gap-1.5">
             {message.attachments.map((attachment) => (
@@ -422,6 +428,8 @@ export function ChatWorkspace({
   imageGeneration,
   connectorMentions,
   selectedConnectorMentionIds,
+  serverReferences = [],
+  onServerReferencesChange,
   attachments,
   documents,
   publications,
@@ -482,6 +490,9 @@ export function ChatWorkspace({
     attachmentSelectionRef.current += 1;
     return () => { attachmentSelectionRef.current += 1; };
   }, [project?.id, thread?.id]);
+  const serverSelectionKey = `${project?.id ?? ""}:${thread?.id ?? ""}`;
+  const [serverOpenKey, setServerOpenKey] = useState<string | null>(null);
+  const serverOpen = serverOpenKey === serverSelectionKey;
   const [mentionOpen, setMentionOpen] = useState(false);
   const [connectorCatalogOpen, setConnectorCatalogOpen] = useState(false);
   const [mentionActiveIndex, setMentionActiveIndex] = useState(0);
@@ -491,17 +502,17 @@ export function ChatWorkspace({
   const [restoringThreadId, setRestoringThreadId] = useState<string | null>(null);
   const restoringRequest = Boolean(thread && restoringThreadId === thread.id);
   const restoreControllerRef = useRef<AbortController | null>(null);
-  const currentDraftRef = useRef({ prompt, attachments, documents });
+  const currentDraftRef = useRef({ prompt, attachments, documents, serverReferences });
   useLayoutEffect(() => {
-    currentDraftRef.current = { prompt, attachments, documents };
-  }, [prompt, attachments, documents]);
+    currentDraftRef.current = { prompt, attachments, documents, serverReferences };
+  }, [prompt, attachments, documents, serverReferences]);
   useEffect(() => () => {
     restoreControllerRef.current?.abort();
     restoreControllerRef.current = null;
   }, [project?.id, thread?.id]);
   const restoreFailedRequest = async (request: ChatMessage) => {
     if (!thread || readOnly || sending || documentUploading || restoreControllerRef.current) return;
-    if (prompt.trim() || attachments.length || documents.length) {
+    if (prompt.trim() || attachments.length || documents.length || serverReferences.length) {
       onComposerNotice("Conserva o vacía el borrador actual antes de recuperar otra solicitud.");
       return;
     }
@@ -514,12 +525,13 @@ export function ChatWorkspace({
       const restored = await Promise.all(request.attachments.map((attachment) => restoreRequestDocument(thread.id, attachment, controller.signal)));
       if (controller.signal.aborted || selection !== attachmentSelectionRef.current) return;
       const current = currentDraftRef.current;
-      if (current.prompt.trim() || current.attachments.length || current.documents.length) {
+      if (current.prompt.trim() || current.attachments.length || current.documents.length || current.serverReferences.length) {
         onComposerNotice("Tu borrador actual se ha conservado. Vacíalo antes de recuperar otra solicitud.");
         return;
       }
       onPromptChange(request.content);
       onDocumentsChange(restored);
+      onServerReferencesChange?.(request.serverReferences ?? []);
       onComposerNotice(restored.some((document) => document.status === "error")
         ? "Solicitud recuperada. Vuelve a adjuntar los archivos no disponibles o quítalos antes de enviar."
         : "Solicitud recuperada para revisar. No se ha enviado nada.", "status");
@@ -886,7 +898,7 @@ export function ChatWorkspace({
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !selectedMentions.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !serverReferences.length && !selectedMentions.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
             onPaste={(event) => {
               if (!event.clipboardData.files.length) return;
               event.preventDefault();
@@ -904,7 +916,7 @@ export function ChatWorkspace({
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Tools</button>
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled title="Próximamente"><FileIcon size={17} />Server</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />Server</button>
                 <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="embedded" disabled={sending} onSelect={(text) => {
                   onPromptChange(text);
                   setComposerMenuOpen(false);
@@ -912,6 +924,8 @@ export function ChatWorkspace({
                 }} />
               </div>
             ) : null}
+            {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} /> : null}
+            {serverReferences.length ? <div className="flex flex-wrap gap-2 px-2 py-1" aria-label="Referencias Server">{serverReferences.map(item => <span key={item.path} title={item.path} className="flex max-w-full items-center gap-2 rounded-lg bg-[var(--surface-hover)] px-2 py-1 text-xs"><FileIcon size={14}/><span className="truncate">{item.name}{item.kind === "directory" ? " · carpeta" : ""}</span><button type="button" aria-label={`Quitar referencia ${item.name}`} className="touch-target" onClick={() => onServerReferencesChange?.(serverReferences.filter(ref => ref.path !== item.path))}><X size={14}/></button></span>)}</div> : null}
             {attachments.length || documents.length ? (
               <div className="flex gap-2 overflow-x-auto px-2 pb-1 pt-1">
                 {attachments.map((attachment) => (
@@ -1091,7 +1105,7 @@ export function ChatWorkspace({
                 ) : null}
 
             </div>
-            <button type="button" className="landing-band-item" disabled title="Próximamente"><FileIcon size={15} aria-hidden="true" />Server</button>
+            <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={() => setServerOpenKey(serverSelectionKey)}><FileIcon size={15} aria-hidden="true" />Server</button>
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
             <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
               onPromptChange(text);

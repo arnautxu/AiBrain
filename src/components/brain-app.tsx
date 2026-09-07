@@ -1,5 +1,7 @@
 "use client";
 
+import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { AuthSession } from "@/auth/types";
@@ -566,6 +568,10 @@ export function BrainApp({
   const [preferences, setPreferences] = useState<BrainPreferences>(() => preferencesFromManifest(manifest));
   const [prompt, setPrompt] = useState("");
   const [composerDrafts, setComposerDrafts] = useState<Record<string, string>>({});
+  const serverDraftsKey = `${composerDraftsKey}.server`;
+  const [serverDrafts, setServerDrafts] = useState<Record<string, ServerReference[]>>({});
+  const selectedServerReferences = useMemo(() => serverDrafts[composerDraftKey(activeProjectId, activeThreadId)] ?? [], [serverDrafts, activeProjectId, activeThreadId]);
+  const updateServerReferences = (items: ServerReference[]) => setServerDrafts(current => ({ ...current, [composerDraftKey(activeProjectId, activeThreadId)]: items }));
   const [pendingRuntimeContext, setPendingRuntimeContext] = useState<string | null>(null);
   const [composerExperience, setComposerExperience] = useState<ComposerExperience>("smart");
   const [imageGeneration, setImageGeneration] = useState(false);
@@ -707,6 +713,10 @@ export function BrainApp({
     setThreads(snapshot.threads);
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(thread?.id ?? null);
+    try {
+      const saved = JSON.parse(localStorage.getItem(serverDraftsKey) ?? "{}");
+      if (saved && typeof saved === "object" && !Array.isArray(saved)) setServerDrafts(Object.fromEntries(Object.entries(saved).filter(([, v]) => isServerReferenceList(v)).slice(-100)) as Record<string, ServerReference[]>);
+    } catch { /* A corrupt draft never grants source access. */ }
     const storedDrafts = parseComposerDrafts(localStorage.getItem(composerDraftsKey));
     const restoredPrompt = storedDrafts[composerDraftKey(project?.id ?? null, thread?.id ?? null)] || "";
     activeSelectionRef.current = { projectId: project?.id ?? null, threadId: thread?.id ?? null };
@@ -723,7 +733,7 @@ export function BrainApp({
     threadByProjectRef.current = savedSelection.threadByProject;
     if (project && thread) threadByProjectRef.current[project.id] = thread.id;
     setHydrated(true);
-  }, [composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
+  }, [serverDraftsKey, composerDraftsKey, defaultPreferences, initialWorkbench, preferencesKey, previewKey, selectionKey, taskCenterKey, threadReadKey]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -831,6 +841,9 @@ export function BrainApp({
       window.history.replaceState(null, "", window.location.pathname);
     }
   }, [hydrated]);
+  useEffect(() => {
+    if (hydrated) localStorage.setItem(serverDraftsKey, JSON.stringify(serverDrafts));
+  }, [hydrated, serverDrafts, serverDraftsKey]);
   const activeProject = useMemo(
     () => projects.find((project) => project.id === activeProjectId) ?? null,
     [activeProjectId, projects],
@@ -1483,6 +1496,7 @@ export function BrainApp({
         "complete",
         startedAt.toISOString(),
       );
+      if (selectedServerReferences.length) userMessage.serverReferences = selectedServerReferences;
       const readyDocuments = documents.filter((document) => document.status === "ready");
       userMessage.attachments = [
         ...attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment),
@@ -1532,6 +1546,10 @@ export function BrainApp({
         composerDraftsRef.current = next;
         return next;
       });
+      setServerDrafts(current => {
+        if (current[selectionDraftKey] !== selectedServerReferences) return current;
+        const next = { ...current }; delete next[selectionDraftKey]; return next;
+      });
       if (ownsVisibleComposer) {
         setSelectedMessageId(assistantId);
         promptRef.current = "";
@@ -1573,6 +1591,7 @@ export function BrainApp({
           skill: selectedSkill,
           ...(selectedConnectorMentionIds.length ? { connectorMentions: selectedConnectorMentionIds } : {}),
           attachments,
+          ...(selectedServerReferences.length ? { serverReferences: selectedServerReferences } : {}),
           ...(readyDocuments.length ? { documentUploadIds: readyDocuments.map((document) => document.uploadId) } : {}),
         },
       });
@@ -1623,7 +1642,7 @@ export function BrainApp({
       }
     }
     return succeeded;
-  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedSkill, sending]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments, composerExperience, documentUploading, documents, handleStream, imageGeneration, initialWorkbench.persistence, manifest.identity.language, pendingRuntimeContext, preferences, prompt, selectedConnectorMentionIds, selectedServerReferences, selectedSkill, sending]);
 
   const submitComposerMessage = useCallback((messageOverride?: string, displayMessageOverride?: string) => {
     if (documentUploading || documents.some((document) => document.status !== "ready")) return;
@@ -1632,6 +1651,7 @@ export function BrainApp({
       return;
     }
 
+    if (selectedServerReferences.length) { setNotice(workbenchNotice("Espera a que termine la respuesta para enviar las referencias Server.", "warning")); return; }
     const displayContent = (displayMessageOverride ?? messageOverride ?? promptRef.current).trim();
     const promptContent = (messageOverride ?? promptRef.current).trim();
     const runtimeContent = (messageOverride ?? (pendingRuntimeContext
@@ -1652,7 +1672,7 @@ export function BrainApp({
     }]);
     updateComposerPrompt("");
     setPendingRuntimeContext(null);
-  }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, sendMessage, sending, updateComposerPrompt]);
+  }, [activeProject, activeThread, documentUploading, documents, pendingRuntimeContext, queuedTurns, selectedServerReferences, sendMessage, sending, updateComposerPrompt]);
 
   useEffect(() => {
     if (sending || actionBusy || documentUploading || dispatchingQueuedTurnId || !activeProject || !activeThread) return;
@@ -2283,6 +2303,8 @@ export function BrainApp({
         imageGeneration={imageGeneration}
         connectorMentions={connectorMentions}
         selectedConnectorMentionIds={selectedConnectorMentionIds}
+        serverReferences={selectedServerReferences}
+        onServerReferencesChange={updateServerReferences}
         attachments={attachments}
         documents={documents}
         publications={publications}

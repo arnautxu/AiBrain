@@ -1,3 +1,4 @@
+import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
 import type { RuntimeReasoningEffort } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
 
@@ -148,6 +149,7 @@ export type TurnOptions = {
   connectorMentions?: string[];
   attachments: ChatInputAttachment[];
   documentUploadIds?: string[];
+  serverReferences?: ServerReference[];
 };
 
 export type ApprovalItem = {
@@ -177,6 +179,7 @@ export type ChatMessage = {
   approvals: ApprovalItem[];
   diff: string;
   attachments: ChatAttachment[];
+  serverReferences?: ServerReference[];
   artifacts: GeneratedArtifact[];
   /** Optional while schema-v1 conversations are migrated on read. */
   sources?: TurnSource[];
@@ -413,7 +416,8 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
     value.attachments.length <= 3 &&
     value.attachments.every(isChatInputAttachment) &&
     value.attachments.reduce((total, attachment) => total + attachment.size, 0) <= 5_000_000 &&
-    validDocumentUploadIds
+    validDocumentUploadIds &&
+    (value.serverReferences === undefined || isServerReferenceList(value.serverReferences))
   );
 }
 
@@ -626,6 +630,7 @@ export function isChatMessage(message: unknown): message is ChatMessage {
   if (!Array.isArray(message.activity) || !message.activity.every(isActivityItem)) return false;
   if (!Array.isArray(message.plan) || !message.plan.every(isPlanStep)) return false;
   if (!Array.isArray(message.approvals) || !message.approvals.every(isApprovalItem)) return false;
+  if (message.serverReferences !== undefined && !isServerReferenceList(message.serverReferences)) return false;
   if (!Array.isArray(message.attachments) || !message.attachments.every(isChatAttachment)) return false;
   if (!Array.isArray(message.artifacts) || !message.artifacts.every(isGeneratedArtifact)) return false;
   if (message.sources !== undefined &&

@@ -68,8 +68,11 @@ Integración de conectores:
 - Worker: construir server-side
   `http://aibrain:<percent-encoded-worker-token>@egress-gateway:8080` para
   `HTTP_PROXY`, `HTTPS_PROXY` y `ALL_PROXY`; `NO_PROXY=127.0.0.1,localhost,::1`.
-- Server: el entrypoint configura esas variables con el token server; solo el
-  origen Supabase configurado puede atravesar el canal.
+- Server: el entrypoint configura esas variables con el token server; permite
+  el origen Supabase configurado y `backend.composio.dev`, ambos en HTTPS/443.
+  Composio requiere además una clave del proyecto y configuraciones personales
+  con herramientas de lectura revisadas. No se permiten otros subdominios ni
+  destinos privados; el canal worker no hereda este acceso.
 
 ## Arranque y diagnóstico
 
