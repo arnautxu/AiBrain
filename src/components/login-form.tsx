@@ -265,7 +265,7 @@ export function LoginForm({
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="tu@empresa.com"
-                    className="pl-9"
+                    className="login-icon-field"
                   />
                 </span>
               </label>
@@ -282,7 +282,7 @@ export function LoginForm({
                       maxLength={4096}
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
-                      className="pl-9"
+                      className="login-icon-field"
                     />
                   </span>
                 </label>

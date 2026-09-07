@@ -8,6 +8,7 @@ export type ConnectorMention = {
   status: ConnectorMentionStatus;
   statusCode: string | null;
   canRead: boolean;
+  connectUrl?: string | null;
   requiresApprovalForWrites: boolean;
 };
 
@@ -18,6 +19,7 @@ export function isConnectorMention(value: unknown): value is ConnectorMention {
     ((value as { kind?: unknown }).kind === "app" || (value as { kind?: unknown }).kind === "connector" || (value as { kind?: unknown }).kind === "mcp") &&
     ((value as { status?: unknown }).status === "connected" || (value as { status?: unknown }).status === "requires_login" || (value as { status?: unknown }).status === "admin_setup_required" || (value as { status?: unknown }).status === "unavailable") &&
     ((value as { statusCode?: unknown }).statusCode === null || typeof (value as { statusCode?: unknown }).statusCode === "string") &&
+    ((value as { connectUrl?: unknown }).connectUrl === undefined || (value as { connectUrl?: unknown }).connectUrl === null || (typeof (value as { connectUrl?: unknown }).connectUrl === "string" && /^\/api\/connectors\/[a-z0-9/_-]+$/u.test((value as { connectUrl: string }).connectUrl))) &&
     typeof (value as { canRead?: unknown }).canRead === "boolean" &&
     typeof (value as { requiresApprovalForWrites?: unknown }).requiresApprovalForWrites === "boolean");
 }

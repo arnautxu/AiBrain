@@ -1,4 +1,5 @@
 import "server-only";
+import { ON_CONNECT, resolveComposioToolkit, provisionComposioToolkit } from "./composio-provisioning";
 import path from "node:path";
 import type { AuthSession } from "@/auth/types";
 import { loadInstallationConfig } from "@/config/installation";
@@ -14,11 +15,12 @@ import { ResourceLockManager } from "@/storage";
 export function composioErrorCode(error: unknown) {
   return error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "COMPOSIO_UNAVAILABLE";
 }
-async function context(config: Readonly<InstallationConfig>, userId: string, slug: string, fetcher?: typeof fetch) {
-  const toolkit = config.connectors?.composio?.toolkits.find(t => t.slug === slug);
+async function context(config: Readonly<InstallationConfig>, userId: string, slug: string, fetcher?: typeof fetch, provision = false) {
+  let toolkit = config.connectors?.composio?.toolkits.find(t => t.slug === slug);
   if (!toolkit) throw new ComposioError("COMPOSIO_TOOLKIT_NOT_ENABLED");
   const id = composioConnectorId(slug);
   if (!(await catalogRuntimeEnforcer(config.installationId, userId)).allowsConnector(id)) throw new ComposioError("COMPOSIO_CATALOG_DENIED");
+  toolkit = provision ? await provisionComposioToolkit(config, toolkit, fetcher) : await resolveComposioToolkit(config, toolkit);
   const api = new ComposioApi(process.env.AIBRAIN_COMPOSIO_API_KEY ?? "", fetcher);
   const principal = { installationId: config.installationId, userId, roleId: null };
   const bindings = new FileConnectorBindingStore(config.installationId, config.paths.dataRoot);
@@ -41,7 +43,7 @@ function locked<T>(config: Readonly<InstallationConfig>, userId: string, slug: s
 }
 export async function startComposio(session: AuthSession, slug: string) {
   const config = await sessionConfig(session);
-  const c = await context(config, session.user.id, slug);
+  const c = await context(config, session.user.id, slug, undefined, true);
   // Bind the exact auth config into the durable, one-use state receipt.
   const receipt = `${c.callback}?auth_config=${encodeURIComponent(c.toolkit.authConfigId)}`;
   const state = await c.states.create(session.user.id, receipt);
@@ -72,7 +74,8 @@ export async function composioCapability(config: Readonly<InstallationConfig>, u
     return { ...base, status: "not_configured", statusCode: composioErrorCode(error) };
   }
   try {
-    await c.api.verifyConfig(toolkit);
+    if (c.toolkit.authConfigId === ON_CONNECT) return { ...base, status: process.env.AIBRAIN_COMPOSIO_CATALOG_API_KEY ? "reauth_required" : "not_configured", statusCode: "COMPOSIO_LOGIN_REQUIRED", connectUrl: process.env.AIBRAIN_COMPOSIO_CATALOG_API_KEY ? `/api/connectors/composio/${slug}/connect` : null };
+    await c.api.verifyConfig(c.toolkit);
     const urls = { connectUrl: `/api/connectors/composio/${slug}/connect`, disconnectUrl: `/api/connectors/composio/${slug}/disconnect` };
     const binding = await c.bindings.readPersonalForManagement(c.principal, c.id).catch(error => {
       if (composioErrorCode(error) !== "ENOENT") throw error;
@@ -80,7 +83,7 @@ export async function composioCapability(config: Readonly<InstallationConfig>, u
     });
     if (!binding) return { ...base, ...urls, disconnectUrl: null, status: "reauth_required", statusCode: "COMPOSIO_LOGIN_REQUIRED" };
     if (binding.status !== "active" || !toolkit.scopes.every(s => binding.scopes.includes(s))) return { ...base, ...urls, status: "reauth_required", statusCode: "COMPOSIO_REVOKED" };
-    await c.api.account(toolkit, c.remoteUser, accountId(binding.credentialRef));
+    await c.api.account(c.toolkit, c.remoteUser, accountId(binding.credentialRef));
     return { ...base, ...urls, status: "connected", statusCode: null, checkedAt: new Date().toISOString(), connectionVersion: binding.version, effectiveOperations: toolkit.readTools.map(t => t.slug) };
   } catch (error) {
     return { ...base, status: composioErrorCode(error) === "COMPOSIO_REAUTH_REQUIRED" ? "reauth_required" : "degraded", statusCode: composioErrorCode(error), checkedAt: new Date().toISOString(), connectUrl: `/api/connectors/composio/${slug}/connect`, disconnectUrl: `/api/connectors/composio/${slug}/disconnect` };

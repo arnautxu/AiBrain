@@ -65,10 +65,13 @@ describe("FileWorkbenchStore", () => {
     const project = await store.createProject(USER_A, "Source references");
     const thread = await store.createThread(USER_A, project.id, "Selected source");
     const user = message("user", "complete");
+    user.connectorMentions = ["composio-gmail"];
     user.serverReferences = [{ path: "server-arnall/Y/QA.txt", name: "QA.txt", kind: "file", size: 1, modifiedAt: null }];
     const assistant = message("assistant", "streaming");
     await store.beginThreadTurn(USER_A, thread.id, user, assistant);
     const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.getThread(USER_A, thread.id)).messages[0].connectorMentions).toEqual(["composio-gmail"]);
+    await expect(restarted.beginThreadTurn(USER_A, thread.id, { ...user, connectorMentions: [] }, assistant)).rejects.toBeInstanceOf(WorkbenchConflictError);
     expect((await restarted.getThread(USER_A, thread.id)).messages[0].serverReferences).toEqual(user.serverReferences);
     await expect(restarted.beginThreadTurn(USER_A, thread.id, { ...user, serverReferences: [] }, assistant)).rejects.toBeInstanceOf(WorkbenchConflictError);
   });

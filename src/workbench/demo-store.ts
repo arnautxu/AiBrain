@@ -424,7 +424,8 @@ export async function beginDemoThreadTurn(
         existingUser?.role === "user" && existingAssistant?.role === "assistant" &&
         existingUser.content === userMessage.content &&
         JSON.stringify(existingUser.attachments) === JSON.stringify(userMessage.attachments) &&
-        JSON.stringify(existingUser.serverReferences ?? []) === JSON.stringify(userMessage.serverReferences ?? [])
+        JSON.stringify(existingUser.serverReferences ?? []) === JSON.stringify(userMessage.serverReferences ?? []) &&
+          JSON.stringify(existingUser.connectorMentions ?? []) === JSON.stringify(userMessage.connectorMentions ?? [])
       ) {
         return { outcome: "existing" as const, assistantMessage: existingAssistant };
       }

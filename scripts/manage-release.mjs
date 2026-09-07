@@ -351,7 +351,7 @@ function validComposioToolkit(v) {
   return exactObjectKeys(v, ["slug", "label", "authConfigId", "scopes", "readTools"])
     && typeof v.slug === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(v.slug)
     && typeof v.label === "string" && v.label.length > 0 && v.label.length <= 100
-    && typeof v.authConfigId === "string" && /^ac_[A-Za-z0-9_-]{1,120}$/.test(v.authConfigId)
+    && typeof v.authConfigId === "string" && (v.authConfigId === "on-connect" || /^ac_[A-Za-z0-9_-]{1,120}$/.test(v.authConfigId))
     && Array.isArray(v.scopes) && v.scopes.length > 0 && v.scopes.length <= 32
     && v.scopes.every(s => typeof s === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(s))
     && new Set(v.scopes).size === v.scopes.length

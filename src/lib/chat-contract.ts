@@ -179,6 +179,7 @@ export type ChatMessage = {
   approvals: ApprovalItem[];
   diff: string;
   attachments: ChatAttachment[];
+  connectorMentions?: string[];
   serverReferences?: ServerReference[];
   artifacts: GeneratedArtifact[];
   /** Optional while schema-v1 conversations are migrated on read. */
@@ -630,6 +631,7 @@ export function isChatMessage(message: unknown): message is ChatMessage {
   if (!Array.isArray(message.activity) || !message.activity.every(isActivityItem)) return false;
   if (!Array.isArray(message.plan) || !message.plan.every(isPlanStep)) return false;
   if (!Array.isArray(message.approvals) || !message.approvals.every(isApprovalItem)) return false;
+  if (message.connectorMentions !== undefined && (!Array.isArray(message.connectorMentions) || message.connectorMentions.length > 20 || new Set(message.connectorMentions).size !== message.connectorMentions.length || !message.connectorMentions.every(id => typeof id === "string" && /^[a-z][a-z0-9]*(?:[-.:][a-z0-9]+)*$/.test(id)))) return false;
   if (message.serverReferences !== undefined && !isServerReferenceList(message.serverReferences)) return false;
   if (!Array.isArray(message.attachments) || !message.attachments.every(isChatAttachment)) return false;
   if (!Array.isArray(message.artifacts) || !message.artifacts.every(isGeneratedArtifact)) return false;

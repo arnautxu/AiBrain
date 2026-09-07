@@ -9,6 +9,7 @@ import {
   LOCAL_SESSION_IDLE_MS,
   LOCAL_SESSION_RENEWAL_MS,
 } from "@/auth/local-session-store";
+import { FileLocalAuthChallengeStore } from "@/auth/local-auth-challenge-store";
 import { FileLocalUserStore } from "@/auth/local-user-store";
 
 const USER_ID = "0198b9f0-6631-7000-8000-000000000001";
@@ -124,5 +125,29 @@ describe("FileLocalUserStore", () => {
     await symlink(outside, path.join(directory, "user.json"));
     const store = new FileLocalUserStore(root);
     await expect(store.read(USER_ID)).rejects.toThrow();
+  });
+});
+
+
+describe("FileLocalAuthChallengeStore provider token compatibility", () => {
+  it("consumes a fresh GoTrue challenge with a 12-character refresh token exactly once", async () => {
+    const root = await temporaryRoot();
+    const store = new FileLocalAuthChallengeStore({ rootDirectory: root, encryptionKey: new Uint8Array(32).fill(7) });
+    const credentials = { accessToken: "synthetic-access-token", refreshToken: "abc123DEF456" };
+    const challenge = await store.create({ installationId: "example-lab-dev", userId: USER_ID, ...credentials });
+    expect(await store.consume(challenge.challengeId, "other-installation", async () => "wrong tenant")).toBeNull();
+    expect(await store.consume(challenge.challengeId, "example-lab-dev", async (record) => {
+      expect(record.accessToken).toBe(credentials.accessToken);
+      expect(record.refreshToken).toBe(credentials.refreshToken);
+      return "password changed";
+    })).toBe("password changed");
+    expect(await store.consume(challenge.challengeId, "example-lab-dev", async () => "replayed")).toBeNull();
+  });
+
+  it("still rejects an empty refresh token", async () => {
+    const root = await temporaryRoot();
+    const store = new FileLocalAuthChallengeStore({ rootDirectory: root, encryptionKey: new Uint8Array(32).fill(7) });
+    const challenge = await store.create({ installationId: "example-lab-dev", userId: USER_ID, accessToken: "synthetic-access-token", refreshToken: "" });
+    await expect(store.consume(challenge.challengeId, "example-lab-dev", async () => "accepted")).rejects.toThrow("could not be authenticated");
   });
 });

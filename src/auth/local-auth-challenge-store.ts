@@ -190,7 +190,8 @@ export class FileLocalAuthChallengeStore {
         || !("accessToken" in credentials) || typeof credentials.accessToken !== "string"
         || !("refreshToken" in credentials) || typeof credentials.refreshToken !== "string"
         || credentials.accessToken.length < 16 || credentials.accessToken.length > 16_384
-        || credentials.refreshToken.length < 16 || credentials.refreshToken.length > 16_384
+        // Refresh tokens are opaque provider values; self-hosted GoTrue issues 12-character tokens.
+        || credentials.refreshToken.length < 1 || credentials.refreshToken.length > 16_384
       ) {
         throw new Error("Auth challenge credentials are invalid.");
       }

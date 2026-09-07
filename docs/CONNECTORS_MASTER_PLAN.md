@@ -327,3 +327,9 @@ El MVP estará terminado cuando:
 
 - [OpenAI API: herramientas MCP y conectores](https://developers.openai.com/api/reference/cli/resources/responses/methods/create)
 - [OpenAI Developers: Codex, plugins y MCP](https://developers.openai.com/)
+
+## Catálogo y edición compartidos (candidato 2026-09-07)
+
+[Contrato de catálogo, OAuth al conectar y composer inline](CONNECTOR_CATALOG_20260907.md).
+La ampliación del catálogo se configura por instalación; el código UI y su
+corrección de login son compartidos. No se heredan cuentas entre clientes.

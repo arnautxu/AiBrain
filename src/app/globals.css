@@ -1626,15 +1626,15 @@ button:disabled {
   z-index: 1;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0 8px;
-  margin: 0 18px;
-  padding: 0 10px;
-  border-radius: 0 0 16px 16px;
+  margin: -16px 0 0;
+  padding: 16px 10px 0;
+  border-radius: 0 0 24px 16px;
   background: var(--surface-muted);
   color: var(--text-secondary);
 }
-.landing-project { display: flex; align-items: center; min-width: 0; }
+.landing-project { display: flex; align-items: center; min-width: 0; flex: 1 1 0; }
 .landing-band .composer-destination { flex-shrink: 1; overflow: visible; }
 .landing-band .composer-picker-button { max-width: 190px; font-size: 12px; }
 .landing-band-item {
@@ -1685,8 +1685,10 @@ button:disabled {
 }
 .landing-tasks-suggestions .landing-task-menu { left: 0; right: auto; }
 @media (max-width: 639px) {
-  .landing-band { margin-inline: 8px; padding-inline: 6px; gap: 0 2px; }
-  .landing-band .composer-picker-button { max-width: 140px; }
+  .landing-band { margin-inline: 0; padding-inline: 4px; gap: 0 1px; }
+  .landing-band .composer-picker-button { max-width: 100%; min-height: 44px; padding-inline: 4px; gap: 3px; }
+  .landing-band-item { gap: 4px; padding-inline: 5px; }
+  .landing-band .composer-destination { min-width: 0; width: 100%; }
   .landing-tasks-menu { margin-left: 0; }
   .landing-task-menu { max-height: 220px; }
 }
@@ -1695,3 +1697,15 @@ button:disabled {
 .landing-tasks-embedded > .landing-band-item { width: 100%; min-height: 44px; padding: 10px 12px; gap: 12px; justify-content: flex-start; font-size: 13px; }
 .landing-tasks-embedded .landing-task-menu { position: relative; top: auto; right: auto; width: 100%; max-width: none; box-shadow: none; }
 #composer-add-menu { max-height: min(480px, 55dvh); overflow-y: auto; }
+
+/* The base field's unlayered padding overrides utility classes. Reserve the
+   icon gutter here for placeholder, value and browser autofill alike. */
+.ui-text-field.login-icon-field { padding-inline-start: 40px; font-size: 16px; }
+.composer-mention-overlay { box-sizing: border-box; border: 0; }
+.connector-popover > [role="listbox"] { max-height: inherit; }
+
+@media (max-width: 639px) {
+  .landing-band > .landing-band-item svg, .landing-band > .landing-tasks > .landing-band-item svg { display: none; }
+  .landing-band-item { min-width: 44px; }
+  .landing-band .composer-picker-button { min-width: 44px; }
+}

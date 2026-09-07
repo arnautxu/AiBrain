@@ -1,0 +1,162 @@
+[
+  {
+    "slug": "github",
+    "label": "GitHub",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "read:user",
+      "read:org"
+    ],
+    "readTools": [
+      {
+        "slug": "GITHUB_LIST_PULL_REQUESTS",
+        "version": "20260902_00"
+      },
+      {
+        "slug": "GITHUB_SEARCH_ISSUES",
+        "version": "20260902_00"
+      }
+    ]
+  },
+  {
+    "slug": "slack",
+    "label": "Slack",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "search:read",
+      "channels:read",
+      "channels:history",
+      "groups:read",
+      "groups:history",
+      "im:read",
+      "im:history",
+      "mpim:read",
+      "mpim:history"
+    ],
+    "readTools": [
+      {
+        "slug": "SLACK_LIST_ALL_CHANNELS",
+        "version": "20260826_00"
+      },
+      {
+        "slug": "SLACK_SEARCH_MESSAGES",
+        "version": "20260826_00"
+      },
+      {
+        "slug": "SLACK_FETCH_CONVERSATION_HISTORY",
+        "version": "20260826_00"
+      }
+    ]
+  },
+  {
+    "slug": "googlesheets",
+    "label": "Google Sheets",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "https://www.googleapis.com/auth/spreadsheets.readonly"
+    ],
+    "readTools": [
+      {
+        "slug": "GOOGLESHEETS_GET_SPREADSHEET_INFO",
+        "version": "20260902_00"
+      },
+      {
+        "slug": "GOOGLESHEETS_BATCH_GET",
+        "version": "20260902_00"
+      }
+    ]
+  },
+  {
+    "slug": "googledocs",
+    "label": "Google Docs",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "https://www.googleapis.com/auth/documents.readonly"
+    ],
+    "readTools": [
+      {
+        "slug": "GOOGLEDOCS_GET_DOCUMENT_PLAINTEXT",
+        "version": "20260826_00"
+      }
+    ]
+  },
+  {
+    "slug": "linear",
+    "label": "Linear",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "read"
+    ],
+    "readTools": [
+      {
+        "slug": "LINEAR_GET_CURRENT_USER",
+        "version": "20260819_00"
+      },
+      {
+        "slug": "LINEAR_SEARCH_ISSUES",
+        "version": "20260819_00"
+      }
+    ]
+  },
+  {
+    "slug": "airtable",
+    "label": "Airtable",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "schema.bases:read",
+      "data.records:read"
+    ],
+    "readTools": [
+      {
+        "slug": "AIRTABLE_LIST_BASES",
+        "version": "20260902_00"
+      },
+      {
+        "slug": "AIRTABLE_GET_BASE_SCHEMA",
+        "version": "20260902_00"
+      },
+      {
+        "slug": "AIRTABLE_GET_RECORD",
+        "version": "20260902_00"
+      }
+    ]
+  },
+  {
+    "slug": "jira",
+    "label": "Jira",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "read:jira-work",
+      "read:jira-user",
+      "offline_access"
+    ],
+    "readTools": [
+      {
+        "slug": "JIRA_GET_CURRENT_USER",
+        "version": "20260903_00"
+      },
+      {
+        "slug": "JIRA_SEARCH_ISSUES",
+        "version": "20260903_00"
+      }
+    ]
+  },
+  {
+    "slug": "youtube",
+    "label": "YouTube",
+    "authConfigId": "on-connect",
+    "scopes": [
+      "https://www.googleapis.com/auth/youtube.readonly"
+    ],
+    "readTools": [
+      {
+        "slug": "YOUTUBE_LIST_CHANNELS",
+        "version": "20260721_00"
+      },
+      {
+        "slug": "YOUTUBE_LIST_COMMENTS",
+        "version": "20260721_00"
+      }
+    ]
+  }
+]
