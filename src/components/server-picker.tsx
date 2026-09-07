@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Folder, File, HardDrive, ArrowClockwise, X } from "@phosphor-icons/react";
 import { useModalFocus } from "@/ui/use-modal-focus";
@@ -12,11 +12,11 @@ const serverSnapshot = () => false;
 const isDrive = (item: ServerReference) => item.kind === "directory" && /^server-[^/]+\/[A-Za-z]\/?$/.test(item.path);
 
 type Page = { results: ServerReference[]; checkedAt: string; nextQuery: string | null; limited: boolean };
-export function ServerPicker({ projectId, selected, onSelect, onClose }: {
-  projectId: string; selected: ServerReference[]; onSelect: (items: ServerReference[]) => void; onClose: () => void;
+export function ServerPicker({ projectId, selected, onSelect, onClose, returnFocus }: {
+  projectId: string; selected: ServerReference[]; onSelect: (items: ServerReference[]) => void; onClose: () => void; returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const mounted = useSyncExternalStore(subscribe, clientSnapshot, serverSnapshot);
-  const focus = useModalFocus<HTMLDivElement>(mounted, onClose);
+  const focus = useModalFocus<HTMLDivElement>(mounted, onClose, undefined, returnFocus);
   const [query, setQuery] = useState("server:/");
   const [revision, setRevision] = useState(0);
   const [page, setPage] = useState<Page | null>(null);
