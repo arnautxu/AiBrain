@@ -24,7 +24,6 @@ import {
 import { ChatAttachmentImage } from "@/components/chat-attachment-image";
 import { StarsBackground } from "@/components/animate-ui/components/backgrounds/stars";
 import { RadialGlowButton } from "@/components/ui/radial-glow-button";
-import { MorphicNavbar, SectionPreview, type WorkbenchSection } from "@/components/ui/morphic-navbar";
 import NextImage from "next/image";
 import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
 import { useStickToBottom } from "use-stick-to-bottom";
@@ -475,10 +474,6 @@ export function ChatWorkspace({
   const composerMenuRef = useRef<HTMLDivElement>(null);
   const connectorCatalogRef = useRef<HTMLDivElement>(null);
   const [composerMenuOpen, setComposerMenuOpen] = useState(false);
-  const selectionKey = `${project?.id ?? ""}:${thread?.id ?? ""}`;
-  const [sectionSelection, setSectionSelection] = useState<{ key: string; section: WorkbenchSection }>({ key: selectionKey, section: "chat" });
-  const activeSection = sectionSelection.key === selectionKey ? sectionSelection.section : "chat";
-  const selectSection = (section: WorkbenchSection) => setSectionSelection({ key: selectionKey, section });
   const [composerPickerOpen, setComposerPickerOpen] = useState<"destination" | "experience" | null>(null);
   const fileReadingRef = useRef(false);
   const [fileReading, setFileReading] = useState(false);
@@ -771,7 +766,7 @@ export function ChatWorkspace({
   };
 
   const { dragActive, dropProps } = useComposerFileDrop({
-    enabled: activeSection === "chat" && (canAttachImages || canAttachDocuments) && !readOnly && !sending && !documentUploading && !fileReading,
+    enabled: (canAttachImages || canAttachDocuments) && !readOnly && !sending && !documentUploading && !fileReading,
     selection: `${project?.id}:${thread?.id}`,
     onFiles: (files) => { void addFiles(files); },
     onNotice: onComposerNotice,
@@ -782,7 +777,7 @@ export function ChatWorkspace({
   };
 
   return (
-    <main {...dropProps} aria-busy={!hydrated} data-section={activeSection} data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
+    <main {...dropProps} aria-busy={!hydrated} data-section="chat" data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
       {hydrated && !thread && !sending && !readOnly ? <StarsBackground
         aria-hidden="true"
         className="landing-stars pointer-events-none"
@@ -800,11 +795,9 @@ export function ChatWorkspace({
             {thread ? <h1 className="max-w-[calc(100vw-5.5rem)] truncate text-[13px] font-semibold leading-4 text-[var(--text)] sm:max-w-72">{thread.title}</h1> : null}
           </div>
         </div>
-        <MorphicNavbar value={activeSection} onChange={selectSection} />
         <div aria-hidden="true" className="workbench-navigation-balance" />
       </header>
 
-      {activeSection !== "chat" ? <SectionPreview section={activeSection} onBack={() => selectSection("chat")} /> : null}
 
       <div
         ref={scrollRef}
@@ -910,7 +903,13 @@ export function ChatWorkspace({
               <div ref={composerMenuRef} id="composer-add-menu" role="menu" aria-label="Añadir al mensaje" className={`absolute inset-x-0 z-30 rounded-[20px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2 shadow-[var(--shadow-lg)] ${hasMessages ? "bottom-full mb-2 origin-bottom" : "top-full mt-2 origin-top"}`} onKeyDown={onComposerMenuKeyDown}>
                 {(canAttachImages || canAttachDocuments) ? <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99]" disabled={sending || documentUploading} onClick={() => { setComposerMenuOpen(false); fileInputRef.current?.click(); }}><Paperclip size={17} />Adjuntar archivos</button> : null}
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">Crear imagen</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
-                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Conectores</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={openAuthorizedConnectors}><At size={17} />Tools</button>
+                <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled title="Próximamente"><FileIcon size={17} />Server</button>
+                <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="embedded" disabled={sending} onSelect={(text) => {
+                  onPromptChange(text);
+                  setComposerMenuOpen(false);
+                  requestAnimationFrame(() => composerRef.current?.focus());
+                }} />
               </div>
             ) : null}
             {attachments.length || documents.length ? (
@@ -1092,16 +1091,16 @@ export function ChatWorkspace({
                 ) : null}
 
             </div>
-            <button type="button" className="landing-band-item" disabled title="Próximamente"><FileIcon size={15} aria-hidden="true" />Archivos</button>
+            <button type="button" className="landing-band-item" disabled title="Próximamente"><FileIcon size={15} aria-hidden="true" />Server</button>
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
             <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
-              onPromptChange(prompt ? `${prompt}\n\n${text}` : text);
+              onPromptChange(text);
               requestAnimationFrame(() => composerRef.current?.focus());
             }} />
           </div> : null}
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
             <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
-              onPromptChange(prompt ? `${prompt}\n\n${text}` : text);
+              onPromptChange(text);
               requestAnimationFrame(() => composerRef.current?.focus());
             }} />
           </div> : null}

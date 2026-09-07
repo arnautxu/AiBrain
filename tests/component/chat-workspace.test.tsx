@@ -406,12 +406,12 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("menuitem", { name: "Añadir carpeta" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("webkitdirectory");
     expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("directory");
-    expect(screen.getByRole("menuitem", { name: "Conectores" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Tools" })).toBeInTheDocument();
     for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen", "Desactivar búsqueda web"]) {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Conectores" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tools" }));
     const catalog = screen.getByRole("listbox", { name: "Catálogo de conectores" });
     expect(catalog).toHaveTextContent("Gmail");
     expect(catalog).toHaveTextContent("Outlook");
@@ -430,7 +430,7 @@ describe("chat workspace simplificado", () => {
     renderWorkspace(null, project, { connectorMentions: [], onComposerNotice });
     const add = screen.getByRole("button", { name: "Añadir al mensaje" });
     fireEvent.click(add);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Conectores" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tools" }));
     expect(onComposerNotice).toHaveBeenCalledWith("No hay conectores habilitados en tu catálogo.");
     await waitFor(() => expect(add).toHaveFocus());
   });
@@ -466,7 +466,7 @@ describe("chat workspace simplificado", () => {
     expect(onImageGenerationChange).toHaveBeenCalledWith(true);
   });
 
-  it("offers image examples as editable drafts without sending or discarding existing text", () => {
+  it("offers image examples as editable drafts by replacing existing text without sending", () => {
     const onSend = vi.fn();
     renderWorkspace(null, project, { imageGeneration: true, prompt: "Usa mis colores.", onSend });
     expect(screen.getByRole("heading", { name: "¿Qué imagen quieres crear?" })).toBeInTheDocument();
@@ -474,7 +474,7 @@ describe("chat workspace simplificado", () => {
     expect(composer).toHaveAttribute("placeholder", "Describe la imagen que quieres crear…");
     expect(screen.queryByText("Prioridades")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Para una presentación/ }));
-    expect(composer).toHaveValue("Usa mis colores.\n\nCrea una imagen horizontal para una presentación sobre…");
+    expect(composer).toHaveValue("Crea una imagen horizontal para una presentación sobre…");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -486,22 +486,45 @@ describe("chat workspace simplificado", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("appends schedule templates without sending or changing attachments and destination", () => {
+  it("replaces drafts with schedule templates without sending or changing attachments and destination", () => {
     const onSend = vi.fn();
     const onAttachmentsChange = vi.fn();
     const onDestinationChange = vi.fn();
     renderWorkspace(null, project, { prompt: "Mi borrador.  ", onSend, onAttachmentsChange, onDestinationChange });
     fireEvent.click(screen.getByRole("button", { name: /Trabajemos en los horarios/ }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Dame los horarios preparados" }));
-    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Mi borrador.  \n\nDame los horarios preparados del equipo de Arnall para…");
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Dame los horarios preparados del equipo de Arnall para…");
     expect(onSend).not.toHaveBeenCalled();
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Archivos" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Tareas preprogramadas" }));
+    expect(screen.getByRole("button", { name: "Server" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Tareas programadas" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Trabajemos en los horarios/ }));
     expect(screen.getByRole("menuitem", { name: "Revisar cambios de horarios" })).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("replaces templates in the plus menu with attachments and project intact (chat=%s)", (chat) => {
+    const onSend = vi.fn();
+    const onAttachmentsChange = vi.fn();
+    const onDestinationChange = vi.fn();
+    const message = assistantMessage();
+    const thread: WorkbenchThread | null = chat ? { id: "template-chat", projectId: project.id, title: "Plantillas", status: "active", pinned: false, createdAt: message.createdAt, updatedAt: message.createdAt, messages: [message] } : null;
+    renderWorkspace(thread, project, { prompt: "Texto anterior", onSend, onAttachmentsChange, onDestinationChange,
+      attachments: [{ id: "attachment", name: "reference.png", mimeType: "image/png", size: 10, dataUrl: "data:image/png;base64,AA==" }] });
+    expect(screen.queryByRole("navigation", { name: "Espais de treball" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+    expect(screen.getByRole("menuitem", { name: "Server" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Tools" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Tareas programadas" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Prepárame una presentación" }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Prepárame una presentación sobre…");
+    expect(screen.getByRole("button", { name: "Quitar reference.png" })).toBeInTheDocument();
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(onDestinationChange).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu", { name: "Añadir al mensaje" })).not.toBeInTheDocument();
   });
 
   it("restores a failed request for review without changing the original or sending", async () => {

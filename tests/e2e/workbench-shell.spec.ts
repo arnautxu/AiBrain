@@ -78,7 +78,7 @@ test("the employee shell exposes work, not implementation details", async ({ pag
   await expect(addMenu).toBeVisible();
   await expect(addMenu.getByRole("menuitemcheckbox", { name: /Buscar en la web/ })).toHaveCount(0);
   await expect(addMenu.getByRole("menuitemcheckbox", { name: "Crear imagen" })).toBeVisible();
-  await expect(addMenu.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
+  await expect(addMenu.getByRole("menuitem", { name: "Tools" })).toBeVisible();
   await expect(addMenu.getByText(/Buscar en la web|Acciones guiadas/i)).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(addMenu).toBeHidden();

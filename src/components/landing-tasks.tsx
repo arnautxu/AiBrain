@@ -7,7 +7,7 @@ import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
 
 export function LandingTasks({ tasks, variant, disabled, onSelect }: {
   tasks: LandingSuggestion[];
-  variant: "menu" | "suggestions";
+  variant: "menu" | "suggestions" | "embedded";
   disabled: boolean;
   onSelect: (prompt: string) => void;
 }) {
@@ -37,7 +37,7 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
     setSchedule(null);
     onSelect(text);
   };
-  const inMenu = variant === "menu";
+  const inMenu = variant !== "suggestions";
   const items = tasks.map((task) => {
     const Icon = task.id === "schedule" ? CalendarBlank : task.id === "spreadsheets" ? Table : Presentation;
     return <button key={task.id} type="button" role={inMenu ? "menuitem" : undefined} disabled={disabled}
@@ -52,11 +52,11 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
       }}><Icon size={17} aria-hidden="true" /><span>{task.label}</span>{task.children ? <CaretRight size={12} aria-hidden="true" /> : null}</button>;
   });
   return <div ref={rootRef} className={`landing-tasks landing-tasks-${variant}`}>
-    {variant === "menu" ? <button type="button" disabled={disabled} className="landing-band-item" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
+    {variant !== "suggestions" ? <button type="button" disabled={disabled} role={variant === "embedded" ? "menuitem" : undefined} tabIndex={variant === "embedded" ? -1 : undefined} className="landing-band-item" aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={(event) => { openerRef.current = event.currentTarget; setSchedule(null); setOpen(!open); }}
-      onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />Tareas preprogramadas</button> : items}
-    {open ? <div ref={menuRef} id={id} role="menu" aria-label={schedule ? "Horarios del equipo" : "Tareas preprogramadas"} className="landing-task-menu" onKeyDown={onKeyDown}>
-      {schedule ? <>{variant === "menu" ? <button type="button" role="menuitem" className="landing-task-item" onClick={() => setSchedule(null)}>Volver a las tareas</button> : null}
+      onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />Tareas programadas</button> : items}
+    {open ? <div ref={menuRef} id={id} role="menu" aria-label={schedule ? "Horarios del equipo" : "Tareas programadas"} className="landing-task-menu" onKeyDown={(event) => { event.stopPropagation(); onKeyDown(event); }}>
+      {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" onClick={() => setSchedule(null)}>Volver a las tareas</button> : null}
         {schedule.children?.map((child) => <button key={child.id} type="button" role="menuitem" disabled={disabled} className="landing-task-item" onClick={() => choose(child.prompt)}>{child.label}</button>)}</> : items}
     </div> : null}
   </div>;

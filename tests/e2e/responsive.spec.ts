@@ -51,7 +51,7 @@ for (const viewport of viewports) {
 
     await page.getByRole("button", { name: "Añadir al mensaje" }).click();
     const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
-    await expect(addMenu.getByRole("menuitem", { name: "Conectores" })).toBeVisible();
+    await expect(addMenu.getByRole("menuitem", { name: "Tools" })).toBeVisible();
     const addMenuBox = await addMenu.boundingBox();
     expect(addMenuBox).not.toBeNull();
     expect(addMenuBox!.x).toBeGreaterThanOrEqual(0);
