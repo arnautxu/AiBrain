@@ -37,7 +37,8 @@ import type { ApprovalDecision, ApprovalItem, ChatAttachment, ChatInputAttachmen
 import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
-import { landingSuggestions } from "@/lib/landing-suggestions";
+import { LandingTasks } from "@/components/landing-tasks";
+import { landingSuggestions, scheduledPromptTemplates } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { currentTurnStatusLabel, hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
 import { publicAssistantText } from "@/ui/public-activity";
@@ -886,8 +887,8 @@ export function ChatWorkspace({
             className="mb-2 max-w-none"
           /> : null}
           {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />Sin conexión. El historial sigue disponible y no se enviará nada.</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Enviando solicitud</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />Conectando con el servicio…</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>El servicio no está disponible. Puedes revisar el historial.</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>Reintentar</button></div> : null}
+          <div ref={composerShellRef}>
           <div
-            ref={composerShellRef}
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
@@ -1021,20 +1022,6 @@ export function ChatWorkspace({
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button ref={composerAddButtonRef} aria-label="Añadir al mensaje" aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
-                {!hasMessages ? (
-                  <ComposerPicker
-                    ariaLabel="Destino de la conversación"
-                    value={project?.id ?? ""}
-                    valueLabel={noProject ? "Sin proyecto" : project?.name ?? "Sin proyecto"}
-                    options={destinationOptions}
-                    open={composerPickerOpen === "destination"}
-                    placement={hasMessages ? "above" : "below"}
-                    className="composer-destination"
-                    disabled={sending}
-                    onOpenChange={(open) => { setComposerMenuOpen(false); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerPickerOpen(open ? "destination" : null); }}
-                    onSelect={onDestinationChange}
-                  />
-                ) : null}
                 {canAttachImages || canAttachDocuments ? <input ref={fileInputRef} aria-label="Seleccionar archivos para adjuntar" className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json" multiple tabIndex={-1} onChange={(event) => void addFiles(event.target.files)} /> : null}
               </div>
               <div className="composer-controls-end flex shrink-0 items-center gap-2">
@@ -1086,16 +1073,37 @@ export function ChatWorkspace({
               </div>
             </div>
           </div>
-          {!hasMessages ? <div className="landing-suggestions mx-auto mt-7 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
-            {suggestions.map((suggestion) => (
-              <button key={suggestion.id} type="button" disabled={sending} className="touch-target block min-h-11 w-full rounded-xl px-4 py-2 text-left text-[13px] leading-5 text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[.995] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)] disabled:opacity-40" onClick={() => {
-                onPromptChange(prompt.trim() ? `${prompt.trimEnd()}\n\n${suggestion.prompt}` : suggestion.prompt);
-                requestAnimationFrame(() => composerRef.current?.focus());
-              }}>
-                <span className="font-medium text-[var(--text)]">{suggestion.label}</span>
-                <span className="ml-2 text-[var(--text-muted)]">{suggestion.prompt}</span>
-              </button>
-            ))}
+          {!hasMessages ? <div className="landing-band" aria-label="Opciones para empezar">
+            <div className="landing-project"><FolderOpen size={15} aria-hidden="true" />
+                {!hasMessages ? (
+                  <ComposerPicker
+                    ariaLabel="Destino de la conversación"
+                    value={project?.id ?? ""}
+                    valueLabel={noProject ? "Proyecto" : project?.name ?? "Proyecto"}
+                    options={destinationOptions}
+                    open={composerPickerOpen === "destination"}
+                    placement="below"
+                    className="composer-destination"
+                    disabled={sending}
+                    onOpenChange={(open) => { setComposerMenuOpen(false); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerPickerOpen(open ? "destination" : null); }}
+                    onSelect={onDestinationChange}
+                  />
+                ) : null}
+
+            </div>
+            <button type="button" className="landing-band-item" disabled title="Próximamente"><FileIcon size={15} aria-hidden="true" />Archivos</button>
+            <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={() => { setComposerPickerOpen(null); openAuthorizedConnectors(); }}><At size={15} aria-hidden="true" />Tools</button>
+            <LandingTasks tasks={scheduledPromptTemplates(companyName)} variant="menu" disabled={sending} onSelect={(text) => {
+              onPromptChange(prompt ? `${prompt}\n\n${text}` : text);
+              requestAnimationFrame(() => composerRef.current?.focus());
+            }} />
+          </div> : null}
+          </div>
+          {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label="Sugerencias para empezar">
+            <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
+              onPromptChange(prompt ? `${prompt}\n\n${text}` : text);
+              requestAnimationFrame(() => composerRef.current?.focus());
+            }} />
           </div> : null}
         </div>
       </div>}

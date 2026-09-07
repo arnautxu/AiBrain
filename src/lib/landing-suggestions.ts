@@ -1,14 +1,15 @@
-import { isStandaloneProject, type WorkbenchProject } from "@/workbench/types";
+import { type WorkbenchProject } from "@/workbench/types";
 
 export type LandingSuggestion = {
-  id: "priorities" | "summary" | "plan" | "gmail" | "presentation-image" | "illustration" | "diagram";
+  id: "presentation" | "spreadsheets" | "schedule" | "presentation-image" | "illustration" | "diagram";
   label: string;
   prompt: string;
+  children?: { id: string; label: string; prompt: string }[];
 };
 
 /** Uses only the selected project and installation name, never inferred email data. */
 export function landingSuggestions(
-  project: WorkbenchProject | null,
+  _project: WorkbenchProject | null,
   companyName: string,
   capabilities: { gmailAuthorized?: boolean; imageGeneration?: boolean } = {},
 ): LandingSuggestion[] {
@@ -17,21 +18,18 @@ export function landingSuggestions(
     { id: "illustration", label: "Ilustrar una idea", prompt: "Crea una ilustración que represente…" },
     { id: "diagram", label: "Explicar un proceso", prompt: "Crea un diagrama visual que explique estos pasos: …" },
   ];
-  if (project && !isStandaloneProject(project)) {
-    const projectName = project.name;
-    return [
-      { id: "priorities", label: "Prioridades", prompt: `Organiza las prioridades de esta semana para ${projectName}.` },
-      { id: "summary", label: "Estado del proyecto", prompt: `Resume el estado actual de ${projectName} y señala los próximos pasos.` },
-      capabilities.gmailAuthorized
-        ? { id: "gmail", label: "Revisar Gmail", prompt: `Revisa en Gmail los correos recientes relacionados con ${projectName} y resume los asuntos que requieren atención.` }
-        : { id: "plan", label: "Actualización al equipo", prompt: `Prepara un borrador de actualización para el equipo de ${companyName} sobre ${projectName}.` },
-    ];
-  }
+  return scheduledPromptTemplates(companyName);
+}
+
+/** Fixed editable prompts, never scheduled jobs or automatic actions. */
+export function scheduledPromptTemplates(companyName: string): LandingSuggestion[] {
   return [
-    { id: "priorities", label: "Priorizar mi día", prompt: "Ayúdame a priorizar mi trabajo de hoy." },
-    { id: "summary", label: "Resumir información", prompt: "Resume la información disponible y señala los próximos pasos." },
-    capabilities.gmailAuthorized
-      ? { id: "gmail", label: "Revisar Gmail", prompt: "Revisa en Gmail los correos recientes y resume los asuntos que requieren mi atención." }
-      : { id: "plan", label: "Preparar un plan", prompt: "Prepara un plan claro para esta tarea." },
+    { id: "presentation", label: "Prepárame una presentación", prompt: "Prepárame una presentación sobre…" },
+    { id: "spreadsheets", label: "Trabajemos con estos Excels", prompt: "Trabajemos con estos Excels. Quiero…" },
+    { id: "schedule", label: `Trabajemos en los horarios del equipo de ${companyName}`, prompt: "", children: [
+      { id: "whatsapp", label: "Enviar los WhatsApps a los trabajadores", prompt: `Preparemos los WhatsApps con los horarios para los trabajadores de ${companyName}. Quiero revisar los destinatarios y los mensajes antes de enviarlos.` },
+      { id: "prepared", label: "Dame los horarios preparados", prompt: `Dame los horarios preparados del equipo de ${companyName} para…` },
+      { id: "changes", label: "Revisar cambios de horarios", prompt: `Revisemos los cambios de horarios del equipo de ${companyName} para…` },
+    ] },
   ];
 }
