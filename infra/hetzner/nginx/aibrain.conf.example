@@ -69,6 +69,20 @@ server {
         proxy_send_timeout 65s;
     }
 
+    # The authenticated broker has its own 220-second bounded operation deadline.
+    # Preserve its structured outcome instead of an earlier generic HTML 504.
+    location = /api/server-files {
+        proxy_pass http://aibrain___AIBRAIN_INSTANCE_TOKEN___backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host __AIBRAIN_PUBLIC_HOST__;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 240s;
+        proxy_send_timeout 30s;
+    }
+
     location = /api/chat {
         proxy_pass http://aibrain___AIBRAIN_INSTANCE_TOKEN___backend;
         proxy_http_version 1.1;

@@ -10,7 +10,12 @@ for (const width of [1440, 390]) {
     }));
     const folder = { path: "server-arnall/Y/QA", name: "QA", kind: "directory", size: 0, modifiedAt: null };
     await page.route("**/api/server-files?**", async route => {
-      const root = new URL(route.request().url()).searchParams.get("query") === "server:/";
+      const query = new URL(route.request().url()).searchParams.get("query");
+      if (query === "home") {
+        await route.fulfill({ json: { available: true, navigation: true, sourceChecked: false, checkedAt: null, results: [folder], nextQuery: null } });
+        return;
+      }
+      const root = query === "server:/";
       await route.fulfill({ json: { available: true, sourceChecked: true, checkedAt: new Date().toISOString(), nextQuery: null,
         results: root ? [folder] : [{ ...folder, path: `server-arnall/Y/QA/Version${version}.txt`, name: `Version${version}.txt`, kind: "file", size: version }] } });
     });
@@ -20,6 +25,8 @@ for (const width of [1440, 390]) {
     await composer.fill("Revisa la referencia seleccionada");
     await page.getByRole("button", { name: "Server", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "Server", exact: true });
+    await expect(dialog.getByLabel("Adjuntar QA", { exact: true })).toHaveCount(0);
+    await dialog.getByRole("button", { name: "Explorar unidades", exact: true }).click();
     await dialog.getByLabel("Adjuntar QA", { exact: true }).check();
     await dialog.getByRole("button", { name: "Abrir QA", exact: true }).click();
     await expect(dialog.getByText("Version1.txt", { exact: true })).toBeVisible();

@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+import { issueThreadToken } from "@/runtime/thread-token";
 import type { ChatMessage } from "@/lib/chat-contract";
 import * as chatContract from "@/lib/chat-contract";
 import type { AppServerEvent } from "@/runtime/transport";
@@ -69,6 +70,29 @@ describe("turn projection store", () => {
   afterEach(async () => {
     vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("accepts signed expiry renewal while rejecting changed runtime bindings", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    await projections.initialize(thread, assistant(id));
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+    const first = issueThreadToken(installationId, userId, "runtime-thread");
+    await projections.setRuntimeThreadToken(thread, id, first);
+    clock.mockReturnValue(now + 1000);
+    const renewed = issueThreadToken(installationId, userId, "runtime-thread");
+    expect(renewed).not.toBe(first);
+    await projections.setRuntimeThreadToken(thread, id, renewed);
+    for (const invalid of [
+      issueThreadToken(installationId, userId, "other-thread"),
+      issueThreadToken("other-company", userId, "runtime-thread"),
+      issueThreadToken(installationId, "00000000-0000-4000-8000-000000000099", "runtime-thread"),
+      issueThreadToken(installationId, userId, "runtime-thread", "different-toolset"),
+      renewed + "tampered",
+    ]) await expect(projections.setRuntimeThreadToken(thread, id, invalid)).rejects.toThrow("insegura");
+    expect((await projections.read(thread, id))?.runtimeThreadToken).toBe(renewed);
   });
 
   it("validates a large transcript once per compacted batch, not per delta", async () => {
