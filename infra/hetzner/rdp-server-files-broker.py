@@ -82,7 +82,7 @@ def interactive_read_call(manifest, operation, source, attempts=1):
             time.sleep(min(.25, max(0, deadline - time.monotonic())))
 
 
-def execute(manifest, value, cached_only=False):
+def execute(manifest, value, cached_only=False, channel=None):
     sync.require(validate_request(value, manifest), "INVALID_SERVER_FILE_REQUEST")
     # Revalidate publication ownership before every operation, not just startup.
     for audience in manifest["publications"]:
@@ -92,7 +92,7 @@ def execute(manifest, value, cached_only=False):
             if cached_only:
                 return None
             with folder_module().interactive_access(manifest, catalogue=False):
-                return {**files.search(manifest, **value['input'], run=interactive_browse), 'sourceChecked': True, 'lookupMode': 'live'}
+                return {**files.search(manifest, **value['input'], run=channel.browse if channel else interactive_browse), 'sourceChecked': True, 'lookupMode': 'live'}
         if value['operation'] == 'inventory':
             if cached_only:
                 result = server_map.folder_inventory(manifest, files=files, **value['input'])
@@ -114,13 +114,13 @@ def execute(manifest, value, cached_only=False):
         if cached_only:
             return None
         with folder_module().interactive_access(manifest, catalogue=False):
-            return files.read(manifest, **value["input"], call=interactive_read_call)
+            return files.read(manifest, **value["input"], call=channel.copy if channel else interactive_read_call)
     except Exception as error:
         diagnostic = getattr(error, 'server_file_diagnostic', None)
         code = 'SERVER_FILES_BUSY' if isinstance(error, BlockingIOError) else str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
         if diagnostic and diagnostic.get('cause') == 'RDP_READBACK_TIMEOUT':
             code = 'SERVER_FILES_TIMEOUT'
-        if code not in {"SERVER_FILES_TIMEOUT", "SERVER_FILES_BUSY", "WINDOWS_PATH_UNAVAILABLE", "SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED"}:
+        if code not in {"SERVER_FILES_TIMEOUT", "SERVER_FILES_BUSY", "WINDOWS_PATH_UNAVAILABLE", "SERVER_FORMAT_NOT_READABLE", "SERVER_TEXT_UNAVAILABLE", "SERVER_PART_UNAVAILABLE", "RDP_DRIVE_REDIRECTION_DISABLED", "SERVER_SOURCE_CHANGED", "SERVER_COPY_LIMIT", "SERVER_CHANNEL_QUARANTINED", "SERVER_CHANNEL_POLICY_CHANGED"}:
             code = "SERVER_FILES_UNAVAILABLE"
         warnings = {'SERVER_FILES_BUSY': 'La conexión está ocupada. Reintenta la consulta concreta; no significa que la carpeta no exista.',
                     'WINDOWS_PATH_UNAVAILABLE': 'Windows no ha permitido consultar esta ruta concreta. No acredita una caída del servidor ni ausencia global. Comprueba las carpetas observadas en el padre.'}
@@ -131,10 +131,17 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
     daemon_threads = True
     request_queue_size = 8
 
-    def __init__(self, address, manifest, manifest_path):
+    def __init__(self, address, manifest, manifest_path, transport_config=None):
         self.manifest, self.manifest_path = manifest, manifest_path
         self.slot = threading.BoundedSemaphore(1)
-        self.lookup_slots = threading.BoundedSemaphore(2)
+        self.lookup_slots = threading.BoundedSemaphore(4 if transport_config else 2)
+        self.channel_slots = threading.BoundedSemaphore(4)
+        self.channel = None
+        if transport_config is not None:
+            spec = importlib.util.spec_from_file_location('read_channel', Path(__file__).with_name('rdp-read-channel.py'))
+            channel = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(channel)
+            self.channel = channel.Channel(transport_config, manifest)
         super().__init__(str(address), Handler)
 
     def verify_request(self, request, _):
@@ -154,12 +161,27 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
                     return result
             finally:
                 self.lookup_slots.release()
+        if getattr(self, 'channel', None) is not None and value['operation'] in ('browse', 'read'):
+            if not self.channel_slots.acquire(blocking=False):
+                return busy
+            try:
+                result = execute(self.manifest, value, channel=self.channel)
+                if len(json.dumps(result, ensure_ascii=False).encode()) > 256 * 1024 - 512:
+                    return {"available": False, "error": "SERVER_FILES_UNAVAILABLE"}
+                return result
+            finally:
+                self.channel_slots.release()
         if not self.slot.acquire(blocking=False):
             return busy
         try:
             return self.run(value)
         finally:
             self.slot.release()
+
+    def server_close(self):
+        if self.channel is not None:
+            self.channel.close()
+        super().server_close()
 
     def run(self, value, cached_only=False):
         child = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--manifest", self.manifest_path, "--execute"] + (["--cached-only"] if cached_only else []),
@@ -208,6 +230,7 @@ def main():
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--cached-only", action="store_true")
+    parser.add_argument("--transport-config", help="Explicit root-owned opt-in; absent uses existing transport")
     args = parser.parse_args()
     sync.require(os.geteuid() == 0, "HOST_OPERATOR_REQUIRED")
     os.umask(0o077)
@@ -239,7 +262,7 @@ def main():
                 address.unlink()
             else:
                 raise ValueError("BROKER_ALREADY_RUNNING")
-    with Server(address, manifest, str(Path(args.manifest).resolve())) as server:
+    with Server(address, manifest, str(Path(args.manifest).resolve()), args.transport_config) as server:
         os.chown(address, 0, manifest["appGid"])
         os.chmod(address, 0o660)
         server.serve_forever(poll_interval=0.5)
