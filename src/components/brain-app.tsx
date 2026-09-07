@@ -706,11 +706,13 @@ export function BrainApp({
       ? loadPreviewSnapshot(previewKey, initialWorkbench)
       : initialWorkbench;
     const savedSelection = loadSelection(selectionKey);
-    const project = newThreadDestination(snapshot.projects);
+    const preferredProject = snapshot.projects.find((project) =>
+      project.id === savedSelection.activeProjectId && project.status === "active");
+    const project = preferredProject ?? firstActiveProject(snapshot.projects);
 
     setProjects(snapshot.projects);
     setThreads(snapshot.threads);
-    // A fresh page starts at home; saved selections only help explicit navigation.
+    // A fresh page opens the project home; conversations require explicit selection.
     setActiveProjectId(project?.id ?? null);
     setActiveThreadId(null);
     try {
