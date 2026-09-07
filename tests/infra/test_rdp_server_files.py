@@ -34,7 +34,7 @@ class ServerFileTests(unittest.TestCase):
         self.assertTrue(broker.validate_request(request, self.manifest))
         self.assertFalse(broker.validate_request(dict(request, input={'query': 'invoice', 'limit': 50}), self.manifest))
         with patch.object(broker.sync, 'scope_directory'), patch.object(broker.server_map, 'cached_search') as cached, \
-             patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _: nullcontext())), \
+             patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _, **kwargs: nullcontext())), \
              patch.object(broker.files, 'search', side_effect=[{'available': True, 'results': ['old']}, {'available': True, 'results': ['external-new']}]) as live:
             self.assertEqual(broker.execute(self.manifest, request)['results'], ['old'])
             result = broker.execute(self.manifest, request)
@@ -42,6 +42,18 @@ class ServerFileTests(unittest.TestCase):
             self.assertTrue(result['sourceChecked'])
             self.assertEqual(live.call_count, 2)
             cached.assert_not_called()
+
+    def test_unsupported_reference_rejects_content_without_waiting_for_windows(self):
+        import uuid
+        request = {'schemaVersion': 1, 'operation': 'read', 'requestId': str(uuid.uuid4()),
+                   'installationId': 'test', 'connectionId': 'arnall',
+                   'input': {'path': 'server-arnall/C/Arnall/Vendes/PreusVenda.exe'}}
+        with patch.object(broker.sync, 'scope_directory') as scope, patch.object(broker, 'folder_module') as folder:
+            result = broker.execute(self.manifest, request, cached_only=True)
+        self.assertEqual(result['error'], 'SERVER_FORMAT_NOT_READABLE')
+        self.assertFalse(result['available'])
+        scope.assert_called_once()
+        folder.assert_not_called()
 
     def test_all_drives_and_unlisted_folders_are_addressable(self):
         for source in ['C:\\Users\\Report.docx', 'Y:\\PRESSUPOSTOS\\2026\\Oferta À.pdf', 'Z:\\Other\\Sheet.xlsx']:
@@ -154,7 +166,7 @@ class ServerFileTests(unittest.TestCase):
         from types import SimpleNamespace
         for error, code in [(BlockingIOError(), 'SERVER_FILES_BUSY'), (ValueError('WINDOWS_PATH_UNAVAILABLE'), 'WINDOWS_PATH_UNAVAILABLE')]:
             with patch.object(broker.sync, 'scope_directory'), patch.object(broker.files, 'read', side_effect=error), \
-                 patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _: nullcontext())):
+                 patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _, **kwargs: nullcontext())):
                 result = broker.execute(self.manifest, value)
                 self.assertFalse(result['available'])
                 self.assertEqual(result['error'], code)
@@ -166,7 +178,7 @@ class ServerFileTests(unittest.TestCase):
         entered, release = threading.Event(), threading.Event()
         def run(value, cached_only=False):
             if cached_only:
-                return {'available': True, 'lookupMode': 'metadata-map'}
+                return None if value['operation'] == 'read' else {'available': True, 'lookupMode': 'metadata-map'}
             entered.set()
             if not release.wait(2):
                 raise RuntimeError('Test did not release source')

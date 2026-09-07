@@ -3,6 +3,7 @@
 import argparse
 import importlib.util
 import json
+import ntpath
 import os
 from pathlib import Path
 import signal
@@ -13,6 +14,7 @@ import struct
 import subprocess
 import sys
 import threading
+import time
 import uuid
 
 spec = importlib.util.spec_from_file_location("server_files", Path(__file__).with_name("rdp-server-files.py"))
@@ -69,7 +71,7 @@ def execute(manifest, value, cached_only=False):
         if value['operation'] == 'browse':
             if cached_only:
                 return None
-            with folder_module().interactive_access(manifest):
+            with folder_module().interactive_access(manifest, catalogue=False):
                 return {**files.search(manifest, **value['input']), 'sourceChecked': True, 'lookupMode': 'live'}
         if value['operation'] == 'inventory':
             if cached_only:
@@ -85,9 +87,13 @@ def execute(manifest, value, cached_only=False):
                 return None
             with folder_module().interactive_access(manifest):
                 return files.search(manifest, **value["input"])
+        source, _ = files.source_path(manifest["connectionId"], value["input"]["path"])
+        # Unsupported binaries need neither an RDP session nor an inventory lock.
+        # Validation and publication ownership checks still precede this result.
+        sync.require(ntpath.splitext(source)[1].lower() in sync.FORMATS, "SERVER_FORMAT_NOT_READABLE")
         if cached_only:
             return None
-        with folder_module().interactive_access(manifest):
+        with folder_module().interactive_access(manifest, catalogue=False):
             return files.read(manifest, **value["input"])
     except Exception as error:
         code = 'SERVER_FILES_BUSY' if isinstance(error, BlockingIOError) else str(error) if isinstance(error, ValueError) else "SERVER_FILES_UNAVAILABLE"
@@ -116,7 +122,7 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         # Cached metadata never waits behind a Windows read. Separate, bounded
         # child processes retain the same scope validation and response limit.
         busy = {"available": False, "error": "SERVER_FILES_BUSY", "warning": "El servidor está atendiendo otra consulta. Vuelve a intentarlo en unos segundos."}
-        if value['operation'] in ('search', 'inventory'):
+        if value['operation'] in ('search', 'inventory', 'read'):
             if not self.lookup_slots.acquire(blocking=False):
                 return busy
             try:
@@ -138,7 +144,7 @@ class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         try:
             # Leave room for the preceding lookup and child cleanup inside the
             # app client's 220-second deadline.
-            timeout = 20 if cached_only else 190 if value['operation'] in ('search', 'inventory') else 210
+            timeout = 20 if cached_only else 190 if value['operation'] in ('search', 'inventory', 'read') else 210
             output, _ = child.communicate(json.dumps(value).encode(), timeout=timeout)
             if child.returncode or len(output) > 256 * 1024:
                 raise ValueError("SERVER_FILES_UNAVAILABLE")
@@ -164,10 +170,12 @@ class Handler(socketserver.StreamRequestHandler):
             if not validate_request(value, self.server.manifest):
                 return
             self.connection.settimeout(220)
+            started = time.monotonic()
             result = self.server.dispatch(value)
+            elapsed = round((time.monotonic() - started) * 1000)
             result.update(requestId=value["requestId"], installationId=value["installationId"], connectionId=value["connectionId"])
             self.wfile.write((json.dumps(result, ensure_ascii=False) + "\n").encode())
-            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"]}), flush=True)
+            print(json.dumps({"event": "server_files_requested", "requestId": value["requestId"], "operation": value["operation"], "available": result["available"], "elapsedMs": elapsed, "error": result.get("error")}), flush=True)
         except (ValueError, OSError):
             pass
 

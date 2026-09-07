@@ -211,6 +211,17 @@ class MapTests(unittest.TestCase):
         mapping.atomic_text(marker, '0')
         self.assertFalse(demand.inventory.demand_pending(marker.parent))
 
+    def test_live_demand_does_not_wait_for_local_catalogue_rebuild(self):
+        demand = load('test_live_demand', 'knowledge-folder-inventory.py')
+        from unittest.mock import patch
+        operator = self.root / 'operator'
+        (operator / 'inventory.lock').touch()
+        with patch.object(demand.mapping, 'map_root', return_value=self.root / 'server-map'), \
+             patch.object(demand.fcntl, 'flock', side_effect=AssertionError('Live browsing must not acquire the catalogue lock')):
+            with demand.interactive_access(self.manifest, catalogue=False):
+                self.assertTrue(demand.inventory.demand_pending(operator))
+        self.assertFalse(demand.inventory.demand_pending(operator))
+
     def test_schedule_has_only_metadata_source_operations(self):
         unit = (INFRA / 'aibrain-arnall-knowledge-inventory.service').read_text()
         self.assertIn('knowledge-inventory.py', unit)
