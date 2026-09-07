@@ -1,3 +1,4 @@
+import { spanishUiText, type UiText } from "@/i18n/messages";
 import { type WorkbenchProject } from "@/workbench/types";
 
 export type LandingSuggestion = {
@@ -13,7 +14,7 @@ export function landingSuggestions(
   _project: WorkbenchProject | null,
   companyName: string,
   capabilities: { gmailAuthorized?: boolean; imageGeneration?: boolean } = {},
-  t: (source: string, values?: Record<string, string | number>) => string = (source) => source,
+  t: UiText = spanishUiText,
 ): LandingSuggestion[] {
   if (capabilities.imageGeneration) return [
     { id: "presentation-image", label: t("Para una presentación"), prompt: t("Crea una imagen horizontal para una presentación sobre…") },
@@ -24,7 +25,7 @@ export function landingSuggestions(
 }
 
 /** Fixed editable prompts, never scheduled jobs or automatic actions. */
-export function scheduledPromptTemplates(companyName: string, t: (source: string, values?: Record<string, string | number>) => string = (source, values) => source.replace(/\{company\}/g, String(values?.company ?? ""))): LandingSuggestion[] {
+export function scheduledPromptTemplates(companyName: string, t: UiText = spanishUiText): LandingSuggestion[] {
   return [
     { id: "presentation", iconPath: "/branding/microsoft/powerpoint.svg", label: t("Prepárame una presentación"), prompt: t("Prepárame una presentación sobre…") },
     { id: "spreadsheets", iconPath: "/branding/microsoft/excel.svg", label: t("Trabajemos con estos Excels"), prompt: t("Trabajemos con estos Excels. Quiero…") },
