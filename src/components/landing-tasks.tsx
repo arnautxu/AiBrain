@@ -3,7 +3,7 @@
 import { ConnectorPopover } from "@/components/connector-popover";
 import Image from "next/image";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { CalendarBlank, CaretRight, ListChecks, Presentation, Table } from "@phosphor-icons/react";
+import { CalendarBlank, CaretLeft, CaretRight, ListChecks, Presentation, Table } from "@phosphor-icons/react";
 import type { LandingSuggestion } from "@/lib/landing-suggestions";
 import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
 
@@ -58,7 +58,7 @@ export function LandingTasks({ tasks, variant, disabled, onSelect }: {
       onClick={(event) => { openerRef.current = event.currentTarget; setSchedule(null); setOpen(!open); }}
       onKeyDown={(event) => { if (event.key === "ArrowDown") { event.preventDefault(); openerRef.current = event.currentTarget; setOpen(true); } }}><ListChecks size={15} aria-hidden="true" />Tareas recurrentes</button> : items}
     {open ? <ConnectorPopover anchor={openerRef} centerMobile><div ref={menuRef} id={id} role="menu" aria-label={schedule ? "Horarios del equipo" : "Tareas recurrentes"} className="max-h-[inherit] overflow-y-auto overscroll-contain" onKeyDown={(event) => { event.stopPropagation(); onKeyDown(event); }}>
-      {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" onClick={() => setSchedule(null)}>Volver a las tareas</button> : null}
+      {schedule ? <>{variant !== "suggestions" ? <button type="button" role="menuitem" className="landing-task-item" aria-label="Volver a las tareas" title="Volver a las tareas" onClick={() => setSchedule(null)}><CaretLeft size={12} aria-hidden="true" /></button> : null}
         {schedule.children?.map((child) => <button key={child.id} type="button" role="menuitem" disabled={disabled} className="landing-task-item" onClick={() => choose(child.prompt)}>{schedule.iconPath ? <Image unoptimized src={schedule.iconPath} alt="" width={20} height={20} className="size-5 shrink-0 object-contain" /> : null}{child.label}</button>)}</> : items}
     </div></ConnectorPopover> : null}
   </div>;

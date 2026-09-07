@@ -37,7 +37,7 @@ declare global {
   }
 }
 
-type DictationState = "idle" | "listening" | "processing" | "error";
+type DictationState = "idle" | "requesting" | "listening" | "processing" | "error";
 
 const DICTATION_CONSENT_KEY = "aibrain.voice.dictation-consent.v1";
 const READ_RATE_KEY = "aibrain.voice.read-rate.v1";
@@ -49,8 +49,9 @@ function recognitionConstructor() {
 }
 
 function recognitionError(error?: string) {
-  if (error === "not-allowed" || error === "service-not-allowed") {
-    return "El navegador ha bloqueado el micrófono. Revisa su permiso y vuelve a intentarlo.";
+  if (error === "service-not-allowed") return "El servicio de reconocimiento de voz está bloqueado en este navegador. Prueba un navegador compatible o usa el dictado del teclado.";
+  if (error === "not-allowed") {
+    return "No se ha autorizado el micrófono. Revisa los permisos del sitio y del sistema y vuelve a intentarlo.";
   }
   if (error === "audio-capture") return "No se ha encontrado un micrófono disponible.";
   if (error === "no-speech") return "No se ha detectado voz. Puedes intentarlo de nuevo o escribir el mensaje.";
@@ -61,7 +62,7 @@ function recognitionError(error?: string) {
 function microphonePermissionError(error: unknown) {
   const name = error instanceof DOMException ? error.name : "";
   if (name === "NotAllowedError" || name === "SecurityError") {
-    return "El navegador ha denegado el micrófono. Permítelo para este sitio y vuelve a intentarlo.";
+    return "No se ha autorizado el micrófono. Revisa los permisos del sitio y del sistema y vuelve a intentarlo.";
   }
   if (name === "NotFoundError" || name === "DevicesNotFoundError") {
     return "No se ha encontrado un micrófono disponible.";
@@ -165,6 +166,7 @@ export function VoiceDictationControl({
   const fallbackDismissRef = useRef<HTMLButtonElement>(null);
   const [consentOpen, setConsentOpen] = useState(false);
   const [fallbackOpen, setFallbackOpen] = useState(false);
+  const [permissionHelp, setPermissionHelp] = useState(false);
   const [state, setState] = useState<DictationState>("idle");
   const [error, setError] = useState<string | null>(null);
   const closePopover = useCallback((restoreFocus: boolean) => {
@@ -209,6 +211,7 @@ export function VoiceDictationControl({
     setConsentOpen(false);
     setFallbackOpen(false);
     setError(null);
+    setPermissionHelp(false);
     setState("processing");
     cancelledRef.current = false;
     failedRef.current = false;
@@ -219,18 +222,30 @@ export function VoiceDictationControl({
       const message = "El micrófono necesita una conexión HTTPS y un navegador compatible.";
       setError(message);
       setState("error");
+      setFallbackOpen(true);
       onNotice?.(message, "error");
       requestAnimationFrame(() => triggerRef.current?.focus());
       return;
     }
+    const policyDocument = document as Document & { permissionsPolicy?: { allowsFeature: (feature: string) => boolean }; featurePolicy?: { allowsFeature: (feature: string) => boolean } };
+    const policy = policyDocument.permissionsPolicy ?? policyDocument.featurePolicy;
+    if (policy && !policy.allowsFeature("microphone")) {
+      const message = "Esta página está bloqueando el micrófono. Recarga la página; si persiste, contacta con el administrador de la aplicación.";
+      setError(message); setState("error"); setFallbackOpen(true);
+      onNotice?.(message, "error");
+      return;
+    }
+    setState("requesting");
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       for (const track of stream.getTracks()) track.stop();
     } catch (reason) {
       if (attempt !== startAttemptRef.current) return;
+      setPermissionHelp(reason instanceof DOMException && ["NotAllowedError", "SecurityError"].includes(reason.name));
       const message = microphonePermissionError(reason);
       setError(message);
       setState("error");
+      setFallbackOpen(true);
       onNotice?.(message, "error");
       requestAnimationFrame(() => triggerRef.current?.focus());
       return;
@@ -259,10 +274,12 @@ export function VoiceDictationControl({
     };
     recognition.onerror = (event) => {
       if (cancelledRef.current) return;
+      setPermissionHelp(event.error === "not-allowed");
       const message = recognitionError(event.error);
       failedRef.current = true;
       setError(message);
       setState("error");
+      setFallbackOpen(true);
       onNotice?.(message, "error");
       requestAnimationFrame(() => triggerRef.current?.focus());
     };
@@ -279,6 +296,7 @@ export function VoiceDictationControl({
       const message = "El micrófono ya está en uso o no ha podido iniciarse.";
       setError(message);
       setState("error");
+      setFallbackOpen(true);
       onNotice?.(message, "error");
       requestAnimationFrame(() => triggerRef.current?.focus());
     }
@@ -334,11 +352,11 @@ export function VoiceDictationControl({
           ref={triggerRef}
           type="button"
           className={`composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${state === "error" ? "text-[var(--danger)]" : ""}`}
-          aria-label={state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
-          title={state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
+          aria-label={state === "requesting" ? "Esperando permiso del micrófono" : state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
+          title={state === "requesting" ? "Esperando permiso del micrófono" : state === "processing" ? "Procesando dictado" : "Dictar mensaje"}
           aria-haspopup="dialog"
           aria-expanded={consentOpen || fallbackOpen}
-          disabled={disabled || state === "processing"}
+          disabled={disabled || state === "processing" || state === "requesting"}
           onClick={requestStart}
         >
           <Microphone size={15} className={state === "processing" ? "motion-safe:animate-pulse" : ""} />
@@ -356,15 +374,17 @@ export function VoiceDictationControl({
         </div>
       ) : null}
 
+      {state === "requesting" ? <p role="status" className="sr-only">{"Responde a la solicitud de permiso del navegador para continuar."}</p> : null}
+
       {fallbackOpen ? (
-        <div ref={dictationDialogRef} role="dialog" aria-label="Dictado no disponible" tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
-          <p className="text-[12px] font-semibold text-[var(--text)]">Dictado no disponible</p>
-          <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">Este navegador no ofrece dictado. Escribe o pega el texto en el mensaje. Esta instalación tampoco publica una transcripción de archivos de audio, así que no la simulamos.</p>
+        <div ref={dictationDialogRef} role="dialog" aria-label={error ? "Revisar el micrófono" : "Dictado no disponible"} tabIndex={-1} className="menu-enter absolute bottom-full right-0 z-40 mb-2 w-[min(320px,calc(100vw-2rem))] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-4 text-left shadow-[var(--shadow-popover)]">
+          <p className="text-[12px] font-semibold text-[var(--text)]">{error ? "Revisar el micrófono" : "Dictado no disponible"}</p>
+          {error ? <><p role="alert" className="mt-2 text-[12px] leading-5">{error}</p>{permissionHelp ? <p className="mt-2 text-[11px] leading-4 text-[var(--text-subtle)]">{"Chrome: abre el icono de controles junto a la dirección → Configuración del sitio → Micrófono → Permitir. Safari: revisa los permisos de este sitio. Si ya está permitido, revisa el acceso al micrófono del navegador en los ajustes de privacidad del sistema. En móvil puedes usar el dictado del teclado."}</p> : null}<button type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold" onClick={() => void start()}>{permissionHelp ? "Volver a solicitar permiso" : "Reintentar dictado"}</button></> : <p className="mt-1.5 text-[11px] leading-4 text-[var(--text-subtle)]">Este navegador no ofrece dictado. Escribe o pega el texto en el mensaje. Esta instalación tampoco publica una transcripción de archivos de audio, así que no la simulamos.</p>}
           <button ref={fallbackDismissRef} type="button" className="mt-3 min-h-10 w-full rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text)] hover:bg-[var(--surface-hover)]" onClick={() => closePopover(true)}>Entendido</button>
         </div>
       ) : null}
 
-      {error && !active ? <span className="sr-only" role="alert">{error}</span> : null}
+      {error && !active && !fallbackOpen ? <span className="sr-only" role="alert">{error}</span> : null}
     </div>
   );
 }
