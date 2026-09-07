@@ -1,3 +1,4 @@
+import { serverReferenceInputs } from "@/documents/server-reference-inputs";
 import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "@/runtime/composio-dynamic-tools";
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
 import { randomUUID } from "node:crypto";
@@ -1944,6 +1945,7 @@ export async function runWorkerCodexTurn(
         "Iniciando la tarea",
         "Enviando la petición al asistente",
       );
+      const selectedServerInputs = await serverReferenceInputs(chatRequest.options.serverReferences ?? [], enterpriseDocumentRoots, serverDocumentFiles!);
       let turnResult: JsonValue;
       try {
         turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", {
@@ -1967,6 +1969,7 @@ export async function runWorkerCodexTurn(
               "</current_user_message>",
             ].join("\n\n")
           : chatRequest.message, text_elements: [] },
+        ...selectedServerInputs,
         ...turnDocumentCodexInputs(turnDocuments),
         ...selectedSkills.map((skill) => ({ type: "skill" as const, name: skill.id, path: skill.path })),
         ...chatRequest.options.attachments.map((attachment) => ({

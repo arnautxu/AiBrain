@@ -517,8 +517,8 @@ export class EgressGateway {
     if (channel === "worker" && !this.config.workerHosts.has(hostname)) {
       throw new EgressGatewayError("CHANNEL_REJECTED", "Worker destination is not configured.");
     }
-    if (channel === "server" && hostname !== this.config.supabaseHostname) {
-      throw new EgressGatewayError("CHANNEL_REJECTED", "Server destination is not the configured Supabase host.");
+    if (channel === "server" && hostname !== this.config.supabaseHostname && hostname !== "backend.composio.dev") {
+      throw new EgressGatewayError("CHANNEL_REJECTED", "Server destination is not an approved authentication or connector API host.");
     }
     const results = validateDnsResults(await this.lookup(hostname, { all: true, verbatim: true }), this.config.maxAddresses);
     const selected = results[0]!;

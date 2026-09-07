@@ -42,6 +42,7 @@
     "GET /api/runtime/browser/viewer/stream": "binary:application/vnd.aibrain.browser-frames",
     "GET /api/runtime/status": "RuntimeStatus",
     "GET /api/search": "JsonObject",
+    "GET /api/server-files": "JsonObject",
     "GET /api/settings": "JsonObject",
     "GET /api/settings/team": "TeamResponse",
     "GET /api/task-center": "TaskCenterResponse",

@@ -24,6 +24,25 @@ class ServerFileTests(unittest.TestCase):
                          'sourceRoots': [c + ':\\' for c in string.ascii_uppercase],
                          'publications': [{'scope': 'company', 'scopeId': None}]}
 
+    def test_browse_bypasses_stale_map_and_observes_external_updates(self):
+        from contextlib import nullcontext
+        from types import SimpleNamespace
+        import uuid
+        request = {'schemaVersion': 1, 'operation': 'browse', 'requestId': str(uuid.uuid4()),
+                   'installationId': 'test', 'connectionId': 'arnall',
+                   'input': {'query': 'server:/Y/', 'limit': 50}}
+        self.assertTrue(broker.validate_request(request, self.manifest))
+        self.assertFalse(broker.validate_request(dict(request, input={'query': 'invoice', 'limit': 50}), self.manifest))
+        with patch.object(broker.sync, 'scope_directory'), patch.object(broker.server_map, 'cached_search') as cached, \
+             patch.object(broker, 'folder_module', return_value=SimpleNamespace(interactive_access=lambda _: nullcontext())), \
+             patch.object(broker.files, 'search', side_effect=[{'available': True, 'results': ['old']}, {'available': True, 'results': ['external-new']}]) as live:
+            self.assertEqual(broker.execute(self.manifest, request)['results'], ['old'])
+            result = broker.execute(self.manifest, request)
+            self.assertEqual(result['results'], ['external-new'])
+            self.assertTrue(result['sourceChecked'])
+            self.assertEqual(live.call_count, 2)
+            cached.assert_not_called()
+
     def test_all_drives_and_unlisted_folders_are_addressable(self):
         for source in ['C:\\Users\\Report.docx', 'Y:\\PRESSUPOSTOS\\2026\\Oferta À.pdf', 'Z:\\Other\\Sheet.xlsx']:
             virtual = files.virtual_path('arnall', source)

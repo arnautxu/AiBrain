@@ -43,7 +43,8 @@ export function conversationHistory(thread: StoredThread) {
     const attachments = message.attachments.length
       ? `\n[Attachments: ${message.attachments.map((item) => item.name).join(", ")}]`
       : "";
-    return `${role}:\n${message.content}${attachments}`;
+    const serverReferences = message.serverReferences?.length ? `\n[Server references: ${JSON.stringify(message.serverReferences)}]` : "";
+    return `${role}:\n${message.content}${attachments}${serverReferences}`;
   }).join("\n\n");
 }
 

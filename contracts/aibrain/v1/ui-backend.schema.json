@@ -247,6 +247,18 @@
         }
       ]
     },
+    "ServerReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "name", "kind", "modifiedAt", "size"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "kind": { "enum": ["file", "directory"] },
+        "modifiedAt": { "anyOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }] },
+        "size": { "type": "integer", "minimum": 0 }
+      }
+    },
     "ChatAttachment": {
       "type": "object",
       "additionalProperties": false,
@@ -288,6 +300,7 @@
         "plan": { "type": "array", "items": { "$ref": "#/$defs/PlanStep" } },
         "approvals": { "type": "array", "items": { "$ref": "#/$defs/ApprovalItem" } },
         "diff": { "type": "string" },
+        "serverReferences": { "type": "array", "maxItems": 5, "items": { "$ref": "#/$defs/ServerReference" } },
         "attachments": { "type": "array", "items": { "$ref": "#/$defs/ChatAttachment" } },
         "artifacts": { "type": "array", "items": { "$ref": "#/$defs/GeneratedArtifact" } },
         "sources": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/TurnSource" } },

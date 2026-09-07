@@ -36,7 +36,7 @@ export class ServerDocumentFiles {
   constructor(private readonly network: EnterpriseDocumentNetwork,
     private readonly options: { ownerUid?: number; timeoutMs?: number; signal?: AbortSignal } = {}) {}
 
-  async search(roots: readonly EnterpriseDocumentRoot[], query: string, limit = 50) {
+  async search(roots: readonly EnterpriseDocumentRoot[], query: string, limit = 50, fresh = false) {
     if (!query.trim() || query.length > 200 || /\p{C}/u.test(query) || !Number.isInteger(limit) || limit < 1 || limit > 50) throw new Error("Invalid server query");
     const normalized = /^[A-Za-z]:[\\/]/.test(query)
       ? `server:/${query[0]}/${query.slice(3).replaceAll("\\", "/")}` : query;
@@ -46,7 +46,8 @@ export class ServerDocumentFiles {
       if (location) validatePath(`server-query/${location}`);
       else if (offset !== undefined) throw new Error("Invalid server query");
     } else if (/[\\/]/.test(normalized)) throw new Error("Invalid server query");
-    return this.call(roots, "search", { query, limit });
+    if (fresh && !normalized.startsWith("server:/")) throw new Error("Live browsing requires a directory");
+    return this.call(roots, fresh ? "browse" : "search", { query, limit });
   }
 
   async read(roots: readonly EnterpriseDocumentRoot[], target: { scope: string; path: string }) {
@@ -63,7 +64,7 @@ export class ServerDocumentFiles {
     return this.call(roots, "inventory", { path: target.path, offset });
   }
 
-  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "read" | "inventory", input: { query: string; limit: number } | { path: string; offset?: number }): Promise<ServerResult | null> {
+  private async call(roots: readonly EnterpriseDocumentRoot[], operation: "search" | "browse" | "read" | "inventory", input: { query: string; limit: number } | { path: string; offset?: number }): Promise<ServerResult | null> {
     await this.network.validateSyncRoots(roots);
     // Do not read even the host descriptor for a turn without company access.
     if (!roots.some((root) => root.scope === "company" && root.scopeId === null)) return null;
@@ -129,7 +130,8 @@ export class ServerDocumentFiles {
           if (!record(value) || value.requestId !== requestId || value.connectionId !== connectionId || value.installationId !== this.network.config.installationId || typeof value.available !== "boolean") return abort();
           if (value.available) {
             if (typeof value.checkedAt !== "string" || !Number.isFinite(Date.parse(value.checkedAt)) || Math.abs(Date.now() - Date.parse(value.checkedAt)) > 5 * 60_000) return abort();
-            if (operation === "search" || operation === "inventory") {
+            if (operation === "browse" && value.sourceChecked !== true) return abort();
+            if (operation === "search" || operation === "browse" || operation === "inventory") {
               if (!Array.isArray(value.results) || value.results.length > 50) return abort();
               for (const entry of value.results) {
                 if (!record(entry) || entry.scope !== "company" || typeof entry.path !== "string" || !entry.path.startsWith(`server-${connectionId}/`)) return abort();

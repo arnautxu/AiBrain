@@ -60,6 +60,20 @@ async function fixture(allow = true, reply?: (request: Record<string, unknown>) 
 }
 
 describe("server document file access", () => {
+  it("live browser requires fresh source evidence and never contacts the broker for denied users", async () => {
+    const f = await fixture(true, () => ({ available: true, results: [], checkedAt: new Date().toISOString(), sourceChecked: true }));
+    expect(await f.files.search(f.roots, "server:/", 50, true)).toMatchObject({ available: true });
+    expect(f.requests[0]).toMatchObject({ operation: "browse", input: { query: "server:/", limit: 50 } });
+    expect((await f.tool("search", { query: "live:server:/" })).success).toBe(true);
+    expect(f.requests[1]).toMatchObject({ operation: "browse" });
+    const stale = await fixture(true);
+    expect(await stale.files.search(stale.roots, "server:/", 50, true)).toMatchObject({ available: false });
+    const denied = await fixture(false);
+    expect(await denied.files.search(denied.roots, "server:/", 50, true)).toBeNull();
+    expect(denied.requests).toHaveLength(0);
+    await expect(f.files.search(f.roots, "invoice", 50, true)).rejects.toThrow();
+  });
+
   it("returns whole-tree inventory counts separately from file pages without inferring business counts", async () => {
     const target = "server-arnall/Y/Offers";
     const f = await fixture(true, () => ({ available: true, checkedAt: new Date().toISOString(), scope: "company", path: target,

@@ -15,6 +15,7 @@ export function conversationMarkdown(project: WorkbenchProject, thread: Workbenc
     if (message.attachments.length) {
       lines.push("Adjuntos:", ...message.attachments.map((item) => `- ${item.name} (${item.mimeType})`), "");
     }
+    if (message.serverReferences?.length) lines.push("Referencias Server:", ...message.serverReferences.map(item => `- ${item.name}: ${item.path}`), "");
     if (message.artifacts.length) {
       lines.push("Resultados:", ...message.artifacts.map((item) => `- ${item.name} (${item.type})`), "");
     }

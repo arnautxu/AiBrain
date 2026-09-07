@@ -325,7 +325,13 @@ function validInstallationConnectors(value) {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length === 0 || keys.some((key) => key !== "gmail" && key !== "outlook")) return false;
+  if (keys.length === 0 || keys.some((key) => !["gmail", "outlook", "composio"].includes(key))) return false;
+  if (value.composio !== undefined) {
+    const c = value.composio;
+    if (!exactObjectKeys(c, ["toolkits"]) || !Array.isArray(c.toolkits) || c.toolkits.length > 40
+      || !c.toolkits.every(validComposioToolkit)
+      || new Set(c.toolkits.map(t => t.slug)).size !== c.toolkits.length) return false;
+  }
   if (value.gmail !== undefined && !exactObjectKeys(value.gmail, ["enabled"])) return false;
   if (value.gmail !== undefined && typeof value.gmail.enabled !== "boolean") return false;
   if (value.outlook !== undefined) {
@@ -338,6 +344,22 @@ function validInstallationConnectors(value) {
         || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(value.outlook.tenantId))) return false;
   }
   return true;
+}
+
+// Keep the standalone release gate aligned with connectors/composio-config.ts.
+function validComposioToolkit(v) {
+  return exactObjectKeys(v, ["slug", "label", "authConfigId", "scopes", "readTools"])
+    && typeof v.slug === "string" && /^[a-z][a-z0-9_]{0,39}$/.test(v.slug)
+    && typeof v.label === "string" && v.label.length > 0 && v.label.length <= 100
+    && typeof v.authConfigId === "string" && /^ac_[A-Za-z0-9_-]{1,120}$/.test(v.authConfigId)
+    && Array.isArray(v.scopes) && v.scopes.length > 0 && v.scopes.length <= 32
+    && v.scopes.every(s => typeof s === "string" && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/.test(s))
+    && new Set(v.scopes).size === v.scopes.length
+    && Array.isArray(v.readTools) && v.readTools.length > 0 && v.readTools.length <= 40
+    && v.readTools.every(t => exactObjectKeys(t, ["slug", "version"])
+      && typeof t.slug === "string" && /^[A-Z][A-Z0-9_]{1,150}$/.test(t.slug)
+      && typeof t.version === "string" && /^\d{8}_\d{2}$/.test(t.version))
+    && new Set(v.readTools.map(t => t.slug)).size === v.readTools.length;
 }
 
 function validConfigString(value, maximumLength) {
