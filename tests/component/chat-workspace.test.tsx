@@ -374,7 +374,7 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByLabelText("Destino de la conversación")).toHaveTextContent("Operaciones Arnall");
     expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveFocus();
     expect(screen.queryByText("Trabajar")).not.toBeInTheDocument();
-    expect(screen.getByText("Prioridades")).toBeInTheDocument();
+    expect(screen.getByText("Prepárame una presentación")).toBeInTheDocument();
     expect(screen.getByTestId("project-breadcrumb")).toHaveTextContent("Operaciones Arnall");
     expect(screen.queryByRole("button", { name: /Abrir contexto/ })).not.toBeInTheDocument();
     for (const removed of ["Analizar información", "Crear un documento", "Resumir contenido", "Comprueba los datos importantes antes de usarlos.", "Planificar", "Preguntar", "↵ enviar"]) {
@@ -481,8 +481,26 @@ describe("chat workspace simplificado", () => {
   it("fills a normal suggestion for review rather than submitting it", () => {
     const onSend = vi.fn();
     renderWorkspace(null, project, { onSend });
-    fireEvent.click(screen.getByRole("button", { name: /^Prioridades/ }));
-    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue(`Organiza las prioridades de esta semana para ${project.name}.`);
+    fireEvent.click(screen.getByRole("button", { name: /^Prepárame una presentación/ }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Prepárame una presentación sobre…");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("appends schedule templates without sending or changing attachments and destination", () => {
+    const onSend = vi.fn();
+    const onAttachmentsChange = vi.fn();
+    const onDestinationChange = vi.fn();
+    renderWorkspace(null, project, { prompt: "Mi borrador.  ", onSend, onAttachmentsChange, onDestinationChange });
+    fireEvent.click(screen.getByRole("button", { name: /Trabajemos en los horarios/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Dame los horarios preparados" }));
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Mi borrador.  \n\nDame los horarios preparados del equipo de Arnall para…");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onAttachmentsChange).not.toHaveBeenCalled();
+    expect(onDestinationChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Archivos" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Tareas preprogramadas" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Trabajemos en los horarios/ }));
+    expect(screen.getByRole("menuitem", { name: "Revisar cambios de horarios" })).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
   });
 
