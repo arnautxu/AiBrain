@@ -120,6 +120,37 @@ def load_config(config_path, access_path):
     return config, credentials, access, destination
 
 
+def publish_readback(nonce):
+    require(isinstance(nonce, str) and re.fullmatch(r'[a-f0-9]{32}', nonce), 'Invalid readback nonce')
+    # Both sinks carry the result of the same execution. The redirected target
+    # is a new file in this invocation's private Hetzner job, never Windows disk.
+    return ("try{Set-Clipboard -Value $j}catch{};try{$q='\\\\tsclient\\AiBrain\\readback-" + nonce + "';"
+            "$b=[Text.Encoding]::UTF8.GetBytes($j);$f=$null;try{"
+            "$f=[IO.File]::Open($q+'.tmp',[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None);"
+            "$f.Write($b,0,$b.Length);$f.Flush()}finally{if($f){$f.Dispose()}};"
+            "[IO.File]::Move($q+'.tmp',$q+'.json')}catch{}")
+
+
+def file_readback(destination, nonce):
+    require(isinstance(nonce, str) and re.fullmatch(r'[a-f0-9]{32}', nonce), 'Invalid readback nonce')
+    path = Path(destination) / ('readback-' + nonce + '.json')
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_uid == os.geteuid()
+            and not info.st_mode & 0o077 and info.st_size <= 256 * 1024, 'Unsafe RDP readback file')
+    with path.open('rb') as file:
+        require(os.fstat(file.fileno()).st_ino == info.st_ino, 'Changed RDP readback file')
+        raw = file.read(256 * 1024 + 1)
+    require(len(raw) <= 256 * 1024, 'Oversized RDP readback file')
+    try:
+        value = json.loads(raw)
+    except (ValueError, UnicodeError):
+        return None
+    return value if isinstance(value, dict) and value.get('nonce') == nonce else None
+
+
 def build_command(operation, source, root, nonce, access):
     require(operation in ("list", "copy"), "Unsupported operation")
     request = {"path": source, "root": root, "nonce": nonce, "limit": access["maxEntries"],
@@ -171,7 +202,7 @@ def build_command(operation, source, root, nonce, access):
                    "driveMapping=$e[0].DriveMapping;driveMappingPolicySource=$e[0].PolicySourceDriveMapping}"
                    "}finally{if($t){$t.Dispose()};if($s){$s.Dispose()}}")
     script += (";$r.ok=$true}catch{$r=@{ok=$false;error=$_.Exception.Message}};"
-               "$r.nonce='" + nonce + "';$j=$r|ConvertTo-Json -Depth 6 -Compress;$j;Set-Clipboard -Value $j")
+               "$r.nonce='" + nonce + "';$j=$r|ConvertTo-Json -Depth 6 -Compress;$j;" + publish_readback(nonce))
     encoded = base64.b64encode(script.encode("utf-16le")).decode()
     command = "powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand " + encoded
     require(len(command) <= 7800, "Request exceeds the console command limit")
@@ -304,13 +335,16 @@ class RdpSession:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             require(self.rdp.poll() is None, "RDP_CONNECTION_LOST")
-            clipboard = self.run(["xclip", "-selection", "clipboard", "-o"], timeout=5)
+            result = file_readback(self.destination, nonce)
+            if result is not None:
+                return {**result, 'readbackTransport': 'redirected-file'}
             try:
+                clipboard = self.run(["xclip", "-selection", "clipboard", "-o"], timeout=min(5, max(.1, deadline - time.monotonic())))
                 result = json.loads(clipboard.stdout)
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, subprocess.TimeoutExpired):
                 result = None
             if isinstance(result, dict) and result.get("nonce") == nonce:
-                return result
+                return {**result, 'readbackTransport': 'clipboard'}
             time.sleep(0.5)
         raise ValueError("No matching RDP readback; source access was not confirmed")
 

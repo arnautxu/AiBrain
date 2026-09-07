@@ -266,6 +266,24 @@ class InteractiveAdmissionTests(unittest.TestCase):
                 broker.interactive_read_call({}, 'copy', 'C:\\Work\\a.txt')
             call.assert_called_once()
 
+    def test_disconnected_client_does_not_hide_source_completion(self):
+        import io, json, uuid
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        request = {'schemaVersion': 1, 'operation': 'browse', 'requestId': str(uuid.uuid4()), 'installationId': 'test', 'connectionId': 'arnall', 'input': {'query': 'server:/', 'limit': 50}}
+        handler = object.__new__(broker.Handler)
+        handler.connection = SimpleNamespace(settimeout=Mock())
+        handler.rfile = io.BytesIO((json.dumps(request)+'\n').encode())
+        handler.wfile = SimpleNamespace(write=Mock(side_effect=BrokenPipeError()))
+        handler.server = SimpleNamespace(manifest={'installationId': 'test', 'connectionId': 'arnall'}, dispatch=Mock(return_value={'available': True, 'results': []}))
+        with patch('builtins.print') as log:
+            handler.handle()
+        event = json.loads(log.call_args.args[0])
+        self.assertFalse(event['delivered'])
+        self.assertTrue(event['available'])
+        self.assertEqual(event['requestId'], request['requestId'])
+        handler.server.dispatch.assert_called_once()
+
     def test_nonce_timeout_has_sanitized_phase_without_command_or_source(self):
         class FakeSession:
             def __init__(self, *args): pass
