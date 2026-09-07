@@ -188,3 +188,38 @@ describe("server document file access", () => {
     expect(f.requests).toHaveLength(1);
   });
 });
+
+it("returns configured work folders without a Windows request or invented freshness", async () => {
+  const { files, roots, descriptor, requests } = await fixture();
+  await chmod(descriptor, 0o640);
+  await writeFile(descriptor, JSON.stringify({ schemaVersion: 1, connectionId: "arnall", installationId: "files-test", scope: "company", mode: "read-only",
+    entryPoints: [{ label: "Compres · Y", path: "server-arnall/Y/COMPRES" }] }));
+  await expect(files.navigation(roots)).resolves.toMatchObject({ available: true, navigation: true, sourceChecked: false, checkedAt: null,
+    results: [{ name: "Compres · Y", path: "server-arnall/Y/COMPRES", kind: "directory" }] });
+  expect(requests).toEqual([]);
+});
+
+it("denies navigation metadata before reading a descriptor for a denied user", async () => {
+  const { files, roots, descriptor, requests } = await fixture(false);
+  await chmod(descriptor, 0o640);
+  await writeFile(descriptor, "not valid JSON");
+  await expect(files.navigation(roots)).resolves.toBeNull();
+  expect(requests).toEqual([]);
+});
+
+it("does not expose another installation or connection through navigation", async () => {
+  const { files, roots, descriptor, requests } = await fixture();
+  await chmod(descriptor, 0o640);
+  const base = { schemaVersion: 1, connectionId: "arnall", installationId: "files-test", scope: "company", mode: "read-only" };
+  await writeFile(descriptor, JSON.stringify({ ...base, installationId: "foreign", entryPoints: [{ label: "Foreign", path: "server-arnall/Y/Foreign" }] }));
+  await expect(files.navigation(roots)).resolves.toMatchObject({ available: false });
+  await writeFile(descriptor, JSON.stringify({ ...base, entryPoints: [{ label: "Foreign", path: "server-other/Y/Foreign" }] }));
+  await expect(files.navigation(roots)).resolves.toMatchObject({ available: false });
+  expect(requests).toEqual([]);
+});
+
+it("keeps an unconfigured installation's navigation empty without inventing a customer root", async () => {
+  const { files, roots, requests } = await fixture();
+  await expect(files.navigation(roots)).resolves.toMatchObject({ available: true, navigation: true, results: [] });
+  expect(requests).toEqual([]);
+});
