@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { expect, test, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import {
@@ -95,7 +96,7 @@ test("system theme follows the OS and reduced motion removes decorative animatio
     const prefix = previewKey.slice(0, -"workbench.preview.v1".length);
     localStorage.setItem(`${prefix}selection.v1`, JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: threadId } }));
   });
-  await page.reload();
+  await reloadAndReopenConversation(page);
   const scroller = page.locator(".workbench-main > .scrollbar-thin");
   // Wait for the recovered thread, not just the shell left during hydration.
   await expect(page.getByText("Mensaje 40:", { exact: false })).toBeVisible();

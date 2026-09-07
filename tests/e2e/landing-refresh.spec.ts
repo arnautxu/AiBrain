@@ -15,7 +15,7 @@ for (const width of [390, 1440]) test(`refresh opens home and retains separate d
     const key = Object.keys(localStorage).find(key => key.endsWith(".workbench.preview.v1"))!;
     const prefix = key.replace("workbench.preview.v1", "");
     const snapshot = JSON.parse(localStorage.getItem(key)!);
-    const projectId = snapshot.projects[0].id;
+    const projectId = JSON.parse(localStorage.getItem(prefix + "selection.v1")!).activeProjectId;
     const threadId = crypto.randomUUID();
     const now = new Date().toISOString();
     snapshot.threads.unshift({ id: threadId, projectId, title: "Conversación conservada", status: "active", pinned: false, createdAt: now, updatedAt: now,

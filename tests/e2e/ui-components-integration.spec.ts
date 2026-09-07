@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { test, expect } from "@playwright/test";
 import { mkdir } from "node:fs/promises";
 
@@ -19,7 +20,12 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await send.focus();
     expect(await send.evaluate((element) => getComputedStyle(element).backgroundImage)).toContain("radial-gradient");
     await page.screenshot({ path: `.impeccable/review/landing-stars-${name}.png`, fullPage: true });
-    expect(await page.getByTestId("composer").evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("blur(28px)");
+    const backdrop = await page.getByTestId("composer").evaluate((element) => ({
+      filter: getComputedStyle(element).backdropFilter,
+      opaque: matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active)").matches,
+    }));
+    if (backdrop.opaque) expect(backdrop.filter).toBe("none");
+    else expect(backdrop.filter).toContain("blur(28px)");
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((key) => key.endsWith(".workbench.preview.v1"))!;
       const snapshot = JSON.parse(localStorage.getItem(key)!);
@@ -40,7 +46,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
       const prefix = key.slice(0, -"workbench.preview.v1".length);
       localStorage.setItem(`${prefix}selection.v1`, JSON.stringify({ activeProjectId: project.id, threadByProject: { [project.id]: id } }));
     });
-    await page.reload();
+    await reloadAndReopenConversation(page);
     await expect(page.locator('[data-slot="stars-background"]')).toHaveCount(0);
     await expect(page.locator(".rg-button")).toHaveCount(0);
     await expect(page.locator('[data-slot="day-separator"]')).toBeVisible();

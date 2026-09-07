@@ -1,3 +1,4 @@
+import { reloadAndReopenConversation } from "../helpers/reopen-conversation";
 import { devices, expect, test, type Locator, type Page } from "@playwright/test";
 
 const accountName = process.env.AIBRAIN_UI_INSTALLATION === "northwind-qa" ? "Taylor" : "Alex";
@@ -81,7 +82,7 @@ test("long user content and its editor remain inside a 320px touch viewport", as
       threadByProject: { [project.id]: threadId },
     }));
   }, longToken);
-  await page.reload();
+  await reloadAndReopenConversation(page);
 
   const composer = page.getByRole("textbox", { name: "Mensaje" });
   await expect(composer).toBeVisible();
