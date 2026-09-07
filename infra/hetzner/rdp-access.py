@@ -6,6 +6,7 @@ import contextlib
 import datetime
 import fcntl
 import hashlib
+import importlib.util
 import json
 import ntpath
 import os
@@ -222,6 +223,14 @@ class RdpSession:
         raise ValueError("RDP_DESKTOP_NOT_READY")
 
     def __enter__(self):
+        # Check before starting any graphical session, including legacy callers.
+        # A previous channel crash cannot authorize a duplicate RDP execution.
+        marker = Path(self.destination).parent / '.read-channel-lease.json'
+        if marker.exists() or marker.is_symlink():
+            spec = importlib.util.spec_from_file_location('channel_lease', Path(__file__).with_name('rdp-channel-lease.py'))
+            lease = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(lease)
+            lease.check(self.destination)
         self.temp = tempfile.TemporaryDirectory(prefix="aibrain-rdp-access-")
         self.work = Path(self.temp.name)
         self.env = dict(os.environ)
