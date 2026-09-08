@@ -2,9 +2,12 @@ import { consumeChatEventStream } from "@/ui/app-server-ui-adapter";
 import type { ChatStreamEvent } from "@/lib/chat-contract";
 
 const IDLE_OBSERVATION_MS = 3_000;
-const MAX_RECOVERY_ATTEMPTS = 4;
-const RECOVERY_BASE_DELAY_MS = 250;
-const RECOVERY_MAX_DELAY_MS = 4_000;
+const MAX_RECOVERY_ATTEMPTS = 8;
+const RECOVERY_BASE_DELAY_MS = 1_000;
+const RECOVERY_MAX_DELAY_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 40_000;
+const MAX_RECOVERY_TIME_MS = 90_000;
+const STREAM_SILENCE_TIMEOUT_MS = 45_000; // Server keepalives arrive every 15s.
 
 export type ChatStreamCloseReason = "stream-ended" | "read-error" | "http-error" | "aborted";
 
@@ -29,6 +32,7 @@ export type ChatStreamRecoveryMeasurement = Readonly<{
 export type ChatStreamRecoveryState =
   | Readonly<{ state: "recovering"; attempt: number }>
   | Readonly<{ state: "stalled"; attempt: number }>
+  | Readonly<{ state: "paused" }>
   | Readonly<{ state: "recovered" | "idle" }>;
 
 export class ChatStreamRecoveryError extends Error {
@@ -119,6 +123,8 @@ export async function consumeRecoverableChatStream(options: {
   onAccepted?: () => void;
   onRecoveryState: (state: ChatStreamRecoveryState) => void;
   onMeasurement: (measurement: ChatStreamRecoveryMeasurement) => void;
+  /** Explicit retry or a browser-online event; reuses the same request identity. */
+  waitForRetry?: (signal: AbortSignal) => Promise<void>;
   scheduler?: ChatStreamRecoveryScheduler;
   startedAt?: number;
 }) {
@@ -126,8 +132,10 @@ export async function consumeRecoverableChatStream(options: {
   const startedAt = options.startedAt ?? scheduler.now();
   let measurement = emptyMeasurement();
   let recoveryAttempt = 0;
+  let recoveryWindowStarted: number | null = null;
   let recovered = false;
   let accepted = false;
+  let admissionUncertain = false;
   let lastHttpFailure: ChatStreamHttpError | null = null;
   const elapsed = () => Math.max(0, Math.round(scheduler.now() - startedAt));
   const publish = () => options.onMeasurement(measurement);
@@ -142,18 +150,37 @@ export async function consumeRecoverableChatStream(options: {
       throw options.signal.reason instanceof Error ? options.signal.reason : new DOMException("La recuperación se ha cancelado.", "AbortError");
     }
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let deadline: ReturnType<typeof setTimeout> | null = null;
+    const attemptController = new AbortController();
+    const abortAttempt = () => attemptController.abort(options.signal.reason);
+    options.signal.addEventListener("abort", abortAttempt, { once: true });
+    const armDeadline = (milliseconds: number) => {
+      if (deadline !== null) scheduler.clearTimeout(deadline);
+      deadline = scheduler.setTimeout(() => attemptController.abort(new Error("Chat transport timeout")), milliseconds);
+    };
+    const connectionStartedAt = scheduler.now();
+    let lastActivityAt = connectionStartedAt;
+    let sawEvent = false;
     let sawTerminal = false;
     let sawSnapshot = false;
     try {
-      const response = await options.request(options.signal);
+      armDeadline(recoveryWindowStarted === null ? REQUEST_TIMEOUT_MS
+        : Math.max(1, Math.min(REQUEST_TIMEOUT_MS, MAX_RECOVERY_TIME_MS - (scheduler.now() - recoveryWindowStarted))));
+      const response = await options.request(attemptController.signal);
       const responseOpenedAtMs = elapsed();
       update({ responseOpenedAtMs: measurement.responseOpenedAtMs ?? responseOpenedAtMs });
       if (!response.ok) {
         update({ closedAtMs: elapsed(), closeReason: "http-error" });
         const failure = await responseFailure(response);
         lastHttpFailure = failure;
-        if (!failure.retryable) throw failure;
+        if (!failure.retryable) {
+          if (!accepted && !admissionUncertain) throw failure;
+          // A transport/auth failure after acceptance is not a terminal turn result.
+          recoveryAttempt = MAX_RECOVERY_ATTEMPTS;
+        }
       } else {
+        lastHttpFailure = null;
+        armDeadline(STREAM_SILENCE_TIMEOUT_MS);
         if (!accepted) {
           accepted = true;
           update({ responseAcceptedAtMs: responseOpenedAtMs });
@@ -163,6 +190,7 @@ export async function consumeRecoverableChatStream(options: {
           update({ idleObservedAtMs: elapsed() });
         }, IDLE_OBSERVATION_MS);
         await consumeChatEventStream(response, (event) => {
+          sawEvent = true;
           update({ lastEventAtMs: elapsed() });
           if (event.type === "snapshot" && recoveryAttempt > 0) {
             sawSnapshot = true;
@@ -175,7 +203,7 @@ export async function consumeRecoverableChatStream(options: {
           if (event.type === "done" || event.type === "stopped" || event.type === "error" ||
               (event.type === "snapshot" && event.message.status !== "streaming")) sawTerminal = true;
           options.onEvent(event);
-        }, { signal: options.signal });
+        }, { signal: attemptController.signal, onActivity: () => { lastActivityAt = scheduler.now(); armDeadline(STREAM_SILENCE_TIMEOUT_MS); }, stopOnTerminal: true });
         update({ closedAtMs: elapsed(), closeReason: options.signal.aborted ? "aborted" : "stream-ended" });
         if (sawTerminal) {
           options.onRecoveryState({ state: "idle" });
@@ -188,13 +216,27 @@ export async function consumeRecoverableChatStream(options: {
         throw error;
       }
       if (error instanceof ChatStreamRecoveryError || error instanceof ChatStreamHttpError) throw error;
+      admissionUncertain = true;
       update({ closedAtMs: elapsed(), closeReason: "read-error" });
     } finally {
       if (idleTimer !== null) scheduler.clearTimeout(idleTimer);
+      if (deadline !== null) scheduler.clearTimeout(deadline);
+      options.signal.removeEventListener("abort", abortAttempt);
     }
 
+    if (sawEvent && !attemptController.signal.aborted && lastActivityAt - connectionStartedAt >= 15_000) { recoveryAttempt = 0; recoveryWindowStarted = null; }
+    recoveryWindowStarted ??= scheduler.now();
+    recovered = false;
     recoveryAttempt += 1;
-    if (recoveryAttempt > MAX_RECOVERY_ATTEMPTS) throw lastHttpFailure ?? new ChatStreamRecoveryError();
+    if (recoveryAttempt > MAX_RECOVERY_ATTEMPTS || scheduler.now() - recoveryWindowStarted >= MAX_RECOVERY_TIME_MS) {
+      if (!options.waitForRetry) throw lastHttpFailure ?? new ChatStreamRecoveryError();
+      options.onRecoveryState({ state: "paused" });
+      await options.waitForRetry(options.signal);
+      recoveryAttempt = 1;
+      recoveryWindowStarted = null;
+      recovered = false;
+      lastHttpFailure = null;
+    }
     update({
       recoveryAttempts: recoveryAttempt,
       recoveryStartedAtMs: measurement.recoveryStartedAtMs ?? elapsed(),

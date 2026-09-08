@@ -34,7 +34,8 @@ export function ConnectorPopover({ anchor, caret = 0, centerMobile = false, trig
     update();
     window.addEventListener("resize", update); window.addEventListener("scroll", update, true);
     window.visualViewport?.addEventListener("resize", update);
-    return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); window.visualViewport?.removeEventListener("resize", update); };
+    window.visualViewport?.addEventListener("scroll", update);
+    return () => { window.removeEventListener("resize", update); window.removeEventListener("scroll", update, true); window.visualViewport?.removeEventListener("resize", update); window.visualViewport?.removeEventListener("scroll", update); };
   }, [anchor, caret, centerMobile, triggerAligned, avoidOverlapWith]);
   return position ? createPortal(<div data-connector-popover style={{ position: "fixed", zIndex: 45, ...position }} className="connector-popover overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-1 shadow-[var(--shadow-lg)]">{children}</div>, document.body) : null;
 }

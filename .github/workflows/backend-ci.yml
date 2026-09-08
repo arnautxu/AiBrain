@@ -141,6 +141,11 @@ jobs:
         run: npx playwright install --with-deps "$BROWSER"
       - name: Run isolated E2E suite
         run: ${{ matrix.command }}
+      - name: Validate native composer and transport recovery
+        if: matrix.suite == 'chromium-1' || matrix.suite == 'webkit'
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: npx playwright test --config=playwright.recovery.config.ts --project="$BROWSER-recovery"
 
   e2e:
     name: Filesystem and restart E2E
