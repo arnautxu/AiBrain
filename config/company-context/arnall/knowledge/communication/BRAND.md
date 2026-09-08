@@ -1,3 +1,17 @@
+---
+id: "arnall:communication/BRAND"
+title: "Brand"
+standard_version: 1
+revision: 1
+status: pending
+audience: company
+owner: pending
+source: "Versioned public/product seed; internal facts remain unknown"
+checked_at: 2026-09-08
+review_after: pending
+---
+# Brand
+
 # Brand
 
 ## Known

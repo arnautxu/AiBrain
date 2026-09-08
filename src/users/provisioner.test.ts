@@ -7,6 +7,8 @@ import { parseInstallationConfig } from "@/config/installation-schema";
 import { parsePermissionMarkdown } from "@/permissions/markdown-parser";
 import { UserProvisioner } from "@/users/provisioner";
 import { LocalFileMemoryService } from "@/memory/local-file-memory-service";
+import { COMPANY_KNOWLEDGE_AREAS, standardCompanyContextTemplates } from "@/users/company-context-standard";
+import { companyContextFiles } from "@/users/provisioner";
 
 const roots: string[] = [];
 
@@ -50,6 +52,33 @@ afterEach(async () => {
 });
 
 describe("UserProvisioner", () => {
+  it("uses one layout for unrelated companies and keeps detailed context outside the automatic snapshot", async () => {
+    const { config, provisioner } = await fixture();
+    const second = { ...config, companyName: "Unrelated Example", companySlug: "unrelated-example",
+      installationId: "unrelated-installation", branding: { ...config.branding, productName: "Unrelated Assistant" } };
+    const firstFiles = standardCompanyContextTemplates(config);
+    const secondFiles = standardCompanyContextTemplates(second);
+    expect([...firstFiles.keys()]).toEqual([...secondFiles.keys()]);
+    expect([...secondFiles.values()].join("\n")).not.toMatch(/Arnall|Synthetic Company/);
+    expect([...secondFiles.values()].join("\n")).toContain("Unrelated Example");
+    const arnallFiles = await companyContextFiles(config, path.join(process.cwd(), "config/company-context/arnall"));
+    expect([...arnallFiles.keys()].sort()).toEqual([...firstFiles.keys()].sort());
+    await provisioner.provision({ userId: userId(1), email: "standard@example.test", displayName: "Standard Employee" });
+    for (const area of COMPANY_KNOWLEDGE_AREAS) {
+      expect((await lstat(path.join(config.paths.companyContextRoot, "knowledge", area))).isDirectory()).toBe(true);
+    }
+    const service = new LocalFileMemoryService({ config });
+    const context = { installationId: config.installationId, userId: userId(1) };
+    const snapshot = await service.buildPromptSnapshot(context);
+    expect(snapshot.truncated).toBe(false);
+    expect(snapshot.text.length).toBeLessThan(12_000);
+    expect(snapshot.text).not.toContain("## Recuperación y ajustes");
+    expect(await service.readKnowledge(context, "app/APP_GUIDE.md")).toContain("## Recuperación y ajustes");
+    await expect(service.readKnowledge({ ...context, installationId: second.installationId }, "app/APP_GUIDE.md"))
+      .rejects.toThrow();
+    await expect(service.readKnowledge(context, "../../PERMISSIONS.md")).rejects.toThrow();
+  });
+
   it("provisions twenty complete employee roots without code or configuration changes", async () => {
     const { config, provisioner } = await fixture();
     const inputs = Array.from({ length: 20 }, (_, index) => ({
@@ -147,44 +176,35 @@ describe("UserProvisioner", () => {
     const prompt = JSON.parse(snapshot.text) as {
       companyContext: Array<{ fileName: string; content: string }>;
     };
-    expect(prompt.companyContext.map(({ fileName }) => fileName)).toEqual(expect.arrayContaining([
-      "company/COMPANY.md",
-      "organization/TEAM.md",
-      "organization/DEPARTMENTS.md",
-      "preferences/PREFERENCES.md",
-      "processes/PROCESSES.md",
-      "objectives/OBJECTIVES.md",
-      "brand/BRAND.md",
-      "tools/TOOLS_AND_CONNECTORS.md",
-      "automations/AUTOMATIONS.md",
-      "support/GRAPHIKAI_SUPPORT.md",
-    ]));
-    const authorizedSummaryEvidence = prompt.companyContext.map(({ content }) => content).join("\n");
-    expect(authorizedSummaryEvidence).toContain("Arnall Carniceros & Xarcuteros");
-    expect(authorizedSummaryEvidence).toContain("Sergi, Carles, Roger, David and Arnau");
-    expect(authorizedSummaryEvidence).toContain("No internal process has been supplied");
-    expect(authorizedSummaryEvidence).not.toContain("PERMISSIONS.md belongs");
+    // Detailed documents are deliberately not pushed into every turn.
+    expect(prompt.companyContext.map(({ fileName }) => fileName)).not.toEqual(
+      expect.arrayContaining(["knowledge/company/COMPANY.md"]));
+    const service = new LocalFileMemoryService({ config });
+    const context = { installationId: config.installationId, userId: userId(1) };
+    expect(await service.readKnowledge(context, "company/COMPANY.md")).toContain("Arnall Carniceros & Xarcuteros");
+    expect(await service.readKnowledge(context, "organization/PEOPLE.md")).toContain("Sergi, Carles, Roger, David and Arnau");
+    expect(await service.readKnowledge(context, "processes/PROCESSES.md")).toContain("No internal process has been supplied");
 
     for (const relativePath of [
-      "company/COMPANY.md",
-      "organization/TEAM.md",
-      "organization/DEPARTMENTS.md",
-      "preferences/PREFERENCES.md",
-      "work/CURRENT_WORK.md",
-      "processes/PROCESSES.md",
-      "objectives/OBJECTIVES.md",
-      "brand/BRAND.md",
-      "tools/TOOLS_AND_CONNECTORS.md",
-      "automations/AUTOMATIONS.md",
-      "support/GRAPHIKAI_SUPPORT.md",
-      "provenance/SOURCES.md",
-      "pending/OPEN_QUESTIONS.md",
+      "knowledge/company/COMPANY.md",
+      "knowledge/organization/PEOPLE.md",
+      "knowledge/organization/DEPARTMENTS.md",
+      "knowledge/communication/PREFERENCES.md",
+      "knowledge/projects/PROJECTS.md",
+      "knowledge/processes/PROCESSES.md",
+      "knowledge/goals/GOALS.md",
+      "knowledge/communication/BRAND.md",
+      "knowledge/tools/TOOLS.md",
+      "knowledge/automations/AUTOMATIONS.md",
+      "knowledge/support/SUPPORT.md",
+      "knowledge/sources/SOURCES.md",
+      "knowledge/pending/OPEN_QUESTIONS.md",
     ]) {
       expect(await readFile(path.join(config.paths.companyContextRoot, relativePath), "utf8"))
         .toEqual(await readFile(path.join(seedRoot, relativePath), "utf8"));
     }
 
-    const edited = path.join(config.paths.companyContextRoot, "tools", "TOOLS_AND_CONNECTORS.md");
+    const edited = path.join(config.paths.companyContextRoot, "knowledge", "tools", "TOOLS.md");
     const custom = "# Approved production edit\n\nKeep this exact content.\n";
     await chmod(edited, 0o600);
     await writeFile(edited, custom);

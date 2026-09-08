@@ -144,10 +144,10 @@ describe("LocalFileMemoryService", () => {
       "50_DOCUMENT_RULES.md",
     ]);
     expect(companyContext[1].content).toContain("Memory Company QA");
-    expect(await service.readKnowledgeIndex(contextA)).toContain("knowledge/procedures/");
-    expect(await service.listKnowledge(contextA)).toEqual([
+    expect(await service.readKnowledgeIndex(contextA)).toContain("knowledge/processes/PROCESSES.md");
+    expect(await service.listKnowledge(contextA)).toEqual(expect.arrayContaining([
       expect.objectContaining({ relativePath: "procedures/handoff.md" }),
-    ]);
+    ]));
     expect(await service.readKnowledge(contextA, "procedures/handoff.md"))
       .toContain("Source-backed procedure");
 
