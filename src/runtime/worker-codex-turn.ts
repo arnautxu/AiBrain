@@ -1,3 +1,5 @@
+import { documentServicesForUser } from "@/documents/server-service";
+import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { serverReferenceInputs } from "@/documents/server-reference-inputs";
 import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "@/runtime/composio-dynamic-tools";
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
@@ -276,7 +278,7 @@ function localDocumentDeveloperInstructions() {
     "Para informes de texto sencillos, Word/DOCX y tablas Excel/XLSX, usa `aibrain_documents.create`; es un renderizador básico de contenido final, no otro modelo. Redacta primero el contenido final completo. Nunca envíes como `content` la petición del usuario, un prompt, instrucciones de diseño o una promesa de trabajo.",
     "Para presentaciones, tanto PDF como PowerPoint, usa autoría local con shell y PptxGenJS, no el renderizador básico `aibrain_documents.create`. Lee primero la guía local `/usr/local/share/aibrain/presentations.md` y las skills autorizadas local-documents e impeccable cuando estén disponibles y cumple la política de diseño de esta instalación. PptxGenJS está empaquetado en `/usr/local/share/aibrain/pptxgenjs.cjs`: cárgalo desde Node con require y comprueba su disponibilidad; no instales paquetes ni uses servicios externos. Si falta una herramienta o skill obligatoria, explica la limitación concreta; no sustituyas silenciosamente la presentación por diapositivas de texto básico.",
     "Antes de crear la presentación, redacta un guion con una idea por diapositiva y diseña composiciones, jerarquía tipográfica y elementos visuales relevantes al tema. Respeta idioma, contenido y número solicitado; no repitas títulos ni cortes frases entre páginas para encajar texto. Usa formas, diagramas, gráficos e imágenes locales autorizadas cuando aporten información; no inventes fuentes ni afirmes haber usado imágenes que no existen.",
-    "Trabaja en borradores privados dentro de `.aibrain-drafts/` en el workspace. No anuncies ni publiques sus rutas como entregas. Genera el PPTX, conviértelo a PDF con LibreOffice y renderiza sus páginas con Poppler; inspecciona visualmente todas las diapositivas, comprueba recortes, solapamientos, legibilidad y número de páginas, y corrige antes de entregar. Solo después copia los archivos finales verificados a `documents/` y emite sus rutas para que el servidor cree los artefactos privados. No escribas versiones provisionales en la ruta final; no presentes un borrador no inspeccionado como terminado.",
+    "Trabaja en borradores privados dentro de `.aibrain-drafts/` en el workspace. No anuncies ni publiques sus rutas como entregas. Genera el PPTX en shell y llama a `aibrain_documents.render` con su ruta relativa y cada número de página para obtener el PDF y las imágenes; no ejecutes conversores desde shell, porque su sandbox anidado bloquea el renderizado; inspecciona visualmente todas las diapositivas, comprueba recortes, solapamientos, legibilidad y número de páginas, y corrige antes de entregar. Solo después copia los archivos finales verificados a `documents/` y emite sus rutas para que el servidor cree los artefactos privados. No escribas versiones provisionales en la ruta final; no presentes un borrador no inspeccionado como terminado.",
     "Conserva exactamente los formatos solicitados: entrega PDF si pide PDF y PPTX si pide PowerPoint; si pide ambos, deriva el PDF del mismo PPTX, conservando el diseño y el número de diapositivas. El renderizador básico con `slides` queda reservado para solicitudes explícitas de diapositivas de texto simple; rechaza exceso de contenido en vez de añadir páginas automáticamente. En ese caso usa `format: pdf` para PDF y `format: pptx` para PowerPoint.",
     "Cuando pida un PDF de una imagen generada en este hilo, incluso en un mensaje anterior, usa `aibrain_documents.image_to_pdf` con el `sourceImageItemId` opaco del elemento de generación completado. La herramienta incrusta el PNG real en una única página A4. No copies la descripción como contenido y no uses ni reveles rutas del servidor o del workspace.",
     "Si pide dos o más documentos sencillos para el renderizador básico y `aibrain_documents.create_batch` está disponible, úsala exactamente una vez con esos archivos. Esta regla no aplica a presentaciones diseñadas con autoría local. Solo en una conversación antigua donde esa función no exista, usa `aibrain_documents.create` una vez por archivo; nunca cambies a almacenamiento externo.",
@@ -1522,7 +1524,8 @@ export async function runWorkerCodexTurn(
             reconcileCompletedFinalAnswer(envelope);
           }
           if (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
-              params.item.type === "dynamicToolCall" && params.item.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE) {
+              params.item.type === "dynamicToolCall" && params.item.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE &&
+              params.item.tool !== "render") {
             armDocumentToolRecovery();
           }
           return;
@@ -1705,6 +1708,26 @@ export async function runWorkerCodexTurn(
               sourceThreadId: chatRequest.threadId,
               sourceTurnId: chatRequest.assistantMessageId,
               permissions,
+              renderPresentation: async (input) => {
+                const services = await documentServicesForUser(runtime.config, authenticatedUserId);
+                const preview = await prepareWorkspaceDocumentPreview({
+                  services,
+                  projectId: chatRequest.projectId,
+                  relativePath: input.relativePath,
+                  fileName: input.fileName,
+                  declaredMimeType: input.mimeType,
+                  data: input.data,
+                  signal: turnSignal,
+                });
+                if (preview.pages === null || preview.pages > 50 || input.page > preview.pages) {
+                  throw new Error("Presentation review requires 1–50 pages and an existing page.");
+                }
+                return {
+                  pdf: preview.data,
+                  png: await services.previews.renderPage(preview.threadId, preview.uploadId, input.page, { signal: turnSignal }),
+                  pages: preview.pages,
+                };
+              },
             });
             for (const artifact of result.artifacts) {
               if (projectedDocumentArtifactIds.has(artifact.id) || projectingDocumentArtifactIds.has(artifact.id)) continue;
@@ -1719,7 +1742,7 @@ export async function runWorkerCodexTurn(
                 projectingDocumentArtifactIds.delete(artifact.id);
               }
             }
-            armDocumentToolRecovery();
+            if (request.params.tool !== "render") armDocumentToolRecovery();
             return result.response as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_COMPANY_FILES_TOOL_NAMESPACE) {

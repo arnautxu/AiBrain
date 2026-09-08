@@ -9,6 +9,7 @@ import {
 } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { validateUploadedDocument } from "@/documents/upload-validation";
+import { generatedPngFixture } from "../../tests/helpers/png-fixture";
 import { ResourceLockManager } from "@/storage/resource-lock";
 
 const THREAD_ID = "11111111-1111-4111-8111-111111111111";
@@ -146,6 +147,43 @@ describe("document preview service", () => {
     await expect(service.read(THREAD_ID, UPLOAD_ID))
       .rejects.toMatchObject({ code: "DOCUMENT_PREVIEW_REBUILD_REQUIRED" });
     await expect(service.create(staged)).resolves.toMatchObject({ schemaVersion: 2 });
+  });
+
+  it("renders page two from verified PDF bytes inside the exact private converter root", async () => {
+    const data = Buffer.from("%PDF-1.7\nsynthetic two-page fixture\n%%EOF\n");
+    const png = generatedPngFixture(16, 9);
+    const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+      threadId: THREAD_ID, uploadId: UPLOAD_ID, data,
+      validated: validateUploadedDocument({ fileName: "slides.pdf", declaredMimeType: "application/pdf", data }),
+    });
+    let pageTwoCalls = 0;
+    const runner: DocumentToolRunner = {
+      async run(command, args, options) {
+        if (command.endsWith("pdfinfo")) return { stdout: "Pages: 2\nEncrypted: no\n", stderr: "" };
+        if (command.endsWith("pdftoppm")) {
+          if (args[1] === "2") {
+            pageTwoCalls += 1;
+            expect(path.basename(options.cwd)).toMatch(/^\.work-[A-Za-z0-9_-]+$/u);
+            const input = args.at(-2)!;
+            expect(input).toBe(path.join(options.cwd, "document.pdf"));
+            expect(await readFile(input)).toEqual(data);
+            expect(args.at(-1)).toBe(path.join(options.cwd, "page"));
+          }
+          await writeFile(`${args.at(-1)}.png`, png);
+        }
+        return { stdout: "", stderr: "" };
+      },
+    };
+    const service = new DocumentPreviewService({ stagingRoot, previewRoot, lockManager: locks, runner,
+      tools: { soffice: "/tools/soffice", pdfinfo: "/tools/pdfinfo", pdftoppm: "/tools/pdftoppm" }, requireQpdf: false });
+    await service.create(staged);
+    expect(await service.renderPage(THREAD_ID, UPLOAD_ID, 2)).toEqual(png);
+    expect(pageTwoCalls).toBe(1);
+    const directory = path.join(previewRoot, THREAD_ID, UPLOAD_ID);
+    expect((await readdir(directory)).filter((entry) => entry.startsWith(".work-"))).toEqual([]);
+    await writeFile(path.join(directory, "document.pdf"), "tampered PDF");
+    await expect(service.renderPage(THREAD_ID, UPLOAD_ID, 2)).rejects.toMatchObject({ code: "DOCUMENT_PREVIEW_INTEGRITY_FAILED" });
+    expect(pageTwoCalls).toBe(1);
   });
 
   it("rejects a sparse oversized converter output before loading it into memory", async () => {

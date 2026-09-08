@@ -806,6 +806,7 @@ describe("worker Codex turn", () => {
         tools: expect.arrayContaining([
           expect.objectContaining({ name: "create" }),
           expect.objectContaining({ name: "image_to_pdf" }),
+          expect.objectContaining({ name: "render" }),
         ]),
       }),
       expect.objectContaining({
@@ -839,6 +840,8 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("/usr/local/share/aibrain/pptxgenjs.cjs");
     expect(instructions).toContain("/usr/local/share/aibrain/presentations.md");
     expect(instructions).toContain("`.aibrain-drafts/`");
+    expect(instructions).toContain("`aibrain_documents.render`");
+    expect(instructions).toContain("no ejecutes conversores desde shell");
     expect(instructions).toContain("inspecciona visualmente todas las diapositivas");
     expect(instructions).toContain("no sustituyas silenciosamente la presentación");
     expect(instructions).toContain("Esta regla no aplica a presentaciones diseñadas con autoría local");
@@ -1318,6 +1321,156 @@ describe("worker Codex turn", () => {
     }));
     expect(events).not.toContainEqual({ type: "done" });
   }, 15_000);
+
+  it("keeps reviewing after a completed render beyond the document terminal grace", async () => {
+    vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "5000");
+    vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "5000");
+    vi.stubEnv("AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS", "1000");
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-render-review-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await import("node:fs/promises").then(async ({ mkdir }) => {
+      await mkdir(workspace, { mode: 0o700 });
+      await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
+    });
+    const calls: string[] = [];
+    let handlers: {
+      onNotification(request: unknown, envelope: unknown): Promise<unknown> | unknown;
+    } | null = null;
+    const client = {
+      router: {
+        registerTurn(runtimeThreadId: string, localTurnId: string, value: typeof handlers) {
+          handlers = value;
+          return {
+            threadId: runtimeThreadId,
+            localTurnId,
+            bindRuntimeTurn() {},
+            dispose() {},
+          };
+        },
+      },
+      async connectionSummary() {
+        return {
+          connected: true,
+          authMode: "chatgpt",
+          planType: "team",
+          models: [],
+          skills: [],
+          webSearch: true,
+          imageGeneration: false,
+          processWarm: true,
+          rateLimit: null,
+          usage: null,
+        };
+      },
+      async resolvedSkills() { return []; },
+      prewarmConnection() {},
+      async request(
+        method: string,
+        _params: unknown,
+        purpose: string,
+        _timeout?: number,
+        beforeResolve?: (value: never, event: never) => Promise<void> | void,
+      ) {
+        calls.push(method);
+        if (method === "thread/start") {
+          const result = { thread: { id: "runtime-thread-watchdog", turns: [] } };
+          await beforeResolve?.(result as never, {
+            eventId: "watchdog-thread",
+            sequence: 1,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          const result = { turn: { id: "runtime-turn-watchdog" } };
+          await beforeResolve?.(result as never, {
+            eventId: "watchdog-turn",
+            sequence: 2,
+            occurredAt: new Date().toISOString(),
+            message: { kind: "rpc-response", rpc: { id: purpose, result } },
+          } as never);
+          queueMicrotask(() => {
+            void (async () => {
+              await handlers?.onNotification({
+                method: "item/completed",
+                params: {
+                  threadId: "runtime-thread-watchdog",
+                  turnId: "runtime-turn-watchdog",
+                  item: { id: "render-review", type: "dynamicToolCall", namespace: "aibrain_documents", tool: "render", status: "completed", contentItems: [{ type: "inputText", text: '{"status":"review","page":1,"pages":3}' }] },
+                },
+              }, { eventId: "render-review-completed", sequence: 3, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              // Reviewing the rendered image can legitimately outlast both
+              // terminal grace windows; this is not a final delivery tool.
+              await new Promise((resolve) => setTimeout(resolve, 2300));
+              await handlers?.onNotification({
+                method: "turn/completed",
+                params: { threadId: "runtime-thread-watchdog", turn: { id: "runtime-turn-watchdog", status: "completed", items: [], error: null } },
+              }, { eventId: "render-review-turn-completed", sequence: 4, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+            })();
+          });
+          return result;
+        }
+        if (method === "thread/read") {
+          return {
+            thread: {
+              id: "runtime-thread-watchdog",
+              turns: [{
+                id: "runtime-turn-watchdog",
+                status: "inProgress",
+                error: null,
+                items: [{ type: "userMessage", id: "user-item", clientId: userMessageId, content: [] }],
+              }],
+            },
+          };
+        }
+        if (method === "turn/interrupt") return {};
+        throw new Error(`Unexpected request ${method}`);
+      },
+    };
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
+      client,
+    };
+    const events: Array<Record<string, unknown>> = [];
+
+    await runWorkerCodexTurn(
+      chatRequest(),
+      installationId,
+      userId,
+      null,
+      {
+        tenantId: installationId,
+        mode: "codex",
+        codexBinary: "codex",
+        codexHome: null,
+        workspace: "/legacy-must-not-be-used",
+        model: null,
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+      },
+      permissions([{
+        ruleId: "tools.execute",
+        action: "execute",
+        effect: "allow",
+        instruction: "Create local documents.",
+        sourceScope: "installation",
+        sourcePolicyVersion: 1,
+        precedence: 100,
+      }]),
+      {} as never,
+      memoryDependencies(),
+      [],
+      new AbortController().signal,
+      async (event) => { events.push(event); },
+    );
+
+    expect(calls).toEqual(["thread/start", "turn/start"]);
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events).toContainEqual({ type: "done" });
+  });
 
   it("recovers a completed turn after thread/resume times out without retrying a model action", async () => {
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-recovery-"));

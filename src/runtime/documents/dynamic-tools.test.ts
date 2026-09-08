@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
@@ -477,5 +477,41 @@ describe("local document dynamic tool", () => {
       externalConnectorUsed: false,
     });
     expect(externalFetch).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("presentation render turn boundary", () => {
+  it("denies wrong turns and denied users before touching the workspace or converter", async () => {
+    const ctx = await context(USER_A);
+    const renderPresentation = vi.fn();
+    const params = { ...request("render-denied", "pdf"), tool: "render", arguments: { relativePath: ".aibrain-drafts/deck.pdf", page: 1 } };
+    for (const [call, permissionsValue] of [
+      [{ ...params, turnId: "foreign-turn" }, ctx.permissions],
+      [params, permissions(USER_A, "deny")],
+    ] as const) {
+      const result = await handleLocalDocumentDynamicToolCall(call, { ...ctx, projectWorkspace: "/does-not-exist", permissions: permissionsValue, renderPresentation });
+      expect(result.response.success).toBe(false);
+      expect(JSON.stringify(result.response)).toMatch(/IDENTITY_MISMATCH|PERMISSION_DENIED/);
+      expect(result.artifacts).toEqual([]);
+    }
+    expect(renderPresentation).not.toHaveBeenCalled();
+  });
+
+  it("returns a review image and private draft PDF without creating a final artifact", async () => {
+    const ctx = await context(USER_A);
+    await mkdir(path.join(ctx.projectWorkspace, ".aibrain-drafts"));
+    const pdf = await PDFDocument.create(); pdf.addPage();
+    const data = Buffer.from(await pdf.save());
+    await writeFile(path.join(ctx.projectWorkspace, ".aibrain-drafts/deck.pdf"), data);
+    const renderPresentation = vi.fn().mockResolvedValue({ pdf: data, png: generatedPngFixture(), pages: 1 });
+    const result = await handleLocalDocumentDynamicToolCall({ ...request("render-valid", "pdf"), tool: "render", arguments: { relativePath: ".aibrain-drafts/deck.pdf", page: 1 } }, { ...ctx, renderPresentation });
+    expect(result.response.success).toBe(true);
+    expect(result.artifacts).toEqual([]);
+    expect(result.response.contentItems[1]).toMatchObject({ type: "inputImage", imageUrl: expect.stringMatching(/^data:image\/png;base64,/) });
+    const metadata = JSON.parse(result.response.contentItems[0]!.type === "inputText" ? result.response.contentItems[0].text : "{}");
+    expect(metadata).toMatchObject({ status: "review", page: 1, pages: 1, sha256: createHash("sha256").update(data).digest("hex") });
+    expect(await readFile(path.join(ctx.projectWorkspace, metadata.reviewPdfPath))).toEqual(data);
+    expect(await readdir(ctx.projectWorkspace)).toEqual([".aibrain-drafts"]);
   });
 });
