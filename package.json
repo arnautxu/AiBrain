@@ -55,7 +55,8 @@
     "infra:validate": "node scripts/validate-infra.mjs",
     "infra:preflight": "node scripts/validate-host-preflight.mjs",
     "release:manage": "node scripts/manage-release.mjs",
-    "build:presentation-runtime": "node scripts/build-presentation-runtime.mjs"
+    "build:presentation-runtime": "node scripts/build-presentation-runtime.mjs",
+    "company-context:export": "tsx scripts/export-company-context.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

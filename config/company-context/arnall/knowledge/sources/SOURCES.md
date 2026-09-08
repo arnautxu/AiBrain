@@ -1,3 +1,17 @@
+---
+id: "arnall:sources/SOURCES"
+title: "Provenance and sources"
+standard_version: 1
+revision: 1
+status: pending
+audience: company
+owner: pending
+source: "Versioned public/product seed; internal facts remain unknown"
+checked_at: 2026-09-08
+review_after: pending
+---
+# Provenance and sources
+
 # Provenance and sources
 
 Public facts in this seed were recorded on 2026-08-27 from:

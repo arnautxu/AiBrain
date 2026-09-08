@@ -121,6 +121,8 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 
 ## Durable references
 
+- Shared information architecture and reviewed content migration: [COMPANY_CONTEXT_STANDARD.md](COMPANY_CONTEXT_STANDARD.md). All installations receive the same structure; company data, private versions and permissions remain isolated. Details are retrieved from `knowledge/`, not injected wholesale into each turn.
+
 - Product success: [PRODUCT_NORTH_STAR.md](PRODUCT_NORTH_STAR.md)
 - Priorities: [PRIORITIZED_BACKLOG.md](PRIORITIZED_BACKLOG.md)
 - Release procedure: [RELEASE_AND_ACCEPTANCE_RUNBOOK.md](RELEASE_AND_ACCEPTANCE_RUNBOOK.md)

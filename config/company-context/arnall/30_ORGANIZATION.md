@@ -1,8 +1,3 @@
-# Organization index
+# Organización
 
-See:
-
-- `organization/TEAM.md` for the initial named users and the limits of known roles.
-- `organization/DEPARTMENTS.md` for the department inventory, which is currently unknown.
-
-Do not infer reporting lines, access rights or responsibilities from a person's name or public association with Arnall.
+Consultar knowledge/organization/PEOPLE.md y DEPARTMENTS.md. Cargos, miembros y responsables requieren una fuente aprobada. Un usuario de prueba no demuestra una relación laboral.

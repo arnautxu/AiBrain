@@ -7,6 +7,7 @@ import { parsePermissionMarkdown } from "@/permissions/markdown-parser";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile, atomicWriteJson } from "@/storage/atomic-file";
 import { ResourceLockManager } from "@/storage/resource-lock";
+import { standardCompanyContextTemplates, LEGACY_CONTEXT_PATHS } from "@/users/company-context-standard";
 import { WorkerProvisioner } from "@/runtime/workers/provisioner";
 
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -144,63 +145,6 @@ const DEFAULT_PREFERENCES = [
   "",
 ].join("\n");
 
-function companyContextTemplates(config: Readonly<InstallationConfig>) {
-  return new Map<string, string>([
-    ["00_SYSTEM.md", [
-      "# AiBrain system context",
-      "",
-      `This is the dedicated AiBrain installation for ${config.companyName}.`,
-      "Treat this file as stable company context, not as employee-specific permissions.",
-      "",
-    ].join("\n")],
-    ["10_IDENTITY.md", [
-      "# Company identity",
-      "",
-      `- Company: ${config.companyName}`,
-      `- Installation: ${config.installationId}`,
-      `- Product: ${config.branding.productName}`,
-      "",
-    ].join("\n")],
-    ["20_COMPANY.md", [
-      "# Company context",
-      "",
-      "No additional company context has been recorded.",
-      "",
-    ].join("\n")],
-    ["30_ORGANIZATION.md", [
-      "# Organization",
-      "",
-      "No organization details have been recorded.",
-      "",
-    ].join("\n")],
-    ["40_WORKFLOWS.md", [
-      "# Company workflows",
-      "",
-      "No company workflows have been recorded.",
-      "",
-    ].join("\n")],
-    ["50_DOCUMENT_RULES.md", [
-      "# Document rules",
-      "",
-      "Documents are read from the server-approved source and staging paths.",
-      "Official documents are published only through the explicit server-side confirmation flow.",
-      "",
-    ].join("\n")],
-    ["KNOWLEDGE_INDEX.md", [
-      "# Knowledge index",
-      "",
-      "Company knowledge is explicit and source-backed. No source has been indexed yet.",
-      "",
-      "## Locations",
-      "",
-      "- `knowledge/departments/`",
-      "- `knowledge/procedures/`",
-      "- `knowledge/glossary/`",
-      "- `knowledge/sources/`",
-      "",
-    ].join("\n")],
-  ]);
-}
 
 async function assertPrivateDirectory(directory: string) {
   const metadata = await lstat(directory);
@@ -303,6 +247,20 @@ async function loadCompanyContextSeed(seedRoot: string): Promise<CompanyContextS
   return { directories, files };
 }
 
+export async function companyContextFiles(config: Readonly<InstallationConfig>, seedRoot?: string) {
+  const files = standardCompanyContextTemplates(config);
+  if (seedRoot) {
+    const seed = await loadCompanyContextSeed(seedRoot);
+    for (const file of seed.files) {
+      if (file.relativePath === "PERMISSIONS.md") {
+        throw new UserProvisioningError("COMPANY_CONTEXT_SEED_UNSAFE", "Company content cannot supply permission policy.");
+      }
+      files.set(LEGACY_CONTEXT_PATHS[file.relativePath] ?? file.relativePath, file.contents);
+    }
+  }
+  return files;
+}
+
 function sameUser(left: LocalUser, right: LocalUser) {
   return left.schemaVersion === right.schemaVersion
     && left.userId === right.userId
@@ -330,30 +288,16 @@ export class UserProvisioner {
     return this.lockManager.withLock(`installation-policy:${this.config.installationId}`, async () => {
       await ensurePrivateDirectory(this.config.paths.dataRoot);
       await ensureDescendantTree(this.config.paths.dataRoot, this.config.paths.companyContextRoot);
-      if (this.options.companyContextSeedRoot) {
-        const seed = await loadCompanyContextSeed(this.options.companyContextSeedRoot);
-        for (const relativeDirectory of seed.directories) {
-          await ensureDescendantTree(
-            this.config.paths.companyContextRoot,
-            path.join(this.config.paths.companyContextRoot, relativeDirectory),
-          );
-        }
-        for (const file of seed.files) {
-          await createFileOnce(
-            path.join(this.config.paths.companyContextRoot, file.relativePath),
-            file.contents,
-            0o400,
-          );
-        }
+      const files = await companyContextFiles(this.config, this.options.companyContextSeedRoot);
+      for (const [fileName, contents] of files) {
+        const contextPath = path.join(this.config.paths.companyContextRoot, fileName);
+        await ensureDescendantTree(this.config.paths.dataRoot, path.dirname(contextPath));
+        await createFileOnce(contextPath, contents, 0o400);
       }
       const knowledgeRoot = path.join(this.config.paths.companyContextRoot, "knowledge");
-      await ensurePrivateDirectory(knowledgeRoot);
+      // Retain legacy locations for existing document references.
       for (const directory of ["departments", "procedures", "glossary", "sources"]) {
         await ensurePrivateDirectory(path.join(knowledgeRoot, directory));
-      }
-      for (const [fileName, contents] of companyContextTemplates(this.config)) {
-        const contextPath = path.join(this.config.paths.companyContextRoot, fileName);
-        await createFileOnce(contextPath, contents, 0o400);
       }
       const policyPath = path.join(this.config.paths.companyContextRoot, "PERMISSIONS.md");
       const expected = installationPolicy(this.config);

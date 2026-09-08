@@ -28,7 +28,7 @@ npm run company-context:seed
 npm run users:provision -- --input /secure/operator/users.json
 ```
 
-El seed busca `config/company-context/<companySlug>/`, crea únicamente carpetas y Markdown ausentes y nunca sustituye ni cambia el modo de un archivo de contexto existente. `users:provision` ejecuta la misma operación antes de crear usuarios, por lo que el comando separado es opcional pero útil para una instalación aún sin empleados. Si no existe un seed versionado para la empresa, se conservan las plantillas genéricas.
+El seed crea el [estándar común de contexto](COMPANY_CONTEXT_STANDARD.md) para todas las empresas y lo complementa con `config/company-context/<companySlug>/` cuando existe. Los detalles se guardan bajo `knowledge/`; los seis resúmenes y el índice se mantienen compactos. Solo crea archivos ausentes y nunca sustituye ni cambia el modo de uno existente. `users:provision` ejecuta la misma operación antes de crear usuarios. Sin seed específico, se crea la misma estructura con identidad propia y datos internos pendientes. Una instalación existente se actualiza mediante exportación, revisión y migración con copia/versionado; el seed no sobrescribe sus documentos.
 
 La documentación de producto que guía al agente no forma parte de esa raíz empresarial. Vive versionada en `config/internal-agent-context/<companySlug>.md`, se empaqueta en un directorio server-only y se inyecta como instrucciones; el sandbox la oculta como archivo y el agente tiene prohibido citarla o describirla. Cada instalación debe revisar UI, capacidades, carpetas, automatizaciones, conectores, límites y respuesta de identidad antes de release.
 
