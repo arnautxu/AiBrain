@@ -508,7 +508,9 @@ describe("WorkerRuntimeRegistry", () => {
       staleStart = original.call(this);
       return staleStart;
     });
-    const registry = new WorkerRuntimeRegistry({ config, factory: new LocalGatewayWorkerRuntimeFactory({ processFactory }), workerConnectTimeoutMs: 250 });
+    // The first startup is deliberately blocked regardless of this deadline.
+    // Give the subsequent real filesystem/process startups a CI-sized budget.
+    const registry = new WorkerRuntimeRegistry({ config, factory: new LocalGatewayWorkerRuntimeFactory({ processFactory }), workerConnectTimeoutMs: 2_000 });
     try {
       await expect(registry.start(syntheticUser(1))).rejects.toThrow(/connect in time/);
       expect(processFactory).not.toHaveBeenCalled();
