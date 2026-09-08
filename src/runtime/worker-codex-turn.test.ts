@@ -837,6 +837,8 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("Approved preference");
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
+    expect(instructions).toContain("Para ella usa lectura local de archivos (shell)");
+    expect(instructions).toContain("no uses aibrain_company_files.search/read para esos documentos");
     expect(instructions).toContain("Para informes de texto sencillos");
     expect(instructions).toContain("Redacta primero el contenido final completo");
     expect(instructions).toContain("usa autoría local con shell y PptxGenJS, no el renderizador básico");
