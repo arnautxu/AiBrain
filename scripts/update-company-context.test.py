@@ -30,6 +30,11 @@ class ContextPublicationTests(unittest.TestCase):
             self.assertTrue(receipt['verified'])
             self.assertEqual((root/'PERMISSIONS.md').read_text(),'policy-unchanged')
             self.assertEqual(json.loads(run().stdout)['changes'],[])
+            backup=revisions/receipt['revision']/'before'/'20_COMPANY.md'
+            backup.write_text('corrupted')
+            self.assertNotEqual(run('--rollback',receipt['revision'],'--apply').returncode,0)
+            self.assertEqual((root/'20_COMPANY.md').read_text(),'new-company')
+            backup.write_text('old-company')
             (root/'20_COMPANY.md').write_text('concurrent-edit')
             self.assertNotEqual(run('--rollback',receipt['revision'],'--apply').returncode,0)
             (root/'20_COMPANY.md').write_text('new-company')
