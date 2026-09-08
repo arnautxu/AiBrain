@@ -1,5 +1,6 @@
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
@@ -513,5 +514,61 @@ describe("presentation render turn boundary", () => {
     expect(metadata).toMatchObject({ status: "review", page: 1, pages: 1, sha256: createHash("sha256").update(data).digest("hex") });
     expect(await readFile(path.join(ctx.projectWorkspace, metadata.reviewPdfPath))).toEqual(data);
     expect(await readdir(ctx.projectWorkspace)).toEqual([".aibrain-drafts"]);
+  });
+});
+
+
+describe("explicit document delivery", () => {
+  const delivery = (relativePath: string) => ({ ...request("delivery-call", "pdf"), tool: "deliver", arguments: { relativePath } });
+  it.each(["pdf", "pptx", "docx", "xlsx"] as const)("delivers only the selected %s bytes and preserves stable repeat identity", async (format) => {
+    const ctx = await context(USER_A);
+    await mkdir(path.join(ctx.projectWorkspace, "documents"));
+    const generated = await generateLocalDocument({ format, title: "Selected final", content: "Reviewed final content" });
+    const relativePath = `documents/final.${format}`;
+    await writeFile(path.join(ctx.projectWorkspace, relativePath), generated.data);
+    await writeFile(path.join(ctx.projectWorkspace, `documents/old.${format}`), generated.data);
+    const first = await handleLocalDocumentDynamicToolCall(delivery(relativePath), ctx);
+    expect(first.response.success).toBe(true);
+    expect(first.artifacts).toHaveLength(1);
+    expect(first.artifacts[0]).toMatchObject({ name: `final.${format}`, kind: format, status: "ready" });
+    const repeated = await handleLocalDocumentDynamicToolCall({ ...delivery(relativePath), callId: "delivery-repeat" }, ctx);
+    expect(repeated.artifacts).toEqual(first.artifacts);
+    const stored = path.join(ctx.installation.paths.dataRoot, "generated-document-artifacts", USER_A, first.artifacts[0]!.id, `final.${format}`);
+    expect(await readFile(stored)).toEqual(generated.data);
+    expect(JSON.stringify(first.response)).not.toContain(ctx.projectWorkspace);
+    const changed = await generateLocalDocument({ format, title: "Changed", content: "Different source bytes" });
+    await writeFile(path.join(ctx.projectWorkspace, relativePath), changed.data);
+    const rejected = await handleLocalDocumentDynamicToolCall(delivery(relativePath), ctx);
+    expect(rejected.response.success).toBe(false);
+    expect(rejected.artifacts).toEqual([]);
+    expect(await readFile(stored)).toEqual(generated.data);
+  });
+
+  it("rejects identity and permission mismatches before source reads", async () => {
+    const ctx = await context(USER_A);
+    for (const [params, policy] of [
+      [{ ...delivery("documents/final.pdf"), turnId: "foreign-turn" }, ctx.permissions],
+      [delivery("documents/final.pdf"), permissions(USER_A, "deny")],
+      [delivery("documents/final.pdf"), permissions(USER_B)],
+    ] as const) {
+      const result = await handleLocalDocumentDynamicToolCall(params, { ...ctx, projectWorkspace: "/nonexistent", permissions: policy });
+      expect(result.response.success).toBe(false);
+      expect(JSON.stringify(result.response)).toMatch(/IDENTITY_MISMATCH|PERMISSION_DENIED/);
+      expect(result.artifacts).toEqual([]);
+    }
+  });
+
+  it("rejects drafts, traversal, symlinks and invalid file bytes without delivery", async () => {
+    const ctx = await context(USER_A);
+    await mkdir(path.join(ctx.projectWorkspace, "documents"));
+    await writeFile(path.join(ctx.projectWorkspace, "documents/fake.pdf"), "not a pdf");
+    await symlink(path.join(ctx.projectWorkspace, "documents/fake.pdf"), path.join(ctx.projectWorkspace, "documents/link.pdf"));
+    await symlink(path.join(ctx.projectWorkspace, "documents"), path.join(ctx.projectWorkspace, "documents/linked"));
+    for (const relativePath of [".aibrain-drafts/review.pdf", "documents/../outside.pdf", "documents/.aibrain-drafts/review.pdf", "/documents/final.pdf", "documents//final.pdf", "documents/fake.pdf", "documents/link.pdf", "documents/linked/fake.pdf"]) {
+      const result = await handleLocalDocumentDynamicToolCall(delivery(relativePath), ctx);
+      expect(result.response.success).toBe(false);
+      expect(result.artifacts).toEqual([]);
+    }
+    expect(await readdir(ctx.installation.paths.dataRoot)).toEqual([]);
   });
 });

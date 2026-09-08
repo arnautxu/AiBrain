@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { PDFDocument } from "pdf-lib";
@@ -112,7 +112,14 @@ try {
     assert.ok(png.length > 1000);
   }
   assert.equal(hash(await readFile(path.join(workspace, sourcePath))), sourceHash, "Review must not mutate source");
-  console.log(JSON.stringify({ status: "passed", tool: "aibrain_documents.render", pdfPages: 2, pngResponses: 2, artifacts: 0, wrongUserRejectedBeforeConversion: true, sourceHashVerified: true }));
+  await mkdir(path.join(workspace, "documents"));
+  await copyFile(path.join(workspace, sourcePath), path.join(workspace, "documents", "final.pptx"));
+  const delivered = await handleLocalDocumentDynamicToolCall({ ...request, tool: "deliver", callId: "delivery-final", arguments: { relativePath: "documents/final.pptx" } }, context);
+  assert.equal(delivered.response.success, true, JSON.stringify(delivered.response));
+  assert.equal(delivered.artifacts.length, 1);
+  const repeated = await handleLocalDocumentDynamicToolCall({ ...request, tool: "deliver", callId: "delivery-repeat", arguments: { relativePath: "documents/final.pptx" } }, context);
+  assert.deepEqual(repeated.artifacts, delivered.artifacts);
+  console.log(JSON.stringify({ status: "passed", tool: "aibrain_documents.render", pdfPages: 2, pngResponses: 2, reviewArtifacts: 0, explicitDeliveries: 1, wrongUserRejectedBeforeConversion: true, sourceHashVerified: true }));
 } finally {
   await rm(root, { recursive: true, force: true });
 }

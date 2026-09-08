@@ -1,164 +1,43 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import type { InstallationConfig } from "@/config/installation-schema";
+import { mkdir, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
-import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
+import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@/runtime/generated-document-artifacts";
 
 vi.mock("server-only", () => ({}));
-
 const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
-
-describe("generated document artifact projection", () => {
-  it("turns a verified workspace PDF mentioned by a command into private preview and download URLs", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-document-artifact-"));
-    roots.push(workspace);
-    await mkdir(path.join(workspace, "informes"));
-    await writeFile(path.join(workspace, "informes", "precios carne.pdf"), Buffer.from("%PDF-1.7\nfixture"));
-
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-document-data-"));
-    roots.push(dataRoot);
-    const artifacts = await generatedDocumentArtifactsFromRuntimeItem({
-      command: `pdfinfo '${path.join(workspace, "informes", "precios carne.pdf")}'`,
-      aggregatedOutput: "Pages:          4\n",
-    }, workspace, "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012", {
-      installation: { installationId: "document-test", paths: { dataRoot } as never },
-      threadId: "00000000-0000-4000-8000-000000000013",
-      storageOwnerId: "00000000-0000-4000-8000-000000000014",
-    });
-
-    expect(artifacts).toHaveLength(1);
-    expect(artifacts[0]).toMatchObject({
-      name: "precios carne.pdf",
-      kind: "pdf",
-      pages: 4,
-      status: "ready",
-      previewUrl: expect.stringContaining("/api/threads/00000000-0000-4000-8000-000000000013/artifacts/"),
-      url: expect.stringContaining("?download=1"),
-    });
-    expect(await readFile(path.join(dataRoot, "generated-document-artifacts", "00000000-0000-4000-8000-000000000014", artifacts[0]!.id, "precios carne.pdf"), "utf8"))
-      .toBe("%PDF-1.7\nfixture");
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+async function fixture() {
+  const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-explicit-document-"));
+  roots.push(dataRoot);
+  const turnId = "00000000-0000-4000-8000-000000000012";
+  const relativePath = "documents/review.pdf";
+  return { artifactId: generatedDocumentArtifactId(turnId, relativePath), relativePath,
+    contents: Buffer.from("%PDF-1.7\nfixture"), pages: 4,
+    context: { installation: { installationId: "document-test", paths: { dataRoot } as InstallationConfig["paths"] },
+      projectId: "00000000-0000-4000-8000-000000000011", messageId: turnId,
+      threadId: "00000000-0000-4000-8000-000000000013", storageOwnerId: "00000000-0000-4000-8000-000000000014" } };
+}
+describe("explicit generated document persistence", () => {
+  it("persists verified bytes immutably behind owner-scoped preview and download URLs", async () => {
+    const input = await fixture();
+    const artifact = await persistGeneratedDocumentArtifact(input);
+    expect(artifact).toMatchObject({ name: "review.pdf", pages: 4, status: "ready",
+      previewUrl: expect.stringContaining(`/api/threads/${input.context.threadId}/artifacts/`), url: expect.stringContaining("?download=1") });
+    const saved = path.join(input.context.installation.paths.dataRoot, "generated-document-artifacts", input.context.storageOwnerId, artifact.id, "review.pdf");
+    expect(await readFile(saved)).toEqual(input.contents);
+    expect(await persistGeneratedDocumentArtifact(input)).toEqual(artifact);
+    await expect(persistGeneratedDocumentArtifact({ ...input, contents: Buffer.from("%PDF-1.7\nchanged") })).rejects.toThrow();
+    expect(await readFile(saved)).toEqual(input.contents);
   });
-
-  it("keeps presentation drafts private even when shell output mentions them, then captures the final", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-presentation-drafts-"));
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-presentation-final-"));
-    roots.push(workspace, dataRoot);
-    await mkdir(path.join(workspace, ".aibrain-drafts", "rendered"), { recursive: true });
-    await mkdir(path.join(workspace, "documents"));
-    const draftPptx = await generateLocalDocument({
-      format: "pptx", title: "Quarterly review", content: "Quarterly review",
-      slides: [{ title: "Results", body: "Revenue grew by 12%." }, { title: "Next quarter", body: "Expand the pilot to two teams." }],
-    });
-    const draftPdf = await generateLocalDocument({ format: "pdf", title: "Preview", content: "Internal preview for layout verification." });
-    await writeFile(path.join(workspace, ".aibrain-drafts", "review.pptx"), draftPptx.data);
-    await writeFile(path.join(workspace, ".aibrain-drafts", "rendered", "review.pdf"), draftPdf.data);
-    const persistence = {
-      installation: { installationId: "document-test", paths: { dataRoot } as never },
-      threadId: "00000000-0000-4000-8000-000000000013",
-      storageOwnerId: "00000000-0000-4000-8000-000000000014",
-    };
-    const projectId = "00000000-0000-4000-8000-000000000011";
-    const turnId = "00000000-0000-4000-8000-000000000012";
-    await expect(generatedDocumentArtifactsFromRuntimeItem({
-      command: "render '.aibrain-drafts/review.pptx'",
-      aggregatedOutput: `Rendered "${path.join(workspace, ".aibrain-drafts", "rendered", "review.pdf")}"`,
-      text: 'Preview "documents/../.aibrain-drafts/review.pptx"',
-      changes: [{ path: ".aibrain-drafts/review.pptx" }],
-    }, workspace, projectId, turnId, persistence)).resolves.toEqual([]);
-    expect(await readdir(dataRoot)).toEqual([]);
-
-    await writeFile(path.join(workspace, "documents", "review.pptx"), draftPptx.data);
-    const artifacts = await generatedDocumentArtifactsFromRuntimeItem({
-      aggregatedOutput: 'Copied "./.aibrain-drafts/review.pptx" to "./documents/review.pptx"',
-    }, workspace, projectId, turnId, persistence);
-    expect(artifacts).toHaveLength(1);
-    expect(artifacts[0]).toMatchObject({ name: "review.pptx", kind: "pptx", status: "ready" });
-    expect(await readFile(path.join(dataRoot, "generated-document-artifacts", persistence.storageOwnerId, artifacts[0]!.id, "review.pptx")))
-      .toEqual(draftPptx.data);
-  });
-
-  it.each(["command", "aggregatedOutput", "text", "contentItems"])("captures bare documents paths from %s without publishing drafts or URL suffixes", async (source) => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-bare-delivery-"));
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-bare-delivery-data-"));
-    roots.push(workspace, dataRoot);
-    await mkdir(path.join(workspace, "documents"));
-    await mkdir(path.join(workspace, ".aibrain-drafts", "documents"), { recursive: true });
-    const generated = await generateLocalDocument({ format: "pptx", title: "Delivery", content: "Verified final presentation" });
-    for (const name of ["final.pptx", "draft.pptx", "remote.pptx"]) {
-      await writeFile(path.join(workspace, "documents", name), generated.data);
-    }
-    await writeFile(path.join(workspace, ".aibrain-drafts", "documents", "draft.pptx"), generated.data);
-    const text = [
-      "Created documents/final.pptx",
-      "Final: `documents/final.pptx`.",
-      'Repeated "./documents/final.pptx"',
-      "Draft .aibrain-drafts/documents/draft.pptx",
-      "Draft ./.aibrain-drafts/documents/draft.pptx",
-      "Remote https://example.test/documents/remote.pptx",
-      "Outside documents/../../private.pptx",
-    ].join("\n");
-    const item = source === "contentItems" ? { contentItems: [{ type: "inputText", text }] } : { [source]: text };
-    const artifacts = await generatedDocumentArtifactsFromRuntimeItem(item, workspace,
-      "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012", {
-        installation: { installationId: "document-test", paths: { dataRoot } as never },
-        threadId: "00000000-0000-4000-8000-000000000013",
-        storageOwnerId: "00000000-0000-4000-8000-000000000014",
-      });
-    expect(artifacts.map((artifact) => artifact.name)).toEqual(["final.pptx"]);
-    expect(await readFile(path.join(dataRoot, "generated-document-artifacts", "00000000-0000-4000-8000-000000000014", artifacts[0]!.id, "final.pptx")))
-      .toEqual(generated.data);
-  });
-
-  it("ignores paths outside the project and files that are not PDFs", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-document-boundary-"));
-    const outside = await mkdtemp(path.join(tmpdir(), "aibrain-document-outside-"));
-    roots.push(workspace, outside);
-    const outsidePdf = path.join(outside, "private.pdf");
-    await writeFile(outsidePdf, Buffer.from("%PDF-1.7\nprivate"));
-    await writeFile(path.join(workspace, "fake.pdf"), Buffer.from("not a pdf"));
-
-    await expect(generatedDocumentArtifactsFromRuntimeItem({
-      command: `pdfinfo '${outsidePdf}' './fake.pdf'`,
-    }, workspace, "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012")).resolves.toEqual([]);
-  });
-
-  it("projects verified DOCX, PPTX and XLSX results with private converted previews", async () => {
-    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-office-artifacts-"));
-    roots.push(workspace);
-    await mkdir(path.join(workspace, "documents"));
-    for (const format of ["docx", "pptx", "xlsx"] as const) {
-      const generated = await generateLocalDocument({
-        format,
-        title: `Documento ${format}`,
-        content: format === "xlsx" ? "Nombre\tValor\nPrueba\t1" : "Contenido real",
-      });
-      await writeFile(path.join(workspace, "documents", `resultado.${format}`), generated.data);
-    }
-
-    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-office-data-"));
-    roots.push(dataRoot);
-    const artifacts = await generatedDocumentArtifactsFromRuntimeItem({
-      contentItems: [{
-        type: "inputText",
-        text: JSON.stringify({ paths: [
-          "documents/resultado.docx",
-          "documents/resultado.pptx",
-          "documents/resultado.xlsx",
-        ] }),
-      }],
-    }, workspace, "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012", {
-      installation: { installationId: "document-test", paths: { dataRoot } as never },
-      threadId: "00000000-0000-4000-8000-000000000013",
-      storageOwnerId: "00000000-0000-4000-8000-000000000014",
-    });
-
-    expect(artifacts.map((artifact) => artifact.kind).sort()).toEqual(["docx", "pptx", "xlsx"]);
-    expect(artifacts.every((artifact) => artifact.previewUrl?.endsWith("?preview=1"))).toBe(true);
-    expect(artifacts.every((artifact) => artifact.url.endsWith("?download=1"))).toBe(true);
+  it("rejects invalid bytes and linked storage roots", async () => {
+    const input = await fixture();
+    await expect(persistGeneratedDocumentArtifact({ ...input, contents: Buffer.from("not a pdf") })).rejects.toThrow();
+    const outside = await mkdtemp(path.join(tmpdir(), "aibrain-outside-")); roots.push(outside);
+    const artifactsRoot = path.join(input.context.installation.paths.dataRoot, "generated-document-artifacts");
+    await mkdir(artifactsRoot, { recursive: true });
+    await symlink(outside, path.join(artifactsRoot, input.context.storageOwnerId));
+    await expect(persistGeneratedDocumentArtifact(input)).rejects.toThrow();
   });
 });

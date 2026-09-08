@@ -807,6 +807,7 @@ describe("worker Codex turn", () => {
           expect.objectContaining({ name: "create" }),
           expect.objectContaining({ name: "image_to_pdf" }),
           expect.objectContaining({ name: "render" }),
+          expect.objectContaining({ name: "deliver" }),
         ]),
       }),
       expect.objectContaining({
@@ -841,6 +842,7 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("/usr/local/share/aibrain/presentations.md");
     expect(instructions).toContain("`.aibrain-drafts/`");
     expect(instructions).toContain("`aibrain_documents.render`");
+    expect(instructions).toContain("`aibrain_documents.deliver`");
     expect(instructions).toContain("no ejecutes conversores desde shell");
     expect(instructions).toContain("inspecciona visualmente todas las diapositivas");
     expect(instructions).toContain("no sustituyas silenciosamente la presentación");
@@ -1322,15 +1324,20 @@ describe("worker Codex turn", () => {
     expect(events).not.toContainEqual({ type: "done" });
   }, 15_000);
 
-  it("keeps reviewing after a completed render beyond the document terminal grace", async () => {
+  it("keeps review active and never delivers existing documents merely listed by a command", async () => {
     vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "5000");
     vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "5000");
     vi.stubEnv("AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS", "1000");
     const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-worker-render-review-"));
     const workspace = path.join(userRoot, "workspace");
     const staging = path.join(userRoot, "staging");
-    await import("node:fs/promises").then(async ({ mkdir }) => {
+    await import("node:fs/promises").then(async ({ mkdir, writeFile }) => {
       await mkdir(workspace, { mode: 0o700 });
+      const documents = path.join(workspace, "projects", projectId, "documents");
+      await mkdir(documents, { recursive: true, mode: 0o700 });
+      const { generateLocalDocument } = await import("@/runtime/documents/local-document-generator");
+      const old = await generateLocalDocument({ format: "pdf", title: "Previous presentation", content: "This is an existing document, not a requested delivery." });
+      await writeFile(path.join(documents, "old-deck.pdf"), old.data);
       await mkdir(path.join(staging, "threads"), { recursive: true, mode: 0o700 });
     });
     const calls: string[] = [];
@@ -1401,13 +1408,20 @@ describe("worker Codex turn", () => {
                   item: { id: "render-review", type: "dynamicToolCall", namespace: "aibrain_documents", tool: "render", status: "completed", contentItems: [{ type: "inputText", text: '{"status":"review","page":1,"pages":3}' }] },
                 },
               }, { eventId: "render-review-completed", sequence: 3, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              await handlers?.onNotification({
+                method: "item/completed",
+                params: {
+                  threadId: "runtime-thread-watchdog", turnId: "runtime-turn-watchdog",
+                  item: { id: "list-existing", type: "commandExecution", command: "ls documents/", status: "completed", aggregatedOutput: "documents/old-deck.pdf\n" },
+                },
+              }, { eventId: "list-existing-completed", sequence: 4, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
               // Reviewing the rendered image can legitimately outlast both
               // terminal grace windows; this is not a final delivery tool.
               await new Promise((resolve) => setTimeout(resolve, 2300));
               await handlers?.onNotification({
                 method: "turn/completed",
                 params: { threadId: "runtime-thread-watchdog", turn: { id: "runtime-turn-watchdog", status: "completed", items: [], error: null } },
-              }, { eventId: "render-review-turn-completed", sequence: 4, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              }, { eventId: "render-review-turn-completed", sequence: 5, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
             })();
           });
           return result;
@@ -1430,7 +1444,7 @@ describe("worker Codex turn", () => {
       },
     };
     mocked.runtime = {
-      config: { installationId, paths: installationPaths },
+      config: { installationId, paths: { ...installationPaths, dataRoot: userRoot } },
       handle: { roots: { workspace, staging, artifacts: path.join(userRoot, "artifacts") } },
       client,
     };
@@ -1469,6 +1483,9 @@ describe("worker Codex turn", () => {
 
     expect(calls).toEqual(["thread/start", "turn/start"]);
     expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(events.filter((event) => event.type === "artifact")).toEqual([]);
+    const { readdir } = await import("node:fs/promises");
+    expect(await readdir(userRoot)).not.toContain("generated-document-artifacts");
     expect(events).toContainEqual({ type: "done" });
   });
 

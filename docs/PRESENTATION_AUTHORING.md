@@ -53,13 +53,27 @@ npm, npx, pip, downloads or uninstalled libraries.
 
 Create drafts, scripts, PDF exports and page renders inside `.aibrain-drafts/`
 in the authorized project workspace. This directory is excluded from automatic
-document delivery. Never place an unfinished deck in `documents/`.
+document delivery. Reading or listing any path never delivers a file. Never place an unfinished deck in `documents/`.
 
 Call `aibrain_documents.render` with the project-relative draft path and a
 one-based page number, for example:
 
 ```json
 {"relativePath":".aibrain-drafts/deck.pptx","page":1}
+```
+
+When calling through `functions.exec`, this runtime returns dynamic-tool
+content as a newline-separated string. Display the image with `image()`;
+never serialize the whole result with `text()` or JSON.stringify, because that
+prints megabytes of base64 instead of showing the slide. For example:
+
+```js
+const result = await tools.aibrain_documents__render({relativePath: ".aibrain-drafts/deck.pptx", page: 1});
+const lines = String(result).split("\n");
+const pageImage = lines.find(line => line.startsWith("data:image/png;base64,"));
+if (!pageImage) throw new Error("Render did not return a page image");
+text(lines[0]);
+image(pageImage);
 ```
 
 The server converts the verified source through its private document sandbox
@@ -80,9 +94,15 @@ does not publish anything. If the tool fails, retain the draft and report the
 specific limitation; do not substitute the basic text renderer or invent a link.
 
 Only after review, copy the requested formats to distinct final paths under
-`documents/`, then print those final paths in a completed shell command. The
-application validates and persists them as private artifacts. Do not copy an
-intermediate deck: published bytes are immutable. If both PDF and PowerPoint
+`documents/`, then call `aibrain_documents.deliver` for each requested file:
+
+```json
+{"relativePath":"documents/presentation.pptx"}
+```
+
+Require a successful delivery result before announcing an attachment. Listing,
+printing or linking a path never creates an attachment. The delivery tool
+validates and persists an immutable private artifact. If both PDF and PowerPoint
 were requested, deliver the PDF exported from that same reviewed PPTX. A PDF
 request does not authorize substituting a PPTX or an A4 text report.
 
