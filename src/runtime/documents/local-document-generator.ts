@@ -250,19 +250,18 @@ function presentationSlides(title: string, content: string, explicit?: readonly 
     const heading = (lines.shift() ?? title).replace(/^#+\s*/u, "");
     return { title: lines.length ? heading : title, body: lines.join("\n") || section };
   });
-  // Split dense slides rather than silently discarding lines or letting text overflow.
-  const slides = sections.flatMap((slide) => {
+  // One authored section is one slide. Reject overflow rather than changing the deck narrative.
+  const slides = sections.map((slide) => {
     if (slide.title.length > 80 || /[\r\n]/u.test(slide.title)) {
       throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Slide titles must be a single line of at most 80 characters; shorten the heading and move detail into the body.");
     }
     const lines = wrapLines("", slide.body, 44).slice(2);
-    const result: LocalDocumentSlide[] = [];
-    for (let offset = 0; offset < lines.length; offset += 12) {
-      result.push({ title: slide.title, body: lines.slice(offset, offset + 12).join("\n") });
+    if (lines.length > 12) {
+      throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDE_OVERFLOW", "A slide exceeds the basic renderer layout. Shorten its body or author a designed deck with the local presentation workflow; no extra slides were created.");
     }
-    return result;
+    return { title: slide.title, body: lines.join("\n") };
   });
-  if (slides.length > 50) throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Presentation exceeds 50 pages after layout; shorten or split it into separate files.");
+  if (slides.length > 50) throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Presentation exceeds 50 slides; shorten or split it into separate files.");
   return slides;
 }
 

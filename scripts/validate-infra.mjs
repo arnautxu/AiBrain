@@ -93,6 +93,9 @@ requireMatch(dockerfile, /ARG DEBIAN_SNAPSHOT=\d{8}T\d{6}Z/u, "Dockerfile does n
 requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile APT source is not the pinned Debian snapshot");
 requireMatch(dockerfile, /snapshot\.debian\.org\/archive\/debian-security\/\$\{DEBIAN_SNAPSHOT\}/u, "Dockerfile security APT source is not the pinned Debian snapshot");
 requireMatch(dockerfile, /USER aibrain:aibrain/u, "Dockerfile final process is not non-root");
+requireMatch(dockerfile, /npm run build:presentation-runtime/u, "Dockerfile does not build the offline presentation runtime");
+requireMatch(dockerfile, /COPY --from=builder --chown=root:root \/app\/dist\/pptxgenjs\.cjs \/usr\/local\/share\/aibrain\/pptxgenjs\.cjs/u, "Dockerfile does not ship the locked presentation authoring bundle");
+requireMatch(dockerfile, /COPY --chown=root:root docs\/PRESENTATION_AUTHORING\.md \/usr\/local\/share\/aibrain\/presentations\.md/u, "Dockerfile does not ship presentation authoring instructions");
 requireMatch(dockerfile, /\bbubblewrap\b/u, "Dockerfile does not install the worker mount sandbox");
 requireMatch(dockerfile, /src\/documents\/publication-locks\.ts/u, "Dockerfile backup CLI is missing the shared publication barrier contract");
 requireMatch(dockerfile, /src\/operations\/backup-replica\.ts/u, "Dockerfile is missing the encrypted backup replica adapter");

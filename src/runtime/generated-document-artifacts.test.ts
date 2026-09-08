@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -42,6 +42,44 @@ describe("generated document artifact projection", () => {
     });
     expect(await readFile(path.join(dataRoot, "generated-document-artifacts", "00000000-0000-4000-8000-000000000014", artifacts[0]!.id, "precios carne.pdf"), "utf8"))
       .toBe("%PDF-1.7\nfixture");
+  });
+
+  it("keeps presentation drafts private even when shell output mentions them, then captures the final", async () => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-presentation-drafts-"));
+    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-presentation-final-"));
+    roots.push(workspace, dataRoot);
+    await mkdir(path.join(workspace, ".aibrain-drafts", "rendered"), { recursive: true });
+    await mkdir(path.join(workspace, "documents"));
+    const draftPptx = await generateLocalDocument({
+      format: "pptx", title: "Quarterly review", content: "Quarterly review",
+      slides: [{ title: "Results", body: "Revenue grew by 12%." }, { title: "Next quarter", body: "Expand the pilot to two teams." }],
+    });
+    const draftPdf = await generateLocalDocument({ format: "pdf", title: "Preview", content: "Internal preview for layout verification." });
+    await writeFile(path.join(workspace, ".aibrain-drafts", "review.pptx"), draftPptx.data);
+    await writeFile(path.join(workspace, ".aibrain-drafts", "rendered", "review.pdf"), draftPdf.data);
+    const persistence = {
+      installation: { installationId: "document-test", paths: { dataRoot } as never },
+      threadId: "00000000-0000-4000-8000-000000000013",
+      storageOwnerId: "00000000-0000-4000-8000-000000000014",
+    };
+    const projectId = "00000000-0000-4000-8000-000000000011";
+    const turnId = "00000000-0000-4000-8000-000000000012";
+    await expect(generatedDocumentArtifactsFromRuntimeItem({
+      command: "render '.aibrain-drafts/review.pptx'",
+      aggregatedOutput: `Rendered "${path.join(workspace, ".aibrain-drafts", "rendered", "review.pdf")}"`,
+      text: 'Preview "documents/../.aibrain-drafts/review.pptx"',
+      changes: [{ path: ".aibrain-drafts/review.pptx" }],
+    }, workspace, projectId, turnId, persistence)).resolves.toEqual([]);
+    expect(await readdir(dataRoot)).toEqual([]);
+
+    await writeFile(path.join(workspace, "documents", "review.pptx"), draftPptx.data);
+    const artifacts = await generatedDocumentArtifactsFromRuntimeItem({
+      aggregatedOutput: 'Copied "./.aibrain-drafts/review.pptx" to "./documents/review.pptx"',
+    }, workspace, projectId, turnId, persistence);
+    expect(artifacts).toHaveLength(1);
+    expect(artifacts[0]).toMatchObject({ name: "review.pptx", kind: "pptx", status: "ready" });
+    expect(await readFile(path.join(dataRoot, "generated-document-artifacts", persistence.storageOwnerId, artifacts[0]!.id, "review.pptx")))
+      .toEqual(draftPptx.data);
   });
 
   it("ignores paths outside the project and files that are not PDFs", async () => {

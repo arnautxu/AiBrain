@@ -217,6 +217,9 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
       : path.normalize(candidate);
     if (!relativePath || relativePath === "." || path.isAbsolute(relativePath) ||
         relativePath === ".." || relativePath.startsWith(`..${path.sep}`)) continue;
+    // Authoring and rendering checks may mention intermediate files. They must
+    // never become immutable chat deliveries before the agent promotes a final.
+    if (relativePath.split(path.sep).includes(".aibrain-drafts")) continue;
 
     try {
       const contents = await readRegularFileWithin(projectWorkspace, relativePath, MAXIMUM_DOCUMENT_BYTES);
