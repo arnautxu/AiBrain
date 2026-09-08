@@ -52,6 +52,8 @@ import {
   type ChatStreamRecoveryState,
 } from "@/ui/recoverable-chat-stream";
 import { createChatReattachRequest } from "@/ui/chat-reattach-request";
+import { useStoredResponse } from "@/ui/use-stored-response";
+import { useRuntimeStatus } from "@/ui/use-runtime-status";
 import {
   ClientTurnPerformance,
   type ClientTurnPerformanceReadback,
@@ -72,8 +74,6 @@ import {
   type BrowserUiStatus,
 } from "@/ui/browser-ui-adapter";
 import {
-  initialRuntimeStatus,
-  isRuntimeStatus,
   type RuntimeStatus,
 } from "@/lib/runtime-status";
 import {
@@ -175,7 +175,7 @@ type ConfirmDialogState =
 type StreamRecoveryNotice = {
   threadId: string;
   assistantMessageId: string;
-  attempt: number;
+  attempt: number | null;
 };
 
 type QueuedChatTurn = {
@@ -616,16 +616,19 @@ export function BrainApp({
   const [automationsOpen, setAutomationsOpen] = useState(false);
   const [automationsBlockingSurfaceOpen, setAutomationsBlockingSurfaceOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>(initialRuntimeStatus);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
   const [networkOnline, setNetworkOnline] = useState(true);
+  const initializedSelectionKey = useRef<string | null>(null);
   const [runtimeRetry, setRuntimeRetry] = useState(0);
+  const runtimeStatus = useRuntimeStatus({ hydrated, online: networkOnline, projectId: activeProjectId, retry: runtimeRetry });
   const [mobileSidebarRestoreFocus, setMobileSidebarRestoreFocus] = useState(false);
   const [compactOverlayLayout, setCompactOverlayLayout] = useState(false);
   const [textDialog, setTextDialog] = useState<TextDialogState | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
   const [notice, setNotice] = useState<WorkbenchNotice | null>(null);
   const [streamRecoveryNotice, setStreamRecoveryNotice] = useState<StreamRecoveryNotice | null>(null);
+  const [storedResponseRetry, setStoredResponseRetry] = useState(0);
+  const streamRetryRef = useRef(new Map<string, () => void>());
   const [pendingBranchSend, setPendingBranchSend] = useState<{ threadId: string; content: string } | null>(null);
   const [queuedTurns, setQueuedTurns] = useState<QueuedChatTurn[]>([]);
   const [dispatchingQueuedTurnId, setDispatchingQueuedTurnId] = useState<string | null>(null);
@@ -702,6 +705,11 @@ export function BrainApp({
   }, []);
 
   useEffect(() => {
+    // A server-component refresh may supply a new snapshot object while a turn
+    // is attached. Initialize once per identity/mount; only a fresh page resets
+    // navigation to the landing page. Never discard a live turn on a soft refresh.
+    if (initializedSelectionKey.current === selectionKey) return;
+    initializedSelectionKey.current = selectionKey;
     const snapshot = initialWorkbench.persistence === "browser-preview"
       ? loadPreviewSnapshot(previewKey, initialWorkbench)
       : initialWorkbench;
@@ -815,7 +823,6 @@ export function BrainApp({
       const online = navigator.onLine;
       setNetworkOnline(online);
       if (online) setRuntimeRetry((current) => current + 1);
-      else setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
     };
     setNetworkOnline(navigator.onLine);
     window.addEventListener("online", updateNetwork);
@@ -858,6 +865,20 @@ export function BrainApp({
     () => threads.find((thread) => thread.id === activeThreadId) ?? null,
     [activeThreadId, threads],
   );
+  const applyStoredResponse = useCallback((threadId: string, message: ChatMessage) => {
+    setThreads(current => updateThreadMessage(current, threadId, message.id, previous =>
+      applyChatStreamEvent(previous, { type: "snapshot", message })));
+    if (message.status !== "streaming") {
+      streamRetryRef.current.get(threadId)?.();
+      setStreamRecoveryNotice(current => current?.threadId === threadId ? null : current);
+    }
+  }, []);
+  const storedResponsePhase = useStoredResponse({
+    thread: activeThread, enabled: initialWorkbench.persistence === "filesystem", online: networkOnline,
+    attached: Boolean(activeThread && runningThreadIds.has(activeThread.id) &&
+      !(streamRecoveryNotice?.threadId === activeThread.id && streamRecoveryNotice.attempt === null)),
+    retry: storedResponseRetry, onSnapshot: applyStoredResponse,
+  });
   const updateComposerPrompt = useCallback((value: string) => {
     const bounded = value.slice(0, MAX_COMPOSER_DRAFT_CHARS);
     const key = composerDraftKey(
@@ -1090,53 +1111,6 @@ export function BrainApp({
     turnReservationsRef.current.clear();
   }, []);
 
-  useEffect(() => {
-    if (!hydrated || !networkOnline) return;
-    const controller = new AbortController();
-    let disposed = false;
-    let retryTimer: number | undefined;
-    const scheduleRetry = () => {
-      if (disposed || retryTimer) return;
-      const retryAfterMs = Math.min(30_000, 2_000 * (2 ** Math.min(runtimeRetry, 4)));
-      retryTimer = window.setTimeout(() => {
-        if (!disposed && navigator.onLine) setRuntimeRetry((current) => current + 1);
-      }, retryAfterMs);
-    };
-    const timeout = window.setTimeout(() => {
-      if (disposed) return;
-      setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
-      controller.abort();
-      scheduleRetry();
-    // The server caps this request at 35 seconds. Keep the browser deadline
-    // slightly above it so a cold, valid Codex worker can report its result.
-    }, 40_000);
-    const query = activeProjectId ? `?projectId=${encodeURIComponent(activeProjectId)}` : "";
-    setRuntimeStatus((current) => ({ ...current, codex: "checking", ready: false }));
-    void fetch(`/api/runtime/status${query}`, { signal: controller.signal, cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((status: unknown) => {
-        if (isRuntimeStatus(status)) {
-          setRuntimeStatus(status);
-          if (status.mode === "codex" && !status.ready) scheduleRetry();
-        } else {
-          setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
-          scheduleRetry();
-        }
-      })
-      .catch(() => {
-        if (!disposed) {
-          setRuntimeStatus((current) => ({ ...current, codex: "unavailable", ready: false }));
-          scheduleRetry();
-        }
-      })
-      .finally(() => window.clearTimeout(timeout));
-    return () => {
-      disposed = true;
-      window.clearTimeout(timeout);
-      if (retryTimer) window.clearTimeout(retryTimer);
-      controller.abort();
-    };
-  }, [activeProjectId, hydrated, networkOnline, runtimeRetry]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -1417,6 +1391,19 @@ export function BrainApp({
         startedAt,
         onEvent: dispatcher.dispatch,
         onMeasurement: (measurement) => performance.transportMeasured(measurement),
+        waitForRetry: (retrySignal) => new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            window.removeEventListener("online", resume);
+            retrySignal.removeEventListener("abort", abort);
+            if (streamRetryRef.current.get(threadId) === resume) streamRetryRef.current.delete(threadId);
+          };
+          const resume = () => { cleanup(); resolve(); };
+          const abort = () => { cleanup(); reject(retrySignal.reason ?? new DOMException("Aborted", "AbortError")); };
+          streamRetryRef.current.set(threadId, resume);
+          window.addEventListener("online", resume, { once: true });
+          retrySignal.addEventListener("abort", abort, { once: true });
+          if (retrySignal.aborted) abort();
+        }),
         onAccepted: () => {
           dispatcher.dispatch({
             type: "activity",
@@ -1430,8 +1417,14 @@ export function BrainApp({
           performance.feedbackApplied("accepted");
         },
         onRecoveryState: (state: ChatStreamRecoveryState) => {
+          if (state.state === "paused") {
+            setStreamRecoveryNotice({ threadId, assistantMessageId, attempt: null });
+            return;
+          }
           if (state.state === "recovering") {
             performance.reconnectStarted();
+            setStreamRecoveryNotice(current => current?.threadId === threadId && current.attempt === null
+              ? { threadId, assistantMessageId, attempt: state.attempt } : current);
             return;
           }
           if (state.state === "stalled") {
@@ -1622,7 +1615,7 @@ export function BrainApp({
             ...message,
             status: stopped ? "stopped" : "error",
             ...(!stopped && !message.content
-              ? { content: error instanceof Error ? error.message : t("Error desconocido") }
+              ? { content: error instanceof Error ? t(error.message) : t("Error desconocido") }
               : {}),
           }),
         ));
@@ -2326,8 +2319,10 @@ export function BrainApp({
         runtimeStatus={effectiveRuntimeStatus}
         networkOnline={networkOnline}
         streamRecovery={streamRecoveryNotice?.threadId === activeThreadId
-          ? { attempt: streamRecoveryNotice.attempt }
-          : null}
+          ? { attempt: streamRecoveryNotice.attempt, paused: streamRecoveryNotice.attempt === null,
+            onRetry: () => { streamRetryRef.current.get(activeThreadId!)?.(); setStoredResponseRetry(current => current + 1); } }
+          : storedResponsePhase ? { attempt: storedResponsePhase === "checking" ? 0 : null, paused: storedResponsePhase === "paused",
+            onRetry: () => setStoredResponseRetry(current => current + 1) } : null}
         onRetryRuntime={() => setRuntimeRetry((current) => current + 1)}
         onPromptChange={updateComposerPrompt}
         onComposerExperienceChange={setComposerExperience}

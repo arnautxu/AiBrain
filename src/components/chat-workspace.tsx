@@ -89,7 +89,7 @@ type ChatWorkspaceProps = {
   queuedMessages: readonly QueuedMessage[];
   runtimeStatus: RuntimeStatus;
   networkOnline: boolean;
-  streamRecovery: { attempt: number } | null;
+  streamRecovery: { attempt: number | null; paused?: boolean; onRetry?: () => void } | null;
   onRetryRuntime: () => void;
   onPromptChange: (value: string) => void;
   onComposerExperienceChange: (value: ComposerExperience) => void;
@@ -666,10 +666,17 @@ export function ChatWorkspace({
   };
   const changeComposerText = (text: string) => {
     onPromptChange(text);
-    const retained = new Set(mentionTextParts(text, selectedMentions).flatMap(part => part.id ? [part.id] : []));
-    const ids = selectedConnectorMentionIds.filter(id => retained.has(id));
-    if (ids.length !== selectedConnectorMentionIds.length) onConnectorMentionIdsChange(ids);
   };
+  // The editable text is authoritative, including paste, undo and restored drafts.
+  // A partial/deleted token cannot retain an invisible tool selection.
+  useEffect(() => {
+    if (!hydrated || connectorMentions.length === 0 || composing) return;
+    const ids = [...new Set(mentionTextParts(prompt, connectorMentions.filter(mention => mention.canRead))
+      .flatMap(part => part.id ? [part.id] : []))];
+    if (ids.length !== selectedConnectorMentionIds.length || ids.some((id, index) => id !== selectedConnectorMentionIds[index])) {
+      onConnectorMentionIdsChange(ids);
+    }
+  }, [hydrated, prompt, connectorMentions, composing, selectedConnectorMentionIds, onConnectorMentionIdsChange]);
   // Native textarea owns caret, selection, undo, clipboard and IME. Its decorative
   // overlay has exactly the same metrics; no contenteditable serialization.
   useLayoutEffect(() => {
@@ -740,17 +747,17 @@ export function ChatWorkspace({
     if (!mention.canRead) { connectMention(mention); return; }
     const prefix = prompt.slice(0, start);
     const token = `${prefix && !/\s$/u.test(prefix) ? " " : ""}@${mention.label} `;
-    onPromptChange(`${prefix}${token}${prompt.slice(end)}`);
-    if (!selectedConnectorMentionIds.includes(mention.id)) onConnectorMentionIdsChange([...selectedConnectorMentionIds, mention.id]);
-    setMentionOpen(false);
-    setConnectorCatalogOpen(false);
-    requestAnimationFrame(() => {
-      const textarea = composerRef.current;
-      if (!textarea) return;
-      textarea.focus();
+    const next = `${prefix}${token}${prompt.slice(end)}`;
+    const textarea = composerRef.current;
+    if (textarea) {
+      textarea.value = next;
+      textarea.focus({ preventScroll: true });
       textarea.setSelectionRange(start + token.length, start + token.length);
       syncCaret(textarea);
-    });
+    }
+    changeComposerText(next);
+    setMentionOpen(false);
+    setConnectorCatalogOpen(false);
   };
   const selectConnectorMention = (mention: ConnectorMention) => {
     if (mentionMatch) insertMention(mention, mentionMatch.start, mentionMatch.end);
@@ -961,7 +968,7 @@ export function ChatWorkspace({
             language={locale}
             className="mb-2 max-w-none"
           /> : null}
-          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />{t("Sin conexión. El historial sigue disponible y no se enviará nada.")}</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner attempt={streamRecovery.attempt} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Enviando solicitud")}</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Conectando con el servicio…")}</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>{t("El servicio no está disponible. Puedes revisar el historial.")}</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>{t("Reintentar")}</button></div> : null}
+          {!networkOnline ? <div className={`menu-enter flex min-h-11 items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" />{t("Sin conexión. El historial sigue disponible y no se enviará nada.")}</div> : streamRecovery ? <div className={hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}><StreamRecoveryBanner {...streamRecovery} /></div> : sending && !hasMessages ? <div className="absolute inset-x-0 bottom-full mb-2 flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)]" role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Enviando solicitud")}</div> : runtimeStatus.codex === "checking" ? <div className={`flex min-h-9 items-center justify-center gap-2 text-center text-[11px] text-[var(--text-secondary)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="status"><span className="size-3.5 animate-spin rounded-full border-2 border-[var(--border-strong)] border-t-[var(--text-secondary)] motion-reduce:animate-none" aria-hidden="true" />{t("Conectando con el servicio…")}</div> : runtimeStatus.mode === "codex" && !runtimeStatus.ready ? <div className={`menu-enter flex min-h-11 flex-wrap items-center justify-center gap-2 rounded-[18px] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-4 py-2.5 text-center text-[12px] text-[var(--text-secondary)] shadow-[var(--shadow-popover)] ${hasMessages ? "mb-2" : "absolute inset-x-0 bottom-full mb-2"}`} role="alert"><WarningCircle size={15} className="shrink-0 text-[var(--text-subtle)]" /><span>{t("El servicio no está disponible. Puedes revisar el historial.")}</span><button type="button" className="min-h-8 rounded-full border border-[var(--border-strong)] bg-[var(--surface-raised)] px-3 text-[11px] font-semibold text-[var(--text)] transition hover:bg-[var(--surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--focus)]" onClick={onRetryRuntime}>{t("Reintentar")}</button></div> : null}
           <div
             ref={composerShellRef}
             data-testid="composer"
@@ -1038,7 +1045,7 @@ export function ChatWorkspace({
               placeholder={imageGeneration ? t("Describe la imagen que quieres crear…") : t("Escribe a {name}…", { name: placeholderName })}
               rows={1}
               defaultValue={prompt}
-              onChange={(event) => { changeComposerText(event.target.value); syncCaret(event.target); setConnectorCatalogOpen(false); setMentionActiveIndex(0); setMentionOpen(Boolean(mentionQueryAt(event.target.value, event.target.selectionStart))); }}
+              onChange={(event) => { changeComposerText(event.target.value); syncCaret(event.target); setConnectorCatalogOpen(false); setMentionActiveIndex(0); const inputType = (event.nativeEvent as InputEvent).inputType ?? ""; setMentionOpen(!inputType.startsWith("delete") && Boolean(mentionQueryAt(event.target.value, event.target.selectionStart))); }}
               onSelect={(event) => syncCaret(event.currentTarget)}
               onClick={(event) => { syncCaret(event.currentTarget); setMentionOpen(Boolean(mentionQueryAt(event.currentTarget.value, event.currentTarget.selectionStart))); }}
               onScroll={(event) => { if (mentionOverlayRef.current) mentionOverlayRef.current.scrollTop = event.currentTarget.scrollTop; }}

@@ -1294,5 +1294,10 @@
   "Abrir {name}": "Open {name}",
   "Seleccionar {name}": "Select {name}",
   "Adjuntar {name}": "Attach {name}",
-  "Unidad {name}:": "Drive {name}:"
+  "Unidad {name}:": "Drive {name}:",
+  "Experimental": "Experimental",
+  "No se puede comprobar la respuesta ahora. El trabajo y los resultados guardados se conservan.": "The response cannot be checked right now. The work and saved results are preserved.",
+  "Recuperando la respuesta guardada…": "Recovering the saved response…",
+  "Reconectar respuesta": "Reconnect response",
+  "La conexión de la respuesta no se ha podido recuperar.": "The response connection could not be recovered."
 }

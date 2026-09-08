@@ -40,6 +40,9 @@ export default defineConfig({
         "**/visual-matrix/**",
         "**/accessibility/**",
         "**/image-delivery-webkit.spec.ts",
+        "**/connector-editing-webkit.spec.ts",
+        "**/composer-editing-placement.spec.ts",
+        "**/response-network-recovery.spec.ts",
       ],
     },
     {

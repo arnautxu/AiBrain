@@ -25,7 +25,7 @@ function parseEvent(line: string): ChatStreamEvent {
 export async function consumeChatEventStream(
   response: Response,
   onEvent: (event: ChatStreamEvent) => void,
-  options: { signal?: AbortSignal } = {},
+  options: { signal?: AbortSignal; onActivity?: () => void; stopOnTerminal?: boolean } = {},
 ) {
   if (!response.body) {
     throw new ChatStreamProtocolError("La respuesta no contiene datos.");
@@ -34,6 +34,7 @@ export async function consumeChatEventStream(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let terminal = false;
   const abortError = () => options.signal?.reason instanceof Error
     ? options.signal.reason
     : new DOMException("La lectura del stream se ha cancelado.", "AbortError");
@@ -45,7 +46,10 @@ export async function consumeChatEventStream(
     if (line.length > MAX_EVENT_LINE_LENGTH) {
       throw new ChatStreamProtocolError("El evento recibido supera el límite permitido.");
     }
-    onEvent(parseEvent(line));
+    const event = parseEvent(line);
+    onEvent(event);
+    terminal = options.stopOnTerminal === true && (event.type === "done" || event.type === "stopped" || event.type === "error" ||
+      (event.type === "snapshot" && event.message.status !== "streaming"));
   };
 
   try {
@@ -53,13 +57,17 @@ export async function consumeChatEventStream(
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      options.onActivity?.();
       buffer += decoder.decode(value, { stream: true });
       if (buffer.length > MAX_EVENT_LINE_LENGTH && !buffer.includes("\n")) {
         throw new ChatStreamProtocolError("El evento recibido supera el límite permitido.");
       }
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
-      lines.forEach(applyLine);
+      for (const line of lines) {
+        applyLine(line);
+        if (terminal) { await reader.cancel().catch(() => undefined); return; }
+      }
     }
     buffer += decoder.decode();
     applyLine(buffer);

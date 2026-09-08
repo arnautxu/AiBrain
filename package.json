@@ -20,6 +20,7 @@
     "test:contract": "vitest run tests/contract",
     "test:e2e": "npm run test:e2e:backend && npm run test:e2e:ui",
     "test:e2e:backend": "vitest run --config vitest.e2e.config.mts",
+    "test:e2e:recovery": "playwright test --config=playwright.recovery.config.ts",
     "test:e2e:ui": "playwright test --project=chromium-desktop --project=webkit-iphone",
     "test:visual": "playwright test --project=visual-desktop --project=visual-mobile --project=visual-matrix",
     "test:a11y": "playwright test --project=accessibility",

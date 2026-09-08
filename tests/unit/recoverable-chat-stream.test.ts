@@ -69,6 +69,7 @@ function controlledResponse() {
     response: new Response(body),
     emit(event: ChatStreamEvent) { controller?.enqueue(encoder.encode(`${JSON.stringify(event)}\n`)); },
     close() { controller?.close(); },
+    heartbeat() { controller?.enqueue(encoder.encode("\n")); },
   };
 }
 
@@ -209,6 +210,7 @@ describe("recoverable chat stream", () => {
 
   it("preserves a sanitized server error after retrying a temporary HTTP failure", async () => {
     const scheduler = new ControlledScheduler();
+    const states: unknown[] = [];
     const request = vi.fn(async () => Response.json({
       error: "Servicio sintético no disponible.",
       internal: "must not be shown",
@@ -217,19 +219,19 @@ describe("recoverable chat stream", () => {
       request,
       signal: new AbortController().signal,
       onEvent: () => undefined,
-      onRecoveryState: () => undefined,
+      onRecoveryState: state => states.push(state),
       onMeasurement: () => undefined,
       scheduler: scheduler.api,
       startedAt: 0,
     });
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      await vi.waitFor(() => expect(scheduler.hasPending()).toBe(true));
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt: attempt + 1 }));
       scheduler.runNext();
     }
 
     await expect(run).rejects.toThrow("Servicio sintético no disponible.");
-    expect(request).toHaveBeenCalledTimes(5);
+    expect(request).toHaveBeenCalledTimes(9);
   });
 
   it("returns a non-retryable server error immediately", async () => {
@@ -248,4 +250,163 @@ describe("recoverable chat stream", () => {
     await expect(run).rejects.toThrow("La petición no es válida.");
     expect(request).toHaveBeenCalledTimes(1);
   });
+});
+
+describe("bounded transport recovery without replaying work", () => {
+  const saved = (content = "Saved result", status: ChatMessage["status"] = "complete"): ChatMessage => ({
+    id: "same-assistant", role: "assistant", content, status, createdAt: "2026-09-08T00:00:00.000Z",
+    activity: [], plan: [], approvals: [], diff: "", attachments: [], artifacts: [], sources: [], toolResults: [],
+  });
+  it("survives a twelve-second outage using exactly the same turn identity", async () => {
+    const scheduler = new ControlledScheduler();
+    const states: Array<{ state: string; attempt?: number }> = [];
+    const bodies: unknown[] = [];
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      bodies.push(init?.body);
+      if (scheduler.nowMs < 12_000) throw new TypeError("network unavailable");
+      return response([{ type: "snapshot", message: saved() }]);
+    });
+    const events: ChatStreamEvent[] = [];
+    const run = consumeRecoverableChatStream({ request: createChatReattachRequest('{"assistantMessageId":"same-assistant"}', fetcher),
+      signal: new AbortController().signal, scheduler: scheduler.api,
+      onEvent: event => events.push(event), onRecoveryState: state => states.push(state), onMeasurement: () => undefined });
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt }));
+      scheduler.runNext();
+    }
+    await run;
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(new Set(bodies).size).toBe(1);
+    expect(events).toEqual([{ type: "snapshot", message: saved() }]);
+  });
+
+  it("pauses after a bounded retry window and resumes on explicit retry without inventing a failed result", async () => {
+    const scheduler = new ControlledScheduler();
+    const states: Array<{ state: string; attempt?: number }> = [];
+    const events: ChatStreamEvent[] = [];
+    let restored = false;
+    let resume!: () => void;
+    const request = vi.fn(async () => {
+      if (restored) return response([{ type: "snapshot", message: saved() }]);
+      if (request.mock.calls.length === 1) return response([{ type: "snapshot", message: saved("Partial", "streaming") }]);
+      throw new TypeError("offline");
+    });
+    const run = consumeRecoverableChatStream({ request, signal: new AbortController().signal,
+      scheduler: scheduler.api, onEvent: event => events.push(event), onMeasurement: () => undefined,
+      onRecoveryState: state => states.push(state), waitForRetry: () => new Promise(resolve => { resume = resolve; }) });
+    for (let attempt = 1; attempt <= 8; attempt++) {
+      await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt }));
+      scheduler.runNext();
+    }
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "paused" }));
+    scheduler.advance(300_000);
+    expect(request).toHaveBeenCalledTimes(9);
+    expect(events.some(event => event.type === "error")).toBe(false);
+    restored = true;
+    resume();
+    await flush();
+    scheduler.runNext();
+    await run;
+    expect(events.at(-1)).toEqual({ type: "snapshot", message: saved() });
+  });
+
+  it("bounds a request that never opens and aborts only that transport attempt", async () => {
+    const scheduler = new ControlledScheduler();
+    const states: unknown[] = [];
+    let timedOut = false;
+    const parent = new AbortController();
+    const request = vi.fn((signal: AbortSignal) => request.mock.calls.length === 1
+      ? new Promise<Response>((_resolve, reject) => signal.addEventListener("abort", () => { timedOut = true; reject(signal.reason); }, { once: true }))
+      : Promise.resolve(response([{ type: "snapshot", message: saved() }])));
+    const run = consumeRecoverableChatStream({ request, signal: parent.signal, scheduler: scheduler.api,
+      onEvent: () => undefined, onRecoveryState: state => states.push(state), onMeasurement: () => undefined });
+    scheduler.advance(40_000);
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt: 1 }));
+    expect(timedOut).toBe(true);
+    expect(parent.signal.aborted).toBe(false);
+    scheduler.runNext();
+    await run;
+  });
+
+  it("keeps a quiet stream with heartbeat bytes and completes without waiting for EOF", async () => {
+    const scheduler = new ControlledScheduler();
+    const source = controlledResponse();
+    const accepted = vi.fn();
+    const states: unknown[] = [];
+    const request = vi.fn(async () => source.response);
+    const run = consumeRecoverableChatStream({ request, signal: new AbortController().signal, scheduler: scheduler.api,
+      onAccepted: accepted, onEvent: () => undefined, onRecoveryState: state => states.push(state), onMeasurement: () => undefined });
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce());
+    for (let i = 0; i < 3; i++) { scheduler.advance(30_000); source.heartbeat(); await flush(); }
+    expect(states).toEqual([]);
+    source.emit({ type: "done" }); // Deliberately no EOF.
+    await run;
+    expect(request).toHaveBeenCalledOnce();
+    expect(scheduler.hasPending()).toBe(false);
+  });
+
+  it("reattaches a silently dead stream after missing heartbeats", async () => {
+    const scheduler = new ControlledScheduler();
+    const source = controlledResponse();
+    const accepted = vi.fn();
+    const states: unknown[] = [];
+    const request = vi.fn(async () => request.mock.calls.length === 1 ? source.response
+      : response([{ type: "snapshot", message: saved() }]));
+    const run = consumeRecoverableChatStream({ request, signal: new AbortController().signal, scheduler: scheduler.api,
+      onAccepted: accepted, onEvent: () => undefined, onRecoveryState: state => states.push(state), onMeasurement: () => undefined });
+    await vi.waitFor(() => expect(accepted).toHaveBeenCalledOnce());
+    scheduler.advance(45_000);
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt: 1 }));
+    scheduler.runNext();
+    await run;
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+  it("pauses repeated silent snapshots instead of renewing the recovery budget forever", async () => {
+    const scheduler = new ControlledScheduler();
+    const states: Array<{ state: string }> = [];
+    const parent = new AbortController();
+    const request = vi.fn(async () => {
+      const stream = controlledResponse();
+      stream.emit({ type: "snapshot", message: saved("Partial", "streaming") });
+      return stream.response;
+    });
+    const run = consumeRecoverableChatStream({ request, signal: parent.signal, scheduler: scheduler.api,
+      onEvent: () => undefined, onRecoveryState: state => states.push(state), onMeasurement: () => undefined,
+      waitForRetry: signal => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason))) });
+    const rejected = expect(run).rejects.toThrow("test complete");
+    for (let i = 0; i < 20 && !states.some(s => s.state === "paused"); i++) {
+      await flush();
+      if (scheduler.hasPending()) scheduler.runNext();
+    }
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "paused" }));
+    expect(request.mock.calls.length).toBeLessThan(6);
+    const count = request.mock.calls.length;
+    scheduler.advance(300_000);
+    expect(request).toHaveBeenCalledTimes(count);
+    parent.abort(new Error("test complete"));
+    await rejected;
+  });
+
+  it("pauses an auth rejection after uncertain admission without fabricating a terminal error", async () => {
+    const scheduler = new ControlledScheduler();
+    const events: ChatStreamEvent[] = [];
+    const states: unknown[] = [];
+    const parent = new AbortController();
+    const request = vi.fn(async () => {
+      if (request.mock.calls.length === 1) throw new TypeError("lost admission response");
+      return Response.json({ error: "Sign in" }, { status: 401 });
+    });
+    const run = consumeRecoverableChatStream({ request, signal: parent.signal, scheduler: scheduler.api,
+      onEvent: event => events.push(event), onRecoveryState: state => states.push(state), onMeasurement: () => undefined,
+      waitForRetry: signal => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason))) });
+    const rejected = expect(run).rejects.toThrow("test complete");
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "recovering", attempt: 1 }));
+    scheduler.runNext();
+    await vi.waitFor(() => expect(states).toContainEqual({ state: "paused" }));
+    expect(events).toEqual([]);
+    expect(request).toHaveBeenCalledTimes(2);
+    parent.abort(new Error("test complete"));
+    await rejected;
+  });
+
 });
