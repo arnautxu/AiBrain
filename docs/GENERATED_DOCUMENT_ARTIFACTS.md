@@ -92,3 +92,30 @@ Los recibos incluyen las diapositivas en su huella de idempotencia. Las pruebas
 locales cubren formatos, límites, paginación y entrega durable; la aceptación de
 una presentación requiere además inspección del archivo real generado por un
 turno autenticado. CI, publicación y despliegue siguen siendo gates separados.
+
+## Conversión headless en el contenedor restringido
+
+El conversor usa un `/proc` vacío de solo lectura dentro de su namespace PID.
+No monta el proc del host ni relaja el aislamiento cuando el kernel rechaza un
+nuevo procfs. LibreOffice se ejecuta mediante su binario nativo con directorio
+de bibliotecas fijo, perfil privado, backend `svp` y HOME/XDG/TMPDIR privados y
+escribibles. Se conservan `--safe-mode`, `--norestore` y el nivel de seguridad de
+macros. Los códigos de ciclo de vida 81/82 permiten como máximo tres ejecuciones
+del mismo comando; otros errores se propagan sin reintentar.
+
+La guía de autoría del worker utiliza los mismos launchers de conversión desde
+un directorio temporal autorizado, para evitar heredar caches de solo lectura
+o intentar abrir un display. El estado correcto exige un PDF real y páginas PNG
+válidas; un preflight que solo comprueba montajes o una salida cero no demuestra
+conversión. La prueba de contenedor debe usar las restricciones de producción y
+comprobar exportación y renderizado, además de las fronteras de privacidad.
+
+El perfil seccomp permite `close_range` para cerrar descriptores sin consultar
+`/proc`; `clone3` sigue denegado con ENOSYS para conservar el fallback de libc
+a las reglas restringidas de `clone`. La publicación de este cambio requiere
+actualizar también el perfil del host. Backend CI ejecuta
+`scripts/container-document-conversion-acceptance.mjs` en la imagen final:
+PptxGenJS → PDF de dos páginas → texto verificado → dos PNG, sin red ni datos de
+clientes. La reproducción aislada con la imagen desplegada también convirtió
+el deck recuperado de Minecraft en ocho páginas PDF y ocho PNG. Esto no prueba
+que el cambio esté desplegado ni sustituye una nueva aceptación autenticada.

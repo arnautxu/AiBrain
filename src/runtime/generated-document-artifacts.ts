@@ -161,7 +161,10 @@ const GENERATED_FORMATS = {
 function pathsInText(value: unknown) {
   if (typeof value !== "string") return [];
   const paths: string[] = [];
-  const expression = /(?:"([^"\n\r]+\.(?:pdf|docx|pptx|xlsx))"|'([^'\n\r]+\.(?:pdf|docx|pptx|xlsx))'|((?:\/|\.{1,2}\/)[^\s"'<>|]+\.(?:pdf|docx|pptx|xlsx)))/giu;
+  // Shell listings often print the delivery path without quotes or ./.
+  // Match complete path tokens so URLs and draft-path suffixes cannot be
+  // reinterpreted as a different workspace file.
+  const expression = /(?:"([^"\n\r]+\.(?:pdf|docx|pptx|xlsx))"|'([^'\n\r]+\.(?:pdf|docx|pptx|xlsx))'|(?<![\w./:-])((?:\/|\.{1,2}\/|documents\/)[^\s"'<>|`()[\]{}]+\.(?:pdf|docx|pptx|xlsx))(?=$|[\s"'<>|`()[\]{},;.!?]))/giu;
   for (const match of value.matchAll(expression)) {
     const candidate = match[1] ?? match[2] ?? match[3];
     if (candidate) paths.push(candidate);
@@ -210,6 +213,7 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
   if (!isRecord(value)) return [];
   const pages = pageCount(value);
   const artifacts: DocumentArtifact[] = [];
+  const capturedPaths = new Set<string>();
 
   for (const candidate of runtimeDocumentPaths(value)) {
     const relativePath = path.isAbsolute(candidate)
@@ -220,6 +224,7 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
     // Authoring and rendering checks may mention intermediate files. They must
     // never become immutable chat deliveries before the agent promotes a final.
     if (relativePath.split(path.sep).includes(".aibrain-drafts")) continue;
+    if (capturedPaths.has(relativePath)) continue;
 
     try {
       const contents = await readRegularFileWithin(projectWorkspace, relativePath, MAXIMUM_DOCUMENT_BYTES);
@@ -239,6 +244,7 @@ export async function generatedDocumentArtifactsFromRuntimeItem(
         pages: format.kind === "pdf" ? pages : null,
         context: { ...persistence, projectId, messageId: turnId },
       }));
+      capturedPaths.add(relativePath);
     } catch {
       // Runtime text is untrusted; inaccessible or out-of-workspace paths are ignored.
     }

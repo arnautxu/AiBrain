@@ -55,15 +55,35 @@ Create drafts, scripts, PDF exports and page renders inside `.aibrain-drafts/`
 in the authorized project workspace. This directory is excluded from automatic
 document delivery. Never place an unfinished deck in `documents/`.
 
-Inside the worker's existing isolated shell, use the installed local binaries:
+Use the sandboxed conversion launchers below, not bare `soffice`. They set a
+headless backend and private HOME, temporary directory and XDG caches; inherited
+employee-runtime cache paths may be read-only inside the command sandbox.
 
 ```sh
+set -eu
 mkdir -p .aibrain-drafts/pdf .aibrain-drafts/pages documents
-soffice -env:UserInstallation=file:///tmp/presentation-unique-profile --headless --convert-to pdf --outdir .aibrain-drafts/pdf .aibrain-drafts/deck.pptx
-pdfinfo .aibrain-drafts/pdf/deck.pdf
-pdftotext -layout .aibrain-drafts/pdf/deck.pdf .aibrain-drafts/text.txt
-pdftoppm -scale-to 1400 -png .aibrain-drafts/pdf/deck.pdf .aibrain-drafts/pages/slide
+conversion=$(mktemp -d /tmp/aibrain-turn-document-XXXXXX)
+trap 'rm -rf "$conversion"' EXIT
+cp .aibrain-drafts/deck.pptx "$conversion/deck.pptx"
+(
+  cd "$conversion"
+  /usr/local/bin/aibrain-soffice \
+    "-env:UserInstallation=file://$conversion/lo-profile" \
+    --headless --invisible --nologo --nodefault --nofirststartwizard \
+    --norestore --safe-mode --convert-to pdf --outdir "$conversion" "$conversion/deck.pptx"
+  test -s deck.pdf
+  /usr/local/bin/aibrain-pdfinfo "$conversion/deck.pdf"
+  /usr/local/bin/aibrain-pdftotext -layout "$conversion/deck.pdf" "$conversion/text.txt"
+  /usr/local/bin/aibrain-pdftoppm -scale-to 1400 -png "$conversion/deck.pdf" "$conversion/slide"
+)
+cp "$conversion/deck.pdf" .aibrain-drafts/pdf/deck.pdf
+cp "$conversion/text.txt" .aibrain-drafts/text.txt
+cp "$conversion"/slide-*.png .aibrain-drafts/pages/
 ```
+
+Do not bypass a failed sandbox launcher by invoking an unsandboxed converter,
+changing process-mount permissions or switching to a basic document renderer.
+Report the specific missing export or review capability and retain the draft.
 
 Use a unique private LibreOffice profile per run. Inspect every rendered page
 with the available image-reading tool: clipping, contrast, legibility, empty

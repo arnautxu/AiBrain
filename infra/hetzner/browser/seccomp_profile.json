@@ -51,6 +51,18 @@
 	],
 	"syscalls": [
 		{
+			"comment": "Close inherited descriptors without reading a process filesystem",
+			"names": ["close_range"],
+			"action": "SCMP_ACT_ALLOW",
+			"args": []
+		},
+		{
+			"comment": "Keep clone3 denied with ENOSYS so libc uses the existing constrained clone rules",
+			"names": ["clone3"],
+			"action": "SCMP_ACT_ERRNO",
+			"errnoRet": 38
+		},
+		{
 			"comment": "Allow Bubblewrap namespace setup; mount capabilities remain confined to the new user namespace",
 			"names": [
 				"clone",

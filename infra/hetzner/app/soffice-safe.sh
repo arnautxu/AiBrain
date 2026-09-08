@@ -26,7 +26,7 @@ preview_pattern="^/var/lib/aibrain/data/users/${uuid}/state/document-previews/${
 turn_pattern='^(/tmp|/private/tmp)/aibrain-turn-document-[A-Za-z0-9_-]+$'
 [[ "$work_root" =~ $preview_pattern || "$work_root" =~ $turn_pattern ]] || fail "work directory is outside a private conversion root"
 
-mkdir -p "$work_root/home" "$work_root/tmp"
+mkdir -p "$work_root/home" "$work_root/tmp" "$work_root/home/.cache" "$work_root/home/.config" "$work_root/home/.local/share" "$work_root/home/.local/state"
 chmod 0700 "$work_root" "$work_root/home" "$work_root/tmp"
 
 preflight=${AIBRAIN_DOCUMENT_SANDBOX_PREFLIGHT:-}
@@ -82,7 +82,26 @@ else
 EOF
     chmod 0600 "$work_root/lo-profile/user/registrymodifications.xcu"
   fi
-  command=("$tool" "${rewritten[@]}")
+  if [ "$launcher" = aibrain-soffice ]; then
+    # The distro launcher inspects /proc; invoke the native binary with its
+    # fixed library directory instead. LibreOffice requests a fresh process
+    # with status 81 or 82. Retry only these bounded
+    # lifecycle statuses, retaining the private profile and all safety flags.
+    command=(/bin/sh -c '
+      attempt=1
+      while :; do
+        "$@"
+        status=$?
+        case "$status" in
+          81|82) [ "$attempt" -lt 3 ] || exit "$status" ;;
+          *) exit "$status" ;;
+        esac
+        attempt=$((attempt + 1))
+      done
+    ' aibrain-office-restart /usr/lib/libreoffice/program/soffice.bin "${rewritten[@]}")
+  else
+    command=("$tool" "${rewritten[@]}")
+  fi
 fi
 
 exec /usr/bin/bwrap \
@@ -96,7 +115,8 @@ exec /usr/bin/bwrap \
   --cap-drop ALL \
   --ro-bind / / \
   --dev /dev \
-  --proc /proc \
+  --tmpfs /proc \
+  --remount-ro /proc \
   --tmpfs /tmp \
   --tmpfs /run \
   --tmpfs /etc/aibrain \
@@ -112,6 +132,11 @@ exec /usr/bin/bwrap \
   --clearenv \
   --setenv HOME /work/home \
   --setenv TMPDIR /work/tmp \
+  --setenv XDG_CACHE_HOME /work/home/.cache \
+  --setenv XDG_CONFIG_HOME /work/home/.config \
+  --setenv XDG_DATA_HOME /work/home/.local/share \
+  --setenv XDG_STATE_HOME /work/home/.local/state \
+  --setenv LD_LIBRARY_PATH /usr/lib/libreoffice/program \
   --setenv LANG C.UTF-8 \
   --setenv LC_ALL C.UTF-8 \
   --setenv SAL_USE_VCLPLUGIN svp \

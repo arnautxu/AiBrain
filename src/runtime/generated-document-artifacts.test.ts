@@ -82,6 +82,38 @@ describe("generated document artifact projection", () => {
       .toEqual(draftPptx.data);
   });
 
+  it.each(["command", "aggregatedOutput", "text", "contentItems"])("captures bare documents paths from %s without publishing drafts or URL suffixes", async (source) => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-bare-delivery-"));
+    const dataRoot = await mkdtemp(path.join(tmpdir(), "aibrain-bare-delivery-data-"));
+    roots.push(workspace, dataRoot);
+    await mkdir(path.join(workspace, "documents"));
+    await mkdir(path.join(workspace, ".aibrain-drafts", "documents"), { recursive: true });
+    const generated = await generateLocalDocument({ format: "pptx", title: "Delivery", content: "Verified final presentation" });
+    for (const name of ["final.pptx", "draft.pptx", "remote.pptx"]) {
+      await writeFile(path.join(workspace, "documents", name), generated.data);
+    }
+    await writeFile(path.join(workspace, ".aibrain-drafts", "documents", "draft.pptx"), generated.data);
+    const text = [
+      "Created documents/final.pptx",
+      "Final: `documents/final.pptx`.",
+      'Repeated "./documents/final.pptx"',
+      "Draft .aibrain-drafts/documents/draft.pptx",
+      "Draft ./.aibrain-drafts/documents/draft.pptx",
+      "Remote https://example.test/documents/remote.pptx",
+      "Outside documents/../../private.pptx",
+    ].join("\n");
+    const item = source === "contentItems" ? { contentItems: [{ type: "inputText", text }] } : { [source]: text };
+    const artifacts = await generatedDocumentArtifactsFromRuntimeItem(item, workspace,
+      "00000000-0000-4000-8000-000000000011", "00000000-0000-4000-8000-000000000012", {
+        installation: { installationId: "document-test", paths: { dataRoot } as never },
+        threadId: "00000000-0000-4000-8000-000000000013",
+        storageOwnerId: "00000000-0000-4000-8000-000000000014",
+      });
+    expect(artifacts.map((artifact) => artifact.name)).toEqual(["final.pptx"]);
+    expect(await readFile(path.join(dataRoot, "generated-document-artifacts", "00000000-0000-4000-8000-000000000014", artifacts[0]!.id, "final.pptx")))
+      .toEqual(generated.data);
+  });
+
   it("ignores paths outside the project and files that are not PDFs", async () => {
     const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-document-boundary-"));
     const outside = await mkdtemp(path.join(tmpdir(), "aibrain-document-outside-"));
