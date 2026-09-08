@@ -518,12 +518,23 @@ export class DocumentPreviewService {
           if (!(error instanceof Error && error.message === "invalid cached page")) throw error;
         }
       }
-      const work = await mkdtemp(path.join(directory, `.page-${page}-`));
+      const work = await mkdtemp(path.join(directory, ".work-"));
       try {
+        // The converter can read only its private work root. Copy verified
+        // immutable bytes into it rather than passing a sibling cache path.
+        const pdf = await readRegularFileWithin(directory, "document.pdf", MAX_PDF_PREVIEW_BYTES);
+        if (preview.schemaVersion === 2) {
+          const expected = preview.artifacts.find((artifact) => artifact.fileName === "document.pdf");
+          if (!expected || expected.size !== pdf.length || expected.sha256 !== createHash("sha256").update(pdf).digest("hex")) {
+            throw new StorageError("DOCUMENT_PREVIEW_INTEGRITY_FAILED", "Cached PDF no longer matches its preview identity.");
+          }
+        }
+        const inputPath = path.join(work, "document.pdf");
+        await atomicWriteFile(inputPath, pdf, { mode: 0o600 });
         await this.runWithConversionAdmission(async () => {
           await this.runner.run(this.tools.pdftoppm, [
             "-f", String(page), "-l", String(page), "-singlefile", "-png", "-r", "144",
-            path.join(directory, "document.pdf"), path.join(work, "page"),
+            inputPath, path.join(work, "page"),
           ], {
             cwd: work,
             env: { HOME: work, LANG: "C.UTF-8", LC_ALL: "C.UTF-8" },

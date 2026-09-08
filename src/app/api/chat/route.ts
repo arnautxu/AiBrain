@@ -404,13 +404,13 @@ export async function POST(request: Request) {
     );
   }
   const runtimeThreadId = runtimeThreadIdForChatMessage(runtimeThreadContext, body.message);
-  const rebootstrapAutomationThread = Boolean(runtimeThreadContext && !runtimeThreadId);
-  if (rebootstrapAutomationThread) {
+  const rebootstrapToolsetThread = Boolean(runtimeThreadContext && !runtimeThreadId);
+  if (rebootstrapToolsetThread) {
     operationalLogger.info("chat.runtime_thread_toolset_upgrade", {
       ...setupCorrelation,
       fromRevision: runtimeThreadContext?.toolsetRevision ?? "legacy",
       toRevision: CURRENT_THREAD_TOOLSET_REVISION,
-      reason: "automation-chat-tools-required",
+      reason: "runtime-toolset-upgrade-required",
     });
   }
 
@@ -772,7 +772,7 @@ export async function POST(request: Request) {
             emitCodex,
             maintenanceActivity ?? undefined,
             assistantName,
-            rebootstrapAutomationThread
+            rebootstrapToolsetThread
               ? { ...context, branchHistory: preparedPersistentTurn?.rebootstrapHistory ?? null }
               : context,
             requestStartedAt,

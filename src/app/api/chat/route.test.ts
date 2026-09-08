@@ -209,11 +209,13 @@ describe("chat turn transport lifecycle", () => {
     await vi.waitFor(() => expect(mocked.releaseMaintenance).toHaveBeenCalledOnce());
   });
 
-  it("re-bootstraps only automation turns from a legacy dynamic-tool thread", () => {
+  it("re-bootstraps stale toolsets while preserving current runtime threads", () => {
     const legacy = { threadId: "runtime-thread-legacy", toolsetRevision: null };
     const current = { threadId: "runtime-thread-current", toolsetRevision: "aibrain-tools-test" };
     expect(runtimeThreadIdForChatMessage(legacy, "Envíame hello dentro de 2 minutos")).toBeNull();
-    expect(runtimeThreadIdForChatMessage(legacy, "Resume la conversación")).toBe("runtime-thread-legacy");
+    expect(runtimeThreadIdForChatMessage(legacy, "Resume la conversación")).toBeNull();
+    expect(runtimeThreadIdForChatMessage(legacy, "Segueix amb el preview")).toBeNull();
+    expect(runtimeThreadIdForChatMessage(current, "Revisa el PowerPoint")).toBe("runtime-thread-current");
     expect(runtimeThreadIdForChatMessage(current, "Cada lunes prepara un resumen")).toBe("runtime-thread-current");
   });
 

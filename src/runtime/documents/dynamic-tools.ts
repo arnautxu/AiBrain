@@ -1,3 +1,4 @@
+import { renderPresentationDraft, PresentationRenderError, type PresentationRenderCallback } from "@/runtime/documents/presentation-render";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import path from "node:path";
@@ -53,6 +54,16 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   name: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
   description: "Create validated PDF, Word, PowerPoint and Excel files in this employee's private AiBrain project workspace on the installation server. This is the default document destination. It does not use Google Drive or any external connector.",
   tools: [
+    {
+      type: "function", name: "render",
+      description: "Review one page of a worker-authored PPTX or PDF under .aibrain-drafts using the server document sandbox. Returns the page image, total pages, source hash and a draft review PDF path. Call for each page before promoting final files; this does not publish an artifact.",
+      inputSchema: {
+        type: "object", properties: {
+          relativePath: { type: "string", minLength: 1, maxLength: 1024 },
+          page: { type: "integer", minimum: 1, maximum: 50 },
+        }, required: ["relativePath", "page"], additionalProperties: false,
+      },
+    },
     {
       type: "function",
       name: "create",
@@ -206,6 +217,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   sourceThreadId: string;
   sourceTurnId: string;
   permissions: ResolvedPermissions;
+  renderPresentation?: PresentationRenderCallback;
   now?: () => Date;
 }>;
 
@@ -581,7 +593,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf" && params.tool !== "render")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -599,6 +611,13 @@ async function handleSingleLocalDocumentDynamicToolCall(
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
+    }
+    if (params.tool === "render") {
+      const { png, ...review } = await renderPresentationDraft(params.arguments, context.projectWorkspace, context.renderPresentation);
+      return { artifacts: [], response: { success: true, contentItems: [
+        { type: "inputText", text: JSON.stringify({ status: "review", ...review }) },
+        { type: "inputImage", imageUrl: `data:image/png;base64,${png.toString("base64")}` },
+      ] } };
     }
     const input = params.tool === "image_to_pdf"
       ? parseImageToPdfArguments(params.arguments)
@@ -688,7 +707,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError
+    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError || error instanceof PresentationRenderError
       ? failure(error.code, error.message)
       : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el documento local.");
   }

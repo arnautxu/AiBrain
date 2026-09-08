@@ -55,42 +55,29 @@ Create drafts, scripts, PDF exports and page renders inside `.aibrain-drafts/`
 in the authorized project workspace. This directory is excluded from automatic
 document delivery. Never place an unfinished deck in `documents/`.
 
-Use the sandboxed conversion launchers below, not bare `soffice`. They set a
-headless backend and private HOME, temporary directory and XDG caches; inherited
-employee-runtime cache paths may be read-only inside the command sandbox.
+Call `aibrain_documents.render` with the project-relative draft path and a
+one-based page number, for example:
 
-```sh
-set -eu
-mkdir -p .aibrain-drafts/pdf .aibrain-drafts/pages documents
-conversion=$(mktemp -d /tmp/aibrain-turn-document-XXXXXX)
-trap 'rm -rf "$conversion"' EXIT
-cp .aibrain-drafts/deck.pptx "$conversion/deck.pptx"
-(
-  cd "$conversion"
-  /usr/local/bin/aibrain-soffice \
-    "-env:UserInstallation=file://$conversion/lo-profile" \
-    --headless --invisible --nologo --nodefault --nofirststartwizard \
-    --norestore --safe-mode --convert-to pdf --outdir "$conversion" "$conversion/deck.pptx"
-  test -s deck.pdf
-  /usr/local/bin/aibrain-pdfinfo "$conversion/deck.pdf"
-  /usr/local/bin/aibrain-pdftotext -layout "$conversion/deck.pdf" "$conversion/text.txt"
-  /usr/local/bin/aibrain-pdftoppm -scale-to 1400 -png "$conversion/deck.pdf" "$conversion/slide"
-)
-cp "$conversion/deck.pdf" .aibrain-drafts/pdf/deck.pdf
-cp "$conversion/text.txt" .aibrain-drafts/text.txt
-cp "$conversion"/slide-*.png .aibrain-drafts/pages/
+```json
+{"relativePath":".aibrain-drafts/deck.pptx","page":1}
 ```
 
-Do not bypass a failed sandbox launcher by invoking an unsandboxed converter,
-changing process-mount permissions or switching to a basic document renderer.
-Report the specific missing export or review capability and retain the draft.
+The server converts the verified source through its private document sandbox
+and returns the requested page image, total page count, source SHA-256 and a
+review PDF path in `.aibrain-drafts/`. Inspect that returned image, then call the
+same tool for every remaining page. It supports up to 50 pages. Rendering is
+technical verification; you must still inspect clipping, contrast, legibility,
+empty pages, repetitive layout and unintended overlap against the brief.
 
-Use a unique private LibreOffice profile per run. Inspect every rendered page
-with the available image-reading tool: clipping, contrast, legibility, empty
-pages, repetitive layout and unintended overlap. Check extracted text and page
-count against the brief. Fix the script and render again until the actual deck
-is acceptable. If image inspection or conversion is unavailable, state that
-verification is incomplete; do not claim a visual review.
+Do not run LibreOffice, Poppler or their wrappers through shell. The agent's
+nested command sandbox cannot initialize the converter's network namespace.
+The document tool runs at the server boundary with the same private conversion
+sandbox and no network access; it does not relax the agent sandbox.
+
+If you change the source, render again and use only results with the new source
+hash. Use the exact returned PDF path for the matching PDF delivery. Rendering
+does not publish anything. If the tool fails, retain the draft and report the
+specific limitation; do not substitute the basic text renderer or invent a link.
 
 Only after review, copy the requested formats to distinct final paths under
 `documents/`, then print those final paths in a completed shell command. The

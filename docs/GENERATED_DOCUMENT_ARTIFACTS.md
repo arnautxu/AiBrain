@@ -119,3 +119,43 @@ PptxGenJS → PDF de dos páginas → texto verificado → dos PNG, sin red ni d
 clientes. La reproducción aislada con la imagen desplegada también convirtió
 el deck recuperado de Minecraft en ocho páginas PDF y ocho PNG. Esto no prueba
 que el cambio esté desplegado ni sustituye una nueva aceptación autenticada.
+
+## Revisión de presentaciones fuera del shell del agente
+
+La conversión desde el contenedor no prueba conversión desde un comando Codex:
+el sandbox anidado del agente deniega el socket `NETLINK_ROUTE` que bubblewrap
+usa al inicializar loopback. La herramienta cerrada `aibrain_documents.render`
+se despacha en el servidor, tras comprobar identidad de instalación, usuario,
+proyecto, turno y permiso `tools.execute`. Lee únicamente un borrador relativo
+al workspace autorizado, valida sus bytes y utiliza el servicio de preview con
+sus límites de concurrencia y los mismos wrappers aislados. No se amplían los
+permisos del shell ni se añade acceso de red al conversor.
+
+Cada llamada devuelve una página PNG para inspección, el número de páginas,
+el hash del origen y un PDF de revisión dentro de `.aibrain-drafts/`; nunca
+crea una entrega final. Una modificación del origen invalida la revisión.
+Solo después de inspeccionar todas las páginas el agente promueve los formatos
+solicitados a `documents/`. Las conversaciones con un catálogo antiguo abren
+un runtime actualizado conservando el historial durable de la conversación:
+las herramientas dinámicas no se pueden añadir a un runtime ya creado.
+
+La aceptación de contenedor debe ejercitar la herramienta de renderizado con
+el servicio real y comprobar imagen, PDF, aislamiento y ausencia de artefactos
+finales prematuros. Sigue siendo distinta de una nueva aceptación autenticada
+que demuestre autoría, revisión visual y entrega desde un turno del producto.
+
+El renderizado de páginas posteriores a la primera usa también un directorio
+`.work-*` privado y una copia verificada del PDF dentro de él. Pasar la ruta
+al PDF del directorio padre queda prohibido por el wrapper. La prueba real
+recorre al menos dos páginas para cubrir tanto la página inicial cacheada como
+la generación posterior; una prueba de conversión única no cubre esa ruta.
+Las llamadas de revisión `render` no activan el temporizador de cierre reservado
+a la entrega de documentos: el agente puede continuar inspeccionando páginas.
+
+Verificación local del candidato (2026-09-08): la herramienta real ejecutada en
+un contenedor desechable con la imagen desplegada y sus restricciones produjo
+10 páginas PDF y 10 respuestas PNG del PPTX de la incidencia; el origen conservó
+su SHA-256 y una identidad incorrecta se rechazó antes de convertir. No se
+montaron volúmenes de producción en el contenedor de prueba ni se modificó el servicio
+en ejecución. El despliegue del candidato y un nuevo turno autenticado siguen
+pendientes.
