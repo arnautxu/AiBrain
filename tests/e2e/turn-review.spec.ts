@@ -105,19 +105,38 @@ test("plan, command, diff and approval decisions consume the typed turn contract
   await expect(page.getByText("Incluidos en este turno")).toBeVisible();
 });
 
-test("a network failure is announced without an unhandled page error", async ({ page }) => {
+test("a network failure pauses and resumes the same request without an unhandled page error", async ({ page }) => {
   const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.route("**/api/chat", (route) => route.fulfill({
-    status: 503,
-    contentType: "application/json",
-    body: JSON.stringify({ error: "Servicio sintético no disponible." }),
-  }));
-
+  const requests: string[] = [];
+  let restored = false;
+  page.on("pageerror", error => pageErrors.push(error.message));
+  await page.route("**/api/chat", route => {
+    requests.push(route.request().postData()!);
+    return route.fulfill(restored ? {
+      status: 200, contentType: "application/x-ndjson",
+      body: JSON.stringify({ type: "delta", value: "Respuesta recuperada" }) + "\n" + JSON.stringify({ type: "done" }) + "\n",
+    } : { status: 503, contentType: "application/json", body: JSON.stringify({ error: "Servicio sintético no disponible." }) });
+  });
   await login(page);
+  await page.clock.install();
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Provoca un error de red sintético.");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
-  await expect(page.getByText("Servicio sintético no disponible.")).toBeVisible();
-  await expect(page.getByRole("alert").filter({ hasText: "No se ha podido completar" })).toContainText("No se ha podido completar esta respuesta");
+  await expect.poll(() => requests.length).toBe(1);
+  for (let i = 2; i <= 9; i++) {
+    await page.clock.fastForward(10_000);
+    await expect.poll(() => requests.length).toBe(i);
+  }
+  const retry = page.getByRole("button", { name: "Reconectar respuesta", exact: true });
+  await expect(retry).toBeVisible();
+  await expect(page.getByText("No se puede comprobar la respuesta ahora. El trabajo y los resultados guardados se conservan.")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "No se ha podido completar esta respuesta" })).toHaveCount(0);
+  await page.clock.fastForward(300_000);
+  expect(requests).toHaveLength(9);
+  restored = true;
+  await retry.click();
+  await page.clock.fastForward(2_000);
+  await expect(page.getByText("Respuesta recuperada", { exact: true })).toBeVisible();
+  expect(requests).toHaveLength(10);
+  expect(new Set(requests).size).toBe(1);
   expect(pageErrors).toEqual([]);
 });
