@@ -43,6 +43,54 @@ describe("local document generator", () => {
     await expect(pptxZip.file("ppt/slides/slide1.xml")!.async("text")).resolves.toContain("Impacto medible");
   });
 
+  it("renders authored slides as matching multi-page PDF and PowerPoint without copying the brief", async () => {
+    const slides = [
+      { title: "Objectiu", body: "Reduir el temps de preparació de les comandes." },
+      { title: "Execució", body: "Agrupar les comandes per ruta.\nRevisar incidències cada matí." },
+      { title: "Seguiment", body: "Mesurar el temps per comanda setmanalment." },
+    ];
+    const brief = "Create a presentation about operations";
+    const pptx = await generateLocalDocument({ format: "pptx", title: "Operacions", content: brief, slides });
+    const archive = await JSZip.loadAsync(pptx.data);
+    expect(pptx.pages).toBe(3);
+    expect(Object.keys(archive.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name))).toHaveLength(3);
+    for (const [index, slide] of slides.entries()) {
+      const text = await archive.file(`ppt/slides/slide${index + 1}.xml`)!.async("text");
+      expect(text).toContain(slide.title);
+      expect(Array.from(text.matchAll(/<a:t>(.*?)<\/a:t>/gu), (match) => match[1]).join(" ")).toContain(slide.body.replaceAll("\n", " "));
+      expect(text).not.toContain(brief);
+    }
+    const pdf = await generateLocalDocument({ format: "pdf", title: "Operacions", content: brief, slides });
+    const document = await PDFDocument.load(pdf.data);
+    expect(pdf.pages).toBe(3);
+    expect(document.getPages()).toHaveLength(3);
+    for (const page of document.getPages()) {
+      expect(page.getWidth() / page.getHeight()).toBeCloseTo(16 / 9);
+    }
+    expect(pdf.data.toString("latin1")).toContain("Agrupar les comandes per ruta.");
+    expect(pdf.data.toString("latin1")).not.toContain(brief);
+  });
+
+  it("preserves legacy slide overflow instead of truncating after twenty lines", async () => {
+    const content = "Seguiment\n" + Array.from({ length: 30 }, (_, index) => `Indicador ${index + 1}`).join("\n");
+    const result = await generateLocalDocument({ format: "pptx", title: "Seguiment", content });
+    const archive = await JSZip.loadAsync(result.data);
+    const texts = await Promise.all(Object.keys(archive.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name)).map((name) => archive.file(name)!.async("text")));
+    expect(result.pages).toBe(3);
+    expect(texts.join("\n")).toContain("Indicador 30");
+    await expect(generateLocalDocument({ format: "pptx", title: "Too many", content: Array.from({ length: 51 }, () => "Title\nBody").join("\n---\n") }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDES_INVALID" });
+  });
+
+  it("rejects malformed structured slides and slides for non-presentation formats", async () => {
+    await expect(generateLocalDocument({ format: "pdf", title: "Deck", content: "Summary", slides: [] }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDES_INVALID" });
+    await expect(generateLocalDocument({ format: "pptx", title: "Deck", content: "Summary", slides: [{ title: "x".repeat(81), body: "Body" }] }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDES_INVALID" });
+    await expect(generateLocalDocument({ format: "docx", title: "Deck", content: "Summary", slides: [{ title: "Heading", body: "Body" }] }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDES_INVALID" });
+  });
+
   it("writes explicit numeric formulas while leaving formula-looking text inert", async () => {
     const generated = await generateLocalDocument({ format: "xlsx", title: "Formula regression", content: "10 plus 20",
       rows: [["Values"], [10], [20], [{ formula: "SUM(A2:A3)" }], ["=SUM(A2:A3)"], ["=WEBSERVICE(\"https://example.test\")"]] });

@@ -834,6 +834,9 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("La cerca web en viu està sempre disponible");
     expect(instructions).toContain("no tiene acceso al disco físico del Mac");
     expect(instructions).toContain("usa por defecto `aibrain_documents.create`");
+    expect(instructions).toContain("redacta primero el contenido final completo");
+    expect(instructions).toContain("usa `slides` con título y cuerpo final por diapositiva");
+    expect(instructions).toContain("Usa `format: pdf` para PDF y `format: pptx` para PowerPoint");
     expect(instructions).toContain("usa `aibrain_documents.image_to_pdf`");
     expect(instructions).toContain("incrusta el PNG real en una única página A4");
     expect(instructions).toContain("`aibrain_documents.create_batch` está disponible");

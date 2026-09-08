@@ -59,3 +59,24 @@ La aceptación debe cubrir de forma separada:
 
 La validación local no prueba por sí sola CI, publicación, despliegue ni
 aceptación autenticada en Arnall.
+
+## Autoría y paginación de presentaciones
+
+`aibrain_documents.create` y `create_batch` renderizan contenido final: no ejecutan
+prompts ni redactan una presentación a partir de una petición. El agente debe
+redactar primero el contenido y enviar `slides: [{ title, body }, ...]` para una
+presentación PDF o PPTX. El formato solicitado se conserva; si se piden ambos,
+el lote usa las mismas diapositivas para ambos archivos. `content` contiene un
+resumen cuando se utiliza `slides`, y ese resumen no se imprime en las páginas.
+
+Cada diapositiva inicia una página 16:9. El texto denso continúa en otra página,
+sin descartar líneas. Más de 50 páginas tras maquetar produce un error explícito
+para que el agente reduzca o divida la entrega. La respuesta incluye el número
+de páginas también para PPTX. El modo antiguo de PPTX con separadores `---`
+sigue disponible; un PDF sin `slides` conserva el formato de informe A4.
+
+Los recibos incluyen las diapositivas en su huella de idempotencia; cambiar su
+contenido no puede reutilizar el resultado de una llamada anterior. Las pruebas
+locales comprueban páginas reales PDF, contenido OOXML, continuidad del texto,
+validación y repetición del lote. Esto no demuestra que un turno real del modelo
+haya redactado correctamente la presentación ni sustituye la aceptación live.

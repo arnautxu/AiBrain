@@ -17,7 +17,7 @@ for (const mobile of [false, true]) {
     expect(await card.evaluate((element) => getComputedStyle(element).backdropFilter)).toContain("blur(24px)");
     for (const theme of ["light", "dark"]) {
       await page.evaluate((theme) => document.documentElement.setAttribute("data-theme", theme), theme);
-      if (!mobile) await expect(page.getByTestId("sidebar-wave").locator("canvas")).toBeVisible();
+      await expect(page.getByTestId("sidebar-wave")).toHaveCount(0);
       await page.getByTestId("workbench-sidebar").screenshot({ path: `.impeccable/review/profile-glass-${mobile ? "mobile" : "desktop"}-${theme}.png` });
     }
     await card.click();
