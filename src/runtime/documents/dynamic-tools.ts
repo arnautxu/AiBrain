@@ -13,6 +13,9 @@ import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile } from "@/storage";
 import {
   generateLocalDocument,
+  normalizeDocumentSlides,
+  LocalDocumentGenerationError,
+  type LocalDocumentSlide,
   isLocalDocumentFormula,
   type LocalDocumentCell,
   type LocalDocumentFormat,
@@ -31,6 +34,18 @@ const CELL_SCHEMA = {
     { type: "object", properties: { formula: { type: "string", minLength: 1, maxLength: 1000 } }, required: ["formula"], additionalProperties: false },
   ],
 };
+const SLIDES_SCHEMA = {
+  type: "array", minItems: 1, maxItems: 50,
+  description: "Authored presentation slides for PPTX or PDF. Each entry starts a new 16:9 page. Write the final content first; this renderer cannot execute prompts or invent content. Use the same slides for matching PDF and PPTX outputs.",
+  items: {
+    type: "object",
+    properties: {
+      title: { type: "string", minLength: 1, maxLength: 80 },
+      body: { type: "string", minLength: 1, maxLength: 16000 },
+    },
+    required: ["title", "body"], additionalProperties: false,
+  },
+};
 const FORMATS = ["pdf", "docx", "pptx", "xlsx"] as const;
 
 export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze([{
@@ -41,14 +56,15 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     {
       type: "function",
       name: "create",
-      description: "Create one non-empty local document, verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table. Formula cells must be explicit objects like {formula: 'SUM(A2:A3)'}; plain strings stay literal text. Only same-sheet numeric references/arithmetic and SUM, MIN, MAX, AVERAGE, COUNT, ROUND, ABS are supported; no external links.",
+      description: "Render final authored content into one local document; this is not an AI authoring tool and does not execute instructions in content. Never pass the user request or a prompt as the document. For presentations use slides with complete titles and body text (PPTX or PDF); honor the requested format and slide count. Legacy PPTX content separates slides with a line containing ---. Verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table. Formula cells must be explicit objects like {formula: 'SUM(A2:A3)'}; plain strings stay literal text. Only same-sheet numeric references/arithmetic and SUM, MIN, MAX, AVERAGE, COUNT, ROUND, ABS are supported; no external links.",
       inputSchema: {
         type: "object",
         properties: {
           format: { type: "string", enum: ["pdf", "docx", "pptx", "xlsx"] },
           fileName: { type: "string", minLength: 1, maxLength: 160 },
           title: { type: "string", minLength: 1, maxLength: 500 },
-          content: { type: "string", minLength: 1, maxLength: 200_000 },
+          content: { type: "string", minLength: 1, maxLength: 200_000, description: "Final document text, or a brief summary when slides/rows carry the actual content. Never a request to create content." },
+          slides: SLIDES_SCHEMA,
           rows: {
             type: "array",
             minItems: 1,
@@ -68,7 +84,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     {
       type: "function",
       name: "create_batch",
-      description: "Create and verify every requested local document in one bounded call. Use this once when the user requests two or more PDF, DOCX, PPTX or XLSX outputs; each file receives exactly one private artifact.",
+      description: "Create and verify every requested local document in one bounded call. Use this once when the user requests two or more PDF, DOCX, PPTX or XLSX outputs; each file receives exactly one private artifact. Author the final content before calling; use slides for presentations in both PDF and PPTX, never a generation prompt.",
       inputSchema: {
         type: "object",
         properties: {
@@ -82,7 +98,8 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
                 format: { type: "string", enum: ["pdf", "docx", "pptx", "xlsx"] },
                 fileName: { type: "string", minLength: 1, maxLength: 160 },
                 title: { type: "string", minLength: 1, maxLength: 500 },
-                content: { type: "string", minLength: 1, maxLength: 200_000 },
+                content: { type: "string", minLength: 1, maxLength: 200_000, description: "Final document text, or a brief summary when slides/rows carry the actual content. Never a request to create content." },
+          slides: SLIDES_SCHEMA,
                 rows: {
                   type: "array",
                   minItems: 1,
@@ -135,6 +152,7 @@ type CreateArguments = Readonly<{
   title: string;
   content: string;
   rows?: readonly (readonly LocalDocumentCell[])[];
+  slides?: readonly LocalDocumentSlide[];
   sourceImageItemId?: string;
 }>;
 
@@ -222,7 +240,7 @@ function parseRows(value: unknown): readonly (readonly LocalDocumentCell[])[] | 
 
 function parseArguments(value: unknown): CreateArguments {
   if (!isRecord(value)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Document arguments must be an object.");
-  exactKeys(value, ["format", "fileName", "title", "content"], ["rows"]);
+  exactKeys(value, ["format", "fileName", "title", "content"], ["rows", "slides"]);
   if (typeof value.format !== "string" || !FORMATS.includes(value.format as LocalDocumentFormat) ||
       typeof value.fileName !== "string" || !FILE_NAME_PATTERN.test(value.fileName) || value.fileName === "." || value.fileName === ".." ||
       typeof value.title !== "string" || typeof value.content !== "string") {
@@ -238,6 +256,7 @@ function parseArguments(value: unknown): CreateArguments {
     title: value.title,
     content: value.content,
     rows: parseRows(value.rows),
+    ...(value.slides === undefined ? {} : { slides: normalizeDocumentSlides(value.slides) }),
   };
 }
 
@@ -289,6 +308,7 @@ function canonicalInput(input: CreateArguments) {
     title: input.title,
     content: input.content,
     rows: input.rows ?? null,
+    ...(input.slides === undefined ? {} : { slides: input.slides }),
     sourceImageItemId: input.sourceImageItemId ?? null,
   });
 }
@@ -618,6 +638,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
         title: input.title,
         content: input.content,
         rows: input.rows,
+        slides: input.slides,
         sourcePng,
       });
       validateUploadedDocument({ fileName: input.fileName, declaredMimeType: generated.mimeType, data: generated.data });
@@ -667,7 +688,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    return error instanceof LocalDocumentDynamicToolError
+    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError
       ? failure(error.code, error.message)
       : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el documento local.");
   }
@@ -773,6 +794,7 @@ export async function handleLocalDocumentDynamicToolCall(
           arguments: {
             ...file,
             rows: file.rows?.map((row) => [...row]),
+            slides: file.slides?.map((slide) => ({ ...slide })),
           },
         }, context));
       }
@@ -784,7 +806,7 @@ export async function handleLocalDocumentDynamicToolCall(
       if (claimed) await rm(claimPath, { recursive: true, force: false }).catch(() => undefined);
     }
   } catch (error) {
-    return error instanceof LocalDocumentDynamicToolError
+    return error instanceof LocalDocumentDynamicToolError || error instanceof LocalDocumentGenerationError
       ? failure(error.code, error.message)
       : failure("LOCAL_DOCUMENT_GENERATION_FAILED", "No se ha podido crear y verificar el lote documental local.");
   }

@@ -131,6 +131,37 @@ function batchRequest(callId = "hello-world-batch") {
 }
 
 describe("local document dynamic tool", () => {
+  it("persists matching structured PDF and PPTX presentations and binds slide content to replay", async () => {
+    const ctx = await context(USER_A);
+    const slides = [{ title: "Objectiu", body: "Reduir incidències." }, { title: "Mesura", body: "Revisió setmanal de comandes." }];
+    const params = {
+      ...batchRequest("presentation-batch"),
+      arguments: { files: (["pdf", "pptx"] as const).map((format) => ({
+        format, fileName: `presentacio.${format}`, title: "Operacions", content: "Resum de la presentació", slides,
+      })) },
+    };
+    const result = await handleLocalDocumentDynamicToolCall(params, ctx);
+    expect(result.response.success).toBe(true);
+    expect(result.artifacts).toHaveLength(2);
+    for (const artifact of result.artifacts) expect(artifact.pages).toBe(2);
+    const pdf = await PDFDocument.load(await readFile(path.join(ctx.projectWorkspace, "documents/presentacio.pdf")));
+    expect(pdf.getPageCount()).toBe(2);
+    const replay = await handleLocalDocumentDynamicToolCall(params, ctx);
+    expect(replay.artifacts.map((artifact) => artifact.id)).toEqual(result.artifacts.map((artifact) => artifact.id));
+    const changed = await handleLocalDocumentDynamicToolCall({ ...params, arguments: { files: params.arguments.files.map((file) => ({ ...file, slides: [{ title: "Changed", body: "Different final content" }] })) } }, ctx);
+    expect(changed.response.success).toBe(false);
+    expect(changed.artifacts).toHaveLength(0);
+  });
+
+  it("returns actionable slide validation failures without publishing artifacts", async () => {
+    const ctx = await context(USER_A);
+    const params = request("bad-slides", "pptx");
+    const result = await handleLocalDocumentDynamicToolCall({ ...params, arguments: { ...params.arguments, slides: [] } }, ctx);
+    expect(result.response.success).toBe(false);
+    expect(result.response.contentItems).toEqual([expect.objectContaining({ text: expect.stringContaining("LOCAL_DOCUMENT_SLIDES_INVALID") })]);
+    expect(result.artifacts).toHaveLength(0);
+  });
+
   it("creates, verifies and projects all four formats from a private project workspace", async () => {
     const ctx = await context(USER_A);
     for (const format of ["pdf", "docx", "pptx", "xlsx"] as const) {

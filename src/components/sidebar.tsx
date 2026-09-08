@@ -48,7 +48,6 @@ import { useModalFocus } from "@/ui/use-modal-focus";
 import { useMenuKeyboardNavigation } from "@/ui/use-menu-keyboard-navigation";
 import type { ThreadActivity } from "@/workbench/thread-activity";
 import { SupportDialog } from "@/components/support-dialog";
-import { SidebarWave } from "@/components/sidebar-wave";
 
 export type ProjectMenuAction = "settings" | "rename" | "pin" | "unpin" | "archive" | "restore";
 export type ThreadMenuAction = "rename" | "pin" | "unpin" | "archive" | "restore";
@@ -338,7 +337,6 @@ export function Sidebar({
       >
         <div aria-hidden="true" className={styles.texture} />
         <div aria-hidden="true" className={styles.glass} />
-        <SidebarWave expanded={desktopOpen} />
         <div aria-hidden={desktopOpen ? "true" : undefined} inert={desktopOpen ? true : undefined} aria-label={t("Navegación compacta")} data-testid="workbench-sidebar-rail" className={`${styles.rail} absolute inset-0 hidden h-full w-[52px] flex-col items-center bg-[var(--sidebar)] py-2 transition-opacity duration-150 md:flex ${desktopOpen ? "pointer-events-none opacity-0" : "opacity-100"}`}>
           <button ref={railOpenButtonRef} aria-label={t("Mostrar barra lateral")} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)]" onClick={() => { onOpenDesktop(); requestAnimationFrame(() => desktopCloseButtonRef.current?.focus()); }}><SidebarSimple size={19} /></button>
           <button aria-label={t("Buscar")} title={t("Buscar")} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] focus-visible:outline-2 focus-visible:outline-[var(--focus)]" onClick={(event) => onOpenCommandPalette(event.currentTarget)}><MagnifyingGlass size={18} /></button>

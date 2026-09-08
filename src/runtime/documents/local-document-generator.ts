@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 
 export type LocalDocumentFormat = "pdf" | "docx" | "pptx" | "xlsx";
+export type LocalDocumentSlide = Readonly<{ title: string; body: string }>;
 export type LocalDocumentFormula = Readonly<{ formula: string }>;
 export type LocalDocumentCell = string | number | boolean | null | LocalDocumentFormula;
 
@@ -24,6 +25,7 @@ export type LocalDocumentInput = Readonly<{
   title: string;
   content: string;
   rows?: readonly (readonly LocalDocumentCell[])[];
+  slides?: readonly LocalDocumentSlide[];
   sourcePng?: Uint8Array;
 }>;
 
@@ -121,7 +123,29 @@ function normalizedInput(input: LocalDocumentInput) {
       }
     }
   }
-  return { format: input.format, title, content, rows: input.rows, sourcePng };
+  const slides = input.slides === undefined ? undefined : normalizeDocumentSlides(input.slides);
+  if (slides && (sourcePng || !["pdf", "pptx"].includes(input.format))) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Slides require PDF or PPTX without a source image.");
+  }
+  return { format: input.format, title, content, rows: input.rows, slides, sourcePng };
+}
+
+export function normalizeDocumentSlides(value: unknown): readonly LocalDocumentSlide[] {
+  if (!Array.isArray(value) || !value.length || value.length > 50) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Provide between 1 and 50 authored slides, each with title and body.");
+  }
+  const slides = value.map((slide: unknown) => {
+    if (!slide || typeof slide !== "object" || Array.isArray(slide) ||
+        Object.keys(slide).length !== 2 || !("title" in slide) || !("body" in slide) ||
+        typeof slide.title !== "string" || typeof slide.body !== "string") {
+      throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Each slide needs final title and body text, not a generation prompt.");
+    }
+    return { title: cleanText(slide.title, 500, "slide title"), body: cleanText(slide.body, 16_000, "slide body") };
+  });
+  if (Buffer.byteLength(JSON.stringify(slides), "utf8") > MAX_CONTENT_BYTES) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Presentation content is too large.");
+  }
+  return slides;
 }
 
 async function zipBytes(files: Record<string, string>) {
@@ -215,17 +239,34 @@ function presentationTheme() {
 }
 
 function slideXml(title: string, body: string) {
-  const paragraphs = body.split("\n").filter((line) => line.trim()).slice(0, 20).map((line) => `<a:p><a:r><a:rPr lang="es-ES" sz="2200"/><a:t>${xml(line.replace(/^[-*]\s+/u, ""))}</a:t></a:r><a:endParaRPr lang="es-ES" sz="2200"/></a:p>`).join("") || "<a:p><a:endParaRPr lang=\"es-ES\" sz=\"2200\"/></a:p>";
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Título"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="1143000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="es-ES" sz="3200" b="1"/><a:t>${xml(title)}</a:t></a:r><a:endParaRPr lang="es-ES" sz="3200"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Contenido"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="1828800"/><a:ext cx="10287000" cy="4572000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>${paragraphs}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
+  const titleSize = Math.min(3200, Math.floor(80000 / Math.max(1, title.length)));
+  const paragraphs = body.split("\n").filter((line) => line.trim()).map((line) => `<a:p><a:r><a:rPr lang="es-ES" sz="1800"/><a:t>${xml(line.replace(/^[-*]\s+/u, ""))}</a:t></a:r><a:endParaRPr lang="es-ES" sz="1800"/></a:p>`).join("") || "<a:p><a:endParaRPr lang=\"es-ES\" sz=\"2200\"/></a:p>";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr><p:sp><p:nvSpPr><p:cNvPr id="2" name="Título"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="1143000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="es-ES" sz="${titleSize}" b="1"/><a:t>${xml(title)}</a:t></a:r><a:endParaRPr lang="es-ES" sz="${titleSize}"/></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Contenido"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="914400" y="1828800"/><a:ext cx="10287000" cy="4572000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>${paragraphs}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`;
 }
 
-async function pptxBytes(title: string, content: string) {
-  const sections = content.split(/\n\s*---\s*\n/gu).map((section) => section.trim()).filter(Boolean).slice(0, 50);
-  const slides = (sections.length ? sections : [content]).map((section, index) => {
+function presentationSlides(title: string, content: string, explicit?: readonly LocalDocumentSlide[]) {
+  const sections = explicit ?? content.split(/\n\s*---\s*\n/gu).map((section) => section.trim()).filter(Boolean).map((section) => {
     const lines = section.split("\n").filter((line) => line.trim());
-    const heading = (lines.shift() ?? `${title} ${index + 1}`).replace(/^#+\s*/u, "");
-    return { title: index === 0 && heading === content ? title : heading, body: lines.join("\n") || (index === 0 ? content : "") };
+    const heading = (lines.shift() ?? title).replace(/^#+\s*/u, "");
+    return { title: lines.length ? heading : title, body: lines.join("\n") || section };
   });
+  // Split dense slides rather than silently discarding lines or letting text overflow.
+  const slides = sections.flatMap((slide) => {
+    if (slide.title.length > 80 || /[\r\n]/u.test(slide.title)) {
+      throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Slide titles must be a single line of at most 80 characters; shorten the heading and move detail into the body.");
+    }
+    const lines = wrapLines("", slide.body, 44).slice(2);
+    const result: LocalDocumentSlide[] = [];
+    for (let offset = 0; offset < lines.length; offset += 12) {
+      result.push({ title: slide.title, body: lines.slice(offset, offset + 12).join("\n") });
+    }
+    return result;
+  });
+  if (slides.length > 50) throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Presentation exceeds 50 pages after layout; shorten or split it into separate files.");
+  return slides;
+}
+
+async function pptxBytes(title: string, slides: readonly LocalDocumentSlide[]) {
   const overrides = slides.map((_, index) => `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join("");
   const slideIds = slides.map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`).join("");
   const relationships = slides.map((_, index) => `<Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`).join("");
@@ -267,18 +308,18 @@ function pdfString(value: string) {
   return Buffer.from(bytes).toString("latin1");
 }
 
-function wrapLines(title: string, content: string) {
+function wrapLines(title: string, content: string, width = 88) {
   const source = [title, "", ...content.split("\n")];
   const result: string[] = [];
   for (const raw of source) {
-    const words = raw.replace(/^#{1,3}\s+/u, "").split(/\s+/u).filter(Boolean);
+    const words = raw.replace(/^#{1,3}\s+/u, "").split(/\s+/u).filter(Boolean).flatMap((word) => word.match(new RegExp(`.{1,${width}}`, "gu")) ?? []);
     if (words.length === 0) {
       result.push("");
       continue;
     }
     let line = "";
     for (const word of words) {
-      if (`${line} ${word}`.trim().length > 88 && line) {
+      if (`${line} ${word}`.trim().length > width && line) {
         result.push(line);
         line = word;
       } else line = `${line} ${word}`.trim();
@@ -288,9 +329,11 @@ function wrapLines(title: string, content: string) {
   return result;
 }
 
-function textPdfBytes(title: string, content: string) {
+function textPdfBytes(title: string, content: string, slides?: readonly LocalDocumentSlide[]) {
   const lines = wrapLines(title, content);
-  const pages = Math.max(1, Math.ceil(lines.length / 44));
+  const pageContents = slides?.map((slide) => [slide.title, "", ...slide.body.split("\n")])
+    ?? Array.from({ length: Math.max(1, Math.ceil(lines.length / 44)) }, (_, page) => lines.slice(page * 44, (page + 1) * 44));
+  const pages = pageContents.length;
   const objects: Buffer[] = [];
   const add = (value: string | Buffer) => {
     objects.push(typeof value === "string" ? Buffer.from(value, "latin1") : value);
@@ -301,15 +344,15 @@ function textPdfBytes(title: string, content: string) {
   const fontId = add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>");
   const pageIds: number[] = [];
   for (let page = 0; page < pages; page += 1) {
-    const pageLines = lines.slice(page * 44, (page + 1) * 44);
-    const operators = pageLines.map((line, index) => `${index === 0 ? "" : "T* "}(${pdfString(line)}) Tj`).join("\n");
-    const stream = Buffer.from(`BT\n/F1 11 Tf\n15 TL\n72 760 Td\n${operators}\nET\n`, "latin1");
+    const pageLines = pageContents[page]!;
+    const operators = pageLines.map((line, index) => `${slides ? `/F1 ${index === 0 ? Math.min(18, Math.floor(800 / Math.max(1, line.length))) : 18} Tf ` : ""}${index === 0 ? "" : "T* "}(${pdfString(line)}) Tj`).join("\n");
+    const stream = Buffer.from(`BT\n/F1 ${slides ? 18 : 11} Tf\n${slides ? 25 : 15} TL\n${slides ? "54 472" : "72 760"} Td\n${operators}\nET\n`, "latin1");
     const streamId = add(Buffer.concat([
       Buffer.from(`<< /Length ${stream.length} >>\nstream\n`, "latin1"),
       stream,
       Buffer.from("endstream", "latin1"),
     ]));
-    pageIds.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${streamId} 0 R >>`));
+    pageIds.push(add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${slides ? "960 540" : "595 842"}] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${streamId} 0 R >>`));
   }
   objects[catalogId - 1] = Buffer.from(`<< /Type /Catalog /Pages ${pagesId} 0 R >>`, "latin1");
   objects[pagesId - 1] = Buffer.from(`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] /Count ${pages} >>`, "latin1");
@@ -363,7 +406,7 @@ export async function generateLocalDocument(input: LocalDocumentInput): Promise<
   if (normalized.format === "pdf") {
     const generated = normalized.sourcePng
       ? await imagePdfBytes(normalized.title, normalized.sourcePng)
-      : textPdfBytes(normalized.title, normalized.content);
+      : textPdfBytes(normalized.title, normalized.content, normalized.slides ? presentationSlides(normalized.title, normalized.content, normalized.slides) : undefined);
     data = generated.data;
     pages = generated.pages;
   } else if (normalized.format === "docx") {
@@ -371,7 +414,9 @@ export async function generateLocalDocument(input: LocalDocumentInput): Promise<
   } else if (normalized.format === "xlsx") {
     data = await xlsxBytes(normalized.title, normalized.content, normalized.rows);
   } else {
-    data = await pptxBytes(normalized.title, normalized.content);
+    const slides = presentationSlides(normalized.title, normalized.content, normalized.slides);
+    data = await pptxBytes(normalized.title, slides);
+    pages = slides.length;
   }
   if (data.length < 64 || data.length > 20_000_000) {
     throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_OUTPUT_INVALID", "Generated document size is invalid.");
