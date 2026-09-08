@@ -230,10 +230,12 @@ describe("worker Codex turn", () => {
   });
 
   it("uses a bounded configurable lifetime for every worker turn", () => {
-    expect(workerTurnTimeoutMs({})).toBe(10 * 60_000);
+    expect(workerTurnTimeoutMs({})).toBe(30 * 60_000);
+    expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: " " })).toBe(30 * 60_000);
     expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "30000" })).toBe(30_000);
     expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "1800000" })).toBe(1_800_000);
     expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "29999" })).toThrow(/between/u);
+    expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "1800001" })).toThrow(/between/u);
     expect(() => workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: "secret" })).toThrow(/invalid/u);
   });
 
