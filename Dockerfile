@@ -128,6 +128,7 @@ RUN printf '%s\n' \
 RUN install -d -m 0555 -o root -g root /work
 
 COPY --from=builder --chown=root:root /app/dist/pptxgenjs.cjs /usr/local/share/aibrain/pptxgenjs.cjs
+COPY --chown=root:root scripts/container-document-conversion-acceptance.mjs /usr/local/share/aibrain/container-document-conversion-acceptance.mjs
 COPY --chown=root:root docs/PRESENTATION_AUTHORING.md /usr/local/share/aibrain/presentations.md
 
 WORKDIR /app
