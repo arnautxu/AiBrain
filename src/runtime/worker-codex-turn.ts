@@ -138,7 +138,9 @@ import {
 } from "@/usage/contracts";
 import { completePublicTextPrefix, publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
 
-const DEFAULT_WORKER_TURN_TIMEOUT_MS = 10 * 60_000;
+// Match the terminal watchdog's hard budget so active tasks are not
+// unconditionally interrupted before their normal recovery window.
+const DEFAULT_WORKER_TURN_TIMEOUT_MS = 30 * 60_000;
 const MIN_WORKER_TURN_TIMEOUT_MS = 30_000;
 const MAX_WORKER_TURN_TIMEOUT_MS = 30 * 60_000;
 
