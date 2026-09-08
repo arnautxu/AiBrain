@@ -91,6 +91,8 @@ def main():
                 raise ValueError("Invalid revision")
             revision = real_directory(str(revisions / args.rollback))
             receipt = json.loads((revision / "receipt.json").read_text())
+            if inventory(real_directory(str(revision / "before"))) != receipt["before"]:
+                raise ValueError("Backup integrity failed; no active files were changed")
             current = inventory(root)
             recoverable = set(current).issubset(set(receipt["after"])) and all(
                 current.get(name) in (receipt["before"].get(name), receipt["after"].get(name))
@@ -146,6 +148,8 @@ def main():
         (revision / "receipt.json").write_bytes(encoded(receipt))
         # Recheck after backup and before any write. Interrupted updates retain
         # their receipt and original files for operator recovery; never hide it.
+        if inventory(revision / "before") != before:
+            raise ValueError("Backup integrity failed before publication")
         if inventory(root) != before or inventory(source) != proposed:
             raise ValueError("Source or destination changed during preparation")
         for relative in changes:
