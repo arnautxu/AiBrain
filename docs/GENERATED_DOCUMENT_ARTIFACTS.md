@@ -60,23 +60,35 @@ La aceptación debe cubrir de forma separada:
 La validación local no prueba por sí sola CI, publicación, despliegue ni
 aceptación autenticada en Arnall.
 
-## Autoría y paginación de presentaciones
+## Autoría, revisión y entrega de presentaciones
 
-`aibrain_documents.create` y `create_batch` renderizan contenido final: no ejecutan
-prompts ni redactan una presentación a partir de una petición. El agente debe
-redactar primero el contenido y enviar `slides: [{ title, body }, ...]` para una
-presentación PDF o PPTX. El formato solicitado se conserva; si se piden ambos,
-el lote usa las mismas diapositivas para ambos archivos. `content` contiene un
-resumen cuando se utiliza `slides`, y ese resumen no se imprime en las páginas.
+Las presentaciones diseñadas siguen la ruta de autoría local con PptxGenJS
+empaquetado en la imagen. El agente redacta un guion, compone las diapositivas
+con texto y elementos visuales pertinentes, aplica las skills autorizadas y
+revisa el resultado antes de publicarlo. No se instalan dependencias durante el
+turno ni se sustituye una capacidad ausente por una presentación básica sin
+explicar la limitación.
 
-Cada diapositiva inicia una página 16:9. El texto denso continúa en otra página,
-sin descartar líneas. Más de 50 páginas tras maquetar produce un error explícito
-para que el agente reduzca o divida la entrega. La respuesta incluye el número
-de páginas también para PPTX. El modo antiguo de PPTX con separadores `---`
-sigue disponible; un PDF sin `slides` conserva el formato de informe A4.
+Los borradores se guardan en `.aibrain-drafts/` dentro del workspace privado.
+La comprobación usa el PPTX real: conversión a PDF mediante LibreOffice,
+renderizado de todas sus páginas con Poppler e inspección de composición,
+legibilidad, recortes, solapamientos y número de diapositivas. Solo los archivos
+finales revisados se copian a `documents/` y se anuncian al capturador durable.
+Si se solicitan PDF y PPTX, el PDF se deriva del mismo PPTX para conservar diseño
+y paginación. La captura de bytes válidos no demuestra calidad visual.
 
-Los recibos incluyen las diapositivas en su huella de idempotencia; cambiar su
-contenido no puede reutilizar el resultado de una llamada anterior. Las pruebas
-locales comprueban páginas reales PDF, contenido OOXML, continuidad del texto,
-validación y repetición del lote. Esto no demuestra que un turno real del modelo
-haya redactado correctamente la presentación ni sustituye la aceptación live.
+`aibrain_documents.create` y `create_batch` siguen disponibles para documentos
+sencillos. Son renderizadores de contenido final, no ejecutores de prompts.
+Las `slides: [{ title, body }, ...]` sirven para solicitudes explícitas de
+presentaciones de texto básico. `content` es un resumen y no se imprime cuando
+se proporcionan diapositivas. Cada entrada produce exactamente una página
+16:9: si supera la capacidad del diseño se devuelve
+`LOCAL_DOCUMENT_SLIDE_OVERFLOW`, sin cortar frases, repetir títulos ni crear
+páginas adicionales. El PPTX antiguo con separadores `---` mantiene sus límites
+explícitos y la misma validación de exceso. Más de 50 diapositivas produce un
+error. Un PDF sin `slides` conserva el formato de informe A4.
+
+Los recibos incluyen las diapositivas en su huella de idempotencia. Las pruebas
+locales cubren formatos, límites, paginación y entrega durable; la aceptación de
+una presentación requiere además inspección del archivo real generado por un
+turno autenticado. CI, publicación y despliegue siguen siendo gates separados.

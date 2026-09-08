@@ -36,7 +36,7 @@ const CELL_SCHEMA = {
 };
 const SLIDES_SCHEMA = {
   type: "array", minItems: 1, maxItems: 50,
-  description: "Authored presentation slides for PPTX or PDF. Each entry starts a new 16:9 page. Write the final content first; this renderer cannot execute prompts or invent content. Use the same slides for matching PDF and PPTX outputs.",
+  description: "Basic text-only slides for explicitly simple PPTX or PDF requests, not designed presentations. Each entry is one 16:9 page; overflowing text is rejected, never auto-paginated. Write the final content first; this renderer cannot execute prompts or invent content. Use the same slides for matching PDF and PPTX outputs.",
   items: {
     type: "object",
     properties: {
@@ -56,7 +56,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     {
       type: "function",
       name: "create",
-      description: "Render final authored content into one local document; this is not an AI authoring tool and does not execute instructions in content. Never pass the user request or a prompt as the document. For presentations use slides with complete titles and body text (PPTX or PDF); honor the requested format and slide count. Legacy PPTX content separates slides with a line containing ---. Verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table. Formula cells must be explicit objects like {formula: 'SUM(A2:A3)'}; plain strings stay literal text. Only same-sheet numeric references/arithmetic and SUM, MIN, MAX, AVERAGE, COUNT, ROUND, ABS are supported; no external links.",
+      description: "Render final authored content into one local document; this is not an AI authoring tool and does not execute instructions in content. Never pass the user request or a prompt as the document. This renderer supports only plain text, not visual presentation design. For presentations use the local authoring workflow described by the runtime; reserve slides for explicitly basic text-only outputs. Legacy PPTX content separates slides with a line containing ---. Verify its format and return its private preview/download artifact. Use rows for structured Excel data; content is still required as a human-readable description or fallback table. Formula cells must be explicit objects like {formula: 'SUM(A2:A3)'}; plain strings stay literal text. Only same-sheet numeric references/arithmetic and SUM, MIN, MAX, AVERAGE, COUNT, ROUND, ABS are supported; no external links.",
       inputSchema: {
         type: "object",
         properties: {
@@ -84,7 +84,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
     {
       type: "function",
       name: "create_batch",
-      description: "Create and verify every requested local document in one bounded call. Use this once when the user requests two or more PDF, DOCX, PPTX or XLSX outputs; each file receives exactly one private artifact. Author the final content before calling; use slides for presentations in both PDF and PPTX, never a generation prompt.",
+      description: "Create and verify every requested local document in one bounded call. Use this for two or more basic text/table documents, not designed presentations; each file receives exactly one private artifact. Author final content before calling. Designed presentations and matching PDFs use the local authoring workflow, never this basic batch renderer.",
       inputSchema: {
         type: "object",
         properties: {

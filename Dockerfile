@@ -32,7 +32,7 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build && npm run build:automation-worker && npm run build:container-app-server-acceptance
+RUN npm run build && npm run build:automation-worker && npm run build:container-app-server-acceptance && npm run build:presentation-runtime
 
 FROM ${NODE_IMAGE} AS runtime
 
@@ -126,6 +126,9 @@ RUN printf '%s\n' \
 # Bubblewrap needs a pre-existing mountpoint because the container root is
 # deliberately read-only before document conversion begins.
 RUN install -d -m 0555 -o root -g root /work
+
+COPY --from=builder --chown=root:root /app/dist/pptxgenjs.cjs /usr/local/share/aibrain/pptxgenjs.cjs
+COPY --chown=root:root docs/PRESENTATION_AUTHORING.md /usr/local/share/aibrain/presentations.md
 
 WORKDIR /app
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./

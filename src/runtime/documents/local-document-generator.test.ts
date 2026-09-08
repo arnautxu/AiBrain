@@ -71,13 +71,20 @@ describe("local document generator", () => {
     expect(pdf.data.toString("latin1")).not.toContain(brief);
   });
 
-  it("preserves legacy slide overflow instead of truncating after twenty lines", async () => {
+  it.each(["pdf", "pptx"] as const)("rejects dense authored %s slides without silently changing the slide count", async (format) => {
+    const body = Array.from({ length: 13 }, (_, index) => `Indicador ${index + 1}`).join("\n");
+    await expect(generateLocalDocument({ format, title: "Seguiment", content: "Summary", slides: [{ title: "Resultats", body }] }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDE_OVERFLOW" });
+  });
+
+  it("rejects legacy overflow while retaining explicit section boundaries for short decks", async () => {
     const content = "Seguiment\n" + Array.from({ length: 30 }, (_, index) => `Indicador ${index + 1}`).join("\n");
-    const result = await generateLocalDocument({ format: "pptx", title: "Seguiment", content });
+    await expect(generateLocalDocument({ format: "pptx", title: "Seguiment", content }))
+      .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDE_OVERFLOW" });
+    const result = await generateLocalDocument({ format: "pptx", title: "Seguiment", content: "Objectiu\nReduir incidències.\n---\nMesura\nRevisió setmanal." });
+    expect(result.pages).toBe(2);
     const archive = await JSZip.loadAsync(result.data);
-    const texts = await Promise.all(Object.keys(archive.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/u.test(name)).map((name) => archive.file(name)!.async("text")));
-    expect(result.pages).toBe(3);
-    expect(texts.join("\n")).toContain("Indicador 30");
+    expect(await archive.file("ppt/slides/slide2.xml")!.async("text")).toContain("Revisió setmanal.");
     await expect(generateLocalDocument({ format: "pptx", title: "Too many", content: Array.from({ length: 51 }, () => "Title\nBody").join("\n---\n") }))
       .rejects.toMatchObject({ code: "LOCAL_DOCUMENT_SLIDES_INVALID" });
   });
