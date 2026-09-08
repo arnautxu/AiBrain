@@ -206,7 +206,7 @@ function isCanonicalIsoDate(value: unknown) {
 
 function hasExactArtifactKeys(value: ChatMessage["artifacts"][number]) {
   if (value.type === "image") {
-    return hasExactKeys(value, ["id", "type", "name", "url", "prompt"]);
+    return hasExactKeys(value, ["id", "type", "name", "url", "prompt"], ["width", "height"]);
   }
   if (value.type === "document") {
     return hasExactKeys(value, [

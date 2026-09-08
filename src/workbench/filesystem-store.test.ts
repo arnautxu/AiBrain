@@ -229,6 +229,34 @@ describe("FileWorkbenchStore", () => {
     });
   });
 
+  it("durably finishes image turns with dimensions while rejecting invalid or unknown fields", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Image project");
+    const thread = await store.createThread(USER_A, project.id, "Presentation visuals");
+    const userMessage = message("user", "complete");
+    const assistantMessage = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, userMessage, assistantMessage);
+    const imageId = randomUUID();
+    const legacyId = randomUUID();
+    const finished: ChatMessage = { ...assistantMessage, status: "complete", content: "Visuals prepared", artifacts: [
+      { id: imageId, type: "image", name: "visual.png", url: `/api/projects/${project.id}/artifacts/${imageId}`, prompt: null, width: 1672, height: 941 },
+      { id: legacyId, type: "image", name: "legacy.png", url: `/api/projects/${project.id}/artifacts/${legacyId}`, prompt: null },
+    ] };
+    await store.finishThreadTurn(USER_A, thread.id, finished, null);
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.getThread(USER_A, thread.id)).messages.at(-1)).toEqual(finished);
+
+    for (const invalidFields of [
+      { width: 0 }, { height: 8193 }, { width: 1.5 }, { height: "941" },
+      { width: undefined }, { unexpected: "must remain forbidden" },
+    ]) {
+      const invalid = structuredClone(finished);
+      Object.assign(invalid.artifacts[0]!, invalidFields);
+      await expect(store.finishThreadTurn(USER_A, thread.id, invalid, null)).rejects.toBeInstanceOf(WorkbenchPersistenceError);
+      expect((await restarted.getThread(USER_A, thread.id)).messages.at(-1)).toEqual(finished);
+    }
+  });
+
   it("finishes and reloads turns with an authenticated spreadsheet preview", async () => {
     const { usersRoot, store } = await fixture();
     const project = await store.createProject(USER_A, "Spreadsheet project");

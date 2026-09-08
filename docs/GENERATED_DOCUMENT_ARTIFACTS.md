@@ -9,7 +9,7 @@ entonces emite el artefacto hacia la proyección durable del mensaje.
 ## Cadena persistente
 
 ```text
-fichero generado en workspace privado
+fichero final en documents/ + llamada explícita a aibrain_documents.deliver
   -> validación de firma, MIME, tamaño y OOXML
   -> blob inmutable por propietario + id de artefacto
   -> índice durable proyecto + conversación + mensaje + propietario + hash
@@ -73,7 +73,8 @@ Los borradores se guardan en `.aibrain-drafts/` dentro del workspace privado.
 La comprobación usa el PPTX real: conversión a PDF mediante LibreOffice,
 renderizado de todas sus páginas con Poppler e inspección de composición,
 legibilidad, recortes, solapamientos y número de diapositivas. Solo los archivos
-finales revisados se copian a `documents/` y se anuncian al capturador durable.
+finales revisados se copian a `documents/` y se entregan mediante
+`aibrain_documents.deliver`. Los listados, comandos y textos no crean adjuntos.
 Si se solicitan PDF y PPTX, el PDF se deriva del mismo PPTX para conservar diseño
 y paginación. La captura de bytes válidos no demuestra calidad visual.
 
@@ -159,3 +160,25 @@ su SHA-256 y una identidad incorrecta se rechazó antes de convertir. No se
 montaron volúmenes de producción en el contenedor de prueba ni se modificó el servicio
 en ejecución. El despliegue del candidato y un nuevo turno autenticado siguen
 pendientes.
+
+## Entrega explícita y persistencia de imágenes
+
+La inferencia de entregas desde texto de comandos, listados o historial está
+retirada: mencionaba archivos antiguos y los adjuntaba al turno equivocado.
+`aibrain_documents.deliver` acepta únicamente una ruta relativa bajo
+`documents/`, tras validar identidad exacta del turno y permisos. La lectura
+segura y validación de bytes preceden a la publicación privada inmutable; una
+segunda llamada con los mismos bytes conserva el artefacto y no puede cambiarlo.
+La revisión `render` sigue sin entregar archivos. El catálogo versionado renueva
+los runtimes anteriores con su historial durable para disponer de `deliver`.
+
+El validador de persistencia del mensaje acepta las dimensiones opcionales
+`width` y `height` de imágenes generadas, igual que el contrato público. Ambas
+deben estar presentes como enteros válidos; campos desconocidos siguen
+rechazados. Antes de este ajuste, un turno con imágenes podía verse en la
+proyección incremental pero fallar al finalizar el almacenamiento del chat.
+
+La guía de revisión muestra cómo emitir la imagen retornada desde code mode
+sin imprimir su base64 como texto. La incidencia observada alcanzó primero
+el límite de diez minutos del turno y después falló al persistir las imágenes;
+corregir la persistencia no equivale a haber completado ese trabajo interrumpido.

@@ -11,7 +11,7 @@ const THREAD_TOKEN_SECONDS = 60 * 60 * 24 * 30;
  * later `thread/resume`, so callers can use this marker to re-bootstrap only
  * turns that actually need the current toolset.
  */
-export const CURRENT_THREAD_TOOLSET_REVISION = "aibrain-tools-2026-09-08-document-render-v1";
+export const CURRENT_THREAD_TOOLSET_REVISION = "aibrain-tools-2026-09-08-document-deliver-v1";
 
 type ThreadPayload = {
   version: 3;

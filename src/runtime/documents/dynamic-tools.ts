@@ -55,6 +55,13 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   description: "Create validated PDF, Word, PowerPoint and Excel files in this employee's private AiBrain project workspace on the installation server. This is the default document destination. It does not use Google Drive or any external connector.",
   tools: [
     {
+      type: "function", name: "deliver",
+      description: "Attach one explicitly selected final document from documents/ to this chat. Call only after authoring and review are finished. Validates and preserves exact private bytes; listing, inspecting or rendering a file does not deliver it. Repeat the same path only for identical bytes; use a new final filename for a revision.",
+      inputSchema: { type: "object", properties: {
+        relativePath: { type: "string", minLength: 1, maxLength: 1024 },
+      }, required: ["relativePath"], additionalProperties: false },
+    },
+    {
       type: "function", name: "render",
       description: "Review one page of a worker-authored PPTX or PDF under .aibrain-drafts using the server document sandbox. Returns the page image, total pages, source hash and a draft review PDF path. Call for each page before promoting final files; this does not publish an artifact.",
       inputSchema: {
@@ -593,7 +600,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf" && params.tool !== "render")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -611,6 +618,41 @@ async function handleSingleLocalDocumentDynamicToolCall(
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
+    }
+    if (params.tool === "deliver") {
+      if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Delivery fields are invalid.");
+      exactKeys(params.arguments, ["relativePath"]);
+      const relativePath = params.arguments.relativePath;
+      if (typeof relativePath !== "string" || relativePath.length > 1024 ||
+          !/^documents\/.+\.(pdf|pptx|docx|xlsx)$/u.test(relativePath) ||
+          /[\\\0\r\n]/u.test(relativePath) || relativePath.split("/").some((segment) => !segment || segment === "." || segment === ".." || segment === ".aibrain-drafts")) {
+        throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Delivery requires a final project-relative document under documents/.");
+      }
+      // Reject linked components before the bounded safe-file read; the worker
+      // cannot choose an owner, root, conversation or external destination.
+      let current = context.projectWorkspace;
+      if (await realpath(current) !== current) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_SOURCE_INVALID", "Delivery workspace is unsafe.");
+      for (const segment of relativePath.split("/")) {
+        current = path.join(current, segment);
+        if ((await lstat(current)).isSymbolicLink()) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_SOURCE_INVALID", "Delivery source may not contain symbolic links.");
+      }
+      const contents = await readRegularFileWithin(context.projectWorkspace, relativePath, 50 * 1024 * 1024);
+      const fileName = path.basename(relativePath);
+      const format = path.extname(relativePath).slice(1) as LocalDocumentFormat;
+      const mimeTypes: Record<LocalDocumentFormat, string> = {
+        pdf: "application/pdf",
+        pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      };
+      const validated = validateUploadedDocument({ fileName, declaredMimeType: mimeTypes[format], data: contents });
+      const artifact = await persistGeneratedDocumentArtifact({
+        artifactId: generatedDocumentArtifactId(context.sourceTurnId, relativePath), relativePath, contents, pages: null,
+        context: { installation: context.installation, projectId: context.projectId, threadId: context.sourceThreadId, messageId: context.sourceTurnId, storageOwnerId: context.userId },
+      });
+      return { artifacts: [artifact], response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify({
+        status: "delivered", artifact, sha256: validated.sha256, externalConnectorUsed: false,
+      }) }] } };
     }
     if (params.tool === "render") {
       const { png, ...review } = await renderPresentationDraft(params.arguments, context.projectWorkspace, context.renderPresentation);

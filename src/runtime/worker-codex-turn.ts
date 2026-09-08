@@ -107,7 +107,6 @@ import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
-import { generatedDocumentArtifactsFromRuntimeItem } from "@/runtime/generated-document-artifacts";
 import {
   persistGeneratedImageArtifact,
   type GeneratedImageArtifactContext,
@@ -278,12 +277,12 @@ function localDocumentDeveloperInstructions() {
     "Para informes de texto sencillos, Word/DOCX y tablas Excel/XLSX, usa `aibrain_documents.create`; es un renderizador básico de contenido final, no otro modelo. Redacta primero el contenido final completo. Nunca envíes como `content` la petición del usuario, un prompt, instrucciones de diseño o una promesa de trabajo.",
     "Para presentaciones, tanto PDF como PowerPoint, usa autoría local con shell y PptxGenJS, no el renderizador básico `aibrain_documents.create`. Lee primero la guía local `/usr/local/share/aibrain/presentations.md` y las skills autorizadas local-documents e impeccable cuando estén disponibles y cumple la política de diseño de esta instalación. PptxGenJS está empaquetado en `/usr/local/share/aibrain/pptxgenjs.cjs`: cárgalo desde Node con require y comprueba su disponibilidad; no instales paquetes ni uses servicios externos. Si falta una herramienta o skill obligatoria, explica la limitación concreta; no sustituyas silenciosamente la presentación por diapositivas de texto básico.",
     "Antes de crear la presentación, redacta un guion con una idea por diapositiva y diseña composiciones, jerarquía tipográfica y elementos visuales relevantes al tema. Respeta idioma, contenido y número solicitado; no repitas títulos ni cortes frases entre páginas para encajar texto. Usa formas, diagramas, gráficos e imágenes locales autorizadas cuando aporten información; no inventes fuentes ni afirmes haber usado imágenes que no existen.",
-    "Trabaja en borradores privados dentro de `.aibrain-drafts/` en el workspace. No anuncies ni publiques sus rutas como entregas. Genera el PPTX en shell y llama a `aibrain_documents.render` con su ruta relativa y cada número de página para obtener el PDF y las imágenes; no ejecutes conversores desde shell, porque su sandbox anidado bloquea el renderizado; inspecciona visualmente todas las diapositivas, comprueba recortes, solapamientos, legibilidad y número de páginas, y corrige antes de entregar. Solo después copia los archivos finales verificados a `documents/` y emite sus rutas para que el servidor cree los artefactos privados. No escribas versiones provisionales en la ruta final; no presentes un borrador no inspeccionado como terminado.",
+    "Trabaja en borradores privados dentro de `.aibrain-drafts/` en el workspace. No anuncies ni publiques sus rutas como entregas. Genera el PPTX en shell y llama a `aibrain_documents.render` con su ruta relativa y cada número de página para obtener el PDF y las imágenes; no ejecutes conversores desde shell, porque su sandbox anidado bloquea el renderizado; inspecciona visualmente todas las diapositivas, comprueba recortes, solapamientos, legibilidad y número de páginas, y corrige antes de entregar. Solo después copia los archivos finales verificados a `documents/` y llama a `aibrain_documents.deliver` con la ruta relativa de cada archivo solicitado para adjuntarlo. Consultar o imprimir rutas no entrega documentos. No escribas versiones provisionales en la ruta final; no presentes un borrador no inspeccionado como terminado.",
     "Conserva exactamente los formatos solicitados: entrega PDF si pide PDF y PPTX si pide PowerPoint; si pide ambos, deriva el PDF del mismo PPTX, conservando el diseño y el número de diapositivas. El renderizador básico con `slides` queda reservado para solicitudes explícitas de diapositivas de texto simple; rechaza exceso de contenido en vez de añadir páginas automáticamente. En ese caso usa `format: pdf` para PDF y `format: pptx` para PowerPoint.",
     "Cuando pida un PDF de una imagen generada en este hilo, incluso en un mensaje anterior, usa `aibrain_documents.image_to_pdf` con el `sourceImageItemId` opaco del elemento de generación completado. La herramienta incrusta el PNG real en una única página A4. No copies la descripción como contenido y no uses ni reveles rutas del servidor o del workspace.",
     "Si pide dos o más documentos sencillos para el renderizador básico y `aibrain_documents.create_batch` está disponible, úsala exactamente una vez con esos archivos. Esta regla no aplica a presentaciones diseñadas con autoría local. Solo en una conversación antigua donde esa función no exista, usa `aibrain_documents.create` una vez por archivo; nunca cambies a almacenamiento externo.",
     "No uses Google Drive, Dropbox ni ningún conector o almacenamiento externo para crear o guardar estos documentos salvo que el usuario elija explícitamente ese proveedor o destino en su petición actual. Una credencial disponible no constituye esa elección.",
-    "No anuncies un archivo como terminado hasta verificar sus bytes, formato y contenido: el renderizador básico debe devolver `success: true`, tamaño mayor que cero y hash; para autoría local, verifica los archivos finales con herramientas locales antes de emitir sus rutas para la captura durable. Si la herramienta no está disponible en un hilo antiguo, crea el archivo dentro de `documents/` con las herramientas locales del workspace y verifica el formato; nunca sustituyas este flujo por Drive.",
+    "No anuncies un archivo como terminado hasta verificar sus bytes, formato y contenido: el renderizador básico debe devolver `success: true`, tamaño mayor que cero y hash; para autoría local, verifica los archivos finales y exige una respuesta exitosa de `aibrain_documents.deliver` antes de anunciar una entrega. Si falta la herramienta de entrega, conserva el archivo y explica la limitación; nunca inventes un enlace ni sustituyas este flujo por Drive.",
     "Nunca muestres al usuario una ruta interna del servidor o del workspace (por ejemplo `/var/lib/...`). En la respuesta final menciona solo los nombres de archivo y usa las tarjetas privadas para previsualizar o descargar.",
   ].join("\n");
 }
@@ -398,42 +397,7 @@ async function persistGeneratedImage(
   }, { envelope, key: `artifact:${String(item.id ?? artifact.id)}` });
 }
 
-async function projectGeneratedDocuments(
-  item: unknown,
-  projectWorkspace: string,
-  projectId: string,
-  turnId: string,
-  persistence: {
-    installation: GeneratedImageArtifactContext["installation"];
-    threadId: string;
-    storageOwnerId: string;
-  },
-  envelope: AppServerEvent,
-  emit: EmitEvent,
-  projectedArtifactIds: Set<string>,
-  projectingArtifactIds: Set<string>,
-) {
-  const artifacts = await generatedDocumentArtifactsFromRuntimeItem(
-    item,
-    projectWorkspace,
-    projectId,
-    turnId,
-    persistence,
-  );
-  for (const artifact of artifacts) {
-    if (projectedArtifactIds.has(artifact.id) || projectingArtifactIds.has(artifact.id)) continue;
-    projectingArtifactIds.add(artifact.id);
-    try {
-      await emit(
-        { type: "artifact", item: artifact },
-        { envelope, key: `artifact:document:${artifact.id}` },
-      );
-      projectedArtifactIds.add(artifact.id);
-    } finally {
-      projectingArtifactIds.delete(artifact.id);
-    }
-  }
-}
+
 
 async function projectItemEvidence(
   params: unknown,
@@ -913,22 +877,7 @@ export async function runWorkerCodexTurn(
           emit,
         );
       }
-      await projectGeneratedDocuments(
-        item,
-        projectWorkspace,
-        chatRequest.projectId,
-        chatRequest.assistantMessageId,
-        {
-          installation: runtime.config,
-          threadId: chatRequest.threadId,
-          storageOwnerId: authenticatedUserId,
-        },
-        envelope,
-        emit,
-        projectedDocumentArtifactIds,
-        projectingDocumentArtifactIds,
-      );
-      await projectItemEvidence({ item }, true, envelope, emit);
+            await projectItemEvidence({ item }, true, envelope, emit);
       const activity = itemActivity({ item }, true);
       if (activity) {
         activities.set(activity.id, activity);
@@ -1488,23 +1437,6 @@ export async function runWorkerCodexTurn(
               envelope,
               emit,
             );
-            if (isRecord(params) && isRecord(params.item)) {
-              await projectGeneratedDocuments(
-                params.item,
-                projectWorkspace,
-                chatRequest.projectId,
-                chatRequest.assistantMessageId,
-                {
-                  installation: runtime.config,
-                  threadId: chatRequest.threadId,
-                  storageOwnerId: authenticatedUserId,
-                },
-                envelope,
-                emit,
-                projectedDocumentArtifactIds,
-                projectingDocumentArtifactIds,
-              );
-            }
           }
           await projectItemEvidence(params, method === "item/completed", envelope, emit);
           const activity = itemActivity(params, method === "item/completed");
