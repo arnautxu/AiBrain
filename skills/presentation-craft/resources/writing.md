@@ -194,4 +194,3 @@ Use a takeaway title when the slide establishes a specific finding. Use a range 
 Apply the writing quality instructions above and the punctuation rules below to whichever form you choose.
 
 **Periods in titles and headings:** Remove trailing periods from short slide titles and section headings. Keep a terminal period only when the title or heading is a longer, complete sentence. A short complete sentence does not need a trailing period. Do not lengthen or otherwise rewrite a good title just to retain a period. Use normal punctuation in body text and preserve periods within abbreviations and numbers.
-
