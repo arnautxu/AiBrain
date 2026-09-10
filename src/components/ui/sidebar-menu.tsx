@@ -604,6 +604,7 @@ function useMenuRow(rowRef: RefObject<HTMLLIElement | null>, isSubRow = false) {
   // phase). The flag holds the truth through that window, and attachRow
   // re-syncs the scope whenever the <li> lands.
   const activeFlagRef = useRef(false);
+  const buttonElementRef = useRef<HTMLElement | null>(null);
 
   useIsoLayoutEffect(() => {
     const el = rowRef.current;
@@ -617,8 +618,9 @@ function useMenuRow(rowRef: RefObject<HTMLLIElement | null>, isSubRow = false) {
     (node: HTMLLIElement | null) => {
       rowRef.current = node;
       if (node && setRowActive) setRowActive(node, activeFlagRef.current);
+      if (node && setRowButton) setRowButton(node, buttonElementRef.current);
     },
-    [setRowActive, rowRef]
+    [setRowActive, setRowButton, rowRef]
   );
 
   const setActive = useCallback(
@@ -631,6 +633,9 @@ function useMenuRow(rowRef: RefObject<HTMLLIElement | null>, isSubRow = false) {
 
   const setButtonEl = useCallback(
     (el: HTMLElement | null) => {
+      // Child layout effects may precede the parent row ref attaching.
+      // Retain the button so attachRow can replay its actual geometry.
+      buttonElementRef.current = el;
       if (rowRef.current && setRowButton) setRowButton(rowRef.current, el);
     },
     [setRowButton, rowRef]
