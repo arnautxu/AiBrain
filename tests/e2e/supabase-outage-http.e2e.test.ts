@@ -179,7 +179,7 @@ beforeAll(async () => {
   applicationRoot = path.join(root, "application");
   await mkdir(applicationRoot, { recursive: true, mode: 0o700 });
   await Promise.all([
-    "src", "contracts", "public", "config", "next.config.ts", "next-env.d.ts", "package.json",
+    "src", "contracts", "public", "config", "skills", "next.config.ts", "next-env.d.ts", "package.json",
     "postcss.config.mjs", "tsconfig.json",
   ].map((entry) => cp(path.join(repositoryRoot, entry), path.join(applicationRoot, entry), { recursive: true })));
   await symlink(path.join(repositoryRoot, "node_modules"), path.join(applicationRoot, "node_modules"), "dir");
