@@ -21,9 +21,18 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     expect(Math.abs(a!.width - b!.width)).toBeLessThanOrEqual(1);
     const controls = await band.locator('button[aria-label="Destino de la conversación"], button.landing-band-item').evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { top: r.top, left: r.left, right: r.right, height: r.height }; }));
     expect(controls.length).toBe(4);
-    expect(controls[1].left - controls[0].right).toBeLessThan(24);
-    expect(controls[2].left - controls[1].right).toBeLessThan(24);
-    expect(Math.max(...controls.map(r => r.top)) - Math.min(...controls.map(r => r.top))).toBeLessThan(3);
+    if (width >= 640) {
+      expect(Math.max(...controls.map(r => r.top)) - Math.min(...controls.map(r => r.top))).toBeLessThan(3);
+    } else {
+      // The project has its own row; secondary actions may wrap on narrow screens.
+      expect(Math.min(...controls.slice(1).map(r => r.top))).toBeGreaterThanOrEqual(controls[0].top + controls[0].height);
+    }
+    for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) {
+      const first = controls[i], second = controls[j];
+      const overlapsX = Math.min(first.right, second.right) - Math.max(first.left, second.left) > 1;
+      const overlapsY = Math.min(first.top + first.height, second.top + second.height) - Math.max(first.top, second.top) > 1;
+      expect(overlapsX && overlapsY).toBe(false);
+    }
     for (const r of controls) { expect(r.left).toBeGreaterThanOrEqual(0); expect(r.right).toBeLessThanOrEqual(width); expect(r.height).toBeGreaterThanOrEqual(44); }
     await input.fill("Borrador que se reemplaza.");
     await band.getByRole("button", { name: "Tareas recurrentes", exact: true }).click();
