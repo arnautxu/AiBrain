@@ -831,7 +831,7 @@ describe("worker Codex turn", () => {
     ]);
     const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
-    expect(instructions).toContain("Arnall: mandatory design skill");
+    expect(instructions).toContain("Automatic design and writing guidance");
     expect(instructions).toContain("required skill is unavailable");
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
@@ -1711,7 +1711,7 @@ describe("worker Codex turn", () => {
         },
       },
     });
-    expect(JSON.stringify(calls[0]?.params)).toContain("Arnall: mandatory design skill");
+    expect(JSON.stringify(calls[0]?.params)).toContain("Automatic design and writing guidance");
     expect(JSON.stringify(calls[0]?.params)).toContain("required skill is unavailable");
     expect(events).not.toContainEqual(expect.objectContaining({
       type: "activity",

@@ -9,7 +9,7 @@ import { FileCompanySkillPackageStore, synchronizeEffectiveSkills, readVersioned
 import { ensureInstallationCatalog } from "@/catalog/baseline";
 import { FileCatalogStore } from "@/catalog/store";
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
-import { managedSkillsForInstallation } from "@/catalog/managed-skills";
+import { DESIGN_COPY_SKILLS, managedSkillsForInstallation } from "@/catalog/managed-skills";
 
 const USER_A = "00000000-0000-4000-8000-000000000001";
 const USER_B = "00000000-0000-4000-8000-000000000002";
@@ -55,6 +55,17 @@ describe("managed skill packages", () => {
     expect((await ensureInstallationCatalog(store, config)).revision).toBe(state.revision);
     const first = await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot });
     const second = await synchronizeEffectiveSkills({ config, userId: USER_B, state, principal: principal(USER_B), packagesRoot });
+    for (const { id } of DESIGN_COPY_SKILLS) {
+      expect(state.resources.filter((resource) => resource.id === id)).toHaveLength(1);
+      const own = first.skills.find((skill) => skill.id === id)!;
+      const otherCopy = second.skills.find((skill) => skill.id === id)!;
+      expect(own.path).not.toBe(otherCopy.path);
+      expect(own.digest).toBe(otherCopy.digest);
+      const bundle = await readVersionedSkillPackage(packagesRoot, id);
+      for (const file of bundle.manifest.files) {
+        expect(await readFile(path.join(own.path, file), "utf8")).toBe(bundle.files[file]);
+      }
+    }
     const a = first.skills.find(({ id }) => id === "impeccable")!;
     const b = second.skills.find(({ id }) => id === "impeccable")!;
     expect(a.version).toBe("4.1.1");
@@ -70,18 +81,30 @@ describe("managed skill packages", () => {
     expect(instructions).toContain("full conversation");
     expect(instructions).toContain("A different selected skill complements");
     expect(instructions).not.toContain(b.path);
+    expect(instructions).toContain("Writing-only work does not activate visual design skills");
+    expect(instructions).toContain("Apply relevant skills silently");
+    expect(instructions).not.toContain("Briefly tell the user");
+    expect(instructions).toContain("Never invent causes, metrics, testimonials");
+    expect(instructions).toContain("ogilvy-copywriting only for persuasive or commercial copy");
     state.rules.push({ id: "deny-design-a", scope: "user", subjectId: USER_A, resourceId: "impeccable", effect: "deny", operations: ["read"] });
     state.revision += 1;
     const denied = await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot });
     expect(denied.revoked).toContain("impeccable");
+    expect(designSkillDeveloperInstructions(config, denied)).toContain("ux-writing@");
+    state.rules.push({ id: "deny-copy-a", scope: "user", subjectId: USER_A, resourceId: "ux-writing", effect: "deny", operations: ["read"] });
+    state.revision += 1;
+    const deniedCopy = await synchronizeEffectiveSkills({ config, userId: USER_A, state, principal: principal(USER_A), packagesRoot });
+    expect(deniedCopy.revoked).toContain("ux-writing");
+    expect(designSkillDeveloperInstructions(config, deniedCopy)).not.toContain("ux-writing@");
+    expect(await readFile(path.join(second.skills.find(({ id }) => id === "ux-writing")!.path, "SKILL.md"), "utf8")).toContain("name: ux-writing");
     await expect(readFile(path.join(a.path, "SKILL.md"))).rejects.toMatchObject({ code: "ENOENT" });
     expect(designSkillDeveloperInstructions(config, denied)).toContain("required skill is unavailable");
     expect(designSkillDeveloperInstructions(config, denied)).not.toContain(a.path);
     expect(await readFile(path.join(b.path, "SKILL.md"), "utf8")).toContain("name: impeccable");
     const other = { ...config, companySlug: "another-company" };
-    expect(managedSkillsForInstallation(other).some(({ id }) => id === "impeccable")).toBe(false);
-    expect(designSkillDeveloperInstructions(other, second)).toBe("");
-    expect(managedSkillsForInstallation({ ...config, catalog: { graphikAIManagedSkills: [{ id: "impeccable", label: "Impeccable" }] } })).toHaveLength(1);
+    expect(managedSkillsForInstallation(other).some(({ id }) => id === "impeccable")).toBe(true);
+    expect(designSkillDeveloperInstructions(other, second)).toContain("Apply relevant skills silently");
+    expect(managedSkillsForInstallation({ ...config, catalog: { graphikAIManagedSkills: [{ id: "impeccable", label: "Impeccable" }] } })).toHaveLength(DESIGN_COPY_SKILLS.length);
   });
 
   it("still rejects executable and oversized administrative skill uploads", async () => {

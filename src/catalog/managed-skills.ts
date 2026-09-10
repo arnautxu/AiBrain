@@ -1,12 +1,18 @@
 import type { InstallationConfig } from "@/config/installation-schema";
 
 export const IMPECCABLE_SKILL = { id: "impeccable", label: "Impeccable · Diseño y UX" };
+export const DESIGN_COPY_SKILLS = [
+  IMPECCABLE_SKILL,
+  { id: "emil-design-eng", label: "Interacciones y movimiento" },
+  { id: "design-taste-frontend", label: "Criterio visual" },
+  { id: "redesign-existing-projects", label: "Refinamiento de interfaces" },
+  { id: "ux-writing", label: "Textos de interfaz" },
+  { id: "human-writing", label: "Redacción natural" },
+  { id: "ogilvy-copywriting", label: "Copy comercial" },
+];
 
-/** Server-owned defaults also apply to existing Arnall installation configs. */
+/** Product defaults; effective catalog denials still override installation grants. */
 export function managedSkillsForInstallation(config: Readonly<InstallationConfig>) {
   const configured = config.catalog?.graphikAIManagedSkills ?? [];
-  if (config.companySlug !== "arnall" || configured.some(({ id }) => id === IMPECCABLE_SKILL.id)) {
-    return configured;
-  }
-  return [...configured, IMPECCABLE_SKILL];
+  return [...configured, ...DESIGN_COPY_SKILLS.filter(({ id }) => !configured.some((skill) => skill.id === id))];
 }
