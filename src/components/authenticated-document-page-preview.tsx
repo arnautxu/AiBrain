@@ -15,6 +15,7 @@ export function AuthenticatedDocumentPagePreview({
   zoom,
   onLoad,
   onError,
+  onPageCount,
 }: {
   previewUrl: string;
   page: number;
@@ -22,6 +23,7 @@ export function AuthenticatedDocumentPagePreview({
   zoom: number;
   onLoad?: () => void;
   onError?: (error: Error) => void;
+  onPageCount?: (pages: number) => void;
 }) {
   const t = useUiText();
   const source = pageUrl(previewUrl, page);
@@ -47,6 +49,8 @@ export function AuthenticatedDocumentPagePreview({
       const image = await response.blob();
       if (!image.size || image.size > 20 * 1024 * 1024) throw new Error(t("La página excede el tamaño permitido."));
       if (controller.signal.aborted) return;
+      const pages = Number(response.headers.get("X-Document-Page-Count"));
+      if (Number.isSafeInteger(pages) && pages > 0 && pages <= 500) onPageCount?.(pages);
       blobUrl = URL.createObjectURL(new Blob([image], { type: "image/png" }));
       setState({ source, blobUrl });
     }).catch((error: unknown) => {
@@ -59,7 +63,7 @@ export function AuthenticatedDocumentPagePreview({
       controller.abort();
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [onError, source, t]);
+  }, [onError, onPageCount, source, t]);
 
   if (state.source !== source || (!state.blobUrl && !state.error)) {
     return <div className="grid h-full place-items-center text-sm text-[var(--text-muted)]" role="status">{t("Preparando página")}{" "}{page}…</div>;

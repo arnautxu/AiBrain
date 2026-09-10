@@ -76,6 +76,7 @@ describe("generated document artifact route", () => {
     const page = await GET(request("?preview=1&page=2"), { params: Promise.resolve({ threadId: THREAD, artifactId: ARTIFACT }) });
     expect(page.status).toBe(200);
     expect(page.headers.get("content-type")).toBe("image/png");
+    expect(page.headers.get("x-document-page-count")).toBe("3");
     expect(mocks.page).toHaveBeenCalledWith(expect.objectContaining({ page: 2 }));
   });
 

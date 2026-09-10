@@ -95,6 +95,7 @@ export async function GET(
           "Content-Disposition": contentDisposition(`${location.fileName}-page-${page}.png`, "inline"),
           "Content-Length": String(rendered.data.byteLength),
           "Content-Type": "image/png",
+          "X-Document-Page-Count": String(rendered.pages),
           "Cross-Origin-Resource-Policy": "same-origin",
           "Referrer-Policy": "no-referrer",
           "X-Content-Type-Options": "nosniff",

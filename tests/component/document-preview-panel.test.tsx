@@ -141,4 +141,23 @@ describe("DocumentPreviewPanel", () => {
     expect(screen.getByRole("complementary")).toHaveClass("xl:fixed");
     expect(screen.getByRole("link", { name: "Descargar informe-precios.pdf" })).toHaveAttribute("href", expect.stringContaining("/api/threads/"));
   });
+  it.each(["pdf", "pptx"] as const)("renders historic %s deliveries without stored page counts", async (kind) => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), {
+      headers: { "Content-Type": "image/png", "X-Document-Page-Count": "3" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("URL", { createObjectURL: vi.fn(() => "blob:page"), revokeObjectURL: vi.fn() });
+    render(<DocumentPreviewPanel artifact={{ ...artifact, kind, pages: null,
+      previewUrl: "/api/threads/thread/artifacts/artifact?preview=1",
+    }} onClose={vi.fn()} />);
+    const first = await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 1" });
+    fireEvent.load(first);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(screen.getAllByText("1 / 3")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole("button", { name: "Página siguiente" })[0]!);
+    expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=2"), expect.anything());
+  });
+
 });
