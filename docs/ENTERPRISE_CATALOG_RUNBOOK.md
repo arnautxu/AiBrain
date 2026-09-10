@@ -31,41 +31,49 @@ Cada proveedor usa un callback, secreto de aplicación, clave de cifrado y direc
 
 No uses este fixture como credencial ni lo completes con secretos. La evidencia de una acción real sigue exigiendo OAuth, binding personal/compartido correcto, aprobación, una única ejecución, readback del provider y auditoría correlacionada.
 
-## Diseño de Arnall: Impeccable obligatorio
+## Diseño y copy automáticos
 
-Las instalaciones con `companySlug: arnall` incorporan `impeccable` como skill
-GraphikAI base, también con configuraciones existentes que todavía no la enumeran.
-El valor procede de la configuración del servidor, nunca del texto de un chat.
-La sincronización usa el catálogo efectivo: una denegación por usuario, grupo o
-rol sigue prevaleciendo y retira la copia privada de ese usuario.
+Todas las instalaciones incorporan como baseline de producto `impeccable`,
+`emil-design-eng`, `design-taste-frontend`, `redesign-existing-projects`,
+`ux-writing`, `human-writing` y `ogilvy-copywriting`. Se preservan las entradas
+configuradas y se añaden solo los IDs ausentes. El catálogo efectivo sigue
+aplicando denegaciones por usuario, grupo o rol y revoca la copia privada.
 
-Cada turno incluye una instrucción de aplicación obligatoria para trabajo de
-diseño, revisión visual o refinamiento, también cuando otra skill esté seleccionada.
-El modelo decide la relevancia a partir de toda la conversación y las referencias,
-sin depender de palabras clave ni de que el empleado seleccione una skill.
-La regla enlaza el `SKILL.md` privado con versión y digest y exige leerlo y aplicar
-el playbook correspondiente antes de actuar. Se conserva al reanudar una
-conversación y mediante el contexto de aplicación de los turnos en memoria.
-Si la skill está denegada o no disponible, debe explicar el bloqueo de diseño;
-no puede instalarla ni sustituirla silenciosamente. El trabajo ajeno al diseño
-no activa sus guías.
+La política del servidor se incorpora en cada turno, incluidas reanudaciones.
+El modelo interpreta la conversación completa, referencias y continuaciones en
+cualquier idioma; no depende de palabras clave ni de selección manual.
 
-`skills/impeccable` contiene una copia completa, con normalización de espacios, de la skill
-instalada Impeccable 4.1.1 (153 archivos), más el manifiesto de AiBrain.
-Los paquetes del repositorio admiten hasta 256 archivos, 512 KiB por archivo y
-4 MiB en total, con rutas acotadas de recursos, referencias, scripts y agentes.
-Las cargas administrativas mantienen el límite de 24 archivos de texto,
-64 KiB por archivo y 256 KiB por paquete; no admiten scripts. Copiar un script
-no lo ejecuta ni autoriza herramientas, proveedores, costes o publicaciones.
-Las capacidades opcionales de Impeccable siguen sujetas al runtime disponible.
-El tracing standalone existente incluye el paquete completo en la imagen.
+- Diseño: Impeccable dirige coherencia y verificación.
+- Frontend: Taste revisa patrones genéricos; Emil se aplica a interacciones y
+  movimiento; Redesign a mejoras de interfaces existentes.
+- Textos de interfaz: UX Writing, incluso en peticiones sin cambios visuales.
+- Prosa entregable: Human Writing; Ogilvy solo añade criterio comercial cuando
+  el objetivo sea persuasivo. Una respuesta factual no carga estas guías.
 
-Validación local: catálogo base idempotente, copia íntegra en dos hogares
-privados, denegación y revocación individual, separación entre empresas,
-límites de cargas administrativas y contexto de nuevos turnos/reanudaciones.
-La aplicación en Arnall requiere publicar y desplegar el candidato por el flujo
-protegido, y después comprobar una petición real de diseño y una continuación
-con lectura observable de Impeccable. Esos gates live son independientes.
+La aplicación es silenciosa: no se anuncian skills, rutas o versiones salvo
+pregunta expresa. Se explican resultados y limitaciones materiales. El brief,
+la marca y la función prevalecen sobre recetas estéticas. La revisión editorial
+preserva hechos y voz, elimina relleno y prohíbe inventar cifras, testimonios,
+causas de error o promesas. Las métricas de legibilidad son orientativas.
+
+Solo se enlazan rutas privadas de paquetes autorizados, con versión y digest.
+Una guía requerida no disponible no autoriza instalarla ni leer otra copia;
+se explica la limitación en lenguaje de producto. Las tareas no relacionadas
+pueden continuar. Ninguna skill amplía permisos de herramientas o proveedores.
+
+Los seis nuevos paquetes son snapshots de las skills locales del 2026-09-10,
+con manifiestos versionados. Los materiales de apoyo de UX Writing y Human
+Writing se incluyen en `resources/`. Impeccable conserva su paquete versionado
+existente; esta integración no actualiza su distribución.
+Los límites de paquetes y cargas administrativas permanecen iguales.
+
+Validación: sincronización íntegra e idempotente, copias aisladas, revocación
+individual y política de activación/copy. Esto verifica el contrato local, no
+la selección semántica real de un modelo. La aceptación tras publicación y
+despliegue debe probar diseño, continuación, microcopy, correo comercial y una
+consulta sin diseño; comprobar lecturas pertinentes sin anuncios internos,
+y un usuario con guía denegada. CI, publicación, despliegue y aceptación
+conversacional son gates independientes.
 
 ## Apps gestionadas por usuario (Composio)
 
