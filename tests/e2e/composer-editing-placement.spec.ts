@@ -84,6 +84,6 @@ for (const width of [390, 1440]) {
 test("Server dialog visibly labels the feature Experimental", async ({ page }) => {
   await page.route("**/api/server-files?**", route => route.fulfill({ json: { available: true, navigation: true, results: [], checkedAt: null } }));
   await establishDemoSession(page, "example-user");
-  await page.locator(".landing-band").getByRole("button", { name: "Server", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Server", exact: true }).getByText("Experimental", { exact: true })).toBeVisible();
+  await page.locator(".landing-band").getByRole("button", { name: "Archivos del servidor", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Archivos del servidor", exact: true }).getByText("Experimental", { exact: true })).toBeVisible();
 });

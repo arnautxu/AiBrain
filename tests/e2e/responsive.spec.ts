@@ -51,7 +51,7 @@ for (const viewport of viewports) {
 
     await page.getByRole("button", { name: "Añadir al mensaje" }).click();
     const addMenu = page.getByRole("menu", { name: "Añadir al mensaje" });
-    await expect(addMenu.getByRole("menuitem", { name: "Tools" })).toBeVisible();
+    await expect(addMenu.getByRole("menuitem", { name: "Conexiones" })).toBeVisible();
     const addMenuBox = await addMenu.boundingBox();
     expect(addMenuBox).not.toBeNull();
     expect(addMenuBox!.x).toBeGreaterThanOrEqual(0);
@@ -145,7 +145,8 @@ test("a pinned chat persists once across mobile and desktop sidebars", async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
   await login(page);
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();
-  await page.getByRole("button", { name: /^Nueva conversación en / }).first().click();
+  await page.getByTestId("sidebar-project-header").first().getByRole("button", { name: /^Acciones de / }).click();
+  await page.getByRole("menuitem", { name: /^Nueva conversación en / }).click();
   await page.getByRole("textbox", { name: "Mensaje" }).fill("Conversación para fijar");
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await page.getByRole("button", { name: "Mostrar u ocultar la barra lateral" }).click();

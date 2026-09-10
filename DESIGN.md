@@ -99,21 +99,12 @@ no permet exposar dades o controls aliens al rol de l'usuari.
 ## Superfícies i color
 
 El sidebar d'escriptori és una superfície flotant: marge exterior de 12 px,
-radi continu de 20 px, doble vora especular i ombra de contacte/direccional.
-El material té una opacitat del 52% i blur de 28 px sobre variacions suaus;
-les preferències de contrast o transparència reduïda activen el fons opac.
-El camp de missatge comparteix el vidre (58% de superfície, blur de 28 px)
-amb reflexos de vora, sense degradat decoratiu.
-El canvas principal es manté neutre. El color viu només sota el vidre del
-sidebar desktop: una ona dithered de 220 px al peu, en navy/blau gel,
-amb fade superior i una làmina fina de vidre perquè el patró es conservi.
-El perfil queda per sobre, amb fons llegible. El shader Paper Dithering usa
-`wave`, `8x8`, píxel 3 i velocitat 0,6; es carrega diferit i es desmunta
-fora de pantalla, en plegar el sidebar o ocultar la pestanya. Amb moviment
-reduït és estàtic; amb transparència reduïda/contrast forçat o al mòbil no
-es carrega WebGL. Els controls mantenen els tokens neutres.
-Conserva les amplades animades i l'scroll intern. El drawer mòbil manté
-la geometria edge-to-edge existent.
+radi de 20 px, vora neutra i ombra curta. El fons és sòlid, sense reflexos
+especulars ni textura animada. El camp de missatge comparteix aquesta
+sobrietat amb una ombra de contacte i un contorn de focus llegible.
+El canvas principal no incorpora punts ni estrelles. El perfil és un control
+integrat, sense una segona capa de vidre. Es conserven les amplades animades,
+l'scroll intern i la geometria edge-to-edge del drawer mòbil.
 
 - Clar: canvas i superfície principal `#ffffff`; `#f7f7f5` és l'única zona
   clara alternativa i s'utilitza per separar regions grans, especialment la
@@ -172,13 +163,9 @@ aconseguir més densitat. La densitat compacta modifica espai, no jerarquia.
   8–12 px i resultats de 12–16 px. El radi configurable continua governant
   les superfícies que ja consumeixen `--brain-radius`.
 - Ritme base de 4/8 px, agrupacions de 12/16 px i separacions de 24/32 px.
-- El sidebar és un material liquid glass sobre una textura neutra molt subtil:
-  translúcid sobre el patró inferior, amb blur, una vora lluminosa
-  fina i fallback sòlid per `prefers-reduced-transparency`. No s'apilen dues
-  superfícies translúcides.
-- La textura queda a la part inferior, sota el vidre i fora dels menús animats;
-  cap capa decorativa intercepta clics. El rail, el drawer, els springs de hover
-  i focus, els desplegables i les preferències persistides conserven el comportament.
+- Sidebar i composer usen superfícies neutres sòlides. No s'apilen reflexos,
+  textures i ombres decoratives. Els menús, el rail i les preferències
+  persistides conserven el comportament.
   L'èmfasi dels controls usa un crossfade 500/600 en la mateixa caixa perquè Poppins
   no té un eix variable de pes. Es respecta moviment reduït.
 - El missatge d'usuari conserva una superfície neutra; la inversió blanc/negre
@@ -234,3 +221,16 @@ Respectar `prefers-reduced-motion`; l'estat continua sent llegible sense
 animació. Les imatges privades usen `unoptimized` perquè l'optimitzador no
 transfereix la cookie d'autorització. No introduir una caché pública per
 millorar una puntuació de rendiment.
+
+## Revisió del 10 de setembre de 2026
+
+- La capçalera usa favicon compacte i un únic nom llegible.
+- Les accions de projecte s'agrupen al menú; el nom conserva la mateixa
+  amplada en hover. Crear conversa continua respectant permisos i estat busy.
+- Al mòbil, el destí del composer té una fila pròpia; fitxers del servidor,
+  connexions i tasques recurrents es disposen a continuació.
+- La UI existent en castellà i anglès tradueix també les etiquetes accessibles.
+  El català del contingut no implica una tercera llengua d'interfície.
+- El visor mostra format i pàgina amb text auxiliar de 12 px. Les dreceres
+  només actuen dins del visor i no en camps editables. Pantalla completa
+  conté el focus; Escape recupera la vista anterior.

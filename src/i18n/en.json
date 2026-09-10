@@ -228,7 +228,7 @@
   "Revisa la solicitud y los resultados parciales antes de volver a enviarla.": "Review the request and partial results before sending it again.",
   "Editar solicitud": "Edit request",
   "Respuesta detenida.": "Response stopped.",
-  "Server ·": "Server ·",
+  "Server ·": "Server file ·",
   "Publicar como documento oficial": "Publish as an official document",
   "Editar mensaje": "Edit message",
   "Enviar edición": "Send edit",
@@ -251,9 +251,9 @@
   "Añadir al mensaje": "Add to message",
   "Adjuntar archivos": "Attach files",
   "Crear imagen": "Create image",
-  "Tools": "Tools",
-  "Server": "Server",
-  "Referencias Server": "Server references",
+  "Tools": "Connections",
+  "Server": "Server files",
+  "Referencias Server": "Server files",
   "Lista ·": "Ready ·",
   "KB": "KB",
   "Abrir": "Open",
@@ -1299,5 +1299,10 @@
   "No se puede comprobar la respuesta ahora. El trabajo y los resultados guardados se conservan.": "The response cannot be checked right now. The work and saved results are preserved.",
   "Recuperando la respuesta guardada…": "Recovering the saved response…",
   "Reconectar respuesta": "Reconnect response",
-  "La conexión de la respuesta no se ha podido recuperar.": "The response connection could not be recovered."
+  "La conexión de la respuesta no se ha podido recuperar.": "The response connection could not be recovered.",
+  "Contraer {p0}": "Collapse {p0}",
+  "Expandir {p0}": "Expand {p0}",
+  "{p0}. Mostrar cuenta": "{p0}. Show account",
+  "Descargar {p0}": "Download {p0}",
+  "Documento {p0}": "Document {p0}"
 }

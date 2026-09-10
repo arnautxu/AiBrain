@@ -24,7 +24,7 @@ for (const reducedMotion of ["reduce", "no-preference"] as const) {
     }
     await expect(page.getByTestId("composer")).toBeVisible();
     await expect(page.getByTestId("login-transition")).toHaveCount(0);
-    await expect(page.locator('[data-slot="stars-background"]')).toHaveAttribute("data-motion", reducedMotion === "reduce" ? "static" : "moving");
+    await expect(page.locator('[data-slot="stars-background"]')).toHaveCount(0);
   });
 }
 

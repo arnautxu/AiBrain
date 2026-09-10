@@ -138,7 +138,7 @@ describe("DocumentPreviewPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Acercar" })[0]!);
     expect(screen.getAllByText("125%").length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole("button", { name: "Pantalla completa" }));
-    expect(screen.getByRole("complementary")).toHaveClass("xl:fixed");
+    expect(screen.getByRole("dialog")).toHaveClass("xl:fixed");
     expect(screen.getByRole("link", { name: "Descargar informe-precios.pdf" })).toHaveAttribute("href", expect.stringContaining("/api/threads/"));
   });
   it.each(["pdf", "pptx"] as const)("renders historic %s deliveries without stored page counts", async (kind) => {
@@ -158,6 +158,51 @@ describe("DocumentPreviewPanel", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Página siguiente" })[0]!);
     expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenLastCalledWith(expect.stringContaining("page=2"), expect.anything());
+  });
+
+  it("keeps document shortcuts local to the preview, leaving composer editing alone", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), {
+      headers: { "Content-Type": "image/png", "X-Document-Page-Count": "3" },
+    })));
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:page", revokeObjectURL: vi.fn() });
+    render(<><textarea aria-label="Mensaje" /><DocumentPreviewPanel artifact={{ ...artifact,
+      previewUrl: "/api/threads/thread/artifacts/artifact?preview=1",
+    }} onClose={vi.fn()} /></>);
+    await screen.findByRole("img");
+    const composer = screen.getByRole("textbox", { name: "Mensaje" });
+    composer.focus();
+    fireEvent.keyDown(composer, { key: "-" });
+    fireEvent.keyDown(composer, { key: "ArrowRight" });
+    expect(screen.getAllByText("100%")).toHaveLength(2);
+    expect(screen.getAllByText("1 / 3")).toHaveLength(2);
+    const page = screen.getByLabelText("Documento informe-precios.pdf, página 1", { selector: "div" });
+    page.focus();
+    fireEvent.keyDown(page, { key: "-", ctrlKey: true });
+    expect(screen.getAllByText("100%")).toHaveLength(2);
+    fireEvent.keyDown(page, { key: "-" });
+    expect(screen.getAllByText("75%")).toHaveLength(2);
+    fireEvent.keyDown(page, { key: "ArrowRight" });
+    expect(await screen.findByRole("img", { name: "Documento informe-precios.pdf, página 2" })).toBeInTheDocument();
+  });
+
+  it("contains desktop fullscreen focus and Escape restores the fullscreen opener", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("%PDF-1.7", { headers: { "Content-Type": "application/pdf" } })));
+    vi.stubGlobal("URL", { createObjectURL: () => "blob:pdf", revokeObjectURL: vi.fn() });
+    const onClose = vi.fn();
+    render(<><button>Outside</button><DocumentPreviewPanel artifact={artifact} onClose={onClose} /></>);
+    const opener = screen.getByRole("button", { name: "Pantalla completa" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(await screen.findByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    const close = screen.getByRole("button", { name: "Cerrar vista previa" });
+    await waitFor(() => expect(close).toHaveFocus());
+    fireEvent.keyDown(close, { key: "Tab" });
+    expect(screen.getByRole("dialog")).toContainElement(document.activeElement as HTMLElement);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(opener).toHaveFocus();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
 });

@@ -42,7 +42,7 @@ test("dark shell, composer tools and turn capabilities have no blocking axe viol
 
   await page.getByRole("button", { name: "Añadir al mensaje" }).click();
   await expect(page.getByRole("menu", { name: "Añadir al mensaje" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "Tools" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Conexiones" })).toBeVisible();
   await assertNoBlockingViolations();
   await page.keyboard.press("Escape");
 

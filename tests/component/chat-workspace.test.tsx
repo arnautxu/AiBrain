@@ -293,7 +293,7 @@ describe("chat workspace simplificado", () => {
     renderWorkspace(null, null, {
       connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true }],
     });
-    const trigger = screen.getByRole("button", { name: "Tools" });
+    const trigger = screen.getByRole("button", { name: "Conexiones" });
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({ left: 120, right: 180, top: 200, bottom: 244, width: 60, height: 44, x: 120, y: 200, toJSON: () => ({}) });
     fireEvent.click(trigger);
     const popup = screen.getByRole("listbox", { name: "Catálogo de conectores" }).parentElement!;
@@ -309,7 +309,7 @@ describe("chat workspace simplificado", () => {
       connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: true }],
     });
     const rect = (top: number, height: number) => ({ left: 120, right: 180, top, bottom: top + height, width: 60, height, x: 120, y: top, toJSON: () => ({}) });
-    const trigger = screen.getByRole("button", { name: "Tools" });
+    const trigger = screen.getByRole("button", { name: "Conexiones" });
     vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(rect(window.innerHeight - 44, 44));
     vi.spyOn(screen.getByTestId("composer"), "getBoundingClientRect").mockReturnValue(rect(200, 120));
     fireEvent.click(trigger);
@@ -436,12 +436,12 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("menuitem", { name: "Añadir carpeta" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("webkitdirectory");
     expect(screen.getByLabelText("Seleccionar archivos para adjuntar")).not.toHaveAttribute("directory");
-    expect(screen.getByRole("menuitem", { name: "Tools" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Conexiones" })).toBeInTheDocument();
     for (const removed of ["Acciones guiadas", "Buscar en la web", "Crear imagen", "Desactivar búsqueda web"]) {
       expect(screen.queryByText(removed, { exact: false })).not.toBeInTheDocument();
     }
 
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tools" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
     const catalog = screen.getByRole("listbox", { name: "Catálogo de conectores" });
     expect(catalog).toHaveTextContent("Gmail");
     expect(catalog).toHaveTextContent("Outlook");
@@ -460,7 +460,7 @@ describe("chat workspace simplificado", () => {
     renderWorkspace(null, project, { connectorMentions: [], onComposerNotice });
     const add = screen.getByRole("button", { name: "Añadir al mensaje" });
     fireEvent.click(add);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tools" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
     expect(onComposerNotice).toHaveBeenCalledWith("No hay conectores habilitados en tu catálogo.");
     await waitFor(() => expect(add).toHaveFocus());
   });
@@ -527,7 +527,7 @@ describe("chat workspace simplificado", () => {
     expect(onSend).not.toHaveBeenCalled();
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "Server" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Archivos del servidor" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Tareas recurrentes" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /Trabajemos en los horarios/ }));
     expect(screen.getByRole("menuitem", { name: "Revisar cambios de horarios" })).toBeInTheDocument();
@@ -544,8 +544,8 @@ describe("chat workspace simplificado", () => {
       attachments: [{ id: "attachment", name: "reference.png", mimeType: "image/png", size: 10, dataUrl: "data:image/png;base64,AA==" }] });
     expect(screen.queryByRole("navigation", { name: "Espais de treball" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
-    expect(screen.getByRole("menuitem", { name: "Server" })).toBeDisabled();
-    expect(screen.getByRole("menuitem", { name: "Tools" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Archivos del servidor" })).toBeDisabled();
+    expect(screen.getByRole("menuitem", { name: "Conexiones" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitem", { name: "Tareas recurrentes" }));
     fireEvent.click(screen.getByRole("menuitem", { name: "Prepárame una presentación" }));

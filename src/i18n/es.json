@@ -87,5 +87,14 @@
   "Un espai per encaixar els horaris.": "Un espacio para organizar los horarios.",
   "Disponibilitats i planificació de les botigues, en un sol lloc.": "Disponibilidad y planificación de las tiendas en un solo lugar.",
   "Pròximament.": "Próximamente.",
-  "Tornar al xat": "Volver al chat"
+  "Tornar al xat": "Volver al chat",
+  "Server": "Archivos del servidor",
+  "Tools": "Conexiones",
+  "Server ·": "Archivo del servidor ·",
+  "Referencias Server": "Archivos del servidor",
+  "Contraer {p0}": "Contraer {p0}",
+  "Expandir {p0}": "Expandir {p0}",
+  "{p0}. Mostrar cuenta": "{p0}. Mostrar cuenta",
+  "Descargar {p0}": "Descargar {p0}",
+  "Documento {p0}": "Documento {p0}"
 }

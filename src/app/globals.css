@@ -442,30 +442,14 @@ button:disabled {
 
 .composer-shadow {
   background: var(--surface);
-  border-color: color-mix(in srgb, var(--text) 12%, transparent);
-  box-shadow:
-    inset 1px 1px 1px rgb(255 255 255 / 65%),
-    inset -1px -1px 1px color-mix(in srgb, var(--text) 10%, transparent),
-    0 2px 4px rgb(24 24 22 / 6%),
-    0 12px 32px -14px rgb(24 24 22 / 18%);
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
-}
-
-@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .composer-shadow {
-    background: color-mix(in srgb, var(--surface) 58%, transparent);
-    -webkit-backdrop-filter: blur(28px) saturate(1.1);
-    backdrop-filter: blur(28px) saturate(1.1);
-  }
+  border-color: var(--border);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 6%);
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .composer-shadow:focus-within {
-  border-color: color-mix(in srgb, var(--text) 24%, transparent);
-  box-shadow:
-    inset 1px 1px 1px rgb(255 255 255 / 75%),
-    inset -1px -1px 1px color-mix(in srgb, var(--text) 12%, transparent),
-    0 2px 5px rgb(24 24 22 / 8%),
-    0 14px 36px -14px rgb(24 24 22 / 22%);
+  border-color: var(--text-secondary);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 8%);
 }
 
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
@@ -1540,7 +1524,7 @@ button:disabled {
   }
 
   .sidebar-touch-row[data-testid="sidebar-project-row"] {
-    padding-right: 8.25rem;
+    padding-right: 2.75rem;
   }
 
   .sidebar-item-action {
@@ -1686,13 +1670,14 @@ button:disabled {
 }
 .landing-tasks-suggestions .landing-task-menu { left: 0; right: auto; }
 @media (max-width: 639px) {
-  .landing-band { margin-inline: 0; padding-inline: 4px; gap: 0 1px; }
-  .landing-project { flex: 0 1 90px; }
+  .landing-band { margin-inline: 0; padding: 16px 8px 4px; gap: 0 4px; flex-wrap: wrap; }
+  .landing-project { flex: 1 0 100%; }
   .landing-project > svg { display: none; }
   .landing-band > .landing-tasks { flex-shrink: 0; }
   .landing-band .composer-picker-button { max-width: 100%; min-height: 44px; padding-inline: 4px; gap: 3px; }
   .landing-band-item { gap: 4px; padding-inline: 5px; }
   .landing-band .composer-destination { min-width: 0; width: 100%; }
+  .landing-project .composer-picker-button { width: 100%; justify-content: flex-start; }
   .landing-tasks-menu { margin-left: 0; }
   .landing-task-menu { max-height: 220px; }
 }
