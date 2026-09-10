@@ -4,6 +4,20 @@ This guide is bundled at `/usr/local/share/aibrain/presentations.md` for the
 employee worker. It provides local authoring, not authorization for external
 services or access to any other employee's files.
 
+## Editorial workflow is mandatory
+
+For all slide decks, including PDF-only output, read the authorized private
+`presentation-craft` SKILL.md supplied by the server policy before authoring.
+It carries the Codex presentation narrative, writing, template, chart and visual
+review workflow adapted to this runtime. This document is the implementation
+adapter, not a replacement for that editorial workflow. Follow human-writing
+for slide copy and Impeccable for applicable visual direction. Do not load
+frontend motion guides merely because a deck has design.
+
+Keep a private storyboard and page-by-page review record in `.aibrain-drafts/`.
+Check chart arithmetic independently and inspect every final slide image.
+A render receipt proves conversion only, not inspection or design quality.
+
 ## Plan a real deck
 
 Use the user's brief, language, slide count, reference and available design

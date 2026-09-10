@@ -81,6 +81,9 @@ describe("managed skill packages", () => {
     expect(instructions).toContain("full conversation");
     expect(instructions).toContain("A different selected skill complements");
     expect(instructions).not.toContain(b.path);
+    expect(instructions).toContain("MUST use presentation-craft together with impeccable");
+    expect(instructions).toContain("inspect every final rendered page");
+    expect(instructions).toContain("Use human-writing for slide copy");
     expect(instructions).toContain("Writing-only work does not activate visual design skills");
     expect(instructions).toContain("Apply relevant skills silently");
     expect(instructions).not.toContain("Briefly tell the user");
