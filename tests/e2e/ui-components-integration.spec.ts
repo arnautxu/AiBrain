@@ -11,7 +11,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     await page.goto("/login");
     await page.getByRole("button", { name: /Alex/ }).click();
     await expect(page.getByTestId("composer")).toBeVisible();
-    await expect(page.locator('[data-slot="stars-background"]')).toHaveAttribute("data-motion", "static");
+    await expect(page.locator('[data-slot="stars-background"]')).toHaveCount(0);
     const send = page.getByRole("button", { name: "Enviar mensaje", exact: true });
     await expect(send).toHaveClass(/rg-button/);
     await expect(send).toBeDisabled();
@@ -25,7 +25,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
       opaque: matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active)").matches,
     }));
     if (backdrop.opaque) expect(backdrop.filter).toBe("none");
-    else expect(backdrop.filter).toContain("blur(28px)");
+    else expect(backdrop.filter).toBe("none");
     await page.evaluate(() => {
       const key = Object.keys(localStorage).find((key) => key.endsWith(".workbench.preview.v1"))!;
       const snapshot = JSON.parse(localStorage.getItem(key)!);

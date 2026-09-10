@@ -51,7 +51,7 @@ export function ServerPicker({ projectId, selected, onSelect, onClose, returnFoc
   }
   if (!mounted) return null;
   return createPortal(<div data-testid="server-backdrop" className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-3" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <div ref={focus} role="dialog" aria-modal="true" aria-label="Server" aria-describedby="server-description" tabIndex={-1} className="flex max-h-[85dvh] w-full max-w-3xl flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-[var(--text)] shadow-xl">
+    <div ref={focus} role="dialog" aria-modal="true" aria-label={t("Server")} aria-describedby="server-description" tabIndex={-1} className="flex max-h-[85dvh] w-full max-w-3xl flex-col rounded-2xl border border-[var(--border)] bg-[var(--surface-raised)] p-4 text-[var(--text)] shadow-xl">
       <div className="flex items-center justify-between gap-2"><h2 className="flex items-center gap-2 font-semibold">Server <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">{t("Experimental")}</span></h2><button type="button" aria-label={t("Cerrar Server")} className="touch-target rounded p-2" onClick={onClose}><X size={20}/></button></div>
       <p id="server-description" className="mb-3 text-xs text-[var(--text-muted)]">{t("Archivos del servidor Windows. Selecciona hasta 5 referencias para trabajar en el chat. Los originales son de sólo lectura.")}</p>
       <div className="mb-3 flex items-center gap-2">

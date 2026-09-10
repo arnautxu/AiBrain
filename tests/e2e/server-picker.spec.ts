@@ -23,8 +23,8 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: /Alex/ }).click();
     const composer = page.getByRole("textbox", { name: "Mensaje", exact: true });
     await composer.fill("Revisa la referencia seleccionada");
-    await page.getByRole("button", { name: "Server", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Server", exact: true });
+    await page.getByRole("button", { name: "Archivos del servidor", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Archivos del servidor", exact: true });
     await expect(dialog.getByLabel("Adjuntar QA", { exact: true })).toHaveCount(0);
     await dialog.getByRole("button", { name: "Explorar unidades", exact: true }).click();
     await dialog.getByLabel("Adjuntar QA", { exact: true }).check();
@@ -43,7 +43,7 @@ for (const width of [1440, 390]) {
     await expect(composer).toHaveValue("Revisa la referencia seleccionada");
     expect(await page.locator("body").evaluate(el => el.scrollWidth)).toBeLessThanOrEqual(width);
     await page.getByRole("button", { name: "Añadir al mensaje", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Server", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Archivos del servidor", exact: true }).click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toHaveCount(0);
@@ -52,6 +52,6 @@ for (const width of [1440, 390]) {
     await page.getByRole("button", { name: "Enviar mensaje", exact: true }).click();
     const body = (await request).postDataJSON();
     expect(body.options.serverReferences).toEqual([{ ...folder, path: "server-arnall/Y/QA/Version2.txt", name: "Version2.txt", kind: "file", size: 2 }]);
-    await expect(page.getByText("Server · Version2.txt", { exact: true })).toBeVisible();
+    await expect(page.getByText("Archivo del servidor · Version2.txt", { exact: true })).toBeVisible();
   });
 }

@@ -38,7 +38,9 @@ function DocumentPreviewContent({ artifact, onClose }: {
   const previewKind = artifact.kind === "pdf" ? "PDF" : "documento";
   const [mobileOverlay, setMobileOverlay] = useState(false);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useModalFocus<HTMLElement>(mobileOverlay, onClose, closeButtonRef);
+  const modal = mobileOverlay || fullscreen;
+  const exitModal = useCallback(() => { if (fullscreen) setFullscreen(false); else onClose(); }, [fullscreen, onClose]);
+  const panelRef = useModalFocus<HTMLElement>(modal, exitModal, closeButtonRef);
   const handleLoad = useCallback(() => setLoaded(true), []);
   const handleError = useCallback((error: Error) => { setFailureReason(error.message); setFailed(true); }, []);
   // Explicit deliveries may not have page metadata yet, including historic messages.
@@ -55,14 +57,12 @@ function DocumentPreviewContent({ artifact, onClose }: {
   }, []);
 
   useEffect(() => {
-    if (!fullscreen) return;
-    const previous = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = previous; };
-  }, [fullscreen]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element) || !panelRef.current?.contains(target) ||
+          target.closest("input, textarea, select, [contenteditable]:not([contenteditable=\"false\"])") ||
+          event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return;
+      if (["ArrowLeft", "ArrowRight", "+", "=", "-"].includes(event.key)) event.preventDefault();
       if (event.key === "ArrowLeft" && page > 1) setPage((current) => current - 1);
       if (event.key === "ArrowRight" && pageCount && page < pageCount) setPage((current) => current + 1);
       if (event.key === "+" || event.key === "=") setZoom((current) => Math.min(200, current + 25));
@@ -70,7 +70,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [pageCount, page]);
+  }, [pageCount, page, panelRef]);
 
   const retry = () => {
     if (!artifact.previewUrl) return;
@@ -84,27 +84,27 @@ function DocumentPreviewContent({ artifact, onClose }: {
     <aside
       ref={panelRef}
       aria-label={t("Vista previa de {p0}", { p0: artifact.name })}
-      aria-modal={mobileOverlay ? "true" : undefined}
-      role={mobileOverlay ? "dialog" : undefined}
-      tabIndex={mobileOverlay ? -1 : undefined}
+      aria-modal={modal ? "true" : undefined}
+      role={modal ? "dialog" : undefined}
+      tabIndex={modal ? -1 : undefined}
       className={`document-preview-panel fixed inset-0 z-50 flex min-w-0 flex-col bg-[var(--surface)] ${fullscreen ? "xl:fixed xl:inset-0 xl:z-[80] xl:w-auto" : "xl:static xl:z-auto xl:w-[min(48vw,720px)] xl:shrink-0 xl:border-l xl:border-[var(--border)]"}`}
     >
       <header className="flex min-h-[52px] shrink-0 items-center gap-3 border-b border-[var(--border-subtle)] px-3.5 pt-[env(safe-area-inset-top)] xl:h-[52px] xl:pt-0">
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{documentIcon(artifact.previewFormat === "spreadsheet" ? "xlsx" : artifact.kind)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13px] font-semibold text-[var(--text)]">{artifact.name}</h2>
-          <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? t("Excel · vista de datos") : artifact.kind.toUpperCase()} {" "}{t("· representación segura ·")}{" "}{Math.max(1, Math.ceil(artifact.size / 1024))} {" "}{t("KB")}{pageCount ? ` · ${pageCount} ${pageCount === 1 ? t("página") : t("páginas")}` : ""}</p>
+          <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? t("Excel · vista de datos") : artifact.kind.toUpperCase()}{pageCount ? ` · ${pageCount} ${pageCount === 1 ? t("página") : t("páginas")}` : ""}</p>
         </div>
         {richPages ? <nav className="hidden items-center gap-1 sm:flex" aria-label={t("Navegación del documento")}>
           <button type="button" disabled={page <= 1} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Página anterior")} onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={16} /></button>
-          <span className="min-w-14 text-center text-[11px] tabular-nums text-[var(--text-secondary)]">{page} / {pageCount ?? "…"}</span>
+          <span className="min-w-14 text-center text-[12px] tabular-nums text-[var(--text-secondary)]">{page} / {pageCount ?? "…"}</span>
           <button type="button" disabled={!pageCount || page >= pageCount} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Página siguiente")} onClick={() => setPage((current) => Math.min(pageCount ?? current, current + 1))}><CaretRight size={16} /></button>
           <button type="button" disabled={zoom <= 50} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Alejar")} onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={15} /></button>
-          <span className="w-10 text-center text-[10px] tabular-nums text-[var(--text-muted)]">{zoom}%</span>
+          <span className="w-10 text-center text-[12px] tabular-nums text-[var(--text-muted)]">{zoom}%</span>
           <button type="button" disabled={zoom >= 200} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Acercar")} onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={15} /></button>
         </nav> : null}
         <button type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]" aria-label={fullscreen ? t("Salir de pantalla completa") : t("Pantalla completa")} onClick={() => setFullscreen((current) => !current)}>{fullscreen ? <ArrowsIn size={17} /> : <ArrowsOut size={17} />}</button>
-        <a href={artifact.url} download={artifact.previewFormat === "spreadsheet" ? `${artifact.name}.preview.json` : artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={artifact.previewFormat === "spreadsheet" ? t("Descargar datos de la vista previa") : `Descargar ${artifact.name}`} title={t("Descargar")}><DownloadSimple size={17} /></a>
+        <a href={artifact.url} download={artifact.previewFormat === "spreadsheet" ? `${artifact.name}.preview.json` : artifact.name} className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={artifact.previewFormat === "spreadsheet" ? t("Descargar datos de la vista previa") : t("Descargar {p0}", { p0: artifact.name })} title={t("Descargar")}><DownloadSimple size={17} /></a>
         <button ref={closeButtonRef} type="button" className="touch-target grid size-9 place-items-center rounded-lg text-[var(--text-secondary)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] active:scale-[0.98]" aria-label={t("Cerrar vista previa")} onClick={onClose}><X size={17} /></button>
       </header>
 
@@ -124,14 +124,14 @@ function DocumentPreviewContent({ artifact, onClose }: {
         ) : artifact.previewUrl && artifact.previewFormat === "spreadsheet" ? (
           <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} />
         ) : artifact.previewUrl && artifact.kind === "text" ? (
-          <AuthenticatedTextPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} title={`Documento ${artifact.name}`} />
+          <AuthenticatedTextPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} title={t("Documento {p0}", { p0: artifact.name })} />
         ) : artifact.previewUrl && richPages ? (
           <AuthenticatedDocumentPagePreview
             key={`${artifact.id}:${reload}:${page}`}
             previewUrl={artifact.previewUrl}
             page={page}
             zoom={zoom}
-            title={`Documento ${artifact.name}`}
+            title={t("Documento {p0}", { p0: artifact.name })}
             onLoad={handleLoad}
             onError={handleError}
             onPageCount={setPageCount}
@@ -140,7 +140,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
           <AuthenticatedPdfPreview
             key={`${artifact.id}:${reload}`}
             previewUrl={artifact.previewUrl}
-            title={`Documento ${artifact.name}`}
+            title={t("Documento {p0}", { p0: artifact.name })}
             className={`h-full w-full rounded-xl border border-[var(--border)] bg-white shadow-[var(--shadow-sm)] transition-opacity duration-200 ${loaded ? "opacity-100" : "opacity-0"}`}
             onLoad={handleLoad}
             onError={handleError}
@@ -149,10 +149,10 @@ function DocumentPreviewContent({ artifact, onClose }: {
       </div>
       {richPages ? <nav className="flex shrink-0 items-center justify-center gap-1 border-t border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 sm:hidden" aria-label={t("Navegación móvil del documento")}>
         <button type="button" disabled={page <= 1} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Página anterior")} onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={17} /></button>
-        <span className="min-w-14 text-center text-[11px] tabular-nums">{page} / {pageCount ?? "…"}</span>
+        <span className="min-w-14 text-center text-[12px] tabular-nums">{page} / {pageCount ?? "…"}</span>
         <button type="button" disabled={!pageCount || page >= pageCount} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Página siguiente")} onClick={() => setPage((current) => Math.min(pageCount ?? current, current + 1))}><CaretRight size={17} /></button>
         <button type="button" disabled={zoom <= 50} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Alejar")} onClick={() => setZoom((current) => Math.max(50, current - 25))}><Minus size={16} /></button>
-        <span className="w-10 text-center text-[10px] tabular-nums">{zoom}%</span>
+        <span className="w-10 text-center text-[12px] tabular-nums">{zoom}%</span>
         <button type="button" disabled={zoom >= 200} className="touch-target grid size-10 place-items-center rounded-lg disabled:opacity-30" aria-label={t("Acercar")} onClick={() => setZoom((current) => Math.min(200, current + 25))}><Plus size={16} /></button>
       </nav> : null}
     </aside>

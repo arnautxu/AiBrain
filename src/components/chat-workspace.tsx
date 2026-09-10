@@ -30,7 +30,6 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { ChatAttachmentImage } from "@/components/chat-attachment-image";
-import { StarsBackground } from "@/components/animate-ui/components/backgrounds/stars";
 import { RadialGlowButton } from "@/components/ui/radial-glow-button";
 import NextImage from "next/image";
 import { useComposerFileDrop } from "@/ui/use-composer-file-drop";
@@ -867,13 +866,6 @@ export function ChatWorkspace({
 
   return (
     <main {...dropProps} aria-busy={!hydrated} data-section="chat" data-read-only={readOnly ? "true" : "false"} className="workbench-main relative flex min-w-0 flex-1 flex-col bg-[var(--surface)]">
-      {hydrated && !thread && !sending && !readOnly ? <StarsBackground
-        aria-hidden="true"
-        className="landing-stars pointer-events-none"
-        starColor="var(--text-secondary)"
-        pointerEvents={false}
-        speed={100}
-      /> : null}
       <header data-testid="mobile-app-header" className="mobile-app-header workbench-navigation shrink-0 items-center px-2 md:px-3">
         <div className="workbench-navigation-context flex min-w-0 items-center gap-2">
           <button aria-label={t("Mostrar u ocultar la barra lateral")} aria-expanded={sidebarOpen} className="touch-target rounded-lg p-2 text-[var(--text-subtle)] transition hover:bg-[var(--surface-hover)] hover:text-[var(--text)] md:hidden" onClick={(event) => onToggleSidebar(event.currentTarget)}>

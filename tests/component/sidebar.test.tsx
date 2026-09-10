@@ -139,11 +139,12 @@ describe("Sidebar", () => {
     const { onNewThread, onSelectThread } = renderSidebar(true);
     fireEvent.click(screen.getByRole("button", { name: "Expandir Producto" }));
     const otherChat = screen.getByRole("button", { name: "Roadmap" });
-    const newChat = screen.getByRole("button", { name: "Nueva conversación en Operaciones" });
+    fireEvent.click(screen.getByRole("button", { name: "Acciones de Operaciones" }));
+    const newChat = screen.getByRole("menuitem", { name: "Nueva conversación en Operaciones" });
     expect(otherChat).toBeEnabled();
     expect(newChat).toBeEnabled();
-    fireEvent.click(otherChat);
     fireEvent.click(newChat);
+    fireEvent.click(otherChat);
     expect(onSelectThread).toHaveBeenCalledWith("thread-roadmap");
     expect(onNewThread).toHaveBeenCalledWith("project-operations");
   });
@@ -236,7 +237,8 @@ describe("Sidebar", () => {
     expect(operationsHeader).toBeDefined();
     expect(operationsHeader).not.toContainElement(operationsChats);
 
-    fireEvent.click(screen.getByRole("button", { name: "Nueva conversación en Operaciones" }));
+    fireEvent.click(screen.getByRole("button", { name: "Acciones de Operaciones" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Nueva conversación en Operaciones" }));
     fireEvent.click(screen.getByRole("button", { name: "Nueva conversación independiente" }));
     expect(onNewThread).toHaveBeenNthCalledWith(1, "project-operations");
     expect(onNewThread).toHaveBeenNthCalledWith(2);

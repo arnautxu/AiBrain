@@ -15,8 +15,8 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844
     await composer.fill("Texto anterior que debe desaparecer.");
     await page.getByRole("button", { name: "Añadir al mensaje", exact: true }).click();
     const menu = page.getByRole("menu", { name: "Añadir al mensaje", exact: true });
-    await expect(menu.getByRole("menuitem", { name: "Server", exact: true })).toBeEnabled();
-    await expect(menu.getByRole("menuitem", { name: "Tools", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Archivos del servidor", exact: true })).toBeEnabled();
+    await expect(menu.getByRole("menuitem", { name: "Conexiones", exact: true })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Adjuntar archivos", exact: true })).toBeFocused();
     await page.keyboard.press("End");
     await expect(menu.getByRole("menuitem", { name: "Tareas recurrentes", exact: true })).toBeFocused();
