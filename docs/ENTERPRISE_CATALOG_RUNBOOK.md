@@ -84,3 +84,25 @@ configs externos. Catálogo, consentimiento, readback ACTIVE por usuario, @,
 lecturas y revocación están enlazados; las cuentas/configuración externas siguen
 siendo un gate independiente. Véase [CONNECTORS.md](../CONNECTORS.md) para el
 manifiesto, callbacks, scopes, comparación con Melso y aceptación pendiente.
+
+## Flujo especializado de presentaciones
+
+`presentation-craft` se incorpora al mismo baseline efectivo y privado para
+presentaciones PPTX y PDF de diapositivas. Traslada del bundle Codex Presentations
+26.905.11957 las guías editoriales, visuales, de portada y financieras. La
+adaptación sustituye APIs exclusivas de escritorio por el autor PptxGenJS y las
+herramientas privadas `render`/`deliver` que Arnall ya ofrece. No afirma paridad
+de herramientas, importación fiel de PPTX o un finalizador automático inexistente.
+
+El flujo exige storyboard, fuentes y cálculos coherentes, evidencia editable,
+revisión de todas las imágenes finales y corrección antes de entregar. El copy
+de diapositivas activa también Human Writing. La elección de guías se hace en
+cada turno sin anuncios internos. Las instrucciones de frontend siguen sin
+aplicarse a un deck: ahora existe una ruta editorial específica para ese medio.
+
+La política exige la revisión al modelo; no es un bloqueo técnico que pruebe
+que haya observado una imagen. Validación local de paquetes y contexto no
+sustituye aceptación con un turno real. Caso de aceptación: rehacer un informe
+ficticio autorizado de facturación con gráfico de cascada, verificar el total
+final desde cero, unidades sin cortes, cálculos y lectura de cada página del
+mismo hash; evaluar composición y copy además de conversión y entrega.

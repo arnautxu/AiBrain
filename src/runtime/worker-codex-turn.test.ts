@@ -844,6 +844,7 @@ describe("worker Codex turn", () => {
     expect(instructions).toContain("usa autoría local con shell y PptxGenJS, no el renderizador básico");
     expect(instructions).toContain("/usr/local/share/aibrain/pptxgenjs.cjs");
     expect(instructions).toContain("/usr/local/share/aibrain/presentations.md");
+    expect(instructions).toContain("presentation-craft");
     expect(instructions).toContain("`.aibrain-drafts/`");
     expect(instructions).toContain("`aibrain_documents.render`");
     expect(instructions).toContain("`aibrain_documents.deliver`");
