@@ -182,3 +182,12 @@ La guía de revisión muestra cómo emitir la imagen retornada desde code mode
 sin imprimir su base64 como texto. La incidencia observada alcanzó primero
 el límite de diez minutos del turno y después falló al persistir las imágenes;
 corregir la persistencia no equivale a haber completado ese trabajo interrumpido.
+
+## Preview de entregas sin paginación persistida
+
+Las entregas explícitas pueden conservar `pages: null`. El visor identifica la
+ruta de artefactos generados y solicita igualmente la primera página PNG,
+sin depender del visor PDF nativo del navegador. La respuesta autenticada incluye
+`X-Document-Page-Count`, obtenido de la conversión validada, para habilitar la
+navegación. Esto recupera también mensajes históricos sin reescribir sus blobs
+ni su metadata durable. Descarga, integridad y ACL mantienen la misma frontera.
