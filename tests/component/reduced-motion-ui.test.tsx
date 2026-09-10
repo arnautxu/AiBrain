@@ -149,6 +149,20 @@ describe("reduced-motion UI effects", () => {
     expect(document.getElementById(panelId as string)).not.toHaveAttribute("hidden");
   });
 
+  it("measures a wrapped project button instead of its expanded conversation tree", async () => {
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (this: HTMLElement) {
+      return this.dataset.sidebar === "menu-item" ? 120 : 32;
+    });
+    render(<SidebarMenu><SidebarMenuItem>
+      <div><SidebarMenuButton isActive>Tests</SidebarMenuButton></div>
+      <div>Expanded conversation</div>
+    </SidebarMenuItem></SidebarMenu>);
+    await waitFor(() => {
+      const active = motionTestState.records.filter((record) => record.className?.includes("bg-active")).at(-1);
+      expect(active?.animate).toMatchObject({ height: 32 });
+    });
+  });
+
   it("snaps sidebar sub-menu and traveling overlays under reduced motion", async () => {
     const { rerender } = render(
       <>

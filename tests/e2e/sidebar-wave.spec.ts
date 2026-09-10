@@ -26,3 +26,18 @@ test("mobile drawer stays functional without WebGL decoration", async ({ page })
   await page.getByRole("button", { name: /Alex.*Abrir menú de cuenta/ }).click();
   await expect(page.getByRole("menu", { name: "Cuenta y preferencias" })).toBeVisible();
 });
+
+test("project selection stays within its header when conversations are expanded", async ({ page }) => {
+  await login(page);
+  const row = page.getByTestId("sidebar-project-row").first();
+  await row.click();
+  const menu = page.locator('#projects-list');
+  const highlight = menu.locator('.bg-active');
+  await expect(highlight).toHaveCount(1);
+  await expect.poll(async () => {
+    const buttonBox = await row.boundingBox();
+    const highlightBox = await highlight.boundingBox();
+    if (!buttonBox || !highlightBox) return 999;
+    return Math.max(Math.abs(highlightBox.height - buttonBox.height), Math.abs(highlightBox.y - buttonBox.y));
+  }).toBeLessThanOrEqual(1);
+});
