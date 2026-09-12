@@ -137,6 +137,7 @@ Never collapse these states. Health/readiness is operational evidence, not user-
   scope publication, entities, memory and application acceptance have separate
   evidence and unfinished phases.
 - Bounded semantic generation candidate: [KNOWLEDGE_GENERATION_OPERATIONS.md](KNOWLEDGE_GENERATION_OPERATIONS.md).
-  Hierarchical source synthesis and the provider-independent scheduling core are
-  implemented; model connection, process isolation, host service activation and
-  real-document semantic acceptance remain separate unfinished gates.
+  Hierarchical synthesis, bounded scheduling and a pinned Codex adapter are
+  implemented. The user selected the existing Codex connection on 2026-09-12;
+  protocol probes observe no model tools. Linux process isolation, host service
+  activation and real-document semantic acceptance remain unfinished gates.

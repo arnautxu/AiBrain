@@ -1,0 +1,33 @@
+[Unit]
+Description=Bounded company knowledge generation for %i
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/aibrain/%i/knowledge-generation.json
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/bin/python3 /usr/local/lib/aibrain/knowledge/knowledge-generation-run.py --config /etc/aibrain/%i/knowledge-generation.json --execute
+TimeoutStartSec=360
+TimeoutStopSec=5
+KillMode=control-group
+MemoryMax=1G
+TasksMax=128
+CPUQuota=50%
+Nice=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+ReadWritePaths=/var/lib/aibrain/knowledge
+
+# bwrap requires user/mount namespaces. Never replace its minimal filesystem
+# with the employee worker launcher if namespace support is unavailable.
+# Deliberately no [Install]: installing a file does not enable generation.

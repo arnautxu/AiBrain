@@ -1,8 +1,8 @@
 # Source-backed document summaries
 
 Status: source-backed summary protocol, durable executor, hierarchical synthesis
-and provider-independent scheduler implementation (2026-09-12 candidate).
-No model adapter or scheduled provider execution is enabled by these modules alone.
+and scheduler with a pinned Codex adapter (2026-09-12 candidate).
+No scheduled provider execution is enabled by these modules alone.
 Deployment requires current authorization, an accepted adapter and real-document
 semantic evaluation. Keep installation readbacks private.
 
@@ -89,7 +89,8 @@ Windows files/configuration do not need to change for this host migration.
 The review UI and actor binding are implemented in the local candidate; see
 `KNOWLEDGE_REVIEW.md`. A resumable executor core now implements one model step per
 call, as described below. The host current-policy adapter is also implemented.
-Still required: a concrete governed model adapter and host service wiring, real-document semantic evaluation,
+The Codex adapter and inactive service templates are implemented. Still required:
+Linux isolation acceptance, explicit service activation, real-document semantic evaluation,
 app release and authenticated chat acceptance. No provider or employee permission is implied
 by customer text, a prepared plan or a successful unit test. The current operator
 CLI is not an employee-facing mutation endpoint.
@@ -107,7 +108,7 @@ restored-reader gate before opening this partition, and revalidates them for eac
 job. The executor calls it before content access, immediately before dispatch and
 again before saving. Source SHA/extraction checks are repeated by the summary
 protocol. The concrete `GenerationPolicy` below provides this callback and opens
-the authorized store. Service wiring is pending; permissive callbacks are only
+the authorized store. The host runner uses it directly; permissive callbacks are only
 used in isolated executor tests and must not become a production default.
 
 Each call executes at most one unfinished part, intermediate reduction or final synthesis. The model
@@ -163,7 +164,7 @@ Run this offline probe explicitly; it uses a loopback fictional endpoint and no
 real credential or provider generation:
 
 ```sh
-python3 scripts/probe-knowledge-codex-isolation.py --codex-bin /absolute/path/to/codex-0.149.1 --model gpt-5.4
+python3 scripts/probe-knowledge-codex-isolation.py --codex-bin /absolute/path/to/codex-0.153.4 --app-server
 ```
 
 The model argument selects metadata for a fictional request only. It does not
@@ -176,6 +177,16 @@ The 2026-09-03 macOS run with Codex 0.149.1 observed `update_plan`,
 `request_user_input`, `apply_patch` and `view_image`. It had no metadata fallback,
 so that direct CLI configuration does not satisfy the model-only requirement. Separate child HOME and
 CODEX_HOME removed the earlier skills-context warning. No existing home changed.
+
+The 2026-09-12 candidate supersedes that configuration with the shared pinned
+model catalog, `features.view_image=false`, `tools.experimental_request_user_input.enabled=false`,
+disabled orchestrator/bundled skills and no turn environments. Both the exec and
+App Server probes on Codex 0.153.4 observed one fictional model request, zero
+advertised tools and no metadata fallback. The App Server probe exercises external
+access-token login and the adapter's actual thread/turn path. Its fake credentials,
+backend URL and HTTP proxy are restricted to a loopback fixture; there is no real
+model generation. These results do not establish semantic quality or Linux
+filesystem isolation. The configured model is `gpt-5.6-luna` with no fallback.
 
 The probe was informed by official [non-interactive execution documentation](https://learn.chatgpt.com/docs/non-interactive-mode)
 and the [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
@@ -227,8 +238,11 @@ no policy or grants and cannot broaden publication. Its model adapter must run i
 a dedicated context with enforced tool and filesystem isolation. The local Codex
 contracts expose ephemeral threads and structured final output, but those fields
 alone do not establish a model-only execution boundary. No existing employee
-conversation, worker home or credential was reused for semantic execution in this
-phase. Model adapter, process isolation and host-service acceptance remain pending.
+conversation, worker home or credential was reused for semantic execution in these
+tests. The user has selected the existing Codex connection. The candidate adapter
+passes only a currently valid access token from an explicitly bound account into
+a fresh in-memory login; it never copies or refreshes its credential store. Linux
+process isolation and host-service acceptance remain pending.
 
 The operator must provision a current generation policy before execution. This
 adapter does not create authorization. Tests use fictional grants and sources, substituting only
@@ -241,4 +255,5 @@ before dispatch/during generation, source versions and pinned model identity.
 See [KNOWLEDGE_GENERATION_OPERATIONS.md](KNOWLEDGE_GENERATION_OPERATIONS.md) for
 the 2026-09-12 provider-independent scheduler, durable daily budgets, fair job
 selection, additive migration, rollback constraints and semantic acceptance.
-Host service wiring and model selection are still required before activation.
+The Codex adapter and inactive service templates are described there. Host
+installation, connection binding, scope grants and acceptance remain required.

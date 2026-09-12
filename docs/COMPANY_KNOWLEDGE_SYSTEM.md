@@ -120,12 +120,13 @@ Backend CI, GHCR publication, deployment and authenticated live acceptance as
 separate gates for the exact revision. Real employees must be tested, including a
 second user denied access to foreign private data.
 
-The model adapter, automatic semantic execution, employee/entity mapping quality,
+Automatic semantic execution, employee/entity mapping quality,
 full corpus processing and off-host recovery acceptance are not established by
 this implementation alone. The 2026-09-12 candidate implements resumable
-hierarchical synthesis and a provider-independent scheduler with durable daily
-dispatch reservations. Model connection, external process isolation, service
-wiring and semantic acceptance are still separate. Individual oversized inputs
+hierarchical synthesis, durable daily dispatch reservations and a Codex adapter
+using the existing connection with ephemeral sessions and no model tools. The
+service templates are inactive. Linux process isolation, explicit host activation
+and semantic acceptance are still separate. Individual oversized inputs
 stop instead of truncating; processing all parts does not prove full semantic
 coverage. OCR does not establish visual or table understanding.
 
