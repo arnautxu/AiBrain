@@ -1,0 +1,101 @@
+name: Deploy accepted release to MODTIME
+
+# Emitted only after the common live acceptance packet is available. A green
+# Arnall deployment alone does not constitute a stable fleet release.
+on:
+  repository_dispatch:
+    types: [aibrain-canary-accepted]
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-modtime-stable
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      CANDIDATE_SHA: ${{ github.event.client_payload.revision }}
+      ACCEPTANCE_RUN_ID: ${{ github.event.client_payload.acceptance_run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate the candidate and its pipeline independently
+        id: pipeline
+        run: |
+          [[ "$CANDIDATE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ACCEPTANCE_RUN_ID" =~ ^[0-9]{6,20}$ ]]
+          git merge-base --is-ancestor "$CANDIDATE_SHA" origin/main
+          acceptance_run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ACCEPTANCE_RUN_ID")"
+          jq -e --arg sha "$CANDIDATE_SHA" --arg repo "$GITHUB_REPOSITORY" \
+            '.head_sha == $sha and .conclusion == "success" and .head_repository.full_name == $repo' <<< "$acceptance_run" >/dev/null
+          for workflow in backend-ci.yml publish-ghcr.yml deploy-arnall.yml; do
+            runs="$(gh api --method GET "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs" -f head_sha="$CANDIDATE_SHA" -f branch=main -f status=completed -f per_page=100)"
+            expected_event=workflow_run; [[ "$workflow" != backend-ci.yml ]] || expected_event=push
+            ids="$(jq -c --arg sha "$CANDIDATE_SHA" --arg event "$expected_event" '[.workflow_runs[] | select(.head_sha == $sha and .head_branch == "main" and .event == $event and .conclusion == "success") | .id] | unique' <<< "$runs")"
+            [[ "$(jq length <<< "$ids")" == 1 ]]
+            if [[ "$workflow" == publish-ghcr.yml ]]; then
+              echo "publish_run_id=$(jq -r '.[0]' <<< "$ids")" >> "$GITHUB_OUTPUT"
+            fi
+          done
+          git worktree add --detach "$RUNNER_TEMP/candidate-checkout" "$CANDIDATE_SHA"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: aibrain-live-acceptance-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/canary-acceptance
+          run-id: ${{ env.ACCEPTANCE_RUN_ID }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Verify every common live acceptance gate and evidence hash
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node_modules/.bin/tsx scripts/verify-live-acceptance.ts \
+            --manifest "$RUNNER_TEMP/canary-acceptance/manifest.json" \
+            --evidence-root "$RUNNER_TEMP/canary-acceptance/evidence" \
+            --checkout-root "$RUNNER_TEMP/candidate-checkout" --format json > "$RUNNER_TEMP/acceptance-verdict.json"
+          jq -e --arg sha "$CANDIDATE_SHA" '.verdict == "accepted" and .releaseSha == $sha and .target == "https://arnall.graphikai.com"' "$RUNNER_TEMP/acceptance-verdict.json" >/dev/null
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: aibrain-ghcr-release-${{ env.CANDIDATE_SHA }}
+          path: ${{ runner.temp }}/immutable-release
+          run-id: ${{ steps.pipeline.outputs.publish_run_id }}
+          github-token: ${{ github.token }}
+      - name: Promote the same immutable images to the isolated MODTIME host
+        env:
+          DEPLOY_KEY: ${{ secrets.MODTIME_DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.MODTIME_DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.MODTIME_DEPLOY_HOST }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          umask 077
+          [[ "$DEPLOY_HOST" == 46.62.215.84 ]]
+          [[ "$GHCR_USER" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ ]]
+          ssh_dir="$RUNNER_TEMP/modtime-ssh"
+          install -d -m 0700 "$ssh_dir"
+          trap 'rm -rf -- "$ssh_dir"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          unset DEPLOY_KEY KNOWN_HOSTS
+          ssh_args=(-i "$ssh_dir/key" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts")
+          current="$(ssh "${ssh_args[@]}" root@"$DEPLOY_HOST" status | jq -er '.revision')"
+          [[ "$current" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$current" "$CANDIDATE_SHA"
+          release="$RUNNER_TEMP/immutable-release/release.json"
+          [[ "$(jq -er .revision "$release")" == "$CANDIDATE_SHA" ]]
+          app="$(jq -er .image "$release")"
+          egress="$(jq -er .egressImage "$release")"
+          [[ "$app" =~ ^ghcr\.io/arnautxu/aibrain@sha256:[0-9a-f]{64}$ ]]
+          [[ "$egress" =~ ^ghcr\.io/arnautxu/aibrain-egress@sha256:[0-9a-f]{64}$ ]]
+          printf '%s' "$GH_TOKEN" | ssh "${ssh_args[@]}" root@"$DEPLOY_HOST" "deploy-ghcr $CANDIDATE_SHA $app $egress $GHCR_USER"
+          ssh "${ssh_args[@]}" root@"$DEPLOY_HOST" status > "$RUNNER_TEMP/modtime-status.json"
+          jq -e --arg sha "$CANDIDATE_SHA" '.installationId == "modtime" and .revision == $sha and .releaseLedger == true' "$RUNNER_TEMP/modtime-status.json" >/dev/null
