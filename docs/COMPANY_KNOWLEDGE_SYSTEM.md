@@ -122,9 +122,12 @@ second user denied access to foreign private data.
 
 The model adapter, automatic semantic execution, employee/entity mapping quality,
 full corpus processing and off-host recovery acceptance are not established by
-this implementation alone. Large summary synthesis currently stops at its bounded
-input limit rather than silently truncating; hierarchical synthesis remains an
-integration limitation. OCR does not establish visual or table understanding.
+this implementation alone. The 2026-09-12 candidate implements resumable
+hierarchical synthesis and a provider-independent scheduler with durable daily
+dispatch reservations. Model connection, external process isolation, service
+wiring and semantic acceptance are still separate. Individual oversized inputs
+stop instead of truncating; processing all parts does not prove full semantic
+coverage. OCR does not establish visual or table understanding.
 
 Operational inventories, source mappings, backup identifiers, service invocation
 IDs and customer acceptance records belong in private operator storage. This

@@ -136,3 +136,7 @@ Never collapse these states. Health/readiness is operational evidence, not user-
   catalogue is distinct from employee-visible knowledge; source ingestion,
   scope publication, entities, memory and application acceptance have separate
   evidence and unfinished phases.
+- Bounded semantic generation candidate: [KNOWLEDGE_GENERATION_OPERATIONS.md](KNOWLEDGE_GENERATION_OPERATIONS.md).
+  Hierarchical source synthesis and the provider-independent scheduling core are
+  implemented; model connection, process isolation, host service activation and
+  real-document semantic acceptance remain separate unfinished gates.

@@ -140,6 +140,9 @@ class Summary:
                 'Resumen del contenido extraído','\n\n'.join(content),list(evidence.values()),'whole-summary:'+identifier)
             coverage={'processedParts':len(drafts),'totalParts':len(plan['parts']),'extractedUnits':plan['unitCount'],
                       'warnings':plan['warnings'][:20],'warningCount':len(plan['warnings']),'boundary':plan['coverageBoundary']}
+            reductions=self.store.db.execute('SELECT count(*) FROM summary_reductions WHERE job=?',(identifier,)).fetchone()[0]
+            if reductions:
+                coverage['boundary']+=' Hierarchical synthesis processed every part through bounded groups; selection may omit meaning and still requires semantic review.'
             self.current(plan)
             self.store.db.execute('UPDATE summary_jobs SET record=?,synthesis=?,coverage=? WHERE id=?',
                                   (record['id'],json.dumps(claims,ensure_ascii=False),json.dumps(coverage,ensure_ascii=False),identifier))

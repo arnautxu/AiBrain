@@ -14,7 +14,7 @@ class MigrationTests(unittest.TestCase):
         store=migration.catalogue.Catalogue(self.root,'test','operator')
         scan=store.start_scan(['Y:\\'])
         store.record_page(scan,'Y:\\',0,[{'source':'Y:\\report.txt','directory':False,'bytes':20,'modifiedUtc':'2026-09-03T00:00:00Z'}],None)
-        for name in ['summary_execution','summary_jobs','knowledge_corrections']:
+        for name in ['summary_reductions','summary_execution','summary_jobs','knowledge_corrections']:
             store.db.execute('DROP TABLE '+name)
         store.close()
 

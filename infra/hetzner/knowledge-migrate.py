@@ -12,7 +12,7 @@ import tempfile
 spec=importlib.util.spec_from_file_location('catalogue',Path(__file__).with_name('knowledge-catalogue.py'))
 catalogue=importlib.util.module_from_spec(spec);spec.loader.exec_module(catalogue)
 require=catalogue.require
-ADDITIONS={'summary_jobs','summary_execution','knowledge_corrections'}
+ADDITIONS={'summary_jobs','summary_execution','summary_reductions','knowledge_corrections'}
 
 
 def schema(db):

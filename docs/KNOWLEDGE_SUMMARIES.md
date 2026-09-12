@@ -1,6 +1,7 @@
 # Source-backed document summaries
 
-Status: source-backed summary protocol and durable executor implementation.
+Status: source-backed summary protocol, durable executor, hierarchical synthesis
+and provider-independent scheduler implementation (2026-09-12 candidate).
 No model adapter or scheduled provider execution is enabled by these modules alone.
 Deployment requires current authorization, an accepted adapter and real-document
 semantic evaluation. Keep installation readbacks private.
@@ -88,7 +89,7 @@ Windows files/configuration do not need to change for this host migration.
 The review UI and actor binding are implemented in the local candidate; see
 `KNOWLEDGE_REVIEW.md`. A resumable executor core now implements one model step per
 call, as described below. The host current-policy adapter is also implemented.
-Still required: a concrete governed model adapter and host scheduler, real-document semantic evaluation,
+Still required: a concrete governed model adapter and host service wiring, real-document semantic evaluation,
 app release and authenticated chat acceptance. No provider or employee permission is implied
 by customer text, a prepared plan or a successful unit test. The current operator
 CLI is not an employee-facing mutation endpoint.
@@ -109,11 +110,24 @@ protocol. The concrete `GenerationPolicy` below provides this callback and opens
 the authorized store. Service wiring is pending; permissive callbacks are only
 used in isolated executor tests and must not become a production default.
 
-Each call executes at most one unfinished part or the final synthesis. The model
+Each call executes at most one unfinished part, intermediate reduction or final synthesis. The model
 receives source data separately from fixed instructions, exact citation rules and
-extraction warnings. Input is limited to 256 KiB and output to 64 KiB. Large final
-syntheses stop with `MODEL_INPUT_TOO_LARGE`; they require hierarchical synthesis,
-not truncation or a partial summary mislabeled as complete.
+extraction warnings. Input is limited to 256 KiB and output to 64 KiB. Jobs with
+more than eight parts use `knowledge-summary-hierarchy.py`: deterministic groups
+of at most eight nodes are reduced until a bounded final synthesis is possible.
+Singleton groups carry forward without another call. Every input part enters
+the tree; intermediate claims retain references to original part claims, never
+to invented group IDs. References outside the current group are rejected. The
+final verifier still resolves original quotes and preserves the twenty-citation
+limit.
+
+`summary_reductions` retains each node's input fingerprint and claims in the same
+transaction as the execution checkpoint. A restart reuses completed reductions.
+A changed fingerprint, source revision, extraction or revoked grant rejects the
+step. Reduction does not prove complete semantic coverage: the returned coverage
+boundary explicitly says that selection may omit meaning and requires review.
+Oversized individual inputs, including excessive extraction warnings, still stop
+with `MODEL_INPUT_TOO_LARGE`; nothing is silently truncated.
 
 The adapter contract is `generate(request, request_key, timeout_seconds)`. It must
 enforce the supplied 90-second timeout, output limit and a tool-free generation
@@ -139,7 +153,7 @@ unresolved lease; it cannot publish a summary without its progress checkpoint.
 Lost permission, expired lease, invalid quotation or source changes discard the
 result. The executor has no confirm/review capability.
 
-Installation must migrate `summary_execution` alongside the existing summary and
+Installation must migrate `summary_reductions` and `summary_execution` alongside the existing summary and
 review tables. Do not copy only the executor into a live installation or enable a
 timer before its provider/policy adapters and cost/concurrency limits are accepted.
 
@@ -214,10 +228,17 @@ a dedicated context with enforced tool and filesystem isolation. The local Codex
 contracts expose ephemeral threads and structured final output, but those fields
 alone do not establish a model-only execution boundary. No existing employee
 conversation, worker home or credential was reused for semantic execution in this
-phase. Model adapter, process isolation and scheduler acceptance remain pending.
+phase. Model adapter, process isolation and host-service acceptance remain pending.
 
 The operator must provision a current generation policy before execution. This
 adapter does not create authorization. Tests use fictional grants and sources, substituting only
 the fixture's root ownership and deployed scope-marker setup. Separate tests use
 the unchanged ownership guard and verify denied scopes, restore gates, revocation
 before dispatch/during generation, source versions and pinned model identity.
+
+## Bounded scheduling candidate
+
+See [KNOWLEDGE_GENERATION_OPERATIONS.md](KNOWLEDGE_GENERATION_OPERATIONS.md) for
+the 2026-09-12 provider-independent scheduler, durable daily budgets, fair job
+selection, additive migration, rollback constraints and semantic acceptance.
+Host service wiring and model selection are still required before activation.

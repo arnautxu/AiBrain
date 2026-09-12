@@ -57,10 +57,14 @@ class GenerationPolicy:
         self.manifest,self.bindings_path,self.policy_path=manifest,bindings_path,policy_path
         self.clock=clock or (lambda:dt.datetime.now(dt.timezone.utc))
 
-    def permission(self,job,expected=None):
-        require(isinstance(job,str) and SHA.fullmatch(job),'INVALID_GENERATION_JOB')
+    def snapshot(self):
         policy,expiry=validate(private_json(self.policy_path),self.manifest)
         require(policy['enabled'] and self.clock()<expiry,'GENERATION_DISABLED_OR_EXPIRED')
+        return policy
+
+    def permission(self,job,expected=None):
+        require(isinstance(job,str) and SHA.fullmatch(job),'INVALID_GENERATION_JOB')
+        policy=self.snapshot()
         grant=next((g for g in policy['grants'] if g['jobId']==job),None)
         require(grant is not None,'GENERATION_JOB_NOT_GRANTED')
         binding={'grant':grant,'modelKey':policy['modelKey']}

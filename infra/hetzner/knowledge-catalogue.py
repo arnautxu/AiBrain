@@ -133,6 +133,10 @@ class Catalogue:
             state TEXT NOT NULL, step TEXT, attempts INTEGER NOT NULL DEFAULT 0,
             lease TEXT, lease_until REAL, next_attempt REAL NOT NULL DEFAULT 0,
             error TEXT, updated TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS summary_reductions (
+            job TEXT NOT NULL REFERENCES summary_jobs(id), node TEXT NOT NULL,
+            input_hash TEXT NOT NULL, claims TEXT NOT NULL,
+            PRIMARY KEY(job,node));
           CREATE TABLE IF NOT EXISTS knowledge_records (
             id TEXT PRIMARY KEY,kind TEXT NOT NULL,entity_type TEXT NOT NULL,entity_key TEXT NOT NULL,
             label TEXT NOT NULL,topic TEXT NOT NULL,content TEXT NOT NULL,status TEXT NOT NULL,
