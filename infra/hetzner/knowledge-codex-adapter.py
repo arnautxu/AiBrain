@@ -189,7 +189,7 @@ def exchange(process, request, login, deadline):
         rpc.close()
 
 
-def sandbox_command(binary, catalog_path):
+def sandbox_command(binary_fd, catalog_fd):
     # A fresh filesystem, not a bind of host /. No employee files, auth home,
     # source mount, daemon sockets, host /proc or inherited environment.
     command = ['/usr/bin/bwrap', '--die-with-parent', '--new-session', '--unshare-pid',
@@ -202,8 +202,9 @@ def sandbox_command(binary, catalog_path):
         if Path(path).exists():
             command += ['--ro-bind', path, path]
     command += ['--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run',
-        '--dir', '/run/home', '--dir', '/work', '--ro-bind', str(binary), '/run/codex',
-        '--ro-bind', str(catalog_path), '/run/models.json', '--chdir', '/work',
+        '--dir', '/run/home', '--dir', '/work',
+        '--perms', '0555', '--ro-bind-data', str(binary_fd), '/run/codex',
+        '--perms', '0444', '--ro-bind-data', str(catalog_fd), '/run/models.json', '--chdir', '/work',
         '--setenv', 'HOME', '/run/home', '--setenv', 'CODEX_HOME', '/run/home',
         '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'TMPDIR', '/tmp',
         '/run/codex', 'app-server', *settings.arguments('/run/models.json')]
@@ -236,9 +237,15 @@ class CodexAdapter:
             with tempfile.TemporaryDirectory(prefix='aibrain-knowledge-') as temporary:
                 catalog_path = Path(temporary) / 'models.json'
                 catalog_path.write_text(json.dumps(settings.catalog()))
-                process = subprocess.Popen(sandbox_command(self.binary, catalog_path), stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'}, start_new_session=True)
-                return exchange(process, request, login, deadline)
+                # bwrap drops mount-time filesystem privileges when selecting the
+                # child UID. Pass already-open public inputs, so private host
+                # parent directories never need broader permissions.
+                with os.fdopen(open_absolute(self.binary, trusted_binary=True), 'rb') as binary, catalog_path.open('rb') as catalog:
+                    descriptors = (binary.fileno(), catalog.fileno())
+                    process = subprocess.Popen(sandbox_command(*descriptors), stdin=subprocess.PIPE,
+                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env={'PATH': '/usr/bin:/bin'},
+                        start_new_session=True, pass_fds=descriptors)
+                    return exchange(process, request, login, deadline)
         except Exception:
             # No claim that a failed/expired turn was undispatched. The durable
             # worker blocks an uncertain outcome and never silently retries it.

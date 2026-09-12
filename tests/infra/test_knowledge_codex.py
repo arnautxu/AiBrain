@@ -114,13 +114,14 @@ class CodexTests(unittest.TestCase):
             with self.assertRaises(ValueError): adapter.access_token(path, 'fixture', os.geteuid())
 
     def test_sandbox_never_binds_host_or_employee_auth_home(self):
-        command = adapter.sandbox_command(Path('/opt/codex'), Path('/tmp/public-models.json'))
+        command = adapter.sandbox_command(20, 21)
         self.assertNotIn('--bind', command)
         self.assertNotIn('/', command)
         self.assertNotIn('/home', command)
         self.assertIn('--clearenv', command)
         self.assertIn('--unshare-pid', command)
         self.assertIn('--unshare-user', command)
+        self.assertEqual(command.count('--ro-bind-data'), 2)
         self.assertNotIn('auth.json', ' '.join(command))
 
     def test_non_linux_fails_before_credentials_or_process(self):

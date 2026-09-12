@@ -4,7 +4,8 @@ This candidate implements bounded hierarchical reduction, scheduling and a Codex
 App Server adapter. The user selected the existing Codex connection on 2026-09-12.
 It is not an enabled generation service. No real model generation was performed,
 credential created, company document ingested, source grant changed or installation
-deployed. Linux process isolation and real-document acceptance remain pending.
+deployed at the initial candidate. Subsequent host validation is recorded below;
+real-document acceptance remains pending.
 
 ## Implemented behavior
 
@@ -139,6 +140,18 @@ Observed on the development Mac: 243 tests, 11 skips, no test failures. Skipped
 host/format checks and native Linux isolation remain gates for CI/the deployment
 host. Fixtures are fictional. These tests establish mechanics and provenance,
 not model correctness on customer documents.
+
+### Linux deployment validation
+
+The first Arnall host smoke test exposed a mount-time permission failure: after
+selecting UID 65534, bwrap could not traverse the host's private binary/catalog
+directories. The adapter now passes already-open descriptors through
+`--ro-bind-data`, with explicit read/execute modes. It does not broaden host
+directory permissions. The corrected host smoke test ran the exact Codex 0.153.4
+binary as UID 65534, wrote to its disposable home, and verified that host data and
+employee home directories were absent. Service-level and model-quality acceptance
+are separate gates. No actual credential or customer document was used for this
+filesystem smoke test.
 
 ## Semantic acceptance before activation
 
