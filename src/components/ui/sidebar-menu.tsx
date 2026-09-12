@@ -830,7 +830,7 @@ function MenuRowLabel({
   return (
     <>
       <span className={cn("inline-grid min-w-0 text-left", textClass)}>
-        {/* The semibold layer reserves width at the heaviest weight, hidden from AT.
+        {/* The medium layer reserves width at the heaviest weight, hidden from AT.
             Both cells truncate so a long label clips with an ellipsis
             instead of wrapping the row. The trim box spans cap height to
             baseline, so the overflow clip would shave ascenders and
@@ -841,13 +841,13 @@ function MenuRowLabel({
             "col-start-1 row-start-1 truncate pt-[0.25em] -mt-[0.25em] pb-[0.25em] -mb-[0.25em] transition-[color,opacity] duration-80 motion-reduce:transition-none [text-box:trim-both_cap_alphabetic]",
             lit ? "text-foreground" : "text-muted-foreground",
           )}
-          style={{ fontWeight: 600, opacity: emphasized ? 1 : 0 }}
+          style={{ fontWeight: 500, opacity: emphasized ? 1 : 0 }}
           aria-hidden="true"
         >
           {label}
         </span>
-        {/* Crossfade in the same cell: Poppins has static weights, so an
-            axis-only transition would silently lose the weight animation.
+        {/* Crossfade regular and medium in the same cell, including on
+            system fallbacks without a variable weight axis.
             This remains the one accessible label, including at opacity 0. */}
         <span
           className={cn(
@@ -855,7 +855,7 @@ function MenuRowLabel({
             lit ? "text-foreground" : "text-muted-foreground"
           )}
           style={{
-            fontWeight: 500,
+            fontWeight: 400,
             opacity: emphasized ? 0 : 1,
           }}
         >

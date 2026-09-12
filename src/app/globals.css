@@ -6,10 +6,10 @@
 :root {
   color-scheme: light;
   --installation-accent: #315ee7;
-  --mineral-black: #181816;
+  --mineral-black: #292929;
   --mineral-white: #ffffff;
   --mineral-soft: #f7f7f5;
-  --mineral-secondary: #575752;
+  --mineral-secondary: #5d5d5d;
   --canvas: #ffffff;
   --glass-ice: #92bee2;
   --glass-periwinkle: #b2ace0;
@@ -32,7 +32,7 @@
   --text: var(--mineral-black);
   --text-secondary: var(--mineral-secondary);
   --text-muted: var(--mineral-secondary);
-  --text-subtle: var(--mineral-secondary);
+  --text-subtle: #9e9e9e;
   --border: rgba(0, 0, 0, 0.10);
   --border-subtle: rgba(0, 0, 0, 0.05);
   --border-strong: rgba(0, 0, 0, 0.14);
@@ -60,7 +60,7 @@
   --font-caption: 0.75rem;
   --font-secondary: 0.8125rem;
   --font-body: 0.875rem;
-  --font-reading: 1rem;
+  --font-reading: 0.875rem;
   --background: var(--canvas);
   --foreground: var(--text);
   --muted: var(--surface-muted);
@@ -162,7 +162,8 @@ body {
 }
 
 body {
-  font-family: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans);
+  letter-spacing: -0.15px;
   font-size: 0.8125rem;
   line-height: 1.5;
   font-optical-sizing: auto;
@@ -249,8 +250,8 @@ button:disabled {
   max-width: 14rem;
   color: var(--text);
   font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: -0.15px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -268,7 +269,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .ui-button-sm {
@@ -284,6 +285,7 @@ button:disabled {
 }
 
 .ui-button-primary {
+  border-radius: 999px;
   background: var(--accent);
   color: var(--accent-contrast);
 }
@@ -353,8 +355,8 @@ button:disabled {
   padding: 0.12rem 0.45rem;
   background: var(--surface-muted);
   color: var(--text-muted);
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 500;
   line-height: 1;
 }
 
@@ -441,6 +443,7 @@ button:disabled {
 }
 
 .composer-shadow {
+  border-radius: var(--radius-lg);
   background: var(--surface);
   border-color: var(--border);
   box-shadow: 0 3px 10px rgb(0 0 0 / 6%);
@@ -480,6 +483,7 @@ button:disabled {
 }
 
 .composer-submit {
+  border-radius: 999px;
   transition-property: background-color, color, opacity, transform;
   transition-duration: 180ms;
   transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
@@ -567,9 +571,9 @@ button:disabled {
 }
 
 .workspace-panel-title {
-  font-size: 1rem;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-size: 0.875rem;
+  font-weight: 500;
+  letter-spacing: -0.15px;
 }
 
 .workspace-panel-subtitle {
@@ -598,9 +602,9 @@ button:disabled {
 }
 
 .sidebar-section-label {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: -0.15px;
 }
 
 [data-context-menu-open="true"] .sidebar-item-action.context-menu-suppressed {
@@ -683,8 +687,8 @@ button:disabled {
   border-radius: 999px;
   background: var(--brain-accent-soft);
   color: var(--brain-accent-on-soft);
-  font-size: 0.6875rem;
-  font-weight: 600;
+  font-size: 0.75rem;
+  font-weight: 500;
 }
 
 .guided-trace-step > strong {
@@ -693,7 +697,7 @@ button:disabled {
   max-width: 7.5rem;
   background: var(--surface);
   padding-right: 0.5rem;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 @media (max-width: 767px) {
@@ -752,12 +756,12 @@ button:disabled {
   .composer-compact .composer-textarea {
     min-height: 40px;
     padding: 8px;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 24px;
   }
 
   .composer-shadow {
-    border-radius: 20px;
+    border-radius: var(--radius-lg);
   }
 
   .composer-shadow [role="menu"] > button {
@@ -829,10 +833,12 @@ button:disabled {
   .composer-compact .composer-textarea {
     min-height: 40px;
     padding: 8px;
-    font-size: 16px;
+    font-size: 14px;
     line-height: 24px;
   }
 }
+
+.composer-textarea { font-size: 14px; }
 
 .composer-textarea:focus,
 .composer-textarea:focus-visible {
@@ -942,15 +948,15 @@ button:disabled {
 .markdown-body h4 {
   margin: 1.35rem 0 0.55rem;
   color: var(--text);
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.25;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.15px;
 }
 
-.markdown-body h1 { font-size: 1.35rem; }
-.markdown-body h2 { font-size: 1.15rem; }
-.markdown-body h3 { font-size: 1rem; }
-.markdown-body h4 { font-size: 0.925rem; }
+.markdown-body h1 { font-size: 1.5rem; }
+.markdown-body h2 { font-size: 0.875rem; }
+.markdown-body h3 { font-size: 0.875rem; }
+.markdown-body h4 { font-size: 0.875rem; }
 
 .markdown-body ul,
 .markdown-body ol {
@@ -1009,7 +1015,7 @@ button:disabled {
 .markdown-body th {
   background: var(--surface-muted);
   color: var(--text-secondary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .markdown-body tr:last-child td { border-bottom: 0; }
@@ -1174,7 +1180,7 @@ button:disabled {
   padding: 0 0.6rem;
   color: var(--text-secondary);
   font-size: var(--font-caption);
-  font-weight: 600;
+  font-weight: 500;
   transition: color 160ms ease;
 }
 
@@ -1645,13 +1651,14 @@ button:disabled {
   width: 100%;
   min-height: 44px;
   padding: 10px 14px;
-  border-radius: 10px;
-  color: var(--text-secondary);
+  border-radius: var(--radius-lg);
+  color: var(--text);
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 20px;
 }
 .landing-task-item svg { flex-shrink: 0; }
+.landing-task-item img, .landing-task-item > svg:first-child { width: 20px; height: 20px; }
 .landing-task-item:disabled { opacity: .4; }
 .landing-task-menu {
   position: absolute;
@@ -1689,7 +1696,7 @@ button:disabled {
 
 /* The base field's unlayered padding overrides utility classes. Reserve the
    icon gutter here for placeholder, value and browser autofill alike. */
-.ui-text-field.login-icon-field { padding-inline-start: 40px; font-size: 16px; }
+.ui-text-field.login-icon-field { padding-inline-start: 40px; font-size: 14px; }
 .composer-mention-overlay { box-sizing: border-box; border: 0; }
 .connector-popover > [role="listbox"] { max-height: inherit; }
 

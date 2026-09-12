@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, Poppins } from "next/font/google";
+import { Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import type { CSSProperties } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -14,13 +14,6 @@ import "./globals.css";
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
-});
-
-const poppins = Poppins({
-  variable: "--font-poppins",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
-  display: "swap",
 });
 
 export const dynamic = "force-dynamic";
@@ -63,7 +56,7 @@ export default async function RootLayout({
       suppressHydrationWarning
       style={installationStyle}
     >
-      <body className={`${poppins.variable} ${geistMono.variable}`}>
+      <body className={geistMono.variable}>
         <UiLocaleProvider locale={locale}><ThemeProvider>{children}</ThemeProvider></UiLocaleProvider>
         <Script id="aibrain-theme" strategy="beforeInteractive">
           {THEME_BOOTSTRAP_SCRIPT}

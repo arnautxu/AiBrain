@@ -75,7 +75,7 @@ for (const [name, viewport] of Object.entries({ desktop: { width: 1440, height: 
     const newConversation = sidebar.getByRole("button", { name: "Nueva conversación", exact: true });
     expect(await newConversation.evaluate((element) => getComputedStyle(element).boxShadow)).not.toBe("none");
     await page.evaluate(() => document.fonts.ready);
-    expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily)).toContain("Poppins");
+    expect(await page.locator("body").evaluate((element) => getComputedStyle(element).fontFamily)).toContain("-apple-system");
     if (name === "mobile") await page.screenshot({ path: ".impeccable/review/integrated-mobile-sidebar.png", fullPage: true });
     await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
     // Primary surfaces invert in dark mode; a literal text-white would
