@@ -45,12 +45,12 @@
   --color-accent-950: var(--color-blue-950);
 
   /* ----- Typography ----------------------------------------------------------
-   * Poppins is self-hosted by next/font, with metric-adjusted system fallbacks.
+   * SF Pro uses the native Apple face, with system fallbacks elsewhere.
    * --------------------------------------------------------------------------*/
-  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif,
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif,
                "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol",
                "Noto Color Emoji";
-  --font-weight-bold: 600;
+  --font-weight-bold: 500;
 
   /* Monospace ramp for code blocks. Geist Mono is loaded via next/font in
    * app/layout.tsx and exposed as --font-geist-mono. */
@@ -171,9 +171,9 @@
   --color-button-primary-disabled-foreground: var(--color-neutral-400);
 
   /* Text */
-  --color-text-primary:         var(--color-neutral-950);
-  --color-text-secondary:       var(--color-neutral-500);
-  --color-text-tertiary:        var(--color-neutral-400);
+  --color-text-primary:         #292929;
+  --color-text-secondary:       #5d5d5d;
+  --color-text-tertiary:        #9e9e9e;
   --color-text-disabled:        var(--color-neutral-300);
   --color-text-disabled-danger: var(--color-red-300);
   --color-text-placeholder:     var(--color-neutral-400);

@@ -950,7 +950,7 @@ export function ChatWorkspace({
           }}
         ><ArrowDown size={13} />{t("Volver al final")}</button></div> : null}
         <div className="relative mx-auto max-w-[768px]">
-          {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-.025em] text-[var(--text)]">{landingHeadline}</h1> : null}
+          {!hasMessages ? <h1 className="mb-10 text-center text-balance text-[24px] font-medium leading-8 tracking-[-0.15px] text-[var(--text)]">{landingHeadline}</h1> : null}
           {sending && hasMessages ? <MessageQueue
             running={runningMessage}
             queued={queuedMessages}
@@ -966,7 +966,7 @@ export function ChatWorkspace({
             data-testid="composer"
             data-layout={hasMessages ? "conversation" : "landing"}
             data-focused={composerFocused ? "true" : "false"}
-            className={`composer-shadow relative flex flex-col rounded-[24px] border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !serverReferences.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
+            className={`composer-shadow relative flex flex-col rounded-2xl border bg-[var(--surface-raised)] p-2 ${hasMessages ? "composer-conversation" : "composer-landing"} ${composerFocused ? "composer-focused" : ""} ${hasMessages && !composerMultiline && !attachments.length && !documents.length && !serverReferences.length && !imageGeneration ? "composer-compact" : ""} ${dragActive ? "border-[var(--border-strong)] ring-2 ring-[var(--border)]" : "border-transparent"}`}
             onPaste={(event) => {
               if (!event.clipboardData.files.length) return;
               event.preventDefault();
@@ -1032,8 +1032,8 @@ export function ChatWorkspace({
               aria-controls={mentionOpen ? "connector-mention-options" : undefined}
               aria-activedescendant={mentionOpen && activeMentionOption ? connectorOptionId("mention", activeMentionOption.id) : undefined}
               autoFocus={false}
-              className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[16px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] md:text-[14px] ${hasMessages ? "min-h-8" : "min-h-12"}`}
-              style={{ fontSize: 16, ...(hasInlineMentions ? { color: "transparent", caretColor: "var(--text)" } : {}) }}
+              className={`composer-textarea max-h-52 w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2.5 text-[14px] leading-[24px] text-[var(--text)] outline-none placeholder:text-[var(--text-subtle)] ${hasMessages ? "min-h-8" : "min-h-12"}`}
+              style={hasInlineMentions ? { color: "transparent", caretColor: "var(--text)" } : undefined}
               placeholder={imageGeneration ? t("Describe la imagen que quieres crear…") : t("Escribe a {name}…", { name: placeholderName })}
               rows={1}
               defaultValue={prompt}

@@ -94,16 +94,16 @@ interface TypeScaleStep {
  */
 const typeScale = {
   /** Page titles. */
-  display: { default: 28, compact: 24 },
+  display: { default: 24, compact: 24 },
   /** Section headings, dialog titles. */
-  title: { default: 16, compact: 15 },
+  title: { default: 14, compact: 14 },
   /** Card titles, chat bubbles, emphasized rows. */
   subtitle: { default: 14, compact: 13 },
   /** Control labels and body copy — `SizeClasses.text`. */
   body: { default: 13, compact: 12 },
   /** Secondary text: descriptions, meta rows, errors, eyebrows and group
    *  labels (the former overline role — an uppercase or muted caption). */
-  caption: { default: 12, compact: 11 },
+  caption: { default: 12, compact: 12 },
 } as const satisfies Record<string, TypeScaleStep>;
 
 type TypeScaleRole = keyof typeof typeScale;
