@@ -14,7 +14,9 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     const input = page.getByRole("textbox", { name: "Mensaje", exact: true });
     await expect(input).toBeVisible({ timeout: 30_000 });
     await expect(input).toBeFocused();
-    expect(await input.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+    // The approved SF Pro scale uses 14px at both breakpoints; retain the
+    // separate 44px touch-target and overlap checks below.
+    expect(await input.evaluate(el => parseFloat(getComputedStyle(el).fontSize))).toBe(14);
     const band = page.getByLabel("Opciones para empezar"), composer = page.getByTestId("composer");
     const a = await band.boundingBox(), b = await composer.boundingBox();
     expect(Math.abs(a!.x - b!.x)).toBeLessThanOrEqual(1);

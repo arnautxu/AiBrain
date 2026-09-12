@@ -24,6 +24,9 @@ composer and suggestion rows. It supersedes the Poppins styling described in
 
 - Production build, TypeScript and zero-warning ESLint passed.
 - Sidebar, reduced-motion and theme suites: 20 tests passed.
+- The existing composer collision suite now requires the approved 14px text
+  exactly, replacing its former 16px minimum. Its six viewport/theme cases,
+  44px targets, focus, geometry and persistence checks remain intact.
 - Browser inspection at 1280x720 and 390x844: landing layout, computed font,
   colors/radii, mobile drawer open/close, light/dark theme switching and
   multiline text entry. No horizontal overflow or composer-control overlap.
