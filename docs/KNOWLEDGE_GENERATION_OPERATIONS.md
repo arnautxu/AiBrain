@@ -1,9 +1,10 @@
 # Company knowledge generation candidate — 2026-09-12
 
-This candidate completes bounded hierarchical reduction and the scheduling core.
-It is not an enabled generation service. No provider was called, credential
-created, company document ingested, source grant changed or installation deployed.
-Model connection and its process isolation are still to be selected and accepted.
+This candidate implements bounded hierarchical reduction, scheduling and a Codex
+App Server adapter. The user selected the existing Codex connection on 2026-09-12.
+It is not an enabled generation service. No real model generation was performed,
+credential created, company document ingested, source grant changed or installation
+deployed. Linux process isolation and real-document acceptance remain pending.
 
 ## Implemented behavior
 
@@ -32,7 +33,9 @@ per UTC day. The permitted configuration caps are 32 steps and 256 daily attempt
 A reservation is fsynced before the model call and is never refunded following
 a crash or uncertain outcome. Clock rollback cannot renew the daily budget.
 Counts are upper bounds on attempts, not monetary cost or token accounting.
-The chosen adapter must also enforce model, input/output/token and time budgets.
+The Codex adapter pins `gpt-5.6-luna`, a 256 KiB serialized request, a 64 KiB
+result and a 90-second total process deadline. It disables transport and stream
+retries. This is a byte/time/attempt budget, not an exact token or euro ceiling.
 
 State lives under `<knowledge-root>/generation-runtime/` in owner-only files,
 bound to installation identity. Symlinks and foreign state are rejected. The
@@ -43,8 +46,61 @@ without creating scheduler state or calling the model.
 The `seconds` limit bounds admission of another job, not interruption of an
 already running adapter. Host wiring must enforce a per-request deadline and an
 external process deadline with whole-process-group cleanup. An expired execution
-lease is blocked as unknown, never silently repeated. No systemd timer is
-installed by this candidate.
+lease is blocked as unknown, never silently repeated. The supplied systemd service
+has a 360-second outer deadline, whole-control-group termination and a 1 GiB memory
+limit. No systemd timer is installed or enabled by this candidate.
+
+## Existing Codex connection
+
+`knowledge-codex-adapter.py` starts a fresh pinned Codex 0.153.4 App Server per
+step. `account/login/start` uses `chatgptAuthTokens` in memory, taking only the
+current access token and account ID from the explicitly selected employee's
+existing login. The auth file is opened read-only without following symlinks;
+ownership, private mode, account binding and at least 120 seconds remaining
+validity are required. The refresh token and ID token are never passed on. The
+employee's normal runtime remains responsible for renewal. Expired/missing auth,
+server refresh requests or uncertain outcomes stop the job; this adapter never
+automatically resets it or performs a second login.
+
+The Linux `bwrap` child gets a new user/PID/mount context, a minimal filesystem,
+an empty in-memory home, system libraries, certificates, the pinned executable
+and the public model catalog. It receives neither employee/source directories
+nor host daemon sockets. Environment variables are cleared. Its thread and turn
+have no environments, dynamic tools, capability roots or employee instructions.
+The shared `knowledge-codex-config.py` disables tool and skill surfaces, analytics,
+history and credential persistence. Source data is only turn input. All server
+requests, foreign thread/turn events, tool items and unexpected memory citations
+fail closed. This must be exercised under the actual host's namespace policy
+before activation; the Mac protocol probe alone does not validate Linux mounts.
+
+The host entry point `knowledge-generation-run.py --config <private-config>`
+defaults to permission preview and does not read authentication or launch Codex.
+`--execute` is the explicit generation entry point. The root-owned, mode-0600
+configuration has exactly these fields (replace placeholders during authorized
+installation; this example is not an active grant):
+
+```json
+{
+  "schemaVersion": 1,
+  "manifest": "/etc/aibrain/INSTALLATION/rdp/sync.json",
+  "bindings": "/etc/aibrain/INSTALLATION/knowledge-bindings.json",
+  "policy": "/etc/aibrain/INSTALLATION/knowledge-generation-policy.json",
+  "codexBinary": "/usr/local/lib/aibrain/codex-0.153.4",
+  "employeeId": "SELECTED_EMPLOYEE",
+  "chatgptAccountId": "SELECTED_ACCOUNT",
+  "maxSteps": 4,
+  "maxDailyCalls": 32,
+  "seconds": 240
+}
+```
+
+The auth path is derived under the manifest's exact data volume and selected
+employee; arbitrary auth paths are not accepted. No secrets belong in this config.
+The generation policy must pin `codex-0.153.4:gpt-5.6-luna:knowledge-v1` and contain
+explicit source-version/job/audience grants with an expiry. Publication alone
+does not grant generation. Copying the service/timer templates does not authorize
+activation. The timer runs at most once per 15 minutes after the prior invocation,
+with jitter; the durable daily budget remains authoritative across restarts.
 
 ## Installation and rollback requirements
 
@@ -54,9 +110,12 @@ installed by this candidate.
 3. Migrate the additive `summary_reductions` table in operator and existing
    audience partitions. Existing tables and rows must remain unchanged.
 4. Install the worker and hierarchy module together, plus updated catalogue,
-   policy, migration and scheduler modules. Do not copy only the new worker.
-5. Select the model transport, isolated execution identity and reviewed source
-   grants. Do not reuse an employee conversation or credentials implicitly.
+   policy, migration, scheduler, Codex config/adapter and generation runner modules.
+   Install the exact native Codex 0.153.4 binary in a root-owned directory and
+   ensure host `bwrap`/user namespaces work. Do not copy only the new worker.
+5. Bind the user-selected existing Codex account and reviewed source grants.
+   Verify the Linux child cannot read host/employee/source files and that its home
+   disappears on termination. Do not reuse an employee conversation.
 6. Preview the grants, accept the model boundary and semantic quality, then
    install the bounded service/timer only after explicit activation authority.
 7. Retain separate host, app release and authenticated employee acceptance.
@@ -76,7 +135,7 @@ The new tests exercise 70-part, multi-level synthesis larger than the previous
 cross-group reference denial; source/grant revocation; installation locking;
 durable quotas; clock rollback; private state and fair cursor advancement.
 
-Observed on the development Mac: 232 tests, 11 skips, no test failures. Skipped
+Observed on the development Mac: 243 tests, 11 skips, no test failures. Skipped
 host/format checks and native Linux isolation remain gates for CI/the deployment
 host. Fixtures are fictional. These tests establish mechanics and provenance,
 not model correctness on customer documents.

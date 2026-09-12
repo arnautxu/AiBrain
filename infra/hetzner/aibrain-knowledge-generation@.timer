@@ -1,0 +1,12 @@
+[Unit]
+Description=Bounded company knowledge generation schedule for %i
+
+[Timer]
+OnBootSec=10min
+OnUnitInactiveSec=15min
+RandomizedDelaySec=2min
+Persistent=false
+Unit=aibrain-knowledge-generation@%i.service
+
+[Install]
+WantedBy=timers.target
