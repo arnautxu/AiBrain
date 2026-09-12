@@ -201,7 +201,11 @@ def sandbox_command(binary_fd, catalog_fd):
     for path in ('/etc/ssl/certs', '/etc/resolv.conf', '/etc/hosts', '/etc/nsswitch.conf'):
         if Path(path).exists():
             command += ['--ro-bind', path, path]
-    command += ['--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run',
+    # Protected systemd units cannot mount nested procfs. No environment/tools
+    # need a process table. Codex startup only needs current_exe(), supplied by a
+    # static link to its own binary, not a live procfs or the host's processes.
+    command += ['--tmpfs', '/proc', '--dir', '/proc/self', '--symlink', '/run/codex', '/proc/self/exe',
+        '--remount-ro', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/run',
         '--dir', '/run/home', '--dir', '/work',
         '--perms', '0555', '--ro-bind-data', str(binary_fd), '/run/codex',
         '--perms', '0444', '--ro-bind-data', str(catalog_fd), '/run/models.json', '--chdir', '/work',

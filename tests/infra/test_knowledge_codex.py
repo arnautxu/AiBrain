@@ -122,6 +122,8 @@ class CodexTests(unittest.TestCase):
         self.assertIn('--unshare-pid', command)
         self.assertIn('--unshare-user', command)
         self.assertEqual(command.count('--ro-bind-data'), 2)
+        self.assertNotIn('--proc', command)
+        self.assertIn('--remount-ro', command)
         self.assertNotIn('auth.json', ' '.join(command))
 
     def test_non_linux_fails_before_credentials_or_process(self):

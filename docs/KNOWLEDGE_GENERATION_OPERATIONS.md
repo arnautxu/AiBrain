@@ -153,6 +153,23 @@ employee home directories were absent. Service-level and model-quality acceptanc
 are separate gates. No actual credential or customer document was used for this
 filesystem smoke test.
 
+The protected service additionally rejects nested procfs mounts. The adapter
+uses a read-only synthetic `/proc` containing only `self/exe -> /run/codex`,
+which Codex needs to resolve its executable at startup. No process table, host
+PID, descriptors or environment are exposed. The complete
+`scripts/probe-knowledge-linux-isolation.py` passed on Arnall under the service
+restrictions plus `PrivateNetwork=yes`: filesystem denial, ephemeral writable
+home, external fictional login, exactly one loopback model request, zero model
+tools and a correctly decoded structured response. Peak service memory was
+326.2 MiB. This proves isolated transport with a fixture, not real-document
+quality or actual account acceptance.
+
+Before migration, the existing scheduled backup failure was traced to permissive
+modes on old diagnostic/archive copies inside the private knowledge tree. Their
+original modes were recorded privately and tightened without changing contents;
+the scheduled backup then completed and verified a new snapshot. No source file,
+employee permission or Windows ACL changed.
+
 ## Semantic acceptance before activation
 
 Use an explicitly authorized sample with a recorded source hash and expected
