@@ -1,0 +1,41 @@
+import { loadInstallationConfig } from "@/config/installation";
+import { bridgeToken, loadHorariaConfig } from "@/horaria/client";
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+async function forward(request: Request, context: { params: Promise<{ path: string[] }> }) {
+  const segments = (await context.params).path;
+  const webhook = segments.length === 1 && segments[0] === "webhook";
+  const media = segments.length === 2 && segments[0] === "media" && /^[a-zA-Z0-9_-]{20,120}$/.test(segments[1]) && ["GET", "HEAD"].includes(request.method);
+  if (!webhook && !media) return new Response(null, { status: 404 });
+  try {
+    const config = await loadHorariaConfig(await loadInstallationConfig());
+    if (!config.eventsEnabled) return new Response(null, { status: 404 });
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = request.body?.getReader();
+    if (reader) {
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.length;
+        if (size > 1024 * 1024) { await reader.cancel(); return new Response(null, { status: 413 }); }
+        chunks.push(chunk.value);
+      }
+    }
+    const body = Buffer.concat(chunks);
+    const contentType = request.headers.get("content-type") || "";
+    const target = webhook ? `/api/whatsapp/webhook${new URL(request.url).search}` : `/api/schedules/published-pdf/${segments[1]}`;
+    const token = bridgeToken(config, { method: request.method, target, contentType, body, kind: "event" });
+    const headers = new Headers({ "x-aibrain-authorization": token });
+    for (const name of ["content-type", "x-hub-signature-256", "x-twilio-signature", "x-horaria-webhook-secret"]) {
+      const value = request.headers.get(name); if (value) headers.set(name, value);
+    }
+    const result = await fetch(new URL(target, config.baseUrl), { method: request.method, headers, body: body.length ? body : undefined, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(60_000) });
+    return new Response(result.body, { status: result.status, headers: { "content-type": result.headers.get("content-type") || "text/plain", "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
+  } catch { return new Response(null, { status: 503 }); }
+}
+export const GET = forward;
+export const POST = forward;
+
+export const HEAD = forward;

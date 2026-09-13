@@ -141,3 +141,9 @@ Never collapse these states. Health/readiness is operational evidence, not user-
   implemented. The user selected the existing Codex connection on 2026-09-12;
   protocol probes observe no model tools. Linux process isolation, host service
   activation and real-document semantic acceptance remain unfinished gates.
+
+## horarIA integration candidate — 2026-09-13
+
+A chat-only scheduling automation is implemented in `src/horaria` with the imported engine in `modules/horaria/backend`. Previews use existing private document artifacts; there is no separate horarIA UI. The product image packages a separately supervised private service, with opt-in installation configuration. The deployment gateway promotes and verifies it through `horaria-release.sh` only for configured installations. Its PostgreSQL database and private service state require their own installation provisioning and backup coverage. AI, WhatsApp delivery and the internal weekly scheduler remain disabled until explicitly activated. See [HORARIA.md](HORARIA.md) for source provenance, local migration evidence, permissions, recovery limitations and the separate remote release gates.
+
+horarIA uses the user's connected Codex worker for inference through an internal signed, replay-protected callback; Anthropic credentials are not required. The computation thread disables tools/apps/environments and returns structured output to the imported business validators. Meta Business delivery remains separately configurable and disabled until the operator connects it.

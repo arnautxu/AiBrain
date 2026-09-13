@@ -114,3 +114,7 @@ Recipients are an independent, non-empty set of direct users and groups.
 Current membership is resolved on every authorized result read. The owner is not
 implicitly a recipient. Only that owner or a workspace administrator can edit,
 pause, run or delete; other recipients can only view results.
+
+## horarIA per xat
+
+La integració d’horaris conserva el xat i les previsualitzacions natives d’AiBrain, sense UI pròpia. El worker resol la identitat, els permisos i les operacions background autoritzades a cada execució. La configuració, migració i gates d’activació són a [HORARIA.md](HORARIA.md). La integració local no activa proveïdors ni modifica les automatitzacions reals.

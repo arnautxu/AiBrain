@@ -28,6 +28,12 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
+FROM ${NODE_IMAGE} AS horaria-dependencies
+WORKDIR /horaria
+COPY modules/horaria/backend/package.json modules/horaria/backend/package-lock.json ./
+COPY modules/horaria/backend/prisma ./prisma
+RUN npm ci --ignore-scripts && npm run build
+
 FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
@@ -133,6 +139,8 @@ COPY --chown=root:root docs/PRESENTATION_AUTHORING.md /usr/local/share/aibrain/p
 
 WORKDIR /app
 COPY --from=builder --chown=aibrain:aibrain /app/.next/standalone ./
+COPY --from=horaria-dependencies --chown=root:root /horaria /opt/aibrain-horaria
+COPY --chown=root:root modules/horaria/backend/src /opt/aibrain-horaria/src
 COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/config/internal-agent-context /usr/local/share/aibrain/internal-agent-context

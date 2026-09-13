@@ -14,6 +14,8 @@ export default defineConfig([
     "test-results/**",
     "next-env.d.ts",
     "runtime/**",
+    // Imported module has its own backend and frontend lint gates.
+    "modules/horaria/**",
     // Immutable upstream skill snapshot; project integration is linted normally.
     "skills/impeccable/**",
     // Vendored by the Fluid Functionalism shadcn registry. Keep project code

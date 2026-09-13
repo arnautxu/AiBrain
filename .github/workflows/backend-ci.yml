@@ -61,6 +61,8 @@ jobs:
         run: |
           npm run infra:validate
           bash -n infra/hetzner/app/deploy-arnall-main.sh
+          bash -n infra/hetzner/app/horaria-release.sh
+          bash -n infra/hetzner/app/horaria-backup.sh
 
   quality-tests:
     name: Tests (${{ matrix.shard }}/3)
@@ -88,7 +90,7 @@ jobs:
 
   quality:
     name: Types, lint, contracts, tests and build
-    needs: [quality-build, quality-tests]
+    needs: [quality-build, quality-tests, horaria-tests]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -97,9 +99,28 @@ jobs:
         env:
           BUILD_RESULT: ${{ needs.quality-build.result }}
           TESTS_RESULT: ${{ needs.quality-tests.result }}
+          HORARIA_RESULT: ${{ needs.horaria-tests.result }}
         run: |
           test "$BUILD_RESULT" = success
           test "$TESTS_RESULT" = success
+          test "$HORARIA_RESULT" = success
+
+  horaria-tests:
+    name: Horaria engine and authenticated chat service
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
+        with:
+          node-version: 24.18.1
+          cache: npm
+          cache-dependency-path: modules/horaria/backend/package-lock.json
+      - run: npm ci --ignore-scripts --prefix modules/horaria/backend
+      - run: npm run build --prefix modules/horaria/backend
+      - run: npm test --prefix modules/horaria/backend
 
   e2e-suites:
     name: E2E (${{ matrix.suite }})

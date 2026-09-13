@@ -1,3 +1,4 @@
+import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
 import { documentServicesForUser } from "@/documents/server-service";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { serverReferenceInputs } from "@/documents/server-reference-inputs";
@@ -816,6 +817,7 @@ export async function runWorkerCodexTurn(
   const developerInstructions = [
     buildCodexDeveloperInstructions(chatRequest, permissions, assistantName, internalAgentContext),
     localDocumentDeveloperInstructions(),
+    ...(runtimeIdentitySession || automationSession ? [horariaInstructions] : []),
     readableFilesDeveloperInstructions(enterpriseDocumentRoots),
     projectDeveloperInstructions(projectGuidance),
     preparedMemory.developerInstructions,
@@ -962,6 +964,7 @@ export async function runWorkerCodexTurn(
               ...OUTLOOK_DYNAMIC_TOOLS,
               ...(runtime.config.connectors?.composio?.toolkits.length ? COMPOSIO_DYNAMIC_TOOLS : []),
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
+      ...(runtimeIdentitySession || automationSession ? HORARIA_TOOLS : []),
             ],
             ephemeral: false,
             serviceName: "aibrain_workbench",
@@ -1605,6 +1608,35 @@ export async function runWorkerCodexTurn(
         try {
         if (request.method === "item/tool/call") {
           if (!runtimeTurnId) throw new Error("Dynamic tool call arrived before the turn was bound.");
+          const horariaSession = runtimeIdentitySession ?? automationSession;
+          if (horariaSession && isRecord(request.params) && request.params.namespace === HORARIA_NAMESPACE) {
+            return await handleHorariaToolCall(request.params as never, {
+              session: horariaSession, installation: runtime.config, permissions, projectId: chatRequest.projectId,
+              sourceThreadId: chatRequest.threadId, sourceTurnId: chatRequest.assistantMessageId,
+              sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId,
+              projectWorkspace, background: Boolean(backgroundExecution),
+              preview: async (data) => {
+                if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
+                const result = await handleLocalDocumentDynamicToolCall({
+                  ...(request.params as never as import("../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams").DynamicToolCallParams),
+                  namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE, tool: "create",
+                  arguments: { format: "xlsx", fileName: `horari-${String(data.semana)}-${String(data.establecimientoId)}-${data.previewHash.slice(0, 12)}.xlsx`, title: data.title, content: `${String(data.status)}. ${String(data.note)}`, rows: data.rows } as JsonValue,
+                }, {
+                  installation: runtime.config, installationId, userId: authenticatedUserId,
+                  projectId: chatRequest.projectId, projectWorkspace,
+                  receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
+                  runtimeThreadId: threadId, runtimeTurnId: runtimeTurnId!, sourceThreadId: chatRequest.threadId,
+                  sourceTurnId: chatRequest.assistantMessageId, permissions,
+                });
+                if (!result.response.success) throw new Error("No s’ha pogut crear la previsualització de l’horari.");
+                for (const artifact of result.artifacts) {
+                  if (projectedDocumentArtifactIds.has(artifact.id)) continue;
+                  await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:horaria:${artifact.id}` });
+                  projectedDocumentArtifactIds.add(artifact.id);
+                }
+              },
+            }) as JsonValue;
+          }
           if (automationSession && isRecord(request.params) && request.params.namespace === AIBRAIN_AUTOMATION_TOOL_NAMESPACE) {
             return await handleAutomationToolCall(request.params as never, {
               session: automationSession,
