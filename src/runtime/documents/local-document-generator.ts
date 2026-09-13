@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { styleScheduleWorkbook } from "./schedule-spreadsheet";
 import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 
@@ -27,6 +28,7 @@ export type LocalDocumentInput = Readonly<{
   rows?: readonly (readonly LocalDocumentCell[])[];
   slides?: readonly LocalDocumentSlide[];
   sourcePng?: Uint8Array;
+  spreadsheetLayout?: "schedule";
 }>;
 
 export type GeneratedLocalDocument = Readonly<{
@@ -127,7 +129,10 @@ function normalizedInput(input: LocalDocumentInput) {
   if (slides && (sourcePng || !["pdf", "pptx"].includes(input.format))) {
     throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_SLIDES_INVALID", "Slides require PDF or PPTX without a source image.");
   }
-  return { format: input.format, title, content, rows: input.rows, slides, sourcePng };
+  if (input.spreadsheetLayout && (input.format !== "xlsx" || !input.rows || input.rows.some(row => row.length !== 9))) {
+    throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_ROWS_INVALID", "Schedule layout requires nine spreadsheet columns.");
+  }
+  return { format: input.format, title, content, rows: input.rows, slides, sourcePng, spreadsheetLayout: input.spreadsheetLayout };
 }
 
 export function normalizeDocumentSlides(value: unknown): readonly LocalDocumentSlide[] {
@@ -210,7 +215,7 @@ function columnName(index: number) {
   return name;
 }
 
-async function xlsxBytes(title: string, content: string, explicitRows?: readonly (readonly LocalDocumentCell[])[]) {
+async function xlsxBytes(title: string, content: string, explicitRows?: readonly (readonly LocalDocumentCell[])[], layout?: "schedule") {
   const rows = spreadsheetRows(content, explicitRows);
   const sheetRows = rows.map((row, rowIndex) => {
     const cells = row.map((cell, columnIndex) => {
@@ -222,7 +227,7 @@ async function xlsxBytes(title: string, content: string, explicitRows?: readonly
     }).join("");
     return `<row r="${rowIndex + 1}">${cells}</row>`;
   }).join("");
-  return zipBytes({
+  const files = {
     "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`,
     "_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`,
     "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${xml(title.slice(0, 31).replace(/[\\/*?:\[\]]/gu, " ") || "Datos")}" sheetId="1" r:id="rId1"/></sheets><calcPr calcId="0" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`,
@@ -231,7 +236,9 @@ async function xlsxBytes(title: string, content: string, explicitRows?: readonly
     "xl/styles.xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="11"/><name val="Arial"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`,
     "docProps/core.xml": coreProperties(title),
     "docProps/app.xml": appProperties("AiBrain Spreadsheet Generator"),
-  });
+  };
+  if (layout === "schedule") styleScheduleWorkbook(files, title, content, rows);
+  return zipBytes(files);
 }
 
 function presentationTheme() {
@@ -411,7 +418,7 @@ export async function generateLocalDocument(input: LocalDocumentInput): Promise<
   } else if (normalized.format === "docx") {
     data = await docxBytes(normalized.title, normalized.content);
   } else if (normalized.format === "xlsx") {
-    data = await xlsxBytes(normalized.title, normalized.content, normalized.rows);
+    data = await xlsxBytes(normalized.title, normalized.content, normalized.rows, normalized.spreadsheetLayout);
   } else {
     const slides = presentationSlides(normalized.title, normalized.content, normalized.slides);
     data = await pptxBytes(normalized.title, slides);

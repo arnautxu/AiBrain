@@ -1,9 +1,43 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { signEnvelope, bodyHash } from './signature.js';
 
 // Identity is inherited from the verified request, never from prompts or customer data.
 export const aiIdentity = new AsyncLocalStorage();
+
+// Native transport avoids fetch's five-minute response-header deadline. The
+// calculation has its own bounded deadline and only targets operator config.
+export function requestCodex(url, token, body, timeoutMs = 20 * 60_000) {
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/api/horaria-codex' || url.search || url.hash) throw new Error('Invalid internal Codex URL.');
+  return new Promise((resolve, reject) => {
+    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
+      agent: false, method: 'POST', signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'content-type': 'application/json', 'content-length': body.length, 'x-aibrain-authorization': token },
+    }, response => {
+      if (response.statusCode !== 200) {
+        response.resume();
+        reject(new Error(`Codex d’AiBrain no ha completat el càlcul (${response.statusCode}).`));
+        return;
+      }
+      const chunks = [];
+      let size = 0;
+      response.on('data', chunk => {
+        size += chunk.length;
+        if (size > 8 * 1024 * 1024) response.destroy(new Error('Codex response too large.'));
+        else chunks.push(chunk);
+      });
+      response.on('error', reject);
+      response.on('end', () => {
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8'))); }
+        catch { reject(new Error('Codex returned invalid JSON.')); }
+      });
+    });
+    request.on('error', reject);
+    request.end(body);
+  });
+}
 export function createAiClient() {
   return { messages: { async create(params) {
     if (process.env.HORARIA_ALLOW_AI !== '1') throw new Error('La generació amb IA encara no està activada.');
@@ -15,12 +49,7 @@ export function createAiClient() {
       actorId: identity.actorId, employeeId: identity.employeeId, method: 'POST', target,
       timestamp: Date.now(), nonce: randomUUID(), contentType: 'application/json', bodyHash: bodyHash(body),
     }, process.env.HORARIA_BRIDGE_SECRET);
-    const response = await fetch(new URL(target, process.env.HORARIA_CODEX_URL), {
-      method: 'POST', headers: { 'content-type': 'application/json', 'x-aibrain-authorization': token },
-      body, redirect: 'error', signal: AbortSignal.timeout(20 * 60_000),
-    });
-    if (!response.ok) throw new Error(`Codex d’AiBrain no ha completat el càlcul (${response.status}).`);
-    return response.json();
+    return requestCodex(new URL(target, process.env.HORARIA_CODEX_URL), token, body);
   } } };
 }
 
