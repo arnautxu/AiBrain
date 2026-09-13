@@ -35,7 +35,7 @@ async function forward(request: Request, context: { params: Promise<{ path: stri
     return new Response(result.body, { status: result.status, headers: { "content-type": result.headers.get("content-type") || "text/plain", "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
   } catch { return new Response(null, { status: 503 }); }
 }
-export const GET = forward;
-export const POST = forward;
+export async function GET(request: Request, context: { params: Promise<{ path: string[] }> }) { return forward(request, context); }
+export async function POST(request: Request, context: { params: Promise<{ path: string[] }> }) { return forward(request, context); }
 
 export const HEAD = forward;
