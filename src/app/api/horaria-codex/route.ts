@@ -1,3 +1,4 @@
+import { operationalLogger } from "@/operations/server-logger";
 import { loadInstallationConfig } from "@/config/installation";
 import { callHoraria, loadHorariaConfig } from "@/horaria/client";
 import { verifyCodexRequest } from "@/horaria/codex-auth";
@@ -30,7 +31,7 @@ export async function POST(request: Request) {
     stage = "calculation";
     return Response.json(await runHorariaCodex(userId, JSON.parse(bytes.toString())), { headers: { "cache-control": "private, no-store" } });
   } catch (error) {
-    console.error("horaria_codex_failed", { stage, error: error instanceof Error ? error.message.slice(0, 250) : "Calculation failed" });
+    operationalLogger.error("horaria.calculation_failed", { stage, error: error instanceof Error ? error.message.slice(0, 250) : "Calculation failed" });
     return new Response(null, { status: 503 });
   }
   finally { if (userId) active.delete(userId); }
