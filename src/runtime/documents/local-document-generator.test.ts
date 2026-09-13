@@ -6,6 +6,24 @@ import { generateLocalDocument } from "@/runtime/documents/local-document-genera
 import { generatedPngFixture } from "../../../tests/helpers/png-fixture";
 
 describe("local document generator", () => {
+  it("prints schedule names and split shifts with wrapping, generous rows and repeated weekly headings", async () => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Palamós · 2026-W16", content: "Esborrany. Revisar abans de publicar.", spreadsheetLayout: "schedule", rows: [
+      ["Persona", "Dl", "Dt", "Dc", "Dj", "Dv", "Ds", "Dg", "Hores"],
+      ["Persona amb dos cognoms llargs", ...Array(7).fill("08:00–14:00 Obrador / 17:00–20:00 Botiga"), 40],
+    ] });
+    const archive = await JSZip.loadAsync(generated.data);
+    const sheet = await archive.file("xl/worksheets/sheet1.xml")!.async("text");
+    expect(sheet).toContain('width="30"');
+    expect(sheet).toContain('orientation="landscape"');
+    expect(sheet).toContain('fitToHeight="0"');
+    expect(sheet).toContain('ht="54"');
+    expect(sheet).toContain("Persona amb dos cognoms llargs");
+    expect(sheet).toContain("17:00–20:00 Botiga");
+    expect(sheet).toContain('r="I2" s="0"><v>40</v>');
+    expect(await archive.file("xl/styles.xml")!.async("text")).toContain('wrapText="1"');
+    expect(await archive.file("xl/workbook.xml")!.async("text")).toContain("_xlnm.Print_Titles");
+  });
+
   it.each([
     ["pdf", "Informe local", "Resumen\nContenido comprobable"],
     ["docx", "Documento local", "# Resumen\nContenido comprobable"],

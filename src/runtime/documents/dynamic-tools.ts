@@ -225,6 +225,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   sourceTurnId: string;
   permissions: ResolvedPermissions;
   renderPresentation?: PresentationRenderCallback;
+  spreadsheetLayout?: "schedule";
   now?: () => Date;
 }>;
 
@@ -664,7 +665,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
     const input = params.tool === "image_to_pdf"
       ? parseImageToPdfArguments(params.arguments)
       : parseArguments(params.arguments);
-    const inputFingerprint = createHash("sha256").update(canonicalInput(input)).digest("hex");
+    const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (context.spreadsheetLayout ? `|layout:${context.spreadsheetLayout}` : "")).digest("hex");
     const receiptName = receiptNameFor(params.callId);
     const receiptPath = path.join(context.receiptRoot, receiptName);
     await mkdir(context.receiptRoot, { recursive: true, mode: 0o700 });
@@ -699,6 +700,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
         title: input.title,
         content: input.content,
         rows: input.rows,
+        spreadsheetLayout: context.spreadsheetLayout,
         slides: input.slides,
         sourcePng,
       });

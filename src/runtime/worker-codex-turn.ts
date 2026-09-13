@@ -1623,6 +1623,7 @@ export async function runWorkerCodexTurn(
                   arguments: { format: "xlsx", fileName: `horari-${String(data.semana)}-${String(data.establecimientoId)}-${data.previewHash.slice(0, 12)}.xlsx`, title: data.title, content: `${String(data.status)}. ${String(data.note)}`, rows: data.rows } as JsonValue,
                 }, {
                   installation: runtime.config, installationId, userId: authenticatedUserId,
+                  spreadsheetLayout: "schedule",
                   projectId: chatRequest.projectId, projectWorkspace,
                   receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
                   runtimeThreadId: threadId, runtimeTurnId: runtimeTurnId!, sourceThreadId: chatRequest.threadId,
