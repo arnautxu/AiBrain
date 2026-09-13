@@ -50,7 +50,7 @@ No reutilitzeu la persona 1 sense revisar el backup i la identitat real. `backgr
 
 ## Instal·lació i migració
 
-1. Construir i provar la revisió. La imatge AiBrain inclou el servei a `/opt/aibrain-horaria` i el client Prisma per Debian/OpenSSL 3. El servei s’executa separadament amb la mateixa imatge immutable. El job `horaria-tests` forma part del gate Backend CI.
+1. Construir i provar la revisió. La imatge AiBrain inclou el servei a `/opt/aibrain-horaria`, el client i el motor de migracions Prisma per Debian/OpenSSL 3. La construcció fixa `PRISMA_CLI_BINARY_TARGETS` i executa el binari de migracions dins de la imatge final per detectar errors d’ABI abans de publicar. El servei s’executa separadament amb la mateixa imatge immutable. El job `horaria-tests` forma part del gate Backend CI.
 2. Provisionar una base de dades buida exclusiva de la instal·lació i un directori privat `HORARIA_STATE_ROOT` propietat de l’usuari del servei. Registrar la base, el volum, les còpies i les credencials al runbook de la instal·lació.
 3. Aplicar les 33 migracions amb el Prisma inclòs: `node node_modules/prisma/build/index.js migrate deploy --schema prisma/schema.prisma`, des de `/opt/aibrain-horaria`. No fer servir `migrate dev` en producció.
 4. Inspeccionar una còpia actual amb `node src/integration/import-backup.js /private/backup.json`. Només mostra data, hash i recomptes. Per importar, afegir `--apply-empty SHA256_INSPECCIONAT` i definir `HORARIA_INSTALLATION_ID`. L’importador comprova totes les taules, rebutja un destí no buit, utilitza una transacció, restitueix referències circulars i seqüències i retorna recomptes reals. No esborra ni fusiona dades existents.
