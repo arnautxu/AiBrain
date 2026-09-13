@@ -370,6 +370,10 @@ deploy_ghcr_release() {
       && automation_worker_is_healthy \
       && runtime_noninteractive_browser_policy_is_active "${STATE_FILE}.active.compose.yaml"; then
     verify_public_health
+    if [[ -f "${CONFIG_DIR}/horaria/compose.env" ]]; then
+      require_root_owned_file "${OPS_ROOT}/horaria-release.sh"
+      bash "${OPS_ROOT}/horaria-release.sh" "$app_image" "$revision"
+    fi
     cleanup_inactive_aibrain_images
     cleanup_legacy_release_directories
     printf 'ARNALL_DEPLOY_ALREADY_CURRENT revision=%s\n' "$revision"
@@ -406,6 +410,10 @@ deploy_ghcr_release() {
     || fail "deployed runtime permits interactive browser approvals"
   verify_public_health
   verify_openai_auth_egress "${STATE_FILE}.active.compose.yaml"
+  if [[ -f "${CONFIG_DIR}/horaria/compose.env" ]]; then
+    require_root_owned_file "${OPS_ROOT}/horaria-release.sh"
+    bash "${OPS_ROOT}/horaria-release.sh" "$app_image" "$revision"
+  fi
   cleanup_inactive_aibrain_images
   cleanup_legacy_release_directories
 

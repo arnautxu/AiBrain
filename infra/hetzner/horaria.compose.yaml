@@ -1,0 +1,71 @@
+# Opt-in private installation service, with its own Compose project and database.
+name: "${AIBRAIN_HORARIA_PROJECT_NAME:?set an installation-specific project}"
+services:
+  horaria-db:
+    image: postgres:17-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    env_file: ["${AIBRAIN_HORARIA_DATABASE_ENV_FILE:?set private database environment}"]
+    restart: unless-stopped
+    shm_size: 128m
+    mem_limit: 512m
+    volumes:
+      - type: bind
+        source: "${AIBRAIN_HORARIA_DATABASE_HOST:?set dedicated database directory}"
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
+    networks: [aibrain-internal]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U horaria -d horaria"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+  horaria:
+    image: "${AIBRAIN_IMAGE:?set the tested immutable product digest}"
+    entrypoint: ["node", "/opt/aibrain-horaria/src/integration/start.js"]
+    env_file:
+      - "${AIBRAIN_HORARIA_ENV_FILE:?set a private horaria environment file}"
+    environment:
+      HORARIA_INSTALLATION_ID: "${AIBRAIN_INSTALLATION_ID:?set installation id}"
+      HORARIA_STATE_ROOT: /var/lib/horaria
+      HOST: 0.0.0.0
+      PORT: "3210"
+      TZ: "${AIBRAIN_TIMEZONE:-Europe/Madrid}"
+    user: "${AIBRAIN_UID:-10001}:${AIBRAIN_GID:-10001}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    pids_limit: 128
+    mem_limit: 1g
+    tmpfs: [/tmp:rw,nosuid,nodev,noexec,size=64m]
+    volumes:
+      - type: bind
+        source: "${AIBRAIN_HORARIA_STATE_HOST:?set private state directory owned by service uid}"
+        target: /var/lib/horaria
+        bind:
+          create_host_path: false
+    networks: [aibrain-internal, aibrain-egress]
+    depends_on:
+      horaria-db:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3210/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    labels:
+      com.graphikai.aibrain.product: aibrain
+      com.graphikai.aibrain.installation: "${AIBRAIN_INSTALLATION_ID}"
+    logging:
+      driver: local
+      options: {max-size: 10m, max-file: "3"}
+networks:
+  aibrain-internal:
+    external: true
+    name: "${AIBRAIN_NETWORK_NAME:?set the existing installation network}"
+  aibrain-egress:
+    external: true
+    name: "${AIBRAIN_EGRESS_NETWORK_NAME:?set the existing installation egress network}"

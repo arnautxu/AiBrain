@@ -1,0 +1,80 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { InstallationConfig } from "@/config/installation-schema";
+import type { ResolvedPermissions } from "@/permissions";
+import type { AuthSession } from "@/auth/types";
+import { handleHorariaToolCall, HORARIA_NAMESPACE } from "./chat-tools";
+import { resolveOperation } from "./operations";
+import { callHoraria, loadHorariaConfig } from "./client";
+vi.mock("server-only", () => ({}));
+vi.mock("./client", () => ({ callHoraria: vi.fn(), loadHorariaConfig: vi.fn() }));
+const roots: string[] = [];
+afterEach(async () => { vi.resetAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+async function setup() {
+  const root = await mkdtemp(path.join(tmpdir(), "horaria-chat-test-")); roots.push(root);
+  const session = { provider: "local", tenant: { id: "test-shop", name: "Test" }, user: { id: "10000000-0000-4000-8000-000000000001", name: "Manager", email: "manager@example.test" }, expiresAt: "2099-01-01" } as AuthSession;
+  const config = { installationId: "test-shop", baseUrl: "http://127.0.0.1:3210", secret: "x".repeat(40), eventsEnabled: false, users: { [session.user.id]: { employeeId: 1, backgroundOperations: [] as string[] } } };
+  vi.mocked(loadHorariaConfig).mockResolvedValue(config);
+  vi.mocked(callHoraria).mockResolvedValue({ saved: true });
+  const context = { projectId: "project-a", permissions: { installationId: session.tenant.id, userId: session.user.id, projectId: "project-a", rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow" }] } as unknown as ResolvedPermissions, session, installation: { installationId: "test-shop", paths: { usersRoot: root } } as InstallationConfig, sourceThreadId: "thread-a", sourceTurnId: "turn-1", sourceMessage: "Prepara el canvi", runtimeThreadId: "runtime-a", runtimeTurnId: "runtime-1", projectWorkspace: root, background: false, preview: vi.fn() };
+  const run = async (tool: string, args: Record<string, unknown>, overrides = {}) => {
+    const result = await handleHorariaToolCall({ namespace: HORARIA_NAMESPACE, tool, arguments: args as never, threadId: "runtime-a", turnId: "runtime-1", callId: "call-1" }, { ...context, ...overrides });
+    return JSON.parse((result.contentItems[0] as { text: string }).text);
+  };
+  return { context, config, run };
+}
+describe("horarIA chat boundary", () => {
+  it("queries preview and projects its real data through the existing artifact callback", async () => {
+    const { run, context } = await setup();
+    const value = { title: "Week", rows: [["Persona", "Dl"], ["Test", "Matí"]] };
+    vi.mocked(callHoraria).mockResolvedValue(value);
+    expect(await run("run", { operation: "preview", query: { semana: "2026-W38", establecimiento: 1 } })).toEqual(value);
+    expect(context.preview).toHaveBeenCalledWith(value);
+  });
+  it("freezes a change, rejects same-turn/cross-thread confirmation and executes once", async () => {
+    const { run } = await setup();
+    const input = { operation: "schedules.update", id: "11", body: { turno: "LIBRE" } };
+    const proposal = await run("run", input);
+    expect(callHoraria).not.toHaveBeenCalled();
+    await expect(run("confirm", { proposalId: proposal.proposalId }, { sourceMessage: "sí" })).rejects.toThrow();
+    await expect(run("confirm", { proposalId: proposal.proposalId }, { sourceMessage: "sí", sourceTurnId: "turn-2", sourceThreadId: "other" })).rejects.toThrow();
+    const overrides = { sourceTurnId: "turn-2", sourceMessage: "fes-ho" };
+    await run("confirm", { proposalId: proposal.proposalId }, overrides);
+    await run("confirm", { proposalId: proposal.proposalId }, overrides);
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
+  });
+  it("will not retry a write whose response was lost", async () => {
+    const { run } = await setup();
+    const p = await run("run", { operation: "whatsapp.broadcast", body: { establecimientoId: 1, semana: "2026-W38" } });
+    vi.mocked(callHoraria).mockRejectedValue(new Error("Connection lost"));
+    const overrides = { sourceMessage: "endavant", sourceTurnId: "turn-2" };
+    await expect(run("confirm", { proposalId: p.proposalId }, overrides)).rejects.toThrow("Connection lost");
+    await expect(run("confirm", { proposalId: p.proposalId }, overrides)).rejects.toThrow("pot haver-se aplicat");
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+  });
+  it("background text cannot confirm or grant itself write permission", async () => {
+    const { run, config, context } = await setup();
+    const input = { operation: "schedules.generate", body: { establecimientoId: 1, semana: "2026-W38" } };
+    await expect(run("run", input, { background: true })).rejects.toThrow("autorització durable");
+    expect(callHoraria).not.toHaveBeenCalled();
+    config.users[context.session.user.id].backgroundOperations.push("schedules.generate");
+    await run("run", input, { background: true });
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+  });
+  it("honors a revoked AiBrain tools.execute permission before reading business data", async () => {
+    const { run, context } = await setup();
+    context.permissions.rules[0].effect = "deny";
+    await expect(run("run", { operation: "status" })).rejects.toThrow("permís");
+    expect(callHoraria).not.toHaveBeenCalled();
+  });
+  it("rejects unmapped users and host/path injection", async () => {
+    const { run, config } = await setup(); config.users = {};
+    await expect(run("run", { operation: "status" })).rejects.toThrow("accés");
+    expect(() => resolveOperation({ operation: "__proto__" })).toThrow();
+    expect(() => resolveOperation({ operation: "employees.update", id: "../whatsapp/webhook" })).toThrow();
+    expect(() => resolveOperation({ operation: "status", query: { secret: "guess" } })).toThrow();
+  });
+});
