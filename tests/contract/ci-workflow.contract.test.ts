@@ -46,22 +46,24 @@ describe("backend CI contract", () => {
   it("retains the required check and fails closed for every non-success dependency result", async () => {
     const gate = (await readJobs()).quality;
     expect(gate.name).toBe("Types, lint, contracts, tests and build");
-    expect(gate.needs).toEqual(["quality-build", "quality-tests"]);
+    expect(gate.needs).toEqual(["quality-build", "quality-tests", "horaria-tests"]);
     expect(gate.if).toBe("always()");
     expect(gate["continue-on-error"]).toBeUndefined();
     expect(gate.steps).toHaveLength(1);
     const step = gate.steps[0];
     expect(step.if).toBeUndefined();
     expect(step["continue-on-error"]).toBeUndefined();
-    expect(step.env).toEqual({ BUILD_RESULT: "${{ needs.quality-build.result }}", TESTS_RESULT: "${{ needs.quality-tests.result }}" });
+    expect(step.env).toEqual({ BUILD_RESULT: "${{ needs.quality-build.result }}", TESTS_RESULT: "${{ needs.quality-tests.result }}", HORARIA_RESULT: "${{ needs.horaria-tests.result }}" });
     expect(step.run).toBeTruthy();
     for (const build of ["success", "failure", "cancelled", "skipped", ""]) {
       for (const tests of ["success", "failure", "cancelled", "skipped", ""]) {
-        const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
-          env: { ...process.env, BUILD_RESULT: build, TESTS_RESULT: tests },
+        for (const horaria of ["success", "failure", "cancelled", "skipped", ""]) {
+          const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
+            env: { ...process.env, BUILD_RESULT: build, TESTS_RESULT: tests, HORARIA_RESULT: horaria },
         });
         expect(result.error).toBeUndefined();
-        expect(result.status === 0, `build=${build}, tests=${tests}`).toBe(build === "success" && tests === "success");
+        expect(result.status === 0, `build=${build}, tests=${tests}, horaria=${horaria}`).toBe(build === "success" && tests === "success" && horaria === "success");
+        }
       }
     }
   });
