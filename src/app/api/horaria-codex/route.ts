@@ -8,6 +8,7 @@ export const dynamic = "force-dynamic";
 const active = new Set<string>();
 export async function POST(request: Request) {
   let userId: string | undefined;
+  let stage = "verification";
   try {
     const config = await loadHorariaConfig(await loadInstallationConfig());
     const chunks: Uint8Array[] = []; let size = 0;
@@ -24,8 +25,13 @@ export async function POST(request: Request) {
     userId = identity.userId; active.add(userId);
     // Recheck the current manager mapping in the service, and the current enabled
     // AiBrain user at worker admission. A prompt cannot choose another account.
+    stage = "manager-check";
     await callHoraria(config, { provider: "local", user: { id: userId }, tenant: { id: config.installationId } } as AuthSession, { operation: "status" }, "");
+    stage = "calculation";
     return Response.json(await runHorariaCodex(userId, JSON.parse(bytes.toString())), { headers: { "cache-control": "private, no-store" } });
-  } catch { return new Response(null, { status: 503 }); }
+  } catch (error) {
+    console.error("horaria_codex_failed", { stage, error: error instanceof Error ? error.message.slice(0, 250) : "Calculation failed" });
+    return new Response(null, { status: 503 });
+  }
   finally { if (userId) active.delete(userId); }
 }
