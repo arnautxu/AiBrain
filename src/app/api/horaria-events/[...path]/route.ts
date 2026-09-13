@@ -1,3 +1,4 @@
+import { privateHorariaRequest } from "@/horaria/private-transport";
 import { loadInstallationConfig } from "@/config/installation";
 import { bridgeToken, loadHorariaConfig } from "@/horaria/client";
 export const runtime = "nodejs";
@@ -31,7 +32,7 @@ async function forward(request: Request, context: { params: Promise<{ path: stri
     for (const name of ["content-type", "x-hub-signature-256", "x-twilio-signature", "x-horaria-webhook-secret"]) {
       const value = request.headers.get(name); if (value) headers.set(name, value);
     }
-    const result = await fetch(new URL(target, config.baseUrl), { method: request.method, headers, body: body.length ? body : undefined, redirect: "error", cache: "no-store", signal: AbortSignal.timeout(60_000) });
+    const result = await privateHorariaRequest(config.baseUrl, target, { method: request.method, headers, body: body.length ? body : undefined, signal: AbortSignal.timeout(60_000) });
     return new Response(result.body, { status: result.status, headers: { "content-type": result.headers.get("content-type") || "text/plain", "cache-control": "private, no-store", "x-content-type-options": "nosniff" } });
   } catch { return new Response(null, { status: 503 }); }
 }

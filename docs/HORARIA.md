@@ -23,6 +23,7 @@ El backup més recent del ZIP inspeccionat és de **2026-08-21 10:15 UTC**, ante
 - Un procés i una base PostgreSQL dedicats per instal·lació. El servei no és un contenidor compartit entre clients.
 - AiBrain llegeix la configuració privada de l’operador a `<dataRoot>/horaria/integration.json`, amb permisos 0600. La instal·lació ha de coincidir amb la sessió local. Les identitats es mapen explícitament a persones de horarIA; cap nom/email extret d’un document concedeix accés.
 - El catàleg tradueix noms d’operació a rutes fixes. El model no pot escollir servidor, capçaleres, actor ni URL.
+- El transport intern usa una connexió directa exclusiva al servei configurat; no passa pel proxy de sortida cap a Internet, no segueix redireccions i no modifica la política de sortida d’AiBrain.
 - Cada petició interna porta una signatura HMAC que vincula instal·lació, actor, persona, mètode, ruta i query, tipus de contingut, hash dels bytes, temps i nonce. El servei només accepta signatures recents i rebutja la reutilització del nonce dins del procés.
 - El servei torna a consultar que la persona sigui activa i responsable, i resol de nou les seves botigues. També es comprova el permís `tools.execute` vigent d’AiBrain. Es mantenen els controls de rol i accés de cada controlador original.
 - Les imatges només es llegeixen dins del projecte autoritzat, sense salts de directori/enllaços simbòlics ni URLs remotes elegides pel model. La proposta fixa el hash de la imatge i el torna a comprovar abans de consumir-la.
