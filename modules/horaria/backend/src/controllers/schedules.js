@@ -127,6 +127,11 @@ export async function getOtherEstablishmentHours(req, res) {
     where: {
       semana,
       establecimientoId: { not: estId },
+      // Cross-shop workload is relevant only for this shop's own/shared staff.
+      ...(req.user.rol === 'MANAGER_LOCAL' ? { empleado: { OR: [
+        { establecimientoId: estId },
+        { establecimientosPermitidos: { some: { establishmentId: estId } } },
+      ] } } : {}),
     },
     select: {
       empleadoId: true,

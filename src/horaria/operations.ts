@@ -26,7 +26,7 @@ add("schedules.list", "GET", "schedules", "read", "query: semana, establecimient
 for (const name of ["conflicts", "other-hours", "fairness", "edit-patterns", "correcciones", "historial", "report", "intensity", "closed-days"]) add(`schedules.${name}`, "GET", `schedules/${name}`, "read", "query: semana, establecimiento");
 add("schedules.create", "POST", "schedules", "write", "body: empleadoId, establecimientoId, semana, dia, turno");
 add("schedules.update", "PUT", "schedules/:id", "write", "body: turno and correction reason as required by service");
-add("schedules.generate", "POST", "schedules/generate-async", "ai", "body: establecimientoId, semana, quality=standard|premium. Poll job then show preview.");
+add("schedules.generate", "POST", "schedules/generate-async", "ai", "body: establecimientoId, semana, quality=standard|high. Poll job then show preview.");
 add("schedules.generation-status", "GET", "schedules/generate-status/:id", "read");
 add("schedules.intensity-set", "POST", "schedules/intensity", "write", "body: establecimientoId, semana, intensidad");
 add("schedules.correction-reason", "POST", "schedules/correcciones", "write");
