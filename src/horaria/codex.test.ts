@@ -48,3 +48,15 @@ describe("horarIA connected Codex", () => {
     expect(bindRuntimeTurn).toHaveBeenCalledWith("calculation-turn");
   });
 });
+
+describe("WhatsApp execution authority", () => {
+  it("requires the currently enabled operator binding for every WhatsApp calculation", () => {
+    const config: HorariaConfig = { installationId: "company", baseUrl: "http://horaria:3210", secret: "a-test-secret-longer-than-32-characters", users: { owner: { employeeId: 7, backgroundOperations: [] }, other: { employeeId: 8, backgroundOperations: [] } }, eventsEnabled: true, eventActorId: "owner" };
+    const body = Buffer.from('{"authorizationOnly":true}');
+    const token = () => bridgeToken(config, { kind: "user", source: "whatsapp", actorId: "owner", employeeId: 7, method: "POST", target: "/api/horaria-codex", contentType: "application/json", body });
+    expect(() => verifyCodexRequest({ ...config, eventsEnabled: false }, token(), body)).toThrow();
+    expect(() => verifyCodexRequest({ ...config, eventActorId: "other" }, token(), body)).toThrow();
+    expect(() => verifyCodexRequest({ ...config, users: {} }, token(), body)).toThrow();
+    expect(verifyCodexRequest(config, token(), body)).toEqual({ userId: "owner", employeeId: 7, source: "whatsapp" });
+  });
+});

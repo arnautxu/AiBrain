@@ -1,7 +1,10 @@
 import '../utils/zonaHoraria.js';
 import express from 'express';
 import helmet from 'helmet';
-import { aiIdentity } from './providers.js';
+import { MetaInbox, metaMessages } from './meta-inbox.js';
+import { processCloudMessage } from '../controllers/whatsapp.js';
+import { stateDirectory } from './durable-state.js';
+import { aiIdentity, authorizeWhatsApp } from './providers.js';
 import rateLimit from 'express-rate-limit';
 import { requireEstablishmentAccess, requireRole } from '../middleware/roles.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -21,12 +24,44 @@ import summary from '../routes/summary.js';
 import ajustes from '../routes/ajustos.js';
 import errors from '../routes/errors.js';
 
-export function createHorariaApp({ secret, installationId, database = prisma }) {
+export function createHorariaApp({ secret, installationId, database = prisma, messageHandler = processCloudMessage, authorizeEventIdentity = authorizeWhatsApp }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
   app.use(rateLimit({ windowMs: 60_000, limit: 600, standardHeaders: 'draft-7', legacyHeaders: false }));
   const verify = createVerifier({ secret, installationId });
+  let writes = Promise.resolve();
+  const lockWrite = async () => {
+    const previous = writes;
+    let release;
+    writes = new Promise(resolve => { release = resolve; });
+    await previous;
+    return release;
+  };
+  const authorizeEvent = async identity => {
+    if (!identity.actorId || !Number.isSafeInteger(identity.employeeId)) throw new Error('Missing event identity');
+    const employee = await database.employee.findUnique({ where: { id: identity.employeeId } });
+    if (!employee?.activo || employee.rol !== 'MANAGER_GENERAL') throw new Error('WhatsApp needs an active general manager');
+    await authorizeEventIdentity(identity);
+  };
+  let inbox;
+  if (process.env.HORARIA_ALLOW_DELIVERY === '1' && (process.env.WHATSAPP_PROVIDER || 'meta') === 'meta' && process.env.HORARIA_STATE_ROOT) {
+    inbox = new MetaInbox({ root: stateDirectory(), installationId, authorize: authorizeEvent,
+      processMessage: async (message, identity) => {
+        const release = await lockWrite();
+        try {
+          await authorizeEvent(identity);
+          return await aiIdentity.run({ ...identity, kind: 'user', source: 'whatsapp' }, () => messageHandler(message));
+        }
+        finally { release(); }
+      },
+      onError: reason => console.error('[WhatsApp inbox]', reason),
+    });
+    // Resume only after the HTTP service can answer the authorization callback.
+  }
+  app.locals.startInbox = () => inbox?.kick();
+  app.locals.stopInbox = () => inbox?.stop();
+
   app.get('/health', (_req, res) => res.json({ ok: true, installationId }));
   app.get('/health/ready', async (_req, res) => {
     try { await database.$queryRaw`SELECT 1`; res.json({ ok: true, installationId }); }
@@ -58,7 +93,19 @@ export function createHorariaApp({ secret, installationId, database = prisma }) 
         const webhook = req.path === '/api/whatsapp/webhook';
         const media = /^\/api\/schedules\/published-pdf\/[a-zA-Z0-9_-]+$/.test(req.path) && ['GET', 'HEAD'].includes(req.method);
         if ((!webhook && !media) || process.env.HORARIA_ALLOW_DELIVERY !== '1') return res.sendStatus(403);
-        if (webhook && req.method === 'POST' && !verifyInbound(req)) return res.sendStatus(403);
+        if (webhook && req.method === 'POST') {
+          if (!verifyInbound(req)) return res.sendStatus(403);
+          if ((process.env.WHATSAPP_PROVIDER || 'meta') === 'meta') {
+            if (!inbox) return res.sendStatus(503);
+            let messages;
+            try { messages = metaMessages(req.body, { wabaId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID, phoneId: process.env.WHATSAPP_PHONE_NUMBER_ID || process.env.WHATSAPP_PHONE_ID }); }
+            catch { return res.sendStatus(403); }
+            if (!claims.actorId || !Number.isSafeInteger(claims.employeeId)) return res.sendStatus(403);
+            try { inbox.enqueue(messages, claims); }
+            catch { return res.sendStatus(503); }
+            return res.sendStatus(200);
+          }
+        }
         return next();
       }
       if (claims.kind === 'scheduler') {
@@ -76,14 +123,11 @@ export function createHorariaApp({ secret, installationId, database = prisma }) 
       res.status(401).json({ error: 'No s’ha pogut validar l’accés a horarIA.' });
     }
   });
+  app.get('/api/integration/whatsapp-inbox', requireRole('MANAGER_GENERAL'), (_req, res) => res.json({ enabled: !!inbox, counts: inbox?.summary() || {} }));
   // Serialize foreground writes so a reviewed publish cannot race a manual edit.
-  let writes = Promise.resolve();
   app.use((req, res, next) => {
     if (['GET', 'HEAD'].includes(req.method)) return next();
-    const previous = writes;
-    let release;
-    writes = new Promise(resolve => { release = resolve; });
-    previous.then(() => {
+    lockWrite().then(release => {
       if (res.destroyed) return release();
       res.once('finish', release); res.once('close', release);
       next();
