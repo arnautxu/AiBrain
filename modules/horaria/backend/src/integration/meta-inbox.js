@@ -12,7 +12,11 @@ export function metaMessages(body, { wabaId, phoneId }) {
     if (entry.id !== wabaId || !Array.isArray(entry.changes)) throw new Error('Unexpected WhatsApp account');
     for (const change of entry.changes) {
       const value = change.value;
-      if (change.field !== 'messages' || value?.metadata?.phone_number_id !== phoneId) throw new Error('Unexpected WhatsApp number');
+      if (typeof change.field !== 'string') throw new Error('Invalid WhatsApp event field');
+      // Account/template notifications share this callback. They carry no
+      // employee messages and need no phone binding or business effects.
+      if (change.field !== 'messages') continue;
+      if (value?.metadata?.phone_number_id !== phoneId) throw new Error('Unexpected WhatsApp number');
       if (value.messages !== undefined && !Array.isArray(value.messages)) throw new Error('Invalid messages');
       for (const message of value.messages || []) {
         if (typeof message.id !== 'string' || !message.id || message.id.length > 512 || !/^\d{6,20}$/.test(message.from || '') || typeof message.type !== 'string') throw new Error('Invalid message');

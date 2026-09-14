@@ -15,6 +15,7 @@ const setup = options => {
 };
 test('validates all batch entries against the expected WABA and phone before admission', () => {
   const body = payload([message('one'), message('two')]);
+  body.entry[0].changes.push({ field: 'message_template_status_update', value: { event: 'APPROVED' } });
   body.entry[0].changes.push({ field: 'messages', value: { metadata: { phone_number_id: 'phone-1' }, statuses: [{ id: 'outgoing', status: 'delivered' }] } });
   assert.equal(metaMessages(body, binding).length, 2);
   assert.throws(() => metaMessages(body, { ...binding, wabaId: 'other' }));

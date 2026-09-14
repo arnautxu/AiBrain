@@ -20,7 +20,8 @@ Cada missatge es desa abans de retornar HTTP 200. La bústia privada
 `HORARIA_STATE_ROOT/whatsapp-inbox` utilitza un rebut pel hash del message ID,
 fitxers 0600 i directori 0700. Processa tots els missatges del lot en ordre de
 recepció, serialitzats amb les escriptures interactives. Els avisos d’estat
-sense missatges es validen i es confirmen sense iniciar IA; aquest canvi no
+sense missatges es validen i es confirmen sense iniciar IA. Els altres avisos de compte/plantilla del mateix WABA es confirmen
+sense efectes ni lectura de contingut com a missatge; aquest canvi no
 implementa un historial d’estats d’entrega.
 
 Abans d’efectes, el servei revalida el responsable general actiu i fa una
