@@ -27,7 +27,9 @@ async function forward(request: Request, context: { params: Promise<{ path: stri
     const body = Buffer.concat(chunks);
     const contentType = request.headers.get("content-type") || "";
     const target = webhook ? `/api/whatsapp/webhook${new URL(request.url).search}` : `/api/schedules/published-pdf/${segments[1]}`;
-    const token = bridgeToken(config, { method: request.method, target, contentType, body, kind: "event" });
+    const actorId = webhook && request.method === "POST" ? config.eventActorId : undefined;
+    if (webhook && request.method === "POST" && !actorId) return new Response(null, { status: 503 });
+    const token = bridgeToken(config, { ...(actorId ? { actorId, employeeId: config.users[actorId].employeeId } : {}), method: request.method, target, contentType, body, kind: "event" });
     const headers = new Headers({ "x-aibrain-authorization": token });
     for (const name of ["content-type", "x-hub-signature-256", "x-twilio-signature", "x-horaria-webhook-secret"]) {
       const value = request.headers.get(name); if (value) headers.set(name, value);

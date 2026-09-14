@@ -9,7 +9,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { resolveOperation, type OperationInput } from "./operations";
 
-export type HorariaConfig = { installationId: string; baseUrl: string; secret: string; users: Record<string, { employeeId: number; backgroundOperations: string[] }>; eventsEnabled: boolean };
+export type HorariaConfig = { installationId: string; baseUrl: string; secret: string; users: Record<string, { employeeId: number; backgroundOperations: string[] }>; eventsEnabled: boolean; eventActorId?: string };
 export async function loadHorariaConfig(installation: Readonly<InstallationConfig>): Promise<HorariaConfig> {
   const file = await open(path.join(installation.paths.dataRoot, "horaria", "integration.json"), constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -22,11 +22,12 @@ export async function loadHorariaConfig(installation: Readonly<InstallationConfi
     for (const user of Object.values(c.users)) {
       if (!Number.isSafeInteger(user.employeeId) || user.employeeId < 1 || !Array.isArray(user.backgroundOperations) || user.backgroundOperations.some(op => typeof op !== "string")) throw new Error("Assignació d’horaris invàlida.");
     }
+    if (c.eventActorId !== undefined && (typeof c.eventActorId !== "string" || !Object.hasOwn(c.users, c.eventActorId))) throw new Error("Responsable de WhatsApp invàlid.");
     return c;
   } finally { await file.close(); }
 }
 
-export function bridgeToken(config: HorariaConfig, request: { method: string; target: string; contentType: string; body: Uint8Array; kind: "user" | "event" | "scheduler"; actorId?: string; employeeId?: number }) {
+export function bridgeToken(config: HorariaConfig, request: { method: string; target: string; contentType: string; body: Uint8Array; kind: "user" | "event" | "scheduler"; actorId?: string; employeeId?: number; source?: "whatsapp" }) {
   const { body, ...claims } = request;
   const payload = Buffer.from(JSON.stringify({ ...claims, v: 1, installationId: config.installationId, timestamp: Date.now(), nonce: randomUUID(), bodyHash: createHash("sha256").update(body).digest("hex") })).toString("base64url");
   return `${payload}.${createHmac("sha256", config.secret).update(payload).digest("base64url")}`;

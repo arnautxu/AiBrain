@@ -67,7 +67,7 @@ export async function transcribeAudio(buffer, mimeType) {
 async function downloadWhatsappMedia(mediaId) {
   if (!WHATSAPP_TOKEN && !D360_API_KEY) return null;
   // Step 1: get media URL
-  const lookupUrl = USE_D360 ? `${D360_BASE_URL}/${mediaId}` : `https://graph.facebook.com/v19.0/${mediaId}`;
+  const lookupUrl = USE_D360 ? `${D360_BASE_URL}/${mediaId}` : `https://graph.facebook.com/v23.0/${mediaId}`;
   const metaRes = await fetch(lookupUrl, { headers: cloudApiAuth() });
   if (!metaRes.ok) return null;
   const meta = await metaRes.json();
@@ -184,7 +184,7 @@ const mockMessages = [];
 function cloudApiUrl(path = 'messages') {
   return USE_D360
     ? `${D360_BASE_URL}/${path}`
-    : `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/${path}`;
+    : `https://graph.facebook.com/v23.0/${WHATSAPP_PHONE_ID}/${path}`;
 }
 
 function cloudApiAuth() {

@@ -38,6 +38,17 @@ export function requestCodex(url, token, body, timeoutMs = 20 * 60_000) {
     request.end(body);
   });
 }
+export async function authorizeWhatsApp(identity) {
+  const target = '/api/horaria-codex';
+  const body = Buffer.from(JSON.stringify({ authorizationOnly: true }));
+  const token = signEnvelope({ v: 1, kind: 'user', source: 'whatsapp', installationId: process.env.HORARIA_INSTALLATION_ID,
+    actorId: identity.actorId, employeeId: identity.employeeId, method: 'POST', target,
+    timestamp: Date.now(), nonce: randomUUID(), contentType: 'application/json', bodyHash: bodyHash(body),
+  }, process.env.HORARIA_BRIDGE_SECRET);
+  const result = await requestCodex(new URL(target, process.env.HORARIA_CODEX_URL), token, body, 15000);
+  if (result.authorized !== true) throw new Error('WhatsApp execution is not authorized');
+}
+
 export function createAiClient() {
   return { messages: { async create(params) {
     if (process.env.HORARIA_ALLOW_AI !== '1') throw new Error('La generació amb IA encara no està activada.');
@@ -46,7 +57,7 @@ export function createAiClient() {
     const target = '/api/horaria-codex';
     const body = Buffer.from(JSON.stringify({ system: params.system, messages: params.messages, tools: params.tools, tool_choice: params.tool_choice }));
     const token = signEnvelope({ v: 1, kind: 'user', installationId: process.env.HORARIA_INSTALLATION_ID,
-      actorId: identity.actorId, employeeId: identity.employeeId, method: 'POST', target,
+      ...(identity.source ? { source: identity.source } : {}), actorId: identity.actorId, employeeId: identity.employeeId, method: 'POST', target,
       timestamp: Date.now(), nonce: randomUUID(), contentType: 'application/json', bodyHash: bodyHash(body),
     }, process.env.HORARIA_BRIDGE_SECRET);
     return requestCodex(new URL(target, process.env.HORARIA_CODEX_URL), token, body);

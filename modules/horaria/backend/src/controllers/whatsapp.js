@@ -33,7 +33,7 @@ export function verifyWebhook(req, res) {
   const token = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
-  if (mode === 'subscribe' && token === process.env.WHATSAPP_VERIFY_TOKEN) {
+  if (mode === 'subscribe' && process.env.WHATSAPP_VERIFY_TOKEN && typeof token === 'string' && token === process.env.WHATSAPP_VERIFY_TOKEN && typeof challenge === 'string' && challenge.length <= 256) {
     return res.status(200).send(challenge);
   }
   return res.status(403).json({ error: 'Token de verificación incorrecto' });
@@ -170,6 +170,19 @@ export async function receiveMessage(req, res) {
   } catch (err) {
     console.error('Error processing WhatsApp webhook:', err);
   }
+}
+
+// The integrated Meta inbox owns durability, batching and execution identity.
+export async function processCloudMessage(message) {
+  const telefono = message.from;
+  if (message.type === 'text') {
+    if (message.text?.body) await handleIncomingMessage(telefono, message.text.body);
+  } else if (message.type === 'audio' || message.type === 'voice') {
+    const mediaId = message.audio?.id || message.voice?.id;
+    if (mediaId) await handleAudioMessage(telefono, { mediaId });
+  } else if (message.type === 'image') {
+    if (message.image?.id) await handlePaperImage(telefono, { mediaId: message.image.id });
+  } else await handleNonTextMessage(telefono, message.type);
 }
 
 // ─────────────────────────────────────────────
