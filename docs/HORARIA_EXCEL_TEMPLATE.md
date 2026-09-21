@@ -51,6 +51,13 @@ botiga i setmana coincideixen amb la preview; si falta, no genera una
 alternativa de nou columnes. Altres instal·lacions conserven el seu format.
 La identitat i els permisos es continuen resolent al servidor.
 
+`schedules.draft` retorna aquest mateix contracte `excelSchedule` a partir
+de la proposta acabada en memòria, sense substituir els horaris desats.
+El worker adjunta directament l’Excel amb la plantilla obligatòria i retorna
+la revisió de compliment i conflictes de la graella final. No es torna a
+consultar `preview` per mostrar-la: això carregaria la setmana desada i
+podria substituir l’esborrany nou per un horari anterior.
+
 Correcció de selecció, 2026-09-21: la configuració versionada d’Arnall té
 `installationId: company-qa` i `companySlug: arnall`. La selecció anterior
 comparava l’identificador d’instal·lació amb `arnall` i produïa la taula

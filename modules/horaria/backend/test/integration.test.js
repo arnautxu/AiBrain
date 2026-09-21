@@ -28,6 +28,12 @@ test('service rejects browser bearer tokens, rechecks active manager, limits sho
     assert.equal((await fetch(base + '/api/session', { headers: { authorization: 'Bearer arbitrary' } })).status, 401);
     assert.equal((await call('/api/session')).status, 200);
     assert.equal((await call('/api/integration/preview?semana=2026-W38&establecimiento=3')).status, 403);
+    const draftTarget = '/api/integration/draft';
+    const draftBody = JSON.stringify({ establecimientoId: 3, semana: '2026-W40' });
+    assert.equal((await fetch(base + draftTarget, { method: 'POST', body: draftBody, headers: {
+      'content-type': 'application/json',
+      'x-aibrain-authorization': signed(draftTarget, { method: 'POST', contentType: 'application/json', bodyHash: bodyHash(Buffer.from(draftBody)) }),
+    } })).status, 403, 'a draft cannot read or generate another manager’s shop');
     assert.equal((await call('/api/whatsapp/mock/config')).status, 403);
     assert.equal((await call('/horaris')).status, 404);
     active = false; assert.equal((await call('/api/session')).status, 403);
