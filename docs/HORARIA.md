@@ -12,13 +12,29 @@ Les consultes s’executen directament. Els canvis interactius es desen com a pr
 
 `schedules.draft` calcula una proposta en el mateix torn i n’adjunta l’Excel, sense confirmació addicional ni missatges anunciant passos futurs. La resposta final explica el compliment verificat, els conflictes concrets i com llegir la proposta. Les restriccions temporals van a `requests`: dies lliures, disponibilitat de matí/tarda per dia, absències, límit d’hores i prohibició de torns partits. No es converteixen en canvis permanents de preferències, personal, absències o regles. No s’inventen restriccions ni cobertura; una condició no representable s’explica com a no comprovada.
 
+Fer o generar un horari significa preparar aquest esborrany per defecte; no cal
+que l’usuari demani explícitament una simulació ni pregunti després pel compliment.
+La resposta lliura l’Excel, què s’ha respectat i què cal revisar en el mateix torn.
+Les propostes de canvis permanents pendents a l’historial no bloquegen el càlcul:
+les respostes d’aquestes eines indiquen l’alternativa `schedules.draft`, sense
+aplicar ni confirmar les propostes. La generació persistent només correspon a una
+petició explícita de desar o substituir horaris.
+
+`coverage` admet els mínims temporals demanats per dependència i elaboració,
+matí i tarda (`minDependientasManana`, `minDependientasTarde`,
+`minElaboracionManana`, `minElaboracionTarde`, enters entre 0 i 99). S’apliquen
+en memòria a la setmana calculada, al motor i a la revisió de la graella final.
+Es conserven els mínims desats més exigents, els màxims i els àmbits per dia;
+si no hi havia regles, es crea només una regla temporal. Així, preparar l’esborrany
+amb cobertura no necessita una proposta `rules.create` ni modificar la base.
+
 El servei privat `POST /api/integration/draft` conserva autenticació signada, rol i accés a la botiga. Utilitza el mateix motor, amb dades i peticions en memòria, i retorna **abans de qualsevol escriptura de negoci**. Com que no desa horaris, no pren el bloqueig d’escriptures; es limita a 20 peticions per hora i responsable. Manté el permís d’IA existent i el transport privat de 20 minuts. En background també exigeix l’autorització durable explícita de l’operació. No canvia cap permís de publicació o enviament.
 
 La revisió comprova la graella final, no les afirmacions del model: disponibilitat, dies lliures, absències, torns partits sol·licitats, hores màximes incloent altres botigues i cobertura mínima/màxima configurada. Retorna comprovacions i conflictes separats del resum del model. L’equitat històrica, descans i compliment complet de condicions textuals no estan certificats; apareixen a `notVerified`. `allRespected` és `false` si hi ha un conflicte i `null` si encara hi ha aspectes sense certificar: el xat no pot afirmar compliment total.
 
 El resultat i la recepció interna queden al directori privat de propostes per usuari/conversa; si només falla l’adjunt, es reutilitza el resultat sense repetir el càlcul. Si el càlcul queda en estat incert, no es repeteix automàticament. El fitxer es crea amb el mateix circuit d’artefactes i plantilla obligatòria. No es crida `preview` després, perquè llegiria la setmana desada. El hash del draft no autoritza publicar-lo: el flux de publicació continua requerint dades desades i comprovades. La generació persistent `schedules.generate` conserva el job asíncron i la confirmació habitual.
 
-La revisió del catàleg `aibrain-tools-2026-09-21-horaria-draft-v2` fa que els xats existents carreguin les eines noves conservant l’historial durable. Mentre una eina horarIA espera el càlcul, el control d’inactivitat no talla el torn; el límit màxim del torn continua actiu i la protecció d’inactivitat es reprèn quan l’eina retorna o falla.
+La revisió del catàleg `aibrain-tools-2026-09-21-horaria-draft-v3` fa que els xats existents carreguin les eines noves conservant l’historial durable. Mentre una eina horarIA espera el càlcul, el control d’inactivitat no talla el torn; el límit màxim del torn continua actiu i la protecció d’inactivitat es reprèn quan l’eina retorna o falla.
 
 Les automatitzacions recurrents es creen amb el sistema existent `aibrain_automations`. El worker rep les eines horarIA amb la identitat de qui executa. Les escriptures background necessiten una autorització de l’operador a `backgroundOperations`; crear una tasca per xat no concedeix aquests permisos. El batec intern del servei és una opció separada per als enviaments i recordatoris definits als ajustos de les botigues. Només s’activa amb `HORARIA_ALLOW_AUTOMATIC=1`.
 
@@ -87,6 +103,14 @@ L’origen importat conserva deduplicació en memòria per a Twilio/360dialog; M
 - Assaig opcional sobre una base **local** amb `rehearsal` al nom: `node src/integration/rehearsal.js`. Rebutja host remot i qualsevol crida externa; comprova lectura, preview PDF, CRUD de personal i bloqueig dels enviaments. Modifica només la base de l’assaig.
 
 Validació local dels esborranys, 2026-09-21: 680 proves del servei i 121 proves del pont, worker, recuperació de converses i contractes; tipus, lint, contractes, infraestructura i construccions del worker i web correctes (webpack al worktree amb dependències enllaçades). La prova de navegador comprova procés plegat durant la resposta, obertura manual i recuperació del xat. El cas de conflictes amb quatre persones fictícies recorre el motor i la preparació de dades Excel amb un proveïdor HTTP local: detecta manca de cobertura malgrat el resum optimista del model i comprova zero escriptures de negoci. Això no constitueix una generació autenticada amb el proveïdor real ni acceptació en producció.
+
+La correcció posterior de continuació sense confirmació s’ha verificat localment
+amb 683 proves del servei, 94 proves del pont, catàleg i contractes i 16 del
+worker, més tipus, lint i construcció del worker. Inclou sis propostes pendents que no impedeixen retornar l’esborrany, cobertura
+temporal sense regles desades i zero escriptures de negoci. El model de l’assaig
+és local i simulat: aquestes proves no acrediten que el xat real triï sempre el
+flux correcte. Backend CI, GHCR, desplegament i acceptació autenticada d’aquesta
+correcció queden pendents.
 
 L’assaig de 2026-09-13 ha verificat migració completa, set consultes de negoci, CRUD de personal i una preview de 238 torns amb 35 files (capçalera inclosa). No s’han fet crides a Anthropic, Deepgram, Meta, Twilio ni 360dialog.
 

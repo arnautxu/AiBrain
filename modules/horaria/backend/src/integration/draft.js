@@ -2,14 +2,16 @@ import { createHash } from 'node:crypto';
 import { generateAISchedule } from '../services/aiScheduler.js';
 import { scheduleRows } from './preview.js';
 import { excelSchedule } from './excel-schedule.js';
+import { validateDraftCoverage } from '../services/draft-scenario.js';
 
 export async function draftHandler(req, res) {
   const body = req.body;
-  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !['establecimientoId', 'semana', 'quality', 'requests'].includes(k)) ||
+  if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(k => !['establecimientoId', 'semana', 'quality', 'requests', 'coverage'].includes(k)) ||
       !Number.isSafeInteger(body.establecimientoId) || body.establecimientoId < 1 ||
       !/^\d{4}-W\d{2}$/.test(body.semana || '') || !['standard', 'high', undefined].includes(body.quality)) {
     return res.status(400).json({ error: 'Indica una botiga, setmana i peticions vàlides.' });
   }
+  try { validateDraftCoverage(body.coverage); } catch (error) { return res.status(400).json({ error: error.message }); }
   const [year, week] = body.semana.split('-W').map(Number);
   const jan4 = new Date(Date.UTC(year, 0, 4));
   const thursday = new Date(jan4.getTime() + (3 - (jan4.getUTCDay() + 6) % 7 + (week - 1) * 7) * 86400000);

@@ -26,6 +26,31 @@ async function setup() {
   return { context, config, run };
 }
 describe("horarIA chat boundary", () => {
+  it("completes the draft and review with six pending prerequisite proposals, without confirmation or writes", async () => {
+    const { run, context } = await setup();
+    const requests = [1, 2, 3, 4].map(employeeId => ({ employeeId, maxHours: 40 }));
+    const coverage = { minDependientasManana: 1, minDependientasTarde: 1, minElaboracionManana: 1, minElaboracionTarde: 1 };
+    const changes = [
+      ...requests.map(r => ({ operation: "preferences.update", id: String(r.employeeId), body: { semana: "2026-W40", maxHorasSemana: 40 } })),
+      { operation: "absences.create", body: { empleadoId: 3, tipo: "VACACIONES", fechaInicio: "2026-10-01", fechaFin: "2026-10-03" } },
+      { operation: "rules.create", body: { establecimientoId: 5, ...coverage } },
+    ];
+    for (const change of changes) {
+      const proposal = await run("run", change);
+      expect(proposal.confirmationRequired).toBe(true);
+      expect(proposal.draftAlternative).toMatchObject({ operation: "schedules.draft", confirmationRequired: false });
+    }
+    expect(callHoraria).not.toHaveBeenCalled();
+    const draft = { draftOnly: true, review: { checks: [{ status: "respected" }], conflicts: ["Cobertura insuficient"], notVerified: ["Descans"], allRespected: false } };
+    vi.mocked(callHoraria).mockResolvedValue(draft);
+    const input = { operation: "schedules.draft", body: { establecimientoId: 5, semana: "2026-W40", requests, coverage } };
+    // No confirming message or extra turn is required even after the model
+    // mistakenly staged all six business changes.
+    expect(await run("run", input)).toEqual(draft);
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(callHoraria).mock.calls[0][2]).toEqual(input);
+    expect(context.preview).toHaveBeenCalledWith(draft);
+  });
   it("generates and attaches a draft in the requesting turn without business-write confirmation", async () => {
     const { run, context } = await setup();
     const draft = { title: "Proves", draftOnly: true, review: { allRespected: false, conflicts: ["Cobertura insuficient"] } };

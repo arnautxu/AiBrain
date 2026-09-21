@@ -4,6 +4,29 @@ export const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABAD
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
 const days = value => Array.isArray(value) && value.length <= 7 && new Set(value).size === value.length && value.every(day => DAYS.includes(day));
 
+const COVERAGE_MINIMUMS = ['minDependientasManana', 'minDependientasTarde', 'minElaboracionManana', 'minElaboracionTarde'];
+
+export function validateDraftCoverage(coverage) {
+  if (coverage === undefined) return;
+  if (!record(coverage) || !Object.keys(coverage).length || Object.entries(coverage).some(([key, value]) =>
+    !COVERAGE_MINIMUMS.includes(key) || !Number.isSafeInteger(value) || value < 0 || value > 99)) {
+    throw new Error('Cobertura temporal invàlida: indica mínims de persones per funció i torn.');
+  }
+}
+
+// Add the requested weekly targets to every applicable rule in memory. Keep
+// stricter saved minima, maxima and day scopes; never relax a business rule.
+export function applyDraftCoverage(coverage, rules) {
+  validateDraftCoverage(coverage);
+  if (coverage === undefined) return rules;
+  const temporaryRule = { nombre: 'Cobertura temporal de l’esborrany', diasAplica: null, minPersonasDescansoPartido: 0,
+    ...Object.fromEntries(COVERAGE_MINIMUMS.map(key => [key, 0])) };
+  return (rules.length ? rules : [temporaryRule]).map(rule => ({
+    ...rule,
+    ...Object.fromEntries(Object.entries(coverage).map(([key, value]) => [key, Math.max(rule[key] ?? 0, value)])),
+  }));
+}
+
 export function validateDraftRequests(requests, employees) {
   if (!Array.isArray(requests) || requests.length > employees.length) throw new Error('Peticions de simulació invàlides.');
   const ids = new Set();

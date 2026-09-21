@@ -4,7 +4,35 @@ import http from 'node:http';
 import { prisma } from '../src/services/prisma.js';
 import { aiIdentity } from '../src/integration/providers.js';
 import { draftHandler } from '../src/integration/draft.js';
-import { DAYS, validateDraftRequests } from '../src/services/draft-scenario.js';
+import { DAYS, applyDraftCoverage, validateDraftCoverage, validateDraftRequests } from '../src/services/draft-scenario.js';
+import { generateAISchedule } from '../src/services/aiScheduler.js';
+
+test('temporary coverage preserves saved bounds and scopes without mutating them', () => {
+  const rules = [{ diasAplica: '["LUNES"]', minDependientasManana: 2, maxDependientasManana: 3 }];
+  const before = structuredClone(rules);
+  const result = applyDraftCoverage({ minDependientasManana: 1, minElaboracionTarde: 1 }, rules);
+  assert.deepEqual(result, [{ ...rules[0], minElaboracionTarde: 1 }]);
+  assert.deepEqual(rules, before);
+  const [temporary] = applyDraftCoverage({ minElaboracionTarde: 1 }, []);
+  assert.equal(temporary.diasAplica, null);
+  assert.equal(temporary.minElaboracionTarde, 1);
+  assert.equal(temporary.minDependientasManana, 0);
+  assert.equal(temporary.minDependientasTarde, 0);
+  assert.equal(temporary.minElaboracionManana, 0);
+  assert.equal(temporary.minPersonasDescansoPartido, 0);
+  assert.equal(applyDraftCoverage(undefined, rules), rules);
+});
+
+test('invalid coverage is rejected before any model call and cannot enter persistent generation', async () => {
+  for (const coverage of [null, [], {}, { minElaboracionTarde: -1 }, { minElaboracionTarde: 0.5 },
+    { minElaboracionTarde: '1' }, { minElaboracionTarde: 100 }, { establishmentId: 2 }, { maxDependientasManana: 0 }]) {
+    assert.throws(() => validateDraftCoverage(coverage));
+    const res = { status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
+    await draftHandler({ body: { establecimientoId: 5, semana: '2026-W40', coverage } }, res);
+    assert.equal(res.statusCode, 400);
+  }
+  await assert.rejects(generateAISchedule({ establecimientoId: 5, semana: '2026-W40', coverage: { minElaboracionTarde: 1 } }), /només es poden utilitzar en esborranys/);
+});
 
 test('draft validates request shape, employee membership and rejects ignored fields', () => {
   const employees = [{ id: 1 }];
@@ -15,7 +43,7 @@ test('draft validates request shape, employee membership and rejects ignored fie
   }
 });
 
-test('real draft pipeline returns template data and checks the final grid without ANY business writes', async () => {
+for (const temporaryCoverage of [false, true]) test(`real draft pipeline checks final grid without ANY business writes (temporary coverage: ${temporaryCoverage})`, async () => {
   const employees = ['Aina', 'Biel', 'Clàudia', 'Dídac'].map((nombre, i) => ({
     id: i + 1, nombre, apellidos: 'Prova', activo: true, funcion: i < 2 ? 'DEPENDIENTA' : 'ELABORACION',
     maxHorasSemana: 40, establecimientoId: 5, flexible: false, disponibilidad: null,
@@ -43,7 +71,7 @@ test('real draft pipeline returns template data and checks the final grid withou
   }
   replaceMethod(prisma.employee, 'findMany', async () => structuredClone(employees));
   replaceMethod(prisma.establishment, 'findUnique', async () => structuredClone(establishment));
-  replaceMethod(prisma.establishmentRules, 'findMany', async () => structuredClone(rules));
+  replaceMethod(prisma.establishmentRules, 'findMany', async () => temporaryCoverage ? [] : structuredClone(rules));
   for (const name of ['schedule', 'shiftPreference', 'absence', 'freeTextRule']) replaceMethod(prisma[name], 'findMany', async () => []);
   replaceMethod(prisma.semanaIntensidad, 'findUnique', async () => null);
   const server = http.createServer((req, res) => {
@@ -61,7 +89,8 @@ test('real draft pipeline returns template data and checks the final grid withou
   Object.assign(process.env, env);
   const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
   try {
-    await aiIdentity.run({ kind: 'user', actorId: 'manager', employeeId: 99 }, () => draftHandler({ body: { establecimientoId: 5, semana: '2026-W40', requests } }, res));
+    const coverage = temporaryCoverage ? { minDependientasManana: 1, minDependientasTarde: 1, minElaboracionManana: 1, minElaboracionTarde: 1 } : undefined;
+    await aiIdentity.run({ kind: 'user', actorId: 'manager', employeeId: 99 }, () => draftHandler({ body: { establecimientoId: 5, semana: '2026-W40', requests, coverage } }, res));
     assert.equal(res.statusCode, 200);
     assert.equal(res.body.draftOnly, true);
     assert.equal(res.body.excelSchedule.people.length, 4);
@@ -70,6 +99,9 @@ test('real draft pipeline returns template data and checks the final grid withou
     assert.ok(res.body.excelSchedule.people.find(p => p.id === 4).days.every(d => d.code !== 'D'));
     assert.ok(res.body.review.conflicts.length > 0, 'impossible coverage must not disappear behind the model summary');
     assert.equal(res.body.review.allRespected, false);
+    assert.equal(res.body.review.checks.filter(c => c.employeeId === null).length, 28);
+    assert.ok(res.body.review.checks.filter(c => c.employeeId === null).every(c => c.detail.includes('mínim 1')));
+    assert.ok(!res.body.review.notVerified.some(note => note.includes('No hi ha regles de cobertura')));
     assert.ok(res.body.review.checks.filter(c => c.detail === 'Petició de la simulació' || c.detail === 'Absència simulada, no desada').every(c => c.status === 'respected'));
     assert.equal(writes, 0);
     assert.equal(modelCalls, 1);
