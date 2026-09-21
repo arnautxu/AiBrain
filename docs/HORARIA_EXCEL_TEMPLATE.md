@@ -51,6 +51,19 @@ botiga i setmana coincideixen amb la preview; si falta, no genera una
 alternativa de nou columnes. Altres instal·lacions conserven el seu format.
 La identitat i els permisos es continuen resolent al servidor.
 
+Correcció de selecció, 2026-09-21: la configuració versionada d’Arnall té
+`installationId: company-qa` i `companySlug: arnall`. La selecció anterior
+comparava l’identificador d’instal·lació amb `arnall` i produïa la taula
+genèrica, tot i les instruccions de conservar la plantilla. Ara el worker
+selecciona el format mitjançant `companySlug` de la configuració del servidor.
+No utilitza noms, notes ni identificadors aportats pel model o pel document
+per seleccionar-lo, ni canvia la identitat usada pels permisos i l’aïllament.
+La prova de regressió utilitza la configuració Arnall versionada i inspecciona
+l’Excel generat: quatre fulls, 2.499 fórmules al full d’horari, estils,
+combinacions i impressió originals. També comprova el rebuig de dades absents
+o d’una altra botiga/setmana, sense alternativa genèrica. Aquesta comprovació
+local no equival a desplegament ni acceptació al xat.
+
 El generador rebutja identificadors repetits, setmanes ISO invàlides,
 torns d’una altra botiga/setmana i equips que excedeixen la capacitat.
 Una casella buida continua significant sense assignar, no festa.
