@@ -229,6 +229,60 @@ describe("worker Codex turn", () => {
     vi.unstubAllEnvs();
   });
 
+  it("recovers a late thread creation once and keeps subsequent turns' creation keys distinct", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-thread-create-recovery-"));
+    let handlers: { onNotification(value: unknown, event: unknown): Promise<void> };
+    const calls: Array<{ method: string; purpose: string }> = [];
+    let sequence = 0;
+    const envelope = () => ({ eventId: `recovery-${++sequence}`, sequence,
+      occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    mocked.runtime = {
+      config: { installationId, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        canReuseLoadedThread: () => false,
+        connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+          handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+        } },
+        async request(method: string, _params: unknown, purpose: string, timeout: number,
+          beforeResolve?: (value: never, event: never) => Promise<void>) {
+          calls.push({ method, purpose });
+          if (method === "thread/start") {
+            const lateResponse = new Promise<never>((resolve, reject) => setTimeout(() => {
+              const result = { thread: { id: "recovered-thread", turns: [] } };
+              Promise.resolve(beforeResolve?.(result as never, envelope() as never))
+                .then(() => resolve(result as never), reject);
+            }, 5));
+            throw new AppServerRequestTimeoutError("thread/start", purpose, timeout, lateResponse);
+          }
+          if (method !== "turn/start") throw new Error(`Unexpected request: ${method}`);
+          const result = { turn: { id: "recovered-turn" } };
+          await beforeResolve?.(result as never, envelope() as never);
+          queueMicrotask(() => { void handlers.onNotification({ method: "turn/completed", params: {
+            threadId: "recovered-thread", turn: { id: "recovered-turn", status: "completed", items: [], error: null },
+          } }, envelope()); });
+          return result;
+        },
+      },
+    };
+    for (const localTurnId of [assistantMessageId, "00000000-0000-4000-8000-000000000042"]) {
+      const events: Array<{ type: string }> = [];
+      await runWorkerCodexTurn({ ...chatRequest(), assistantMessageId: localTurnId }, installationId, userId, null, {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+        workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, { ...permissions(), turnId: localTurnId }, {} as never, memoryDependencies(), [], new AbortController().signal,
+      async event => { events.push(event); });
+      expect(events.filter(event => event.type === "runtimeThread")).toHaveLength(1);
+      expect(events.some(event => event.type === "done")).toBe(true);
+      expect(events.some(event => event.type === "error")).toBe(false);
+    }
+    expect(calls.filter(call => call.method === "thread/start").map(call => call.purpose)).toEqual([
+      `thread-start:${assistantMessageId}`, "thread-start:00000000-0000-4000-8000-000000000042",
+    ]);
+    expect(calls.filter(call => call.method === "turn/start")).toHaveLength(2);
+  });
+
   it("uses a bounded configurable lifetime for every worker turn", () => {
     expect(workerTurnTimeoutMs({})).toBe(30 * 60_000);
     expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: " " })).toBe(30 * 60_000);

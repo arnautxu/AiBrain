@@ -73,6 +73,42 @@ function event(sequence: number, message: AppServerEvent["message"]): AppServerE
 }
 
 describe("AppServerRpcRouter", () => {
+  it("drains a large calculation stream while its parent tool is awaiting that calculation", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport);
+    let completeCalculation!: () => void;
+    const calculation = new Promise<void>(resolve => { completeCalculation = resolve; });
+    const tool = vi.fn(async () => { await calculation; return { success: true }; });
+    router.registerTurn("parent", "local-parent", {
+      onNotification: vi.fn(), onServerRequest: tool, onFailure: vi.fn(),
+    }).bindRuntimeTurn("parent-turn");
+    const childNotification = vi.fn((notification) => {
+      if (notification.method === "turn/completed") completeCalculation();
+    });
+    router.registerTurn("calculation", "local-calculation", {
+      onNotification: childNotification, onServerRequest: vi.fn(), onFailure: vi.fn(),
+    }).bindRuntimeTurn("calculation-turn");
+    await router.start();
+    transport.queue.push(event(1, { kind: "rpc-request", rpc: { method: "item/tool/call", id: "draft", params: {
+      threadId: "parent", turnId: "parent-turn", callId: "draft", namespace: "aibrain_horaria", tool: "run", arguments: {},
+    } } }));
+    for (let sequence = 2; sequence <= 1401; sequence++) transport.queue.push(event(sequence, {
+      kind: "rpc-notification", rpc: { method: "item/agentMessage/delta", params: {
+        threadId: "calculation", turnId: "calculation-turn", itemId: "schedule", delta: ".",
+      } },
+    }));
+    transport.queue.push(event(1402, { kind: "rpc-notification", rpc: { method: "turn/completed", params: {
+      threadId: "calculation", turn: { id: "calculation-turn", status: "completed", items: [], error: null,
+        itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+    } } }));
+    try {
+      await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1402), { timeout: 2_000 });
+      expect(childNotification).toHaveBeenCalledTimes(1401);
+      expect(tool).toHaveBeenCalledOnce();
+      expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual(Array.from({ length: 1402 }, (_, i) => i + 1));
+    } finally { completeCalculation(); await router.close(); }
+  });
+
   it("stays failed after an unexpected EOF so a cached initializer cannot mask a dead transport", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
@@ -272,6 +308,7 @@ describe("AppServerRpcRouter", () => {
       projected,
     );
     const timedOut = expect(result).rejects.toBeInstanceOf(AppServerRequestTimeoutError);
+    const timeoutError = result.then(() => { throw new Error("Expected a timeout"); }, (error: unknown) => error as AppServerRequestTimeoutError);
     await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
     transport.queue.push(event(1, {
       kind: "rpc-response",
@@ -283,6 +320,8 @@ describe("AppServerRpcRouter", () => {
     expect(transport.acknowledged).toHaveLength(0);
     releaseProjection();
     await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(1));
+    await expect((await timeoutError).lateResponse).resolves.toEqual({ thread: { id: "thread-a" } });
+    expect(transport.sent).toHaveLength(1);
     await router.close();
   });
 

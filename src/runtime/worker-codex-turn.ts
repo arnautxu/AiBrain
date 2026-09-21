@@ -969,51 +969,70 @@ export async function runWorkerCodexTurn(
             ],
             ephemeral: false,
             serviceName: "aibrain_workbench",
-          }, `thread-start:${chatRequest.threadId}`, 60_000, persistThreadIdentity));
+          // One creation key per admitted local turn. A new user request or a
+          // toolset upgrade must not reuse another turn's pending creation;
+          // reconnecting this same turn still retains its stable key.
+          }, `thread-start:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
     } catch (error) {
-      if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
-        throw error;
-      }
-      try {
-        threadResult = await awaitLateAppServerResponse(error, 15_000);
-      } catch {
+      if (error instanceof AppServerRequestTimeoutError && error.method === "thread/start" && !runtimeThreadId) {
         await setRuntimePhase(
           "runtime-thread-recovery",
-          "Comprobando la conversación",
-          "La reanudación ha tardado demasiado; leyendo el estado durable antes de repetirla",
+          "Recuperando la conversación",
+          "Esperando la apertura ya solicitada, sin repetir la petición",
         );
-        const recoveredResult = await requestWithLateResponseRecovery(
-          () => runtime.client.request(
-            "thread/read",
-            { threadId: runtimeThreadId, includeTurns: true },
-            `thread-resume-recover:${chatRequest.assistantMessageId}`,
-            15_000,
-            persistThreadIdentity,
-          ),
-        );
-        if (extractThreadId(recoveredResult) !== runtimeThreadId) {
-          throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
+        // A schedule calculation can leave a large durable event backlog in
+        // this user's worker. Recover the original response instead of ending
+        // the turn and inviting a retry of an ID still reserved by the router.
+        threadResult = await awaitLateAppServerResponse(error, 120_000);
+        await completeRuntimePhase("runtime-thread-recovery", {
+          label: "Conversación recuperada",
+          detail: "El servicio ha confirmado la apertura original",
+        });
+      } else {
+        if (!(error instanceof AppServerRequestTimeoutError) || error.method !== "thread/resume" || !runtimeThreadId) {
+          throw error;
         }
-        const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
-        if (durableTurn && durableTurn.status !== "inProgress") {
-          threadResult = recoveredResult;
-          await completeRuntimePhase("runtime-thread-recovery", {
-            label: "Conversación recuperada",
-            detail: "Se ha encontrado el resultado durable sin repetir la petición",
-          });
-        } else {
-          // `thread/resume` does not submit a model turn. Once the durable read
-          // has proved the thread identity, one identical resume is safe to
-          // reattach the stream; there is deliberately no retry loop.
+        try {
+          threadResult = await awaitLateAppServerResponse(error, 15_000);
+        } catch {
           await setRuntimePhase(
-            "runtime-thread-retry",
-            "Reanudando la conversación",
-            "El estado durable se ha verificado; reconectando una sola vez",
+            "runtime-thread-recovery",
+            "Comprobando la conversación",
+            "La reanudación ha tardado demasiado; leyendo el estado durable antes de repetirla",
           );
-          threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
-            threadId: runtimeThreadId,
-            ...commonThreadParams,
-          }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+          const recoveredResult = await requestWithLateResponseRecovery(
+            () => runtime.client.request(
+              "thread/read",
+              { threadId: runtimeThreadId, includeTurns: true },
+              `thread-resume-recover:${chatRequest.assistantMessageId}`,
+              15_000,
+              persistThreadIdentity,
+            ),
+          );
+          if (extractThreadId(recoveredResult) !== runtimeThreadId) {
+            throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
+          }
+          const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+          if (durableTurn && durableTurn.status !== "inProgress") {
+            threadResult = recoveredResult;
+            await completeRuntimePhase("runtime-thread-recovery", {
+              label: "Conversación recuperada",
+              detail: "Se ha encontrado el resultado durable sin repetir la petición",
+            });
+          } else {
+            // `thread/resume` does not submit a model turn. Once the durable read
+            // has proved the thread identity, one identical resume is safe to
+            // reattach the stream; there is deliberately no retry loop.
+            await setRuntimePhase(
+              "runtime-thread-retry",
+              "Reanudando la conversación",
+              "El estado durable se ha verificado; reconectando una sola vez",
+            );
+            threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
+              threadId: runtimeThreadId,
+              ...commonThreadParams,
+            }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+          }
         }
       }
     }

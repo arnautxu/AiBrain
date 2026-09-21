@@ -15,6 +15,33 @@ default) while every undelivered event remains durable. Payload sequence and
 the delivery cursor stay authoritative across compaction and restart; the
 internal JSONL sequence is intentionally regenerable.
 
+### Thread creation and late responses
+
+Thread creation uses the admitted local turn ID as its stable request key.
+Retries of that turn retain the same key; a subsequent user turn or toolset
+bootstrap does not reuse an older creation request. After the initial 60-second
+deadline, the chat waits up to 120 seconds for that request's original response
+without submitting another `thread/start` or model turn. Duplicate pending
+requests remain rejected by the router. If the deadline expires during the
+durable response projection, completing that projection also resolves the
+original late-response promise and clears its timeout receipt.
+
+On 2026-09-21, production revision `7f89f20` recorded a creation timeout at
+11:58:40 UTC, followed by two attempts with the same conversation-wide creation
+key. The original response reached the journal at 12:00:31 UTC. A concurrent
+horarIA calculation produced more than 1,300 streamed deltas, with the original
+tool event still undelivered. This evidence motivates bounded late-response
+recovery; it does not establish that journal throughput or cancellation of a
+nested calculation is fixed. The new recovery and request-key behavior require
+separate CI, publication, deployment and authenticated acceptance.
+
+Local regression coverage includes recovery of a late creation without a
+second submission, distinct creation keys for subsequent turns, projection
+completion after the primary deadline, and 1,400 calculation deltas while the
+parent tool is blocked. The 138 targeted runtime, transport, permission,
+multi-user, restart and release tests passed, along with type checking, scoped
+lint, generated-contract validation, infrastructure checks and the worker build.
+
 Client submissions are acknowledged only after the gateway has durably
 accepted their idempotency key and written them to App Server stdin. JSON-RPC
 responses to server-initiated requests are stricter: their
