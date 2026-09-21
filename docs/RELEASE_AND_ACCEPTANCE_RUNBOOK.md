@@ -181,6 +181,23 @@ preserve its prior file, apply the tested gateway under the deployment lock,
 then retry the GitHub Deploy job for the same successful CI/publication SHA.
 The already-current path verifies health and completes the missing readbacks.
 
+The GitHub deployment key actually executes
+`/usr/local/sbin/aibrain-deploy-gateway`; the copy under
+`/opt/aibrain-company-qa/ghcr-ops/deploy-arnall-main.sh` is not that entrypoint.
+Inspect the key's forced command without exposing key material, and compare
+both hashes before claiming the host patch is active. Both copies now match
+`6ec56fdfd6650579e405b8503c9549059cc68efaff31d0e671cd1fe1ebd0e726`.
+Preserve root ownership and the entrypoint's mode 0700.
+
+Recovery completed for `5a62263ada7ddace1b6ed74db0edd24ae40d975f`:
+Backend CI `35575873910`, Publish `35576350147`, and Deploy `35576585290`
+(attempt 3) passed. The earlier attempts still used the old forced-command
+entrypoint. Host release state, app/gateway/worker/horarIA revisions and
+published digests match; live/readiness pass and the private acceptance
+manifest records the three run IDs. The Insijets containers retained their
+original images and start times. This is deployment recovery evidence, not
+authenticated acceptance of an employee's revised-Excel distribution flow.
+
 The deploy job must log `ARNALL_DEPLOY_OK revision=<candidate-full-sha>`. Retain
 the job URL and sanitized lines containing:
 
