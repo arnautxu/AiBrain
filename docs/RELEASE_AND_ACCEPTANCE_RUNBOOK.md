@@ -165,6 +165,22 @@ subsequent warm-cache publication have actually run.
 
 ## 6. Immutable deployment readback
 
+### 2026-09-21: shared image retention after promotion
+
+Deploy run `35575357339` failed after promoting `430cbe7` successfully. Host
+release state, application and horarIA all matched the candidate, but the final
+image cleanup encountered a running `aibrain-insijets-demo` container using an
+older egress image. The retention guard preserved that image and incorrectly
+returned a deployment failure; post-deploy evidence was not collected.
+
+The gateway now treats a verified running/foreign consumer, foreign image alias
+or alias of the active image as a retained image and continues. Inconsistent
+inspection and actual deletion errors still fail closed. Never delete or stop a
+foreign workload to clear this condition. Verify the installed gateway hash,
+preserve its prior file, apply the tested gateway under the deployment lock,
+then retry the GitHub Deploy job for the same successful CI/publication SHA.
+The already-current path verifies health and completes the missing readbacks.
+
 The deploy job must log `ARNALL_DEPLOY_OK revision=<candidate-full-sha>`. Retain
 the job URL and sanitized lines containing:
 

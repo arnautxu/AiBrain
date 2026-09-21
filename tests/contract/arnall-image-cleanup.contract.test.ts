@@ -24,6 +24,7 @@ type Fixture = {
   useInactiveCleanup?: boolean;
   currentSharesImageId?: boolean;
   inventory?: string;
+  removalFails?: boolean;
 };
 
 async function runCleanup(fixture: Fixture): Promise<string> {
@@ -89,11 +90,13 @@ docker() {
     return 0
   fi
   if [[ "$1 $2" == "container rm" ]]; then
+    ${fixture.removalFails ? "return 1" : ":"}
     printf 'container-rm %s\\n' "$3" >> "$log"
     containers=""
     return 0
   fi
   if [[ "$1 $2" == "image rm" ]]; then
+    ${fixture.removalFails ? "return 1" : ":"}
     printf 'image-rm %s\\n' "$3" >> "$log"
     present=0
     return 0
@@ -154,7 +157,7 @@ describe("Arnall single-release image cleanup contract", () => {
     const output = await runCleanup({ references: `${oldImage}\nexample.test/other-workload:stable\n` });
 
     expect(output).toContain("reason=shared-image-reference detail=reference=example.test/other-workload:stable");
-    expect(output).toContain("cleanup-status=1");
+    expect(output).toContain("cleanup-status=0");
     expect(output).not.toContain("image-rm");
     expect(output).not.toContain("container-rm");
   });
@@ -163,7 +166,7 @@ describe("Arnall single-release image cleanup contract", () => {
     const output = await runCleanup({ currentSharesImageId: true });
 
     expect(output).toContain(`reason=current-image-id detail=image_id=${imageId}`);
-    expect(output).toContain("cleanup-status=1");
+    expect(output).toContain("cleanup-status=0");
     expect(output).not.toContain("image-rm");
   });
 
@@ -174,9 +177,33 @@ describe("Arnall single-release image cleanup contract", () => {
     });
 
     expect(output).toContain(`reason=container-reference detail=container=${containerId},running=true,image=${imageId},project=another-compose-project`);
-    expect(output).toContain("cleanup-status=1");
+    expect(output).toContain("cleanup-status=0");
     expect(output).not.toContain("image-rm");
     expect(output).not.toContain("container-rm");
+  });
+
+  it("completes post-deploy cleanup while retaining another installation's running image", async () => {
+    const output = await runCleanup({ useInactiveCleanup: true,
+      containers: `${containerId}\n`,
+      containerDetails: `true|${imageId}|aibrain-insijets-demo`,
+    });
+    expect(output).toContain("cleanup-status=0");
+    expect(output).toContain("project=aibrain-insijets-demo");
+    expect(output).not.toContain("image-rm");
+    expect(output).not.toContain("container-rm");
+  });
+
+  it("still fails closed when inspection is inconsistent or a real deletion fails", async () => {
+    for (const fixture of [
+      { containers: `${containerId}\n`, containerDetails: "" },
+      { removalFails: true },
+      { removalFails: true, containers: `${containerId}\n`, containerDetails: `false|${imageId}|aibrain-company-qa` },
+    ]) {
+      const output = await runCleanup({ ...fixture, useInactiveCleanup: true });
+      expect(output).toContain("cleanup-status=1");
+      expect(output).not.toContain("image-rm");
+      expect(output).not.toContain("container-rm");
+    }
   });
 
   it("is idempotent once the stale image and its stopped container are gone", async () => {
