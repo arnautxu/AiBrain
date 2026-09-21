@@ -216,21 +216,25 @@ remove_obsolete_aibrain_containers() {
     [[ "$container" =~ ^[0-9a-f]{12,64}$ ]] || continue
     details="$(docker container inspect --format '{{.State.Running}}|{{.Image}}|{{index .Config.Labels "com.docker.compose.project"}}' "$container" 2>/dev/null || true)"
     IFS='|' read -r running container_image project <<< "$details"
-    if [[ "$running" == "true" || "$container_image" != "$image_id" || "$project" != "$COMPOSE_PROJECT" ]]; then
+    if [[ "$container_image" != "$image_id" || ! "$running" =~ ^(true|false)$ || -z "$project" ]]; then
       report_cleanup_blocked "$image" "container-reference" "container=${container},running=${running:-unknown},image=${container_image:-unknown},project=${project:-unknown}"
       return 1
+    fi
+    if [[ "$running" == "true" || "$project" != "$COMPOSE_PROJECT" ]]; then
+      report_cleanup_blocked "$image" "container-reference" "container=${container},running=${running},image=${container_image},project=${project}"
+      return 2 # Valid consumer: retain the image, without failing promotion.
     fi
     obsolete_containers+=("$container")
   done < <(docker ps --all --quiet --filter "ancestor=${image_id}")
   for container in ${obsolete_containers[@]+"${obsolete_containers[@]}"}; do
-    docker container rm "$container" >/dev/null
+    docker container rm "$container" >/dev/null || return 1
     printf 'ARNALL_RELEASE_CLEANUP_REMOVED_CONTAINER image=%s container=%s\n' "$image" "$container"
   done
   return 0
 }
 
 remove_unused_aibrain_image() {
-  local image="$1" image_id label reference
+  local image="$1" image_id label reference cleanup_status
   local -a image_references=()
   [[ "$image" =~ ^(127\.0\.0\.1:5000/aibrain-company-qa|127\.0\.0\.1:5000/aibrain-company-qa-egress|${GHCR_APP_REPOSITORY}|${GHCR_EGRESS_REPOSITORY})@sha256:[0-9a-f]{64}$ ]] || return 0
   is_current_aibrain_image "$image" && return 0
@@ -242,15 +246,21 @@ remove_unused_aibrain_image() {
     [[ -n "$reference" && "$reference" != "<none>:<none>" ]] || continue
     is_aibrain_image_reference "$reference" || {
       report_cleanup_blocked "$image" "shared-image-reference" "reference=${reference}"
-      return 1
+      return 0
     }
     image_references+=("$reference")
   done < <(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}' "$image_id")
   if current_aibrain_image_id_matches "$image_id"; then
     report_cleanup_blocked "$image" "current-image-id" "image_id=${image_id}"
-    return 1
+    return 0
   fi
-  remove_obsolete_aibrain_containers "$image" "$image_id" || return 1
+  if remove_obsolete_aibrain_containers "$image" "$image_id"; then
+    :
+  else
+    cleanup_status=$?
+    [[ "$cleanup_status" == 2 ]] && return 0
+    return "$cleanup_status"
+  fi
   if ((${#image_references[@]})); then
     for reference in "${image_references[@]}"; do
       # Docker can expose several RepoDigests for one image ID. Removing the
