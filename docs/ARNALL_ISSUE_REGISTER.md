@@ -49,3 +49,32 @@ provider authorization. It does not solve shared-QA credential rotation:
 renewal reconciliation/per-user identity remains a separate unresolved issue.
 The focused regression models a valid account whose proactive renewal fails.
 Deployment and an authenticated real turn must be verified separately.
+
+#### 2026-09-21 — expired shared-QA session recovered
+
+After the successful deployment of `5a62263`, the authenticated Arnau session
+still showed “The service is unavailable” and disabled sending. Live/readiness
+passed, but employee runtime status reported `codex: unavailable`. The worker
+log confirmed `token_expired` and `refresh_token_reused`; all five auth files
+inspected within this installation were expired. No viable local copy remained.
+
+Recovery used the installed Codex 0.153.4 device-login flow through the existing
+egress proxy, in a private recovery home on the same host. The user completed
+the provider email verification. The new credential matched the existing
+account and email, and its access token was valid. After private reversible
+backups, the configured shared-QA source and affected employee auth file were
+replaced atomically with owner 10001 and mode 0600. No credentials were copied
+from another installation or the operator's computer.
+
+Stopping the employee Codex child alone did not clear the application client's
+cached disconnected state. The operator maintenance endpoint confirmed zero
+active activities and drained successfully before restarting only the Arnall
+app container. The new worker connected, the unavailable banner disappeared,
+and the existing “Hola” draft received a real assistant reply. Reloading and
+reopening that conversation retained the reply. Readiness also passed after
+restart. This is authenticated one-user chat recovery, not acceptance of the
+revised-Excel distribution flow or two-user isolation.
+
+The shared-QA rotation/reconciliation issue above remains unresolved; this
+relogin does not establish a permanent fix or a production identity model.
+The disconnected-client restart behavior also needs a separate scoped fix.
