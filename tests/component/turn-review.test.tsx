@@ -73,7 +73,10 @@ describe("turn activity and Review", () => {
       message={liveMessage}
       onResolveApproval={vi.fn()}
     />);
-    let trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
+    let trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(trigger);
 
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect(trigger).toHaveTextContent("Preparando cambios en src/components/turn-activity.tsx");
@@ -215,6 +218,7 @@ describe("turn activity and Review", () => {
       onResolveApproval={vi.fn()}
     />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
     fireEvent.click(screen.getByRole("button", { name: /src\/example\.ts/ }));
     await waitFor(() => {
       expect(screen.getByText("export const ready = true;")).toBeVisible();
