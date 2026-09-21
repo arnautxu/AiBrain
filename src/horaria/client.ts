@@ -52,7 +52,7 @@ export async function callHoraria(config: HorariaConfig, session: AuthSession, i
   }
   if (body.length > 12 * 1024 * 1024) throw new Error("Petició massa gran.");
   const token = bridgeToken(config, { method: op.method, target: op.target, contentType, body, kind: "user", actorId: session.user.id, employeeId: config.users[session.user.id].employeeId });
-  const response = await privateHorariaRequest(config.baseUrl, op.target, { method: op.method, headers: { "x-aibrain-authorization": token, ...(contentType ? { "content-type": contentType } : {}) }, body: body.length ? body : undefined, signal: AbortSignal.timeout(op.effect === "ai" ? 20 * 60_000 : 90_000) });
+  const response = await privateHorariaRequest(config.baseUrl, op.target, { method: op.method, headers: { "x-aibrain-authorization": token, ...(contentType ? { "content-type": contentType } : {}) }, body: body.length ? body : undefined, signal: AbortSignal.timeout(op.effect === "ai" || op.effect === "draft" ? 20 * 60_000 : 90_000) });
   const text = await response.text();
   if (text.length > 2_000_000) throw new Error("Resposta massa gran; filtra per botiga i setmana.");
   if (!response.ok) throw new Error(`horarIA (${response.status}): ${text.slice(0, 1500)}`);

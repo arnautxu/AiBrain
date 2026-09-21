@@ -1,5 +1,5 @@
 /** Fixed internal endpoints; the model never chooses a host, URL or identity. */
-export type Operation = { method: "GET" | "POST" | "PUT" | "DELETE"; path: string; effect: "read" | "write" | "ai" | "delivery"; fields?: string };
+export type Operation = { method: "GET" | "POST" | "PUT" | "DELETE"; path: string; effect: "read" | "draft" | "write" | "ai" | "delivery"; fields?: string };
 export const OPERATIONS: Record<string, Operation> = {
   status: { method: "GET", path: "/api/session", effect: "read" },
   preview: { method: "GET", path: "/api/integration/preview", effect: "read", fields: "query: semana (YYYY-Www), establecimiento" },
@@ -27,6 +27,7 @@ for (const name of ["conflicts", "other-hours", "fairness", "edit-patterns", "co
 add("schedules.create", "POST", "schedules", "write", "body: empleadoId, establecimientoId, semana, dia, turno");
 add("schedules.update", "PUT", "schedules/:id", "write", "body: turno and correction reason as required by service");
 add("schedules.generate", "POST", "schedules/generate-async", "ai", "body: establecimientoId, semana, quality=standard|high. Poll job then show preview.");
+add("schedules.draft", "POST", "integration/draft", "draft", "Generate and attach a non-persisted draft immediately, no confirmation. body: establecimientoId, semana, quality=standard|high, requests?: [{employeeId, daysOff?: [LUNES..DOMINGO], shiftsByDay?: {LUNES: MANANA|TARDE, ...}, noSplit?: boolean, maxHours?: number, absences?: {JUEVES: VACACIONES|BAJA_MEDICA, ...}}]. Use real employee IDs from employees.list. Only include restrictions explicitly requested, never invented ones. Existing rules apply. Returns Excel preview and review of the final grid; never saves or sends business data.");
 add("schedules.generation-status", "GET", "schedules/generate-status/:id", "read");
 add("schedules.intensity-set", "POST", "schedules/intensity", "write", "body: establecimientoId, semana, intensidad");
 add("schedules.correction-reason", "POST", "schedules/correcciones", "write");

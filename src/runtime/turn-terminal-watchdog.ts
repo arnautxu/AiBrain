@@ -27,6 +27,7 @@ export class TurnTerminalWatchdog {
   private hardTimer: ReturnType<typeof setTimeout> | null = null;
   private started = false;
   private paused = false;
+  private activeToolCalls = 0;
   private settled = false;
   private resolveTimeout!: (kind: TurnTerminalTimeoutKind) => void;
   readonly timedOut: Promise<TurnTerminalTimeoutKind>;
@@ -77,7 +78,21 @@ export class TurnTerminalWatchdog {
     this.clearTimers();
   }
 
+  /** An awaited tool is work, not idle time. Keep the hard deadline intact. */
+  async duringToolCall<T>(run: () => Promise<T>): Promise<T> {
+    this.activeToolCalls += 1;
+    if (this.idleTimer) this.scheduler.clearTimeout(this.idleTimer);
+    this.idleTimer = null;
+    try {
+      return await run();
+    } finally {
+      this.activeToolCalls -= 1;
+      this.touch();
+    }
+  }
+
   private armIdle() {
+    if (this.activeToolCalls > 0) return;
     if (this.idleTimer) this.scheduler.clearTimeout(this.idleTimer);
     this.idleTimer = this.scheduler.setTimeout(() => this.finish("idle"), this.idleTimeoutMs);
     this.idleTimer.unref?.();

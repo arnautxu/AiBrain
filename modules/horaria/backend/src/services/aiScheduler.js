@@ -10,6 +10,7 @@ import { revisaInforme } from './reportCheck.js';
 import { ocupacioAltresBotigues } from './altresBotigues.js';
 import { edicionsNetes, moviments, NOMS_DIA as DIA_CA } from './edicionsNetes.js';
 import { aplicaAUnaPersona, sincronitzaMatins } from './passadesCondicions.js';
+import { applyDraftRequests, reviewDraft } from './draft-scenario.js';
 
 const client = createAiClient();
 
@@ -254,7 +255,8 @@ export async function getEditPatterns(establecimientoId, employees) {
 
 // Main function — generates a full week schedule
 // ─────────────────────────────────────────────
-export async function generateAISchedule({ establecimientoId, semana, quality = 'standard' }) {
+export async function generateAISchedule({ establecimientoId, semana, quality = 'standard', draftOnly = false, requests = [] }) {
+  if (!draftOnly && requests.length) throw new Error('Les simulacions només es poden utilitzar en esborranys no desats.');
 
   // 1. Fetch employees: PRIMARY + cross-establishment (flexible ones from other establishments)
   const employees = await prisma.employee.findMany({
@@ -430,6 +432,16 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
       if (DIAS.includes(up) && (t === 'MANANA' || t === 'TARDE') && !emp.diasPreferenciaLibre[up]) {
         emp.turnosPorDiaPreferencia[up] = t;
       }
+    }
+  }
+
+  if (draftOnly) {
+    if (!establishment || !employees.length) throw new Error('Cal una botiga amb personal actiu per preparar un esborrany.');
+    applyDraftRequests(requests, employees);
+    for (const r of requests) {
+      prefMap[r.employeeId] = { ...prefMap[r.employeeId],
+        diasNoDisponible: Object.keys(employees.find(e => e.id === r.employeeId).diasPreferenciaLibre),
+        turnosPorDia: employees.find(e => e.id === r.employeeId).turnosPorDiaPreferencia };
     }
   }
 
@@ -678,6 +690,33 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
   // rather than taken from the model, which gave the same week two different
   // break times and left the split shifts our own passes created without one.
   aplicarHorasFijas(scheduleData.horario, employees, establishment);
+
+  // Return before EVERY business write. Simulations cannot replace saved shifts,
+  // preferences, absences, rules, reports or published schedules.
+  if (draftOnly) {
+    const schedules = [];
+    for (const e of employees) {
+      const proposed = scheduleData.horario.filter(h => h.empleadoId === e.id);
+      if (proposed.length !== 1 || proposed[0].dias.length !== 7 || new Set(proposed[0].dias.map(d => d.dia)).size !== 7) throw new Error('La proposta no conté una setmana completa per persona.');
+      for (const d of proposed[0].dias) {
+        if (!DIAS.includes(d.dia) || !['MANANA', 'TARDE', 'PARTIDO', 'LIBRE'].includes(d.turno)) throw new Error('Torn de la proposta invàlid.');
+        const noSplit = requests.some(r => r.employeeId === e.id && r.noSplit);
+        const blocked = e.diasAusente[d.dia] || e.diasPreferenciaLibre[d.dia] || festivoDays.includes(d.dia) || e.diasOcupadosOtrosEstablecimientos[d.dia] ||
+          !disponiblePara(e, d.dia, d.turno) || (e.turnosPorDiaPreferencia[d.dia] && !['LIBRE', e.turnosPorDiaPreferencia[d.dia]].includes(d.turno)) || (noSplit && d.turno === 'PARTIDO');
+        const turno = blocked ? 'LIBRE' : d.turno;
+        schedules.push({ empleadoId: e.id, establecimientoId, semana, dia: d.dia, turno,
+          horaEntrada: entradaPara(e, turno), horaDescanso: descansoPara(turno, establishment),
+          ausencia: e.diasAusente[d.dia] || null, publicado: false,
+          empleado: { id: e.id, nombre: e.nombre, apellidos: e.apellidos, funcion: e.funcion, maxHorasSemana: e.maxHorasSemana,
+            horasPorTurno: e.horasPorTurno, horaEntradaManana: e.horaEntradaManana, horaEntradaTarde: e.horaEntradaTarde } });
+      }
+    }
+    const review = reviewDraft(schedules, employees, rules, festivoDays, requests, freeRules);
+    return { schedules, establishment: { ...establishment, id: establecimientoId },
+      roster: employees.map(e => schedules.find(s => s.empleadoId === e.id).empleado), review,
+      // Model commentary is separate from checks on the final grid.
+      modelSummary: scheduleData.resumen || '', modelConflicts: scheduleData.conflictos || [] };
+  }
 
   // 6. Save schedules to DB
   const results = [];

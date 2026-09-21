@@ -19,13 +19,40 @@ async function setup() {
   vi.mocked(loadHorariaConfig).mockResolvedValue(config);
   vi.mocked(callHoraria).mockResolvedValue({ saved: true });
   const context = { projectId: "project-a", permissions: { installationId: session.tenant.id, userId: session.user.id, projectId: "project-a", rules: [{ ruleId: "tools.execute", action: "execute", effect: "allow" }] } as unknown as ResolvedPermissions, session, installation: { installationId: "test-shop", paths: { usersRoot: root } } as InstallationConfig, sourceThreadId: "thread-a", sourceTurnId: "turn-1", sourceMessage: "Prepara el canvi", runtimeThreadId: "runtime-a", runtimeTurnId: "runtime-1", projectWorkspace: root, background: false, preview: vi.fn() };
-  const run = async (tool: string, args: Record<string, unknown>, overrides = {}) => {
-    const result = await handleHorariaToolCall({ namespace: HORARIA_NAMESPACE, tool, arguments: args as never, threadId: "runtime-a", turnId: "runtime-1", callId: "call-1" }, { ...context, ...overrides });
+  const run = async (tool: string, args: Record<string, unknown>, overrides = {}, callId = "call-1") => {
+    const result = await handleHorariaToolCall({ namespace: HORARIA_NAMESPACE, tool, arguments: args as never, threadId: "runtime-a", turnId: "runtime-1", callId }, { ...context, ...overrides });
     return JSON.parse((result.contentItems[0] as { text: string }).text);
   };
   return { context, config, run };
 }
 describe("horarIA chat boundary", () => {
+  it("generates and attaches a draft in the requesting turn without business-write confirmation", async () => {
+    const { run, context } = await setup();
+    const draft = { title: "Proves", draftOnly: true, review: { allRespected: false, conflicts: ["Cobertura insuficient"] } };
+    vi.mocked(callHoraria).mockResolvedValue(draft);
+    const input = { operation: "schedules.draft", body: { establecimientoId: 5, semana: "2026-W40", requests: [{ employeeId: 1, noSplit: true }] } };
+    expect(await run("run", input)).toEqual(draft);
+    expect(context.preview).toHaveBeenCalledWith(draft);
+    expect(await run("run", input)).toEqual(draft);
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+    expect(resolveOperation(input).effect).toBe("draft");
+  });
+  it("does not rerun generation when only draft attachment failed", async () => {
+    const { run, context } = await setup();
+    context.preview.mockRejectedValueOnce(new Error("Preview unavailable"));
+    const input = { operation: "schedules.draft", body: { establecimientoId: 5, semana: "2026-W40" } };
+    await expect(run("run", input)).rejects.toThrow("Preview unavailable");
+    await run("run", input, {}, "call-retry");
+    expect(callHoraria).toHaveBeenCalledTimes(1);
+  });
+  it("keeps durable authorization for background drafts and confirmation for permanent preferences", async () => {
+    const { run } = await setup();
+    await expect(run("run", { operation: "schedules.draft", body: { establecimientoId: 5, semana: "2026-W40" } }, { background: true }))
+      .rejects.toThrow("autorització durable");
+    const result = await run("run", { operation: "preferences.update", id: "1", body: { semana: "2026-W40", diasNoDisponible: ["MARTES"] } });
+    expect(result.confirmationRequired).toBe(true);
+    expect(callHoraria).not.toHaveBeenCalled();
+  });
   it("queries preview and projects its real data through the existing artifact callback", async () => {
     const { run, context } = await setup();
     const value = { title: "Week", rows: [["Persona", "Dl"], ["Test", "Matí"]] };

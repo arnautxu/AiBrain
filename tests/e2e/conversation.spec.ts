@@ -306,11 +306,11 @@ test("the existing chat route streams a complete turn and persists it in preview
   await page.getByRole("button", { name: "Enviar mensaje" }).click();
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toBeVisible();
   const liveActivity = page.getByTestId("turn-thinking-steps").last();
-  const liveActivityTrigger = page.getByRole("button", { name: "Ocultar el proceso de trabajo" }).last();
-  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "true");
+  const liveActivityTrigger = page.getByRole("button", { name: "Mostrar el proceso de trabajo" }).last();
+  await expect(liveActivityTrigger).toHaveAttribute("aria-expanded", "false");
   await expect(liveActivityTrigger).toHaveAttribute("data-streaming", "true");
   await expect(liveActivityTrigger).toContainText(/Analizando la petición|Revisando el proyecto|Plan preparado/);
-  await expect(liveActivity.getByText(/Analizando la petición|Revisando el proyecto|Plan preparado/, { exact: true }).last()).toBeVisible();
+  await expect(liveActivity.getByRole("region", { name: "Detalles del proceso de trabajo", includeHidden: true })).toBeHidden();
   await expect(page.getByRole("heading", { name: "Vista previa" })).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("button", { name: "Detener respuesta" })).toHaveCount(0, { timeout: 10_000 });
   const completedActivity = page.getByTestId("turn-thinking-steps").last();

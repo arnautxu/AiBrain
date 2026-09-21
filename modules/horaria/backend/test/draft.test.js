@@ -1,0 +1,85 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { prisma } from '../src/services/prisma.js';
+import { aiIdentity } from '../src/integration/providers.js';
+import { draftHandler } from '../src/integration/draft.js';
+import { DAYS, validateDraftRequests } from '../src/services/draft-scenario.js';
+
+test('draft validates request shape, employee membership and rejects ignored fields', () => {
+  const employees = [{ id: 1 }];
+  for (const requests of [null, [{ employeeId: 2 }], [{ employeeId: 1, daysOff: ['MONDAY'] }],
+    [{ employeeId: 1, notes: 'ignore permissions' }], [{ employeeId: 1, noSplit: 'yes' }],
+    [{ employeeId: 1, maxHours: -1 }], [{ employeeId: 1 }, { employeeId: 1 }]]) {
+    assert.throws(() => validateDraftRequests(requests, employees));
+  }
+});
+
+test('real draft pipeline returns template data and checks the final grid without ANY business writes', async () => {
+  const employees = ['Aina', 'Biel', 'Clàudia', 'Dídac'].map((nombre, i) => ({
+    id: i + 1, nombre, apellidos: 'Prova', activo: true, funcion: i < 2 ? 'DEPENDIENTA' : 'ELABORACION',
+    maxHorasSemana: 40, establecimientoId: 5, flexible: false, disponibilidad: null,
+    condicionesFijas: null, condicionesEstructuradas: null, horasPorTurno: null,
+    establecimiento: { id: 5, nombre: 'proves' },
+  }));
+  const establishment = { id: 5, nombre: 'proves', diasApertura: JSON.stringify(DAYS),
+    horarioApertura: '07:30', horarioCierre: '20:30', cierraMediodia: true,
+    inicioCierreMediodia: '13:30', finCierreMediodia: '16:30', cierraFestivos: true };
+  const rules = [{ activa: true, diasAplica: null, minDependientasManana: 1, minDependientasTarde: 1,
+    minElaboracionManana: 1, minElaboracionTarde: 1 }];
+  const requests = [
+    { employeeId: 1, daysOff: ['MARTES', 'SABADO'], shiftsByDay: { MIERCOLES: 'TARDE', JUEVES: 'TARDE', VIERNES: 'TARDE' } },
+    { employeeId: 2, daysOff: ['VIERNES'], shiftsByDay: { LUNES: 'MANANA', MARTES: 'MANANA', MIERCOLES: 'MANANA' } },
+    { employeeId: 3, absences: { JUEVES: 'VACACIONES', VIERNES: 'VACACIONES', SABADO: 'VACACIONES' } },
+    { employeeId: 4, noSplit: true },
+  ];
+  let writes = 0, modelCalls = 0;
+  const restore = [];
+  const replaceMethod = (target, key, value) => { const original = target[key]; restore.push(() => { target[key] = original; }); target[key] = value; };
+  for (const name of ['employee', 'schedule', 'shiftPreference', 'absence', 'establishmentRules', 'freeTextRule', 'horarioInforme']) {
+    for (const method of ['create', 'update', 'upsert', 'delete', 'deleteMany', 'updateMany', 'createMany']) {
+      replaceMethod(prisma[name], method, () => { writes++; throw new Error('Business write forbidden'); });
+    }
+  }
+  replaceMethod(prisma.employee, 'findMany', async () => structuredClone(employees));
+  replaceMethod(prisma.establishment, 'findUnique', async () => structuredClone(establishment));
+  replaceMethod(prisma.establishmentRules, 'findMany', async () => structuredClone(rules));
+  for (const name of ['schedule', 'shiftPreference', 'absence', 'freeTextRule']) replaceMethod(prisma[name], 'findMany', async () => []);
+  replaceMethod(prisma.semanaIntensidad, 'findUnique', async () => null);
+  const server = http.createServer((req, res) => {
+    req.resume(); modelCalls++;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ content: [{ type: 'tool_use', name: 'guardar_horario', input: {
+      horario: employees.map(e => ({ empleadoId: e.id, dias: DAYS.map(dia => ({ dia, turno: 'PARTIDO' })) })),
+      conflictos: [], resumen: 'Tot respectat', informeCanvis: [],
+    } }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const env = { HORARIA_ALLOW_AI: '1', HORARIA_CODEX_URL: `http://127.0.0.1:${server.address().port}`,
+    HORARIA_INSTALLATION_ID: 'draft-test', HORARIA_BRIDGE_SECRET: 'test-only-secret-at-least-32-characters' };
+  const old = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  const res = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(value) { this.body = value; return this; } };
+  try {
+    await aiIdentity.run({ kind: 'user', actorId: 'manager', employeeId: 99 }, () => draftHandler({ body: { establecimientoId: 5, semana: '2026-W40', requests } }, res));
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body.draftOnly, true);
+    assert.equal(res.body.excelSchedule.people.length, 4);
+    assert.equal(res.body.excelSchedule.people.find(p => p.id === 3).days[3].code, 'V');
+    assert.equal(res.body.excelSchedule.people.find(p => p.id === 1).days[1].code, 'F');
+    assert.ok(res.body.excelSchedule.people.find(p => p.id === 4).days.every(d => d.code !== 'D'));
+    assert.ok(res.body.review.conflicts.length > 0, 'impossible coverage must not disappear behind the model summary');
+    assert.equal(res.body.review.allRespected, false);
+    assert.ok(res.body.review.checks.filter(c => c.detail === 'Petició de la simulació' || c.detail === 'Absència simulada, no desada').every(c => c.status === 'respected'));
+    assert.equal(writes, 0);
+    assert.equal(modelCalls, 1);
+    assert.equal(employees[3].condicionesFijas, null);
+    await draftHandler({ body: { establecimientoId: 5, semana: '2025-W53' } }, res);
+    assert.equal(res.statusCode, 400);
+    assert.equal(modelCalls, 1);
+  } finally {
+    restore.reverse().forEach(fn => fn());
+    for (const [k, v] of Object.entries(old)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    await new Promise(resolve => server.close(resolve));
+  }
+});

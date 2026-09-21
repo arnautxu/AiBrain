@@ -1611,10 +1611,11 @@ export async function runWorkerCodexTurn(
           if (!runtimeTurnId) throw new Error("Dynamic tool call arrived before the turn was bound.");
           const horariaSession = runtimeIdentitySession ?? automationSession;
           if (horariaSession && isRecord(request.params) && request.params.namespace === HORARIA_NAMESPACE) {
-            return await handleHorariaToolCall(request.params as never, {
+            const horariaTurnId = runtimeTurnId;
+            const runHoraria = () => handleHorariaToolCall(request.params as never, {
               session: horariaSession, installation: runtime.config, permissions, projectId: chatRequest.projectId,
               sourceThreadId: chatRequest.threadId, sourceTurnId: chatRequest.assistantMessageId,
-              sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId,
+              sourceMessage: chatRequest.message, runtimeThreadId: threadId, runtimeTurnId: horariaTurnId,
               projectWorkspace, background: Boolean(backgroundExecution),
               preview: async (data) => {
                 if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
@@ -1639,7 +1640,8 @@ export async function runWorkerCodexTurn(
                   projectedDocumentArtifactIds.add(artifact.id);
                 }
               },
-            }) as JsonValue;
+            });
+            return await (terminalWatchdog ? terminalWatchdog.duringToolCall(runHoraria) : runHoraria()) as JsonValue;
           }
           if (automationSession && isRecord(request.params) && request.params.namespace === AIBRAIN_AUTOMATION_TOOL_NAMESPACE) {
             return await handleAutomationToolCall(request.params as never, {
