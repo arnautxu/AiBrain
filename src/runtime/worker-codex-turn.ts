@@ -5,6 +5,7 @@ import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
 import { serverReferenceInputs } from "@/documents/server-reference-inputs";
 import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "@/runtime/composio-dynamic-tools";
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
+import { prepareDesignBrandAssets } from "@/runtime/design-brand-assets";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -708,6 +709,7 @@ export async function runWorkerCodexTurn(
     runtime.handle.roots.artifacts,
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
+  const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);
   // A new conversation used to wait for the optional model/skills/usage
   // catalog before it even opened its App Server thread.  The status route
   // prewarms that catalog, but a direct first turn must not depend on it.
@@ -824,6 +826,7 @@ export async function runWorkerCodexTurn(
     preparedMemory.developerInstructions,
     synchronizedSkills.developerInstructions,
     designSkillDeveloperInstructions(runtime.config, synchronizedSkills.result),
+    designBrandInstructions,
     connectorMentionDeveloperInstructions(selectedConnectorMentions),
     ...(automationSession ? [await automationChatDeveloperInstructions(automationSession, {
       projectId: chatRequest.projectId,

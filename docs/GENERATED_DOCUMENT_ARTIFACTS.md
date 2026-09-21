@@ -94,6 +94,33 @@ locales cubren formatos, límites, paginación y entrega durable; la aceptación
 una presentación requiere además inspección del archivo real generado por un
 turno autenticado. CI, publicación y despliegue siguen siendo gates separados.
 
+## Logo oficial en los diseños de Arnall
+
+En cada turno de la instalación `companySlug=arnall`, el servidor prepara una
+copia del logo oficial en `.aibrain-brand/arnall-logo.jpg` dentro del proyecto
+privado del empleado. Usa el JPEG empaquetado en `public/branding/arnall/`,
+verifica el SHA-256 registrado en `SOURCE.md`, rechaza enlaces simbólicos y
+repone copias modificadas. No descarga activos externos ni prepara logos o
+instrucciones de Arnall para otras instalaciones.
+
+La política del turno exige incorporar la imagen completa, legible y con sus
+proporciones, colores y fondo originales en todos los archivos de diseño y
+formatos exportados. Se aplica también a revisiones y conversaciones retomadas,
+sin pedir otra confirmación o carga del archivo. En documentos de varias páginas
+debe aparecer como mínimo en la portada o primera página. La revisión visual
+comprueba su presencia antes de entregar; no basta con un enlace o adjunto
+separado. Si el activo no se puede preparar de forma segura, el asistente debe
+explicar la limitación y no presentar una entrega final sin marca como completa.
+Las consultas ajenas al diseño pueden continuar.
+
+Esto proporciona el activo y la política de autoría; no es un detector automático
+de logos dentro de formatos arbitrarios. La entrega conserva los bytes revisados
+sin añadir marcas después de la revisión. Las pruebas cubren aprovisionamiento,
+integridad, aislamiento e instrucciones en turnos nuevos y reutilizados. La
+aceptación visual desde un turno autenticado sigue siendo un gate separado.
+El seed de marca documenta el activo conocido; no se reemplaza el contexto
+durable editado de la instalación al desplegar.
+
 ## Conversión headless en el contenedor restringido
 
 El conversor usa un `/proc` vacío de solo lectura dentro de su namespace PID.
