@@ -5,6 +5,7 @@ import { getAll as getEmployees } from '../controllers/employees.js';
 import { prisma } from '../services/prisma.js';
 import { shiftHours, entradaPara, salidaPara, descansoPara } from '../utils/shiftHours.js';
 import { requireDelivery } from './providers.js';
+import { excelSchedule } from './excel-schedule.js';
 
 const DAYS = ['LUNES', 'MARTES', 'MIERCOLES', 'JUEVES', 'VIERNES', 'SABADO', 'DOMINGO'];
 const LABELS = { MANANA: 'Matí', TARDE: 'Tarda', PARTIDO: 'Partit', LIBRE: 'Lliure' };
@@ -39,9 +40,10 @@ export async function weekPreview(req) {
   const conflicts = await capture(checkEstablishmentConflicts, req);
   const roster = await capture(getEmployees, req);
   const rows = scheduleRows(schedules, establishment, roster);
+  const excel = excelSchedule(schedules, establishment, roster, semana);
   const title = `${establishment.nombre} · ${semana}`;
-  const previewHash = createHash('sha256').update(JSON.stringify({ rows, conflicts, schedules: [...schedules].sort((a, b) => a.id - b.id) })).digest('hex');
-  return { title, semana, establecimientoId: establishment.id, shiftCount: schedules.length, status: schedules.length && schedules.every(s => s.publicado) ? 'publicat' : 'esborrany', rows, conflicts, previewHash, note: '* Petició de la persona. Sense assignar no equival a dia lliure.', generatedAt: new Date().toISOString() };
+  const previewHash = createHash('sha256').update(JSON.stringify({ rows, excel, conflicts, schedules: [...schedules].sort((a, b) => a.id - b.id) })).digest('hex');
+  return { title, semana, establecimientoId: establishment.id, shiftCount: schedules.length, status: schedules.length && schedules.every(s => s.publicado) ? 'publicat' : 'esborrany', rows, excelSchedule: excel, excelCalculationWarnings: ['El model Excel original conserva referències trencades preexistents. No equival a una validació dels seus càlculs.', 'Els saldos històrics de personal, tractes mensuals i vacances no s’han importat. Els zeros dels auxiliars buits no són saldos verificats.'], conflicts, previewHash, note: '* Petició de la persona. Sense assignar no equival a dia lliure.', generatedAt: new Date().toISOString() };
 }
 export function previewPdf(preview) {
   const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });

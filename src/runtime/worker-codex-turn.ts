@@ -1617,6 +1617,7 @@ export async function runWorkerCodexTurn(
               projectWorkspace, background: Boolean(backgroundExecution),
               preview: async (data) => {
                 if (!isRecord(data) || !Array.isArray(data.rows) || typeof data.title !== "string" || typeof data.previewHash !== "string") throw new Error("Previsualització d’horaris invàlida.");
+                if (installationId === "arnall" && (!isRecord(data.excelSchedule) || data.excelSchedule.establishmentId !== data.establecimientoId || data.excelSchedule.week !== data.semana)) throw new Error("Falten les dades de la plantilla Excel obligatòria. No es pot substituir per un altre format.");
                 const result = await handleLocalDocumentDynamicToolCall({
                   ...(request.params as never as import("../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams").DynamicToolCallParams),
                   namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE, tool: "create",
@@ -1624,6 +1625,7 @@ export async function runWorkerCodexTurn(
                 }, {
                   installation: runtime.config, installationId, userId: authenticatedUserId,
                   spreadsheetLayout: "schedule",
+                  arnallSchedule: installationId === "arnall" ? data.excelSchedule as import("./documents/arnall-schedule").ArnallSchedule : undefined,
                   projectId: chatRequest.projectId, projectWorkspace,
                   receiptRoot: path.join(path.dirname(runtime.handle.roots.workspace), "state", "document-generation-calls"),
                   runtimeThreadId: threadId, runtimeTurnId: runtimeTurnId!, sourceThreadId: chatRequest.threadId,

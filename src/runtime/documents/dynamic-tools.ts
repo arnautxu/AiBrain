@@ -226,6 +226,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   permissions: ResolvedPermissions;
   renderPresentation?: PresentationRenderCallback;
   spreadsheetLayout?: "schedule";
+  arnallSchedule?: import("./arnall-schedule").ArnallSchedule;
   now?: () => Date;
 }>;
 
@@ -665,7 +666,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
     const input = params.tool === "image_to_pdf"
       ? parseImageToPdfArguments(params.arguments)
       : parseArguments(params.arguments);
-    const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (context.spreadsheetLayout ? `|layout:${context.spreadsheetLayout}` : "")).digest("hex");
+    const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (context.spreadsheetLayout ? `|layout:${context.spreadsheetLayout}` : "") + (context.arnallSchedule ? `|arnall-schedule-v2-original-formulas:${JSON.stringify(context.arnallSchedule)}` : "")).digest("hex");
     const receiptName = receiptNameFor(params.callId);
     const receiptPath = path.join(context.receiptRoot, receiptName);
     await mkdir(context.receiptRoot, { recursive: true, mode: 0o700 });
@@ -701,6 +702,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
         content: input.content,
         rows: input.rows,
         spreadsheetLayout: context.spreadsheetLayout,
+        arnallSchedule: context.arnallSchedule,
         slides: input.slides,
         sourcePng,
       });
