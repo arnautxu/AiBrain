@@ -239,7 +239,7 @@ export function TurnActivity({
   } | null>(null);
   const executionOpen = manualDisclosure?.status === message.status
     ? manualDisclosure.open
-    : streaming;
+    : false;
 
   const visiblePlan = message.plan.flatMap((step) => {
     const publicStep = publicActivityText(step.step, 1_000);

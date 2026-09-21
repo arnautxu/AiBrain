@@ -12,6 +12,7 @@ describe("TurnActivity timeline", () => {
   it("collapses the same mounted live timeline when the final response arrives", () => {
     const message = turnActivityScenarios.multipleTools;
     const { rerender } = render(<TurnActivity message={message} onResolveApproval={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
     expect(screen.getByRole("button", { name: "Ocultar el proceso de trabajo" })).toHaveAttribute("aria-expanded", "true");
     rerender(<TurnActivity message={{ ...message, status: "complete", content: "Respuesta final", durationMs: 2000 }} onResolveApproval={vi.fn()} />);
     expect(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" })).toHaveTextContent("Ha trabajado durante 0m 2s");
@@ -19,11 +20,14 @@ describe("TurnActivity timeline", () => {
     expect(screen.queryByText("Respuesta final")).not.toBeInTheDocument();
   });
 
-  it("starts expanded while running and interleaves compact tool cards in transport order", () => {
+  it("starts collapsed while running and reveals ordered tool cards only on request", () => {
     const { container } = render(
       <TurnActivity message={turnActivityScenarios.multipleTools} onResolveApproval={vi.fn()} />,
     );
-    const trigger = screen.getByRole("button", { name: "Ocultar el proceso de trabajo" });
+    const trigger = screen.getByRole("button", { name: "Mostrar el proceso de trabajo" });
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("list", { name: "Actividad del trabajo" })).not.toBeInTheDocument();
+    fireEvent.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "true");
     expect([...container.querySelectorAll("[data-timeline-key]")].map((node) =>
       node.getAttribute("data-timeline-key"))).toEqual(orderGolden.multipleTools);
@@ -33,6 +37,22 @@ describe("TurnActivity timeline", () => {
     fireEvent.click(screen.getByText("Ejecutando comprobaciones"));
     expect(commandCard).toHaveAttribute("open");
     expect(screen.getByLabelText("Salida de Ejecutando comprobaciones")).toHaveTextContent("12 pruebas superadas");
+  });
+
+  it("keeps details closed across live updates, completion and recovery until clicked", () => {
+    const message = turnActivityScenarios.multipleTools;
+    const { rerender } = render(<TurnActivity message={message} onResolveApproval={vi.fn()} />);
+    for (const status of ["streaming", "complete", "streaming", "error", "streaming", "stopped"] as const) {
+      rerender(<TurnActivity message={{ ...message, status, activity: [...message.activity, {
+        id: `update-${status}`, kind: "tool", label: "Comprovant l’horari", status: "running",
+      }] }} onResolveApproval={vi.fn()} />);
+      expect(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }))
+        .toHaveAttribute("aria-expanded", "false");
+      expect(screen.queryByRole("list", { name: "Actividad del trabajo" })).not.toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+    expect(screen.getByRole("button", { name: "Ocultar el proceso de trabajo" }))
+      .toHaveAttribute("aria-expanded", "true");
   });
 
   it("collapses completed recovery activity under the measured duration", () => {
