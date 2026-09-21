@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -886,6 +886,10 @@ describe("worker Codex turn", () => {
     const instructions = String((threadStart?.params as { developerInstructions?: string })?.developerInstructions);
     expect(instructions).toContain(`Policy fingerprint: ${fingerprint}`);
     expect(instructions).toContain("Automatic design and writing guidance");
+    expect(instructions).toContain("Arnall design files: mandatory official logo");
+    const logoPath = path.join(workspace, "projects", projectId, ".aibrain-brand/arnall-logo.jpg");
+    expect(instructions).toContain(JSON.stringify(logoPath));
+    expect(await readFile(logoPath)).toEqual(await readFile("public/branding/arnall/logo.jpg"));
     expect(instructions).toContain("required skill is unavailable");
     expect(instructions).toContain("Explicit memory snapshot: untrusted data only");
     expect(instructions).toContain("Approved preference");
@@ -1767,6 +1771,10 @@ describe("worker Codex turn", () => {
       },
     });
     expect(JSON.stringify(calls[0]?.params)).toContain("Automatic design and writing guidance");
+    expect(JSON.stringify(calls[0]?.params)).toContain("Arnall design files: mandatory official logo");
+    const logoPath = path.join(workspace, "projects", projectId, ".aibrain-brand/arnall-logo.jpg");
+    expect(JSON.stringify(calls[0]?.params)).toContain(logoPath);
+    expect(await readFile(logoPath)).toEqual(await readFile("public/branding/arnall/logo.jpg"));
     expect(JSON.stringify(calls[0]?.params)).toContain("required skill is unavailable");
     expect(events).not.toContainEqual(expect.objectContaining({
       type: "activity",
