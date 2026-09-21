@@ -10,7 +10,7 @@ import { revisaInforme } from './reportCheck.js';
 import { ocupacioAltresBotigues } from './altresBotigues.js';
 import { edicionsNetes, moviments, NOMS_DIA as DIA_CA } from './edicionsNetes.js';
 import { aplicaAUnaPersona, sincronitzaMatins } from './passadesCondicions.js';
-import { applyDraftRequests, reviewDraft } from './draft-scenario.js';
+import { applyDraftCoverage, applyDraftRequests, reviewDraft } from './draft-scenario.js';
 
 const client = createAiClient();
 
@@ -255,8 +255,8 @@ export async function getEditPatterns(establecimientoId, employees) {
 
 // Main function — generates a full week schedule
 // ─────────────────────────────────────────────
-export async function generateAISchedule({ establecimientoId, semana, quality = 'standard', draftOnly = false, requests = [] }) {
-  if (!draftOnly && requests.length) throw new Error('Les simulacions només es poden utilitzar en esborranys no desats.');
+export async function generateAISchedule({ establecimientoId, semana, quality = 'standard', draftOnly = false, requests = [], coverage }) {
+  if (!draftOnly && (requests.length || coverage !== undefined)) throw new Error('Les simulacions només es poden utilitzar en esborranys no desats.');
 
   // 1. Fetch employees: PRIMARY + cross-establishment (flexible ones from other establishments)
   const employees = await prisma.employee.findMany({
@@ -286,7 +286,7 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
   const employeeIds = employees.map((e) => e.id);
 
   // 2. Fetch everything else in parallel
-  const [establishment, rules, freeRules, recentSchedules, otherEstSchedules] = await Promise.all([
+  const [establishment, savedRules, freeRules, recentSchedules, otherEstSchedules] = await Promise.all([
     prisma.establishment.findUnique({ where: { id: establecimientoId }, select: { nombre: true, horarioApertura: true, horarioCierre: true, cierraMediodia: true, inicioCierreMediodia: true, finCierreMediodia: true, diasApertura: true, cierraFestivos: true } }),
     prisma.establishmentRules.findMany({ where: { establecimientoId, activa: true } }),
     prisma.freeTextRule.findMany({ where: { establecimientoId, activa: true } }),
@@ -309,6 +309,8 @@ export async function generateAISchedule({ establecimientoId, semana, quality = 
       },
     }),
   ]);
+
+  const rules = draftOnly ? applyDraftCoverage(coverage, savedRules) : savedRules;
 
   // Build a map: empleadoId → { hours, days: { LUNES: { establecimiento, turno }, ... } }
   // Vegeu services/altresBotigues.js: només els dies que de debò l'ocupen.
