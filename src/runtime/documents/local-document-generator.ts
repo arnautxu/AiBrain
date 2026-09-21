@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { styleScheduleWorkbook } from "./schedule-spreadsheet";
+import { arnallScheduleParts, type ArnallSchedule } from "./arnall-schedule";
 import JSZip from "jszip";
 import { PDFDocument } from "pdf-lib";
 
@@ -29,6 +30,7 @@ export type LocalDocumentInput = Readonly<{
   slides?: readonly LocalDocumentSlide[];
   sourcePng?: Uint8Array;
   spreadsheetLayout?: "schedule";
+  arnallSchedule?: ArnallSchedule;
 }>;
 
 export type GeneratedLocalDocument = Readonly<{
@@ -132,7 +134,8 @@ function normalizedInput(input: LocalDocumentInput) {
   if (input.spreadsheetLayout && (input.format !== "xlsx" || !input.rows || input.rows.some(row => row.length !== 9))) {
     throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_ROWS_INVALID", "Schedule layout requires nine spreadsheet columns.");
   }
-  return { format: input.format, title, content, rows: input.rows, slides, sourcePng, spreadsheetLayout: input.spreadsheetLayout };
+  if (input.arnallSchedule && (input.format !== "xlsx" || input.spreadsheetLayout !== "schedule")) throw new LocalDocumentGenerationError("LOCAL_DOCUMENT_ROWS_INVALID", "The approved schedule template requires an XLSX schedule.");
+  return { format: input.format, title, content, rows: input.rows, slides, sourcePng, spreadsheetLayout: input.spreadsheetLayout, arnallSchedule: input.arnallSchedule };
 }
 
 export function normalizeDocumentSlides(value: unknown): readonly LocalDocumentSlide[] {
@@ -418,7 +421,7 @@ export async function generateLocalDocument(input: LocalDocumentInput): Promise<
   } else if (normalized.format === "docx") {
     data = await docxBytes(normalized.title, normalized.content);
   } else if (normalized.format === "xlsx") {
-    data = await xlsxBytes(normalized.title, normalized.content, normalized.rows, normalized.spreadsheetLayout);
+    data = normalized.arnallSchedule ? await zipBytes(arnallScheduleParts(normalized.arnallSchedule)) : await xlsxBytes(normalized.title, normalized.content, normalized.rows, normalized.spreadsheetLayout);
   } else {
     const slides = presentationSlides(normalized.title, normalized.content, normalized.slides);
     data = await pptxBytes(normalized.title, slides);
