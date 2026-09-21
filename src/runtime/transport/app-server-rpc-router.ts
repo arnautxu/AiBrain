@@ -486,7 +486,18 @@ export class AppServerRpcRouter {
           // finishes and the event can be ACKed, but the caller must recover
           // from the typed timeout instead of receiving a late success.
           if (pending) {
-            if (this.pending.get(response.id) !== pending) return;
+            if (this.pending.get(response.id) !== pending) {
+              // The deadline may have moved this very response into timedOut
+              // while beforeResolve was persisting it. Complete its recovery
+              // promise now; no second response will arrive to do that for us.
+              const timedOut = this.timedOut.get(response.id);
+              if (timedOut?.pending === pending) {
+                clearTimeout(timedOut.cleanup);
+                this.timedOut.delete(response.id);
+                pending.resolveLate(response.result);
+              }
+              return;
+            }
             clearTimeout(pending.timeout);
             this.pending.delete(response.id);
             this.emitPendingMetric(pending, "completed");
