@@ -220,6 +220,13 @@ export function excludedBackupPath(relativePath: string) {
   const segments = relativePath.split("/");
   const basename = segments.at(-1) as string;
   if (SENSITIVE_ROOT_DIRECTORIES.has(segments[0])) return true;
+  // Recovery homes can contain authentication material; runtime tmp and XDG
+  // sockets are regenerated and must not be treated as durable product files.
+  if (segments[0].startsWith("auth-recovery-")) return true;
+  if (segments[0] === "app-home" && segments[1] === ".codex" && segments[2] === "tmp") return true;
+  if (segments[0] === "users" && segments[2] === "runtime" &&
+    segments[3] === "codex-home" && segments[4] === "tmp") return true;
+  if (segments[0] === "users" && segments[2] === "browser" && segments[3] === "xdg") return true;
   if (basename === "auth.json" || basename === ".env" || basename.startsWith(".env.")) {
     return true;
   }

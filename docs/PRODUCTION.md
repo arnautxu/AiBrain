@@ -139,6 +139,14 @@ toolchain LibreOffice/Poppler/QPDF. No crea workers ni browsers. Un estado
 backups sin réplica reciente o errores `preflight failed` deben alertar al
 operador. El runbook muestra los comandos de diagnóstico sin imprimir secretos.
 
+El snapshot incluye estado durable: se excluyen los hogares `auth-recovery-*`, los
+temporales `app-home/.codex/tmp` y `users/*/runtime/codex-home/tmp`, y el estado
+regenerable `users/*/browser/xdg`. Los enlaces fuera de esas rutas siguen siendo
+un error; no se siguen enlaces para ampliar la copia. El historial del motor,
+los archivos de usuario y las descargas siguen incluidos. Las rutas durables
+deben pertenecer al UID/GID de la instalación; una intervención como root no
+debe dejar directorios de auditoría inaccesibles al servicio.
+
 Cada `backup:verify` correcto escribe atómicamente
 `backups/verification/latest.json` con installation, backup ID, fingerprint,
 fecha de creación y fecha de verificación. El evaluator local

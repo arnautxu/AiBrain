@@ -86,6 +86,20 @@ afterEach(async () => {
 });
 
 describe("FileBackupService", () => {
+  it("excludes regenerated runtime links and recovery credentials but retains runtime history", async () => {
+    const { dataRoot, service } = await fixture();
+    for (const relative of ["app-home/.codex/tmp", "auth-recovery-test/tmp", "users/user-one/runtime/codex-home/tmp", "users/user-one/browser/xdg"]) {
+      await mkdir(path.join(dataRoot, relative), { recursive: true });
+      await symlink("/missing-runtime-target", path.join(dataRoot, relative, "ephemeral"));
+    }
+    await writeFile(path.join(dataRoot, "users/user-one/runtime/codex-home/history.jsonl"), "durable-history\n");
+    const created = await service.create();
+    const paths = created.manifest.files.map((entry) => entry.path);
+    expect(paths).toContain("users/user-one/runtime/codex-home/history.jsonl");
+    expect(paths.some((entry) => entry.includes("ephemeral"))).toBe(false);
+    await expect(service.verify(created.snapshotRoot)).resolves.toEqual(created.manifest);
+  });
+
   it("creates a schema-valid backup id when the clock includes milliseconds", async () => {
     const { dataRoot, backupsRoot, publishWriteRoot } = await fixture();
     const service = new FileBackupService(
