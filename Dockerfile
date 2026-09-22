@@ -101,6 +101,7 @@ RUN printf '%s\n' \
     ca-certificates \
     chromium \
     chromium-sandbox \
+    file \
     fonts-dejavu-core \
     fonts-liberation \
     libreoffice-calc \
