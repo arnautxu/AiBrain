@@ -211,3 +211,17 @@ y recupera automáticamente los inputs y las dos imágenes anteriores si una pro
 healthy. Un journal por fase, timeout de subprocess, deadline compartido, lock advisory del SO e
 inspección del digest/revisión realmente ejecutados cubren caída y reboot;
 runbook: `docs/RELEASES.md`.
+
+
+### Onboarding readiness fixes (2026-09-22)
+
+The private gateway coalesces adjacent queued assistant text fragments before
+assigning durable event IDs. Thread, turn, item, RPC response and completion
+boundaries remain ordered; persisted events and their ACK contract are unchanged.
+This bounds the per-token journal overhead observed during a long scheduling
+calculation. Real scheduling acceptance must be repeated after deployment.
+
+The host backup orchestrator accepts a root-owned Docker executable up to 128 MiB
+(the live executable is about 30 MiB); configuration files retain the 1 MiB limit
+and all ownership, link and permission checks. A successful simulation is not a
+verified production snapshot or an off-host replica.

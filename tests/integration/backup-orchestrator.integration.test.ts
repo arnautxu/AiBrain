@@ -122,6 +122,15 @@ describe("durable host backup orchestrator", () => {
     expect(commands.findIndex((args) => args.includes("create"))).toBeLessThan(commands.findIndex((args) => args.includes("verify")));
   });
 
+  it("accepts a normal-sized Docker executable while retaining private configuration checks", async () => {
+    const input = await fixture();
+    const executable = input.args[input.args.indexOf("--docker-bin") + 1];
+    await writeFile(executable, (await readFile(executable, "utf8")) + "\n/*" + "x".repeat(2 * 1024 * 1024) + "*/\n");
+    const result = await execFileAsync(process.execPath, input.args, { env: input.env });
+    expect(JSON.parse(result.stdout)).toMatchObject({ status: "verified", backupId });
+    expect(input.actions).toEqual(["drain", "resume"]);
+  });
+
   it("restores app and admission after a backup command failure without claiming success", async () => {
     const input = await fixture();
     await expect(execFileAsync(process.execPath, input.args, {
