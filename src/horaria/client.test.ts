@@ -33,7 +33,7 @@ describe("private horarIA transport", () => {
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   });
   it("rejects cross-installation sessions before contacting any service", async () => {
-    await expect(callHoraria(config, { ...session, tenant: { id: "shop-b", name: "Other" } }, { operation: "status" }, tmpdir())).rejects.toThrow("accés");
+    await expect(callHoraria(config, { ...session, tenant: { id: "shop-b", name: "Other" } }, { operation: "status" }, tmpdir())).rejects.toThrow("acceso");
   });
   it("requires a private installation-bound config and refuses a symlink config", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "horaria-config-"));
