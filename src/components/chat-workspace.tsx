@@ -44,7 +44,7 @@ import type { BrainManifest, BrainPreferences } from "@/config/brain";
 import type { RuntimeStatus } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
 import { LandingTasks } from "@/components/landing-tasks";
-import { landingSuggestions, scheduledPromptTemplates } from "@/lib/landing-suggestions";
+import { landingSuggestions } from "@/lib/landing-suggestions";
 import { isStandaloneProject, type WorkbenchProject, type WorkbenchThread } from "@/workbench/types";
 import { currentTurnStatusLabel, hasRelevantWorkProcess, TurnActivity } from "@/components/turn-activity";
 import { publicAssistantText } from "@/ui/public-activity";
@@ -666,6 +666,20 @@ export function ChatWorkspace({
   const changeComposerText = (text: string) => {
     onPromptChange(text);
   };
+  const selectSuggestion = (text: string) => {
+    const textarea = composerRef.current;
+    if (textarea) {
+      // Set the editable value before React updates defaultValue; otherwise a
+      // pristine textarea can reset its selection on the next focus/select render.
+      textarea.value = text;
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(text.length, text.length);
+      syncCaret(textarea);
+    }
+    changeComposerText(text);
+    setMentionOpen(false);
+    setConnectorCatalogOpen(false);
+  };
   // The editable text is authoritative, including paste, undo and restored drafts.
   // A partial/deleted token cannot retain an invisible tool selection.
   useEffect(() => {
@@ -985,11 +999,6 @@ export function ChatWorkspace({
                 {canGenerateImages ? <button role="menuitemcheckbox" tabIndex={-1} aria-checked={imageGeneration} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => { onImageGenerationChange(!imageGeneration); setComposerMenuOpen(false); requestAnimationFrame(() => composerAddButtonRef.current?.focus()); }}><ImagesSquare size={17} /><span className="min-w-0 flex-1">{t("Crear imagen")}</span>{imageGeneration ? <Check size={13} weight="bold" /> : null}</button> : null}
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] hover:bg-[var(--surface-hover)] active:scale-[.99] disabled:opacity-45" disabled={sending} onClick={() => openAuthorizedConnectors(composerAddButtonRef.current)}><At size={17} />{t("Tools")}</button>
                 <button role="menuitem" tabIndex={-1} className="touch-target flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-[13px] text-[var(--text)] disabled:opacity-45" disabled={!project || sending || !onServerReferencesChange} onClick={() => { serverReturnFocusRef.current = composerAddButtonRef.current; setComposerMenuOpen(false); setServerOpenKey(serverSelectionKey); }}><FileIcon size={17} />{t("Server")}</button>
-                <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="embedded" disabled={sending} onSelect={(text) => {
-                  onPromptChange(text);
-                  setComposerMenuOpen(false);
-                  requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
-                }} />
               </div>
             ) : null}
             {serverOpen && project && onServerReferencesChange ? <ServerPicker key={project.id + (thread?.id ?? "")} projectId={project.id} selected={serverReferences} onSelect={onServerReferencesChange} onClose={() => setServerOpenKey(null)} returnFocus={serverReturnFocusRef} /> : null}
@@ -1180,16 +1189,9 @@ export function ChatWorkspace({
             </div>
             <button type="button" className="landing-band-item" disabled={!project || sending || !onServerReferencesChange} onClick={event => { serverReturnFocusRef.current = event.currentTarget; setServerOpenKey(serverSelectionKey); }}><FileIcon size={15} aria-hidden="true" />{t("Server")}</button>
             <button type="button" className="landing-band-item" disabled={sending} aria-haspopup="listbox" aria-expanded={connectorCatalogOpen} onClick={(event) => { setComposerPickerOpen(null); if (connectorCatalogOpen) setConnectorCatalogOpen(false); else openAuthorizedConnectors(event.currentTarget); }}><At size={15} aria-hidden="true" />{t("Tools")}</button>
-            <LandingTasks tasks={scheduledPromptTemplates(companyName, t)} variant="menu" disabled={sending} onSelect={(text) => {
-              onPromptChange(text);
-              requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
-            }} />
           </div> : null}
           {!hasMessages ? <div className="landing-suggestions mx-auto mt-5 w-full max-w-[720px]" aria-label={t("Sugerencias para empezar")}>
-            <LandingTasks tasks={suggestions} variant="suggestions" disabled={sending} onSelect={(text) => {
-              onPromptChange(text);
-              requestAnimationFrame(() => composerRef.current?.focus({ preventScroll: true }));
-            }} />
+            <LandingTasks tasks={suggestions} disabled={sending} onSelect={selectSuggestion} />
           </div> : null}
         </div>
       </div>}

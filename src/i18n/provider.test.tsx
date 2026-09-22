@@ -11,7 +11,7 @@ const refresh = vi.hoisted(() => vi.fn());
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function Example({ content }: { content: string }) { const t = useUiText(); return <><button>{t("Proyecto")}</button><p data-testid="customer-content">{content}</p><p>{t("Rol de {p0}", { p0: content })}</p></>; }
-function Tasks({ onSelect }: { onSelect: (text: string) => void }) { const t = useUiText(); return <LandingTasks tasks={scheduledPromptTemplates("Empresa Proyecto", t)} variant="menu" disabled={false} onSelect={onSelect} />; }
+function Tasks({ onSelect }: { onSelect: (text: string) => void }) { const t = useUiText(); return <LandingTasks tasks={scheduledPromptTemplates("Empresa Proyecto", t)} disabled={false} onSelect={onSelect} />; }
 describe("installation interface language", () => {
   it("defaults to English and refreshes every consumer without translating customer text", () => {
     const content = "Proyecto: conserva mi texto en español.";
@@ -29,11 +29,11 @@ describe("installation interface language", () => {
     expect(translate("es", "Correu o contrasenya incorrectes.")).toBe("Correo o contraseña incorrectos.");
     expect(translate("en", "Correu o contrasenya incorrectes.")).toBe("Incorrect email or password.");
   });
-  it("localizes built-in recurring prompts while preserving the company name", async () => {
+  it("localizes built-in suggestion prompts while preserving the company name", async () => {
     const select = vi.fn(); render(<Tasks onSelect={select} />);
-    fireEvent.click(screen.getByRole("button", { name: "Recurring tasks" }));
-    fireEvent.click(await screen.findByRole("menuitem", { name: "Work on team schedules for Empresa Proyecto" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Review schedule changes" }));
+    expect(screen.queryByRole("button", { name: "Recurring tasks" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Work on team schedules for Empresa Proyecto" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Review schedule changes" }));
     expect(select).toHaveBeenCalledWith("Review team schedule changes for Empresa Proyecto for…");
   });
   it("refreshes only after an acknowledged company preference write", async () => {

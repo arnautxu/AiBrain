@@ -528,13 +528,12 @@ describe("chat workspace simplificado", () => {
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Archivos del servidor" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Tareas recurrentes" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /Trabajemos en los horarios/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Trabajemos en los horarios/ }));
     expect(screen.getByRole("menuitem", { name: "Revisar cambios de horarios" })).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it.each([false, true])("replaces templates in the plus menu with attachments and project intact (chat=%s)", (chat) => {
+  it.each([false, true])("keeps the plus menu and draft intact without recurring tasks (chat=%s)", (chat) => {
     const onSend = vi.fn();
     const onAttachmentsChange = vi.fn();
     const onDestinationChange = vi.fn();
@@ -547,14 +546,14 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByRole("menuitem", { name: "Archivos del servidor" })).toBeDisabled();
     expect(screen.getByRole("menuitem", { name: "Conexiones" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Adjuntar archivos" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Tareas recurrentes" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Prepárame una presentación" }));
-    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Prepárame una presentación sobre…");
+    expect(screen.queryByRole("menuitem", { name: "Tareas recurrentes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Tareas recurrentes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Mensaje" })).toHaveValue("Texto anterior");
     expect(screen.getByRole("button", { name: "Quitar reference.png" })).toBeInTheDocument();
     expect(onAttachmentsChange).not.toHaveBeenCalled();
     expect(onDestinationChange).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
-    expect(screen.queryByRole("menu", { name: "Añadir al mensaje" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menu", { name: "Añadir al mensaje" })).toBeInTheDocument();
   });
 
   it("restores a failed request for review without changing the original or sending", async () => {
