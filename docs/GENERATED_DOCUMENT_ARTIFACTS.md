@@ -123,6 +123,12 @@ durable editado de la instalación al desplegar.
 
 ## Conversión headless en el contenedor restringido
 
+La imagen incluye la utilidad `file` y su base de firmas de Debian para que el
+asistente pueda identificar archivos locales durante la revisión. Se instala
+al construir la imagen desde el snapshot fijado; no requiere instalaciones en
+el host ni durante un turno. Esta comprobación no sustituye el renderizado ni
+la validación del contenido y permisos antes de entregar.
+
 El conversor usa un `/proc` vacío de solo lectura dentro de su namespace PID.
 No monta el proc del host ni relaja el aislamiento cuando el kernel rechaza un
 nuevo procfs. LibreOffice se ejecuta mediante su binario nativo con directorio
