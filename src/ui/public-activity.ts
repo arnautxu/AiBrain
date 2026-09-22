@@ -82,7 +82,7 @@ export function publicAssistantText(value: unknown, assistantName: string, maxim
   if (!normalized) return "";
   const links: string[] = [];
   const protectedText = normalized.replace(
-    /https?:\/\/[^\s<>"']+|\/api\/(?:projects|browser|documents)\/[^\s<>"')\]]+/giu,
+    /https?:\/\/[^\s<>"']+|\/api\/threads\/[0-9a-f-]{36}\/artifacts\/[0-9a-f-]{36}(?:\?[^\s<>"')\]]*)?|\/api\/(?:projects|browser|documents)\/[^\s<>"')\]]+/giu,
     (link) => {
       const index = links.push(link) - 1;
       return `SAFEURLTOKEN${index}ENDTOKEN`;

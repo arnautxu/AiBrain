@@ -3,6 +3,14 @@ import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
 import { completePublicTextPrefix, publicAssistantText } from "@/ui/public-activity";
 
 describe("known private workspace prefixes", () => {
+  it("preserves downloadable artifact links while redacting standalone internal ids", () => {
+    const id = "07267fd4-0bc1-4b34-9a4c-3a023c27172b";
+    const artifact = "d1358f70-ef69-434e-823b-ade88f4f21ca";
+    const url = `/api/threads/${id}/artifacts/${artifact}?download=1`;
+    expect(publicAssistantText(`[Descargar](${url})\nInterno: ${id}`, "Asistente"))
+      .toBe(`[Descargar](${url})\nInterno: identificador interno`);
+  });
+
   it.each([
     '/tmp/aibrain QA_PRIVATE_MARKER tail-abc/workspace',
     '/tmp/aibrain "QA_PRIVATE_MARKER" tail-abc/workspace',
