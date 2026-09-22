@@ -13,7 +13,7 @@ export function arnallScheduleForPreview(
   if (!schedule || typeof schedule !== "object" || Array.isArray(schedule) ||
       !("establishmentId" in schedule) || schedule.establishmentId !== preview.establecimientoId ||
       !("week" in schedule) || schedule.week !== preview.semana) {
-    throw new Error("Falten les dades de la plantilla Excel obligatòria. No es pot substituir per un altre format.");
+    throw new Error("Faltan los datos de la plantilla Excel obligatoria. No se puede sustituir por otro formato.");
   }
   // The workbook generator validates all people, shifts and template capacity.
   return schedule as ArnallSchedule;

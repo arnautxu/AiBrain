@@ -100,3 +100,7 @@ npm run users:manage -- \
 ```
 
 No ejecutar el modo offline con la aplicación activa: no puede cerrar objetos de runtime que viven en otro proceso. La protección durable (`enabled:false` y revocación de sesiones) sigue evitando accesos nuevos, pero el endpoint host-local es el mecanismo correcto para una baja inmediata.
+
+## Arnall language
+
+Arnall onboarding uses Spanish for user-facing text, schedule previews, review explanations and generated schedule labels. The approved workbook retains its original sheet names, shift codes, formulas and layout so calculation references remain intact. Historical balances and inherited formula defects remain explicitly unverified.

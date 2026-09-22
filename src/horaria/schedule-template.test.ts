@@ -26,8 +26,8 @@ describe("Arnall preview template selection", () => {
     expect(workbook.match(/state="hidden"/gu)).toHaveLength(3);
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("text");
     expect(sheet).toContain("Persona fictícia");
-    expect(sheet.match(/<f\b[^>]*(?:\/>|>[\s\S]*?<\/f>)/gu))
-      .toEqual(template["xl/worksheets/sheet1.xml"].match(/<f\b[^>]*(?:\/>|>[\s\S]*?<\/f>)/gu));
+    expect(sheet.match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/gu))
+      .toEqual(template["xl/worksheets/sheet1.xml"].match(/<f\b[^>]*?(?:\/>|>[\s\S]*?<\/f>)/gu));
     expect(sheet.match(/<f\b/gu)).toHaveLength(2499);
     for (const node of ["cols", "mergeCells", "pageMargins", "pageSetup"]) {
       const re = new RegExp(`<${node}\\b[^>]*(?:/>|>[\\s\\S]*?</${node}>)`, "u");
@@ -40,7 +40,7 @@ describe("Arnall preview template selection", () => {
     "rejects missing or mismatched schedule data instead of using the generic table: %j",
     (excelSchedule) => {
       expect(() => arnallScheduleForPreview(installation, { ...preview, excelSchedule }))
-        .toThrow("plantilla Excel obligatòria");
+        .toThrow("plantilla Excel obligatoria");
     },
   );
 

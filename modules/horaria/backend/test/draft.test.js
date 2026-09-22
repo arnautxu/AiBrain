@@ -100,9 +100,9 @@ for (const temporaryCoverage of [false, true]) test(`real draft pipeline checks 
     assert.ok(res.body.review.conflicts.length > 0, 'impossible coverage must not disappear behind the model summary');
     assert.equal(res.body.review.allRespected, false);
     assert.equal(res.body.review.checks.filter(c => c.employeeId === null).length, 28);
-    assert.ok(res.body.review.checks.filter(c => c.employeeId === null).every(c => c.detail.includes('mínim 1')));
-    assert.ok(!res.body.review.notVerified.some(note => note.includes('No hi ha regles de cobertura')));
-    assert.ok(res.body.review.checks.filter(c => c.detail === 'Petició de la simulació' || c.detail === 'Absència simulada, no desada').every(c => c.status === 'respected'));
+    assert.ok(res.body.review.checks.filter(c => c.employeeId === null).every(c => c.detail.includes('mínimo 1')));
+    assert.ok(!res.body.review.notVerified.some(note => note.includes('No hay reglas de cobertura')));
+    assert.ok(res.body.review.checks.filter(c => c.detail === 'Petición de la simulación' || c.detail === 'Ausencia simulada, sin guardar').every(c => c.status === 'respected'));
     assert.equal(writes, 0);
     assert.equal(modelCalls, 1);
     assert.equal(employees[3].condicionesFijas, null);

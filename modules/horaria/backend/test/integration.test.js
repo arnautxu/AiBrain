@@ -42,8 +42,8 @@ test('service rejects browser bearer tokens, rechecks active manager, limits sho
 test('preview preserves reduced hours, absences, unassigned people and produces real PDF', () => {
   const employee = { id: 1, nombre: 'Persona', apellidos: 'Prova', horasPorTurno: 4 };
   const rows = scheduleRows([{ empleadoId: 1, empleado: employee, dia: 'LUNES', turno: 'MANANA', horaEntrada: '08:00', peticio: 'MANANA' }, { empleadoId: 1, empleado: employee, dia: 'MARTES', turno: 'LIBRE', ausencia: 'VACACIONES' }], {}, [employee, { id: 2, nombre: 'Sense torns' }]);
-  assert.equal(rows[1][1], 'Matí 08:00–12:00 *'); assert.equal(rows[1][2], 'Vacances'); assert.equal(rows[1][8], 4);
-  assert.equal(rows[2][1], 'Sense assignar');
+  assert.equal(rows[1][1], 'Mañana 08:00–12:00 *'); assert.equal(rows[1][2], 'Vacaciones'); assert.equal(rows[1][8], 4);
+  assert.equal(rows[2][1], 'Sin asignar');
   assert.equal(previewPdf({ title: 'Prova', status: 'esborrany', note: 'Peticions', rows }).subarray(0, 5).toString(), '%PDF-');
 });
 test('incoming WhatsApp requires provider signature even with valid bridge identity', () => {
