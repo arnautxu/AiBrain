@@ -125,3 +125,13 @@ Les crides de generació mantenen el seu job durable; un càlcul interromput no 
 `infra/hetzner/app/horaria-backup.sh` crea còpies PostgreSQL en format custom al volum de backups existent, comprova que `pg_restore` en pot llegir el catàleg i desa el SHA256. Cal instal·lar-lo amb un timer diari del host i executar la primera còpia després de la importació. No elimina dades ni còpies existents. La comprovació del catàleg no substitueix un assaig de restauració ni prova per si sola la replicació fora del host.
 
 La proposta Excel d’Arnall utilitza obligatòriament el format del full acabat de `HORARI SAGARO.xlsm`, amb dues files per persona i torn/hores per dia. La plantilla, la separació per botiga i el circuit de revisió i repartiment estan documentats a [HORARIA_EXCEL_TEMPLATE.md](HORARIA_EXCEL_TEMPLATE.md), incloent què està implementat i què encara no és un flux automàtic. Altres instal·lacions conserven la maqueta genèrica de nou columnes. El transport de càlcul usa una connexió HTTP privada amb termini explícit de vint minuts, sense el límit implícit de cinc minuts de les capçaleres de fetch.
+
+
+## Preparación de onboarding, 2026-09-22
+
+La prueba autenticada de un borrador de S’Agaró agotó los 18 minutos del
+cálculo con el modelo conectado y esfuerzo heredado. El cálculo solicita ahora
+explícitamente esfuerzo `medium`, conserva el modelo conectado, los límites,
+la ausencia de herramientas y la validación determinista posterior. Esto no
+certifica que el problema esté resuelto: requiere repetir el borrador real tras
+el despliegue y verificar su Excel, conflictos y ausencia de escrituras.

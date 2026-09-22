@@ -35,6 +35,7 @@ describe("horarIA connected Codex", () => {
         return { thread: { id: "calculation" } };
       }
       if (method === "turn/start") {
+        expect(params.effort).toBe("medium");
         beforeResolve({ turn: { id: "calculation-turn" } });
         handlers.onNotification({ method: "item/completed", params: { item: { type: "agentMessage", text: JSON.stringify({ text: "Calculated", toolName: "", toolInput: "" }) } } });
         handlers.onNotification({ method: "turn/completed", params: { turn: { status: "completed" } } });
