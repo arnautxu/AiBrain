@@ -73,7 +73,7 @@ describe("horarIA chat boundary", () => {
   it("keeps durable authorization for background drafts and confirmation for permanent preferences", async () => {
     const { run } = await setup();
     await expect(run("run", { operation: "schedules.draft", body: { establecimientoId: 5, semana: "2026-W40" } }, { background: true }))
-      .rejects.toThrow("autorització durable");
+      .rejects.toThrow("autorización permanente");
     const result = await run("run", { operation: "preferences.update", id: "1", body: { semana: "2026-W40", diasNoDisponible: ["MARTES"] } });
     expect(result.confirmationRequired).toBe(true);
     expect(callHoraria).not.toHaveBeenCalled();
@@ -104,13 +104,13 @@ describe("horarIA chat boundary", () => {
     vi.mocked(callHoraria).mockRejectedValue(new Error("Connection lost"));
     const overrides = { sourceMessage: "endavant", sourceTurnId: "turn-2" };
     await expect(run("confirm", { proposalId: p.proposalId }, overrides)).rejects.toThrow("Connection lost");
-    await expect(run("confirm", { proposalId: p.proposalId }, overrides)).rejects.toThrow("pot haver-se aplicat");
+    await expect(run("confirm", { proposalId: p.proposalId }, overrides)).rejects.toThrow("puede haberse aplicado");
     expect(callHoraria).toHaveBeenCalledTimes(1);
   });
   it("background text cannot confirm or grant itself write permission", async () => {
     const { run, config, context } = await setup();
     const input = { operation: "schedules.generate", body: { establecimientoId: 1, semana: "2026-W38" } };
-    await expect(run("run", input, { background: true })).rejects.toThrow("autorització durable");
+    await expect(run("run", input, { background: true })).rejects.toThrow("autorización permanente");
     expect(callHoraria).not.toHaveBeenCalled();
     config.users[context.session.user.id].backgroundOperations.push("schedules.generate");
     await run("run", input, { background: true });
@@ -119,12 +119,12 @@ describe("horarIA chat boundary", () => {
   it("honors a revoked AiBrain tools.execute permission before reading business data", async () => {
     const { run, context } = await setup();
     context.permissions.rules[0].effect = "deny";
-    await expect(run("run", { operation: "status" })).rejects.toThrow("permís");
+    await expect(run("run", { operation: "status" })).rejects.toThrow("permiso");
     expect(callHoraria).not.toHaveBeenCalled();
   });
   it("rejects unmapped users and host/path injection", async () => {
     const { run, config } = await setup(); config.users = {};
-    await expect(run("run", { operation: "status" })).rejects.toThrow("accés");
+    await expect(run("run", { operation: "status" })).rejects.toThrow("acceso");
     expect(() => resolveOperation({ operation: "__proto__" })).toThrow();
     expect(() => resolveOperation({ operation: "employees.update", id: "../whatsapp/webhook" })).toThrow();
     expect(() => resolveOperation({ operation: "status", query: { secret: "guess" } })).toThrow();

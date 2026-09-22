@@ -50,18 +50,18 @@ const response = (value: unknown): DynamicToolCallResponse => ({ success: true, 
 export function confirmsHoraria(message: string) { return /^(sí|si|yes|ok|confirmo|confirmat|confirma|confirmar|endavant|fes-ho|adelante|aplica-ho|publica-ho|envia-ho)[.!\s]*$/iu.test(message.trim()); }
 
 export async function handleHorariaToolCall(params: DynamicToolCallParams, context: Context) {
-  if (params.namespace !== HORARIA_NAMESPACE || params.threadId !== context.runtimeThreadId || params.turnId !== context.runtimeTurnId || !record(params.arguments)) throw new Error("Crida d’horaris invàlida.");
+  if (params.namespace !== HORARIA_NAMESPACE || params.threadId !== context.runtimeThreadId || params.turnId !== context.runtimeTurnId || !record(params.arguments)) throw new Error("Solicitud de horarios no válida.");
   const permissions = context.permissions;
   const toolRules = permissions.rules.filter(rule => rule.ruleId === "tools.execute" && rule.action === "execute");
-  if (permissions.installationId !== context.session.tenant.id || permissions.userId !== context.session.user.id || permissions.projectId !== context.projectId || toolRules.some(rule => rule.effect === "deny") || !toolRules.some(rule => rule.effect === "allow")) throw new Error("No tens permís per executar eines d’horaris en aquest projecte.");
+  if (permissions.installationId !== context.session.tenant.id || permissions.userId !== context.session.user.id || permissions.projectId !== context.projectId || toolRules.some(rule => rule.effect === "deny") || !toolRules.some(rule => rule.effect === "allow")) throw new Error("No tienes permiso para utilizar las herramientas de horarios en este proyecto.");
   if (params.tool === "catalog") return response(OPERATIONS);
   let config;
-  try { config = await loadHorariaConfig(context.installation); } catch { throw new Error("horarIA encara no està configurat en aquesta instal·lació. Cal connectar el servei privat i assignar els responsables."); }
-  if (context.session.provider !== "local" || context.session.tenant.id !== config.installationId || !Object.hasOwn(config.users, context.session.user.id)) throw new Error("No tens accés a horarIA.");
+  try { config = await loadHorariaConfig(context.installation); } catch { throw new Error("Horarios todavía no está configurado en esta instalación. Hay que conectar el servicio privado y asignar a los responsables."); }
+  if (context.session.provider !== "local" || context.session.tenant.id !== config.installationId || !Object.hasOwn(config.users, context.session.user.id)) throw new Error("No tienes acceso a Horarios.");
   const root = path.join(context.installation.paths.usersRoot, context.session.user.id, "horaria-proposals");
   await mkdir(root, { recursive: true, mode: 0o700 });
   const metadata = await lstat(root);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o077)) throw new Error("El directori d’horaris no és privat.");
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o077)) throw new Error("El directorio de horarios no es privado.");
   const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
   const execute = async (input: OperationInput) => {
     const result = await callHoraria(config, context.session, input, context.projectWorkspace);
@@ -70,7 +70,7 @@ export async function handleHorariaToolCall(params: DynamicToolCallParams, conte
   };
   if (params.tool === "run") {
     const raw = params.arguments;
-    if (Object.keys(raw).some(k => !["operation", "id", "query", "body", "uploadPath"].includes(k)) || typeof raw.operation !== "string" || (raw.id !== undefined && typeof raw.id !== "string") || (raw.query !== undefined && !record(raw.query)) || (raw.body !== undefined && !record(raw.body)) || (raw.uploadPath !== undefined && typeof raw.uploadPath !== "string") || JSON.stringify(raw).length > 500_000) throw new Error("Dades d’horaris invàlides.");
+    if (Object.keys(raw).some(k => !["operation", "id", "query", "body", "uploadPath"].includes(k)) || typeof raw.operation !== "string" || (raw.id !== undefined && typeof raw.id !== "string") || (raw.query !== undefined && !record(raw.query)) || (raw.body !== undefined && !record(raw.body)) || (raw.uploadPath !== undefined && typeof raw.uploadPath !== "string") || JSON.stringify(raw).length > 500_000) throw new Error("Datos de horarios no válidos.");
     const input = raw as OperationInput;
     const operation = resolveOperation(input);
     if (operation.effect === "read") return response(await execute(input));
@@ -87,15 +87,15 @@ export async function handleHorariaToolCall(params: DynamicToolCallParams, conte
         await atomicWriteFile(file, JSON.stringify(proposal), { mode: 0o600 });
       }
       if (context.background || operation.effect === "draft") {
-        if (context.background && !config.users[context.session.user.id].backgroundOperations.includes(input.operation)) throw new Error("Aquesta escriptura no té autorització durable per executar-se automàticament.");
+        if (context.background && !config.users[context.session.user.id].backgroundOperations.includes(input.operation)) throw new Error("Este cambio no tiene autorización permanente para ejecutarse automáticamente.");
         if (proposal.state === "complete") {
           if (operation.effect === "draft") await context.preview(proposal.result);
           return response(proposal.result);
         }
-        if (proposal.state === "executing") throw new Error("Resultat anterior desconegut; revisa l’estat abans de repetir.");
+        if (proposal.state === "executing") throw new Error("Resultado anterior desconocido; revisa el estado antes de repetir.");
         proposal.state = "executing";
         await atomicWriteFile(file, JSON.stringify(proposal), { mode: 0o600 });
-        if (proposal.uploadHash && proposal.input.uploadPath && createHash("sha256").update(await readRegularFileWithin(context.projectWorkspace, proposal.input.uploadPath, 10 * 1024 * 1024)).digest("hex") !== proposal.uploadHash) throw new Error("La imatge ha canviat: revisa una nova proposta.");
+        if (proposal.uploadHash && proposal.input.uploadPath && createHash("sha256").update(await readRegularFileWithin(context.projectWorkspace, proposal.input.uploadPath, 10 * 1024 * 1024)).digest("hex") !== proposal.uploadHash) throw new Error("La imagen ha cambiado: revisa una nueva propuesta.");
         proposal.result = await execute(proposal.input);
         proposal.state = "complete";
         await atomicWriteFile(file, JSON.stringify(proposal), { mode: 0o600 });
@@ -112,21 +112,21 @@ export async function handleHorariaToolCall(params: DynamicToolCallParams, conte
   }
   if (params.tool === "confirm") {
     const id = params.arguments.proposalId;
-    if (Object.keys(params.arguments).length !== 1 || typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id) || context.background || !confirmsHoraria(context.sourceMessage)) throw new Error("Cal una confirmació explícita al xat.");
+    if (Object.keys(params.arguments).length !== 1 || typeof id !== "string" || !/^[a-f0-9]{64}$/.test(id) || context.background || !confirmsHoraria(context.sourceMessage)) throw new Error("Hace falta una confirmación explícita en el chat.");
     return locks.withLock(id, async () => {
       const file = path.join(root, `${id}.json`);
       const proposal = JSON.parse(await readFile(file, "utf8")) as Proposal;
-      if (proposal.threadId !== context.sourceThreadId || proposal.turnId === context.sourceTurnId || Date.now() - proposal.createdAt > 24 * 60 * 60 * 1000) throw new Error("Revisa i confirma una proposta vigent d’aquest xat.");
+      if (proposal.threadId !== context.sourceThreadId || proposal.turnId === context.sourceTurnId || Date.now() - proposal.createdAt > 24 * 60 * 60 * 1000) throw new Error("Revisa y confirma una propuesta vigente de este chat.");
       if (proposal.state === "complete") return response(proposal.result);
-      if (proposal.state !== "pending") throw new Error("L’operació pot haver-se aplicat; consulta l’estat abans de repetir-la.");
+      if (proposal.state !== "pending") throw new Error("La operación puede haberse aplicado; consulta el estado antes de repetirla.");
       proposal.state = "executing";
       await atomicWriteFile(file, JSON.stringify(proposal), { mode: 0o600 });
-      if (proposal.uploadHash && proposal.input.uploadPath && createHash("sha256").update(await readRegularFileWithin(context.projectWorkspace, proposal.input.uploadPath, 10 * 1024 * 1024)).digest("hex") !== proposal.uploadHash) throw new Error("La imatge ha canviat: revisa una nova proposta.");
+      if (proposal.uploadHash && proposal.input.uploadPath && createHash("sha256").update(await readRegularFileWithin(context.projectWorkspace, proposal.input.uploadPath, 10 * 1024 * 1024)).digest("hex") !== proposal.uploadHash) throw new Error("La imagen ha cambiado: revisa una nueva propuesta.");
       proposal.result = await execute(proposal.input);
       proposal.state = "complete";
       await atomicWriteFile(file, JSON.stringify(proposal), { mode: 0o600 });
       return response(proposal.result);
     });
   }
-  throw new Error("Eina d’horaris desconeguda.");
+  throw new Error("Herramienta de horarios desconocida.");
 }

@@ -41,19 +41,19 @@ for (const name of ["broadcast", "reminders", "unblock"]) add(`whatsapp.${name}`
 export type OperationInput = { operation: string; id?: string; query?: Record<string, string | number | boolean>; body?: Record<string, unknown>; uploadPath?: string };
 export function resolveOperation(input: OperationInput) {
   const operation = Object.hasOwn(OPERATIONS, input.operation) ? OPERATIONS[input.operation] : null;
-  if (!operation) throw new Error("Operació d’horaris desconeguda.");
+  if (!operation) throw new Error("Operación de horarios desconocida.");
   let target = operation.path;
   if (target.includes(":id")) {
-    if (!input.id || !/^[A-Za-z0-9_-]{1,100}$/.test(input.id)) throw new Error("Falta un identificador vàlid.");
+    if (!input.id || !/^[A-Za-z0-9_-]{1,100}$/.test(input.id)) throw new Error("Falta un identificador válido.");
     target = target.replace(":id", encodeURIComponent(input.id));
-  } else if (input.id !== undefined) throw new Error("Aquesta operació no accepta id.");
+  } else if (input.id !== undefined) throw new Error("Esta operación no admite un identificador.");
   const query = new URLSearchParams();
   for (const [key, value] of Object.entries(input.query ?? {})) {
-    if (!["semana", "establecimiento", "year", "empleado", "rol", "telefono", "limit", "comunidad", "q"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || String(value).length > 200) throw new Error("Filtre d’horaris invàlid.");
+    if (!["semana", "establecimiento", "year", "empleado", "rol", "telefono", "limit", "comunidad", "q"].includes(key) || !["string", "number", "boolean"].includes(typeof value) || String(value).length > 200) throw new Error("Filtro de horarios no válido.");
     query.set(key, String(value));
   }
-  if (operation.method === "GET" && (input.body || input.uploadPath)) throw new Error("Una consulta no accepta dades d’escriptura.");
-  if (input.uploadPath && input.operation !== "preferences.upload-sheet") throw new Error("Fitxer no admès.");
+  if (operation.method === "GET" && (input.body || input.uploadPath)) throw new Error("Una consulta no admite datos de escritura.");
+  if (input.uploadPath && input.operation !== "preferences.upload-sheet") throw new Error("Archivo no admitido.");
   return { ...operation, target: `${target}${query.size ? `?${query}` : ""}` };
 }
 

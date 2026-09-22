@@ -1661,7 +1661,7 @@ export async function runWorkerCodexTurn(
                 const result = await handleLocalDocumentDynamicToolCall({
                   ...(request.params as never as import("../../contracts/codex/0.153.4/types/v2/DynamicToolCallParams").DynamicToolCallParams),
                   namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE, tool: "create",
-                  arguments: { format: "xlsx", fileName: `horari-${String(data.semana)}-${String(data.establecimientoId)}-${data.previewHash.slice(0, 12)}.xlsx`, title: data.title, content: `${String(data.status)}. ${String(data.note)}`, rows: data.rows } as JsonValue,
+                  arguments: { format: "xlsx", fileName: `horario-${String(data.semana)}-${String(data.establecimientoId)}-${data.previewHash.slice(0, 12)}.xlsx`, title: data.title, content: `${data.status === "publicat" ? "Publicado" : "Borrador"}. ${String(data.note)}`, rows: data.rows } as JsonValue,
                 }, {
                   installation: runtime.config, installationId, userId: authenticatedUserId,
                   spreadsheetLayout: "schedule",
