@@ -10,7 +10,7 @@ export function validateDraftCoverage(coverage) {
   if (coverage === undefined) return;
   if (!record(coverage) || !Object.keys(coverage).length || Object.entries(coverage).some(([key, value]) =>
     !COVERAGE_MINIMUMS.includes(key) || !Number.isSafeInteger(value) || value < 0 || value > 99)) {
-    throw new Error('Cobertura temporal invàlida: indica mínims de persones per funció i torn.');
+    throw new Error('Cobertura temporal no válida: indica mínimos de personas por función y turno.');
   }
 }
 
@@ -19,7 +19,7 @@ export function validateDraftCoverage(coverage) {
 export function applyDraftCoverage(coverage, rules) {
   validateDraftCoverage(coverage);
   if (coverage === undefined) return rules;
-  const temporaryRule = { nombre: 'Cobertura temporal de l’esborrany', diasAplica: null, minPersonasDescansoPartido: 0,
+  const temporaryRule = { nombre: 'Cobertura temporal del borrador', diasAplica: null, minPersonasDescansoPartido: 0,
     ...Object.fromEntries(COVERAGE_MINIMUMS.map(key => [key, 0])) };
   return (rules.length ? rules : [temporaryRule]).map(rule => ({
     ...rule,
@@ -28,7 +28,7 @@ export function applyDraftCoverage(coverage, rules) {
 }
 
 export function validateDraftRequests(requests, employees) {
-  if (!Array.isArray(requests) || requests.length > employees.length) throw new Error('Peticions de simulació invàlides.');
+  if (!Array.isArray(requests) || requests.length > employees.length) throw new Error('Peticiones de simulación no válidas.');
   const ids = new Set();
   for (const r of requests) {
     if (!record(r) || Object.keys(r).some(k => !['employeeId', 'daysOff', 'shiftsByDay', 'noSplit', 'absences', 'maxHours'].includes(k)) ||
@@ -38,7 +38,7 @@ export function validateDraftRequests(requests, employees) {
         (r.maxHours !== undefined && (!Number.isFinite(r.maxHours) || r.maxHours < 0 || r.maxHours > 168)) ||
         (r.shiftsByDay !== undefined && (!record(r.shiftsByDay) || Object.entries(r.shiftsByDay).some(([d, t]) => !DAYS.includes(d) || !['MANANA', 'TARDE'].includes(t)))) ||
         (r.absences !== undefined && (!record(r.absences) || Object.entries(r.absences).some(([d, t]) => !DAYS.includes(d) || !['VACACIONES', 'BAJA_MEDICA'].includes(t))))) {
-      throw new Error('Petició no admesa o persona fora de la botiga.');
+      throw new Error('Petición no admitida o persona ajena a la tienda.');
     }
     ids.add(r.employeeId);
   }
@@ -68,18 +68,18 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
     const shifts = schedules.filter(s => s.empleadoId === e.id);
     const work = shifts.filter(s => s.turno !== 'LIBRE');
     const hours = work.reduce((sum, s) => sum + shiftHours(e, s.turno), 0) + (e.horasYaTrabajadas || 0);
-    check(e.id, 'Hores màximes setmanals', hours <= e.maxHorasSemana, `${hours} / ${e.maxHorasSemana} h, incloent altres botigues`);
-    check(e.id, 'Setmana completa', DAYS.every(d => shifts.filter(s => s.dia === d).length === 1), 'Un torn o dia lliure per persona i dia');
+    check(e.id, 'Horas máximas semanales', hours <= e.maxHorasSemana, `${hours} / ${e.maxHorasSemana} h, incluyendo otras tiendas`);
+    check(e.id, 'Semana completa', DAYS.every(d => shifts.filter(s => s.dia === d).length === 1), 'Un turno o día libre por persona y día');
     for (const s of work) {
       const slot = e.dispParsed?.[s.dia];
       const available = s.turno === 'MANANA' ? slot?.M !== false : s.turno === 'TARDE' ? slot?.T !== false : slot?.M !== false && slot?.T !== false;
-      check(e.id, `Disponibilitat ${s.dia}`, available && !closedDays.includes(s.dia) && !e.diasAusente[s.dia] && !e.diasPreferenciaLibre[s.dia] && !e.diasOcupadosOtrosEstablecimientos?.[s.dia] && (!e.turnosPorDiaPreferencia[s.dia] || e.turnosPorDiaPreferencia[s.dia] === s.turno), s.turno);
+      check(e.id, `Disponibilidad ${s.dia}`, available && !closedDays.includes(s.dia) && !e.diasAusente[s.dia] && !e.diasPreferenciaLibre[s.dia] && !e.diasOcupadosOtrosEstablecimientos?.[s.dia] && (!e.turnosPorDiaPreferencia[s.dia] || e.turnosPorDiaPreferencia[s.dia] === s.turno), s.turno);
     }
     const r = requests.find(r => r.employeeId === e.id);
-    if (r?.noSplit) check(e.id, 'Sense torns partits', !work.some(s => s.turno === 'PARTIDO'), 'Petició de la simulació');
-    for (const d of r?.daysOff || []) check(e.id, `${d} lliure`, shifts.some(s => s.dia === d && s.turno === 'LIBRE'), 'Petició de la simulació');
-    for (const [d, t] of Object.entries(r?.shiftsByDay || {})) check(e.id, `${d} només ${t}`, shifts.some(s => s.dia === d && [t, 'LIBRE'].includes(s.turno)), 'Petició de la simulació');
-    for (const [d, t] of Object.entries(r?.absences || {})) check(e.id, `${d} ${t}`, shifts.some(s => s.dia === d && s.turno === 'LIBRE' && s.ausencia === t), 'Absència simulada, no desada');
+    if (r?.noSplit) check(e.id, 'Sin turnos partidos', !work.some(s => s.turno === 'PARTIDO'), 'Petición de la simulación');
+    for (const d of r?.daysOff || []) check(e.id, `${d} libre`, shifts.some(s => s.dia === d && s.turno === 'LIBRE'), 'Petición de la simulación');
+    for (const [d, t] of Object.entries(r?.shiftsByDay || {})) check(e.id, `${d} solo ${t}`, shifts.some(s => s.dia === d && [t, 'LIBRE'].includes(s.turno)), 'Petición de la simulación');
+    for (const [d, t] of Object.entries(r?.absences || {})) check(e.id, `${d} ${t}`, shifts.some(s => s.dia === d && s.turno === 'LIBRE' && s.ausencia === t), 'Ausencia simulada, sin guardar');
   }
   for (const d of DAYS.filter(d => !closedDays.includes(d))) {
     const rule = rules.find(r => r.diasAplica && JSON.parse(r.diasAplica).includes(d)) || rules.find(r => !r.diasAplica) || rules[0];
@@ -89,14 +89,14 @@ export function reviewDraft(schedules, employees, rules, closedDays, requests, f
         const count = schedules.filter(s => s.dia === d && [shift, 'PARTIDO'].includes(s.turno) && s.empleado.funcion === role).length;
         const min = rule[`min${suffix}${period}`] ?? 0;
         const max = rule[`max${suffix}${period}`] ?? Infinity;
-        check(null, `${d} ${role} ${shift}`, count >= min && count <= max, `${count} persones; mínim ${min}${Number.isFinite(max) ? `, màxim ${max}` : ''}`);
+        check(null, `${d} ${role} ${shift}`, count >= min && count <= max, `${count} personas; mínimo ${min}${Number.isFinite(max) ? `, máximo ${max}` : ''}`);
       }
     }
   }
-  const notVerified = ['Equitat històrica, alternança de dissabtes i temps de descans: no certificats per aquesta revisió.'];
-  if (!rules.length) notVerified.push('No hi ha regles de cobertura configurades; no es pot certificar la cobertura.');
-  if (freeRules.length || employees.some(e => e.condicionesFijas || e.condicionesEstructuradas)) notVerified.push('Condicions fixes i regles de text: el motor les ha rebut, però aquesta revisió no en certifica el compliment complet.');
+  const notVerified = ['Equidad histórica, alternancia de sábados y tiempo de descanso: no certificados por esta revisión.'];
+  if (!rules.length) notVerified.push('No hay reglas de cobertura configuradas; no se puede certificar la cobertura.');
+  if (freeRules.length || employees.some(e => e.condicionesFijas || e.condicionesEstructuradas)) notVerified.push('El motor ha recibido las condiciones fijas y reglas de texto, pero esta revisión no certifica su cumplimiento completo.');
   return { checks, conflicts: checks.filter(c => c.status === 'conflict'), notVerified,
     allRespected: checks.some(c => c.status === 'conflict') ? false : null,
-    explanation: 'Esborrany calculat amb les dades vigents i les peticions temporals indicades. Els dies lliures, absències i límits personals tenen prioritat sobre la cobertura. Reviseu els conflictes abans de desar o publicar. No s’ha modificat ni enviat cap horari.' };
+    explanation: 'Borrador calculado con los datos cargados y las peticiones temporales indicadas. Los días libres, ausencias y límites personales tienen prioridad sobre la cobertura. Revisa los conflictos antes de guardar o publicar. No se ha modificado ni enviado ningún horario.' };
 }

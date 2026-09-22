@@ -21,6 +21,9 @@ describe("approved Arnall schedule template", () => {
     expect(parts["xl/styles.xml"]).toBe(template["xl/styles.xml"]);
     expect(parts["xl/theme/theme1.xml"]).toBe(template["xl/theme/theme1.xml"]);
     expect(sheet).toContain('r="B54"');
+    expect(sheet).toContain("TABLA DE SIGNOS");
+    expect(sheet).toContain("PETICIÓN APROBADA");
+    expect(sheet).not.toContain("PETICIÓ APROVADA");
     expect(sheet).toContain("16:30–20:30");
     expect(sheet).toContain('COUNTIF(E46:E91,"=M")');
   });
@@ -71,10 +74,10 @@ describe("approved Arnall schedule template", () => {
   });
 
   it("does not silently truncate people, invalid weeks, duplicate IDs or missing shop identity", () => {
-    expect(() => arnallScheduleParts({...data(),week:"2025-W53"})).toThrow("Setmana ISO");
+    expect(() => arnallScheduleParts({...data(),week:"2025-W53"})).toThrow("Semana ISO");
     expect(() => arnallScheduleParts({...data(),establishmentId:0})).toThrow();
     expect(() => arnallScheduleParts({...data(),people:[data().people[0],data().people[0]]})).toThrow();
-    expect(() => arnallScheduleParts({...data(),people:Array.from({length:25},(_,i)=>({...data().people[0],id:i+1}))})).toThrow("24 dependents");
+    expect(() => arnallScheduleParts({...data(),people:Array.from({length:25},(_,i)=>({...data().people[0],id:i+1}))})).toThrow("24 dependientes");
   });
 
   it("keeps unassigned days empty, makes occupied source-hidden slots visible and writes names as text", () => {
