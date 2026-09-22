@@ -1387,7 +1387,7 @@ describe("worker Codex turn", () => {
     expect(events).not.toContainEqual({ type: "done" });
   }, 15_000);
 
-  it("keeps review active and never delivers existing documents merely listed by a command", async () => {
+  it.each([false, true])("keeps review active after an intermediate delivery (%s) and never delivers listed documents", async (deliveredEarlier) => {
     vi.stubEnv("AIBRAIN_TURN_IDLE_TIMEOUT_MS", "5000");
     vi.stubEnv("AIBRAIN_TURN_HARD_TIMEOUT_MS", "5000");
     vi.stubEnv("AIBRAIN_DOCUMENT_TOOL_TERMINAL_GRACE_MS", "1000");
@@ -1463,6 +1463,15 @@ describe("worker Codex turn", () => {
           } as never);
           queueMicrotask(() => {
             void (async () => {
+              if (deliveredEarlier) {
+                await handlers?.onNotification({
+                  method: "item/completed",
+                  params: {
+                    threadId: "runtime-thread-watchdog", turnId: "runtime-turn-watchdog",
+                    item: { id: "intermediate-pdf", type: "dynamicToolCall", namespace: "aibrain_documents", tool: "create", status: "completed", contentItems: [] },
+                  },
+                }, { eventId: "intermediate-pdf-completed", sequence: 3, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+              }
               await handlers?.onNotification({
                 method: "item/completed",
                 params: {

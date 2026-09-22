@@ -1074,6 +1074,13 @@ export async function runWorkerCodexTurn(
   let terminalWatchdog: TurnTerminalWatchdog | null = null;
   let documentToolRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let documentToolRecoveryStartedAt: number | null = null;
+  let documentToolRecoveryGeneration = 0;
+  const clearDocumentToolRecovery = () => {
+    documentToolRecoveryGeneration += 1;
+    if (documentToolRecoveryTimer) clearTimeout(documentToolRecoveryTimer);
+    documentToolRecoveryTimer = null;
+    documentToolRecoveryStartedAt = null;
+  };
   let runtimeProgressRevision = 0;
   const turnController = new AbortController();
   const forwardExternalAbort = () => turnController.abort();
@@ -1158,6 +1165,7 @@ export async function runWorkerCodexTurn(
     const deadline = documentToolRecoveryStartedAt + (2 * graceMs);
     const delayMs = Math.max(1, Math.min(graceMs, deadline - Date.now()));
     const armedAtRevision = runtimeProgressRevision;
+    const armedGeneration = ++documentToolRecoveryGeneration;
     documentToolRecoveryTimer = setTimeout(() => {
       documentToolRecoveryTimer = null;
       void (async () => {
@@ -1177,7 +1185,7 @@ export async function runWorkerCodexTurn(
           // A single bounded interruption below still guarantees a terminal
           // local state without retrying any document effect.
         }
-        if (terminalTurnStatus) return;
+        if (terminalTurnStatus || armedGeneration !== documentToolRecoveryGeneration) return;
         if (recoveredDocumentTurn && recoveredDocumentTurn.status !== "inProgress" && recoveryEnvelope) {
           await projectRecoveredTurn(recoveredDocumentTurn, recoveryEnvelope, "document-tool-recovery");
           finishTurn({ status: recoveredDocumentTurn.status, error: recoveredDocumentTurn.error });
@@ -1254,6 +1262,13 @@ export async function runWorkerCodexTurn(
         terminalWatchdog?.resume();
         terminalWatchdog?.touch();
         const { method, params } = notification;
+        // A delivered file can be an intermediate result. Further authoring or
+        // visual review belongs to the normal bounded turn, not its old close
+        // timer. Invalidate an in-flight reconciliation as well as the timer.
+        if (method === "item/started" ||
+            (method === "item/completed" && isRecord(params) && isRecord(params.item) &&
+             params.item.type === "dynamicToolCall" && params.item.namespace === AIBRAIN_DOCUMENT_TOOL_NAMESPACE &&
+             params.item.tool === "render")) clearDocumentToolRecovery();
         const phaseProjection = (key: string): WorkerTurnProjection => ({
           envelope,
           key: `runtime-phase:${key}`,
@@ -1613,6 +1628,7 @@ export async function runWorkerCodexTurn(
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
         runtimeProgressRevision += 1;
+        clearDocumentToolRecovery();
         terminalWatchdog?.resume();
         terminalWatchdog?.touch();
         const dynamicToolParams = request.method === "item/tool/call" && isRecord(request.params)

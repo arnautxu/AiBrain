@@ -47,6 +47,36 @@ describe("Arnall weekly host cleanup contract", () => {
     expect(lastHealth).toBeGreaterThan(cleanup);
   });
 
+  it.each([
+    ["true|healthy|aibrain-company-qa-horaria|company-qa|revision|horaria", true, true],
+    ["true|unhealthy|aibrain-company-qa-horaria|company-qa|revision|horaria", true, false],
+    ["true|healthy|aibrain-company-qa-horaria|company-qa|old-revision|horaria", true, false],
+    ["true|healthy|foreign-project|company-qa|revision|horaria", true, false],
+    ["true|healthy|aibrain-company-qa-horaria|company-qa|revision|other-service", true, false],
+    ["true|healthy|aibrain-company-qa-horaria|company-qa|revision|horaria", false, false],
+  ])("validates scheduling consumers without replacing the core runtime: %s core=%s", async (details, corePresent, succeeds) => {
+    const source = (await readFile(cleanupPath, "utf8")).replace(/main "\$@"\s*$/u, "");
+    const harness = `
+      jq() { case "$2" in .current.revision) echo revision ;; *) echo image ;; esac; }
+      bounded() {
+        if [[ "$2" == "ps" ]]; then
+          [[ "$CORE_PRESENT" == true ]] && echo core
+          echo scheduling
+        elif [[ "\${@: -1}" == core ]]; then
+          echo 'true|healthy|aibrain-company-qa|company-qa|revision|app'
+        else
+          echo "$SCHEDULING_DETAILS"
+        fi
+      }
+      verify_current_runtime
+    `;
+    const run = () => execFileSync("bash", ["-c", `${source}\n${harness}`], {
+      env: { ...process.env, CORE_PRESENT: String(corePresent), SCHEDULING_DETAILS: details }, stdio: "pipe",
+    });
+    if (succeeds) expect(run).not.toThrow();
+    else expect(run).toThrow();
+  });
+
   it("runs from a bounded hardened service", async () => {
     const service = await readFile(servicePath, "utf8");
 

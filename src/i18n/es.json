@@ -96,5 +96,6 @@
   "Expandir {p0}": "Expandir {p0}",
   "{p0}. Mostrar cuenta": "{p0}. Mostrar cuenta",
   "Descargar {p0}": "Descargar {p0}",
-  "Documento {p0}": "Documento {p0}"
+  "Documento {p0}": "Documento {p0}",
+  "La tarea crea una conversación en el proyecto y ejecuta este prompt. Las acciones sensibles solo se ejecutan con autorización durable previa; el worker no espera aprobaciones interactivas. No envía mensajes externos por sí sola.": "La tarea crea una conversación en el proyecto y sigue estas instrucciones. Las acciones sensibles necesitan autorización previa: durante la ejecución automática no se pueden pedir confirmaciones. No envía mensajes externos por sí sola."
 }

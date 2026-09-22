@@ -129,12 +129,18 @@ verify_current_runtime() {
     found=0
     while IFS= read -r container; do
       [[ -n "$container" ]] || continue
-      found=1
       details="$(bounded docker container inspect --format \
-        '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.graphikai.aibrain.installation"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+        '{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.graphikai.aibrain.installation"}}|{{index .Config.Labels "org.opencontainers.image.revision"}}|{{index .Config.Labels "com.docker.compose.service"}}' \
         "$container")" || fail "runtime-inspect-failed container=$container"
-      [[ "$details" == "true|healthy|${COMPOSE_PROJECT}|${INSTALLATION_ID}|${revision}" ]] \
-        || fail "runtime-identity-or-health-mismatch container=$container"
+      case "$details" in
+        "true|healthy|${COMPOSE_PROJECT}|${INSTALLATION_ID}|${revision}|"*) found=1 ;;
+        "true|healthy|${COMPOSE_PROJECT}-horaria|${INSTALLATION_ID}|${revision}|horaria")
+          # The scheduling service deliberately shares the app image, but is
+          # supervised in its own compose project. It cannot satisfy the core
+          # runtime requirement and must match the same immutable release.
+          ;;
+        *) fail "runtime-identity-or-health-mismatch container=$container" ;;
+      esac
     done < <(bounded docker ps --quiet --filter "ancestor=$image" --filter "label=com.graphikai.aibrain.installation=${INSTALLATION_ID}")
     ((found == 1)) || fail "current-image-has-no-running-container image=$image"
   done

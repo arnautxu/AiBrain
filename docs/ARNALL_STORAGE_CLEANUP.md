@@ -30,7 +30,10 @@ previous release revisions are also protected if their SHA appears in a
 staging name.
 
 Both health endpoints and the running container revision/image identities must
-pass before and after cleanup. A dedicated lock prevents overlapping cleanup.
+pass before and after cleanup. The separately supervised `aibrain-company-qa-horaria`
+service may consume the app image only when it is healthy, belongs to this
+installation and matches the current revision. It never substitutes for the
+required core runtime. A dedicated lock prevents overlapping cleanup.
 A shared hold on the Arnall deploy lock prevents a release from starting while
 cleanup runs; an active release, transaction or release process makes the run
 exit without deleting. Each external command is bounded, the whole service is
