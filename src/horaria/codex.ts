@@ -83,6 +83,10 @@ export async function runHorariaCodex(userId: string, request: unknown) {
     try {
       await runtime.client.request("turn/start", {
         threadId, input, environments: [], approvalPolicy: "never", sandboxPolicy: { type: "readOnly" },
+        // Scheduling is a bounded structured calculation with deterministic
+        // validation afterwards. Do not inherit an unbounded/default reasoning
+        // budget from the employee's general-purpose assistant.
+        effort: "medium",
         outputSchema: { type: "object", properties: { text: { type: "string" }, toolName: { type: "string" }, toolInput: { type: "string" } }, required: ["text", "toolName", "toolInput"], additionalProperties: false },
       }, `horaria-turn:${id}`, 60_000, value => {
         turnId = (value as { turn: { id: string } }).turn.id;
