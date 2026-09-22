@@ -83,6 +83,8 @@ import {
   branchThreadRequest,
   createProjectRequest,
   createThreadRequest,
+  getThreadRequest,
+  getProjectRequest,
   updateProjectRequest,
   updateThreadRequest,
 } from "@/lib/workbench-api-client";
@@ -1189,9 +1191,32 @@ export function BrainApp({
     return true;
   }, [activeProjectId, activeThreadId, cancelDocumentUploads, projects, switchComposerSelection, threads]);
 
-  const selectThread = useCallback((threadId: string) => {
-    const thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
-    if (!thread) return;
+  const selectThread = useCallback(async (threadId: string) => {
+    const generation = ++selectionGenerationRef.current;
+    let thread = threads.find((candidate) => candidate.id === threadId && candidate.status === "active");
+    if (!thread) {
+      try {
+        // Background work and search results can refer to conversations absent
+        // from the initial sidebar snapshot. Revalidate access before opening.
+        thread = await getThreadRequest(threadId);
+        const project = await getProjectRequest(thread.projectId);
+        if (generation !== selectionGenerationRef.current) return;
+        if (thread.id !== threadId || project.id !== thread.projectId ||
+            thread.status !== "active" || project.status !== "active") {
+          throw new Error(t("Esta conversación ya no está disponible."));
+        }
+        const loadedThread = thread;
+        setThreads((current) => current.some((item) => item.id === loadedThread.id)
+          ? current : [loadedThread, ...current]);
+        setProjects((current) => current.some((item) => item.id === project.id)
+          ? current : [project, ...current]);
+      } catch {
+        if (generation === selectionGenerationRef.current) {
+          setNotice(workbenchNotice(t("No se ha podido abrir esta conversación. Comprueba que sigues teniendo acceso."), "error"));
+        }
+        return;
+      }
+    }
     cancelDocumentUploads();
     switchComposerSelection({ projectId: thread.projectId, threadId: thread.id });
     setActiveProjectId(thread.projectId);
@@ -1202,7 +1227,7 @@ export function BrainApp({
     threadByProjectRef.current[thread.projectId] = thread.id;
     setSelectedMessageId(null);
     setMobileSidebarOpen(false);
-  }, [cancelDocumentUploads, switchComposerSelection, threads]);
+  }, [cancelDocumentUploads, switchComposerSelection, threads, t]);
 
   const startNewThread = useCallback((projectId?: string) => {
     const destination = newThreadDestination(projects, projectId);
@@ -2398,10 +2423,7 @@ export function BrainApp({
         onClose={() => setTaskCenterOpen(false)}
         onOpenConversation={(task) => {
           setTaskCenterOpen(false);
-          switchComposerSelection({ projectId: task.projectId, threadId: task.threadId });
-          setActiveProjectId(task.projectId);
-          setActiveThreadId(task.threadId);
-          setSelectedMessageId(null);
+          void selectThread(task.threadId);
           if (task.unread) void mutateTaskCenter({ action: "mark_read", taskIds: [task.id] });
         }}
         onMarkRead={(taskId) => void mutateTaskCenter({ action: "mark_read", taskIds: [taskId] })}

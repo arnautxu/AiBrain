@@ -166,3 +166,38 @@ test("the mobile drawer opens and the composer remains available", async ({ page
   await page.getByRole("navigation", { name: "Navegación principal" }).getByRole("button", { name: "Nueva conversación" }).click();
   await expect(page.getByTestId("composer")).toBeVisible();
 });
+
+test("opens a new automation result absent from the initial sidebar", async ({ page }) => {
+  await login(page);
+  const snapshot = await (await page.request.get("/api/workbench")).json();
+  const project = snapshot.workbench.projects[0];
+  const threadId = "c9638d21-296b-4a5b-8c12-4796555a6441";
+  const taskId = "d9638d21-296b-4a5b-8c12-4796555a6441";
+  const timestamp = "2026-09-22T10:00:00.000Z";
+  const thread = {
+    id: threadId, projectId: project.id, title: "Resultado nuevo fuera de la barra lateral",
+    status: "active", pinned: false, createdAt: timestamp, updatedAt: timestamp, messages: [],
+  };
+  await page.route(`**/api/threads/${threadId}`, (route) => route.fulfill({ json: { thread } }));
+  await page.route(`**/api/projects/${project.id}`, (route) => route.fulfill({ json: { project } }));
+  await page.route("**/api/automations", (route) => route.fulfill({ json: {
+    schemaVersion: 1,
+    audienceDirectory: { currentUserId: "owner", membershipPolicy: "current", users: [], groups: [] },
+    tasks: [{
+      id: taskId, name: "Prueba de resultado nuevo", prompt: "Solo lectura", projectId: project.id,
+      projectName: project.name, state: "completed", timeZone: "Europe/Madrid",
+      schedule: { kind: "once", runAt: timestamp }, nextRunAt: null, lastRunAt: timestamp,
+      lastRunStatus: "succeeded", manualRun: null, lease: null,
+      owner: { userId: "owner", name: accountName }, audience: { userIds: [], groupIds: [], membershipPolicy: "current" },
+      access: { canManage: true, canViewResults: true },
+    }],
+  } }));
+  await page.route(`**/api/automations/${taskId}/runs`, (route) => route.fulfill({ json: {
+    schemaVersion: 1, runs: [{ runKey: "test-run", attempt: 1, status: "succeeded", threadId, startedAt: timestamp, finishedAt: timestamp }],
+  } }));
+  await page.getByRole("button", { name: "Automatizaciones", exact: true }).click();
+  await page.getByRole("button", { name: "Historial y resultados" }).click();
+  await page.getByRole("button", { name: "Abrir resultado" }).click();
+  await expect(page.getByRole("heading", { name: thread.title, exact: true })).toBeVisible();
+  await expect(page.getByTestId("composer")).toBeVisible();
+});
