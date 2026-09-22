@@ -1,3 +1,4 @@
+import { takeAppServerOutput } from "./app-server-output-buffer";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { stopOwnedWorkerProcess } from "./owned-process";
@@ -339,6 +340,8 @@ export class PrivateWorkerGateway {
   // behind that persistence work: doing so made one busy turn block
   // thread/start, thread/read and turn/interrupt for every chat of the user.
   private appServerOutputChain = Promise.resolve();
+  private readonly appServerOutputLines: string[] = [];
+  private drainingAppServerOutput = false;
   private clientFrameChain = Promise.resolve();
   private eventAcknowledgementChain = Promise.resolve();
   private eventRecordChain = Promise.resolve();
@@ -403,9 +406,22 @@ export class PrivateWorkerGateway {
       this.child = this.processFactory(this.context);
       this.lines = createInterface({ input: this.child.stdout });
       this.lines.on("line", (line) => {
-        this.appServerOutputChain = this.appServerOutputChain
-          .then(() => this.receiveAppServerLine(line))
-          .catch((error: unknown) => this.fail(error));
+        if (Buffer.byteLength(line, "utf8") > MAX_STDIO_LINE_BYTES) {
+          this.fail(new Error("Codex App Server line exceeds the safety limit."));
+          return;
+        }
+        this.appServerOutputLines.push(line);
+        if (this.drainingAppServerOutput) return;
+        this.drainingAppServerOutput = true;
+        this.appServerOutputChain = this.appServerOutputChain.then(async () => {
+          let next: string | null;
+          while ((next = takeAppServerOutput(this.appServerOutputLines)) !== null) {
+            await this.receiveAppServerLine(next);
+          }
+        }).catch((error: unknown) => {
+          this.appServerOutputLines.length = 0;
+          this.fail(error);
+        }).finally(() => { this.drainingAppServerOutput = false; });
       });
       this.child.stderr.resume();
       this.child.once("error", (error) => { if (!this.retired) this.fail(error); });

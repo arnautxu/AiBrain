@@ -94,19 +94,19 @@ function parseArguments(argv) {
     stateFile: safeStatePath(values.get("--state-file")),
     maintenanceUrl: maintenanceUrl.href,
     origin: origin.origin,
-    dockerBin: safeFile(values.get("--docker-bin") ?? "/usr/bin/docker", "Docker executable"),
+    dockerBin: safeFile(values.get("--docker-bin") ?? "/usr/bin/docker", "Docker executable", false, 128 * 1024 * 1024),
     drainTimeoutMs: numeric("--drain-timeout-ms", "600000", 600_000),
     dockerTimeoutMs: numeric("--docker-timeout-ms", "120000", 900_000),
     healthTimeoutMs: numeric("--health-timeout-ms", "120000", 900_000),
   };
 }
 
-function safeFile(file, label, privateFile = false) {
+function safeFile(file, label, privateFile = false, maximumBytes = 1024 * 1024) {
   if (!path.isAbsolute(file)) throw new BackupOperationError("BACKUP_OPERATION_PATH_INVALID", `${label} path must be absolute.`);
   const before = lstatSync(file, { throwIfNoEntry: false });
   const expectedUid = typeof process.getuid === "function" ? process.getuid() : before?.uid;
   if (!before?.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.uid !== expectedUid
-    || (before.mode & (privateFile ? 0o077 : 0o022)) !== 0 || before.size > 1024 * 1024) {
+    || (before.mode & (privateFile ? 0o077 : 0o022)) !== 0 || before.size > maximumBytes) {
     throw new BackupOperationError("BACKUP_OPERATION_PATH_INVALID", `${label} is not an exclusive owner-controlled file.`);
   }
   const canonical = realpathSync(file);
