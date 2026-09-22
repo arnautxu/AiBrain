@@ -5,14 +5,21 @@ const mentions = [{ id: "gmail", label: "Gmail", kind: "connector", status: "con
   canRead: true, requiresApprovalForWrites: true }];
 
 for (const zoom of [1, 1.5]) for (const viewport of [{ width: 1440, height: 900 }, { width: 900, height: 520 }, { width: 390, height: 844 }, { width: 844, height: 390 }]) {
-  test(`recurring menu stays next to its trigger at ${viewport.width}x${viewport.height}, zoom ${zoom}`, async ({ page }) => {
+  test(`schedule suggestions respect layout at ${viewport.width}x${viewport.height}, zoom ${zoom}`, async ({ page }) => {
     await page.setViewportSize(viewport);
     await establishDemoSession(page, "example-user");
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("Emulation.setPageScaleFactor", { pageScaleFactor: zoom });
-    const trigger = page.getByRole("button", { name: "Tareas recurrentes", exact: true });
+    if (viewport.height <= 600) {
+      // Compact-height layouts already hide suggestions to keep the composer usable.
+      await expect(page.getByLabel("Sugerencias para empezar")).toBeHidden();
+      await expect(page.getByRole("textbox", { name: "Mensaje", exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Tareas recurrentes", exact: true })).toHaveCount(0);
+      return;
+    }
+    const trigger = page.getByRole("button", { name: /Trabajemos en los horarios/ });
     if (zoom > 1) { await trigger.focus(); await trigger.press("Enter"); } else await trigger.click();
-    const menu = page.getByRole("menu", { name: "Tareas recurrentes", exact: true });
+    const menu = page.getByRole("menu", { name: "Horarios del equipo", exact: true });
     const popup = page.locator("[data-connector-popover]");
     await expect(menu).toBeVisible();
     const assertAnchor = async () => {
@@ -28,10 +35,10 @@ for (const zoom of [1, 1.5]) for (const viewport of [{ width: 1440, height: 900 
       expect(b!.y + b!.height).toBeLessThanOrEqual(v.y + v.height);
     };
     await expect(assertAnchor).toPass({ timeout: 3_000 });
-    const schedules = page.getByRole("menuitem", { name: /horarios del equipo/ });
-    if (zoom > 1) { await schedules.focus(); await schedules.press("Enter"); } else await schedules.click();
-    await expect(page.getByRole("menu", { name: "Horarios del equipo" })).toBeVisible();
-    await expect(assertAnchor).toPass({ timeout: 3_000 });
+    await page.keyboard.press("End");
+    await expect(menu.getByRole("menuitem", { name: "Revisar cambios de horarios", exact: true })).toBeFocused();
+    await page.keyboard.press("Home");
+    await expect(menu.getByRole("menuitem", { name: "Enviar los WhatsApps a los trabajadores", exact: true })).toBeFocused();
     await page.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
   });

@@ -17,15 +17,18 @@ for (const [name, width, height] of [["desktop", 1440, 900], ["mobile", 390, 844
     const menu = page.getByRole("menu", { name: "Añadir al mensaje", exact: true });
     await expect(menu.getByRole("menuitem", { name: "Archivos del servidor", exact: true })).toBeEnabled();
     await expect(menu.getByRole("menuitem", { name: "Conexiones", exact: true })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Tareas recurrentes", exact: true })).toHaveCount(0);
     await expect(menu.getByRole("menuitem", { name: "Adjuntar archivos", exact: true })).toBeFocused();
     await page.keyboard.press("End");
-    await expect(menu.getByRole("menuitem", { name: "Tareas recurrentes", exact: true })).toBeFocused();
-    await page.keyboard.press("Enter");
-    await page.getByRole("menuitem", { name: /Trabajemos en los horarios/ }).click();
+    await expect(menu.getByRole("menuitem", { name: "Archivos del servidor", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "Añadir al mensaje", exact: true })).toBeFocused();
+    await page.getByRole("button", { name: /Trabajemos en los horarios/ }).click();
     await page.getByRole("menuitem", { name: "Revisar cambios de horarios", exact: true }).click();
     await expect(composer).toHaveValue(/^Revisemos los cambios de horarios/);
     await expect(composer).toBeFocused();
     await expect(menu).toHaveCount(0);
+    await expect(page.getByRole("menu", { name: "Horarios del equipo", exact: true })).toHaveCount(0);
     expect(await page.locator("body").evaluate(el => el.scrollWidth)).toBeLessThanOrEqual(width);
   });
 }

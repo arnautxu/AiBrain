@@ -22,7 +22,7 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     expect(Math.abs(a!.x - b!.x)).toBeLessThanOrEqual(1);
     expect(Math.abs(a!.width - b!.width)).toBeLessThanOrEqual(1);
     const controls = await band.locator('button[aria-label="Destino de la conversación"], button.landing-band-item').evaluateAll(nodes => nodes.map(n => { const r = n.getBoundingClientRect(); return { top: r.top, left: r.left, right: r.right, height: r.height }; }));
-    expect(controls.length).toBe(4);
+    expect(controls.length).toBe(3);
     if (width >= 640) {
       expect(Math.max(...controls.map(r => r.top)) - Math.min(...controls.map(r => r.top))).toBeLessThan(3);
     } else {
@@ -37,22 +37,22 @@ for (const width of [320, 390, 1440]) for (const theme of ["light", "dark"] as c
     }
     for (const r of controls) { expect(r.left).toBeGreaterThanOrEqual(0); expect(r.right).toBeLessThanOrEqual(width); expect(r.height).toBeGreaterThanOrEqual(44); }
     await input.fill("Borrador que se reemplaza.");
-    await band.getByRole("button", { name: "Tareas recurrentes", exact: true }).click();
-    const menu = page.getByRole("menu", { name: "Tareas recurrentes", exact: true });
+    await expect(page.getByRole("button", { name: "Tareas recurrentes", exact: true })).toHaveCount(0);
+    const schedules = page.getByRole("button", { name: /Trabajemos en los horarios/ });
+    await schedules.click();
+    const menu = page.getByRole("menu", { name: "Horarios del equipo", exact: true });
     await expect(menu).toBeVisible();
     const popup = page.locator('[data-connector-popover]');
     const r = await popup.boundingBox();
     expect(r!.x).toBeGreaterThanOrEqual(11); expect(r!.x + r!.width).toBeLessThanOrEqual(width - 11);
     if (width < 640) expect(Math.abs(r!.x + r!.width / 2 - width / 2)).toBeLessThan(2);
     await page.screenshot({ path: `.impeccable/review/connector-tasks-${width}-${theme}.png` });
-    await page.getByRole("menuitem", { name: /Trabajemos en los horarios/ }).click();
-    await expect(page.getByRole("menu", { name: "Horarios del equipo" })).toBeVisible();
-    const back = page.getByRole("menuitem", { name: "Volver a las tareas", exact: true });
-    await expect(back.locator("svg")).toHaveCount(1);
-    await expect(back).toHaveText("");
-    await back.click();
+    await expect(menu.getByRole("menuitem", { name: "Enviar los WhatsApps a los trabajadores", exact: true })).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(schedules).toBeFocused();
+    await schedules.press("ArrowDown");
     await expect(menu).toBeVisible();
-    await page.getByRole("menuitem", { name: /Trabajemos en los horarios/ }).click();
     const child = await popup.boundingBox();
     expect(child!.x).toBeGreaterThanOrEqual(11); expect(child!.x + child!.width).toBeLessThanOrEqual(width - 11);
     await page.getByRole("menuitem", { name: "Revisar cambios de horarios", exact: true }).click();
