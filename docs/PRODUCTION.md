@@ -147,6 +147,11 @@ los archivos de usuario y las descargas siguen incluidos. Las rutas durables
 deben pertenecer al UID/GID de la instalación; una intervención como root no
 debe dejar directorios de auditoría inaccesibles al servicio.
 
+El controlador admite el mensaje exacto de aceptación del motor que imprime
+el arranque del contenedor antes del JSON de backup. Las comprobaciones de
+arranque siguen ejecutándose y el resultado JSON conserva su validación
+estricta; cualquier otro texto inesperado continúa siendo un error.
+
 Cada `backup:verify` correcto escribe atómicamente
 `backups/verification/latest.json` con installation, backup ID, fingerprint,
 fecha de creación y fecha de verificación. El evaluator local
