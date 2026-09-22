@@ -226,7 +226,10 @@ function composeArgs(options, ...args) {
 
 function parseBackupOutput(output, operation) {
   let value;
-  try { value = JSON.parse(output); } catch (error) {
+  // The production entrypoint runs protocol acceptance before the requested
+  // command. Keep that check enabled and admit only its exact success banner.
+  const json = output.replace(/^Codex App Server container acceptance passed\.\r?\n/u, "");
+  try { value = JSON.parse(json); } catch (error) {
     throw new BackupOperationError("BACKUP_OPERATION_OUTPUT_INVALID", `Backup ${operation} returned invalid output.`, { cause: error });
   }
   if (value?.operation !== operation || !BACKUP_ID.test(value.backupId)
