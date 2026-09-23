@@ -58,6 +58,14 @@ la revisió de compliment i conflictes de la graella final. No es torna a
 consultar `preview` per mostrar-la: això carregaria la setmana desada i
 podria substituir l’esborrany nou per un horari anterior.
 
+Quan l’usuari dona una botiga i persones explícitament fictícies, no existeixen
+identificadors horarIA ni cal donar-les d’alta. L’eina documental
+`create_arnall_schedule` rep la graella completa, hi assigna identificadors
+efímers només per al llibre i aplica la mateixa plantilla integrada. Només
+és disponible a la instal·lació Arnall, crea un artefacte privat i no consulta
+ni escriu dades de negoci. La graella fictícia no és una revisió certificada
+pel planificador: les condicions es comproven i s’expliquen per separat.
+
 Correcció de selecció, 2026-09-21: la configuració versionada d’Arnall té
 `installationId: company-qa` i `companySlug: arnall`. La selecció anterior
 comparava l’identificador d’instal·lació amb `arnall` i produïa la taula

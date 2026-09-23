@@ -23,6 +23,7 @@ import {
 } from "@/runtime/documents/local-document-generator";
 import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@/runtime/generated-document-artifacts";
 import { generatedImageArtifactId, isPng } from "@/runtime/generated-image-artifacts";
+import type { ArnallSchedule } from "@/runtime/documents/arnall-schedule";
 
 export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
 
@@ -54,6 +55,25 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   name: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
   description: "Create validated PDF, Word, PowerPoint and Excel files in this employee's private AiBrain project workspace on the installation server. This is the default document destination. It does not use Google Drive or any external connector.",
   tools: [
+    {
+      type: "function", name: "create_arnall_schedule",
+      description: "Create and attach a fictional Arnall shop schedule in the embedded HORARI SAGARO Excel template. Use only when the user explicitly supplies an invented shop and people; no horarIA database records are created or read. Supply the complete seven-day grid for each person and the actual hours for M, T and D. This does not certify coverage or compliance; check those separately. For real employees and shops use aibrain_horaria schedules.draft instead. Never ask the user to upload the template: it is bundled on the server.",
+      inputSchema: { type: "object", properties: {
+        fileName: { type: "string", minLength: 1, maxLength: 160 },
+        establishmentName: { type: "string", minLength: 1, maxLength: 80 },
+        week: { type: "string", pattern: "^[0-9]{4}-W[0-9]{2}$" },
+        people: { type: "array", minItems: 1, maxItems: 43, items: { type: "object", properties: {
+          name: { type: "string", minLength: 1, maxLength: 100 },
+          section: { type: "string", enum: ["DEPENDIENTA", "ELABORACION"] },
+          codeHours: { type: "object", properties: { M: { type: "number", minimum: 0, maximum: 24 }, T: { type: "number", minimum: 0, maximum: 24 }, D: { type: "number", minimum: 0, maximum: 24 } }, required: ["M", "T", "D"], additionalProperties: false },
+          days: { type: "array", minItems: 7, maxItems: 7, items: { anyOf: [{ type: "null" }, { type: "object", properties: {
+            code: { type: "string", enum: ["M", "T", "D", "F", "V", "B"] },
+            firstLine: { type: "string", maxLength: 60 }, secondLine: { type: "string", maxLength: 60 },
+            requested: { type: "boolean" },
+          }, required: ["code", "firstLine", "secondLine"], additionalProperties: false }] } },
+        }, required: ["name", "section", "codeHours", "days"], additionalProperties: false } },
+      }, required: ["fileName", "establishmentName", "week", "people"], additionalProperties: false },
+    },
     {
       type: "function", name: "deliver",
       description: "Attach one explicitly selected final document from documents/ to this chat. Call only after authoring and review are finished. Validates and preserves exact private bytes; listing, inspecting or rendering a file does not deliver it. Repeat the same path only for identical bytes; use a new final filename for a revision.",
@@ -213,7 +233,7 @@ export type LocalDocumentDynamicToolResult = Readonly<{
 }>;
 
 export type LocalDocumentDynamicToolContext = Readonly<{
-  installation: Pick<InstallationConfig, "installationId" | "paths">;
+  installation: Pick<InstallationConfig, "installationId" | "paths"> & { companySlug?: string };
   installationId: string;
   userId: string;
   projectId: string;
@@ -226,7 +246,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   permissions: ResolvedPermissions;
   renderPresentation?: PresentationRenderCallback;
   spreadsheetLayout?: "schedule";
-  arnallSchedule?: import("./arnall-schedule").ArnallSchedule;
+  arnallSchedule?: ArnallSchedule;
   now?: () => Date;
 }>;
 
@@ -279,6 +299,32 @@ function parseArguments(value: unknown): CreateArguments {
     rows: parseRows(value.rows),
     ...(value.slides === undefined ? {} : { slides: normalizeDocumentSlides(value.slides) }),
   };
+}
+
+function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments; schedule: ArnallSchedule } {
+  if (!isRecord(value)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Faltan los datos del horario ficticio.");
+  exactKeys(value, ["fileName", "establishmentName", "week", "people"]);
+  if (typeof value.fileName !== "string" || !FILE_NAME_PATTERN.test(value.fileName) ||
+      path.extname(value.fileName).toLocaleLowerCase() !== ".xlsx" ||
+      typeof value.establishmentName !== "string" || typeof value.week !== "string" ||
+      !Array.isArray(value.people) || value.people.length < 1 || value.people.length > 43) {
+    throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Los datos del horario ficticio no son válidos.");
+  }
+  const people = value.people.map((person: unknown, index: number) => {
+    if (!isRecord(person)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Persona ficticia no válida.");
+    exactKeys(person, ["name", "section", "codeHours", "days"]);
+    if (!isRecord(person.codeHours)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Horas ficticias no válidas.");
+    exactKeys(person.codeHours, ["M", "T", "D"]);
+    if (!Array.isArray(person.days)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Semana ficticia no válida.");
+    for (const day of person.days) if (day !== null) {
+      if (!isRecord(day)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Turno ficticio no válido.");
+      exactKeys(day, ["code", "firstLine", "secondLine"], ["requested"]);
+    }
+    return { ...person, id: index + 1 };
+  });
+  const schedule = { establishmentId: 1, establishmentName: value.establishmentName, week: value.week, people } as unknown as ArnallSchedule;
+  const input = parseArguments({ format: "xlsx", fileName: value.fileName, title: `Simulación de horario ${value.week}`, content: "Simulación ficticia no guardada ni aprobada.", rows: [["Persona", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom", "Horas"]] });
+  return { input, schedule };
 }
 
 function parseImageToPdfArguments(value: unknown): CreateArguments {
@@ -602,7 +648,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -663,10 +709,14 @@ async function handleSingleLocalDocumentDynamicToolCall(
         { type: "inputImage", imageUrl: `data:image/png;base64,${png.toString("base64")}` },
       ] } };
     }
-    const input = params.tool === "image_to_pdf"
-      ? parseImageToPdfArguments(params.arguments)
-      : parseArguments(params.arguments);
-    const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (context.spreadsheetLayout ? `|layout:${context.spreadsheetLayout}` : "") + (context.arnallSchedule ? `|arnall-schedule-v2-original-formulas:${JSON.stringify(context.arnallSchedule)}` : "")).digest("hex");
+    if (params.tool === "create_arnall_schedule" && context.installation.companySlug !== "arnall") {
+      throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Esta plantilla solo está disponible en Arnall.");
+    }
+    const fictional = params.tool === "create_arnall_schedule" ? parseFictionalArnallSchedule(params.arguments) : null;
+    const input = fictional?.input ?? (params.tool === "image_to_pdf" ? parseImageToPdfArguments(params.arguments) : parseArguments(params.arguments));
+    const spreadsheetLayout = fictional ? "schedule" : context.spreadsheetLayout;
+    const arnallSchedule = fictional?.schedule ?? context.arnallSchedule;
+    const inputFingerprint = createHash("sha256").update(canonicalInput(input) + (spreadsheetLayout ? `|layout:${spreadsheetLayout}` : "") + (arnallSchedule ? `|arnall-schedule-v2-original-formulas:${JSON.stringify(arnallSchedule)}` : "")).digest("hex");
     const receiptName = receiptNameFor(params.callId);
     const receiptPath = path.join(context.receiptRoot, receiptName);
     await mkdir(context.receiptRoot, { recursive: true, mode: 0o700 });
@@ -701,8 +751,8 @@ async function handleSingleLocalDocumentDynamicToolCall(
         title: input.title,
         content: input.content,
         rows: input.rows,
-        spreadsheetLayout: context.spreadsheetLayout,
-        arnallSchedule: context.arnallSchedule,
+        spreadsheetLayout,
+        arnallSchedule,
         slides: input.slides,
         sourcePng,
       });
