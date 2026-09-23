@@ -9,6 +9,7 @@ import { DocumentConversionBackpressureError } from "@/documents/conversion-gate
 import { documentServicesForUser } from "@/documents/server-service";
 import { UploadValidationError, validateUploadedDocument } from "@/documents/upload-validation";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
+import { prepareWorkbookGrid } from "@/documents/workbook-grid";
 import { deriveWorkerRoots, resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { StorageError } from "@/storage";
@@ -98,19 +99,23 @@ export async function GET(
   const raw = url.searchParams.get("raw") === "1";
   const download = url.searchParams.get("download") === "1";
   const representation = url.searchParams.get("representation") === "1";
+  const grid = url.searchParams.get("grid") === "1";
   const resourceId = url.searchParams.get("resourceId");
   if (
-    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download" && key !== "representation" && key !== "resourceId") ||
+    [...url.searchParams.keys()].some((key) => key !== "path" && key !== "raw" && key !== "download" && key !== "representation" && key !== "grid" && key !== "resourceId") ||
     url.searchParams.getAll("path").length !== 1 ||
     url.searchParams.getAll("raw").length > 1 ||
     url.searchParams.getAll("download").length > 1 ||
     url.searchParams.getAll("representation").length > 1 ||
+    url.searchParams.getAll("grid").length > 1 ||
     url.searchParams.getAll("resourceId").length > 1 ||
     (url.searchParams.has("raw") && url.searchParams.get("raw") !== "1") ||
     (url.searchParams.has("download") && url.searchParams.get("download") !== "1") ||
     (url.searchParams.has("representation") && url.searchParams.get("representation") !== "1") ||
+    (url.searchParams.has("grid") && url.searchParams.get("grid") !== "1") ||
     (download && !raw) ||
     (representation && (raw || download)) ||
+    (grid && (raw || download || representation)) ||
     (resourceId !== null && !isUuid(resourceId)) ||
     !filePath || filePath.length > 2_048 || filePath.includes("\0")
   ) {
@@ -163,6 +168,22 @@ export async function GET(
     const resourceSuffix = resourceId ? `&resourceId=${resourceId}` : "";
     const rawUrl = `/api/projects/${projectId}/files?path=${encodedPath}&raw=1${resourceSuffix}`;
     const downloadUrl = `${rawUrl}&download=1`;
+
+    if (grid) {
+      if (preview.mimeType !== officeMimeTypes[".xlsx"]) {
+        return privateJson({ error: "Este archivo no es un libro Excel." }, 400);
+      }
+      const services = await documentServicesForUser(installation, session.user.id);
+      const spreadsheet = await services.conversionGate.run(
+        () => prepareWorkbookGrid({ fileName: path.basename(filePath), data: contents, signal: request.signal }),
+        { signal: request.signal },
+      );
+      return privateJson(spreadsheet, 200, {
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+      });
+    }
 
     if (representation) {
       if (preview.kind !== "office") {

@@ -23,7 +23,7 @@ it("authors editable rich slides from the standalone runtime with no workspace d
       cover.addText('Operations', { x: .7, y: 1, w: 10, h: 1, fontSize: 42, color: 'FFFFFF' });
       const evidence = deck.addSlide();
       evidence.addText('Example data', { x: .7, y: .4, w: 10, h: .8, fontSize: 32 });
-      evidence.addChart(deck.ChartType.bar, [{ name: 'Illustrative', labels: ['A', 'B'], values: [10, 20] }], { x: .7, y: 1.5, w: 8, h: 4 });
+      evidence.addChart(deck.ChartType.bar, [{ name: 'Illustrative', labels: ['A', 'B'], values: [10, 0] }], { x: .7, y: 1.5, w: 8, h: 4 });
       evidence.addImage({ data: 'image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMQaEgAAAGUAPHREbpHAAAAAElFTkSuQmCC', x: 10, y: 2, w: 1, h: 1 });
       deck.writeFile({ fileName: 'review.pptx' });
     `);
@@ -35,6 +35,14 @@ it("authors editable rich slides from the standalone runtime with no workspace d
     expect(slides).toHaveLength(2);
     expect(await archive.file(slides[0]!)!.async("text")).toContain('142B23');
     expect(Object.keys(archive.files).some((name) => /^ppt\/charts\/chart\d+\.xml$/u.test(name))).toBe(true);
+    const embeddedName = Object.keys(archive.files).find((name) => /^ppt\/embeddings\/.*\.xlsx$/u.test(name));
+    expect(embeddedName).toBeDefined();
+    const embedded = await JSZip.loadAsync(await archive.file(embeddedName!)!.async("nodebuffer"));
+    const table = await embedded.file("xl/tables/table1.xml")!.async("text");
+    expect(table).toMatch(/ref="A1:[A-Z]+[1-9][0-9]*"/u);
+    expect(table).not.toMatch(/ref="[^"]*'"/u);
+    const sheet = await embedded.file("xl/worksheets/sheet1.xml")!.async("text");
+    expect(sheet).toMatch(/<c r="B3"><v>0<\/v><\/c>/u);
     expect(Object.keys(archive.files).some((name) => name.startsWith("ppt/media/") && name.endsWith(".png"))).toBe(true);
     expect(await archive.file(slides[1]!)!.async("text")).toContain("Example data");
   } finally {

@@ -7,6 +7,7 @@ verified the uploaded bytes; this process enforces its own extraction limits.
 """
 
 import csv
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 import io
@@ -27,6 +28,8 @@ MAX_ROWS = 20_000
 MAX_CELLS = 120_000
 MAX_COLUMNS = 256
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+MAX_PREVIEW_BYTES = 60_000
+MAX_PREVIEW_CELLS_PER_SHEET = 2_000
 
 
 def tag(name):
@@ -190,14 +193,74 @@ def workbook_text(archive):
     return output.getvalue()
 
 
+def workbook_preview(archive):
+    """Return bounded saved cell values for the private, read-only grid."""
+    workbook = part(archive, "xl/workbook.xml", 4 * 1024 * 1024)
+    relationships = part(archive, "xl/_rels/workbook.xml.rels", 4 * 1024 * 1024)
+    rels = {item.attrib["Id"]: item.attrib["Target"]
+            for item in relationships.findall(f"{{{PACKAGE_REL}}}Relationship")
+            if item.attrib.get("Type", "").endswith("/worksheet")
+            and item.attrib.get("TargetMode") != "External"}
+    listed = workbook.findall(f"{tag('sheets')}/{tag('sheet')}")
+    if not listed or len(listed) > MAX_SHEETS:
+        raise ValueError("Invalid number of worksheets")
+    props = workbook.find(tag("workbookPr"))
+    epoch = "1904" if props is not None and props.attrib.get("date1904") in ("1", "true") else "1900"
+    strings = shared_strings(archive)
+    dates = date_styles(archive)
+    result = {"schemaVersion": 1, "kind": "spreadsheet", "sheets": [], "truncated": False}
+    budget = MAX_PREVIEW_BYTES - 4_000
+    for sheet in listed:
+        name = sheet.attrib.get("name", "")[:100]
+        relation = sheet.attrib.get(f"{{{REL}}}id")
+        target = rels.get(relation)
+        if not target:
+            raise ValueError("Worksheet relationship is missing")
+        file_name = posixpath.normpath(target.lstrip("/") if target.startswith("/")
+                                      else posixpath.join("xl", target))
+        if not file_name.startswith("xl/") or file_name not in archive.namelist():
+            raise ValueError("Worksheet path is invalid")
+        entry = {"name": name, "hidden": sheet.attrib.get("state", "visible") != "visible", "cells": []}
+        result["sheets"].append(entry)
+        budget -= len(json.dumps(entry, ensure_ascii=False).encode("utf-8")) + 100
+        root = part(archive, file_name)
+        sheet_truncated = False
+        for row in root.findall(f"{tag('sheetData')}/{tag('row')}"):
+            for cell in row.findall(tag("c")):
+                address = cell.attrib.get("r", "")
+                if not CELL_REF.match(address):
+                    raise ValueError("Invalid cell address")
+                value = cell_text(cell, strings, dates, epoch)
+                if not value:
+                    continue
+                item = {"address": address, "value": value}
+                size = len(json.dumps(item, ensure_ascii=False).encode("utf-8")) + 2
+                if len(entry["cells"]) >= MAX_PREVIEW_CELLS_PER_SHEET or size > budget:
+                    result["truncated"] = True
+                    sheet_truncated = True
+                    break
+                entry["cells"].append(item)
+                budget -= size
+            if sheet_truncated:
+                break
+    return result
+
+
 def main():
-    if len(sys.argv) != 2:
+    preview = len(sys.argv) == 3 and sys.argv[1] == "--preview-json"
+    if len(sys.argv) != (3 if preview else 2):
         raise ValueError("Expected one XLSX path")
     try:
-        with ZipFile(sys.argv[1]) as archive:
-            result = workbook_text(archive)
+        with ZipFile(sys.argv[2 if preview else 1]) as archive:
+            result = workbook_preview(archive) if preview else workbook_text(archive)
     except (BadZipFile, KeyError, ET.ParseError) as error:
         raise ValueError("Invalid XLSX structure") from error
+    if preview:
+        output = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        if len(output.encode("utf-8")) > MAX_PREVIEW_BYTES:
+            raise ValueError("Workbook preview exceeds the safe output size")
+        sys.stdout.write(output)
+        return
     if len(result.encode("utf-8")) > MAX_OUTPUT_BYTES:
         raise ValueError("Workbook exceeds the safe turn text size")
     sys.stdout.write(result)

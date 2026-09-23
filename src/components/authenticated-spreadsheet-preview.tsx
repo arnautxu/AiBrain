@@ -19,11 +19,11 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
     for (let value = index; value > 0; value = Math.floor((value - 1) / 26)) result = String.fromCharCode(65 + ((value - 1) % 26)) + result;
     return result;
   };
-  const rows = sheet.cells.length ? Array.from({ length: Math.max(...populatedRows) }, (_, index) => index + 1) : [];
-  const columns = sheet.cells.length ? Array.from({ length: Math.max(...populatedColumns.map(columnIndex)) }, (_, index) => columnName(index + 1)) : [];
+  const rowCount = sheet.cells.length ? Math.max(...populatedRows) : 0;
+  const columnCount = sheet.cells.length ? Math.max(...populatedColumns.map(columnIndex)) : 0;
   const values = new Map(sheet.cells.map((cell) => [cell.address, cell.value]));
-  const visibleRows = rows.slice(rowPage * 50, (rowPage + 1) * 50);
-  const visibleColumns = columns.slice(columnPage * 12, (columnPage + 1) * 12);
+  const visibleRows = Array.from({ length: Math.max(0, Math.min(50, rowCount - rowPage * 50)) }, (_, index) => rowPage * 50 + index + 1);
+  const visibleColumns = Array.from({ length: Math.max(0, Math.min(12, columnCount - columnPage * 12)) }, (_, index) => columnName(columnPage * 12 + index + 1));
   const button = "touch-target min-h-10 rounded-lg border border-[var(--border)] px-3 text-sm hover:bg-[var(--surface-hover)] disabled:opacity-40";
   const activeValue = activeCell ? values.get(activeCell) ?? "" : t("Selecciona una celda");
   const selectSheet = (index: number) => { setSelected(index); setRowPage(0); setColumnPage(0); setActiveCell(null); };
@@ -43,7 +43,7 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
     </div>
     {preview.truncated ? <p role="status" className="shrink-0 border-b border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-900">{t("Vista parcial por tamaño. Confirma el resto antes de sacar conclusiones.")}</p> : null}
     <div tabIndex={0} aria-label={t("Celdas de {p0}", { p0: sheet.name })} className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-white">
-      {rows.length ? <table className="w-full border-separate border-spacing-0 text-left text-[12px] tabular-nums">
+      {rowCount ? <table className="w-full border-separate border-spacing-0 text-left text-[12px] tabular-nums">
         <caption className="sr-only">{sheet.name}{t(": valores guardados por dirección de celda")}</caption>
         <thead className="sticky top-0 z-10 bg-[#edf1ee]"><tr><th scope="col" className="sticky left-0 z-20 h-7 w-10 border-b border-r border-[#cbd6cf] bg-[#e4eae6]" aria-label={t("Esquina de la hoja")} />{visibleColumns.map((column) => <th key={column} scope="col" className="min-w-28 border-b border-r border-[#cbd6cf] px-2 py-1 text-center font-semibold text-[#4d5b52]">{column}</th>)}</tr></thead>
         <tbody>{visibleRows.map((row) => <tr key={row}><th scope="row" className="sticky left-0 z-[5] w-10 border-b border-r border-[#cbd6cf] bg-[#edf1ee] px-2 py-1.5 text-center font-medium text-[#66736b]">{row}</th>{visibleColumns.map((column) => {
@@ -53,9 +53,9 @@ export function SpreadsheetTable({ preview }: { preview: SpreadsheetPreview }) {
         })}</tr>)}</tbody>
       </table> : <p className="p-6 text-sm">{t("No hay celdas con valores en esta vista.")}{preview.truncated ? t(" La extracción es parcial.") : ""}</p>}
     </div>
-    {rows.length > 50 || columns.length > 12 ? <nav aria-label={t("Páginas de celdas")} className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[#cbd6cf] bg-white p-2">
-      {rows.length > 50 ? <><button className={button} disabled={rowPage === 0} onClick={() => setRowPage(rowPage - 1)}>{t("Filas anteriores")}</button><span className="text-sm">{rowPage + 1} / {Math.ceil(rows.length / 50)}</span><button className={button} disabled={(rowPage + 1) * 50 >= rows.length} onClick={() => setRowPage(rowPage + 1)}>{t("Más filas")}</button></> : null}
-      {columns.length > 12 ? <><button className={button} disabled={columnPage === 0} onClick={() => setColumnPage(columnPage - 1)}>{t("Columnas anteriores")}</button><button className={button} disabled={(columnPage + 1) * 12 >= columns.length} onClick={() => setColumnPage(columnPage + 1)}>{t("Más columnas")}</button></> : null}
+    {rowCount > 50 || columnCount > 12 ? <nav aria-label={t("Páginas de celdas")} className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[#cbd6cf] bg-white p-2">
+      {rowCount > 50 ? <><button className={button} disabled={rowPage === 0} onClick={() => setRowPage(rowPage - 1)}>{t("Filas anteriores")}</button><span className="text-sm">{rowPage + 1} / {Math.ceil(rowCount / 50)}</span><button className={button} disabled={(rowPage + 1) * 50 >= rowCount} onClick={() => setRowPage(rowPage + 1)}>{t("Más filas")}</button></> : null}
+      {columnCount > 12 ? <><button className={button} disabled={columnPage === 0} onClick={() => setColumnPage(columnPage - 1)}>{t("Columnas anteriores")}</button><span className="text-sm tabular-nums">{visibleColumns[0]}–{visibleColumns.at(-1)} / {columnName(columnCount)}</span><button className={button} disabled={(columnPage + 1) * 12 >= columnCount} onClick={() => setColumnPage(columnPage + 1)}>{t("Más columnas")}</button></> : null}
     </nav> : null}
     <div className="scrollbar-thin flex shrink-0 items-end gap-1 overflow-x-auto border-t border-[#cbd6cf] bg-[#edf1ee] px-2 pt-1">
       {preview.sheets.map((item, index) => <button key={index} type="button" onClick={() => selectSheet(index)} className={`touch-target min-h-9 shrink-0 border-b-2 px-3 text-[11px] font-medium ${selected === index ? "border-[#176b46] bg-white text-[#176b46]" : "border-transparent text-[#536158] hover:bg-white/70"}`}>{item.name}{item.hidden ? " · oculta" : ""}</button>)}

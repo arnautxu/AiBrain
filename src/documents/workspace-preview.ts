@@ -32,7 +32,7 @@ export async function prepareWorkspaceDocumentPreview(input: {
   }
   const threadId = deterministicUuid(`workspace-preview-thread\0${input.projectId}`);
   const uploadId = deterministicUuid(
-    `workspace-preview-upload\0${input.projectId}\0${input.relativePath}\0${validated.sha256}`,
+    `workspace-preview-upload\0${input.projectId}\0${input.relativePath}\0${validated.sha256}${validated.kind === "xlsx" ? "\0whole-sheet-v1" : ""}`,
   );
   const staged = await input.services.staging.stage({
     threadId,

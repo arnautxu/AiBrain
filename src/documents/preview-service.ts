@@ -423,10 +423,16 @@ export class DocumentPreviewService {
           };
           await ensurePrivateDirectoryTree(work, ["home"]);
           if (document.kind !== "pdf") {
+            // Calc's normal print pagination slices wide sheets into narrow
+            // strips. Whole-sheet export keeps cell styles, merges, drawings
+            // and charts together on one vector PDF page per sheet.
+            const pdfFilter = document.kind === "xlsx"
+              ? 'pdf:calc_pdf_Export:{"SinglePageSheets":{"type":"boolean","value":"true"}}'
+              : "pdf";
             await this.runner.run(this.tools.soffice, [
               `-env:UserInstallation=file://${path.join(work, "lo-profile")}`,
               "--headless", "--invisible", "--nologo", "--nodefault", "--nofirststartwizard",
-              "--norestore", "--safe-mode", "--convert-to", "pdf", "--outdir", work, inputPath,
+              "--norestore", "--safe-mode", "--convert-to", pdfFilter, "--outdir", work, inputPath,
             ], { cwd: work, env: environment, timeoutMs: 60_000, signal: options.signal });
             pdfPath = path.join(work, "input.pdf");
           }
@@ -452,7 +458,7 @@ export class DocumentPreviewService {
           });
           pages = parsePdfInfo(info.stdout);
           await this.runner.run(this.tools.pdftoppm, [
-            "-f", "1", "-singlefile", "-png", "-r", "120", pdfPath, path.join(work, "page-1"),
+            "-f", "1", "-singlefile", "-png", ...(document.kind === "xlsx" ? ["-scale-to", "2000"] : ["-r", "120"]), pdfPath, path.join(work, "page-1"),
           ], { cwd: work, env: environment, timeoutMs: 30_000, signal: options.signal });
           let pdf: Buffer;
           let image: Buffer;
@@ -533,7 +539,7 @@ export class DocumentPreviewService {
         await atomicWriteFile(inputPath, pdf, { mode: 0o600 });
         await this.runWithConversionAdmission(async () => {
           await this.runner.run(this.tools.pdftoppm, [
-            "-f", String(page), "-l", String(page), "-singlefile", "-png", "-r", "144",
+            "-f", String(page), "-l", String(page), "-singlefile", "-png", ...(preview.kind === "xlsx" ? ["-scale-to", "2000"] : ["-r", "144"]),
             inputPath, path.join(work, "page"),
           ], {
             cwd: work,

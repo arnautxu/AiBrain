@@ -48,3 +48,38 @@ for (const width of [1440, 390]) {
     await expect(page.getByRole("textbox", { name: "Mensaje" })).toBeVisible();
   });
 }
+
+test("a 40-column XLSX reaches its last value in the mobile preview", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  const previewUrl = "/api/threads/00000000-0000-4000-8000-000000000013/artifacts/00000000-0000-4000-8000-000000000099?preview=1";
+  await page.route("**/api/chat", (route) => route.fulfill({ contentType: "application/x-ndjson", body: [
+    { type: "artifact", item: { id: "00000000-0000-4000-8000-000000000099", type: "document", name: "Informe.xlsx",
+      kind: "xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 1000,
+      status: "ready", pages: null, url: previewUrl.replace("preview=1", "download=1"), previewUrl,
+      publicationStatus: null, publicationError: null, targetLabel: null, error: null } },
+    { type: "done" },
+  ].map((event) => JSON.stringify(event)).join("\n") + "\n" }));
+  await page.route("**/api/threads/*/artifacts/*?grid=1", (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({
+    schemaVersion: 1, kind: "spreadsheet", truncated: false,
+    sheets: [{ name: "Dades", hidden: false, cells: Array.from({ length: 40 }, (_, index) => {
+      let n = index + 1;
+      let column = "";
+      while (n > 0) { column = String.fromCharCode(65 + (n - 1) % 26) + column; n = Math.floor((n - 1) / 26); }
+      return { address: `${column}2`, value: `Valor ${index + 1}` };
+    }) }],
+  }) }));
+  await page.goto("/login");
+  await page.getByRole("button", { name: /Alex/ }).click();
+  await page.getByRole("textbox", { name: "Mensaje" }).fill("Mostra l’informe.");
+  await page.getByRole("button", { name: "Enviar mensaje" }).click();
+  await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
+  await page.getByRole("button", { name: "Datos" }).click();
+  for (let index = 0; index < 3; index++) await page.getByRole("button", { name: "Más columnas" }).click();
+  const last = page.getByRole("cell", { name: "Valor 40" });
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
+  await expect(page.getByText("AK–AN / AN")).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "Vista previa de Informe.xlsx" }).getByRole("link", { name: "Descargar Informe.xlsx" }))
+    .toHaveAttribute("href", previewUrl.replace("preview=1", "download=1"));
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
