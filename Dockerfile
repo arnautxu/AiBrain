@@ -111,6 +111,7 @@ RUN printf '%s\n' \
     poppler-utils \
     python3 \
     python3-openpyxl \
+    python3-pil \
     python3-venv \
     qpdf \
     restic \
@@ -134,7 +135,7 @@ RUN printf '%s\n' \
   && install -d -m 0555 -o root -g root /srv/aibrain/source-ro \
   && install -d -m 0755 -o root -g root /etc/aibrain /usr/local/share/aibrain
 
-RUN /usr/bin/python3 -c "import openpyxl"
+RUN /usr/bin/python3 -c "import openpyxl; from PIL import Image"
 
 # Bubblewrap needs a pre-existing mountpoint because the container root is
 # deliberately read-only before document conversion begins.
