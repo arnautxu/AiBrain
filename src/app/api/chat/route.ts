@@ -509,6 +509,7 @@ export async function POST(request: Request) {
                 previews: documentServices.previews,
                 pdftotext: documentServices.toolchain.pdftotext,
                 conversionGate: documentServices.conversionGate,
+                workspaceXlsx: true,
               }),
             });
           },

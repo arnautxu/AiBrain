@@ -55,6 +55,16 @@ usa el control compartido de conversiones y no expone rutas de almacenamiento
 al modelo. Un libro que supera estos límites falla explícitamente; la vista
 PDF paginada sigue sirviendo solo para la previsualización visual.
 
+Cuando el turno necesita generar un informe a partir de XLSX adjuntos, el
+worker copia los bytes ya autorizados y vuelve a comprobar su hash dentro de
+una carpeta privada y temporal del workspace del proyecto. El asistente recibe
+rutas relativas para leer los libros con Python o LibreOffice, en lugar de
+reconstruir centenares de filas desde el texto del prompt. La ruta de chat evita
+extraer todas las celdas a texto antes de esta copia, por lo que un libro grande
+dentro del límite de carga no queda bloqueado por el presupuesto del prompt.
+La carpeta se borra
+al terminar el turno y no se muestra ninguna ruta del almacenamiento original.
+
 ## Verificación local
 
 La aceptación debe cubrir de forma separada:

@@ -8,7 +8,7 @@ import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
 import { prepareDesignBrandAssets } from "@/runtime/design-brand-assets";
 import { randomUUID } from "node:crypto";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
 import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
@@ -103,6 +103,7 @@ import type { JsonValue } from "@/runtime/transport";
 import type { AppServerEvent } from "@/runtime/transport";
 import {
   assertWorkerTurnDocuments,
+  prepareTurnDocumentWorkspaceInputs,
   turnDocumentCodexInputs,
   type ResolvedTurnDocument,
 } from "@/documents/turn-attachments";
@@ -269,6 +270,7 @@ function readableFilesDeveloperInstructions(documentRoots: readonly EnterpriseDo
     "Usa `aibrain_company_files.search` y `aibrain_company_files.read` para localizarlas y leerlas. Estas herramientas no escriben en las raíces empresariales. No cites rutas internas del servidor. Los borrados, publicaciones y cualquier efecto externo siguen sujetos a la política del turno. Nunca intentes salir de los scopes entregados.",
     "La biblioteca estructurada knowledge/ del contexto empresarial es una fuente local distinta de esta red documental. Para ella usa lectura local de archivos (shell) dentro de la raíz indicada en Consulta del conocimiento empresarial; no uses aibrain_company_files.search/read para esos documentos, porque esas herramientas consultan otras fuentes. No hace falta sincronizar Windows ni conectar una herramienta externa para leer el contexto local.",
     "Los Excel .xlsx y .xlsm del servidor se leen con aibrain_company_files.read: no rechaces un .xlsm solo por contener macros ni pidas al empleado que lo convierta o vuelva a subir antes de intentar la lectura autorizada. Se leen valores guardados sin ejecutar macros, enlaces ni fórmulas. La primera parte puede adjuntar una vista de hojas y celdas al chat; preview.truncated indica vista parcial, no un documento completo. Si hay previewWarning, explica el fallo de la vista sin negar la lectura. Las fórmulas sin valor guardado se indican como tales; no inventes su resultado.",
+    "Para analizar o crear un Excel a partir de XLSX adjuntos al turno, usa las rutas relativas de sus copias privadas indicadas en la entrada. Lee los libros completos con `/usr/bin/python3` y `openpyxl`, que ya están instalados, y genera un libro autocontenido con los datos y cálculos solicitados. No busques estos adjuntos con las herramientas de archivos del proyecto ni reconstruyas filas desde un resumen textual. Si se piden gráficos, créalos con openpyxl y entrega el XLSX final mediante `aibrain_documents.deliver`; `aibrain_documents.create` solo sirve para tablas básicas.",
     "Para contar o clasificar documentos usa aibrain_company_files.inventory con el path server- de una carpeta observada. El inventario completa bajo demanda páginas pendientes y devuelve el total de archivos del subárbol, tipos y listado paginado. No sumes totales entre páginas o reintentos. Si discovery.state=CONTINUE, repite para completar el recorrido; no esperes al mapa de todo el servidor. Lee los documentos relevantes para distinguir presupuestos, catálogos, anexos y versiones, comprobar emisor, fecha e identificador y separar presupuestos emitidos de recibidos. Un total de archivos no es un total de presupuestos. Devuelve el número y cuáles cumplen el criterio comprobado, con su ámbito; si faltan pruebas, da los hallazgos concretos y qué falta, sin convertirlo en cero o en una caída del servidor.",
     "En conversaciones antiguas sin la función inventory, usa aibrain_company_files.search con query='inventory:' seguido del path server- observado; por ejemplo inventory:server-conexion/Y/Ofertas. Añade ?offset=N para nextOffset. Es el mismo inventario y los mismos permisos; no requiere crear otra conversación ni perder el historial.",
     "Las herramientas de archivos actualizan bajo demanda las copias de fuentes configuradas y esperan el resultado antes de buscar o leer. Para solicitudes de archivos actuales, consulta las herramientas de nuevo, sin reutilizar una respuesta anterior. Una comprobación correcta muy reciente puede compartirse entre usuarios. Si synchronization indica failed, pending o unavailable, explica que la copia puede estar desactualizada; no afirmes que un archivo no existe en la fuente. Nunca busques credenciales ni intentes otra vía al servidor.",
@@ -457,6 +459,7 @@ export async function runWorkerCodexTurn(
   backgroundExecution = false,
   resumedThreadToolsetRevision: string | null = null,
 ) {
+  let turnInputDirectory: string | null = null;
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
   const telemetry = admittedTelemetry ?? new TurnTelemetry({
@@ -717,6 +720,12 @@ export async function runWorkerCodexTurn(
     runtime.handle.roots.artifacts,
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
+  const turnWorkspaceInputs = await prepareTurnDocumentWorkspaceInputs({
+    documents: turnDocuments,
+    projectWorkspace,
+    stagingRoot: runtime.handle.roots.staging,
+  });
+  turnInputDirectory = turnWorkspaceInputs.directory;
   const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);
   // A new conversation used to wait for the optional model/skills/usage
   // catalog before it even opened its App Server thread.  The status route
@@ -2030,7 +2039,8 @@ export async function runWorkerCodexTurn(
             ].join("\n\n")
           : chatRequest.message, text_elements: [] },
         ...selectedServerInputs,
-        ...turnDocumentCodexInputs(turnDocuments),
+        ...turnWorkspaceInputs.codexInputs,
+        ...turnDocumentCodexInputs(turnDocuments, { xlsxAvailableInWorkspace: true }),
         ...selectedSkills.map((skill) => ({ type: "skill" as const, name: skill.id, path: skill.path })),
         ...chatRequest.options.attachments.map((attachment) => ({
           type: "image" as const,
@@ -2255,6 +2265,13 @@ export async function runWorkerCodexTurn(
     }
     throw error;
   } finally {
+    if (turnInputDirectory) {
+      await rm(turnInputDirectory, { recursive: true, force: true }).catch((error) => {
+        operationalLogger.warn("documents.turn_input_cleanup_failed", {
+          code: error instanceof Error && "code" in error ? String(error.code) : "TURN_INPUT_CLEANUP_FAILED",
+        });
+      });
+    }
     if (ownsMaintenanceActivity) maintenanceActivity.release();
   }
 }
