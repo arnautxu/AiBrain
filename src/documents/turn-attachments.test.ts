@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -9,6 +9,7 @@ import { validateUploadedDocument } from "@/documents/upload-validation";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import {
   resolveTurnDocumentAttachments,
+  prepareTurnDocumentWorkspaceInputs,
   ServerTurnDocumentInputResolver,
   turnDocumentChatAttachments,
   turnDocumentCodexInputs,
@@ -188,7 +189,7 @@ describe("turn document attachment binding", () => {
   });
 
   it("reads uploaded XLSX cells by row without using the lossy PDF preview", async () => {
-    const { staging, stagingRoot } = await fixture();
+    const { root, staging, stagingRoot } = await fixture();
     const generated = await generateLocalDocument({
       format: "xlsx",
       title: "Vendes",
@@ -236,5 +237,32 @@ describe("turn document attachment binding", () => {
       text: expect.stringContaining("2026-08-03,P002,51.66,9.9"),
     });
     expect(JSON.stringify(inputs)).not.toContain(stagingRoot);
+    expect(turnDocumentCodexInputs(resolved, { xlsxAvailableInWorkspace: true })).toHaveLength(1);
+    const projectWorkspace = path.join(root, "private-project");
+    await mkdir(projectWorkspace, { mode: 0o700 });
+    const prepared = await prepareTurnDocumentWorkspaceInputs({
+      documents: resolved,
+      projectWorkspace,
+      stagingRoot,
+    });
+    expect(prepared.directory).toBeTruthy();
+    expect(prepared.codexInputs).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("input-1.xlsx") }),
+    ]);
+    expect(JSON.stringify(prepared.codexInputs)).not.toContain(stagingRoot);
+    expect(await readFile(path.join(prepared.directory!, "input-1.xlsx"))).toEqual(generated.data);
+    const workspaceResolver = new ServerTurnDocumentInputResolver({
+      stagingRoot,
+      previews: {
+        read: async () => { throw new Error("XLSX must not use a PDF preview"); },
+        readFile: async () => { throw new Error("XLSX must not use a PDF preview"); },
+      },
+      pdftotext: "/tools/pdftotext",
+      workspaceXlsx: true,
+      runner: { run: async () => { throw new Error("XLSX must not be rendered as text before workspace copy"); } },
+    });
+    expect(await workspaceResolver.resolve(document)).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("private turn workspace") }),
+    ]);
   });
 });
