@@ -37,7 +37,7 @@ vi.mock("@/runtime/workers/provisioner", () => ({
 vi.mock("@/security/safe-file", () => ({
   readRegularFileWithin: mocks.readRegularFileWithin,
 }));
-vi.mock("@/documents/server-service", () => ({ documentServicesForUser: async () => ({}) }));
+vi.mock("@/documents/server-service", () => ({ documentServicesForUser: async () => ({ conversionGate: { run: (operation: () => Promise<unknown>) => operation() } }) }));
 vi.mock("@/documents/workspace-preview", () => ({
   prepareWorkspaceDocumentPreview: mocks.prepareWorkspaceDocumentPreview,
 }));
@@ -284,6 +284,20 @@ describe("workspace file preview route", () => {
       expect(preview.headers.get("Content-Type")).toBe("application/pdf");
       expect(Buffer.from(await preview.arrayBuffer()).subarray(0, 5).toString("ascii")).toBe("%PDF-");
     }
+  });
+
+  it("routes an XLSX workspace file to its private cell grid", async () => {
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Full", content: "Nom\tTotal\nProva\t24" });
+    mocks.readRegularFileWithin.mockResolvedValue(generated.data);
+    const metadata = await GET(request("documents/full.xlsx"), { params: Promise.resolve({ projectId }) });
+    expect(await metadata.json()).toMatchObject({ file: {
+      previewMimeType: "application/pdf",
+      previewUrl: `/api/projects/${projectId}/files?path=documents%2Ffull.xlsx&representation=1`,
+    } });
+    const grid = await GET(new Request(`https://brain.example/api/projects/${projectId}/files?path=documents%2Ffull.xlsx&grid=1`),
+      { params: Promise.resolve({ projectId }) });
+    expect(grid.status).toBe(200);
+    expect((await grid.json()).sheets[0].cells).toContainEqual({ address: "B2", value: "24" });
   });
 
   it("rejects malformed queries before reading the workspace", async () => {

@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { documentServicesForUser } from "@/documents/server-service";
 import { prepareWorkspaceDocumentPage, prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
+import { prepareWorkbookGrid } from "@/documents/workbook-grid";
 import { contentDisposition, libraryResourceErrorResponse } from "@/library/http";
 import { resolveGeneratedDocumentResource } from "@/library/server-resource-access";
 import { readRegularFileWithin } from "@/security/safe-file";
@@ -35,12 +36,14 @@ export async function GET(
   const url = new URL(request.url);
   const preview = url.searchParams.get("preview") === "1";
   const download = url.searchParams.get("download") === "1";
+  const grid = url.searchParams.get("grid") === "1";
   const rawPage = url.searchParams.get("page");
   const page = rawPage === null ? null : Number(rawPage);
-  if ([...url.searchParams.keys()].some((key) => key !== "preview" && key !== "download" && key !== "page") ||
+  if ([...url.searchParams.keys()].some((key) => key !== "preview" && key !== "download" && key !== "grid" && key !== "page") ||
       url.searchParams.getAll("preview").length > 1 || url.searchParams.getAll("download").length > 1 ||
-      url.searchParams.getAll("page").length > 1 || (url.searchParams.has("preview") && !preview) ||
-      (url.searchParams.has("download") && !download) || preview === download ||
+      url.searchParams.getAll("grid").length > 1 || url.searchParams.getAll("page").length > 1 ||
+      (url.searchParams.has("preview") && !preview) || (url.searchParams.has("download") && !download) ||
+      (url.searchParams.has("grid") && !grid) || Number(preview) + Number(download) + Number(grid) !== 1 ||
       (page !== null && (!preview || !Number.isSafeInteger(page) || page < 1 || page > 500))) {
     return privateJson("Consulta no válida.", 400);
   }
@@ -75,6 +78,23 @@ export async function GET(
           "X-Content-Type-Options": "nosniff",
         },
       });
+    }
+
+    if (grid) {
+      if (location.mediaType !== "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+        return privateJson("Este documento no es un libro Excel.", 400);
+      }
+      const services = await documentServicesForUser(resource.installation, location.storageOwnerId);
+      const spreadsheet = await services.conversionGate.run(
+        () => prepareWorkbookGrid({ fileName: location.fileName, data: contents, signal: request.signal }),
+        { signal: request.signal },
+      );
+      return NextResponse.json(spreadsheet, { headers: {
+        "Cache-Control": "private, no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
+        "Referrer-Policy": "no-referrer",
+        "X-Content-Type-Options": "nosniff",
+      } });
     }
 
     const services = await documentServicesForUser(resource.installation, location.storageOwnerId);

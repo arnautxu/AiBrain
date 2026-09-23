@@ -42,6 +42,15 @@ histórico mostrado en la conversación.
 
 Las representaciones no ejecutan contenido. Office se abre con LibreOffice en
 modo headless/safe y se convierte a PDF; las páginas se renderizan como PNG.
+Los XLSX se muestran por defecto como PDF vectorial con una página completa
+por hoja: la conversión conserva los estilos, celdas combinadas, dibujos y
+gráficos que LibreOffice puede interpretar, sin cortar un libro horizontal en
+tiras de impresión. Los XLSX generados ofrecen además una cuadrícula privada
+de datos de solo lectura, con navegación por hojas, filas y columnas. Esta
+lee valores guardados del OOXML verificado, no ejecuta fórmulas ni conexiones,
+y señala cuando el límite de celdas hace parcial la vista. La descarga sigue
+entregando los bytes originales del XLSX. La representación PDF es una lectura
+local con LibreOffice, no una sesión editable de Microsoft Excel.
 Los libros XLSM de la red documental siguen el extractor OOXML de solo datos:
 no se carga ni ejecuta `vbaProject.bin`, no se recalculan fórmulas y la UI
 muestra valores guardados en una superficie de libro protegida.
@@ -94,6 +103,13 @@ renderizado de todas sus páginas con Poppler e inspección de composición,
 legibilidad, recortes, solapamientos y número de diapositivas. Solo los archivos
 finales revisados se copian a `documents/` y se entregan mediante
 `aibrain_documents.deliver`. Los listados, comandos y textos no crean adjuntos.
+El bundle local de PptxGenJS 4.0.1 corrige al empaquetar una referencia de tabla
+inválida y la serialización de ceros en el XLSX incrustado de los gráficos de
+categorías. Sin esa corrección, Keynote y Quick Look pueden omitir el gráfico
+aunque LibreOffice muestre la vista previa. La prueba de integración inspecciona
+el XLSX incrustado en un PPTX nuevo, y la aceptación del contenedor revisa
+el mismo dato en el runtime final. La descarga sirve el PPTX original e
+inmutable, sin reconvertirlo.
 Si se solicitan PDF y PPTX, el PDF se deriva del mismo PPTX para conservar diseño
 y paginación. La captura de bytes válidos no demuestra calidad visual.
 

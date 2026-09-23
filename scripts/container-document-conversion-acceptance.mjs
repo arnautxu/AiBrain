@@ -32,7 +32,7 @@ try {
     const slide = deck.addSlide();
     slide.background = { color: index ? 'E8EEF4' : '172C3C' };
     slide.addText(marker, { x: 0.6, y: 0.6, w: 12, h: 1, fontSize: 30, color: index ? '172C3C' : 'FFFFFF' });
-    slide.addChart(deck.ChartType.bar, [{ name: 'Synthetic values', labels: ['A', 'B', 'C'], values: [2, 5, 8] }], {
+    slide.addChart(deck.ChartType.bar, [{ name: 'Synthetic values', labels: ['A', 'B', 'C'], values: [2, 0, 8] }], {
       x: 0.8, y: 2, w: 11.5, h: 4, showTitle: false, showLegend: false,
     });
   }
@@ -40,6 +40,18 @@ try {
   const pdf = path.join(work, 'acceptance.pdf');
   await deck.writeFile({ fileName: pptx });
   assert.equal((await readFile(pptx)).subarray(0, 2).toString(), 'PK', 'PptxGenJS must produce OOXML bytes');
+  await run('/usr/bin/python3', ['-c', [
+    'import sys, zipfile, xml.etree.ElementTree as ET',
+    'with zipfile.ZipFile(sys.argv[1]) as deck:',
+    '    names = [name for name in deck.namelist() if name.startswith("ppt/embeddings/") and name.endswith(".xlsx")]',
+    '    assert len(names) == 2, "Each chart must embed an Excel workbook"',
+    '    for name in names:',
+    '        with zipfile.ZipFile(deck.open(name)) as book:',
+    '            table = ET.fromstring(book.read("xl/tables/table1.xml"))',
+    '            assert "\'" not in table.attrib["ref"], "Chart table reference is invalid"',
+    '            sheet = book.read("xl/worksheets/sheet1.xml")',
+    '            assert b\'<c r="B3"><v>0</v></c>\' in sheet, "Chart lost a zero value"',
+  ].join('\n'), pptx], { cwd: work, timeout: 15_000 });
   await tool('soffice', [
     `-env:UserInstallation=file://${work}/lo-profile`, '--headless', '--invisible', '--nologo',
     '--nodefault', '--nofirststartwizard', '--norestore', '--safe-mode',

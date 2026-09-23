@@ -37,6 +37,32 @@ it("opens a spreadsheet inside the document panel with escaped values and sheet 
   expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/projects/"), expect.objectContaining({ cache: "no-store", credentials: "same-origin" }));
 });
 
+it("opens a generated XLSX in the private grid and keeps its original download", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(preview), { headers: { "Content-Type": "application/json" } }));
+  vi.stubGlobal("fetch", fetch);
+  render(<DocumentPreviewPanel artifact={{ id: "00000000-0000-4000-8000-000000000099", type: "document", name: "Resultat.xlsx",
+    kind: "xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 500, status: "ready", pages: null,
+    url: "/api/threads/test/artifacts/file?download=1", previewUrl: "/api/threads/test/artifacts/file?preview=1",
+    publicationStatus: null, publicationError: null, targetLabel: null, error: null }} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Datos" }));
+  expect(await screen.findByRole("cell", { name: "09:00" })).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledWith("/api/threads/test/artifacts/file?grid=1", expect.any(Object));
+  expect(screen.getByRole("link", { name: "Descargar Resultat.xlsx" })).toHaveAttribute("href", "/api/threads/test/artifacts/file?download=1");
+});
+
+it("starts a generated XLSX in the formatted PDF view", async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response("%PDF-1.7\n%%EOF", { headers: { "Content-Type": "application/pdf" } }));
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("URL", { createObjectURL: () => "blob:formatted-workbook", revokeObjectURL: vi.fn() });
+  render(<DocumentPreviewPanel artifact={{ id: "00000000-0000-4000-8000-000000000098", type: "document", name: "Informe.xlsx",
+    kind: "xlsx", mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", size: 500, status: "ready", pages: null,
+    url: "/api/threads/test/artifacts/file?download=1", previewUrl: "/api/threads/test/artifacts/file?preview=1",
+    publicationStatus: null, publicationError: null, targetLabel: null, error: null }} onClose={vi.fn()} />);
+  expect(await screen.findByTitle("Documento Informe.xlsx")).toHaveAttribute("src", "blob:formatted-workbook");
+  expect(screen.getByText("Excel · vista con formato")).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledWith("/api/threads/test/artifacts/file?preview=1", expect.objectContaining({ credentials: "same-origin" }));
+});
+
 it("recovers from an unavailable route", async () => {
   const fetch = vi.fn().mockResolvedValueOnce(new Response("denied", { status: 403 }))
     .mockResolvedValueOnce(new Response(JSON.stringify(preview), { headers: { "Content-Type": "application/json" } }));

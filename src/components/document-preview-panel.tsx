@@ -27,6 +27,10 @@ function DocumentPreviewContent({ artifact, onClose }: {
   onClose: () => void;
 }) {
   const t = useUiText();
+  const workbook = artifact.kind === "xlsx";
+  const gridUrl = workbook && artifact.previewUrl?.endsWith("?preview=1")
+    ? artifact.previewUrl.replace(/\?preview=1$/u, "?grid=1") : null;
+  const [workbookView, setWorkbookView] = useState<"formatted" | "data">("formatted");
   const [loaded, setLoaded] = useState(artifact.kind === "text" || artifact.previewFormat === "spreadsheet");
   const [failureReason, setFailureReason] = useState<string | null>(null);
   const [failed, setFailed] = useState(!artifact.previewUrl);
@@ -44,7 +48,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
   const handleLoad = useCallback(() => setLoaded(true), []);
   const handleError = useCallback((error: Error) => { setFailureReason(error.message); setFailed(true); }, []);
   // Explicit deliveries may not have page metadata yet, including historic messages.
-  const richPages = Boolean(artifact.previewUrl?.match(/^\/api\/threads\/[^/]+\/artifacts\/[^/?]+\?preview=1$/) ||
+  const richPages = !workbook && Boolean(artifact.previewUrl?.match(/^\/api\/threads\/[^/]+\/artifacts\/[^/?]+\?preview=1$/) ||
     (pageCount && artifact.previewUrl?.startsWith("/api/threads/")));
 
   useEffect(() => {
@@ -74,7 +78,7 @@ function DocumentPreviewContent({ artifact, onClose }: {
 
   const retry = () => {
     if (!artifact.previewUrl) return;
-    setLoaded(artifact.kind === "text" || artifact.previewFormat === "spreadsheet");
+    setLoaded(artifact.kind === "text" || artifact.previewFormat === "spreadsheet" || (workbook && workbookView === "data"));
     setFailed(false);
     setFailureReason(null);
     setReload((current) => current + 1);
@@ -93,8 +97,13 @@ function DocumentPreviewContent({ artifact, onClose }: {
         <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-secondary)]">{documentIcon(artifact.previewFormat === "spreadsheet" ? "xlsx" : artifact.kind)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[13px] font-semibold text-[var(--text)]">{artifact.name}</h2>
-          <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" ? t("Excel · vista de datos") : artifact.kind.toUpperCase()}{pageCount ? ` · ${pageCount} ${pageCount === 1 ? t("página") : t("páginas")}` : ""}</p>
+          <p className="mt-0.5 text-[12px] text-[var(--text-muted)]">{artifact.previewFormat === "spreadsheet" || (workbook && workbookView === "data") ? t("Excel · vista de datos") : workbook ? t("Excel · vista con formato") : artifact.kind.toUpperCase()}{!workbook && pageCount ? ` · ${pageCount} ${pageCount === 1 ? t("página") : t("páginas")}` : ""}</p>
         </div>
+        {gridUrl ? <button type="button" className="touch-target rounded-md border border-[var(--border)] px-2 text-[11px] font-medium text-[var(--text-secondary)]" onClick={() => {
+          setWorkbookView((current) => current === "formatted" ? "data" : "formatted");
+          setLoaded(workbookView === "formatted");
+          setFailed(false);
+        }}>{workbookView === "formatted" ? t("Datos") : t("Formato")}</button> : null}
         {richPages ? <nav className="hidden items-center gap-1 sm:flex" aria-label={t("Navegación del documento")}>
           <button type="button" disabled={page <= 1} className="touch-target grid size-9 place-items-center rounded-lg hover:bg-[var(--surface-hover)] disabled:opacity-30" aria-label={t("Página anterior")} onClick={() => setPage((current) => Math.max(1, current - 1))}><CaretLeft size={16} /></button>
           <span className="min-w-14 text-center text-[12px] tabular-nums text-[var(--text-secondary)]">{page} / {pageCount ?? "…"}</span>
@@ -123,6 +132,8 @@ function DocumentPreviewContent({ artifact, onClose }: {
           </div>
         ) : artifact.previewUrl && artifact.previewFormat === "spreadsheet" ? (
           <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} />
+        ) : gridUrl && workbookView === "data" ? (
+          <AuthenticatedSpreadsheetPreview key={`${artifact.id}:${reload}`} previewUrl={gridUrl} />
         ) : artifact.previewUrl && artifact.kind === "text" ? (
           <AuthenticatedTextPreview key={`${artifact.id}:${reload}`} previewUrl={artifact.previewUrl} title={t("Documento {p0}", { p0: artifact.name })} />
         ) : artifact.previewUrl && richPages ? (

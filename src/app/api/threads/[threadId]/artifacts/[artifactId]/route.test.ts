@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   services: vi.fn(),
   preview: vi.fn(),
   page: vi.fn(),
+  grid: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -25,6 +26,7 @@ vi.mock("@/documents/workspace-preview", () => ({
   prepareWorkspaceDocumentPreview: mocks.preview,
   prepareWorkspaceDocumentPage: mocks.page,
 }));
+vi.mock("@/documents/workbook-grid", () => ({ prepareWorkbookGrid: mocks.grid }));
 
 import { GET } from "./route";
 
@@ -49,9 +51,10 @@ describe("generated document artifact route", () => {
     location.sha256 = createHash("sha256").update(contents).digest("hex");
     mocks.resolve.mockReset().mockResolvedValue({ installation: { paths: { dataRoot: "/private/data" } }, location });
     mocks.read.mockReset().mockResolvedValue(contents);
-    mocks.services.mockReset().mockResolvedValue({});
+    mocks.services.mockReset().mockResolvedValue({ conversionGate: { run: (operation: () => Promise<unknown>) => operation() } });
     mocks.preview.mockReset().mockResolvedValue({ data: Buffer.from("%PDF-1.7\npreview"), pages: 3 });
     mocks.page.mockReset().mockResolvedValue({ data: Buffer.from("89504e470d0a1a0a00", "hex"), pages: 3 });
+    mocks.grid.mockReset().mockResolvedValue({ schemaVersion: 1, kind: "spreadsheet", truncated: false, sheets: [{ name: "Full", hidden: false, cells: [{ address: "AN2", value: "Valor 40" }] }] });
   });
 
   it("serves the immutable original and binds resolution to the URL thread", async () => {
@@ -95,5 +98,16 @@ describe("generated document artifact route", () => {
     const foreign = await GET(request("?download=1"), { params: Promise.resolve({ threadId: THREAD, artifactId: ARTIFACT }) });
     expect(foreign.status).toBe(404);
     expect(mocks.read).not.toHaveBeenCalled();
+  });
+
+  it("serves the authenticated grid from the verified XLSX bytes", async () => {
+    location.fileName = "report.xlsx";
+    location.relativePath = `generated-document-artifacts/${OWNER}/${ARTIFACT}/report.xlsx`;
+    location.mediaType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    const response = await GET(request("?grid=1"), { params: Promise.resolve({ threadId: THREAD, artifactId: ARTIFACT }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).sheets[0].cells[0]).toEqual({ address: "AN2", value: "Valor 40" });
+    expect(mocks.grid).toHaveBeenCalledWith(expect.objectContaining({ fileName: "report.xlsx", data: contents }));
+    expect(mocks.preview).not.toHaveBeenCalled();
   });
 });

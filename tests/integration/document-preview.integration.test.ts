@@ -20,6 +20,7 @@ function executable(environmentName: string, candidates: readonly string[]) {
 }
 
 const qpdf = executable("AIBRAIN_QPDF_BIN", ["/opt/homebrew/bin/qpdf", "/usr/bin/qpdf"]);
+const python = executable("AIBRAIN_PYTHON_BIN", ["/usr/bin/python3"]);
 const tools = {
   soffice: executable("AIBRAIN_SOFFICE_BIN", [
     "/opt/homebrew/bin/soffice",
@@ -127,6 +128,37 @@ it.skipIf(!hasToolchain)("converts a real DOCX into a validated PDF and PNG prev
   expect(JSON.stringify(turnInputs)).not.toContain(stagingRoot);
 }, 90_000);
 
+it.skipIf(!hasToolchain)("keeps all columns of a wide XLSX on one styled PDF sheet", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-wide-xlsx-preview-"));
+  roots.push(root);
+  const labels = Array.from({ length: 40 }, (_, index) => `Column ${index + 1}`);
+  const generated = await generateLocalDocument({
+    format: "xlsx", title: "Wide workbook", content: "Synthetic evidence",
+    rows: [labels, labels.map((_, index) => `Value ${index + 1}`)],
+  });
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
+  const stagingRoot = path.join(root, "staging");
+  const staged = await new FileDocumentStagingStore(stagingRoot, locks).stage({
+    threadId: "11111111-1111-4111-8111-111111111111",
+    uploadId: "22222222-2222-4222-8222-222222222222",
+    validated: validateUploadedDocument({ fileName: "wide.xlsx", declaredMimeType: generated.mimeType, data: generated.data }),
+    data: generated.data,
+  });
+  const previews = new DocumentPreviewService({
+    stagingRoot, previewRoot: path.join(root, "previews"), lockManager: locks, tools,
+    requireQpdf: Boolean(tools.qpdf),
+  });
+  const preview = await previews.create(staged);
+  expect(preview.pages).toBe(1);
+  const pdf = await previews.readFile(staged.threadId, staged.uploadId, "document.pdf");
+  const pdfPath = path.join(root, "wide.pdf");
+  await writeFile(pdfPath, pdf, { mode: 0o600 });
+  const text = await run(tools.pdftotext, ["-layout", pdfPath, "-"], { timeout: 30_000 });
+  expect(text.stdout).toContain("Column 1");
+  expect(text.stdout).toContain("Value 40");
+  expect((await readFile(path.join(stagingRoot, staged.relativePath))).equals(generated.data)).toBe(true);
+}, 90_000);
+
 it.skipIf(!runFullMatrix)("previews all four AiBrain-generated local formats with real content", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "aibrain-generated-document-matrix-"));
   roots.push(root);
@@ -198,7 +230,7 @@ it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with t
     "--headless", "--nologo", "--nodefault", "--nofirststartwizard", "--norestore",
     "--convert-to", "pdf", "--outdir", root, textPath,
   ], { timeout: 30_000 });
-  await run("/usr/bin/python3", [
+  await run(python, [
     "-c",
     [
       "from pptx import Presentation",
