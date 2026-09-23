@@ -24,6 +24,7 @@ import {
 import { generatedDocumentArtifactId, persistGeneratedDocumentArtifact } from "@/runtime/generated-document-artifacts";
 import { generatedImageArtifactId, isPng } from "@/runtime/generated-image-artifacts";
 import type { ArnallSchedule } from "@/runtime/documents/arnall-schedule";
+import { reviewFictionalArnallSchedule } from "@/runtime/documents/fictional-arnall-schedule";
 
 export const AIBRAIN_DOCUMENT_TOOL_NAMESPACE = "aibrain_documents";
 
@@ -57,7 +58,7 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   tools: [
     {
       type: "function", name: "create_arnall_schedule",
-      description: "Create and attach a fictional Arnall shop schedule in the embedded HORARI SAGARO Excel template. Use only when the user explicitly supplies an invented shop and people; no horarIA database records are created or read. Supply the complete seven-day grid for each person and the actual hours for M, T and D. This does not certify coverage or compliance; check those separately. For real employees and shops use aibrain_horaria schedules.draft instead. Never ask the user to upload the template: it is bundled on the server.",
+      description: "Create and attach a fictional Arnall shop schedule in the embedded HORARI SAGARO Excel template. Use only when the user explicitly supplies an invented shop and people; no horarIA database records are created or read. Supply all seven days per person, marking every free day F, with actual hours for M, T and D. The tool rejects shift-time mismatches and returns calculated hours and coverage from the final grid; compare these with every user rule before claiming compliance. For real employees and shops use aibrain_horaria schedules.draft instead. Never ask the user to upload the template: it is bundled on the server.",
       inputSchema: { type: "object", properties: {
         fileName: { type: "string", minLength: 1, maxLength: 160 },
         establishmentName: { type: "string", minLength: 1, maxLength: 80 },
@@ -301,7 +302,7 @@ function parseArguments(value: unknown): CreateArguments {
   };
 }
 
-function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments; schedule: ArnallSchedule } {
+function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments; schedule: ArnallSchedule; review: ReturnType<typeof reviewFictionalArnallSchedule> } {
   if (!isRecord(value)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Faltan los datos del horario ficticio.");
   exactKeys(value, ["fileName", "establishmentName", "week", "people"]);
   if (typeof value.fileName !== "string" || !FILE_NAME_PATTERN.test(value.fileName) ||
@@ -315,16 +316,26 @@ function parseFictionalArnallSchedule(value: unknown): { input: CreateArguments;
     exactKeys(person, ["name", "section", "codeHours", "days"]);
     if (!isRecord(person.codeHours)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Horas ficticias no válidas.");
     exactKeys(person.codeHours, ["M", "T", "D"]);
-    if (!Array.isArray(person.days)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Semana ficticia no válida.");
+    if (typeof person.name !== "string" || !["DEPENDIENTA", "ELABORACION"].includes(String(person.section)) ||
+        [person.codeHours.M, person.codeHours.T, person.codeHours.D].some((hours) => typeof hours !== "number" || !Number.isFinite(hours))) {
+      throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Persona u horas ficticias no válidas.");
+    }
+    if (!Array.isArray(person.days) || person.days.length !== 7) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Semana ficticia no válida.");
     for (const day of person.days) if (day !== null) {
       if (!isRecord(day)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Turno ficticio no válido.");
       exactKeys(day, ["code", "firstLine", "secondLine"], ["requested"]);
+      if (typeof day.code !== "string" || typeof day.firstLine !== "string" || typeof day.secondLine !== "string") {
+        throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Turno ficticio no válido.");
+      }
     }
     return { ...person, id: index + 1 };
   });
   const schedule = { establishmentId: 1, establishmentName: value.establishmentName, week: value.week, people } as unknown as ArnallSchedule;
+  let review: ReturnType<typeof reviewFictionalArnallSchedule>;
+  try { review = reviewFictionalArnallSchedule(schedule); }
+  catch (error) { throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_SCHEDULE_INVALID", error instanceof Error ? error.message : "Horario ficticio no válido."); }
   const input = parseArguments({ format: "xlsx", fileName: value.fileName, title: `Simulación de horario ${value.week}`, content: "Simulación ficticia no guardada ni aprobada.", rows: [["Persona", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom", "Horas"]] });
-  return { input, schedule };
+  return { input, schedule, review };
 }
 
 function parseImageToPdfArguments(value: unknown): CreateArguments {
@@ -405,7 +416,7 @@ async function artifactFromReceipt(receipt: Receipt, context: LocalDocumentDynam
   });
 }
 
-function responseFor(receipt: Receipt): DynamicToolCallResponse {
+function responseFor(receipt: Receipt, fictionalReview?: ReturnType<typeof reviewFictionalArnallSchedule>): DynamicToolCallResponse {
   return {
     success: true,
     contentItems: [{
@@ -422,6 +433,7 @@ function responseFor(receipt: Receipt): DynamicToolCallResponse {
         pages: receipt.pages,
         previewAvailable: true,
         downloadAvailable: true,
+        ...(fictionalReview ? { review: fictionalReview } : {}),
       }),
     }],
   };
@@ -736,13 +748,13 @@ async function handleSingleLocalDocumentDynamicToolCall(
         );
       }
       await verifyReceipt(existing, inputFingerprint, context);
-      return { response: responseFor(existing), artifacts: [await artifactFromReceipt(existing, context)] };
+      return { response: responseFor(existing, fictional?.review), artifacts: [await artifactFromReceipt(existing, context)] };
     }
     try {
       const existing = await readReceipt(receiptPath);
       if (existing) {
         await verifyReceipt(existing, inputFingerprint, context);
-        return { response: responseFor(existing), artifacts: [await artifactFromReceipt(existing, context)] };
+        return { response: responseFor(existing, fictional?.review), artifacts: [await artifactFromReceipt(existing, context)] };
       }
       const documents = await secureDirectory(context.projectWorkspace);
       const sourcePng = await sourcePngFor(input, context);
@@ -794,7 +806,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
           createdAt: (context.now ?? (() => new Date()))().toISOString(),
         });
         await atomicWriteFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { mode: 0o600 });
-        return { response: responseFor(receipt), artifacts: [await artifactFromReceipt(receipt, context)] };
+        return { response: responseFor(receipt, fictional?.review), artifacts: [await artifactFromReceipt(receipt, context)] };
       } catch (error) {
         if (written) await rm(selected.target, { force: true }).catch(() => undefined);
         throw error;
