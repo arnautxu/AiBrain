@@ -46,6 +46,15 @@ Los libros XLSM de la red documental siguen el extractor OOXML de solo datos:
 no se carga ni ejecuta `vbaProject.bin`, no se recalculan fórmulas y la UI
 muestra valores guardados en una superficie de libro protegida.
 
+Los XLSX que adjunta un usuario al chat se leen directamente de sus celdas
+OOXML verificadas. El turno recibe una tabla CSV por hoja con números de fila,
+columnas y valores guardados; el lector no ejecuta fórmulas ni conexiones. Si
+una fórmula carece de valor guardado, aparece como `#UNCALCULATED_FORMULA`.
+La extracción se limita por tamaño de archivo, hoja, celdas y texto del turno,
+usa el control compartido de conversiones y no expone rutas de almacenamiento
+al modelo. Un libro que supera estos límites falla explícitamente; la vista
+PDF paginada sigue sirviendo solo para la previsualización visual.
+
 ## Verificación local
 
 La aceptación debe cubrir de forma separada:

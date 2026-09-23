@@ -6,6 +6,7 @@ import type { ResolvedPermissions } from "@/permissions";
 import { ResourceLockManager } from "@/storage";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { validateUploadedDocument } from "@/documents/upload-validation";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import {
   resolveTurnDocumentAttachments,
   ServerTurnDocumentInputResolver,
@@ -184,5 +185,56 @@ describe("turn document attachment binding", () => {
       kind: "pdf",
       mediaType: "application/pdf",
     })).rejects.toMatchObject({ code: "TURN_DOCUMENT_PREPARATION_FAILED" });
+  });
+
+  it("reads uploaded XLSX cells by row without using the lossy PDF preview", async () => {
+    const { staging, stagingRoot } = await fixture();
+    const generated = await generateLocalDocument({
+      format: "xlsx",
+      title: "Vendes",
+      content: "Synthetic source",
+      rows: [
+        ["Setmana", "SKU", "Kg", "Preu"],
+        ["2026-07-27", "P001", 37.88, 12.9],
+        ["2026-08-03", "P002", 51.66, 9.9],
+      ],
+    });
+    const validated = validateUploadedDocument({
+      fileName: "vendes.xlsx",
+      declaredMimeType: generated.mimeType,
+      data: generated.data,
+    });
+    const document = await staging.stage({
+      threadId: THREAD_ID,
+      uploadId: "22222222-2222-4222-8222-222222222223",
+      validated,
+      data: generated.data,
+    });
+    const resolver = new ServerTurnDocumentInputResolver({
+      stagingRoot,
+      previews: {
+        read: async () => { throw new Error("XLSX must not use a PDF preview"); },
+        readFile: async () => { throw new Error("XLSX must not use a PDF preview"); },
+      },
+      pdftotext: "/tools/pdftotext",
+    });
+    const resolved = await resolveTurnDocumentAttachments({
+      staging,
+      threadId: THREAD_ID,
+      uploadIds: [document.uploadId],
+      permissions: permissions("allow"),
+      inputResolver: resolver,
+    });
+    const inputs = turnDocumentCodexInputs(resolved);
+    expect(inputs).toEqual([
+      expect.objectContaining({ type: "text", text: expect.stringContaining("server-attached documents") }),
+      expect.objectContaining({ type: "text", text: expect.stringContaining("stored cells") }),
+      expect.objectContaining({ type: "text", text: expect.stringContaining("2026-07-27,P001,37.88,12.9") }),
+    ]);
+    expect(inputs[2]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("2026-08-03,P002,51.66,9.9"),
+    });
+    expect(JSON.stringify(inputs)).not.toContain(stagingRoot);
   });
 });
