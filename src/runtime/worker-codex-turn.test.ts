@@ -149,6 +149,46 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+  it("rejects a fictional Arnall schedule answer that did not attach the required template", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-fictional-schedule-"));
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };
+    const events: Array<{ type: string; value?: string; message?: unknown }> = [];
+    let sequence = 0;
+    const envelope = () => ({ eventId: `fictional-${++sequence}`, sequence,
+      occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    mocked.runtime = {
+      config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
+      handle: { roots: { workspace: root, staging: root, artifacts: root } },
+      client: {
+        canReuseLoadedThread: () => false,
+        connectionSummary: async () => ({ connected: true }),
+        router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+          handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+        } },
+        async request(method: string, _params: unknown, _purpose: string, _timeout: number,
+          beforeResolve?: (value: never, event: never) => Promise<void>) {
+          const result = method === "thread/start" ? { thread: { id: "fictional-thread" } } : { turn: { id: "fictional-turn" } };
+          await beforeResolve?.(result as never, envelope() as never);
+          if (method === "turn/start") queueMicrotask(() => { void (async () => {
+            await handlers.onNotification({ method: "item/started", params: { item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "" } } }, envelope());
+            await handlers.onNotification({ method: "item/agentMessage/delta", params: { itemId: "answer", delta: "Aquí tens la taula sense Excel." } }, envelope());
+            await handlers.onNotification({ method: "item/completed", params: { item: { id: "answer", type: "agentMessage", phase: "final_answer", text: "Aquí tens la taula sense Excel." } } }, envelope());
+            await handlers.onNotification({ method: "turn/completed", params: { turn: { id: "fictional-turn", status: "completed", items: [], error: null } } }, envelope());
+          })(); });
+          return result;
+        },
+      },
+    };
+    const request = { ...chatRequest(), message: "Cas completament fictici. Genera un horari per a la Botiga Demo amb sis persones inventades." };
+    await runWorkerCodexTurn(request, installationId, userId, null, {
+      tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+      workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+    }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+    async (event) => { events.push(event); });
+    expect(events.filter((event) => event.type === "content" || event.type === "delta")).toEqual([]);
+    expect(events.find((event) => event.type === "error")?.message).toContain("HORARI SAGARO");
+  });
+
   it.each(["ordinary", "private", "legacy"])("publishes safe prefixes and keeps explicit final over legacy (%s)", async (mode) => {
     const privateRoot = mode === "private";
     const phase = mode === "legacy" ? undefined : "final_answer";

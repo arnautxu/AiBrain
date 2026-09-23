@@ -1,4 +1,5 @@
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
+import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
 import { documentServicesForUser } from "@/documents/server-service";
 import { prepareWorkspaceDocumentPreview } from "@/documents/workspace-preview";
@@ -281,7 +282,7 @@ function localDocumentDeveloperInstructions() {
   return [
     "## Generación documental local",
     "Para informes de texto sencillos, Word/DOCX y tablas Excel/XLSX, usa `aibrain_documents.create`; es un renderizador básico de contenido final, no otro modelo. Redacta primero el contenido final completo. Nunca envíes como `content` la petición del usuario, un prompt, instrucciones de diseño o una promesa de trabajo.",
-    "Si el usuario pide un horario de Arnall con tienda y personas explícitamente ficticias, usa `aibrain_documents.create_arnall_schedule` para rellenar la plantilla HORARI SAGARO incorporada en el servidor. No necesita adjuntar ni subir la plantilla. Incluye los siete días de cada persona, con F para días libres y horarios reales en las dos líneas de cada turno. No consultes ni des de alta personas o tiendas reales para esta simulación. La herramienta entrega el Excel privado; revisa por separado las condiciones solicitadas y no declares verificado lo que solo has calculado tú. Para tiendas y personal reales usa `aibrain_horaria.run` con `schedules.draft`.",
+    "Si el usuario pide un horario de Arnall con tienda y personas explícitamente ficticias, debes llamar a `aibrain_documents.create_arnall_schedule` antes de responder para rellenar la plantilla HORARI SAGARO incorporada en el servidor. No necesita adjuntar ni subir la plantilla. Incluye los siete días de cada persona, con F para días libres y horarios reales en las dos líneas de cada turno. No consultes ni des de alta personas o tiendas reales para esta simulación. La herramienta entrega el Excel privado y devuelve las horas y la cobertura calculadas de la graella final: compáralas con todas las condiciones solicitadas y no declares verificado lo que no se haya comprobado. Si falla la herramienta, explica el error concreto y no entregues una tabla como sustituto. Para tiendas y personal reales usa `aibrain_horaria.run` con `schedules.draft`.",
     "Para presentaciones, tanto PDF como PowerPoint, usa autoría local con shell y PptxGenJS, no el renderizador básico `aibrain_documents.create`. Lee primero la guía local `/usr/local/share/aibrain/presentations.md` y las skills autorizadas presentation-craft, local-documents e impeccable cuando estén disponibles y cumple la política de diseño de esta instalación. PptxGenJS está empaquetado en `/usr/local/share/aibrain/pptxgenjs.cjs`: cárgalo desde Node con require y comprueba su disponibilidad; no instales paquetes ni uses servicios externos. Si falta una herramienta o skill obligatoria, explica la limitación concreta; no sustituyas silenciosamente la presentación por diapositivas de texto básico.",
     "Antes de crear la presentación, redacta un guion con una idea por diapositiva y diseña composiciones, jerarquía tipográfica y elementos visuales relevantes al tema. Respeta idioma, contenido y número solicitado; no repitas títulos ni cortes frases entre páginas para encajar texto. Usa formas, diagramas, gráficos e imágenes locales autorizadas cuando aporten información; no inventes fuentes ni afirmes haber usado imágenes que no existen.",
     "Trabaja en borradores privados dentro de `.aibrain-drafts/` en el workspace. No anuncies ni publiques sus rutas como entregas. Genera el PPTX en shell y llama a `aibrain_documents.render` con su ruta relativa y cada número de página para obtener el PDF y las imágenes; no ejecutes conversores desde shell, porque su sandbox anidado bloquea el renderizado; inspecciona visualmente todas las diapositivas, comprueba recortes, solapamientos, legibilidad y número de páginas, y corrige antes de entregar. Solo después copia los archivos finales verificados a `documents/` y llama a `aibrain_documents.deliver` con la ruta relativa de cada archivo solicitado para adjuntarlo. Consultar o imprimir rutas no entrega documentos. No escribas versiones provisionales en la ruta final; no presentes un borrador no inspeccionado como terminado.",
@@ -485,6 +486,9 @@ export async function runWorkerCodexTurn(
     return;
   }
   const activities = new Map<string, ActivityItem>();
+  let fictionalScheduleArtifactRequired = false;
+  const fictionalScheduleArtifactIds = new Set<string>();
+  let fictionalScheduleDeliveryFailed = false;
   const agentMessagePhases = new Map<string, "commentary" | "final_answer" | null>();
   const commentaryText = new Map<string, string>();
   const projectedDocumentArtifactIds = new Set<string>();
@@ -567,6 +571,7 @@ export async function runWorkerCodexTurn(
   ) => {
     const rawValue = `${finalAnswerText.get(itemId) ?? ""}${value}`.slice(0, 128_000);
     finalAnswerText.set(itemId, rawValue);
+    if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) return;
     if (agentMessagePhases.get(itemId) !== "final_answer" &&
         [...agentMessagePhases.values()].includes("final_answer")) return;
     const completePrefix = completePublicTextPrefix(
@@ -593,6 +598,7 @@ export async function runWorkerCodexTurn(
     projection?: WorkerTurnProjection,
   ) => {
     finalAnswerText.set(itemId, value.slice(0, 128_000));
+    if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) return;
     if (agentMessagePhases.get(itemId) !== "final_answer" &&
         [...agentMessagePhases.values()].includes("final_answer")) return;
     const publicValue = publicAssistantText(
@@ -626,6 +632,7 @@ export async function runWorkerCodexTurn(
     })),
     telemetry.measure("worker", () => workerAppServerForUser(authenticatedUserId, maintenanceActivity)),
   ]);
+  fictionalScheduleArtifactRequired = requiresFictionalScheduleArtifact(runtime.config.companySlug, chatRequest.message);
   let automaticMemoryScheduled = false;
   const scheduleCompletedConversationMemory = async () => {
     if (automaticMemoryScheduled || typeof runtime.config.paths?.dataRoot !== "string" ||
@@ -859,7 +866,11 @@ export async function runWorkerCodexTurn(
   ) => {
     await emit({ type: "runtimeTurn", turnId: recoveredTurnState.id });
     const text = recoveredAgentText(recoveredTurnState);
-    if (text !== null) {
+    if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0 && recoveredTurnState.status === "completed") {
+      fictionalScheduleDeliveryFailed = true;
+      await emit({ type: "error", message: "No se ha podido confirmar el Excel obligatorio de esta simulación. No se entregará una tabla como sustituto." },
+        { envelope, key: `${keyPrefix}:missing-schedule-template:${recoveredTurnState.id}` });
+    } else if (text !== null) {
       await emit(
         {
           type: "content",
@@ -1615,7 +1626,12 @@ export async function runWorkerCodexTurn(
             // selection without ever publishing rejected fallback candidates.
             const finalEntry = [...finalAnswerText].filter(([id]) => agentMessagePhases.get(id) === "final_answer").at(-1)
               ?? [...finalAnswerText].at(-1);
-            if (finalEntry) {
+            if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) {
+              fictionalScheduleDeliveryFailed = true;
+              await emit({ type: "error", message: "No se ha generado el Excel con la plantilla HORARI SAGARO. No se entregará una tabla como sustituto." },
+                { envelope, key: "turn:missing-schedule-template" });
+              errorEmitted = true;
+            } else if (finalEntry) {
               const [itemId, rawText] = finalEntry;
               await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
             }
@@ -1752,6 +1768,11 @@ export async function runWorkerCodexTurn(
                 projectedDocumentArtifactIds.add(artifact.id);
               } finally {
                 projectingDocumentArtifactIds.delete(artifact.id);
+              }
+            }
+            if (request.params.tool === "create_arnall_schedule" && result.response.success && result.artifacts.length > 0) {
+              for (const artifact of result.artifacts) {
+                if (projectedDocumentArtifactIds.has(artifact.id)) fictionalScheduleArtifactIds.add(artifact.id);
               }
             }
             if (request.params.tool !== "render") armDocumentToolRecovery();
@@ -2199,6 +2220,10 @@ export async function runWorkerCodexTurn(
     if (completed.status === "interrupted" || turnSignal.aborted) {
       if (!stoppedEmitted) await emit({ type: "stopped" });
       telemetry.finish("stopped");
+      return;
+    }
+    if (fictionalScheduleDeliveryFailed) {
+      telemetry.finish("error");
       return;
     }
     const metrics = telemetry.finish("completed");

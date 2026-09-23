@@ -63,8 +63,15 @@ identificadors horarIA ni cal donar-les d’alta. L’eina documental
 `create_arnall_schedule` rep la graella completa, hi assigna identificadors
 efímers només per al llibre i aplica la mateixa plantilla integrada. Només
 és disponible a la instal·lació Arnall, crea un artefacte privat i no consulta
-ni escriu dades de negoci. La graella fictícia no és una revisió certificada
-pel planificador: les condicions es comproven i s’expliquen per separat.
+ni escriu dades de negoci. L’eina exigeix els set dies marcats, contrasta
+les hores de cada codi amb els intervals i retorna el total i la cobertura
+calculats de la graella final. El worker només publica una resposta final
+d’aquest tipus si ha projectat l’Excel de la plantilla; en cas contrari
+retorna un error explícit. Aquesta revisió no certifica totes les condicions
+textuals ni l’optimització de canvis posteriors: cal comparar la revisió
+amb cada condició demanada i fer acceptació autenticada al xat desplegat.
+La revisió del catàleg d’eines es renova perquè els xats existents
+recuperin l’historial en un runtime nou que exposi aquesta eina.
 
 Correcció de selecció, 2026-09-21: la configuració versionada d’Arnall té
 `installationId: company-qa` i `companySlug: arnall`. La selecció anterior

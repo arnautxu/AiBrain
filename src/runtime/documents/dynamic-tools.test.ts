@@ -145,10 +145,10 @@ describe("local document dynamic tool", () => {
         { name: "Aina", section: "DEPENDIENTA", codeHours: { M: 5, T: 4, D: 9 }, days: [
           { code: "M", firstLine: "09:00–14:00", secondLine: "" },
           { code: "M", firstLine: "09:00–14:00", secondLine: "" },
-          null,
+          { code: "F", firstLine: "", secondLine: "" },
           { code: "M", firstLine: "09:00–14:00", secondLine: "" },
           { code: "M", firstLine: "09:00–14:00", secondLine: "" },
-          null,
+          { code: "F", firstLine: "", secondLine: "" },
           { code: "F", firstLine: "", secondLine: "" },
         ] },
       ] },
@@ -159,6 +159,13 @@ describe("local document dynamic tool", () => {
     const result = await handleLocalDocumentDynamicToolCall(params, ctx);
     expect(result.response.success).toBe(true);
     expect(result.artifacts).toHaveLength(1);
+    const payload = JSON.parse((result.response.contentItems[0] as { text: string }).text);
+    expect(payload.review).toMatchObject({ totalHours: 20, people: [{ name: "Aina", workDays: 4, hours: 20 }] });
+    const wrongHours = await handleLocalDocumentDynamicToolCall({ ...params, callId: "fictional-wrong-hours", arguments: {
+      ...params.arguments, people: [{ ...params.arguments.people[0], codeHours: { M: 4, T: 4, D: 9 } }],
+    } }, ctx);
+    expect(wrongHours.response.success).toBe(false);
+    expect(wrongHours.artifacts).toHaveLength(0);
     const zip = await JSZip.loadAsync(await readFile(path.join(ctx.projectWorkspace, "documents/horari-demo.xlsx")));
     const sheet = await zip.file("xl/worksheets/sheet1.xml")!.async("text");
     expect(sheet).toContain("Botiga Demo");
