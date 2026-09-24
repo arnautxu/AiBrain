@@ -21,6 +21,16 @@ codex = module('run_codex', 'knowledge-codex-adapter.py')
 require = policy_module.require
 
 
+def assert_no_weekly_token_budget(manifest):
+    """This ephemeral adapter has no durable token meter. Deny it under a budget."""
+    installation = policy_module.private_json(
+        Path('/etc/aibrain') / manifest['installationId'] / 'installation.json')
+    require(isinstance(installation, dict)
+            and installation.get('installationId') == manifest['installationId'],
+            'GENERATION_INSTALLATION_MISMATCH')
+    require('usageLimits' not in installation, 'GENERATION_WEEKLY_TOKEN_BUDGET_UNSUPPORTED')
+
+
 def run(config_path, execute=False):
     require(os.geteuid() == 0, 'HOST_OPERATOR_REQUIRED')
     value = policy_module.private_json(config_path)
@@ -31,11 +41,17 @@ def run(config_path, execute=False):
             and isinstance(value['chatgptAccountId'], str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{0,119}', value['chatgptAccountId']),
             'INVALID_CODEX_CONNECTION_BINDING')
     manifest = policy_module.files.sync.load_manifest(value['manifest'])
+    if execute:
+        assert_no_weekly_token_budget(manifest)
     policy = policy_module.GenerationPolicy(Path('/var/lib/aibrain/knowledge') / manifest['installationId'],
         manifest, value['bindings'], value['policy'])
     auth_path = Path(manifest['dataRootHost']) / 'users' / value['employeeId'] / 'runtime/codex-home/auth.json'
-    adapter = codex.CodexAdapter(value['codexBinary'],
-        lambda: codex.access_token(auth_path, value['chatgptAccountId'], manifest['appUid']))
+    def token_supplier():
+        # Recheck immediately before each step, including a policy enabled
+        # while the scheduler is already running. No model dispatch precedes it.
+        assert_no_weekly_token_budget(manifest)
+        return codex.access_token(auth_path, value['chatgptAccountId'], manifest['appUid'])
+    adapter = codex.CodexAdapter(value['codexBinary'], token_supplier)
     # Preview does not read an employee token or start Codex. Only explicit grants
     # are considered, and each step rechecks source, audience, version and expiry.
     return scheduler.sweep(policy, adapter, max_steps=value['maxSteps'], max_daily_calls=value['maxDailyCalls'],

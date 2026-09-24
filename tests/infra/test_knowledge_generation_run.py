@@ -20,7 +20,7 @@ class RunTests(unittest.TestCase):
     def run_with(self, execute=False):
         with patch.object(runner.os, 'geteuid', return_value=0), \
              patch.object(runner.policy_module, 'GenerationPolicy') as policy_class, \
-             patch.object(runner.policy_module, 'private_json', return_value=self.config), \
+             patch.object(runner.policy_module, 'private_json', side_effect=lambda p: self.config if str(p) == '/private/config' else {'installationId': 'company-a'}), \
              patch.object(runner.policy_module.files.sync, 'load_manifest', return_value=self.manifest), \
              patch.object(runner.scheduler, 'sweep') as sweep, \
              patch.object(runner.codex, 'access_token', return_value={'fixture': True}) as token:
@@ -38,6 +38,28 @@ class RunTests(unittest.TestCase):
     def test_default_preview_does_not_read_auth(self): self.run_with()
 
     def test_execution_preserves_exact_account_installation_and_limits(self): self.run_with(True)
+
+    def test_budgeted_installation_blocks_before_auth_or_model_dispatch(self):
+        installation = {'installationId': 'company-a', 'usageLimits': {'weeklyTokens': 7500000, 'timeZone': 'Europe/Madrid'}}
+        with patch.object(runner.os, 'geteuid', return_value=0), \
+             patch.object(runner.policy_module, 'private_json', side_effect=[self.config, installation]), \
+             patch.object(runner.policy_module.files.sync, 'load_manifest', return_value=self.manifest), \
+             patch.object(runner.scheduler, 'sweep') as sweep, \
+             patch.object(runner.codex, 'access_token') as token:
+            with self.assertRaisesRegex(ValueError, 'GENERATION_WEEKLY_TOKEN_BUDGET_UNSUPPORTED'):
+                runner.run('/private/config', True)
+            sweep.assert_not_called()
+            token.assert_not_called()
+
+    def test_missing_or_foreign_installation_policy_does_not_bypass_budget(self):
+        for installation in ({}, {'installationId': 'company-b'}):
+            with self.subTest(installation=installation), \
+                 patch.object(runner.policy_module, 'private_json', return_value=installation):
+                with self.assertRaisesRegex(ValueError, 'GENERATION_INSTALLATION_MISMATCH'):
+                    runner.assert_no_weekly_token_budget(self.manifest)
+        with patch.object(runner.policy_module, 'private_json', side_effect=FileNotFoundError):
+            with self.assertRaises(FileNotFoundError):
+                runner.assert_no_weekly_token_budget(self.manifest)
 
     def test_arbitrary_auth_path_and_employee_traversal_rejected(self):
         for change in ({'authPath': '/other/auth.json'}, {'employeeId': '../other'}, {'chatgptAccountId': ''}):

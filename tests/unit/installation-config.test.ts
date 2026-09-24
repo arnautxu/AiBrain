@@ -27,6 +27,19 @@ async function readFixture() {
 }
 
 describe("InstallationConfig", () => {
+  it("accepts an immutable installation-wide token budget and rejects ambiguous policies", async () => {
+    const fixture = await readFixture();
+    expect(parseInstallationConfig(fixture).usageLimits).toBeUndefined();
+    const usageLimits = { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" };
+    const parsed = parseInstallationConfig({ ...fixture, usageLimits });
+    expect(parsed.usageLimits).toEqual(usageLimits);
+    expect(Object.isFrozen(parsed.usageLimits)).toBe(true);
+    for (const invalid of [null, {}, { ...usageLimits, weeklyTokens: 0 },
+      { ...usageLimits, weeklyTokens: 1.5 }, { ...usageLimits, weeklyTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { ...usageLimits, timeZone: "UTC" }, { ...usageLimits, excludeCache: true }]) {
+      expect(() => parseInstallationConfig({ ...fixture, usageLimits: invalid })).toThrow(InstallationConfigValidationError);
+    }
+  });
   it("loads two genuinely different white-label installations", async () => {
     const development = await loadInstallationConfigFromFile(developmentFixture);
     const qa = await loadInstallationConfigFromFile(qaFixture);

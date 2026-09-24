@@ -65,6 +65,8 @@ export type InstallationConfig = {
   paths: InstallationPaths;
   connectors?: InstallationConnectors;
   catalog?: InstallationCatalog;
+  /** Server-owned, installation-wide budget; cached input counts toward this total. */
+  usageLimits?: { weeklyTokens: number; timeZone: "Europe/Madrid" };
 };
 
 export type InstallationConfigIssue = {
@@ -92,6 +94,7 @@ const ROOT_KEYS = [
   "paths",
   "connectors",
   "catalog",
+  "usageLimits",
 ] as const;
 
 const BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"] as const;
@@ -489,6 +492,7 @@ function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): Instal
 function freezeInstallationConfig(config: InstallationConfig): Readonly<InstallationConfig> {
   Object.freeze(config.branding);
   Object.freeze(config.paths);
+  if (config.usageLimits) Object.freeze(config.usageLimits);
   if (config.connectors) {
     if (config.connectors.codexManagedAppAction) {
       Object.freeze(config.connectors.codexManagedAppAction.arguments);
@@ -539,6 +543,24 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
   const paths = parsePaths(value.paths, issues);
   const connectors = parseConnectors(value.connectors, issues);
   const catalog = parseCatalog(value.catalog, issues);
+  let usageLimits: InstallationConfig["usageLimits"];
+  if (value.usageLimits !== undefined) {
+    if (!isRecord(value.usageLimits)) {
+      issues.push({ path: "$.usageLimits", message: "debe ser un objeto" });
+    } else {
+      addUnknownKeyIssues(value.usageLimits, ["weeklyTokens", "timeZone"], "$.usageLimits", issues);
+      const { weeklyTokens, timeZone } = value.usageLimits;
+      if (typeof weeklyTokens !== "number" || !Number.isSafeInteger(weeklyTokens) || weeklyTokens < 1) {
+        issues.push({ path: "$.usageLimits.weeklyTokens", message: "debe ser un entero positivo seguro" });
+      }
+      if (timeZone !== "Europe/Madrid") {
+        issues.push({ path: "$.usageLimits.timeZone", message: "debe ser Europe/Madrid" });
+      }
+      if (typeof weeklyTokens === "number" && Number.isSafeInteger(weeklyTokens) && weeklyTokens > 0 && timeZone === "Europe/Madrid") {
+        usageLimits = { weeklyTokens, timeZone };
+      }
+    }
+  }
 
   if (issues.length > 0) {
     throw new InstallationConfigValidationError(issues);
@@ -553,5 +575,6 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
     paths,
     ...(connectors ? { connectors } : {}),
     ...(catalog ? { catalog } : {}),
+    ...(usageLimits ? { usageLimits } : {}),
   });
 }

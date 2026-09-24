@@ -45,6 +45,9 @@ export type AppServerRequestMetric = Readonly<{
 export type AppServerRpcRouterOptions = Readonly<{
   now?: () => number;
   onRequestMetric?: (metric: AppServerRequestMetric) => void;
+  /** Durable observers run independently of tool/turn handlers, before ACK. */
+  onNotification?: (notification: ServerNotification, event: AppServerEvent) => void | Promise<void>;
+  onTurnBound?: (threadId: string, turnId: string) => void;
 }>;
 
 export class AppServerRequestTimeoutError extends Error {
@@ -144,10 +147,15 @@ export class AppServerRpcRouter {
   private fatalError: Error | null = null;
   private readonly now: () => number;
   private readonly onRequestMetric: ((metric: AppServerRequestMetric) => void) | null;
+  private readonly onNotification: AppServerRpcRouterOptions["onNotification"];
+  private readonly onTurnBound: AppServerRpcRouterOptions["onTurnBound"];
+  private observationChain = Promise.resolve();
 
   constructor(readonly transport: AppServerTransport, options: AppServerRpcRouterOptions = {}) {
     this.now = options.now ?? performance.now.bind(performance);
     this.onRequestMetric = options.onRequestMetric ?? null;
+    this.onNotification = options.onNotification;
+    this.onTurnBound = options.onTurnBound;
   }
 
   start() {
@@ -196,6 +204,7 @@ export class AppServerRpcRouter {
           throw new Error("Turn registration cannot be rebound to another runtime turn.");
         }
         if (!state.runtimeTurnId) {
+          this.onTurnBound?.(threadId, turnId);
           state.runtimeTurnId = turnId;
           state.resolveRuntimeTurnBinding(turnId);
         }
@@ -411,7 +420,16 @@ export class AppServerRpcRouter {
     const key = this.scopeKey(event);
     const receivedTurnOwner = this.turnOwnerAtReceipt(event);
     const previous = key ? this.scopeChains.get(key) ?? Promise.resolve() : Promise.resolve();
-    const routed = previous.then(() => this.route(event, receivedTurnOwner));
+    // Accounting must not wait behind a tool that is awaiting a child turn,
+    // or a notification waiting for its turn/start reply to bind the turn.
+    // Responses keep their independent lane, including quota interruptions.
+    let observed = Promise.resolve();
+    if (event.message.kind === "rpc-notification" && this.onNotification) {
+      const notification = event.message.rpc;
+      observed = this.observationChain.then(() => this.onNotification!(notification, event));
+      this.observationChain = observed;
+    }
+    const routed = Promise.all([previous, observed]).then(() => this.route(event, receivedTurnOwner));
     if (key) {
       this.scopeChains.set(key, routed);
       void routed.finally(() => {

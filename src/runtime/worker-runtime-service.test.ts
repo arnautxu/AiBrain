@@ -23,6 +23,7 @@ import {
   stopWorkerRuntimeForUser,
 } from "@/runtime/worker-runtime-service";
 import type { WorkerRuntimeHandle, WorkerRoots } from "@/runtime/workers/types";
+import { WeeklyTokenBudgetStore } from "@/usage/weekly-token-budget";
 
 class AsyncEvents implements AsyncIterable<AppServerEvent> {
   private values: AppServerEvent[] = [];
@@ -157,6 +158,28 @@ function handle(transport: AppServerTransport): WorkerRuntimeHandle {
 }
 
 describe("worker App Server client", () => {
+  it("blocks both inference entry points while preserving read, stop and recovery requests", async () => {
+    const config = await loadInstallationConfig();
+    const transport = new FakeTransport();
+    const client = new WorkerAppServerClient(handle(transport), null, {
+      ...config, usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" },
+    });
+    const unavailable = vi.spyOn(WeeklyTokenBudgetStore.prototype, "assertAvailable").mockRejectedValue(
+      Object.assign(new Error("Weekly limit reached"), { code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" }),
+    );
+    try {
+      await expect(client.request("turn/start", { threadId: "thread", input: [] }, "start"))
+        .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" });
+      await expect(client.request("turn/steer", { threadId: "thread", expectedTurnId: "turn", input: [] }, "steer"))
+        .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" });
+      await expect(client.request("turn/interrupt", { threadId: "thread", turnId: "turn" }, "stop")).resolves.toEqual({});
+      await expect(client.request("thread/read", { threadId: "thread", includeTurns: true }, "recover")).resolves.toEqual({});
+      expect(unavailable).toHaveBeenCalledTimes(2);
+      expect(transport.sent.filter((message) => message.kind === "rpc-request" &&
+        (message.rpc.method === "turn/start" || message.rpc.method === "turn/steer"))).toHaveLength(0);
+    } finally { unavailable.mockRestore(); await client.close(); }
+  });
+
   it.each([false, true])("coalesces concurrent failed initialization and cleans a failed retry (%s)", async (retryFails) => {
     const config = await loadInstallationConfig();
     const fingerprint = createHash("sha256").update(JSON.stringify({

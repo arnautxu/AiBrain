@@ -23,6 +23,7 @@ import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gatewa
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 import { operationalLogger } from "@/operations/server-logger";
+import { createWeeklyTokenBudgetRuntime, type WeeklyTokenBudgetRuntime } from "@/usage/weekly-token-budget-runtime";
 
 const CATALOG_FRESH_TTL_MS = 5 * 60_000;
 const CATALOG_STALE_TTL_MS = 30 * 60_000;
@@ -40,6 +41,7 @@ function installationFingerprint(config: Readonly<InstallationConfig>) {
     companyContextRoot: config.paths.companyContextRoot,
     sourceReadRoot: config.paths.sourceReadRoot,
     publishWriteRoot: config.paths.publishWriteRoot,
+    usageLimits: config.usageLimits,
   })).digest("hex");
 }
 
@@ -74,12 +76,28 @@ export class WorkerAppServerClient {
   private cachedAt = 0;
   private catalogRefresh: Promise<CodexConnection> | null = null;
   private catalogRefreshCwd: string | null = null;
+  private readonly weeklyBudget: WeeklyTokenBudgetRuntime | null;
 
   constructor(
     readonly handle: WorkerRuntimeHandle,
     private readonly maintenance: MaintenanceCoordinator | null = null,
+    installation: Readonly<InstallationConfig> | null = null,
   ) {
+    this.weeklyBudget = createWeeklyTokenBudgetRuntime(
+      installation,
+      handle.userId,
+      (threadId, turnId, requestId) => this.router.request({
+        method: "turn/interrupt", id: requestId, params: { threadId, turnId },
+      }, 5_000),
+      () => operationalLogger.warn("usage.weekly_budget_runtime_failed", {
+        installationId: handle.installationId, userId: handle.userId,
+      }),
+    );
     this.router = new AppServerRpcRouter(handle.transport, {
+      ...(this.weeklyBudget ? {
+        onNotification: (notification: Parameters<WeeklyTokenBudgetRuntime["observe"]>[0], event: AppServerEvent) => this.weeklyBudget!.observe(notification, event),
+        onTurnBound: (threadId: string, turnId: string) => this.weeklyBudget!.bindTurn(threadId, turnId),
+      } : {}),
       onRequestMetric: (metric) => operationalLogger.info("codex.app_server_request", {
         metricSchemaVersion: 1,
         installationId: handle.installationId,
@@ -147,10 +165,18 @@ export class WorkerAppServerClient {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(purpose)) {
       throw new Error("Stable App Server request id is invalid.");
     }
+    if (method === "turn/start" || method === "turn/steer") {
+      await this.weeklyBudget?.beforeRequest(method, params, purpose);
+    }
     const result = await this.router.request(
       { method, id: purpose, params } as ClientRequest,
       timeoutMs,
-      beforeResolve,
+      async (value, event) => {
+        if (method === "turn/start" || method === "turn/steer") {
+          this.weeklyBudget?.accepted(method, params, value, purpose);
+        }
+        await beforeResolve?.(value, event);
+      },
     );
     if ((method === "thread/start" || method === "thread/resume") &&
         isRecord(result) && isRecord(result.thread) && typeof result.thread.id === "string" &&
@@ -301,6 +327,7 @@ export class WorkerAppServerClient {
   }
 
   close() {
+    this.weeklyBudget?.close();
     return this.router.close();
   }
 }
@@ -457,7 +484,7 @@ async function initializeWorkerClient(
   if (!client || client.handle.transport !== handle.transport) {
     if (client) await client.close();
     assertCurrent();
-    client = new WorkerAppServerClient(handle, state.maintenance);
+    client = new WorkerAppServerClient(handle, state.maintenance, state.config);
     state.clients.set(userId, client);
   }
   try {
@@ -478,7 +505,7 @@ async function initializeWorkerClient(
     assertCurrent();
     handle = await state.registry.start(userId, activityLease);
     assertCurrent();
-    client = new WorkerAppServerClient(handle, state.maintenance);
+    client = new WorkerAppServerClient(handle, state.maintenance, state.config);
     state.clients.set(userId, client);
     try {
       await client.initialize();

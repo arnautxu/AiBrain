@@ -6,6 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "build:automation-worker": "node scripts/build-automation-worker.mjs",
+    "build:weekly-token-budget": "node scripts/build-weekly-token-budget.mjs",
+    "usage:initialize-budget": "tsx scripts/initialize-weekly-token-budget.ts",
     "build:container-app-server-acceptance": "node scripts/build-container-app-server-acceptance.mjs",
     "start": "next start",
     "typecheck": "tsc --noEmit",

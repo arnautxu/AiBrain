@@ -15,6 +15,7 @@ import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { AutomationsPanel } from "@/components/automations-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
+import { WeeklyTokenBudgetNotice } from "@/components/weekly-token-budget-notice";
 import { isEditableShortcutTarget, isTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 import {
   Sidebar,
@@ -2311,6 +2312,8 @@ export function BrainApp({
         }}
       />
 
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col [&>main]:min-h-0">
+      {session.provider === "local" ? <WeeklyTokenBudgetNotice key={`${session.tenant.id}:${session.user.id}`} tenantId={session.tenant.id} userId={session.user.id} modalOpen={modalSurfaceOpen} /> : null}
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
@@ -2388,6 +2391,7 @@ export function BrainApp({
         }}
         readOnly={!workbenchProjectAccess(activeProject).canEdit}
       />}
+      </div>
 
       {previewDocument ? (
         <DocumentPreviewPanel key={previewDocument.id} artifact={previewDocument} onClose={() => setPreviewDocument(null)} />

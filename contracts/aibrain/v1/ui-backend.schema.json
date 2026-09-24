@@ -657,6 +657,50 @@
         "permissionFingerprint": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" }
       }
     },
+    "WeeklyTokenBudgetStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["weekStart", "resetAt", "usedTokens", "limitTokens", "remainingTokens", "percent", "threshold", "initialized"],
+      "properties": {
+        "weekStart": { "$ref": "#/$defs/IsoDate" },
+        "resetAt": { "$ref": "#/$defs/IsoDate" },
+        "limitTokens": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+        "usedTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "remainingTokens": { "type": ["integer", "null"], "minimum": 0, "maximum": 9007199254740991 },
+        "percent": { "type": ["number", "null"], "minimum": 0 },
+        "threshold": { "enum": [0, 25, 50, 75, 100] },
+        "initialized": { "type": "boolean" }
+      },
+      "if": { "properties": { "initialized": { "const": true } } },
+      "then": {
+        "properties": {
+          "usedTokens": { "type": "integer" },
+          "remainingTokens": { "type": "integer" },
+          "percent": { "type": "number" }
+        }
+      },
+      "else": {
+        "properties": {
+          "usedTokens": { "type": "null" },
+          "remainingTokens": { "type": "null" },
+          "percent": { "type": "null" },
+          "threshold": { "const": 0 }
+        }
+      }
+    },
+    "WeeklyTokenBudgetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["budget"],
+      "properties": {
+        "budget": {
+          "oneOf": [
+            { "$ref": "#/$defs/WeeklyTokenBudgetStatus" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
     "TokenUsageBreakdown": {
       "type": "object",
       "additionalProperties": false,
@@ -1181,6 +1225,18 @@
     }
   },
   "x-examples": [
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "usedTokens": 1875000, "limitTokens": 7500000, "remainingTokens": 5625000, "percent": 25, "threshold": 25, "initialized": true } }
+    },
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": null }
+    },
+    {
+      "schema": "WeeklyTokenBudgetResponse",
+      "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "usedTokens": null, "limitTokens": 7500000, "remainingTokens": null, "percent": null, "threshold": 0, "initialized": false } }
+    },
     {
       "schema": "AuthSessionResponse",
       "value": {
