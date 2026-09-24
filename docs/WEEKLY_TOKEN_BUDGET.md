@@ -226,3 +226,23 @@ its protection and must not be described as retaining the limit.
   `20260924T091525Z-4a001430-99ec-408d-b9c5-550762969b50`). Off-host replication
   remains unconfigured: the existing destination is a template `example.invalid`.
   No replacement destination or backup policy was invented during this change.
+
+
+### Final host-guard release and retained allowance
+
+The follow-up revision `f38fdff5c7b97aa78b3e322c7ae17460e66bf077` passed Backend CI
+`35987361428`, GHCR publication `35987865291` and Deploy Arnall `35988193322`.
+Its final product digest is
+`sha256:d933e5d6be3fc22470c23e2e1ee11e78f91d739eff41c50e921b3f0a0be24052`;
+its final egress digest is
+`sha256:a61c31847f02c16b66c74f4024c8f7d2567b2112e33408dc5dee3bfcdb30427a`.
+
+At `2026-09-24T10:38:31Z`, host release state, product/automation OCI labels and
+public live endpoint agreed on that revision; both containers were healthy and
+public readiness passed every required component. The active configuration hash
+was unchanged. The ledger still had its original `2026-09-24T10:23:14.266Z`
+initialization, 276 cursors, empty daily totals and no block reason. No second
+seed was performed. The host guard's exact installed hash and pre-inference
+quota denial were verified again. Employee UI/accounting code is unchanged from
+the authenticated rendered acceptance on `d5472c3`; this follow-up changes only
+the host operator-config reader, its tests and release documentation.
