@@ -55,6 +55,7 @@
     "GET /api/threads/{threadId}/documents/{uploadId}/versions/{versionId}": "binary:document",
     "GET /api/threads/{threadId}/documents/{uploadId}/versions/{versionId}/preview/{fileName}": "binary:document-preview",
     "GET /api/threads/{threadId}/export": "binary:conversation-export",
+    "GET /api/usage/budget": "WeeklyTokenBudgetResponse",
     "GET /api/usage/company": "CompanyUsageResponse",
     "GET /api/usage/me": "PersonalUsageResponse",
     "GET /api/workbench": "WorkbenchResponse",

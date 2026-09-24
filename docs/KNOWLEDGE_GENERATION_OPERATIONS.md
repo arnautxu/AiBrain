@@ -53,6 +53,13 @@ limit. No systemd timer is installed or enabled by this candidate.
 
 ## Existing Codex connection
 
+When installation `usageLimits` is configured, the host execution entry point
+refuses this ephemeral adapter because it cannot contribute durable token usage
+to the shared ledger. It reads `/etc/aibrain/<installationId>/installation.json`
+and rechecks before each step; missing or foreign configuration fails closed.
+Preview remains available. Deploy the matching host guard alongside any token
+budget activation; see [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
+
 `knowledge-codex-adapter.py` starts a fresh pinned Codex 0.153.4 App Server per
 step. `account/login/start` uses `chatgptAuthTokens` in memory, taking only the
 current access token and account ID from the explicitly selected employee's

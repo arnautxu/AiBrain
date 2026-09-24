@@ -1462,6 +1462,17 @@ rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
 ### 14.6 Settings > Usage
 
+`GET /api/usage/budget` requiere una sesión local de la instalación actual y
+devuelve únicamente el saldo compartido: `{ budget: { initialized, weekStart,
+resetAt, usedTokens, limitTokens, remainingTokens, percent, threshold } }`.
+Sin política configurada responde `{ budget: null }`; un contador pendiente de
+inicialización conserva `usedTokens`, `remainingTokens` y `percent` en `null`,
+nunca cero. Una sesión ausente devuelve `401`, una instalación ajena `403` y un
+registro no verificable `503`. Siempre usa `Cache-Control: private, no-store`.
+No consulta al proveedor ni expone datos de la cuenta o de otros empleados.
+Los avisos de 25/50/75% y el agotamiento se describen en
+[`WEEKLY_TOKEN_BUDGET.md`](WEEKLY_TOKEN_BUDGET.md).
+
 `GET /api/usage/me` requiere la cookie local opaca y siempre devuelve únicamente
 las métricas internas del empleado autenticado. `GET /api/usage/company`
 requiere además que la asignación durable del usuario sea `workspace-owner` o

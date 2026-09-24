@@ -41,7 +41,7 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build && npm run build:automation-worker && npm run build:container-app-server-acceptance && npm run build:presentation-runtime && node scripts/build-container-presentation-tool-acceptance.mjs
+RUN npm run build && npm run build:automation-worker && npm run build:weekly-token-budget && npm run build:container-app-server-acceptance && npm run build:presentation-runtime && node scripts/build-container-presentation-tool-acceptance.mjs
 
 FROM ${NODE_IMAGE} AS runtime
 
@@ -155,6 +155,7 @@ COPY --from=builder --chown=aibrain:aibrain /app/.next/static ./.next/static
 COPY --from=builder --chown=aibrain:aibrain /app/public ./public
 COPY --from=builder --chown=root:root /app/config/internal-agent-context /usr/local/share/aibrain/internal-agent-context
 COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automation-worker.mjs
+COPY --from=builder --chown=root:root /app/dist/initialize-weekly-token-budget.mjs /usr/local/share/aibrain/initialize-weekly-token-budget.mjs
 COPY --from=builder --chown=root:root /app/dist/container-app-server-acceptance.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs
 COPY --from=builder --chown=root:root /app/dist/container-presentation-tool-acceptance.mjs /usr/local/share/aibrain/container-presentation-tool-acceptance.mjs
 # The scheduler is an explicit server-conditioned ESM bundle. Unlike the app,

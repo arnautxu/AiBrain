@@ -121,6 +121,13 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 
 ## Durable references
 
+- Installation token quotas: [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
+  The candidate supports Arnall's 7.5 million total tokens per Madrid week and
+  25/50/75% notices. It requires an offline history seed, installation policy and
+  the matching host knowledge guard before activation. Reported-token admission
+  and interruption can overshoot while work is in flight; this is not a provider
+  subscription partition. Production activation and acceptance remain separate.
+
 - Shared information architecture and reviewed content migration: [COMPANY_CONTEXT_STANDARD.md](COMPANY_CONTEXT_STANDARD.md). All installations receive the same structure; company data, private versions and permissions remain isolated. Details are retrieved from `knowledge/`, not injected wholesale into each turn.
 
 - Product success: [PRODUCT_NORTH_STAR.md](PRODUCT_NORTH_STAR.md)

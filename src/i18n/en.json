@@ -1309,5 +1309,13 @@
   "Descargar {p0}": "Download {p0}",
   "Documento {p0}": "Document {p0}",
   "Esta conversación ya no está disponible.": "This conversation is no longer available.",
-  "No se ha podido abrir esta conversación. Comprueba que sigues teniendo acceso.": "This conversation could not be opened. Check that you still have access."
+  "No se ha podido abrir esta conversación. Comprueba que sigues teniendo acceso.": "This conversation could not be opened. Check that you still have access.",
+  "Saldo semanal compartido": "Shared weekly allowance",
+  "No se puede comprobar el saldo semanal. No se pueden iniciar nuevas solicitudes.": "The weekly allowance cannot be checked. New requests cannot be started.",
+  "Uso semanal compartido: {used} de {limit} tokens": "Shared weekly usage: {used} of {limit} tokens",
+  "Disponibles: {remaining}": "Available: {remaining}",
+  "Incluye caché. Se renueva el {date} (hora de Madrid).": "Includes cached tokens. Resets on {date} (Madrid time).",
+  "Límite semanal agotado. Las nuevas solicitudes están bloqueadas hasta la renovación.": "Weekly allowance exhausted. New requests are blocked until the allowance resets.",
+  "Aviso: se ha alcanzado el {percent}% del límite semanal compartido.": "Notice: {percent}% of the shared weekly allowance has been reached.",
+  "Cerrar aviso de consumo semanal": "Dismiss weekly usage notice"
 }

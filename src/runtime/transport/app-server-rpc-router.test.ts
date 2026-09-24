@@ -73,6 +73,61 @@ function event(sequence: number, message: AppServerEvent["message"]): AppServerE
 }
 
 describe("AppServerRpcRouter", () => {
+  it("observes unregistered usage durably without blocking the independent RPC response lane", async () => {
+    const transport = new FakeTransport();
+    let release!: () => void;
+    const observer = vi.fn(() => new Promise<void>((resolve) => { release = resolve; }));
+    const router = new AppServerRpcRouter(transport, { onNotification: observer });
+    const reading = router.request({ method: "thread/read", id: "read", params: { threadId: "child", includeTurns: true } });
+    await vi.waitFor(() => expect(transport.sent).toHaveLength(1));
+    const counts = { totalTokens: 50, inputTokens: 40, cachedInputTokens: 20, cacheWriteInputTokens: 0, outputTokens: 10, reasoningOutputTokens: 0 };
+    transport.queue.push(event(1, { kind: "rpc-notification", rpc: { method: "thread/tokenUsage/updated", params: {
+      threadId: "unregistered-child", turnId: "child-turn", tokenUsage: { total: counts, last: counts, modelContextWindow: null },
+    } } }));
+    transport.queue.push(event(2, { kind: "rpc-response", rpc: { id: "read", result: { thread: { id: "child" } } } }));
+    await expect(reading).resolves.toEqual({ thread: { id: "child" } });
+    expect(observer).toHaveBeenCalledOnce();
+    expect(transport.acknowledged).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(transport.acknowledged.map(({ sequence }) => sequence)).toEqual([1, 2]));
+    await router.close();
+  });
+
+  it("observes usage while a preceding same-thread tool is still awaiting a result", async () => {
+    const transport = new FakeTransport();
+    const observer = vi.fn();
+    const router = new AppServerRpcRouter(transport, { onNotification: observer });
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    const tool = vi.fn(async () => { await blocked; return {}; });
+    router.registerTurn("parent", "local", { onNotification: vi.fn(), onServerRequest: tool, onFailure: vi.fn() }).bindRuntimeTurn("turn");
+    await router.start();
+    transport.queue.push(event(1, { kind: "rpc-request", rpc: { method: "item/tool/call", id: "tool", params: {
+      threadId: "parent", turnId: "turn", callId: "tool", namespace: "aibrain_horaria", tool: "run", arguments: {},
+    } } }));
+    transport.queue.push(event(2, { kind: "rpc-notification", rpc: { method: "turn/started", params: {
+      threadId: "parent", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+    } } }));
+    await vi.waitFor(() => expect(observer).toHaveBeenCalledOnce());
+    expect(tool).toHaveBeenCalledOnce();
+    expect(transport.acknowledged).toHaveLength(0);
+    release();
+    await vi.waitFor(() => expect(transport.acknowledged).toHaveLength(2));
+    await router.close();
+  });
+
+  it("does not acknowledge usage when its durable observer fails", async () => {
+    const transport = new FakeTransport();
+    const router = new AppServerRpcRouter(transport, { onNotification: () => { throw new Error("Ledger unavailable"); } });
+    await router.start();
+    transport.queue.push(event(1, { kind: "rpc-notification", rpc: { method: "turn/started", params: {
+      threadId: "child", turn: { id: "turn", status: "inProgress", items: [], error: null, itemsView: "full", startedAt: null, completedAt: null, durationMs: null },
+    } } }));
+    await vi.waitFor(() => expect(router.failed).toBe(true));
+    expect(transport.acknowledged).toHaveLength(0);
+    await router.close();
+  });
+
   it("drains a large calculation stream while its parent tool is awaiting that calculation", async () => {
     const transport = new FakeTransport();
     const router = new AppServerRpcRouter(transport);
