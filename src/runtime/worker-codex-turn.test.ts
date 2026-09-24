@@ -10,6 +10,7 @@ import type {
   WorkerTurnMemoryDependencies,
 } from "@/runtime/memory-turn";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
+import { createQuotaToolPermissions } from "@/runtime/quota-tool-permissions";
 
 const mocked = vi.hoisted(() => ({
   runtime: null as unknown,
@@ -149,6 +150,78 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+  it.each(["new", "existing"] as const)("attests quota profiles for a %s thread and downgrades the next turn without widening writes", async (kind) => {
+    const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-quota-tools-"));
+    const roots = { workspace, staging: workspace, artifacts: path.join(workspace, "artifacts"),
+      codexHome: path.join(workspace, "runtime/codex-home"), transportAudit: path.join(workspace, "audit/transport") };
+    const policy = createQuotaToolPermissions({ ...roots, workspace: path.join(workspace, "projects", projectId) });
+    const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
+    const denials: unknown[] = [];
+    let handlers: {
+      onNotification(value: unknown, event: unknown): Promise<void>;
+      onServerRequest(value: unknown, event: unknown): Promise<unknown>;
+    };
+    let sequence = 0;
+    const envelope = () => ({ eventId: `quota-${++sequence}`, sequence, occurredAt: new Date().toISOString(),
+      message: { kind: "rpc-notification", rpc: {} } });
+    const client = {
+      // Exercise a loaded resume that reports the preceding turn's profile.
+      canReuseLoadedThread: () => false,
+      connectionSummary: async () => ({ connected: true }),
+      router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+        handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+      } },
+      async request(method: string, params: Record<string, unknown>, _purpose: string, _timeout: number,
+        beforeResolve?: (value: never, event: never) => Promise<void>) {
+        calls.push({ method, params });
+        const result = method.startsWith("thread/") ? {
+          thread: { id: "quota-thread", turns: [] }, cwd: policy.workspace,
+          activePermissionProfile: { id: policy.workspaceWriteId }, approvalPolicy: "never",
+        } : { turn: { id: "quota-turn" } };
+        await beforeResolve?.(result as never, envelope() as never);
+        if (method === "turn/start") queueMicrotask(() => { void (async () => {
+          for (const approvalMethod of ["item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval"]) {
+            denials.push(await handlers.onServerRequest({ id: `request-${approvalMethod}`, method: approvalMethod, params: {
+              threadId: "quota-thread", turnId: "quota-turn", itemId: "private-item",
+              command: "read private runtime state", reason: "Inspect runtime files", permissions: { fileSystem: { read: ["/"], write: null } },
+            } }, envelope()));
+          }
+          await handlers.onNotification({ method: "turn/completed", params: { threadId: "quota-thread",
+            turn: { id: "quota-turn", status: "completed", items: [], error: null } } }, envelope());
+        })(); });
+        return result;
+      },
+    };
+    mocked.runtime = { config: { installationId, paths: installationPaths,
+      usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" } }, handle: { roots }, client };
+    for (const [index, mode] of (["agent", "ask"] as const).entries()) {
+      const localTurnId = index === 0 ? assistantMessageId : "00000000-0000-4000-8000-000000000042";
+      const request = chatRequest();
+      request.assistantMessageId = localTurnId;
+      request.options.mode = mode;
+      await runWorkerCodexTurn(request, installationId, userId, index === 0 && kind === "new" ? null : "quota-thread", {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+        workspace, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, { ...permissions(), turnId: localTurnId }, {} as never, memoryDependencies(), [], new AbortController().signal, async () => {});
+    }
+    const threads = calls.filter(({ method }) => method === "thread/start" || method === "thread/resume");
+    expect(threads.map(({ method }) => method)).toEqual([kind === "new" ? "thread/start" : "thread/resume", "thread/resume"]);
+    expect(threads[0].params).toMatchObject({ permissions: policy.workspaceWriteId, approvalPolicy: "never", config: { web_search: "live" } });
+    expect(threads[1].params).toMatchObject({ permissions: policy.readOnlyId, approvalPolicy: "never", config: { web_search: "live" } });
+    for (const thread of threads) expect(thread.params).not.toHaveProperty("sandbox");
+    const turns = calls.filter(({ method }) => method === "turn/start");
+    expect(turns.map(({ params }) => params.permissions)).toEqual([policy.workspaceWriteId, policy.readOnlyId]);
+    for (const { params } of turns) {
+      expect(params).not.toHaveProperty("sandboxPolicy");
+      expect(params.approvalPolicy).toBe("never");
+      expect(params.runtimeWorkspaceRoots).toEqual([policy.workspace]);
+    }
+    expect(denials).toEqual([
+      { decision: "decline" }, { decision: "decline" }, { permissions: {}, scope: "turn" },
+      { decision: "decline" }, { decision: "decline" }, { permissions: {}, scope: "turn" },
+    ]);
+  });
+
   it("rejects a fictional Arnall schedule answer that did not attach the required template", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "aibrain-fictional-schedule-"));
     let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> };

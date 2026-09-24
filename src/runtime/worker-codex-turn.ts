@@ -45,6 +45,12 @@ import {
   type LegacyServerRequest,
 } from "@/runtime/codex-app-server";
 import type { RuntimeConfig } from "@/runtime/config";
+import {
+  attestQuotaToolPermissions,
+  createQuotaToolPermissions,
+  hasAttestedQuotaToolPermissions,
+  quotaToolPermissionId,
+} from "@/runtime/quota-tool-permissions";
 import { catalogRuntimeEnforcer, synchronizeCatalogSkillsForUser } from "@/catalog/access-service";
 import { resolveConnectorMentionsForTurn } from "@/connectors/mentions";
 import { connectorMentionDeveloperInstructions } from "@/connectors/mentions-contract";
@@ -716,8 +722,7 @@ export async function runWorkerCodexTurn(
   // source-ro/.git and fail on the intentionally read-only mount.
   const runtimeWorkspaceRoots = uniqueAbsoluteRoots([
     projectWorkspace,
-    runtime.handle.roots.workspace,
-    runtime.handle.roots.artifacts,
+    ...(runtime.config.usageLimits ? [] : [runtime.handle.roots.workspace, runtime.handle.roots.artifacts]),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
   const turnWorkspaceInputs = await prepareTurnDocumentWorkspaceInputs({
@@ -855,18 +860,27 @@ export async function runWorkerCodexTurn(
       "Este turno se ejecuta sin una sesión web abierta. Usa web, skills, archivos y conectores de lectura actualmente autorizados como en un chat normal. No solicites ni esperes aprobaciones interactivas. Si una acción sensible requiere aprobación y no existe una autorización durable previa vinculada a esta ejecución, no la intentes: explica el bloqueo en el resultado.",
     ] : []),
   ].filter(Boolean).join("\n\n");
+  const quotaToolPermissions = runtime.config.usageLimits ? createQuotaToolPermissions({
+    workspace: projectWorkspace,
+    codexHome: runtime.handle.roots.codexHome,
+    transportAudit: runtime.handle.roots.transportAudit,
+  }) : null;
+  const quotaPermissionId = quotaToolPermissions
+    ? quotaToolPermissionId(quotaToolPermissions, effectiveSandbox(runtimeConfig, chatRequest))
+    : null;
   const commonThreadParams = {
     ...(selectedModel ? { model: selectedModel } : {}),
     cwd: projectWorkspace,
     runtimeWorkspaceRoots,
-    approvalPolicy: runtimeConfig.approvalPolicy,
+    approvalPolicy: quotaToolPermissions ? "never" as const : runtimeConfig.approvalPolicy,
     approvalsReviewer: SERVER_APPROVALS_REVIEWER,
-    sandbox: effectiveSandbox(runtimeConfig, chatRequest),
+    ...(quotaPermissionId ? { permissions: quotaPermissionId } : { sandbox: effectiveSandbox(runtimeConfig, chatRequest) }),
     config: { web_search: "live", ...connectorAppConfig },
     developerInstructions,
   };
   const reuseLoadedThread = runtimeThreadId !== null &&
-    runtime.client.canReuseLoadedThread(runtimeThreadId, true);
+    runtime.client.canReuseLoadedThread(runtimeThreadId, true) &&
+    (!quotaToolPermissions || hasAttestedQuotaToolPermissions(runtime.client, runtimeThreadId, quotaToolPermissions));
   let recovered: RecoveredTurn | null = null;
   const projectRecoveredTurn = async (
     recoveredTurnState: RecoveredTurn,
@@ -950,6 +964,10 @@ export async function runWorkerCodexTurn(
     if (!recovered) return;
     await projectRecoveredTurn(recovered, envelope);
   };
+  const persistConfiguredThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
+    if (quotaToolPermissions) attestQuotaToolPermissions(runtime.client, result, quotaToolPermissions);
+    await persistThreadIdentity(result, envelope);
+  };
   let threadResult: JsonValue;
   if (reuseLoadedThread && runtimeThreadId) {
     threadResult = { thread: { id: runtimeThreadId, turns: [] } };
@@ -976,7 +994,7 @@ export async function runWorkerCodexTurn(
         ? runtime.client.request("thread/resume", {
             threadId: runtimeThreadId,
             ...commonThreadParams,
-          }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
+          }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity)
         : runtime.client.request("thread/start", {
             ...commonThreadParams,
             // Thread-level dynamic tools cannot be added on a later turn. Each
@@ -996,7 +1014,7 @@ export async function runWorkerCodexTurn(
           // One creation key per admitted local turn. A new user request or a
           // toolset upgrade must not reuse another turn's pending creation;
           // reconnecting this same turn still retains its stable key.
-          }, `thread-start:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+          }, `thread-start:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity));
     } catch (error) {
       if (error instanceof AppServerRequestTimeoutError && error.method === "thread/start" && !runtimeThreadId) {
         await setRuntimePhase(
@@ -1055,7 +1073,7 @@ export async function runWorkerCodexTurn(
             threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
               threadId: runtimeThreadId,
               ...commonThreadParams,
-            }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity));
+            }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity));
           }
         }
       }
@@ -1086,6 +1104,9 @@ export async function runWorkerCodexTurn(
     );
     if (recoveredState.status === "completed") await scheduleCompletedConversationMemory();
     return;
+  }
+  if (quotaToolPermissions && !hasAttestedQuotaToolPermissions(runtime.client, threadId, quotaToolPermissions)) {
+    throw new Error("No se han podido verificar los permisos privados de la conversación. Vuelve a conectar el asistente.");
   }
 
   let runtimeTurnId: string | null = null;
@@ -1901,6 +1922,19 @@ export async function runWorkerCodexTurn(
           ...approval.item,
           permissionFingerprint: permissions.fingerprint,
         };
+        if (quotaToolPermissions) {
+          // Native escalation can bypass filesystem denies. Dynamic browser,
+          // connector and document approvals were handled above and retain
+          // their independently scoped authorization flows.
+          await emit(
+            { type: "approval", item: resolvedApproval({
+              ...permissionBoundItem,
+              detail: "Esta acción requiere acceso fuera del espacio autorizado del asistente y no está disponible.",
+            }, "decline") },
+            { envelope, key: `approval:private-runtime-denied:${approval.item.id}` },
+          );
+          return approval.response("decline") as JsonValue;
+        }
         if (!permissionAllowsGenericToolExecution(permissions)) {
           await emit(
             { type: "approval", item: resolvedApproval(permissionBoundItem, "decline") },
@@ -2049,13 +2083,13 @@ export async function runWorkerCodexTurn(
       ],
       cwd: projectWorkspace,
       runtimeWorkspaceRoots,
-      approvalPolicy: runtimeConfig.approvalPolicy,
+      approvalPolicy: quotaToolPermissions ? "never" as const : runtimeConfig.approvalPolicy,
       approvalsReviewer: SERVER_APPROVALS_REVIEWER,
-      sandboxPolicy: sandboxPolicy(
+      ...(quotaPermissionId ? { permissions: quotaPermissionId } : { sandboxPolicy: sandboxPolicy(
         { ...runtimeConfig, workspace: projectWorkspace },
         chatRequest,
         [],
-      ),
+      ) }),
       ...(selectedModel ? { model: selectedModel } : {}),
       ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
       // Keep simple turns concise while preserving the richer public activity
