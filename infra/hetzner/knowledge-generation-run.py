@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import stat
 
 
 def module(name, filename):
@@ -21,9 +22,25 @@ codex = module('run_codex', 'knowledge-codex-adapter.py')
 require = policy_module.require
 
 
+def operator_installation_json(config_path):
+    """Read root-managed public config without credential-file mode assumptions."""
+    config_path = Path(config_path)
+    require(config_path.is_absolute() and config_path == config_path.resolve(strict=True),
+            'GENERATION_INSTALLATION_CONFIG_UNSAFE')
+    descriptor = os.open(config_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(descriptor, 'rb') as source:
+        metadata = os.fstat(source.fileno())
+        require(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == 0
+                and metadata.st_nlink == 1 and not metadata.st_mode & 0o022,
+                'GENERATION_INSTALLATION_CONFIG_UNSAFE')
+        raw = source.read(1024 * 1024 + 1)
+    require(len(raw) <= 1024 * 1024, 'GENERATION_CONFIG_TOO_LARGE')
+    return json.loads(raw)
+
+
 def assert_no_weekly_token_budget(manifest):
     """This ephemeral adapter has no durable token meter. Deny it under a budget."""
-    installation = policy_module.private_json(
+    installation = operator_installation_json(
         Path('/etc/aibrain') / manifest['installationId'] / 'installation.json')
     require(isinstance(installation, dict)
             and installation.get('installationId') == manifest['installationId'],

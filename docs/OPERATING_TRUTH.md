@@ -122,11 +122,12 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 ## Durable references
 
 - Installation token quotas: [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
-  The candidate supports Arnall's 7.5 million total tokens per Madrid week and
-  25/50/75% notices. The user authorized a fresh allowance from activation on
-  2026-09-24, excluding prior consumption; employees see only the remaining
-  percentage, never the token totals or limit. Activation requires an offline
-  cursor baseline, installation policy and matching host knowledge guard.
+  Arnall activated 7.5 million total tokens per Madrid week and 25/50/75% notices
+  on 2026-09-24 at 12:23:14 Madrid time, excluding prior consumption. Offline
+  initialization retained 276 thread cursors and charged zero historical tokens.
+  Authenticated chat and settings showed only 100% remaining and the reset time.
+  The installation policy and host guard protect the shared allowance; employees
+  never receive the token totals or numerical limit.
   The worker hides operator configuration and transport journals; quota-mode
   native tool profiles protect runtime metadata without expanding project
   writes or allowing employee approvals to bypass the private counters.
