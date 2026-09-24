@@ -4,6 +4,10 @@ import { readdir } from "node:fs/promises";
 import { FileLocalUserStore, type LocalUser } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";
 import { aggregateTurnUsage, FileUsageStore } from "@/usage/file-usage-store";
+import {
+  operatorDashboardCountingStart,
+  operatorDashboardLocalDay,
+} from "@/usage/operator-dashboard-period";
 import { WeeklyTokenBudgetStore, weeklyTokenBudgetWindow } from "@/usage/weekly-token-budget";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -40,7 +44,7 @@ export async function operatorUsageDashboard(now = Date.now()) {
     budgetStore.status(),
     budgetStore.countingStartsAt(),
   ]);
-  const start = Date.parse(window.weekStart);
+  const start = operatorDashboardCountingStart(window.weekStart, countingStartsAt);
   const end = Date.parse(window.resetAt);
 
   const members = users.map((user) => {
@@ -51,7 +55,7 @@ export async function operatorUsageDashboard(now = Date.now()) {
     const aggregate = aggregateTurnUsage(memberTurns);
     const daily = new Map<string, { date: string; turns: number; totalTokens: number }>();
     for (const turn of memberTurns) {
-      const date = turn.completedAt.slice(0, 10);
+      const date = operatorDashboardLocalDay(turn.completedAt);
       const item = daily.get(date) ?? { date, turns: 0, totalTokens: 0 };
       item.turns += 1;
       item.totalTokens += turn.tokenUsage?.totalTokens ?? 0;
