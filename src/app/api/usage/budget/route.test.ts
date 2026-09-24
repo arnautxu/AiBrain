@@ -19,6 +19,14 @@ vi.mock("@/usage/weekly-token-budget", () => ({
 
 import { GET } from "@/app/api/usage/budget/route";
 
+const PUBLIC_STATUS = {
+  weekStart: "2026-09-20T22:00:00.000Z",
+  resetAt: "2026-09-27T22:00:00.000Z",
+  remainingPercent: 75,
+  threshold: 25,
+  initialized: true,
+};
+
 const STATUS = {
   weekStart: "2026-09-20T22:00:00.000Z",
   resetAt: "2026-09-27T22:00:00.000Z",
@@ -70,14 +78,26 @@ describe("installation weekly budget route", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(mocked.constructed).toHaveBeenCalledWith({ installationId: "arnall", dataRoot: "/private/arnall", limitTokens: 7_500_000 });
-    expect(await response.json()).toEqual({ budget: STATUS });
+    expect(await response.json()).toEqual({ budget: PUBLIC_STATUS });
   });
 
   it("preserves unknown initial usage as null rather than showing an empty allowance", async () => {
     const unknown = { ...STATUS, initialized: false, usedTokens: null, remainingTokens: null, percent: null, threshold: 0 };
     mocked.status.mockResolvedValue(unknown);
     const response = await GET();
-    expect(await response.json()).toEqual({ budget: unknown });
+    expect(await response.json()).toEqual({ budget: { ...PUBLIC_STATUS, initialized: false, remainingPercent: null, threshold: 0 } });
+  });
+
+  it.each([
+    { remainingTokens: 1, expected: 1 },
+    { remainingTokens: 0, expected: 0 },
+    { remainingTokens: 7_500_000, expected: 100 },
+  ])("reports only a bounded remaining percentage for $remainingTokens private tokens", async ({ remainingTokens, expected }) => {
+    mocked.status.mockResolvedValue({ ...STATUS, remainingTokens });
+    const response = await GET();
+    const result = await response.json();
+    expect(result.budget.remainingPercent).toBe(expected);
+    expect(JSON.stringify(result)).not.toMatch(/Tokens|usedPercent|sharedSubscription|7500000/);
   });
 
   it("fails closed without leaking a corrupt store path or reporting zero usage", async () => {

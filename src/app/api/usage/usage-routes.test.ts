@@ -10,10 +10,15 @@ const mocked = vi.hoisted(() => ({
   personal: vi.fn(),
   company: vi.fn(),
   isAdmin: vi.fn(),
+  employeeBudget: vi.fn(),
 }));
 
 vi.mock("@/auth/session", () => ({ getSession: async () => mocked.session }));
 vi.mock("@/admin/server-service", () => ({ isWorkspaceAdmin: mocked.isAdmin }));
+vi.mock("@/usage/employee-budget", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/usage/employee-budget")>(),
+  employeeWeeklyBudget: mocked.employeeBudget,
+}));
 vi.mock("@/usage/server-service", () => ({
   personalUsageForUser: mocked.personal,
   companyUsageForUser: mocked.company,
@@ -34,6 +39,8 @@ describe("usage routes", () => {
     mocked.personal.mockReset();
     mocked.company.mockReset();
     mocked.isAdmin.mockReset();
+    mocked.employeeBudget.mockReset();
+    mocked.employeeBudget.mockResolvedValue(null);
     mocked.personal.mockResolvedValue({ schemaVersion: 1, scope: "personal" });
     mocked.company.mockResolvedValue({ schemaVersion: 1, scope: "company" });
     mocked.isAdmin.mockResolvedValue(false);
@@ -61,5 +68,26 @@ describe("usage routes", () => {
     expect(response.status).toBe(200);
     expect(mocked.isAdmin).toHaveBeenCalledWith(mocked.session);
     expect(mocked.company).toHaveBeenCalledWith(USER_ID);
+  });
+
+  it.each([personalGet, companyGet])("returns only the installation percentage when budgeted, including workspace administrators", async (get) => {
+    mocked.isAdmin.mockResolvedValue(true);
+    const budget = { initialized: true, weekStart: "2026-09-20T22:00:00.000Z", resetAt: "2026-09-27T22:00:00.000Z", remainingPercent: 75, threshold: 25 };
+    mocked.employeeBudget.mockResolvedValue(budget);
+    const response = await get();
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(await response.json()).toEqual({ budget });
+    expect(mocked.personal).not.toHaveBeenCalled();
+    expect(mocked.company).not.toHaveBeenCalled();
+  });
+
+  it.each([personalGet, companyGet])("never falls back to provider or employee token counts if the budget cannot be read", async (get) => {
+    mocked.isAdmin.mockResolvedValue(true);
+    mocked.employeeBudget.mockRejectedValue(new Error("unavailable"));
+    const response = await get();
+    expect(response.status).toBe(503);
+    expect(mocked.personal).not.toHaveBeenCalled();
+    expect(mocked.company).not.toHaveBeenCalled();
   });
 });

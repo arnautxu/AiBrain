@@ -97,8 +97,10 @@ export async function workspaceAdminSnapshot(session: AuthSession): Promise<Work
       groupIds: state.groups.filter((group) => group.memberIds.includes(user.userId)).map(({ id }) => id),
       usage: {
         turns: memberTurns.turns,
-        inputTokens: String(memberTurns.tokens.inputTokens),
-        outputTokens: String(memberTurns.tokens.outputTokens),
+        ...(!installation.usageLimits ? {
+          inputTokens: String(memberTurns.tokens.inputTokens),
+          outputTokens: String(memberTurns.tokens.outputTokens),
+        } : {}),
       },
     };
   }));

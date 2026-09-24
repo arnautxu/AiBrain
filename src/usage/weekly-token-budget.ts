@@ -262,6 +262,9 @@ export class WeeklyTokenBudgetStore {
 
   status() { return this.locked(async () => this.current(await this.read())); }
 
+  /** Private runtime boundary; never included in the employee-facing status. */
+  countingStartsAt() { return this.locked(async () => (await this.read())?.initializedAt ?? null); }
+
   async assertAvailable() {
     const status = await this.status();
     if (!status.initialized) throw new WeeklyTokenBudgetError("WEEKLY_TOKEN_BUDGET_UNINITIALIZED", "Weekly token budget requires a verified historical baseline.");
@@ -335,8 +338,9 @@ export class WeeklyTokenBudgetStore {
         if (state.seenEvents.length >= MAX_EVIDENCE) throw unavailable("Weekly token budget evidence capacity is exhausted.");
         let cursor = state.cursors.find((item) => item.key === event.cursorKey);
         let delta = 0;
-        // The operator attests that all consumption up to capturedAt is in the
-        // seed. Such replay never rewinds a cursor or charges the baseline twice.
+        // The operator attests that all consumption up to capturedAt is either
+        // imported or explicitly excluded by a fresh initial allowance. Such
+        // replay never rewinds a cursor or charges the activation baseline.
         if (event.observedAt > state.initializedAt && (!cursor || event.observedAt >= cursor.observedAt)) {
           if (!cursor) {
             if (event.totalTokens !== event.lastTokens) throw unavailable("Weekly token budget thread has no cumulative baseline.");

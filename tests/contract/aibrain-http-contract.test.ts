@@ -86,28 +86,22 @@ describe("versioned AiBrain UI/backend contract", () => {
     expect(uiContractErrors("KnowledgeReviewPostResponse", { available: true, connectionId: "arnall" })).not.toBeNull();
   });
 
-  it("distinguishes an uninitialized weekly allowance from confirmed zero usage", () => {
+  it("keeps employee weekly percentages private and distinguishes unknown from zero", () => {
     const examples = uiContract["x-examples"].filter((item) => item.schema === "WeeklyTokenBudgetResponse");
     const uninitialized = structuredClone(examples.find((item) =>
       (item.value as { budget: { initialized?: boolean } | null }).budget?.initialized === false)!.value) as {
-        budget: { initialized: boolean; usedTokens: number | null; remainingTokens: number | null; percent: number | null; limitTokens: number; threshold: number };
+        budget: { initialized: boolean; remainingPercent: number | null; threshold: number };
       };
-    expect(uiContractErrors("WeeklyTokenBudgetResponse", { budget: null })).toBeNull();
-    expect(uiContractErrors("WeeklyTokenBudgetResponse", uninitialized)).toBeNull();
-    for (const field of ["usedTokens", "remainingTokens", "percent"] as const) {
-      expect(uiContractErrors("WeeklyTokenBudgetResponse", {
-        budget: { ...uninitialized.budget, [field]: 0 },
-      }), field).not.toBeNull();
+    for (const schema of ["WeeklyTokenBudgetResponse", "EmployeePersonalUsageResponse", "EmployeeCompanyUsageResponse"]) {
+      expect(uiContractErrors(schema, { budget: null })).toBeNull();
+      expect(uiContractErrors(schema, uninitialized)).toBeNull();
+      expect(uiContractErrors(schema, { budget: { ...uninitialized.budget, remainingPercent: 0 } })).not.toBeNull();
+      expect(uiContractErrors(schema, { budget: { ...uninitialized.budget, initialized: true } })).not.toBeNull();
+      expect(uiContractErrors(schema, { budget: { ...uninitialized.budget, initialized: true, remainingPercent: 0, threshold: 100 } })).toBeNull();
+      for (const field of ["usedTokens", "limitTokens", "remainingTokens", "percent", "sharedSubscription", "internal", "members"]) {
+        expect(uiContractErrors(schema, { budget: { ...uninitialized.budget, [field]: 12 } }), field).not.toBeNull();
+      }
     }
-    expect(uiContractErrors("WeeklyTokenBudgetResponse", {
-      budget: { ...uninitialized.budget, initialized: true },
-    })).not.toBeNull();
-    expect(uiContractErrors("WeeklyTokenBudgetResponse", {
-      budget: { ...uninitialized.budget, initialized: true, usedTokens: 0, remainingTokens: uninitialized.budget.limitTokens, percent: 0 },
-    })).toBeNull();
-    expect(uiContractErrors("WeeklyTokenBudgetResponse", {
-      budget: { ...uninitialized.budget, members: [{ userId: "foreign-user", tokens: 12 }] },
-    })).not.toBeNull();
   });
 
   it("keeps representative TypeScript contracts compatible with JSON Schema", () => {

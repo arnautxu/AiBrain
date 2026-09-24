@@ -28,6 +28,30 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); window.history.replaceState(
 beforeEach(() => { Object.defineProperty(window, "matchMedia", { configurable: true, value: vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })) }); });
 
 describe("CustomizationPanel", () => {
+  it.each([false, true])("shows only the remaining allowance for budgeted employees (administrator=%s)", async (isAdmin) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === "/api/settings" ? settings(isAdmin) : {
+      budget: { initialized: true, weekStart: "2026-09-20T22:00:00.000Z", resetAt: "2026-09-27T22:00:00.000Z", remainingPercent: 25, threshold: 75 },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="usage" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByText("Saldo semanal disponible: 25%")).toBeInTheDocument();
+    expect(screen.queryByText("Suscripción compartida")).not.toBeInTheDocument();
+    expect(screen.queryByText("Consumo global del servicio compartido")).not.toBeInTheDocument();
+    expect(screen.queryByText("Minutos trabajados")).not.toBeInTheDocument();
+    expect(screen.queryByText("Uso por empleado")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).not.toHaveTextContent(/tokens|7[.,]?500[.,]?000/i);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/usage/company", expect.anything());
+  });
+
+  it("does not display a zero balance for an uninitialized allowance", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => Response.json(String(input) === "/api/settings" ? settings(true) : {
+      budget: { initialized: false, weekStart: "2026-09-20T22:00:00.000Z", resetAt: "2026-09-27T22:00:00.000Z", remainingPercent: null, threshold: 0 },
+    })));
+    render(<ThemeProvider><CustomizationPanel productName="Arnall AI" open initialTab="usage" runtimeStatus={initialRuntimeStatus} onClose={vi.fn()} /></ThemeProvider>);
+    expect(await screen.findByRole("status")).toHaveTextContent("No se puede comprobar el saldo semanal");
+    expect(screen.queryByText(/0%/)).not.toBeInTheDocument();
+  });
+
   it.each(["verified", "failed"])("shows callback %s and new-chat guidance without treating URL as connection proof", async (status) => {
     window.history.replaceState(null, "", `/?settings=connectors&connection=${status}`);
     const snapshot = settings(false);

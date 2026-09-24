@@ -14,6 +14,7 @@ const available = {
 
 function fixture() {
   const store = {
+    countingStartsAt: vi.fn().mockResolvedValue("2026-09-24T00:00:00.000Z"),
     assertAvailable: vi.fn().mockResolvedValue(available),
     recordUsage: vi.fn().mockResolvedValue(available),
     markUnavailable: vi.fn().mockResolvedValue(undefined),
@@ -23,9 +24,9 @@ function fixture() {
   return { store, interrupt, budget };
 }
 
-function envelope(notification: ServerNotification, eventId = "event-1"): AppServerEvent {
+function envelope(notification: ServerNotification, eventId = "event-1", occurredAt = "2026-09-24T12:00:00.000Z"): AppServerEvent {
   return {
-    eventId, sequence: 1, occurredAt: "2026-09-24T12:00:00.000Z",
+    eventId, sequence: 1, occurredAt,
     message: { kind: "rpc-notification", rpc: notification },
   };
 }
@@ -116,17 +117,37 @@ describe("weekly token budget runtime", () => {
     budget.close();
   });
 
-  it.each(["completed", "interrupted", "failed"] as const)("durably blocks accounting when a recovered turn ends %s without usage", async (status) => {
+  it("durably blocks accounting when a recovered turn completes successfully without usage", async () => {
     vi.useFakeTimers();
     const { store, budget } = fixture();
     budget.bindTurn("thread", "turn");
     const terminal = completed() as Extract<ServerNotification, { method: "turn/completed" }>;
-    terminal.params.turn.status = status;
     await budget.observe(terminal, envelope(terminal));
     await vi.advanceTimersByTimeAsync(40);
     expect(store.markUnavailable).toHaveBeenCalledWith("terminal_turn_missing_usage");
     await expect(budget.beforeRequest("turn/start", { threadId: "another" }, "next"))
       .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNAVAILABLE" });
+    budget.close();
+  });
+
+  it.each(["interrupted", "failed"] as const)("keeps admission available after a zero-report %s turn and counts delayed usage", async (status) => {
+    vi.useFakeTimers();
+    const { store, budget, interrupt } = fixture();
+    await budget.beforeRequest("turn/start", { threadId: "thread" }, "start");
+    budget.accepted("turn/start", { threadId: "thread" }, { turn: { id: "turn" } }, "start");
+    const terminal = completed() as Extract<ServerNotification, { method: "turn/completed" }>;
+    terminal.params.turn.status = status;
+    await budget.observe(terminal, envelope(terminal));
+    await budget.beforeRequest("turn/start", { threadId: "next" }, "next");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(store.markUnavailable).not.toHaveBeenCalled();
+    const notification = usage();
+    await budget.observe(notification, envelope(notification, "delayed-usage"));
+    expect(store.recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "thread", eventId: "delayed-usage", totalTokens: 80, lastTokens: 20,
+    }));
+    expect(interrupt).not.toHaveBeenCalled();
+    await budget.beforeRequest("turn/start", { threadId: "next" }, "next-again");
     budget.close();
   });
 
@@ -162,6 +183,51 @@ describe("weekly token budget runtime", () => {
     await budget.observe(terminal, envelope(terminal));
     await vi.advanceTimersByTimeAsync(40);
     expect(store.markUnavailable).toHaveBeenCalledWith("terminal_turn_missing_usage");
+    budget.close();
+  });
+
+  it("does not require usage from lifecycle replay at or before a fresh allowance", async () => {
+    vi.useFakeTimers();
+    const { store, budget, interrupt } = fixture();
+    const terminal = completed("old-thread", "old-turn") as Extract<ServerNotification, { method: "turn/completed" }>;
+    const started: ServerNotification = { method: "turn/started", params: { ...terminal.params, turn: { ...terminal.params.turn, status: "inProgress" } } };
+    await budget.observe(started, envelope(started, "old-start", "2026-09-23T23:59:00.000Z"));
+    // A recovery binding can arrive independently of the replayed lifecycle.
+    budget.bindTurn("old-thread", "old-turn");
+    await budget.observe(terminal, envelope(terminal, "old-terminal", "2026-09-24T00:00:00.000Z"));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(store.markUnavailable).not.toHaveBeenCalled();
+    expect(store.assertAvailable).not.toHaveBeenCalled();
+    expect(interrupt).not.toHaveBeenCalled();
+    await budget.beforeRequest("turn/start", { threadId: "new-thread" });
+    expect(store.countingStartsAt).toHaveBeenCalledOnce();
+    budget.close();
+  });
+
+  it("records pre-activation usage for deduplication without reviving an old turn", async () => {
+    vi.useFakeTimers();
+    const { store, budget, interrupt } = fixture();
+    const notification = usage();
+    await budget.observe(notification, envelope(notification, "old-usage", "2026-09-23T23:59:00.000Z"));
+    expect(store.recordUsage).toHaveBeenCalledWith(expect.objectContaining({
+      eventId: "old-usage", observedAt: "2026-09-23T23:59:00.000Z",
+    }));
+    await vi.advanceTimersByTimeAsync(100);
+    expect(store.assertAvailable).not.toHaveBeenCalled();
+    expect(store.markUnavailable).not.toHaveBeenCalled();
+    expect(interrupt).not.toHaveBeenCalled();
+    budget.close();
+  });
+
+  it("fails closed when the activation boundary cannot be verified", async () => {
+    const { store, budget } = fixture();
+    store.countingStartsAt.mockRejectedValue(new Error("Unreadable ledger"));
+    const notification = usage();
+    await budget.observe(notification, envelope(notification));
+    expect(store.recordUsage).not.toHaveBeenCalled();
+    expect(store.markUnavailable).toHaveBeenCalledWith("invalid_accounting_boundary");
+    await expect(budget.beforeRequest("turn/start", { threadId: "another" }))
+      .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNAVAILABLE" });
     budget.close();
   });
 });

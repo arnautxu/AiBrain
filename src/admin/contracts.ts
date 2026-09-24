@@ -70,7 +70,7 @@ export type WorkspaceAdminMember = {
   workerHealthy: boolean;
   roleId: WorkspaceRoleId;
   groupIds: string[];
-  usage: { turns: number; inputTokens: string; outputTokens: string };
+  usage: { turns: number; inputTokens?: string; outputTokens?: string };
 };
 
 export type WorkspaceAdminSnapshot = {

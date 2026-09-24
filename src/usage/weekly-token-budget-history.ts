@@ -49,6 +49,7 @@ async function regularFiles(directory: string, depth = 0): Promise<string[]> {
 export async function readWeeklyTokenBudgetHistory(
   config: Pick<InstallationConfig, "paths">,
   now = new Date(),
+  options: { startNow?: boolean } = {},
 ): Promise<{ seed: HistorySeed; files: number; sessions: number; resets: number }> {
   const capturedAt = now.toISOString();
   const monday = new Date(`${dateAt(now)}T00:00:00Z`);
@@ -131,6 +132,11 @@ export async function readWeeklyTokenBudgetHistory(
       const uncertainInitial = previous === null && event.total !== event.last;
       previous = event.total;
       latestAt = event.timestamp;
+      // An explicit fresh allowance excludes all pre-activation consumption.
+      // Keep the measured cursor even when older consumption cannot be
+      // reconstructed (for example, truncated or ephemeral legacy history).
+      // Structural validation, timestamps and file-safety checks still apply.
+      if (options.startNow) continue;
       const date = dateAt(event.timestamp);
       if (event.timestamp < history.createdAt) { inheritedPrefix = true; continue; }
       // A fork can start a fresh counter even when its value happens to be

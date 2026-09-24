@@ -1464,17 +1464,28 @@ rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
 `GET /api/usage/budget` requiere una sesión local de la instalación actual y
 devuelve únicamente el saldo compartido: `{ budget: { initialized, weekStart,
-resetAt, usedTokens, limitTokens, remainingTokens, percent, threshold } }`.
+resetAt, remainingPercent, threshold } }`.
 Sin política configurada responde `{ budget: null }`; un contador pendiente de
-inicialización conserva `usedTokens`, `remainingTokens` y `percent` en `null`,
-nunca cero. Una sesión ausente devuelve `401`, una instalación ajena `403` y un
+inicialización conserva `remainingPercent` en `null`, nunca cero. El porcentaje
+restante se redondea hacia arriba para no mostrar agotamiento con saldo positivo. Una sesión ausente devuelve `401`, una instalación ajena `403` y un
 registro no verificable `503`. Siempre usa `Cache-Control: private, no-store`.
-No consulta al proveedor ni expone datos de la cuenta o de otros empleados.
+No consulta al proveedor ni expone tokens, el límite numérico, datos de la cuenta
+o de otros empleados. Los empleados solo ven el porcentaje restante y la fecha
+de renovación; los avisos muestran 75/50/25% restante.
 Los avisos de 25/50/75% y el agotamiento se describen en
 [`WEEKLY_TOKEN_BUDGET.md`](WEEKLY_TOKEN_BUDGET.md).
 
-`GET /api/usage/me` requiere la cookie local opaca y siempre devuelve únicamente
-las métricas internas del empleado autenticado. `GET /api/usage/company`
+`GET /api/usage/me` y `GET /api/usage/company` devuelven el mismo objeto
+`{ budget }` cuando la instalación tiene presupuesto configurado. No consultan
+al proveedor ni incluyen `internal`, `members` o `sharedSubscription`, tampoco
+para `workspace-owner` o `workspace-admin`. Un error del contador nunca activa
+un fallback que exponga métricas. En `/admin`, los miembros tampoco incluyen
+`inputTokens` ni `outputTokens` en ese caso. El registro privado del host conserva
+los contadores para el operador. Los schemas `EmployeePersonalUsageResponse` y
+`EmployeeCompanyUsageResponse` declaran ambas variantes.
+
+Sin presupuesto configurado, `GET /api/usage/me` requiere la cookie local opaca
+y devuelve las métricas internas del empleado autenticado. `GET /api/usage/company`
 requiere además que la asignación durable del usuario sea `workspace-owner` o
 `workspace-admin`; `workspace-member` falla de forma cerrada con `403`. La ruta
 resuelve el rol server-side desde `dataRoot/workspace-admin/state.json` y no

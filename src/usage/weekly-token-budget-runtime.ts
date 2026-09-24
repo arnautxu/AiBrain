@@ -4,7 +4,7 @@ import type { InstallationConfig } from "@/config/installation-schema";
 import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { WeeklyTokenBudgetStore } from "@/usage/weekly-token-budget";
 
-type BudgetStore = Pick<WeeklyTokenBudgetStore, "assertAvailable" | "recordUsage" | "markUnavailable">;
+type BudgetStore = Pick<WeeklyTokenBudgetStore, "assertAvailable" | "recordUsage" | "markUnavailable" | "countingStartsAt">;
 type ActiveTurn = { threadId: string; turnId: string; usageObserved: boolean };
 type RequestMethod = "turn/start" | "turn/steer";
 
@@ -45,6 +45,7 @@ export class WeeklyTokenBudgetRuntime {
   private readonly interrupts = new Map<string, Promise<void>>();
   private timer: ReturnType<typeof setTimeout> | null = null;
   private unavailable: Error | null = null;
+  private countingStartsAt: number | null = null;
   private closed = false;
 
   constructor(private readonly options: {
@@ -93,6 +94,20 @@ export class WeeklyTokenBudgetRuntime {
   async observe(notification: ServerNotification, event: AppServerEvent) {
     const { method } = notification;
     if (method !== "thread/tokenUsage/updated" && method !== "turn/started" && method !== "turn/completed") return;
+    let historical: boolean;
+    try {
+      const occurredAt = Date.parse(event.occurredAt);
+      if (!Number.isFinite(occurredAt)) throw new WeeklyTokenBudgetRuntimeError();
+      if (this.countingStartsAt === null) {
+        const boundary = await this.options.store.countingStartsAt();
+        if (!boundary || !Number.isFinite(Date.parse(boundary))) throw new WeeklyTokenBudgetRuntimeError();
+        this.countingStartsAt = Date.parse(boundary);
+      }
+      historical = occurredAt <= this.countingStartsAt;
+    } catch {
+      await this.accountingFailed("invalid_accounting_boundary");
+      return;
+    }
     const params: unknown = notification.params;
     if (!record(params) || !identifier(params.threadId)) {
       await this.accountingFailed("invalid_usage_scope");
@@ -107,7 +122,7 @@ export class WeeklyTokenBudgetRuntime {
     }
     const key = turnKey(params.threadId, turnId);
     if (method === "turn/started") {
-      this.bindTurn(params.threadId, turnId);
+      if (!historical) this.bindTurn(params.threadId, turnId);
       return;
     }
     if (method === "turn/completed") {
@@ -115,7 +130,7 @@ export class WeeklyTokenBudgetRuntime {
       this.active.delete(key);
       this.interrupts.delete(key);
       this.remember(this.completed, key);
-      if (active && !active.usageObserved) {
+      if (!historical && active && !active.usageObserved && record(params.turn) && params.turn.status === "completed") {
         // Usage can legitimately be delivered after the terminal event. New
         // inference is refused during this grace period; no spend is guessed.
         const timer = setTimeout(() => {
@@ -125,6 +140,9 @@ export class WeeklyTokenBudgetRuntime {
         timer.unref?.();
         this.missingUsage.set(key, timer);
       }
+      // A cancellation or provider failure can precede its first usage report.
+      // It must not disable the whole installation. A delayed cumulative
+      // report is still durably charged below, even after this turn ended.
       if (this.active.size === 0 && this.timer) { clearTimeout(this.timer); this.timer = null; }
       return;
     }
@@ -134,7 +152,10 @@ export class WeeklyTokenBudgetRuntime {
       await this.accountingFailed("invalid_usage_counters");
       return;
     }
-    this.bindTurn(params.threadId, turnId);
+    // Durable transport replays can predate a fresh allowance. Their usage
+    // still reaches the store for deduplication, but cannot revive old turns
+    // or require new usage evidence from work completed before activation.
+    if (!historical) this.bindTurn(params.threadId, turnId);
     try {
       const status = await this.options.store.recordUsage({
         userId: this.options.userId,

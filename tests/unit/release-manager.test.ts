@@ -494,6 +494,48 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     expect(await readFile(files.activeConfigFile, "utf8")).toContain('"companyName": "Company B"');
   }, 20_000);
 
+  it("promotes a weekly token budget with the same revision and images and rolls back its exact configuration", async () => {
+    const files = await fixture();
+    await execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) });
+    const previous = await readFile(files.activeConfigFile, "utf8");
+    const candidate = `${JSON.stringify({ ...JSON.parse(previous),
+      usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" },
+    }, null, 2)}\n`;
+    await writeFile(files.installationConfigC, candidate);
+    const args = commandArgs(files, "promote");
+    args[args.indexOf("--installation-config") + 1] = files.installationConfigC;
+    const promoted = await execFileAsync(process.execPath, args, { env: environment(files) });
+    expect(JSON.parse(promoted.stdout)).toMatchObject({
+      current: { image: digestB, egressImage: egressDigestB, revision: revisionB, installationConfigSha256: sha256(candidate) },
+      previous: { image: digestB, egressImage: egressDigestB, revision: revisionB, installationConfigSha256: sha256(previous) },
+    });
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(candidate);
+    await execFileAsync(process.execPath, commandArgs(files, "rollback"), { env: environment(files) });
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(previous);
+  }, 20_000);
+
+  it.each([
+    null,
+    { weeklyTokens: 0, timeZone: "Europe/Madrid" },
+    { weeklyTokens: -1, timeZone: "Europe/Madrid" },
+    { weeklyTokens: 1.5, timeZone: "Europe/Madrid" },
+    { weeklyTokens: Number.MAX_SAFE_INTEGER + 1, timeZone: "Europe/Madrid" },
+    { weeklyTokens: "7500000", timeZone: "Europe/Madrid" },
+    { weeklyTokens: 7_500_000, timeZone: "UTC" },
+    { weeklyTokens: 7_500_000 },
+    { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid", enabled: false },
+  ])("rejects an invalid weekly token budget before container mutation: %j", async (usageLimits) => {
+    const files = await fixture();
+    await writeFile(files.installationConfig, `${JSON.stringify({
+      ...JSON.parse(installationConfigInput("B")), usageLimits,
+    })}\n`);
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INSTALLATION_CONFIG_INVALID") });
+    const calls = (await readFile(files.logFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line) as string[]);
+    expect(calls.some((args) => args.includes("up"))).toBe(false);
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(installationConfigInput("A"));
+  });
+
   it("rejects unsafe or drifting release inputs before Docker mutation", async () => {
     const secret = await fixture();
     await writeFile(secret.envFile, `${await readFile(secret.envFile, "utf8")}AIBRAIN_SESSION_SECRET=must-not-be-versioned\n`);
