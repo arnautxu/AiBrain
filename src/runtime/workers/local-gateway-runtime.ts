@@ -30,6 +30,7 @@ import type {
   WorkerLaunchContext,
   WorkerRuntimeFactory,
 } from "@/runtime/workers/types";
+import { quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
 import {
   defineVersionedSchema,
   expectIsoDate,
@@ -299,6 +300,7 @@ class GatewayRequestLedger {
 export type PrivateWorkerGatewayOptions = {
   context: WorkerLaunchContext;
   processFactory?: (context: WorkerLaunchContext) => ChildProcessWithoutNullStreams;
+  configOverrides?: readonly string[];
   now?: () => number;
   maxRetainedCompletedRequests?: number;
   maxRetainedDeliveredEvents?: number;
@@ -372,7 +374,7 @@ export class PrivateWorkerGateway {
     this.ownsProcessGroup = !options.processFactory && process.platform !== "win32";
     this.processFactory = options.processFactory ?? ((context) => spawn(/* turbopackIgnore: true */
       process.env.CODEX_BIN?.trim() || "codex",
-      ["app-server", "--stdio"],
+      ["app-server", "--stdio", ...(options.configOverrides ?? []).flatMap((value) => ["-c", value])],
       {
         cwd: context.workspace,
         env: {
@@ -922,6 +924,7 @@ class DeferredAppServerTransport implements AppServerTransport {
 
 export type LocalGatewayWorkerRuntimeFactoryOptions = {
   processFactory?: PrivateWorkerGatewayOptions["processFactory"];
+  quotaToolPrivacy?: boolean;
   now?: () => number;
   maxRetainedCompletedRequests?: number;
   maxRetainedDeliveredEvents?: number;
@@ -948,6 +951,14 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
 
   private async startOnce() {
     if (this.gateway) return;
+    // Profile identity uses the employee's base roots, shared by every service
+    // role. App Server must retain these definitions across settings updates.
+    const configOverrides = this.options.quotaToolPrivacy
+      ? quotaToolPermissionConfigOverrides({
+        codexHome: this.context.environment.CODEX_HOME,
+        transportAudit: this.context.transportAudit,
+      })
+      : undefined;
     // The web app and the detached automation worker deliberately run
     // independent Codex App Server processes.  Their replay/ledger journals
     // must therefore be durable per service role, never shared: otherwise one
@@ -963,6 +974,7 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
     const gateway = new PrivateWorkerGateway({
       context: isolatedContext,
       processFactory: this.options.processFactory,
+      configOverrides,
       now: this.options.now,
       maxRetainedCompletedRequests: this.options.maxRetainedCompletedRequests,
       maxRetainedDeliveredEvents: this.options.maxRetainedDeliveredEvents,

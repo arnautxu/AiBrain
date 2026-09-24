@@ -16,6 +16,23 @@ Employees see only the remaining percentage and reset time. Raw token totals,
 the numerical allowance and the connected account's subscription usage are
 private operator data and are omitted from employee API responses and settings.
 
+The privacy boundary also applies to model tools. The outer worker sandbox
+hides the operator installation configuration and transport audit journals.
+Quota-enabled turns use named filesystem profiles that hide Codex runtime
+usage metadata while retaining access to managed skills and the existing project
+write scope. Read-only turns remain read-only. Native sandbox/permission
+escalation is unavailable under the quota policy, so an employee approval
+cannot expose the private counters. Separate application browser/connector
+approvals are unchanged. Worker restart is required when enabling the policy
+to discard any previous process/session permission grants.
+The profiles are supplied at worker startup, because the pinned App Server
+reloads named profiles from its base configuration when changing turn modes.
+Tool commands retain only the current project's existing write root and the
+same temporary-directory grants. The private paths are non-overlapping session,
+log, history and SQLite-family rules: broad parent-directory denies break the
+pinned Linux helper, and overlapping directory/glob denies can prevent startup.
+Keep this physical Linux compatibility check when upgrading the pinned runtime.
+
 ## Configuration and accounting
 
 The root-owned installation configuration accepts:
@@ -155,3 +172,9 @@ its protection and must not be described as retaining the limit.
   Production configuration and data were not mutated.
 - Backend CI, GHCR publication, deployment and authenticated live acceptance
   remain separate, pending gates. No remote release has been made for this change.
+- The first candidate passed Backend CI `35981025805`; its image publication was
+  intentionally cancelled before deployment to include the tool privacy boundary.
+  Provider-free probes against the host's pinned Linux Codex 0.153.4 proved
+  session, symlink, SQLite/history/log and audit denial while allowing managed
+  skill reads, project writes and temporary files. Artifact and read-only project
+  writes remained blocked. These used synthetic files and no model inference.

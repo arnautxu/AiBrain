@@ -391,7 +391,7 @@ async function serviceState(): Promise<RuntimeServiceState> {
       config,
       registry: new WorkerRuntimeRegistry({
         config,
-        factory: new LocalGatewayWorkerRuntimeFactory(),
+        factory: new LocalGatewayWorkerRuntimeFactory({ quotaToolPrivacy: Boolean(config.usageLimits) }),
         maintenance,
         onLifecycleMetric: (metric) => operationalLogger.info("codex.worker_lifecycle", {
           metricSchemaVersion: 1,

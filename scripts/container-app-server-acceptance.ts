@@ -25,7 +25,7 @@ function withDeadline<T>(operation: Promise<T>, label: string) {
   });
 }
 
-async function installationUsersRoot() {
+async function installationAcceptanceConfig() {
   const configPath = process.env.AIBRAIN_INSTALLATION_CONFIG?.trim()
     || "/etc/aibrain/installation.json";
   const config = JSON.parse(await readFile(configPath, "utf8")) as unknown;
@@ -36,7 +36,7 @@ async function installationUsersRoot() {
   if (process.env.NODE_ENV === "production" && usersRoot !== "/var/lib/aibrain/data/users") {
     throw new Error("Production App Server acceptance requires the immutable users root.");
   }
-  return usersRoot;
+  return { usersRoot, quotaToolPrivacy: Boolean(config.usageLimits) };
 }
 
 async function createContext(usersRoot: string) {
@@ -95,9 +95,10 @@ async function createContext(usersRoot: string) {
   return { context, userRoot };
 }
 
-async function acceptOneGeneration(context: WorkerLaunchContext, generation: number) {
+async function acceptOneGeneration(context: WorkerLaunchContext, generation: number, quotaToolPrivacy: boolean) {
   const runtime = new LocalGatewayWorkerRuntimeFactory({
     runtimeInstanceId: "container-acceptance",
+    quotaToolPrivacy,
   }).create(context);
   const router = new AppServerRpcRouter(runtime.transport);
   try {
@@ -148,11 +149,11 @@ export async function runContainerAppServerAcceptance() {
   if (process.env.AIBRAIN_CODEX_EXPECTED_VERSION?.trim() !== EXPECTED_CODEX_VERSION) {
     throw new Error(`App Server acceptance requires Codex ${EXPECTED_CODEX_VERSION}.`);
   }
-  const usersRoot = await installationUsersRoot();
+  const { usersRoot, quotaToolPrivacy } = await installationAcceptanceConfig();
   const { context, userRoot } = await createContext(usersRoot);
   try {
-    await acceptOneGeneration(context, 1);
-    await acceptOneGeneration(context, 2);
+    await acceptOneGeneration(context, 1, quotaToolPrivacy);
+    await acceptOneGeneration(context, 2, quotaToolPrivacy);
   } finally {
     await rm(userRoot, { recursive: true, force: true });
   }

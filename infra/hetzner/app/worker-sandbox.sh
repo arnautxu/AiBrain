@@ -84,9 +84,12 @@ for private_context_file in PROFILE.md PREFERENCES.md PERMISSIONS.md; do
   [ -f "$context_path" ] && [ ! -L "$context_path" ] || fail "employee context is unavailable: $private_context_file"
 done
 
-# The container root is read-only, then the complete product dataRoot is hidden.
+# The launcher has finished reading the operator config. Hide it from the model
+# worker along with the complete product dataRoot after mounting the root read-only.
 # Only company context, source-ro, this employee's explicit Markdown context and
 # declared writable roots and the employee's upload directory are re-exposed.
+# Transport audit logs stay hidden; the parent gateway persists them outside
+# this mount namespace.
 # Uploads are read-only at `staging/threads`; only `staging/tmp` remains
 # writable. This prevents credential theft from browser profiles, local
 # sessions, backups or sibling employees.
@@ -102,6 +105,8 @@ exec /usr/bin/bwrap \
   --proc /proc \
   --tmpfs /tmp \
   --tmpfs /run \
+  --tmpfs /etc/aibrain \
+  --remount-ro /etc/aibrain \
   --tmpfs /usr/local/share/aibrain/internal-agent-context \
   --tmpfs "$data_root" \
   --ro-bind "$company_root" "$company_root" \
@@ -116,6 +121,5 @@ exec /usr/bin/bwrap \
   --ro-bind "$uploaded_documents_root" "$uploaded_documents_root" \
   --bind "$staging_root/tmp" "$staging_root/tmp" \
   --bind "$artifacts_root" "$artifacts_root" \
-  --bind "$transport_audit_root" "$transport_audit_root" \
   --chdir "$workspace" \
   /usr/local/bin/codex-real "$@"

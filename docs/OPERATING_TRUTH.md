@@ -127,6 +127,9 @@ Never collapse these states. Health/readiness is operational evidence, not user-
   2026-09-24, excluding prior consumption; employees see only the remaining
   percentage, never the token totals or limit. Activation requires an offline
   cursor baseline, installation policy and matching host knowledge guard.
+  The worker hides operator configuration and transport journals; quota-mode
+  native tool profiles protect runtime metadata without expanding project
+  writes or allowing employee approvals to bypass the private counters.
   Reported-token admission
   and interruption can overshoot while work is in flight; this is not a provider
   subscription partition. Production activation and acceptance remain separate.

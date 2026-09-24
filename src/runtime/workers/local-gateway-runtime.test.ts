@@ -18,6 +18,7 @@ import {
   workerTransportAuditRoot,
 } from "@/runtime/workers/local-gateway-runtime";
 import type { WorkerLaunchContext } from "@/runtime/workers/types";
+import { quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
 import { ResourceLockManager } from "@/storage";
 
 vi.mock("server-only", () => ({}));
@@ -188,6 +189,7 @@ describe("private per-user worker gateway", () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
@@ -233,6 +235,71 @@ describe("private per-user worker gateway", () => {
       reconnectJitterRatio: 0,
     });
   }
+
+  it.each([undefined, false, true])("launches immutable quota profiles only when enabled (%s)", async (quotaToolPrivacy) => {
+    const argumentsPath = path.join(root, "worker-arguments.json");
+    const executable = path.join(root, "codex-test.mjs");
+    await writeFile(executable, [
+      `#!${process.execPath}`,
+      'import { writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(argumentsPath)}, JSON.stringify(process.argv.slice(2)));`,
+      'process.stdin.resume();',
+    ].join("\n"), { mode: 0o700 });
+    vi.stubEnv("CODEX_BIN", executable);
+    const runtime = new LocalGatewayWorkerRuntimeFactory({
+      quotaToolPrivacy,
+      runtimeInstanceId: "automation-worker",
+    }).create(context);
+    try {
+      await runtime.start();
+      const expectedOverrides = quotaToolPrivacy
+        ? quotaToolPermissionConfigOverrides({
+          codexHome: context.environment.CODEX_HOME,
+          transportAudit: context.transportAudit,
+        }).flatMap((value) => ["-c", value])
+        : [];
+      await expect.poll(async () => JSON.parse(await readFile(argumentsPath, "utf8")))
+        .toEqual(["app-server", "--stdio", ...expectedOverrides]);
+      if (quotaToolPrivacy) {
+        const serialized = await readFile(argumentsPath, "utf8");
+        expect(serialized).toContain(path.join(context.environment.CODEX_HOME, "sessions"));
+        expect(serialized).toContain(context.transportAudit);
+        expect(serialized).not.toContain("runtime-instances");
+      }
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it("rejects unsafe quota roots before starting a worker", async () => {
+    const processFactory = vi.fn();
+    const runtime = new LocalGatewayWorkerRuntimeFactory({ quotaToolPrivacy: true, processFactory })
+      .create({ ...context, environment: { ...context.environment, CODEX_HOME: "relative-home" } });
+    await expect(runtime.start()).rejects.toThrow(/espacio privado/u);
+    expect(processFactory).not.toHaveBeenCalled();
+  });
+
+  it("keeps an injected process factory's context-only contract with quota privacy enabled", async () => {
+    const processFactory = vi.fn(() => spawn(process.execPath, [fakeServer], {
+      cwd: context.workspace,
+      env: { NODE_ENV: "test", ...context.environment },
+      stdio: ["pipe", "pipe", "pipe"],
+    }));
+    const runtime = new LocalGatewayWorkerRuntimeFactory({
+      quotaToolPrivacy: true,
+      processFactory,
+      runtimeInstanceId: "app",
+    }).create(context);
+    try {
+      await runtime.start();
+      expect(processFactory).toHaveBeenCalledExactlyOnceWith({
+        ...context,
+        transportAudit: workerTransportAuditRoot(context.transportAudit, "app"),
+      });
+    } finally {
+      await runtime.stop();
+    }
+  });
 
   it("runs app and automation transports concurrently without sharing replay journals", async () => {
     const processFactory = () => spawn(process.execPath, [fakeServer], {
