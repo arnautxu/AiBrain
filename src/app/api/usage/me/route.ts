@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession } from "@/auth/session";
 import { personalUsageForUser } from "@/usage/server-service";
+import { employeeWeeklyBudget, EmployeeBudgetAccessError } from "@/usage/employee-budget";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -16,11 +17,16 @@ export async function GET() {
     );
   }
   try {
+    const budget = await employeeWeeklyBudget(session);
+    if (budget) return NextResponse.json({ budget }, { headers: NO_STORE_HEADERS });
     return NextResponse.json(
       await personalUsageForUser(session.user.id),
       { headers: NO_STORE_HEADERS },
     );
-  } catch {
+  } catch (error) {
+    if (error instanceof EmployeeBudgetAccessError) {
+      return NextResponse.json({ error: error.message, code: error.code }, { status: 403, headers: NO_STORE_HEADERS });
+    }
     return NextResponse.json(
       { error: "No s’ha pogut consultar l’ús.", code: "USAGE_UNAVAILABLE" },
       { status: 503, headers: NO_STORE_HEADERS },

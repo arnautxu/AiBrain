@@ -54,6 +54,7 @@ describe("weeklyTokenBudgetWindow", () => {
 describe("WeeklyTokenBudgetStore", () => {
   it("requires an explicit baseline and does not present missing measurements as zero", async () => {
     const { store } = await fixture();
+    expect(await store.countingStartsAt()).toBeNull();
     expect(await store.status()).toMatchObject({ initialized: false, usedTokens: null, remainingTokens: null, percent: null });
     await expect(store.assertAvailable()).rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNINITIALIZED" });
     await expect(store.recordUsage(usage(12))).rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNINITIALIZED" });
@@ -73,6 +74,7 @@ describe("WeeklyTokenBudgetStore", () => {
   it("cannot replace the seed or clear a prior exhaustion", async () => {
     const { store, seed } = await fixture(100);
     await seed({ dailyTotals: [{ date: "2026-09-24", totalTokens: 100 }] });
+    expect(await store.countingStartsAt()).toBe(new Date(DEFAULT_NOW - 60_000).toISOString());
     const before = await readFile(store.statePath, "utf8");
     await expect(seed()).rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_ALREADY_INITIALIZED" });
     expect(await readFile(store.statePath, "utf8")).toBe(before);

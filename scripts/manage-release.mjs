@@ -281,7 +281,7 @@ function assertTargetEnvironment(current, target, options) {
 const INSTALLATION_ROOT_KEYS = [
   "schemaVersion", "installationId", "companyName", "companySlug", "publicUrl", "branding", "paths",
 ];
-const INSTALLATION_OPTIONAL_ROOT_KEYS = ["catalog", "connectors"];
+const INSTALLATION_OPTIONAL_ROOT_KEYS = ["catalog", "connectors", "usageLimits"];
 const INSTALLATION_BRANDING_KEYS = ["productName", "logoPath", "faviconPath", "accentColor"];
 const INSTALLATION_PATHS = Object.freeze({
   dataRoot: "/var/lib/aibrain/data",
@@ -319,6 +319,13 @@ function validInstallationCatalog(value) {
     ids.add(skill.id);
   }
   return true;
+}
+
+// Keep this standalone gate aligned with config/installation-schema.ts.
+function validInstallationUsageLimits(value) {
+  return value === undefined || (exactObjectKeys(value, ["weeklyTokens", "timeZone"])
+    && Number.isSafeInteger(value.weeklyTokens) && value.weeklyTokens > 0
+    && value.timeZone === "Europe/Madrid");
 }
 
 function validInstallationConnectors(value) {
@@ -396,6 +403,7 @@ function validateVersionedInstallationConfig(contents, installationId) {
     || !/^#[0-9a-fA-F]{6}$/u.test(branding.accentColor)
     || !validInstallationCatalog(value.catalog)
     || !validInstallationConnectors(value.connectors)
+    || !validInstallationUsageLimits(value.usageLimits)
     || Object.entries(INSTALLATION_PATHS).some(([key, expected]) => paths[key] !== expected)) {
     throw new ReleaseError("RELEASE_INSTALLATION_CONFIG_INVALID", "InstallationConfig does not match the installation schema and fixed container paths.");
   }

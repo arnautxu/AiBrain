@@ -123,8 +123,11 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 
 - Installation token quotas: [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
   The candidate supports Arnall's 7.5 million total tokens per Madrid week and
-  25/50/75% notices. It requires an offline history seed, installation policy and
-  the matching host knowledge guard before activation. Reported-token admission
+  25/50/75% notices. The user authorized a fresh allowance from activation on
+  2026-09-24, excluding prior consumption; employees see only the remaining
+  percentage, never the token totals or limit. Activation requires an offline
+  cursor baseline, installation policy and matching host knowledge guard.
+  Reported-token admission
   and interruption can overshoot while work is in flight; this is not a provider
   subscription partition. Production activation and acceptance remain separate.
 
