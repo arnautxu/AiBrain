@@ -2,7 +2,7 @@
 
 Arnall activated on 2026-09-24 at 12:23:14 Europe/Madrid (10:23:14 UTC).
 
-Arnall's selected policy is **7,500,000 total tokens per week**, shared by all
+Arnall's selected policy is **15,000,000 total tokens per week**, shared by all
 employees. Cached input is included exactly once. Reasoning output is already
 part of output and is not added again. This is an internal token budget, not a
 percentage of a ChatGPT subscription or a billing estimate.
@@ -43,7 +43,7 @@ Keep this physical Linux compatibility check when upgrading the pinned runtime.
 The root-owned installation configuration accepts:
 
 ```json
-"usageLimits": { "weeklyTokens": 7500000, "timeZone": "Europe/Madrid" }
+"usageLimits": { "weeklyTokens": 15000000, "timeZone": "Europe/Madrid" }
 ```
 
 Omitting this property preserves existing installations' behavior. Unknown
@@ -93,7 +93,7 @@ On **2026-09-24**, the user explicitly chose a fresh initial allowance starting
 at activation, with only the remaining percentage visible to employees. Use
 `--start-now` for this first Arnall activation: exclude all consumption before
 the offline capture, including earlier consumption that day, and start with the
-full 7,500,000-token allowance. This is an authorized initial policy boundary,
+full 15,000,000-token allowance. This is an authorized initial policy boundary,
 not a deduction from or estimate of the connected account's subscription.
 
 The initializer still imports the latest verified cumulative cursor for every
@@ -205,7 +205,7 @@ its protection and must not be described as retaining the limit.
 - Maintenance drained to zero activities. App and detached automation workers
   stopped for the packaged offline `--start-now` initializer. The actual capture
   was `2026-09-24T10:23:14.266Z`: 279 session files, 276 retained thread cursors,
-  empty daily totals, no block reason, and all 7,500,000 tokens available.
+  empty daily totals, no block reason, and all 15,000,000 tokens available.
   The private activation receipt is
   `/etc/aibrain/company-qa/weekly-budget-activation.json`. Never reseed it.
 - After restart, both app and automation containers were healthy. Authenticated
