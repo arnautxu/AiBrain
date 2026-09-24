@@ -1,6 +1,6 @@
 # Installation weekly token budget
 
-Candidate implementation, 2026-09-24. Not yet published, enabled or accepted live.
+Arnall activated on 2026-09-24 at 12:23:14 Europe/Madrid (10:23:14 UTC).
 
 Arnall's selected policy is **7,500,000 total tokens per week**, shared by all
 employees. Cached input is included exactly once. Reasoning output is already
@@ -170,11 +170,59 @@ its protection and must not be described as retaining the limit.
 - A read-only capture of token metadata from the live host's 279 session files
   passed the packaged initializer preview with 15,496,576 current-week tokens.
   Production configuration and data were not mutated.
-- Backend CI, GHCR publication, deployment and authenticated live acceptance
-  remain separate, pending gates. No remote release has been made for this change.
+- Release gates below record the final publication and live activation separately
+  from these local candidate checks.
 - The first candidate passed Backend CI `35981025805`; its image publication was
   intentionally cancelled before deployment to include the tool privacy boundary.
   Provider-free probes against the host's pinned Linux Codex 0.153.4 proved
   session, symlink, SQLite/history/log and audit denial while allowing managed
   skill reads, project writes and temporary files. Artifact and read-only project
   writes remained blocked. These used synthetic files and no model inference.
+
+
+## Live activation evidence (2026-09-24)
+
+- Product revision `d5472c33bcd1ac813325b0f80e3eb65dfe5fc591`: Backend CI
+  `35985490048` passed on attempt 2. Attempt 1 had one existing injected-process
+  recovery-test timeout; 10 isolated and three complete gateway-file repetitions
+  passed before the unchanged failed job was rerun. Assertions were not relaxed.
+- GHCR publication `35986229461` and Deploy Arnall `35986507674` passed.
+  The deployed product digest is
+  `sha256:ffc38b579fcd21f5733d8298042ab0ea1403bb2932065d9cdd45f8f936d5934b`;
+  the egress digest is
+  `sha256:1088a36088022443a7a54f25b941cb3fcbe6dfe999b6c247a43b4786e6aafdff`.
+  Host release state, container OCI labels and public live endpoint agreed.
+- Quota configuration was promoted transactionally on the same images, with
+  active configuration SHA-256
+  `eebd1034b01521fd4debe0d65aa52610019199bbbf064e9d816c96c7d2682d1e`.
+  The host release-manager copy needed the reviewed strict `usageLimits` schema
+  update; its original was retained privately before the update.
+- Maintenance drained to zero activities. App and detached automation workers
+  stopped for the packaged offline `--start-now` initializer. The actual capture
+  was `2026-09-24T10:23:14.266Z`: 279 session files, 276 retained thread cursors,
+  empty daily totals, no block reason, and all 7,500,000 tokens available.
+  The private activation receipt is
+  `/etc/aibrain/company-qa/weekly-budget-activation.json`. Never reseed it.
+- After restart, both app and automation containers were healthy. Authenticated
+  Arnau browser acceptance showed only `Saldo semanal disponible: 100%` in the
+  chat and Settings > Uso, with renewal `28 sept 2026, 0:00 (hora de Madrid)`.
+  The pre-existing draft remained unchanged. A request without a session to
+  `/api/usage/budget` returned 401. Direct browser JSON-navigation capture was
+  unavailable; API field privacy is covered by automated endpoint tests, while
+  the live authenticated claim is limited to the rendered product surfaces.
+- No model inference was requested for acceptance. Linux filesystem-policy and
+  pinned App Server profile-switching proofs used synthetic files/provider-free
+  operations; actual post-activation token deduction remains observable on the
+  first user-requested model turn, not claimed as exercised by this rollout.
+- Live host readback found canonical installation configuration is root-owned
+  `0440`, so the host generation guard now uses a bounded operator-config reader
+  instead of the `0600` credential reader. It accepts read permissions but rejects
+  non-root ownership, symlinks, multiple links and group/world writes. The quota
+  check still runs before credential access and model dispatch. The installed
+  script hash is `3e02d69c5d0545e4ea114fe42af8c06253cf01aba74a65c58fdba9b91fce7963`;
+  live readback returned `GENERATION_WEEKLY_TOKEN_BUDGET_UNSUPPORTED` before any
+  provider call. Thirteen focused host-reader/guard tests passed.
+- A fresh composite local backup was verified before rollout (snapshot
+  `20260924T091525Z-4a001430-99ec-408d-b9c5-550762969b50`). Off-host replication
+  remains unconfigured: the existing destination is a template `example.invalid`.
+  No replacement destination or backup policy was invented during this change.
