@@ -31,6 +31,7 @@
     "GET /api/memory": "JsonObject",
     "GET /api/memory/proposals": "JsonObject",
     "GET /api/operations/maintenance": "JsonObject",
+    "GET /api/operations/usage-dashboard": "JsonObject",
     "GET /api/projects": "JsonObject",
     "GET /api/projects/{projectId}": "JsonObject",
     "GET /api/projects/{projectId}/artifacts/{artifactId}": "binary:image/png",
