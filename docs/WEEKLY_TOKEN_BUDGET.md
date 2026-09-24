@@ -15,6 +15,11 @@ counter is shared, not a separate allowance for each employee.
 Employees see only the remaining percentage and reset time. Raw token totals,
 the numerical allowance and the connected account's subscription usage are
 private operator data and are omitted from employee API responses and settings.
+An independent owner-only dashboard may read the current weekly totals through
+the dedicated `AIBRAIN_USAGE_DASHBOARD_SECRET` operator endpoint. That endpoint
+uses a separate bearer secret, returns no conversation content and remains
+unavailable when the secret is missing or invalid. It must never reuse the
+general maintenance/operator credential or appear in employee configuration.
 
 The privacy boundary also applies to model tools. The outer worker sandbox
 hides the operator installation configuration and transport audit journals.
