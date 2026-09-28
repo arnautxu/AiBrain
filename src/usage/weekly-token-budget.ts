@@ -322,7 +322,7 @@ export class WeeklyTokenBudgetStore {
     } };
   }
 
-  async recordUsage(input: WeeklyTokenBudgetUsage) {
+  async recordUsage(input: WeeklyTokenBudgetUsage, options?: { countTowardLimit?: boolean }) {
     return this.locked(async () => {
       const state = await this.read();
       if (!state) throw new WeeklyTokenBudgetError("WEEKLY_TOKEN_BUDGET_UNINITIALIZED", "Weekly token budget requires a verified historical baseline.");
@@ -365,10 +365,12 @@ export class WeeklyTokenBudgetStore {
           }
           cursor.totalTokens = event.totalTokens;
           cursor.observedAt = event.observedAt;
-          const date = dateInMadrid(Date.parse(event.observedAt));
-          const daily = state.dailyTotals.find((item) => item.date === date);
-          if (daily) daily.totalTokens = checkedCount(daily.totalTokens + delta);
-          else state.dailyTotals.push({ date, totalTokens: delta });
+          if (options?.countTowardLimit !== false) {
+            const date = dateInMadrid(Date.parse(event.observedAt));
+            const daily = state.dailyTotals.find((item) => item.date === date);
+            if (daily) daily.totalTokens = checkedCount(daily.totalTokens + delta);
+            else state.dailyTotals.push({ date, totalTokens: delta });
+          }
         }
         state.seenEvents.push(event.evidence);
         await this.write(state);

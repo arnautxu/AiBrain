@@ -114,6 +114,15 @@ describe("WeeklyTokenBudgetStore", () => {
     expect(await restarted.recordUsage(usage(175, { lastTokens: 75 }))).toMatchObject({ usedTokens: 175 });
   });
 
+  it("advances durable cursors without charging usage from a temporary unlimited period", async () => {
+    const { store, seed } = await fixture(1_000);
+    await seed();
+    await store.recordUsage(usage(400), { countTowardLimit: false });
+    expect(await store.status()).toMatchObject({ usedTokens: 0, remainingTokens: 1_000, threshold: 0 });
+    expect(await store.recordUsage(usage(450, { eventId: "after-unlimited", lastTokens: 50 })))
+      .toMatchObject({ usedTokens: 50, remainingTokens: 950 });
+  });
+
   it("serializes concurrent updates across store instances and deduplicates the same event", async () => {
     const { store, seed, options } = await fixture(1_000);
     await seed();

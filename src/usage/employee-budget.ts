@@ -1,6 +1,7 @@
 import type { AuthSession } from "@/auth/types";
 import { loadInstallationConfig } from "@/config/installation";
 import type { EmployeeWeeklyBudget } from "@/usage/employee-budget-contract";
+import { usageLimitIsUnlimited } from "@/usage/usage-limit-policy";
 import { WeeklyTokenBudgetStore } from "@/usage/weekly-token-budget";
 
 export class EmployeeBudgetAccessError extends Error {
@@ -20,6 +21,15 @@ export async function employeeWeeklyBudget(session: AuthSession): Promise<Employ
     dataRoot: installation.paths.dataRoot,
     limitTokens: installation.usageLimits.weeklyTokens,
   }).status();
+  if (usageLimitIsUnlimited(installation.usageLimits)) {
+    return {
+      initialized: status.initialized,
+      weekStart: status.weekStart,
+      resetAt: status.resetAt,
+      remainingPercent: status.initialized ? 100 : null,
+      threshold: 0,
+    };
+  }
   return {
     initialized: status.initialized,
     weekStart: status.weekStart,

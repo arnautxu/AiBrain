@@ -43,8 +43,22 @@ Keep this physical Linux compatibility check when upgrading the pinned runtime.
 The root-owned installation configuration accepts:
 
 ```json
-"usageLimits": { "weeklyTokens": 15000000, "timeZone": "Europe/Madrid" }
+"usageLimits": {
+  "weeklyTokens": 15000000,
+  "timeZone": "Europe/Madrid",
+  "unlimitedUntil": "2026-10-31T23:00:00.000Z"
+}
 ```
+
+`unlimitedUntil` is an optional canonical UTC timestamp for a temporary
+unlimited period. Before that instant, employee and operator allowance views
+show 100% remaining and quota exhaustion cannot deny or interrupt inference.
+Usage evidence still advances durable per-thread cursors but does not count
+toward the weekly allowance, so the first post-promotion request starts from a
+clean measured boundary. At the timestamp, normal admission and metering resume
+automatically without a deployment or worker restart. Arnall uses this field to
+cover the complete October 2026 introductory month; Madrid midnight on
+2026-11-01 is `2026-10-31T23:00:00.000Z` after the daylight-saving transition.
 
 Omitting this property preserves existing installations' behavior. Unknown
 keys, invalid counts and unsupported time zones are rejected. Employees cannot

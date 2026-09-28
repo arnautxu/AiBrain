@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocked = vi.hoisted(() => ({
   session: null as null | { provider: "local" | "demo"; tenant: { id: string }; user: { id: string } },
-  installation: { installationId: "arnall", paths: { dataRoot: "/private/arnall" }, usageLimits: undefined as undefined | { weeklyTokens: number; timeZone: "Europe/Madrid" } },
+  installation: { installationId: "arnall", paths: { dataRoot: "/private/arnall" }, usageLimits: undefined as undefined | { weeklyTokens: number; timeZone: "Europe/Madrid"; unlimitedUntil?: string } },
   status: vi.fn(),
   constructed: vi.fn(),
   loadInstallation: vi.fn(),
@@ -86,6 +86,17 @@ describe("installation weekly budget route", () => {
     mocked.status.mockResolvedValue(unknown);
     const response = await GET();
     expect(await response.json()).toEqual({ budget: { ...PUBLIC_STATUS, initialized: false, remainingPercent: null, threshold: 0 } });
+  });
+
+  it("shows a full balance throughout a configured unlimited period", async () => {
+    mocked.installation.usageLimits = {
+      weeklyTokens: 7_500_000,
+      timeZone: "Europe/Madrid",
+      unlimitedUntil: "2099-10-31T23:00:00.000Z",
+    };
+    mocked.status.mockResolvedValue({ ...STATUS, remainingTokens: 0, percent: 100, threshold: 100 });
+    const response = await GET();
+    expect(await response.json()).toEqual({ budget: { ...PUBLIC_STATUS, remainingPercent: 100, threshold: 0 } });
   });
 
   it.each([
