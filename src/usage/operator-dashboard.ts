@@ -9,6 +9,7 @@ import {
   operatorDashboardLocalDay,
 } from "@/usage/operator-dashboard-period";
 import { WeeklyTokenBudgetStore, weeklyTokenBudgetWindow } from "@/usage/weekly-token-budget";
+import { usageLimitIsUnlimited } from "@/usage/usage-limit-policy";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -46,6 +47,7 @@ export async function operatorUsageDashboard(now = Date.now()) {
   ]);
   const start = operatorDashboardCountingStart(window.weekStart, countingStartsAt);
   const end = Date.parse(window.resetAt);
+  const unlimited = usageLimitIsUnlimited(installation.usageLimits, now);
 
   const members = users.map((user) => {
     const memberTurns = turns.filter((turn) => {
@@ -88,10 +90,10 @@ export async function operatorUsageDashboard(now = Date.now()) {
     },
     budget: {
       limitTokens: budget.limitTokens,
-      usedTokens: budget.usedTokens ?? 0,
-      remainingTokens: budget.remainingTokens ?? budget.limitTokens,
-      usedPercent: budget.percent ?? 0,
-      remainingPercent: Math.max(0, 100 - (budget.percent ?? 0)),
+      usedTokens: unlimited ? 0 : budget.usedTokens ?? 0,
+      remainingTokens: unlimited ? budget.limitTokens : budget.remainingTokens ?? budget.limitTokens,
+      usedPercent: unlimited ? 0 : budget.percent ?? 0,
+      remainingPercent: unlimited ? 100 : Math.max(0, 100 - (budget.percent ?? 0)),
     },
     members,
   };

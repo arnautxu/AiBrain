@@ -12,7 +12,7 @@ const available = {
   threshold: 0 as const, initialized: true,
 };
 
-function fixture() {
+function fixture(options: { unlimitedUntil?: string; now?: () => number } = {}) {
   const store = {
     countingStartsAt: vi.fn().mockResolvedValue("2026-09-24T00:00:00.000Z"),
     assertAvailable: vi.fn().mockResolvedValue(available),
@@ -20,7 +20,7 @@ function fixture() {
     markUnavailable: vi.fn().mockResolvedValue(undefined),
   };
   const interrupt = vi.fn().mockResolvedValue({});
-  const budget = new WeeklyTokenBudgetRuntime({ userId, store, interrupt, pollIntervalMs: 20, missingUsageGraceMs: 40 });
+  const budget = new WeeklyTokenBudgetRuntime({ userId, store, interrupt, pollIntervalMs: 20, missingUsageGraceMs: 40, ...options });
   return { store, interrupt, budget };
 }
 
@@ -47,6 +47,25 @@ function completed(threadId = "thread", turnId = "turn"): ServerNotification {
 afterEach(() => vi.useRealTimers());
 
 describe("weekly token budget runtime", () => {
+  it("keeps admission open and excludes usage until the temporary unlimited period ends", async () => {
+    let now = Date.parse("2026-09-28T12:00:00.000Z");
+    const { store, budget, interrupt } = fixture({
+      unlimitedUntil: "2026-10-31T23:00:00.000Z",
+      now: () => now,
+    });
+    store.assertAvailable.mockRejectedValue(Object.assign(new Error("Budget exhausted"), { code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" }));
+    await expect(budget.beforeRequest("turn/start", { threadId: "thread" }, "request")).resolves.toBeUndefined();
+    const notification = usage();
+    await budget.observe(notification, envelope(notification, "unlimited-event", "2026-09-28T12:00:00.000Z"));
+    expect(store.recordUsage).toHaveBeenCalledWith(expect.objectContaining({ eventId: "unlimited-event" }), { countTowardLimit: false });
+    expect(interrupt).not.toHaveBeenCalled();
+
+    now = Date.parse("2026-10-31T23:00:00.000Z");
+    await expect(budget.beforeRequest("turn/start", { threadId: "thread" }, "request-after"))
+      .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" });
+    budget.close();
+  });
+
   it.each(["turn/start", "turn/steer"] as const)("refuses %s when accounting is unavailable or the limit is reached", async (method) => {
     const { store, budget } = fixture();
     store.assertAvailable.mockRejectedValue(Object.assign(new Error("Budget exhausted"), { code: "WEEKLY_TOKEN_BUDGET_EXHAUSTED" }));

@@ -4,7 +4,7 @@
   "companyName": "Arnall",
   "companySlug": "arnall",
   "publicUrl": "https://arnall.graphikai.com",
-  "usageLimits": { "weeklyTokens": 15000000, "timeZone": "Europe/Madrid" },
+  "usageLimits": { "weeklyTokens": 15000000, "timeZone": "Europe/Madrid", "unlimitedUntil": "2026-10-31T23:00:00.000Z" },
   "branding": {
     "productName": "Arnall AI",
     "logoPath": "/branding/arnall/logo.jpg",

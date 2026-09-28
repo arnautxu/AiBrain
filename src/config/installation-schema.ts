@@ -66,7 +66,7 @@ export type InstallationConfig = {
   connectors?: InstallationConnectors;
   catalog?: InstallationCatalog;
   /** Server-owned, installation-wide budget; cached input counts toward this total. */
-  usageLimits?: { weeklyTokens: number; timeZone: "Europe/Madrid" };
+  usageLimits?: { weeklyTokens: number; timeZone: "Europe/Madrid"; unlimitedUntil?: string };
 };
 
 export type InstallationConfigIssue = {
@@ -548,16 +548,23 @@ export function parseInstallationConfig(value: unknown): Readonly<InstallationCo
     if (!isRecord(value.usageLimits)) {
       issues.push({ path: "$.usageLimits", message: "debe ser un objeto" });
     } else {
-      addUnknownKeyIssues(value.usageLimits, ["weeklyTokens", "timeZone"], "$.usageLimits", issues);
-      const { weeklyTokens, timeZone } = value.usageLimits;
+      addUnknownKeyIssues(value.usageLimits, ["weeklyTokens", "timeZone", "unlimitedUntil"], "$.usageLimits", issues);
+      const { weeklyTokens, timeZone, unlimitedUntil } = value.usageLimits;
       if (typeof weeklyTokens !== "number" || !Number.isSafeInteger(weeklyTokens) || weeklyTokens < 1) {
         issues.push({ path: "$.usageLimits.weeklyTokens", message: "debe ser un entero positivo seguro" });
       }
       if (timeZone !== "Europe/Madrid") {
         issues.push({ path: "$.usageLimits.timeZone", message: "debe ser Europe/Madrid" });
       }
-      if (typeof weeklyTokens === "number" && Number.isSafeInteger(weeklyTokens) && weeklyTokens > 0 && timeZone === "Europe/Madrid") {
-        usageLimits = { weeklyTokens, timeZone };
+      const normalizedUnlimitedUntil = typeof unlimitedUntil === "string" && Number.isFinite(Date.parse(unlimitedUntil))
+        ? new Date(unlimitedUntil).toISOString()
+        : null;
+      if (unlimitedUntil !== undefined && normalizedUnlimitedUntil !== unlimitedUntil) {
+        issues.push({ path: "$.usageLimits.unlimitedUntil", message: "debe ser una fecha ISO UTC canónica" });
+      }
+      if (typeof weeklyTokens === "number" && Number.isSafeInteger(weeklyTokens) && weeklyTokens > 0 && timeZone === "Europe/Madrid" &&
+          (unlimitedUntil === undefined || normalizedUnlimitedUntil === unlimitedUntil)) {
+        usageLimits = { weeklyTokens, timeZone, ...(normalizedUnlimitedUntil ? { unlimitedUntil: normalizedUnlimitedUntil } : {}) };
       }
     }
   }

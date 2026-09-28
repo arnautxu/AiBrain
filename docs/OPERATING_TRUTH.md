@@ -134,6 +134,11 @@ Never collapse these states. Health/readiness is operational evidence, not user-
   Reported-token admission
   and interruption can overshoot while work is in flight; this is not a provider
   subscription partition. Production activation and acceptance remain separate.
+  Arnall's versioned policy includes a temporary unlimited introductory period
+  through 2026-10-31T23:00:00.000Z (2026-11-01 00:00 Europe/Madrid). During
+  that period the allowance view stays at 100%, quota exhaustion does not stop
+  inference, and promotional usage advances cursors without entering the weekly
+  charged totals. The 15 million weekly policy resumes automatically afterward.
 
 - Shared information architecture and reviewed content migration: [COMPANY_CONTEXT_STANDARD.md](COMPANY_CONTEXT_STANDARD.md). All installations receive the same structure; company data, private versions and permissions remain isolated. Details are retrieved from `knowledge/`, not injected wholesale into each turn.
 

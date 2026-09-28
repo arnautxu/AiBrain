@@ -323,9 +323,15 @@ function validInstallationCatalog(value) {
 
 // Keep this standalone gate aligned with config/installation-schema.ts.
 function validInstallationUsageLimits(value) {
-  return value === undefined || (exactObjectKeys(value, ["weeklyTokens", "timeZone"])
+  const keys = value?.unlimitedUntil === undefined
+    ? ["weeklyTokens", "timeZone"]
+    : ["weeklyTokens", "timeZone", "unlimitedUntil"];
+  const parsedUnlimitedUntil = typeof value?.unlimitedUntil === "string" ? Date.parse(value.unlimitedUntil) : Number.NaN;
+  return value === undefined || (exactObjectKeys(value, keys)
     && Number.isSafeInteger(value.weeklyTokens) && value.weeklyTokens > 0
-    && value.timeZone === "Europe/Madrid");
+    && value.timeZone === "Europe/Madrid"
+    && (value.unlimitedUntil === undefined || (Number.isFinite(parsedUnlimitedUntil)
+      && new Date(parsedUnlimitedUntil).toISOString() === value.unlimitedUntil)));
 }
 
 function validInstallationConnectors(value) {

@@ -499,7 +499,7 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     await execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) });
     const previous = await readFile(files.activeConfigFile, "utf8");
     const candidate = `${JSON.stringify({ ...JSON.parse(previous),
-      usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid" },
+      usageLimits: { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid", unlimitedUntil: "2026-10-31T23:00:00.000Z" },
     }, null, 2)}\n`;
     await writeFile(files.installationConfigC, candidate);
     const args = commandArgs(files, "promote");
@@ -523,6 +523,7 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     { weeklyTokens: "7500000", timeZone: "Europe/Madrid" },
     { weeklyTokens: 7_500_000, timeZone: "UTC" },
     { weeklyTokens: 7_500_000 },
+    { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid", unlimitedUntil: "2026-11-01" },
     { weeklyTokens: 7_500_000, timeZone: "Europe/Madrid", enabled: false },
   ])("rejects an invalid weekly token budget before container mutation: %j", async (usageLimits) => {
     const files = await fixture();

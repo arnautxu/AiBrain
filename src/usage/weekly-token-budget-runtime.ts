@@ -55,11 +55,21 @@ export class WeeklyTokenBudgetRuntime {
     onFailure?: (error: unknown) => void;
     pollIntervalMs?: number;
     missingUsageGraceMs?: number;
+    unlimitedUntil?: string;
+    now?: () => number;
   }) {}
 
+  private unlimited(at = (this.options.now ?? Date.now)()) {
+    return Boolean(this.options.unlimitedUntil && at < Date.parse(this.options.unlimitedUntil));
+  }
+
   async beforeRequest(method: RequestMethod, params: unknown, _requestId?: string) {
-    if (this.unavailable || this.missingUsage.size > 0) throw this.unavailable ?? new WeeklyTokenBudgetRuntimeError();
     if (!record(params) || !identifier(params.threadId)) throw new WeeklyTokenBudgetRuntimeError();
+    if (this.unlimited()) {
+      if (method === "turn/steer" && identifier(params.expectedTurnId)) this.bindTurn(params.threadId, params.expectedTurnId);
+      return;
+    }
+    if (this.unavailable || this.missingUsage.size > 0) throw this.unavailable ?? new WeeklyTokenBudgetRuntimeError();
     try {
       await this.options.store.assertAvailable();
     } catch (error) {
@@ -157,21 +167,25 @@ export class WeeklyTokenBudgetRuntime {
     // or require new usage evidence from work completed before activation.
     if (!historical) this.bindTurn(params.threadId, turnId);
     try {
-      const status = await this.options.store.recordUsage({
+      const promotional = this.unlimited(Date.parse(event.occurredAt));
+      const meteredUsage = {
         userId: this.options.userId,
         threadId: params.threadId,
         eventId: event.eventId,
         totalTokens: usage.total.totalTokens,
         lastTokens: usage.last.totalTokens,
         observedAt: event.occurredAt,
-      });
+      };
+      const status = promotional
+        ? await this.options.store.recordUsage(meteredUsage, { countTowardLimit: false })
+        : await this.options.store.recordUsage(meteredUsage);
       this.remember(this.observedUsage, key);
       const active = this.active.get(key);
       if (active) active.usageObserved = true;
       const missing = this.missingUsage.get(key);
       if (missing) { clearTimeout(missing); this.missingUsage.delete(key); }
       if (!status.initialized || status.usedTokens === null) throw new WeeklyTokenBudgetRuntimeError();
-      if (status.usedTokens >= status.limitTokens) void this.interruptActive();
+      if (!promotional && status.usedTokens >= status.limitTokens) void this.interruptActive();
     } catch {
       await this.accountingFailed("usage_persistence_failed");
     }
@@ -193,6 +207,7 @@ export class WeeklyTokenBudgetRuntime {
 
   private async poll() {
     if (this.closed) return;
+    if (this.unlimited()) return;
     try {
       if (this.unavailable) throw this.unavailable;
       await this.options.store.assertAvailable();
@@ -215,7 +230,7 @@ export class WeeklyTokenBudgetRuntime {
     // Do not await an RPC reply from the notification observation lane: a
     // long queued stream can hit transport backpressure before that reply.
     // Keeping the router alive also preserves reads and explicit stop.
-    void this.interruptActive();
+    if (!this.unlimited()) void this.interruptActive();
   }
 
   private async interruptActive() {
@@ -261,5 +276,6 @@ export function createWeeklyTokenBudgetRuntime(
     }),
     interrupt,
     onFailure,
+    ...(config.usageLimits.unlimitedUntil ? { unlimitedUntil: config.usageLimits.unlimitedUntil } : {}),
   });
 }
