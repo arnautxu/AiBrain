@@ -34,6 +34,7 @@ export class ComposioApi {
     if (!object(data.toolkit) || data.toolkit.slug !== toolkit.slug || data.id !== toolkit.authConfigId || data.status !== "ENABLED" || data.auth_scheme !== "OAUTH2") {
       throw new ComposioError("COMPOSIO_AUTH_CONFIG_MISMATCH");
     }
+    return data;
   }
   async begin(toolkit: ComposioToolkitConfig, userId: string, callback: string) {
     await this.verifyConfig(toolkit);
