@@ -76,6 +76,8 @@ type ChatWorkspaceProps = {
   composerExperience: ComposerExperience;
   imageGeneration: boolean;
   connectorMentions: ConnectorMention[];
+  connectorCatalogStatus?: "loading" | "ready" | "error";
+  onRetryConnectorCatalog?: () => void;
   selectedConnectorMentionIds: string[];
   serverReferences?: ServerReference[];
   onServerReferencesChange?: (items: ServerReference[]) => void;
@@ -434,6 +436,8 @@ export function ChatWorkspace({
   composerExperience,
   imageGeneration,
   connectorMentions,
+  connectorCatalogStatus = "ready",
+  onRetryConnectorCatalog,
   selectedConnectorMentionIds,
   serverReferences = [],
   onServerReferencesChange,
@@ -740,6 +744,13 @@ export function ChatWorkspace({
 
   const openAuthorizedConnectors = (trigger: HTMLButtonElement | null) => {
     connectorTriggerRef.current = trigger;
+    if (connectorCatalogStatus !== "ready") {
+      onComposerNotice(t(connectorCatalogStatus === "loading" ? "Cargando tus conectores…" : "No se pudo cargar el catálogo. Estamos reintentando la conexión."));
+      if (connectorCatalogStatus === "error") onRetryConnectorCatalog?.();
+      setComposerMenuOpen(false);
+      requestAnimationFrame(() => composerAddButtonRef.current?.focus());
+      return;
+    }
     if (connectorMentions.length === 0) {
       onComposerNotice(t("No hay conectores habilitados en tu catálogo."));
       setComposerMenuOpen(false);

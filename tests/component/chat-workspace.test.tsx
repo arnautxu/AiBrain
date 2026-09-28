@@ -455,6 +455,17 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
   });
 
+  it.each(["loading", "error"] as const)("does not report an empty catalog while %s", (connectorCatalogStatus) => {
+    const onComposerNotice = vi.fn();
+    const onRetryConnectorCatalog = vi.fn();
+    renderWorkspace(null, project, { connectorMentions: [], connectorCatalogStatus, onComposerNotice, onRetryConnectorCatalog });
+    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
+    expect(onComposerNotice).not.toHaveBeenCalledWith("No hay conectores habilitados en tu catálogo.");
+    expect(onComposerNotice).toHaveBeenCalledWith(connectorCatalogStatus === "loading" ? "Cargando tus conectores…" : "No se pudo cargar el catálogo. Estamos reintentando la conexión.");
+    expect(onRetryConnectorCatalog).toHaveBeenCalledTimes(connectorCatalogStatus === "error" ? 1 : 0);
+  });
+
   it("returns focus to Add when the connector catalog is empty", async () => {
     const onComposerNotice = vi.fn();
     renderWorkspace(null, project, { connectorMentions: [], onComposerNotice });

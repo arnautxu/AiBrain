@@ -1316,5 +1316,7 @@
   "Se renueva el {date} (hora de Madrid).": "Resets on {date} (Madrid time).",
   "Límite semanal agotado. Las nuevas solicitudes están bloqueadas hasta la renovación.": "Weekly allowance exhausted. New requests are blocked until the allowance resets.",
   "Aviso: queda un {percent}% o menos del saldo semanal compartido.": "Notice: {percent}% or less of the shared weekly allowance remains.",
-  "Cerrar aviso de consumo semanal": "Dismiss weekly usage notice"
+  "Cerrar aviso de consumo semanal": "Dismiss weekly usage notice",
+  "Cargando tus conectores…": "Loading your connectors…",
+  "No se pudo cargar el catálogo. Estamos reintentando la conexión.": "The catalog could not be loaded. Retrying the connection."
 }

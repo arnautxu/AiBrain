@@ -582,6 +582,8 @@ export function BrainApp({
   const [imageGeneration, setImageGeneration] = useState(false);
   const [selectedSkill, setSelectedSkill] = useState<string | null>(null);
   const [connectorMentions, setConnectorMentions] = useState<ConnectorMention[]>([]);
+  const [connectorCatalogStatus, setConnectorCatalogStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [connectorCatalogAttempt, setConnectorCatalogAttempt] = useState(0);
   const connectorDraftsKey = `${composerDraftsKey}.connectors`;
   const [connectorDrafts, setConnectorDrafts] = useState<Record<string, string[]>>({});
   const selectedConnectorMentionIds = useMemo(() => connectorDrafts[composerDraftKey(activeProjectId, activeThreadId)] ?? [], [connectorDrafts, activeProjectId, activeThreadId]);
@@ -773,15 +775,17 @@ export function BrainApp({
   useEffect(() => {
     if (!hydrated || initialWorkbench.persistence === "browser-preview") return;
     const controller = new AbortController();
-    void fetch("/api/connectors/mentions", { signal: controller.signal, cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
+    setConnectorCatalogStatus("loading");
+    void fetch("/api/connectors/mentions", { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]), cache: "no-store" })
+      .then((response) => { if (!response.ok) throw new Error("CONNECTOR_CATALOG_UNAVAILABLE"); return response.json(); })
       .then((value: unknown) => {
         const mentions = value && typeof value === "object" && "mentions" in value ? (value as { mentions?: unknown }).mentions : null;
-        if (Array.isArray(mentions) && mentions.every(isConnectorMention)) setConnectorMentions(mentions);
+        if (!Array.isArray(mentions) || !mentions.every(isConnectorMention)) throw new Error("CONNECTOR_CATALOG_INVALID");
+        if (!controller.signal.aborted) { setConnectorMentions(mentions); setConnectorCatalogStatus("ready"); }
       })
-      .catch(() => undefined);
+      .catch(() => { if (!controller.signal.aborted) { setConnectorMentions([]); setConnectorCatalogStatus("error"); } });
     return () => controller.abort();
-  }, [hydrated, initialWorkbench.persistence]);
+  }, [hydrated, initialWorkbench.persistence, connectorCatalogAttempt, customizationOpen]);
 
 
 
@@ -2334,6 +2338,8 @@ export function BrainApp({
         composerExperience={composerExperience}
         imageGeneration={imageGeneration}
         connectorMentions={connectorMentions}
+        connectorCatalogStatus={initialWorkbench.persistence === "browser-preview" ? "ready" : connectorCatalogStatus}
+        onRetryConnectorCatalog={() => setConnectorCatalogAttempt(attempt => attempt + 1)}
         selectedConnectorMentionIds={selectedConnectorMentionIds}
         serverReferences={selectedServerReferences}
         onServerReferencesChange={updateServerReferences}
