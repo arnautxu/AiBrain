@@ -47,3 +47,42 @@ Local regression coverage includes actual scope-array responses, interrupted
 creation/recovery, concurrency, rejected scope drift, user/tenant/callback isolation,
 loading-versus-empty chat state, and trusted-origin error redirects. Backend CI,
 GHCR publication, deployment and authenticated live acceptance are separate gates.
+
+## Google managed OAuth scope correction
+
+On September 28, Google's account chooser reproduced “Esta aplicación está
+bloqueada” for Composio's managed Docs client with `documents.readonly`. The
+same client/account reached Google's consent screen with `documents`. No consent
+was granted during that comparison. Managed OAuth verification is scope-specific;
+successfully issuing a redirect or reading an existing grant cannot accept a new
+Google authorization.
+
+David explicitly authorized using Composio's standard Google permissions. The
+snapshot `config/connector-profiles/composio-google-standard-scopes-20260928.json`
+pins the provider defaults for Gmail, Calendar, Drive, Sheets, Docs and YouTube.
+These OAuth grants include write permissions and, for Gmail, profile/contact
+permissions. They are not read-only grants. The existing optional profile filename
+is retained for compatibility: its version-pinned **execution tools** remain
+read-only, while its Google OAuth scopes use the approved standard sets.
+Never silently adopt later changes to provider defaults.
+
+`scripts/migrate-google-composio-scopes.ts` is an operator migration, dry-run by
+default. Both `--installation=<id>` and `--public-url=<url>` must match. It checks
+managed config identities, existing scopes and current defaults before mutation.
+With `--apply`, it snapshots the installation/old scopes privately, PATCHes only
+scopes, reads each back, and emits a validated candidate installation file. Failed
+provider updates attempt rollback with readback. The operator must compare the
+current installation to the snapshot before installing the candidate and preserve
+the backup. Use the normal server egress and app user as for the repair script.
+
+Preserve all existing auth-config IDs, including resolved on-connect IDs, in the
+candidate: changing IDs would invalidate existing personal account bindings.
+The migration does not revoke, authorize or replace personal accounts. Existing
+grants keep their original scopes until the user reconnects. No change is made
+to catalog permissions, pinned read tools, tenant/user enforcement or write-tool
+denial. Confirm provider consent screens separately from personal grants and
+post-authorization reads. The final consent belongs to each account owner.
+
+Provider references:
+- https://docs.composio.dev/docs/authentication/controlling-scopes
+- https://docs.composio.dev/docs/changelog/2026/01/14
