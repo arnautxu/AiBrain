@@ -1127,7 +1127,7 @@ export async function broadcastPreferenceRequest(establecimientoId, semana, { fo
         // `ultimoRecordatorio` també: sense reiniciar-lo, una conversa reutilitzada
         // per a la setmana nova s'endú el de la vella i pot silenciar el primer
         // recordatori d'aquesta setmana sense cap motiu.
-        data: { semana: targetWeek, estado: 'PENDIENTE', paso: 0, bloqueada: false, intentosIrrelevantes: 0, completedAt: null, ultimoRecordatorio: null, fechaLimite },
+        data: { semana: targetWeek, fechaApertura: null, estado: 'PENDIENTE', paso: 0, bloqueada: false, intentosIrrelevantes: 0, completedAt: null, ultimoRecordatorio: null, fechaLimite },
       });
     } else {
       await prisma.whatsappConversation.create({
@@ -1762,6 +1762,17 @@ export async function setmanaEnFinestraConfigurada(ara = new Date()) {
   });
 }
 
+/** Active or next collection window, including before its opening day. */
+export function properaFinestra(ara, config) {
+  const candidates = new Map();
+  for (let days = 0; days <= 28; days++) {
+    const semana = setmanaDe(new Date(ara.getTime() + days * 86400000));
+    const window = finestraPeticions(semana, config);
+    if (window.tanca >= ara) candidates.set(semana, { semana, ...window });
+  }
+  return [...candidates.values()].sort((a, b) => a.obre - b.obre)[0];
+}
+
 /**
  * `config` estalvia anar a buscar els ajustos: qui ja té la finestra la passa,
  * i les proves no necessiten base de dades per comprovar l'aritmètica.
@@ -2091,26 +2102,57 @@ export async function handleIncomingMessage(telefono, texto) {
     return handleManagerMessage(telefono, texto, sender);
   }
 
+  // A phone number cannot gain access to a conversation after its employee
+  // has been deactivated. Unknown senders never create business records.
+  if (!sender) {
+    await sendWhatsappMessage(telefono, 'No tenim aquest número associat a un treballador actiu. Contacta amb la persona responsable.');
+    return { handled: false, reason: 'employee_not_found' };
+  }
+
   // Find conversation
   //
   // Només els missatges de la setmana que s'està demanant. Ara que no
   // s'esborren, incloure'ls tots voldria dir que el model llegeix la conversa
   // de la setmana passada com si fos la d'ara i doni per fet el que aquella
   // persona va dir llavors.
-  const conv = await prisma.whatsappConversation.findUnique({ where: { telefono } });
+  let conv = await prisma.whatsappConversation.findUnique({ where: { telefono } });
+  let started = false;
+  if (!conv || (conv.fechaApertura && conv.fechaLimite && new Date(conv.fechaLimite) < new Date())) {
+    const a = await ajustos();
+    const window = properaFinestra(new Date(), {
+      obreDia: a.whatsappObreDia, obreHora: a.whatsappObreHora,
+      tancaDia: a.whatsappTancaDia, tancaHora: a.whatsappTancaHora,
+    });
+    if (!window) throw new Error('No es pot determinar la finestra de preferències.');
+    const data = { semana: window.semana, fechaApertura: window.obre, fechaLimite: window.tanca,
+      estado: 'PENDIENTE', paso: 0, bloqueada: false, intentosIrrelevantes: 0,
+      completedAt: null, ultimoRecordatorio: null, pendentAlternanca: null, dissabteRetirat: null };
+    conv = conv
+      ? await prisma.whatsappConversation.update({ where: { id: conv.id }, data })
+      : await prisma.whatsappConversation.create({ data: { telefono, ...data } });
+    started = true;
+  }
   if (conv) {
     conv.mensajes = await prisma.whatsappMessage.findMany({
-      where: { conversacionId: conv.id, semana: conv.semana },
+      where: { conversacionId: conv.id, semana: conv.semana,
+        ...(conv.fechaApertura ? { createdAt: { gte: conv.fechaApertura } } : {}) },
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  if (!conv) {
-    await sendWhatsappMessage(
-      telefono,
-      'Hola. De moment no hi ha cap sol·licitud de preferències pendent per a tu. El teu responsable et contactarà quan calgui.'
-    );
-    return { handled: false, reason: 'no_conversation' };
+  // Persist the first inbound even outside the collection window. These
+  // messages are visible to AiBrain, but never accepted as preferences early.
+  if (conv.fechaApertura && new Date() < new Date(conv.fechaApertura)) {
+    await logInbound(conv.id, texto, conv.semana);
+    await logOutboundAndSend(telefono, conv.id,
+      `Hola ${sender.nombre}. Hem rebut el teu missatge. La recollida de preferències per a la setmana del ${weekLabel(conv.semana)} obre el ${deadlineLabel(conv.fechaApertura)} i tanca el ${deadlineLabel(conv.fechaLimite)}. Torna a escriure dins d'aquest termini per indicar la teva disponibilitat.`, conv.semana);
+    return { handled: true, reason: 'before_window' };
+  }
+  if (started && /^\s*(hola|bon dia|bona tarda|bona nit|prova|prueba|test|hello|hi)[!.?\s]*$/i.test(texto)) {
+    await logInbound(conv.id, texto, conv.semana);
+    await logOutboundAndSend(telefono, conv.id,
+      `Hola ${sender.nombre}. Ja pots indicar la teva disponibilitat per a la setmana del ${weekLabel(conv.semana)}: quins dies no pots treballar o quin torn necessites? Tens fins al ${deadlineLabel(conv.fechaLimite)}.`, conv.semana);
+    return { handled: true, reason: 'conversation_started' };
   }
 
   // ── BLOCKED: log inbound, no Claude call, no reply ─────────────────────────

@@ -423,6 +423,7 @@ model WhatsappConversation {
   intentosIrrelevantes Int                @default(0) // 0–3, 3 means locked for trolling
   bloqueada            Boolean            @default(false) // true → bot ignores all messages until reset
   completedAt          DateTime? // when preferences were saved (for 10-min edit window)
+  fechaApertura        DateTime? // Non-null for employee-initiated collection; preserve opening boundary.
   fechaLimite          DateTime? // deadline to submit preferences; after it the bot locks
   // Quan se li va recordar per última vegada. El broadcast ja tenia guarda
   // contra la doble execució; els recordatoris no, i un cron que es dispari
