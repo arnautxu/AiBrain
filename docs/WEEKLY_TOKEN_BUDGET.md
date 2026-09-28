@@ -151,12 +151,12 @@ existing thread without a trustworthy baseline remains blocked for reconciliatio
    It refuses to replace an existing budget ledger, including with `--start-now`.
 
 4. Start the candidate workers. Verify authenticated `/api/usage/budget` returns
-   **100% remaining** and the Madrid reset time without exposing token counts or
-   calling a provider. Verify a foreign/missing session cannot read it. Check
+   `{ "budget": null }` so employees cannot infer the allowance, percentage or
+   reset time. Verify a foreign/missing session cannot read it. Check
    the exact private allowance, zero charged history and preserved cursors only
    through operator readback. The first post-activation increment must reduce the
    shared balance; pre-activation replay must leave it unchanged. Use fixtures
-   for the three warning thresholds and exhausted-admission behavior.
+   exhausted-admission behavior through the private operator path.
 5. Record host-script checksum, configuration/ledger readback, exact release SHA,
    and authenticated browser acceptance independently of CI/publish/deploy.
 

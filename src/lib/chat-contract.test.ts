@@ -45,6 +45,25 @@ describe("chat attachment contract", () => {
     expect(isTurnOptions({ ...base, documentUploadIds: ["../escape"] })).toBe(false);
   });
 
+  it("allows at most twenty files across inline images and staged documents", () => {
+    const base = {
+      mode: "agent", model: null, effort: null, webSearch: false,
+      imageGeneration: false, skill: null, attachments: [],
+    };
+    const ids = Array.from({ length: 21 }, (_, index) =>
+      `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
+    expect(isTurnOptions({ ...base, documentUploadIds: ids.slice(0, 20) })).toBe(true);
+    expect(isTurnOptions({ ...base, documentUploadIds: ids })).toBe(false);
+
+    const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00];
+    const image = {
+      id: "11111111-1111-4111-8111-111111111111", name: "image.png",
+      mimeType: "image/png", size: png.length, dataUrl: dataUrl("image/png", png),
+    };
+    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 19) })).toBe(true);
+    expect(isTurnOptions({ ...base, attachments: [image], documentUploadIds: ids.slice(0, 20) })).toBe(false);
+  });
+
   it("accepts only unique catalog connector mentions", () => {
     const base = { mode: "agent", model: null, effort: null, webSearch: false, imageGeneration: false, skill: null, attachments: [] };
     expect(isTurnOptions({ ...base, connectorMentions: ["gmail", "calendar-company"] })).toBe(true);

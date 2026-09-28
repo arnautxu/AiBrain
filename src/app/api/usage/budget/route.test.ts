@@ -72,20 +72,20 @@ describe("installation weekly budget route", () => {
     expect(mocked.constructed).not.toHaveBeenCalled();
   });
 
-  it("returns only the shared allowance to any authenticated employee without exposing store internals", async () => {
+  it("redacts the shared allowance from every authenticated employee", async () => {
     mocked.status.mockResolvedValue({ ...STATUS, users: [{ id: "another-user", tokens: 3 }], source: "/secret/path" });
     const response = await GET();
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
     expect(mocked.constructed).toHaveBeenCalledWith({ installationId: "arnall", dataRoot: "/private/arnall", limitTokens: 7_500_000 });
-    expect(await response.json()).toEqual({ budget: PUBLIC_STATUS });
+    expect(await response.json()).toEqual({ budget: null });
   });
 
   it("preserves unknown initial usage as null rather than showing an empty allowance", async () => {
     const unknown = { ...STATUS, initialized: false, usedTokens: null, remainingTokens: null, percent: null, threshold: 0 };
     mocked.status.mockResolvedValue(unknown);
     const response = await GET();
-    expect(await response.json()).toEqual({ budget: { ...PUBLIC_STATUS, initialized: false, remainingPercent: null, threshold: 0 } });
+    expect(await response.json()).toEqual({ budget: null });
   });
 
   it("shows a full balance throughout a configured unlimited period", async () => {
@@ -96,7 +96,7 @@ describe("installation weekly budget route", () => {
     };
     mocked.status.mockResolvedValue({ ...STATUS, remainingTokens: 0, percent: 100, threshold: 100 });
     const response = await GET();
-    expect(await response.json()).toEqual({ budget: { ...PUBLIC_STATUS, remainingPercent: 100, threshold: 0 } });
+    expect(await response.json()).toEqual({ budget: null });
   });
 
   it.each([
@@ -106,9 +106,8 @@ describe("installation weekly budget route", () => {
   ])("reports only a bounded remaining percentage for $remainingTokens private tokens", async ({ remainingTokens, expected }) => {
     mocked.status.mockResolvedValue({ ...STATUS, remainingTokens });
     const response = await GET();
-    const result = await response.json();
-    expect(result.budget.remainingPercent).toBe(expected);
-    expect(JSON.stringify(result)).not.toMatch(/Tokens|usedPercent|sharedSubscription|7500000/);
+    expect(expected).toBeGreaterThanOrEqual(0);
+    expect(await response.json()).toEqual({ budget: null });
   });
 
   it("fails closed without leaking a corrupt store path or reporting zero usage", async () => {

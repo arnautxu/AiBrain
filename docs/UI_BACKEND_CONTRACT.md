@@ -1460,20 +1460,14 @@ interceptor Fetch conserva una segunda validación con la misma policy.
 El proxy solo permite TCP 80/443 por defecto; un puerto público arbitrario se
 rechaza antes de abrir el socket y nunca es una opción enviada por la UI.
 
-### 14.6 Settings > Usage
+### 14.6 Private usage projection
 
 `GET /api/usage/budget` requiere una sesión local de la instalación actual y
-devuelve únicamente el saldo compartido: `{ budget: { initialized, weekStart,
-resetAt, remainingPercent, threshold } }`.
-Sin política configurada responde `{ budget: null }`; un contador pendiente de
-inicialización conserva `remainingPercent` en `null`, nunca cero. El porcentaje
-restante se redondea hacia arriba para no mostrar agotamiento con saldo positivo. Una sesión ausente devuelve `401`, una instalación ajena `403` y un
-registro no verificable `503`. Siempre usa `Cache-Control: private, no-store`.
-No consulta al proveedor ni expone tokens, el límite numérico, datos de la cuenta
-o de otros empleados. Los empleados solo ven el porcentaje restante y la fecha
-de renovación; los avisos muestran 75/50/25% restante.
-Los avisos de 25/50/75% y el agotamiento se describen en
-[`WEEKLY_TOKEN_BUDGET.md`](WEEKLY_TOKEN_BUDGET.md).
+devuelve `{ budget: null }`. La UI de empleado no ofrece una sección de uso ni
+consulta periódicamente el contador. El cálculo, los umbrales y el bloqueo
+siguen siendo privados del operador. Una sesión ausente devuelve `401`, una
+instalación ajena `403` y un registro no verificable `503`. Siempre usa
+`Cache-Control: private, no-store` y no consulta al proveedor.
 
 `GET /api/usage/me` y `GET /api/usage/company` devuelven el mismo objeto
 `{ budget }` cuando la instalación tiene presupuesto configurado. No consultan

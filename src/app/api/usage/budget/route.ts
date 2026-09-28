@@ -16,7 +16,8 @@ export async function GET() {
     );
   }
   try {
-    return NextResponse.json({ budget: await employeeWeeklyBudget(session) }, { headers: NO_STORE_HEADERS });
+    await employeeWeeklyBudget(session);
+    return NextResponse.json({ budget: null }, { headers: NO_STORE_HEADERS });
   } catch (error) {
     if (error instanceof EmployeeBudgetAccessError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: 403, headers: NO_STORE_HEADERS });
