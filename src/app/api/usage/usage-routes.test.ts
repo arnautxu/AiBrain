@@ -70,14 +70,14 @@ describe("usage routes", () => {
     expect(mocked.company).toHaveBeenCalledWith(USER_ID);
   });
 
-  it.each([personalGet, companyGet])("returns only the installation percentage when budgeted, including workspace administrators", async (get) => {
+  it.each([personalGet, companyGet])("redacts the installation percentage when budgeted, including workspace administrators", async (get) => {
     mocked.isAdmin.mockResolvedValue(true);
     const budget = { initialized: true, weekStart: "2026-09-20T22:00:00.000Z", resetAt: "2026-09-27T22:00:00.000Z", remainingPercent: 75, threshold: 25 };
     mocked.employeeBudget.mockResolvedValue(budget);
     const response = await get();
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
-    expect(await response.json()).toEqual({ budget });
+    expect(await response.json()).toEqual({ budget: null });
     expect(mocked.personal).not.toHaveBeenCalled();
     expect(mocked.company).not.toHaveBeenCalled();
   });

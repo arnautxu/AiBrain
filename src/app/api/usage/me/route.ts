@@ -18,7 +18,7 @@ export async function GET() {
   }
   try {
     const budget = await employeeWeeklyBudget(session);
-    if (budget) return NextResponse.json({ budget }, { headers: NO_STORE_HEADERS });
+    if (budget) return NextResponse.json({ budget: null }, { headers: NO_STORE_HEADERS });
     return NextResponse.json(
       await personalUsageForUser(session.user.id),
       { headers: NO_STORE_HEADERS },

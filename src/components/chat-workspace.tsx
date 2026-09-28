@@ -812,9 +812,9 @@ export function ChatWorkspace({
   const addImages = async (files: FileList | File[] | null) => {
     if (!files || !canAttachImages) return;
     const selection = attachmentSelectionRef.current;
-    const available = Math.max(0, 3 - attachments.length);
+    const available = Math.max(0, 20 - attachments.length - documents.filter((document) => document.status !== "error").length);
     const selected = Array.from(files).slice(0, available);
-    if (files.length > available) onComposerNotice(t("Puedes adjuntar un máximo de 3 imágenes por mensaje."));
+    if (files.length > available) onComposerNotice(t("Puedes adjuntar un máximo de 20 archivos por mensaje."));
     const next: ChatInputAttachment[] = [];
     for (const file of selected) {
       if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {

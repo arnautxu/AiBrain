@@ -15,7 +15,6 @@ import { DocumentPreviewPanel } from "@/components/document-preview-panel";
 import { ProjectPanel } from "@/components/project-panel";
 import { AutomationsPanel } from "@/components/automations-panel";
 import { TaskCenterPanel } from "@/components/task-center-panel";
-import { WeeklyTokenBudgetNotice } from "@/components/weekly-token-budget-notice";
 import { isEditableShortcutTarget, isTaskCenterShortcut } from "@/components/use-task-center-shortcut";
 import {
   Sidebar,
@@ -1266,9 +1265,9 @@ export function BrainApp({
       setNotice(workbenchNotice(t("Los documentos reales requieren el runtime privado de la instalación."), "warning"));
       return;
     }
-    const available = Math.max(0, 10 - documents.filter((document) => document.status !== "error").length);
+    const available = Math.max(0, 20 - attachments.length - documents.filter((document) => document.status !== "error").length);
     const selected = files.slice(0, available);
-    if (files.length > available) setNotice(workbenchNotice(t("Puedes preparar un máximo de 10 documentos por turno."), "warning"));
+    if (files.length > available) setNotice(workbenchNotice(t("Puedes adjuntar un máximo de 20 archivos por mensaje."), "warning"));
     if (!selected.length) return;
 
     let thread = activeThread && activeThread.status === "active" && activeThread.projectId === activeProject.id
@@ -1331,7 +1330,7 @@ export function BrainApp({
     } finally {
       if (documentUploadEpochRef.current === uploadEpoch) setDocumentUploading(false);
     }
-  }, [activeProject, activeThread, adoptCurrentComposerThread, documentUploading, documents, initialWorkbench.persistence, sending, t]);
+  }, [activeProject, activeThread, adoptCurrentComposerThread, attachments.length, documentUploading, documents, initialWorkbench.persistence, sending, t]);
 
   const requestDocumentPublication = useCallback((attachment: ChatAttachment, turnId: string) => {
     if (!activeThread) return;
@@ -2317,7 +2316,6 @@ export function BrainApp({
       />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col [&>main]:min-h-0">
-      {session.provider === "local" ? <WeeklyTokenBudgetNotice key={`${session.tenant.id}:${session.user.id}`} tenantId={session.tenant.id} userId={session.user.id} modalOpen={modalSurfaceOpen} /> : null}
       {automationsOpen ? <AutomationsPanel
         open
         projects={projects}
