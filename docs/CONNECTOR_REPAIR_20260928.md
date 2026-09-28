@@ -16,8 +16,12 @@ config with the exact installation/manifest fingerprint name, toolkit and verifi
 scope set. Existing connected accounts are not deleted or reassigned.
 
 The chat previously presented initial loading and failed catalog requests as an
-empty authorized catalog. It now distinguishes loading, ready/empty and failure;
-a retry is requested when reopening a failed catalog. Closing/opening Settings
+empty authorized catalog. A first click now opens the panel immediately, with
+loading, empty and error states inside it. Results populate the open panel without
+a second click; dismissal during loading is respected. Failed requests can be
+retried inside the panel. Read-only Composio checks overlap in batches of four,
+preserving catalog order, per-user authorization and individual provider failures.
+Closing/opening Settings
 refreshes the projection after connection changes. Connect failures return to the
 product's connector settings and log only a diagnostic code, never credentials or
 provider payloads. Catalog and user authorization remain server-side.

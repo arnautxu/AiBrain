@@ -95,9 +95,18 @@ export async function composioCapabilitiesForSession(session: AuthSession) {
   if (!config.connectors?.composio?.toolkits.length || session.provider !== "local") return [];
   if (config.installationId !== session.tenant.id) throw new ComposioError("COMPOSIO_TENANT_MISMATCH");
   const results: GmailConnectionSnapshot[] = [];
-  for (const toolkit of config.connectors?.composio?.toolkits ?? []) {
-    try { results.push(await composioCapability(config, session.user.id, toolkit.slug)); }
-    catch (error) { if (composioErrorCode(error) !== "COMPOSIO_CATALOG_DENIED") throw error; }
+  const toolkits = config.connectors.composio.toolkits;
+  // Read-only checks can overlap, but cap fan-out to protect the provider and
+  // keep manifest order. Each check still enforces this user's catalog access.
+  for (let offset = 0; offset < toolkits.length; offset += 4) {
+    const batch = await Promise.all(toolkits.slice(offset, offset + 4).map(async toolkit => {
+      try { return await composioCapability(config, session.user.id, toolkit.slug); }
+      catch (error) {
+        if (composioErrorCode(error) === "COMPOSIO_CATALOG_DENIED") return null;
+        throw error;
+      }
+    }));
+    results.push(...batch.filter((item): item is GmailConnectionSnapshot => item !== null));
   }
   return results;
 }
