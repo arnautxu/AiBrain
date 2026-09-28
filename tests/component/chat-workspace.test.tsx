@@ -77,7 +77,10 @@ function renderWorkspace(
     ...remainingOverrides
   } = overrides;
   let finishHydration: () => void = () => undefined;
+  let updateProps: (next: typeof overrides) => void = () => undefined;
   function ControlledWorkspace() {
+    const [updatedProps, setUpdatedProps] = useState<typeof overrides>({});
+    updateProps = setUpdatedProps;
     const [prompt, setPrompt] = useState(initialPrompt);
     const [hydrated, setHydrated] = useState(initialHydrated);
     finishHydration = () => setHydrated(true);
@@ -135,9 +138,10 @@ function renderWorkspace(
     onOpenReview={vi.fn()}
     onOpenBrowser={onOpenBrowser}
     {...remainingOverrides}
+    {...updatedProps}
   />;
   }
-  return { ...render(<ControlledWorkspace />), finishHydration };
+  return { ...render(<ControlledWorkspace />), finishHydration, updateProps: (next: typeof overrides) => updateProps(next) };
 }
 
 afterEach(cleanup);
@@ -455,25 +459,49 @@ describe("chat workspace simplificado", () => {
     expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
   });
 
-  it.each(["loading", "error"] as const)("does not report an empty catalog while %s", (connectorCatalogStatus) => {
+  it.each(["menu", "landing"])("opens %s connectors immediately and fills the same panel after loading", async (entry) => {
     const onComposerNotice = vi.fn();
-    const onRetryConnectorCatalog = vi.fn();
-    renderWorkspace(null, project, { connectorMentions: [], connectorCatalogStatus, onComposerNotice, onRetryConnectorCatalog });
-    fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
-    expect(onComposerNotice).not.toHaveBeenCalledWith("No hay conectores habilitados en tu catálogo.");
-    expect(onComposerNotice).toHaveBeenCalledWith(connectorCatalogStatus === "loading" ? "Cargando tus conectores…" : "No se pudo cargar el catálogo. Estamos reintentando la conexión.");
-    expect(onRetryConnectorCatalog).toHaveBeenCalledTimes(connectorCatalogStatus === "error" ? 1 : 0);
+    const view = renderWorkspace(null, project, { connectorMentions: [], connectorCatalogStatus: "loading", onComposerNotice });
+    if (entry === "menu") {
+      fireEvent.click(screen.getByRole("button", { name: "Añadir al mensaje" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
+    } else fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
+    const catalog = screen.getByRole("listbox", { name: "Catálogo de conectores" });
+    expect(catalog).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("status")).toHaveTextContent("Cargando tus conectores…");
+    expect(onComposerNotice).not.toHaveBeenCalled();
+    act(() => view.updateProps({ connectorCatalogStatus: "ready", connectorMentions: [{ id: "gmail", label: "Gmail", kind: "connector", status: "connected", statusCode: null, canRead: true, requiresApprovalForWrites: false }] }));
+    expect(screen.getByRole("listbox", { name: "Catálogo de conectores" })).toBe(catalog);
+    expect(catalog).toHaveAttribute("aria-busy", "false");
+    expect(screen.getByRole("option", { name: /Gmail/ })).toBeVisible();
+    expect(screen.queryByText("Cargando tus conectores…")).not.toBeInTheDocument();
   });
 
-  it("returns focus to Add when the connector catalog is empty", async () => {
+  it("keeps a dismissed loading panel closed when the request finishes", () => {
+    const view = renderWorkspace(null, project, { connectorCatalogStatus: "loading" });
+    fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
+    fireEvent.keyDown(screen.getByRole("listbox", { name: "Catálogo de conectores" }), { key: "Escape" });
+    act(() => view.updateProps({ connectorCatalogStatus: "ready" }));
+    expect(screen.queryByRole("listbox", { name: "Catálogo de conectores" })).not.toBeInTheDocument();
+  });
+
+  it("shows a retry inside the open panel if loading fails", () => {
+    const retry = vi.fn();
+    const view = renderWorkspace(null, project, { connectorCatalogStatus: "loading", onRetryConnectorCatalog: retry });
+    fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
+    act(() => view.updateProps({ connectorCatalogStatus: "error" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("No se ha podido cargar el catálogo de conectores.");
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    expect(retry).toHaveBeenCalledOnce();
+    expect(screen.getByRole("listbox", { name: "Catálogo de conectores" })).toBeInTheDocument();
+  });
+
+  it("shows an empty authorized catalog inside the panel", () => {
     const onComposerNotice = vi.fn();
     renderWorkspace(null, project, { connectorMentions: [], onComposerNotice });
-    const add = screen.getByRole("button", { name: "Añadir al mensaje" });
-    fireEvent.click(add);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Conexiones" }));
-    expect(onComposerNotice).toHaveBeenCalledWith("No hay conectores habilitados en tu catálogo.");
-    await waitFor(() => expect(add).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: "Conexiones" }));
+    expect(screen.getByRole("listbox", { name: "Catálogo de conectores" })).toHaveTextContent("No hay conectores habilitados en tu catálogo.");
+    expect(onComposerNotice).not.toHaveBeenCalled();
   });
 
   it("submits with Enter while preserving composition and multiline input", () => {

@@ -10,9 +10,9 @@ import { FileGmailOAuthStateStore } from "./gmail-oauth-store";
 import { handleComposioTool, COMPOSIO_NAMESPACE } from "@/runtime/composio-dynamic-tools";
 import { FileConnectorBindingStore } from "./binding-store";
 vi.mock("server-only", () => ({}));
-const state = vi.hoisted(() => ({ config: null as unknown, allowed: true }));
+const state = vi.hoisted(() => ({ config: null as unknown, allowed: true, denied: null as string | null }));
 vi.mock("@/config/installation", () => ({ loadInstallationConfig: async () => state.config }));
-vi.mock("@/catalog/access-service", () => ({ catalogRuntimeEnforcer: async () => ({ allowsConnector: () => state.allowed }) }));
+vi.mock("@/catalog/access-service", () => ({ catalogRuntimeEnforcer: async () => ({ allowsConnector: (id: string) => state.allowed && id !== state.denied }) }));
 const A = "11111111-1111-4111-8111-111111111111", B = "22222222-2222-4222-8222-222222222222";
 const toolkit = { slug: "github", label: "GitHub", authConfigId: "ac_test", scopes: ["read:user"], readTools: [{ slug: "GITHUB_TEST_READ", version: "20260901_00" }] };
 let root: string, config: Readonly<InstallationConfig>;
@@ -31,10 +31,37 @@ async function connect(fetcher = provider()) { const s = await receipt(); await 
 beforeEach(async () => {
   root = await mkdtemp(path.join(os.tmpdir(), "aibrain-composio-test-"));
   config = parseInstallationConfig({ schemaVersion: 1, installationId: "company-qa", companyName: "Company", companySlug: "company", publicUrl: "https://brain.example", branding: { productName: "Company AI", logoPath: "/logo.svg", faviconPath: "/favicon.svg", accentColor: "#315ee7" }, paths: { dataRoot: path.join(root, "data"), companyContextRoot: path.join(root, "data/context"), usersRoot: path.join(root, "data/users"), sourceReadRoot: path.join(root, "source"), publishWriteRoot: path.join(root, "publish"), backupsRoot: path.join(root, "data/backups") }, connectors: { composio: { toolkits: [toolkit] } } });
-  state.config = config; state.allowed = true; vi.stubEnv("AIBRAIN_COMPOSIO_API_KEY", "synthetic-key");
+  state.config = config; state.allowed = true; state.denied = null; vi.stubEnv("AIBRAIN_COMPOSIO_API_KEY", "synthetic-key");
 });
-afterEach(async () => { vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }); });
+afterEach(async () => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); await rm(root, { recursive: true, force: true }); });
 describe("personal connected apps lifecycle (synthetic provider, not live acceptance)", () => {
+  it("checks at most four connectors concurrently, preserving order, authorization and individual failures", async () => {
+    const toolkits = Array.from({ length: 9 }, (_, i) => ({ ...toolkit, slug: `github${i}`, authConfigId: `ac_github${i}` }));
+    state.config = { ...config, connectors: { composio: { toolkits } } };
+    state.denied = "composio-github8";
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let active = 0, peak = 0;
+    const fetcher = vi.fn<typeof fetch>(async url => {
+      active++; peak = Math.max(peak, active);
+      await gate;
+      active--;
+      const id = String(url).split("/").at(-1)!;
+      if (id === "ac_github5") return json({}, 503);
+      return json({ id, toolkit: { slug: id.slice(3) }, status: "ENABLED", auth_scheme: "OAUTH2" });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const pending = composioCapabilitiesForSession(session());
+    try { await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(4)); }
+    finally { release(); }
+    const results = await pending;
+    expect(peak).toBe(4);
+    expect(fetcher).toHaveBeenCalledTimes(8);
+    expect(results.map(item => item.connectorId)).toEqual(toolkits.slice(0, 8).map(t => `composio-${t.slug}`));
+    expect(results[5]).toMatchObject({ status: "degraded", statusCode: "COMPOSIO_PROVIDER_UNAVAILABLE" });
+    expect(results[0]).toMatchObject({ status: "reauth_required" });
+  });
+
   it("keeps optional inventories harmless for non-local or unconfigured sessions", async () => {
     const nonLocal = { ...session(), provider: "mock" } as unknown as AuthSession;
     expect(await composioCapabilitiesForSession(nonLocal)).toEqual([]);

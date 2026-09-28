@@ -718,8 +718,9 @@ export function ChatWorkspace({
   const queueingMessage = sending && hasMessages && Boolean(prompt.trim());
   const visibleMentionActiveIndex = Math.min(mentionActiveIndex, Math.max(mentionOptions.length - 1, 0));
   const activeMentionOption = mentionOptions[visibleMentionActiveIndex] ?? null;
-  const visibleCatalogActiveIndex = Math.min(catalogActiveIndex, Math.max(connectorMentions.length - 1, 0));
-  const activeCatalogOption = connectorMentions[visibleCatalogActiveIndex] ?? null;
+  const catalogOptions = connectorCatalogStatus === "ready" ? connectorMentions : [];
+  const visibleCatalogActiveIndex = Math.min(catalogActiveIndex, Math.max(catalogOptions.length - 1, 0));
+  const activeCatalogOption = catalogOptions[visibleCatalogActiveIndex] ?? null;
   useEffect(() => {
     const scope = mentionOpen ? "mention" : connectorCatalogOpen ? "catalog" : null;
     const option = mentionOpen ? activeMentionOption : activeCatalogOption;
@@ -744,19 +745,7 @@ export function ChatWorkspace({
 
   const openAuthorizedConnectors = (trigger: HTMLButtonElement | null) => {
     connectorTriggerRef.current = trigger;
-    if (connectorCatalogStatus !== "ready") {
-      onComposerNotice(t(connectorCatalogStatus === "loading" ? "Cargando tus conectores…" : "No se pudo cargar el catálogo. Estamos reintentando la conexión."));
-      if (connectorCatalogStatus === "error") onRetryConnectorCatalog?.();
-      setComposerMenuOpen(false);
-      requestAnimationFrame(() => composerAddButtonRef.current?.focus());
-      return;
-    }
-    if (connectorMentions.length === 0) {
-      onComposerNotice(t("No hay conectores habilitados en tu catálogo."));
-      setComposerMenuOpen(false);
-      requestAnimationFrame(() => composerAddButtonRef.current?.focus());
-      return;
-    }
+    if (connectorCatalogStatus === "error") onRetryConnectorCatalog?.();
     setComposerMenuOpen(false);
     setMentionOpen(false);
     const firstEnabled = connectorMentions.findIndex((mention) => mention.canRead);
@@ -1101,15 +1090,18 @@ export function ChatWorkspace({
             {mentionOpen && mentionQuery !== null ? <ConnectorPopover anchor={composerRef} caret={composerCaret}><div id="connector-mention-options" role="listbox" aria-label={t("Conectores disponibles")} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none">
               {mentionOptions.length ? mentionOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("mention", mention.id)} type="button" role="option" aria-selected={index === visibleMentionActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleMentionActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setMentionActiveIndex(index)} onClick={() => selectConnectorMention(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>) : <p className="px-3 py-2 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores autorizados que coincidan.")}</p>}
             </div></ConnectorPopover> : null}
-            {connectorCatalogOpen ? <ConnectorPopover anchor={connectorTriggerRef} triggerAligned avoidOverlapWith={composerShellRef}><div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label={t("Catálogo de conectores")} aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
+            {connectorCatalogOpen ? <ConnectorPopover anchor={connectorTriggerRef} triggerAligned avoidOverlapWith={composerShellRef}><>
+              {connectorCatalogStatus === "loading" ? <p role="status" className="px-3 py-4 text-[12px] text-[var(--text-subtle)]">{t("Cargando tus conectores…")}</p> : null}
+              {connectorCatalogStatus === "error" ? <div className="px-3 py-3"><p role="alert" className="text-[12px] text-[var(--text-subtle)]">{t("No se ha podido cargar el catálogo de conectores.")}</p><button type="button" onClick={onRetryConnectorCatalog} className="touch-target mt-2 rounded-lg border border-[var(--border)] px-3 py-2 text-[12px]">{t("Reintentar")}</button></div> : null}
+              <div ref={connectorCatalogRef} tabIndex={0} role="listbox" aria-label={t("Catálogo de conectores")} aria-busy={connectorCatalogStatus === "loading"} aria-activedescendant={activeCatalogOption ? connectorOptionId("catalog", activeCatalogOption.id) : undefined} className="max-h-[inherit] overflow-y-auto overscroll-contain outline-none" onKeyDown={(event) => {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
-                setCatalogActiveIndex((current) => nextEnabledConnectorIndex(connectorMentions, current, event.key === "ArrowDown" ? 1 : -1));
+                setCatalogActiveIndex((current) => nextEnabledConnectorIndex(catalogOptions, current, event.key === "ArrowDown" ? 1 : -1));
               } else if (event.key === "Home" || event.key === "End") {
                 event.preventDefault();
-                const ordered = event.key === "Home" ? connectorMentions : [...connectorMentions].reverse();
+                const ordered = event.key === "Home" ? catalogOptions : [...catalogOptions].reverse();
                 const target = ordered.find((mention) => mention.canRead || mention.connectUrl);
-                if (target) setCatalogActiveIndex(connectorMentions.indexOf(target));
+                if (target) setCatalogActiveIndex(catalogOptions.indexOf(target));
               } else if (event.key === "Enter" && activeCatalogOption) {
                 event.preventDefault();
                 selectCatalogConnector(activeCatalogOption);
@@ -1118,14 +1110,15 @@ export function ChatWorkspace({
                 event.stopPropagation();
                 setConnectorCatalogOpen(false);
                 requestAnimationFrame(() => connectorTriggerRef.current?.focus());
-              } else if (event.key === "Tab") {
+              } else if (event.key === "Tab" && connectorCatalogStatus !== "error") {
                 event.preventDefault();
                 setConnectorCatalogOpen(false);
                 requestAnimationFrame(() => (event.shiftKey ? composerRef.current : connectorTriggerRef.current)?.focus());
               }
             }}>
-              {connectorMentions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
-            </div></ConnectorPopover> : null}
+              {catalogOptions.map((mention, index) => <button key={mention.id} id={connectorOptionId("catalog", mention.id)} type="button" role="option" aria-selected={index === visibleCatalogActiveIndex} tabIndex={-1} disabled={(!mention.canRead && !mention.connectUrl) || sending} className={`touch-target flex min-h-11 w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-[var(--text)] ${index === visibleCatalogActiveIndex ? "bg-[var(--surface-selected)]" : "hover:bg-[var(--surface-hover)]"} disabled:cursor-not-allowed disabled:opacity-55`} onMouseDown={(event) => event.preventDefault()} onMouseMove={() => setCatalogActiveIndex(index)} onClick={() => selectCatalogConnector(mention)}><ConnectorLogo id={mention.id} /><span className="min-w-0 flex-1"><span className="block truncate font-medium">{mention.label}</span><span className="mt-0.5 block truncate text-[11px] text-[var(--text-subtle)]">{connectorPresentation(mention.id).description}</span></span><span className="text-[11px] text-[var(--text-subtle)]">{mention.status === "connected" ? mention.requiresApprovalForWrites ? t("conectado · escritura con aprobación") : "conectado" : mention.status === "requires_login" ? t("Conectar") : mention.status === "admin_setup_required" ? t("falta configuración administrativa") : t("no disponible")}</span>{selectedConnectorMentionIds.includes(mention.id) ? <Check size={13} weight="bold" aria-label={t("Seleccionado")} /> : null}</button>)}
+              {connectorCatalogStatus === "ready" && catalogOptions.length === 0 ? <p className="px-3 py-4 text-[12px] text-[var(--text-subtle)]">{t("No hay conectores habilitados en tu catálogo.")}</p> : null}
+            </div></></ConnectorPopover> : null}
             <div data-testid="composer-controls" className="composer-controls relative flex items-center justify-between gap-3 px-1 pb-0.5">
               <div className="composer-controls-start flex min-w-0 items-center gap-1 overflow-visible">
                 <button ref={composerAddButtonRef} aria-label={t("Añadir al mensaje")} aria-haspopup="menu" aria-controls={composerMenuOpen ? "composer-add-menu" : undefined} aria-expanded={composerMenuOpen} className={`composer-add-button composer-tool !grid !size-11 !place-items-center !rounded-xl sm:!rounded-full ${composerMenuOpen ? "composer-tool-active" : ""}`} disabled={sending || !project} onClick={() => { setComposerPickerOpen(null); setMentionOpen(false); setConnectorCatalogOpen(false); setComposerMenuOpen((current) => !current); }}><span className="composer-add-icon" aria-hidden="true"><Plus size={15} /></span></button>
