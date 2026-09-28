@@ -1,12 +1,13 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ComposioError } from "@/connectors/composio-api";
-const state = vi.hoisted(() => ({ session: {} as unknown, start: vi.fn() }));
+const state = vi.hoisted(() => ({ session: {} as unknown, start: vi.fn(), warn: vi.fn() }));
+vi.mock("@/operations/server-logger", () => ({ operationalLogger: { warn: state.warn } }));
 vi.mock("@/auth/session", () => ({ getSession: async () => state.session }));
 vi.mock("@/connectors/composio-service", () => ({ startComposio: state.start }));
 vi.mock("@/config/installation", () => ({ loadInstallationConfig: async () => ({ publicUrl: "https://brain.example" }) }));
 import { GET } from "./route";
 const context = { params: Promise.resolve({ toolkit: "airtable" }) };
-afterEach(() => { vi.restoreAllMocks(); state.start.mockReset(); state.session = {}; });
+afterEach(() => { vi.restoreAllMocks(); state.start.mockReset(); state.warn.mockReset(); state.session = {}; });
 
 it("starts OAuth without exposing the provider response", async () => {
   state.start.mockResolvedValue("https://connect.composio.dev/link/test");
@@ -16,11 +17,10 @@ it("starts OAuth without exposing the provider response", async () => {
 });
 it("returns to connector settings on failure using the configured origin", async () => {
   state.start.mockRejectedValue(new ComposioError("COMPOSIO_AUTH_CONFIG_SCOPE_MISMATCH"));
-  const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
   const response = await GET(new Request("http://internal:3000/api/connectors/composio/airtable/connect", { headers: { "x-forwarded-host": "untrusted.example" } }), context);
   expect(response.status).toBe(303);
   expect(response.headers.get("location")).toBe("https://brain.example/?settings=connectors&connection=failed");
-  expect(warn).toHaveBeenCalledWith("composio_connect_failed", "COMPOSIO_AUTH_CONFIG_SCOPE_MISMATCH");
+  expect(state.warn).toHaveBeenCalledWith("connectors.composio_connect_failed", { code: "COMPOSIO_AUTH_CONFIG_SCOPE_MISMATCH" });
 });
 it("does not call the provider without a session or from another site", async () => {
   state.session = null;
