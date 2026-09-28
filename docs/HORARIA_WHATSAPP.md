@@ -116,3 +116,27 @@ WABA/número aliens, cos alterat, actor no resolt, deduplicació després de
 reinici, ordre, revocació, estat corrupte, límit de capacitat i interrupció
 sense reexecució. Tots els proveïdors i efectes de negoci dels tests són locals
 amb substituts explícits; no s’envien WhatsApps reals.
+
+## Converses iniciades pel treballador
+
+Un remitent associat a un treballador actiu pot iniciar una conversa sense
+broadcast previ. El primer text queda desat a `whatsapp_messages` i és visible
+amb la consulta de conversa existent d’AiBrain. Els números desconeguts o
+inactius no creen converses ni obtenen accés a l’historial.
+
+La conversa nova utilitza la finestra activa o la següent de la configuració
+del servidor, amb `fechaApertura` i `fechaLimite` exactes. Abans de l’obertura
+es registra el text i s’envia l’avís de dates, sense recollir preferències.
+El model exclou de l’historial de recollida els missatges previs a l’obertura.
+Dins de la finestra, una salutació inicia el diàleg i una petició concreta
+continua pel motor habitual, amb les mateixes validacions. Una conversa
+iniciada així es renova en el següent cicle conservant els missatges anteriors;
+els bloquejos del mateix cicle es mantenen. Les rondes iniciades manualment
+conserven el seu termini i comportament anteriors.
+
+La migració afegeix una columna nullable; no reescriu ni elimina registres.
+Els errors del proveïdor preserven l’entrada i es propaguen al rebut durable.
+Una resposta desada acredita l’acceptació de l’enviament pel proveïdor, no
+l’entrega al dispositiu. No s’activen broadcasts, recordatoris ni automatismes.
+La publicació requereix els gates habituals i una nova prova real d’entrada,
+lectura autenticada al xat i resposta al telèfon sobre la revisió desplegada.
