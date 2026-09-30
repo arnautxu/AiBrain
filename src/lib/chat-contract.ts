@@ -353,7 +353,7 @@ export function isChatAttachment(value: unknown): value is ChatAttachment {
     value.name.trim().length > 0 &&
     value.name.length <= 120 &&
     typeof value.mimeType === "string" &&
-    /^(?:image\/(?:png|jpeg|webp|gif)|application\/(?:pdf|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(?:plain|markdown|csv)|application\/json)$/.test(value.mimeType) &&
+    /^(?:image\/(?:png|jpeg|webp|gif)|application\/(?:pdf|vnd\.ms-excel|vnd\.openxmlformats-officedocument\.(?:wordprocessingml\.document|spreadsheetml\.sheet|presentationml\.presentation))|text\/(?:plain|markdown|csv)|application\/json)$/.test(value.mimeType) &&
     typeof value.size === "number" &&
     Number.isSafeInteger(value.size) &&
     value.size > 0 &&

@@ -48,3 +48,5 @@ artifact download route after deleting the mutable output, and denies a second
 user. This is local authenticated route evidence, not an Arnall live session.
 Backend CI, GHCR publication, deployment and an authenticated Arnall XLS upload
 remain separate release gates. Local implementation does not establish live support.
+
+Live release acceptance identified one additional persistence boundary: chat attachment MIME validation must accept `application/vnd.ms-excel` after server-side document validation. A filesystem-store regression verifies durable XLS attachment readback after restart and denies a different user access. Upload validation and image-only inline input restrictions remain enforced.
