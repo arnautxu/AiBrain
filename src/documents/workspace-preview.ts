@@ -27,7 +27,7 @@ export async function prepareWorkspaceDocumentPreview(input: {
     declaredMimeType: input.declaredMimeType,
     data: input.data,
   });
-  if (validated.kind !== "docx" && validated.kind !== "xlsx" && validated.kind !== "pptx" && validated.kind !== "pdf") {
+  if (validated.kind !== "docx" && validated.kind !== "xlsx" && validated.kind !== "xls" && validated.kind !== "pptx" && validated.kind !== "pdf") {
     throw new StorageError("WORKSPACE_DOCUMENT_TYPE_INVALID", "Workspace document is not an Office or PDF file.");
   }
   const threadId = deterministicUuid(`workspace-preview-thread\0${input.projectId}`);

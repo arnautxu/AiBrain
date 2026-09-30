@@ -315,3 +315,27 @@ it.skipIf(!runFullMatrix)("previews XLSX, PPTX, PDF, UTF-8 text and image with t
     }
   }
 }, 120_000);
+
+it.skipIf(!hasToolchain)("previews a real XLS, supplies readable turn inputs and preserves original bytes", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-xls-preview-"));
+  roots.push(root);
+  const data = await readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
+  const stagingRoot = path.join(root, "staging");
+  const staging = new FileDocumentStagingStore(stagingRoot, locks);
+  const staged = await staging.stage({
+    threadId: "11111111-1111-4111-8111-111111111111",
+    uploadId: "22222222-2222-4222-8222-222222222222",
+    validated: validateUploadedDocument({ fileName: "horaris.xls", declaredMimeType: "application/vnd.ms-excel", data }), data,
+  });
+  const previews = new DocumentPreviewService({ stagingRoot, previewRoot: path.join(root, "previews"), lockManager: locks, tools, requireQpdf: Boolean(tools.qpdf) });
+  const preview = await previews.create(staged);
+  expect(preview).toMatchObject({ kind: "xls", status: "ready" });
+  expect(preview.pages).toBeGreaterThan(0);
+  expect((await previews.readFile(staged.threadId, staged.uploadId, "page-1.png")).subarray(0, 8))
+    .toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  expect((await readFile(path.join(stagingRoot, staged.relativePath))).equals(data)).toBe(true);
+  expect((await staging.readById(staged.threadId, staged.uploadId)).kind).toBe("xls");
+  const inputs = await new ServerTurnDocumentInputResolver({ stagingRoot, previews, pdftotext: tools.pdftotext }).resolve(staged);
+  expect(inputs).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("12.5") })]));
+}, 90_000);

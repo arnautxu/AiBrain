@@ -1,10 +1,11 @@
+import { inspectLegacyExcel, isLegacyExcelContainer } from "./legacy-excel-validation";
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import path from "node:path";
 import { createInflateRaw } from "node:zlib";
 
-export type SupportedUploadKind = "docx" | "xlsx" | "pptx" | "pdf" | "text" | "image";
+export type SupportedUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
 
 export type ValidatedUpload = {
   kind: SupportedUploadKind;
@@ -402,6 +403,7 @@ function assertMimeAndExtension(
   const allowedExtensions: Record<SupportedUploadKind, readonly string[]> = {
     docx: [".docx"],
     xlsx: [".xlsx"],
+    xls: [".xls"],
     pptx: [".pptx"],
     pdf: [".pdf"],
     text: [".txt", ".md", ".csv", ".json"],
@@ -410,6 +412,7 @@ function assertMimeAndExtension(
   const officeMime: Record<string, string> = {
     docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    xls: "application/vnd.ms-excel",
     pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   };
   const mimeMatches = kind === "text"
@@ -438,6 +441,10 @@ export function validateUploadedDocument(input: {
   if (data.subarray(0, 5).toString("ascii") === "%PDF-") {
     kind = "pdf";
     mediaType = "application/pdf";
+  } else if (isLegacyExcelContainer(data)) {
+    inspectLegacyExcel(data);
+    kind = "xls";
+    mediaType = "application/vnd.ms-excel";
   } else if (startsWith(data, [0x50, 0x4b])) {
     const office = inspectOfficeArchive(data);
     kind = office.kind;
@@ -519,6 +526,11 @@ export async function validateUploadedDocumentFile(input: {
     if (head.subarray(0, 5).toString("ascii") === "%PDF-") {
       kind = "pdf";
       mediaType = "application/pdf";
+    } else if (isLegacyExcelContainer(head)) {
+      if (before.size > 16 * 1024 * 1024) throw new UploadValidationError("UPLOAD_SIZE_INVALID", "Legacy workbook exceeds the safety limit.");
+      inspectLegacyExcel(await readExactly(handle, 0, before.size));
+      kind = "xls";
+      mediaType = "application/vnd.ms-excel";
     } else if (startsWith(head, [0x50, 0x4b])) {
       const office = await inspectOfficeArchiveFile(handle, before.size);
       kind = office.kind;

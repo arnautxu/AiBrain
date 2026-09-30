@@ -84,7 +84,7 @@ type DocumentHistoryVersion = {
   number: number;
   etag: string;
   fileName: string;
-  kind: "docx" | "xlsx" | "pptx" | "pdf" | "text" | "image";
+  kind: "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
   mediaType: string;
   size: number;
   author: { userId: string; name: string };
@@ -123,7 +123,7 @@ function parsedDocumentHistory(value: unknown): DocumentHistory | null {
     if (typeof version.versionId !== "string" || !Number.isSafeInteger(version.number) ||
         typeof version.etag !== "string" || !/^[0-9a-f]{64}$/.test(version.etag) ||
         typeof version.fileName !== "string" ||
-        (version.kind !== "docx" && version.kind !== "xlsx" && version.kind !== "pptx" &&
+        (version.kind !== "docx" && version.kind !== "xlsx" && version.kind !== "xls" && version.kind !== "pptx" &&
           version.kind !== "pdf" && version.kind !== "text" && version.kind !== "image") ||
         typeof version.mediaType !== "string" || !Number.isSafeInteger(version.size) ||
         typeof version.createdAt !== "string" || Number.isNaN(Date.parse(version.createdAt)) ||

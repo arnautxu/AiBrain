@@ -12,7 +12,7 @@ import { useModalFocus } from "@/ui/use-modal-focus";
 
 function documentIcon(kind: DocumentArtifact["kind"]) {
   if (kind === "docx") return <FileDoc size={17} />;
-  if (kind === "xlsx") return <FileXls size={17} />;
+  if (kind === "xlsx" || kind === "xls") return <FileXls size={17} />;
   if (kind === "pptx") return <FilePpt size={17} />;
   if (kind === "text") return <FileText size={17} />;
   return <FilePdf size={17} />;

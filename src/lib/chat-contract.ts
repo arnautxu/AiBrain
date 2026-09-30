@@ -96,7 +96,7 @@ export type ImageArtifact = {
   height?: number;
 };
 
-export type DocumentKind = "docx" | "xlsx" | "pptx" | "pdf" | "text";
+export type DocumentKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text";
 export type PublicationStatus = "awaiting_confirmation" | "publishing" | "published" | "declined" | "conflict";
 
 export type DocumentArtifact = {
@@ -437,7 +437,7 @@ export function isGeneratedArtifact(value: unknown): value is GeneratedArtifact 
   }
   if (value.type === "document") {
     return typeof value.url === "string" && (value.url.startsWith("/api/projects/") || value.url.startsWith("/api/threads/")) &&
-      (value.kind === "docx" || value.kind === "xlsx" || value.kind === "pptx" || value.kind === "pdf" || value.kind === "text") &&
+      (value.kind === "docx" || value.kind === "xlsx" || value.kind === "xls" || value.kind === "pptx" || value.kind === "pdf" || value.kind === "text") &&
       typeof value.mimeType === "string" && value.mimeType.length <= 180 &&
       typeof value.size === "number" && Number.isSafeInteger(value.size) && value.size > 0 && value.size <= 50 * 1024 * 1024 &&
       (value.status === "processing" || value.status === "ready" || value.status === "error") &&
