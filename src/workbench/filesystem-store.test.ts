@@ -60,6 +60,19 @@ afterEach(async () => {
 });
 
 describe("FileWorkbenchStore", () => {
+  it("persists validated legacy Excel attachments across restart with user isolation", async () => {
+    const { usersRoot, store } = await fixture();
+    const project = await store.createProject(USER_A, "Legacy workbook");
+    const thread = await store.createThread(USER_A, project.id, "Edit XLS");
+    const user = message("user", "complete");
+    user.attachments = [{ id: randomUUID(), name: "fixture.xls", mimeType: "application/vnd.ms-excel", size: 5632 }];
+    const assistant = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, user, assistant);
+    const restarted = new FileWorkbenchStore({ installationId: INSTALLATION_ID, usersRoot });
+    expect((await restarted.getThread(USER_A, thread.id)).messages[0].attachments).toEqual(user.attachments);
+    await expect(restarted.getThread(USER_B, thread.id)).rejects.toBeInstanceOf(WorkbenchNotFoundError);
+  });
+
   it("persists server references across restart and rejects changed-reference retry", async () => {
     const { usersRoot, store } = await fixture();
     const project = await store.createProject(USER_A, "Source references");
