@@ -725,10 +725,18 @@ export async function runWorkerCodexTurn(
     ...(runtime.config.usageLimits ? [] : [runtime.handle.roots.workspace, runtime.handle.roots.artifacts]),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
+  const legacyExcelServices = turnDocuments.some(({ document }) => document.kind === "xls")
+    ? await documentServicesForUser(runtime.config, authenticatedUserId)
+    : null;
   const turnWorkspaceInputs = await prepareTurnDocumentWorkspaceInputs({
     documents: turnDocuments,
     projectWorkspace,
     stagingRoot: runtime.handle.roots.staging,
+    ...(legacyExcelServices ? { legacyExcelConversion: {
+      soffice: legacyExcelServices.toolchain.soffice,
+      conversionGate: legacyExcelServices.conversionGate,
+    } } : {}),
+    signal,
   });
   turnInputDirectory = turnWorkspaceInputs.directory;
   const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);

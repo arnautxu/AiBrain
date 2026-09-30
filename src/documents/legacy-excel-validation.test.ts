@@ -1,6 +1,7 @@
 import { readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import { ResourceLockManager } from "@/storage/resource-lock";
 import { FileDocumentStagingStore } from "./staging-store";
 import { prepareTurnDocumentWorkspaceInputs, ServerTurnDocumentInputResolver } from "./turn-attachments";
@@ -30,8 +31,20 @@ describe("legacy Excel attachments", () => {
         readFile: async () => { throw new Error("Original workbook should be used"); },
       } });
       const codexInputs = await resolver.resolve(document);
-      const prepared = await prepareTurnDocumentWorkspaceInputs({ documents: [{ document, absolutePath: filePath, codexInputs }], projectWorkspace: directory, stagingRoot });
-      expect(await readFile(path.join(prepared.directory!, "input-1.xls"))).toEqual(data);
+      const converted = await generateLocalDocument({ format: "xlsx", title: "Fixture", content: "Synthetic conversion output", rows: [["Test", 12.5]] });
+      const prepared = await prepareTurnDocumentWorkspaceInputs({ documents: [{ document, absolutePath: filePath, codexInputs }], projectWorkspace: directory, stagingRoot, legacyExcelConversion: {
+        soffice: "/tools/soffice", conversionGate: { run: async operation => operation() },
+        runner: { run: async (_command, args, options) => {
+          expect(args).toContain("xlsx:Calc MS Excel 2007 XML");
+          expect(args).toContain("--safe-mode");
+          expect(await readFile(path.join(options.cwd, "source.xls"))).toEqual(data);
+          await writeFile(path.join(options.cwd, "source.xlsx"), converted.data, { mode: 0o600 });
+          return { stdout: "", stderr: "" };
+        } },
+      } });
+      expect(await readFile(path.join(prepared.directory!, "input-1.xlsx"))).toEqual(converted.data);
+      expect(await readFile(filePath)).toEqual(data);
+      expect(prepared.codexInputs[0]).toMatchObject({ text: expect.stringContaining('"convertedFrom":"xls"') });
       expect(await validateUploadedDocumentFile({ filePath, fileName: "horaris.xls", declaredMimeType: "application/vnd.ms-excel" })).toEqual(result);
     } finally { await rm(directory, { recursive: true, force: true }); }
   });

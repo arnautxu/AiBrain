@@ -92,7 +92,7 @@ export function inspectLegacyExcel(data: Buffer) {
   let workbook: Buffer | undefined;
   for (const entry of entries.slice(1)) {
     const lower = entry.name.toLowerCase();
-    if (entry.type !== 2 || !["workbook", "\u0005summaryinformation", "\u0005documentsummaryinformation"].includes(lower)) {
+    if (entry.type !== 2 || !["workbook", "\u0005summaryinformation", "\u0005documentsummaryinformation", "\u0001compobj", "\u0001ole"].includes(lower)) {
       reject("UPLOAD_MACROS_REJECTED");
     }
     if (entry.size > data.length) reject();
@@ -101,6 +101,12 @@ export function inspectLegacyExcel(data: Buffer) {
       : chain(entry.start, fat, sector, sectors, occupied);
     const unit = entry.size < 4096 ? 64 : 512;
     if (bytes.length !== Math.ceil(entry.size / unit) * unit) reject();
+    // Root metadata emitted by Excel/LibreOffice is not an embedded object.
+    // Linked OLE metadata and foreign application descriptors remain rejected.
+    if (lower === "\u0001ole" && (entry.size !== 20 || bytes.readUInt32LE(0) !== 0x02000001 ||
+        !bytes.subarray(4, 20).every(byte => byte === 0))) reject("UPLOAD_MACROS_REJECTED");
+    if (lower === "\u0001compobj" && (entry.size < 28 || entry.size > 4096 ||
+        !["1008020000000000c000000000000046", "2008020000000000c000000000000046"].includes(bytes.subarray(12, 28).toString("hex")))) reject();
     if (lower === "workbook") {
       if (workbook) reject();
       workbook = bytes.subarray(0, entry.size);

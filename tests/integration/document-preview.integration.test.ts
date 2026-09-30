@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { DocumentPreviewService } from "@/documents/preview-service";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
-import { ServerTurnDocumentInputResolver } from "@/documents/turn-attachments";
+import { prepareTurnDocumentWorkspaceInputs, ServerTurnDocumentInputResolver } from "@/documents/turn-attachments";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { ResourceLockManager } from "@/storage/resource-lock";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
@@ -337,5 +337,48 @@ it.skipIf(!hasToolchain)("previews a real XLS, supplies readable turn inputs and
   expect((await readFile(path.join(stagingRoot, staged.relativePath))).equals(data)).toBe(true);
   expect((await staging.readById(staged.threadId, staged.uploadId)).kind).toBe("xls");
   const inputs = await new ServerTurnDocumentInputResolver({ stagingRoot, previews, pdftotext: tools.pdftotext }).resolve(staged);
-  expect(inputs).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringContaining("12.5") })]));
+  expect(inputs).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: expect.stringMatching(/12[.,]5/) })]));
 }, 90_000);
+
+
+it.skipIf(!hasToolchain || !process.env.AIBRAIN_XLS_EDIT_TEST_PYTHON)("converts XLS to an editable XLSX preserving workbook structure and edits", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "aibrain-xls-edit-"));
+  roots.push(root);
+  const editingPython = process.env.AIBRAIN_XLS_EDIT_TEST_PYTHON!;
+  const sourceXlsx = path.join(root, "template.xlsx");
+  await run(editingPython, ["-c", `import sys, openpyxl
+from openpyxl.styles import Font, PatternFill
+w=openpyxl.Workbook(); s=w.active; s.title="Horaris"
+s["A1"]="Horari fictici"; s.merge_cells("A1:C1")
+s["A1"].font=Font(bold=True, color="FFFFFF"); s["A1"].fill=PatternFill("solid", fgColor="123456")
+s["B2"]=12.5; s["B3"]=7.25; s["C2"]="=SUM(B2:B3)"; s["B2"].number_format="0.00"
+s.column_dimensions["B"].width=22; s.print_area="A1:C3"; s.page_setup.orientation="landscape"
+w.create_sheet("Persones")["A1"]="Núria"; w.save(sys.argv[1])`, sourceXlsx]);
+  await run(tools.soffice, [isolatedLibreOfficeProfile(root, "lo-profile-xls-fixture"), "--headless", "--safe-mode", "--norestore", "--convert-to", "xls:MS Excel 97", "--outdir", root, sourceXlsx], { timeout: 60_000 });
+  const data = await readFile(path.join(root, "template.xls"));
+  const validated = validateUploadedDocument({ fileName: "template.xls", declaredMimeType: "application/vnd.ms-excel", data });
+  const locks = new ResourceLockManager({ rootDirectory: path.join(root, "locks") });
+  const stagingRoot = path.join(root, "staging");
+  const staging = new FileDocumentStagingStore(stagingRoot, locks);
+  const document = await staging.stage({ threadId: "11111111-1111-4111-8111-111111111111", uploadId: "22222222-2222-4222-8222-222222222222", validated, data });
+  const prepared = await prepareTurnDocumentWorkspaceInputs({ documents: [{ document, absolutePath: path.join(stagingRoot, document.relativePath), codexInputs: [] }], projectWorkspace: root, stagingRoot, legacyExcelConversion: { soffice: tools.soffice, conversionGate: { run: async operation => operation() } } });
+  const copy = path.join(prepared.directory!, "input-1.xlsx");
+  const edited = path.join(root, "edited.xlsx");
+  await run(editingPython, ["-c", `import sys, openpyxl
+w=openpyxl.load_workbook(sys.argv[1]); s=w["Horaris"]
+assert w.sheetnames==["Horaris", "Persones"]
+assert w["Persones"]["A1"].value=="Núria"
+assert s["B2"].value==12.5 and s["B3"].value==7.25
+assert s["C2"].value=="=SUM(B2:B3)"
+assert str(s.merged_cells)=="A1:C1"
+assert s["A1"].font.bold and s["A1"].fill.fgColor.rgb[-6:]=="123456"
+assert s["B2"].number_format=="0.00"
+assert s.column_dimensions["B"].width>20
+assert str(s.print_area).replace("$", "")=="\'Horaris\'!A1:C3"
+assert s.page_setup.orientation=="landscape"
+s["B2"]=20; w.save(sys.argv[2])
+r=openpyxl.load_workbook(sys.argv[2]); assert r["Horaris"]["B2"].value==20
+assert r["Horaris"]["C2"].value=="=SUM(B2:B3)" and str(r["Horaris"].merged_cells)=="A1:C1"`, copy, edited]);
+  expect(validateUploadedDocument({ fileName: "edited.xlsx", declaredMimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", data: await readFile(edited) }).kind).toBe("xlsx");
+  expect(await readFile(path.join(stagingRoot, document.relativePath))).toEqual(data);
+}, 120_000);
