@@ -1476,7 +1476,8 @@ export function BrainApp({
     const runtimeContent = (messageOverride ?? (pendingRuntimeContext
       ? `${prompt.trim()}\n\n${pendingRuntimeContext}`
       : prompt)).trim();
-    if (!visibleContent || !runtimeContent || sending || documentUploading || documents.some((document) => document.status !== "ready") || !activeProject || activeProject.status !== "active") return;
+    const hasAttachment = attachments.length > 0 || documents.some((document) => document.status === "ready");
+    if ((!visibleContent && !hasAttachment) || (!runtimeContent && !hasAttachment) || sending || documentUploading || documents.some((document) => document.status !== "ready") || !activeProject || activeProject.status !== "active") return;
 
     const initialThreadId = activeThread?.id ?? null;
     const selectionAtStart = {
@@ -1501,7 +1502,7 @@ export function BrainApp({
     let succeeded = false;
     try {
       if (!thread) {
-        const title = titleFromMessage(visibleContent);
+        const title = titleFromMessage(visibleContent || attachments[0]?.name || documents.find((document) => document.status === "ready")?.name || t("Archivos adjuntos"));
         thread = initialWorkbench.persistence === "browser-preview"
           ? localThread(activeProject.id, title)
           : await createThreadRequest(activeProject.id, title);

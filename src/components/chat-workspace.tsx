@@ -635,6 +635,7 @@ export function ChatWorkspace({
   const canGenerateImages = manifest.composer.imageGeneration && (runtimeStatus.mode === "demo" || runtimeStatus.capabilities.imageGeneration);
   const canAttachDocuments = runtimeStatus.mode === "codex";
   const runtimeReady = networkOnline && (runtimeStatus.mode === "demo" || runtimeStatus.ready);
+  const hasSendableContent = Boolean(prompt.trim() || attachments.length || documents.some((document) => document.status === "ready"));
   const documentsBlocked = restoringRequest || documents.some((document) => document.status !== "ready");
   const destinationOptions = useMemo(() => projects
     .filter((candidate) => candidate.status === "active")
@@ -1080,7 +1081,7 @@ export function ChatWorkspace({
                 }
                 if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();
-                  if (!documentUploading && !documentsBlocked && prompt.trim() && runtimeReady) {
+                  if (!documentUploading && !documentsBlocked && hasSendableContent && runtimeReady) {
                     jumpToBottom();
                     onSend();
                   }
@@ -1155,7 +1156,7 @@ export function ChatWorkspace({
                   aria-label={queueingMessage ? t("Añadir mensaje a la cola") : sending ? (stopping ? t("Deteniendo respuesta") : t("Detener respuesta")) : t("Enviar mensaje")}
                   aria-busy={(!queueingMessage && stopping) || undefined}
                   className="composer-submit grid size-11 place-items-center rounded-xl bg-[var(--send-button)] text-[var(--send-button-text)] transition active:scale-95 disabled:cursor-not-allowed disabled:opacity-30 sm:rounded-full"
-                  disabled={queueingMessage ? !project || !runtimeReady || documentUploading || documentsBlocked : sending ? stopping : !project || !prompt.trim() || !runtimeReady || documentUploading || documentsBlocked}
+                  disabled={queueingMessage ? !project || !runtimeReady || documentUploading || documentsBlocked : sending ? stopping : !project || !hasSendableContent || !runtimeReady || documentUploading || documentsBlocked}
                   onClick={() => {
                     if (sending) {
                       if (queueingMessage) onSend();

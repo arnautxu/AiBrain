@@ -1,3 +1,18 @@
+## Current employee-facing boundary (2026-09-30)
+
+Arnall AI must tell employees to drag and drop or attach the files in chat for
+now. It must not claim direct access to the Arnall server, promise browsing its
+folders or infer access from historical integration notes. This installation
+instruction is appended to the trusted product context on every turn, including
+resumed threads. Existing operator infrastructure and published company
+knowledge are separate from the employee-facing claim.
+
+The composer and chat API accept a ready document or image without typed text.
+An empty request without an attachment remains invalid; document ownership,
+readiness and turn binding remain checked before execution. The stored user
+message retains empty text; the runtime receives a neutral attachment receipt
+instruction and follows any already-established task in the conversation.
+
 # Read-only access across the Windows server
 
 The 2026-09-02 scope correction authorizes access across the server, not a

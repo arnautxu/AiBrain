@@ -2049,6 +2049,7 @@ export async function runWorkerCodexTurn(
         "Enviando la petición al asistente",
       );
       const selectedServerInputs = await serverReferenceInputs(chatRequest.options.serverReferences ?? [], enterpriseDocumentRoots, serverDocumentFiles!);
+      const userTurnText = chatRequest.message.trim() || "El usuario ha enviado únicamente archivos adjuntos. Confirma su recepción y pregunta qué necesita hacer con ellos si el historial no contiene ya una petición clara. No inventes una tarea.";
       let turnResult: JsonValue;
       try {
         turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", {
@@ -2068,10 +2069,10 @@ export async function runWorkerCodexTurn(
               projectGuidance.branchHistory,
               "</conversation_history>",
               "<current_user_message>",
-              chatRequest.message,
+              userTurnText,
               "</current_user_message>",
             ].join("\n\n")
-          : chatRequest.message, text_elements: [] },
+          : userTurnText, text_elements: [] },
         ...selectedServerInputs,
         ...turnWorkspaceInputs.codexInputs,
         ...turnDocumentCodexInputs(turnDocuments, { xlsxAvailableInWorkspace: true }),
