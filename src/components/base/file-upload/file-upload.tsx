@@ -22,7 +22,7 @@ import { cx } from "@/utils/cx";
  */
 
 const DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
-const DEFAULT_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "xlsx"] as const;
+const DEFAULT_EXTENSIONS = ["pdf", "jpg", "jpeg", "png", "xlsx", "xls"] as const;
 
 type UploadPhase = "idle" | "uploading" | "complete";
 type StaggerState = "shown" | "hiding" | "hidden";
@@ -53,7 +53,7 @@ function extensionFor(fileName: string) {
 
 function DefaultFileIcon({ file }: { file: File }) {
   const extension = extensionFor(file.name);
-  const Icon = extension === "xlsx"
+  const Icon = (extension === "xlsx" || extension === "xls")
     ? RiFileExcel2Line
     : ["jpg", "jpeg", "png"].includes(extension)
       ? RiFileImageLine

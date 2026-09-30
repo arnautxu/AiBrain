@@ -104,7 +104,7 @@ function parseVersion(value: unknown, context: ValidationContext): StoredDocumen
     contentUploadId: expectString(record.contentUploadId, context.at("contentUploadId"), { pattern: UUID }),
     etag: expectString(record.etag, context.at("etag"), { pattern: SHA256 }),
     fileName: expectString(record.fileName, context.at("fileName"), { minLength: 1, maxLength: 120 }),
-    kind: expectOneOf(record.kind, ["docx", "xlsx", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+    kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
     mediaType: expectString(record.mediaType, context.at("mediaType"), { minLength: 1, maxLength: 180 }),
     size: expectInteger(record.size, context.at("size"), { minimum: 1, maximum: 50 * 1024 * 1024 }),
     sha256: expectString(record.sha256, context.at("sha256"), { pattern: SHA256 }),

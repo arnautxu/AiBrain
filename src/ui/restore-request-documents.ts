@@ -2,7 +2,7 @@ import type { ChatAttachment } from "@/lib/chat-contract";
 import type { StagedComposerDocument, DocumentUploadKind } from "@/ui/document-ui-adapter";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const KINDS = new Set<DocumentUploadKind>(["docx", "xlsx", "pptx", "pdf", "text", "image"]);
+const KINDS = new Set<DocumentUploadKind>(["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"]);
 const record = (value: unknown): Record<string, unknown> | null => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 
 /** Reuse the original staged upload; never silently substitute a newer version. */

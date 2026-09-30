@@ -65,7 +65,7 @@ const previewSchema = defineVersionedSchema<DocumentPreview>({
       threadId: expectString(record.threadId, context.at("threadId"), { pattern: UUID }),
       sourceSha256: expectString(record.sourceSha256, context.at("sourceSha256"), { pattern: SHA256 }),
       status: expectOneOf(record.status, ["ready"] as const, context.at("status")),
-      kind: expectOneOf(record.kind, ["docx", "xlsx", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
       files: expectArray(record.files, context.at("files"), (value, item) =>
         expectString(value, item, { minLength: 1, maxLength: 160, pattern: /^[a-z0-9][a-z0-9._-]*$/ }), { maxLength: 2 }),
       artifacts: expectArray(record.artifacts, context.at("artifacts"), parsePreviewArtifact, { maxLength: 2 }),
@@ -97,7 +97,7 @@ const legacyPreviewSchema = defineVersionedSchema<LegacyDocumentPreview>({
       threadId: expectString(record.threadId, context.at("threadId"), { pattern: UUID }),
       sourceSha256: expectString(record.sourceSha256, context.at("sourceSha256"), { pattern: SHA256 }),
       status: expectOneOf(record.status, ["ready"] as const, context.at("status")),
-      kind: expectOneOf(record.kind, ["docx", "xlsx", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
+      kind: expectOneOf(record.kind, ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] as const, context.at("kind")),
       files: expectArray(record.files, context.at("files"), (value, item) =>
         expectString(value, item, { minLength: 1, maxLength: 160, pattern: /^[a-z0-9][a-z0-9._-]*$/ }), { maxLength: 2 }),
       pages: record.pages === null ? null : expectInteger(record.pages, context.at("pages"), { minimum: 1, maximum: 500 }),

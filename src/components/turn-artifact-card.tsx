@@ -44,7 +44,7 @@ const browserControlCopy: Record<NonNullable<BrowserArtifact["control"]>, string
 function DocumentIcon({ kind }: { kind: DocumentArtifact["kind"] }) {
   if (kind === "pdf") return <FilePdf size={18} />;
   if (kind === "docx") return <FileDoc size={18} />;
-  if (kind === "xlsx") return <FileXls size={18} />;
+  if (kind === "xlsx" || kind === "xls") return <FileXls size={18} />;
   if (kind === "pptx") return <FilePpt size={18} />;
   return <FileText size={18} />;
 }

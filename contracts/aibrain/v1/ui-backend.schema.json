@@ -562,7 +562,7 @@
             "threadId": { "$ref": "#/$defs/Uuid" },
             "fileName": { "type": "string", "minLength": 1, "maxLength": 120 },
             "relativePath": { "type": "string", "pattern": "^threads/" },
-            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] },
             "mediaType": { "type": "string", "minLength": 1, "maxLength": 180 },
             "size": { "type": "integer", "minimum": 1, "maximum": 52428800 },
             "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
@@ -580,7 +580,7 @@
             "threadId": { "$ref": "#/$defs/Uuid" },
             "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "status": { "const": "ready" },
-            "kind": { "enum": ["docx", "xlsx", "pptx", "pdf", "text", "image"] },
+            "kind": { "enum": ["docx", "xlsx", "xls", "pptx", "pdf", "text", "image"] },
             "files": {
               "type": "array",
               "minItems": 1,
