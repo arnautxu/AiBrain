@@ -29,3 +29,7 @@ Un proyecto `shared` solo aparece a una cuenta local habilitada cuyo correo est�
 ## Auditoría
 
 Cada mutación administrativa se añade a `dataRoot/workspace-admin/audit.jsonl` con secuencia, actor, acción, destino, resumen y fecha. La UI muestra los últimos 100 eventos. El journal y el estado usan locks, validación estricta y escrituras atómicas.
+
+## Consulta de conversaciones por el operador
+
+El Site privado «Ús d’Arnall AI» permite a los programadores autorizados consultar listas paginadas de conversaciones activas y archivadas y sus mensajes. La API `/api/operations/conversations` exige el bearer dedicado `AIBRAIN_USAGE_DASHBOARD_SECRET` antes de cualquier lectura y una identidad UUID de operador para auditoría. Solo consulta usuarios provisionados de la misma instalación. El Site mantiene la credencial exclusivamente en servidor y restringe esta función a los programadores autorizados Arnau y David. Cada lectura registra actor y destinatario en `workspace-admin/audit.jsonl`, sin copiar mensajes al journal. Las rutas ordinarias del workbench mantienen su aislamiento y esta API no ofrece mutaciones ni ejecuta turnos.

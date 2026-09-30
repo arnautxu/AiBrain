@@ -97,3 +97,11 @@ describe("FileWorkspaceAdminStore", () => {
     expect(updated.groups[0]?.memberIds).toHaveLength(memberIds.length);
   });
 });
+
+ it("durably records conversation reads without changing roles or retaining messages", async () => {
+  const store = new FileWorkspaceAdminStore("example-qa", root);
+  const before = await store.read([ownerId, memberId]);
+  await store.recordConversationRead(ownerId, memberId, "thread-1");
+  expect(await store.auditLog()).toMatchObject([{ actorUserId: ownerId, targetId: memberId, action: "member.conversations-read", summary: "Conversation thread-1 consulted" }]);
+  expect(await store.read([ownerId, memberId])).toEqual(before);
+ });

@@ -33,7 +33,7 @@ import {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INSTALLATION_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const AUDIT_ACTIONS: readonly WorkspaceAuditAction[] = [
-  "member.provisioned-local", "member.role-changed", "member.enabled", "member.disabled",
+  "member.conversations-read", "member.provisioned-local", "member.role-changed", "member.enabled", "member.disabled",
   "group.created", "group.updated", "group.deleted",
 ];
 
@@ -258,6 +258,14 @@ export class FileWorkspaceAdminStore {
       occurredAt: new Date(this.now()).toISOString(),
     });
     return result.state;
+  }
+
+  async recordConversationRead(actorUserId: string, targetId: string, threadId?: string, actorEmail?: string) {
+    await this.prepare();
+    await this.audit.append({ schemaVersion: 1, installationId: this.installationId, actorUserId,
+      action: "member.conversations-read", targetType: "member", targetId,
+      summary: `${actorEmail ? `Programmer ${actorEmail}: ` : ""}${threadId ? `Conversation ${threadId} consulted` : "Conversation list consulted"}`,
+      occurredAt: new Date(this.now()).toISOString() });
   }
 
   async auditLog(limit = 100) {
