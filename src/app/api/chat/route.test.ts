@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { generatedPngFixture } from "../../../../tests/helpers/png-fixture";
 
 vi.mock("server-only", () => ({}));
 
@@ -127,6 +128,8 @@ vi.mock("@/settings/server-service", () => ({
 }));
 
 import { POST } from "@/app/api/chat/route";
+import { documentServicesForUser } from "@/documents/server-service";
+import { resolveTurnDocumentAttachments } from "@/documents/turn-attachments";
 import { runtimeThreadIdForChatMessage } from "@/runtime/chat-thread-selection";
 import { isBrowserPreviewWorkbench, prepareThreadTurn } from "@/workbench/store";
 
@@ -138,7 +141,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknown> = {}) {
+function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknown> = {}, message = "Continue after reconnect") {
   return new Request("http://localhost/api/chat", {
     method: "POST",
     signal,
@@ -148,7 +151,7 @@ function chatRequest(signal: AbortSignal, optionOverrides: Record<string, unknow
       threadId: "00000000-0000-4000-8000-000000000012",
       userMessageId: "00000000-0000-4000-8000-000000000013",
       assistantMessageId: "00000000-0000-4000-8000-000000000014",
-      message: "Continue after reconnect",
+      message,
       preferences: { tone: "direct", language: "en", showActivity: true },
       options: {
         mode: "agent",
@@ -217,6 +220,41 @@ describe("chat turn transport lifecycle", () => {
     expect(runtimeThreadIdForChatMessage(legacy, "Segueix amb el preview")).toBeNull();
     expect(runtimeThreadIdForChatMessage(current, "Revisa el PowerPoint")).toBe("runtime-thread-current");
     expect(runtimeThreadIdForChatMessage(current, "Cada lunes prepara un resumen")).toBe("runtime-thread-current");
+  });
+
+  it("rejects a message with neither text nor attachments", async () => {
+    const response = await POST(chatRequest(new AbortController().signal, {}, "   "));
+    expect(response.status).toBe(400);
+    expect(mocked.runWorkerCodexTurn).not.toHaveBeenCalled();
+  });
+
+  it("accepts an image-only turn without inventing visible user text", async () => {
+    mocked.runWorkerCodexTurn.mockImplementation(async () => undefined);
+    const png = generatedPngFixture();
+    const response = await POST(chatRequest(new AbortController().signal, {
+      attachments: [{ id: "00000000-0000-4000-8000-000000000021", name: "receipt.png", mimeType: "image/png", size: png.length,
+        dataUrl: `data:image/png;base64,${png.toString("base64")}` }],
+    }, ""));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(mocked.runWorkerCodexTurn).toHaveBeenCalled();
+    expect(mocked.runWorkerCodexTurn.mock.calls[0][0]).toMatchObject({ message: "" });
+  });
+
+  it("resolves an attachment-only document through the authorized staging service", async () => {
+    vi.mocked(documentServicesForUser).mockResolvedValueOnce({ staging: {},
+      manifest: { roots: { staging: "/private/staging" } }, previews: {}, toolchain: {}, conversionGate: {} } as never);
+    vi.mocked(resolveTurnDocumentAttachments).mockResolvedValueOnce([]);
+    mocked.runWorkerCodexTurn.mockImplementation(async () => undefined);
+    const uploadId = "00000000-0000-4000-8000-000000000022";
+    const response = await POST(chatRequest(new AbortController().signal, { documentUploadIds: [uploadId] }, ""));
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(resolveTurnDocumentAttachments).toHaveBeenCalledWith(expect.objectContaining({
+      threadId: "00000000-0000-4000-8000-000000000012", uploadIds: [uploadId],
+      permissions: expect.objectContaining({ fingerprint: "a".repeat(64) }),
+    }));
+    expect(mocked.runWorkerCodexTurn.mock.calls[0][0]).toMatchObject({ message: "" });
   });
 
   it("rejects browser-supplied provider settings", async () => {

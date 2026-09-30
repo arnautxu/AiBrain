@@ -90,4 +90,19 @@ test("plus, chat drop and paste keep image attachments in the unsent draft", asy
     await expect(page.getByTestId("sidebar-brand")).toBeVisible();
     await page.screenshot({ path: path.join(evidence, "brand-mobile-dark.png") });
   }
+  await prompt.fill("");
+  const send = composer.getByRole("button", { name: "Enviar mensaje", exact: true });
+  await expect(send).toBeEnabled();
+  await page.route("**/api/chat", (route) => route.fulfill({
+    status: 200, contentType: "application/x-ndjson",
+    body: JSON.stringify({ type: "done" }) + "\n",
+  }));
+  const attachmentOnlyRequest = page.waitForRequest((request) =>
+    new URL(request.url()).pathname === "/api/chat" && request.method() === "POST");
+  await send.click();
+  const submitted = (await attachmentOnlyRequest).postDataJSON();
+  expect(submitted.message).toBe("");
+  expect(submitted.options.attachments.length).toBeGreaterThan(0);
+  expect(submitted.options.attachments.some((attachment: { name: string }) => attachment.name === "mobile-selector.png")).toBe(true);
+
 });

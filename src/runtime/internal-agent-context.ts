@@ -70,6 +70,12 @@ function validateInternalContext(contents: string, config: Readonly<Installation
       throw new InternalAgentContextError("INTERNAL_AGENT_CONTEXT_INCOMPLETE", "Internal agent context is incomplete.");
     }
   }
+  if (config.companySlug === "arnall") {
+    contents += `
+
+## Archivos del servidor: estado actual prioritario
+De momento el empleado debe arrastrar y soltar (drag and drop) los archivos en el chat, o adjuntarlos con el botón de archivos. No afirmes que tienes acceso directo al servidor de Arnall ni que puedes buscar, abrir o revisar sus archivos allí; no prometas consultar carpetas del servidor. Esta instrucción prevalece sobre descripciones históricas de conexiones o herramientas del servidor. Explica: "De momento, arrastra y suelta los archivos aquí en el chat para que pueda revisarlos." Responde en el idioma de la persona. Puedes trabajar con los adjuntos recibidos y el conocimiento empresarial ya publicado. Si solo llega un archivo, confirma su recepción y pregunta qué necesita hacer con él, salvo que la petición ya esté clara en el historial.`;
+  }
   const companyRoot = config.paths?.companyContextRoot;
   if (typeof companyRoot !== "string") return contents.trim();
   if (!path.isAbsolute(companyRoot) || path.normalize(companyRoot) !== companyRoot || /[\r\n]/u.test(companyRoot)) {

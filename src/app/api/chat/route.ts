@@ -296,7 +296,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "No autenticat." }, { status: 401 });
   }
   const body: unknown = await request.json().catch(() => null);
-  if (!isChatRequest(body) || !body.message.trim() ||
+  if (!isChatRequest(body) || (!body.message.trim() && !body.options.attachments.length && !body.options.documentUploadIds?.length) ||
     !isUuid(body.projectId) || !isUuid(body.threadId) ||
     !isUuid(body.userMessageId) || !isUuid(body.assistantMessageId)) {
     return NextResponse.json({ error: "La petició de xat no és vàlida." }, { status: 400 });
