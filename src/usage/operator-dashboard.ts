@@ -64,6 +64,7 @@ export async function operatorUsageDashboard(now = Date.now()) {
       daily.set(date, item);
     }
     return {
+      userId: user.userId,
       displayName: user.displayName,
       email: user.email,
       enabled: user.enabled,

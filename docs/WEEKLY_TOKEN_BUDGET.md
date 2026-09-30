@@ -17,7 +17,7 @@ the numerical allowance and the connected account's subscription usage are
 private operator data and are omitted from employee API responses and settings.
 An independent owner-only dashboard may read the current weekly totals through
 the dedicated `AIBRAIN_USAGE_DASHBOARD_SECRET` operator endpoint. That endpoint
-uses a separate bearer secret, returns no conversation content and remains
+uses a separate bearer secret and remains
 unavailable when the secret is missing or invalid. It must never reuse the
 general maintenance/operator credential or appear in employee configuration.
 
@@ -265,3 +265,8 @@ seed was performed. The host guard's exact installed hash and pre-inference
 quota denial were verified again. Employee UI/accounting code is unchanged from
 the authenticated rendered acceptance on `d5472c3`; this follow-up changes only
 the host operator-config reader, its tests and release documentation.
+
+The programmer-authorized conversation reader is a separate `/api/operations/conversations`
+route using the same dedicated dashboard transport credential. Usage responses
+still contain no messages. The private Site checks the authenticated reader's ID against the programmer allowlist
+before proxying any conversation read; the existing authorized programmers may also inspect conversations. Read events persist in the administrative audit journal.

@@ -41,6 +41,7 @@ export type WorkspaceAdminState = {
 };
 
 export type WorkspaceAuditAction =
+  | "member.conversations-read"
   | "member.provisioned-local"
   | "member.role-changed"
   | "member.enabled"
