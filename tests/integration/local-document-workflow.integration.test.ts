@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -93,7 +93,7 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
   const evidence: Array<Record<string, unknown>> = [];
 
   beforeAll(async () => {
-    root = await mkdtemp(path.join(tmpdir(), "aibrain-local-document-workflow-"));
+    root = await realpath(await mkdtemp(path.join(tmpdir(), "aibrain-local-document-workflow-")));
     const dataRoot = path.join(root, "data");
     const configPath = path.join(root, "installation.json");
     const environment = {
@@ -295,6 +295,46 @@ describe.skipIf(!enabled)("real private local document workflow", () => {
       { mode: 0o600 },
     );
   }, 180_000);
+
+  it.skipIf(!process.env.AIBRAIN_XLS_EDIT_TEST_PYTHON)("converts a legacy upload, edits its XLSX copy and downloads a durable owner-bound artifact", async () => {
+    const [{ documentServicesForUser }, { prepareTurnDocumentWorkspaceInputs }, { validateUploadedDocument }, { handleLocalDocumentDynamicToolCall }, { FileWorkbenchStore }] = await Promise.all([
+      import("@/documents/server-service"), import("@/documents/turn-attachments"), import("@/documents/upload-validation"),
+      import("@/runtime/documents/dynamic-tools"), import("@/workbench/filesystem-store"),
+    ]);
+    const thread = await FileWorkbenchStore.fromInstallation(installation).createThread(USER_A, projectId, "Legacy workbook editing");
+    const services = await documentServicesForUser(installation, USER_A);
+    const original = await readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
+    const document = await services.staging.stage({ threadId: thread.id, uploadId: "0198b9f0-6631-7000-8000-000000000919", data: original,
+      validated: validateUploadedDocument({ fileName: "vendes.xls", declaredMimeType: "application/vnd.ms-excel", data: original }) });
+    const prepared = await prepareTurnDocumentWorkspaceInputs({ documents: [{ document, absolutePath: path.join(services.manifest.roots.staging, document.relativePath), codexInputs: [] }],
+      projectWorkspace, stagingRoot: services.manifest.roots.staging, legacyExcelConversion: { soffice: tools.soffice, conversionGate: services.conversionGate } });
+    const finalPath = "documents/vendes-editades.xlsx";
+    await mkdir(path.join(projectWorkspace, "documents"), { recursive: true, mode: 0o700 });
+    await run(process.env.AIBRAIN_XLS_EDIT_TEST_PYTHON!, ["-c", `import sys,openpyxl
+w=openpyxl.load_workbook(sys.argv[1]); w["Operación"]["B1"]=20; w.save(sys.argv[2])`, path.join(prepared.directory!, "input-1.xlsx"), path.join(projectWorkspace, finalPath)]);
+    const edited = await readFile(path.join(projectWorkspace, finalPath));
+    const result = await handleLocalDocumentDynamicToolCall({ threadId: "runtime-thread", turnId: "runtime-turn", callId: "legacy-xls-edit-delivery", namespace: "aibrain_documents", tool: "deliver", arguments: { relativePath: finalPath } }, {
+      installation, installationId: INSTALLATION_ID, userId: USER_A, projectId, projectWorkspace, receiptRoot,
+      runtimeThreadId: "runtime-thread", runtimeTurnId: "runtime-turn", sourceThreadId: thread.id, sourceTurnId: "0198b9f0-6631-7000-8000-000000000918", permissions: permissions(USER_A, projectId),
+    });
+    expect(result.response.success, JSON.stringify(result.response.contentItems)).toBe(true);
+    const artifact = result.artifacts[0]!;
+    expect(artifact.kind).toBe("xlsx");
+    const artifactRoute = await import("@/app/api/threads/[threadId]/artifacts/[artifactId]/route");
+    const context = { params: Promise.resolve({ threadId: thread.id, artifactId: artifact.id }) };
+    auth.session = session(USER_A);
+    const download = await artifactRoute.GET(new Request(`http://localhost${artifact.url}`), context);
+    expect(download.status).toBe(200);
+    expect(Buffer.from(await download.arrayBuffer())).toEqual(edited);
+    // The durable artifact survives loss of the mutable output and turn copies.
+    await rm(path.join(projectWorkspace, finalPath));
+    await rm(prepared.directory!, { recursive: true });
+    const again = await artifactRoute.GET(new Request(`http://localhost${artifact.url}`), context);
+    expect(Buffer.from(await again.arrayBuffer())).toEqual(edited);
+    auth.session = session(USER_B);
+    expect((await artifactRoute.GET(new Request(`http://localhost${artifact.url}`), context)).status).toBe(404);
+    expect(await readFile(path.join(services.manifest.roots.staging, document.relativePath))).toEqual(original);
+  }, 90_000);
 
   it("reauthorizes every file request and hides User A documents from User B and another tenant", async () => {
     const item = generated.get("pdf")!;
