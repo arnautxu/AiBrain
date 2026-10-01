@@ -638,6 +638,16 @@ describe("chat workspace simplificado", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Hay archivos no disponibles");
   });
 
+  it("distinguishes a stored XLS from readable workbook data without blocking the chat", () => {
+    renderWorkspace(null, project, { prompt: "Revisa el Excel.", documents: [{
+      id: "stored", uploadId: "stored", threadId: "thread", name: "informe.xls",
+      size: 300, mimeType: "text/plain", kind: "text", status: "ready", error: null,
+      pages: null, previewFiles: [], processingUnavailable: true,
+    }] });
+    expect(screen.getByText("Original guardado · procesamiento no disponible")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
+  });
+
   it("queues the next message while keeping stop and cancellation available", () => {
     const onSend = vi.fn();
     const onStop = vi.fn();

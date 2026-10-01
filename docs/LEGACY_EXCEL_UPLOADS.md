@@ -1,9 +1,11 @@
 # Legacy XLS upload compatibility
 
-The upload pipeline accepts bounded Excel 97–2003 CFB/BIFF8 files through two
-reviewed paths. Both preserve the byte-identical original in a server-only vault
-outside worker and browser mounts. Only a separately validated XLSX derivative
-enters normal staging, preview, download, indexing and the turn attachment.
+The upload pipeline preserves structurally valid, bounded CFB/BIFF5/BIFF8
+originals before processing. Two processing paths prepare supported BIFF8 data.
+The original stays byte-identical in a server-only vault outside worker and
+browser mounts. Only a separately validated XLSX derivative, or a generated
+status receipt when processing is unavailable, enters normal staging, preview,
+download, indexing and the turn attachment.
 Upload authorization, MIME/content checks, ownership checks and resource limits
 remain enforced. This change does not add a signature-based antivirus engine or
 claim that a successfully parsed file has been scanned clean.
@@ -52,8 +54,22 @@ The attachment chip identifies the passive copy, and server-authored turn contex
 instructs the assistant to disclose its limitations. Passive copies do not
 preserve layout, images, hidden-sheet presentation or executable formulas.
 Non-tabular sheets are omitted and counted. The original is retained unchanged;
-no conversion result is represented as the original workbook. Encrypted,
-malformed, empty or over-budget inputs still fail closed.
+no conversion result is represented as the original workbook. Encrypted, empty,
+unsupported or over-budget reader results produce no working workbook. A valid
+stored original instead receives the explicit processing-unavailable outcome
+below. Malformed storage structure and oversized input still reject admission.
+
+## Preserved originals without readable data
+
+Failure or lack of processor support does not discard the original. The server
+returns a generated text receipt with strictly parsed `storedLegacyExcel`
+metadata and the original hash/name/size. It contains no customer cells and
+explicitly tells the assistant not to infer workbook results. The composer says
+`Original guardado · procesamiento no disponible`; it remains possible to send
+the chat. The original never becomes a fallback input for tools. A retry returns
+the same receipt after verifying the original binding. Preview rendering can
+also be unavailable independently of a successful workbook conversion, with no
+fabricated preview URLs. See [XLS attachments](XLS_ATTACHMENTS.md).
 
 ## AutoFilter buttons
 

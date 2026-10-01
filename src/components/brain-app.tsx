@@ -1308,7 +1308,7 @@ export function BrainApp({
           const result = await stageDocument(thread.id, file, uploadId, controller.signal);
           setDocuments((current) => current.map((document) => document.uploadId === uploadId ? {
             ...document,
-            name: result.document.fileName,
+            name: result.document.storedLegacyExcel?.originalFileName ?? result.document.fileName,
             mimeType: result.document.mediaType,
             size: result.document.size,
             kind: result.document.kind,
@@ -1316,8 +1316,11 @@ export function BrainApp({
             pages: result.preview.pages,
             status: "ready",
             passive: Boolean(result.document.legacyExcel),
+            processingUnavailable: Boolean(result.document.storedLegacyExcel),
+            previewUnavailable: result.preview.status === "unavailable",
           } : document));
-          if (result.document.legacyExcel) setNotice(workbenchNotice(t("XLS preparado como copia pasiva. Datos guardados y resultados de fórmulas sin verificar; no se ejecutan macros ni se actualizan enlaces. El original se conserva intacto."), "warning"));
+          if (result.document.storedLegacyExcel) setNotice(workbenchNotice(t("Original XLS guardado. Su procesamiento no está disponible; todavía no se han podido leer sus datos."), "warning"));
+          else if (result.document.legacyExcel) setNotice(workbenchNotice(t("XLS preparado como copia pasiva. Datos guardados y resultados de fórmulas sin verificar; no se ejecutan macros ni se actualizan enlaces. El original se conserva intacto."), "warning"));
         } catch (reason) {
           const message = reason instanceof Error ? reason.message : t("No se ha podido preparar el documento.");
           setDocuments((current) => current.map((document) => document.uploadId === uploadId
@@ -1533,7 +1536,7 @@ export function BrainApp({
       const readyDocuments = documents.filter((document) => document.status === "ready");
       userMessage.attachments = [
         ...attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment),
-        ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, passive: _passive, ...attachment }) => attachment),
+        ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, passive: _passive, processingUnavailable: _processingUnavailable, previewUnavailable: _previewUnavailable, ...attachment }) => attachment),
       ];
       assistantMessage = createMessage(
         crypto.randomUUID(),

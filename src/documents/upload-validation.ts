@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import path from "node:path";
-import type { LegacyExcelProvenance } from "./legacy-excel-policy";
+import type { LegacyExcelProvenance, StoredLegacyExcelReceipt } from "./legacy-excel-policy";
 import { createInflateRaw } from "node:zlib";
 
 export type SupportedUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
@@ -16,6 +16,7 @@ export type ValidatedUpload = {
   sha256: string;
   officeEntries: number | null;
   legacyExcel?: LegacyExcelProvenance;
+  storedLegacyExcel?: StoredLegacyExcelReceipt;
 };
 
 export class UploadValidationError extends Error {

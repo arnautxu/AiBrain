@@ -5,9 +5,11 @@ import JSZip from "jszip";
 import { SaxesParser } from "saxes";
 import { readRegularFileWithin } from "@/security/safe-file";
 import { supportsNativeLegacyExcel } from "./legacy-excel-native-profile";
+import { inspectLegacyExcelForStorage } from "./legacy-excel-validation";
+import { STORED_XLS_NOTICE, parseStoredLegacyExcelReceipt } from "./legacy-excel-policy";
 import { preparePassiveLegacyExcelUpload } from "./legacy-excel-passive";
 import { convertLegacyExcelToXlsx } from "./legacy-excel-conversion";
-import { UploadValidationError, validateUploadedDocument, safeFileName } from "./upload-validation";
+import { UploadValidationError, validateUploadedDocument, safeFileName, type ValidatedUpload } from "./upload-validation";
 import { StorageError, type ResourceLockManager } from "@/storage";
 import type { FileDocumentStagingStore } from "./staging-store";
 
@@ -114,14 +116,31 @@ export async function stageLegacyExcelUpload(
     } catch (error) { if (!missing(error)) throw error; }
     try {
       const staged = await options.staging.resolveContentById(input.threadId, input.uploadId);
-      if (!originalExists || staged.document.kind !== "xlsx") throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Upload id has no matching legacy provenance.");
+      if (!originalExists || (staged.document.kind !== "xlsx" && !staged.document.storedLegacyExcel)) throw new StorageError("STORAGE_STAGING_ID_CONFLICT", "Upload id has no matching legacy provenance.");
+      const provenance = staged.document.storedLegacyExcel ?? staged.document.legacyExcel;
+      if (provenance && (provenance.originalSha256 !== sha256 || provenance.originalFileName !== fileName || provenance.originalSize !== bytes.length)) {
+        throw new StorageError("STORAGE_STAGING_CONTENT_CORRUPT", "Legacy receipt no longer matches its original.");
+      }
       const content = await readRegularFileWithin(options.staging.rootDirectory, staged.document.relativePath, 50 * 1024 * 1024);
       if (createHash("sha256").update(content).digest("hex") !== staged.document.sha256) throw new StorageError("STORAGE_STAGING_CONTENT_CORRUPT", "Stored derivative no longer matches its identity.");
       return staged.document;
     } catch (error) { if (!missing(error)) throw error; }
-    const prepared = await prepareLegacyExcelUpload(input, options);
+    inspectLegacyExcelForStorage(bytes);
+    // Admission and preservation precede optional processing. Never expose this
+    // private original through staging, previews, worker mounts or converter fallbacks.
+    const originalValidated: ValidatedUpload = { kind: "xls", fileName, mediaType: "application/vnd.ms-excel", size: bytes.length, sha256, officeEntries: null };
+    await options.originals.stageFile({ threadId: input.threadId, uploadId: input.uploadId, validated: originalValidated, sourcePath: input.filePath });
+    let prepared: Awaited<ReturnType<typeof prepareLegacyExcelUpload>>;
+    try {
+      prepared = await prepareLegacyExcelUpload(input, options);
+    } catch (error) {
+      if (options.signal?.aborted || (error instanceof StorageError && error.code === "DOCUMENT_OPERATION_ABORTED")) throw error;
+      const storedLegacyExcel = parseStoredLegacyExcelReceipt({ status: "unavailable", originalFileName: fileName, originalSha256: sha256, originalSize: bytes.length });
+      const data = Buffer.from(`${STORED_XLS_NOTICE}\nEl original permanece intacto en almacenamiento privado. Este archivo es únicamente el comprobante de estado, no contiene celdas ni resultados. No se han ejecutado macros ni actualizado enlaces. No deduzcas datos ni resultados del libro a partir de este comprobante.\n`);
+      const validated: ValidatedUpload = { ...validateUploadedDocument({ data, fileName: `${fileName.slice(0, 105)}.xls-status.txt`, declaredMimeType: "text/plain" }), storedLegacyExcel };
+      return options.staging.stage({ threadId: input.threadId, uploadId: input.uploadId, validated, data });
+    }
     if (prepared.originalValidated.sha256 !== sha256) throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Original changed during preparation.");
-    await options.originals.stageFile({ threadId: input.threadId, uploadId: input.uploadId, validated: prepared.originalValidated, sourcePath: input.filePath });
     return options.staging.stage({ threadId: input.threadId, uploadId: input.uploadId, validated: prepared.validated, data: prepared.data });
   });
 }

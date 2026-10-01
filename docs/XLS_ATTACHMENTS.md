@@ -1,52 +1,53 @@
 # Legacy Excel attachments
 
-The document upload boundary accepts binary Excel 97-2003 BIFF8 `.xls` files
-with `application/vnd.ms-excel`, up to 16 MiB. Original bytes, hash, filename
-and format are retained. They use the existing isolated LibreOffice PDF/PNG preview path. After turn
-attachment authorization and hash verification, a separate conversion prepares
-an XLSX working copy under the private turn workspace. User and project
-authorization is unchanged. The conversion shares installation-wide admission,
-uses the networkless headless/safe-mode launcher with a private profile, and
-has a 60-second timeout, cancellation and bounded output validation. Its temporary
-source/profile directory is removed on success and failure. Failed conversions
-abort preparation rather than silently substituting a reconstructed table.
+Upload acceptance and processing are separate. A bounded binary `.xls` is
+preserved privately before processing. Formulas, AutoFilter controls, macros,
+external links, encryption or an unsupported processor feature do not by
+themselves discard the attachment. Storage still enforces the 16 MiB limit,
+filename/MIME agreement, CFB allocation graph, workbook identity and record
+bounds. Corrupt containers, renamed executables and HTML/CSV masquerading as XLS
+are rejected. Current storage supports CFB v3 with BIFF5/BIFF8 workbook headers;
+this is not a claim to support every historical Excel encoding.
 
-The model is instructed to edit that existing workbook, preserve sheets,
-formulas, merges, styles and print settings, save a final `documents/*.xlsx` and
-invoke the existing durable `aibrain_documents.deliver` path. The upload remains
-XLS, while the edited XLSX is a separate durable downloadable artifact, not a
-replacement XLS upload version. Source and working-copy hashes are distinguished.
-Conversion does not guarantee full fidelity for every customer workbook; this
-must be checked against the actual supplied workbook before customer acceptance.
+The original goes to the existing per-user private legacy vault, outside all
+worker/browser mounts. It is never an executable fallback or a preview input.
+Permissions, owner resolution, storage admission and original hash checks are
+unchanged. Reusing an upload ID with different original bytes remains a conflict.
 
-A bounded CFB allocation-chain and BIFF record inspection rejects cycles,
-truncation, mismatched formats, encryption, VBA, Excel 4 macro sheets, embedded
-objects and unsupported compound streams. This intentionally does not accept
-HTML/CSV renamed to `.xls`, older BIFF versions, chart sheets or macro workbooks.
-The knowledge-catalogue XLS reader is a separate path and is unchanged.
+Processing has three explicit outcomes:
 
-Validation: run `npx vitest run src/documents tests/integration/document-routes.integration.test.ts`
-and `npm run typecheck`. With LibreOffice and Poppler installed, run
-`npx vitest run tests/integration/document-preview.integration.test.ts -t 'real XLS'`.
-That test checks real PDF/PNG output, readable turn inputs and unchanged source bytes.
-With an openpyxl-capable Python, set `AIBRAIN_XLS_EDIT_TEST_PYTHON` and run the
-same integration file with `-t 'editable XLSX'` to check conversion plus editing:
-two named sheets, a formula, merged cells, values, styles, column width, print
-area and page orientation must survive. The fixture is synthetic and is not
-customer-file acceptance.
+- A recognized BIFF8 workbook follows the existing isolated native conversion,
+  preserving supported local formulas, AutoFilter and workbook presentation in
+  an independently validated XLSX. The model edits that copy and returns XLSX.
+- Other supported BIFF8 workbooks use the isolated passive reader. It reads only
+  the bounded Workbook stream and generates a new values-only XLSX. VBA, XLM,
+  embedded payloads and external-link refresh are never executed. Formula text
+  and saved results carry the existing unverified-data notice.
+- If processing is unavailable or fails, the original remains intact and the
+  upload succeeds with `storedLegacyExcel.status=unavailable`. The composer says
+  **Original guardado · procesamiento no disponible**. Staging contains only a
+  generated text receipt, explicitly stating that no cells/results were read.
+  The chat can receive that status without receiving original executable bytes
+  or inventing workbook contents. Encrypted/BIFF5 inputs take this path without
+  invoking a reader. A retry of the same upload ID returns the same receipt;
+  it does not silently restart processing.
 
-CI native-document tests install pinned `openpyxl==3.1.5` and set
-`AIBRAIN_XLS_EDIT_TEST_PYTHON=/usr/bin/python3` so the structural editing and
-durable download tests run rather than skip. This is a test-only dependency.
+Optional preview rendering failure also preserves an accepted XLS upload. Its
+response has `originalStored=true`, `preview.status=unavailable` and no preview
+URLs. Cancellation, identity/integrity failures and storage failures retain
+their error behavior. Successful conversions retain their usable derivative.
 
-Local evidence (2026-09-30): bounded conversion and workspace tests, typecheck,
-and real LibreOffice 26.8.0.3 XLS preview/conversion/edit tests. See the current
-commit handoff for exact passing results; none of these establishes deployment.
-The real private workflow also edits a converted fixture, delivers it through
-the normal artifact tool, reads the exact edited bytes through the authenticated
-artifact download route after deleting the mutable output, and denies a second
-user. This is local authenticated route evidence, not an Arnall live session.
-Backend CI, GHCR publication, deployment and an authenticated Arnall XLS upload
-remain separate release gates. Local implementation does not establish live support.
+No original is rewritten. Native conversion fidelity is checked against the
+actual supplied workbook, not assumed. Passive data must not be described as
+verified or current, and an unavailable processing receipt is not workbook data.
+The separate knowledge-catalogue XLS reader is unchanged.
 
-Live release acceptance identified one additional persistence boundary: chat attachment MIME validation must accept `application/vnd.ms-excel` after server-side document validation. A filesystem-store regression verifies durable XLS attachment readback after restart and denies a different user access. Upload validation and image-only inline input restrictions remain enforced.
+Validation: `npm exec vitest run src/documents tests/integration/document-routes.integration.test.ts`
+and `npm run typecheck`. Route regressions exercise private original retention,
+native/passive outcomes, processor and preview failures, stable retries and
+cross-user denial. Receipt tests prove unsupported/encrypted files invoke no
+processor and never enter the turn workbook workspace. Container acceptance
+separately checks real isolated native/passive tooling on synthetic fixtures.
+Real customer-file conversion, CI, publication, deployment and authenticated
+live XLS upload remain separate evidence; local tests do not establish live
+acceptance.

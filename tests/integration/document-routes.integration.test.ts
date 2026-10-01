@@ -300,23 +300,65 @@ describe("authenticated document routes", () => {
     } finally { run.mockRestore(); preview.mockRestore(); }
   }, 20_000);
 
-  it("does not stage or disclose original data when the passive reader fails", async () => {
+  it.each(["passive", "native"])("keeps the original and an explicit receipt when the %s processor fails", async mode => {
     const { SystemDocumentToolRunner } = await import("@/documents/preview-service");
     const { POST } = await import("@/app/api/threads/[threadId]/documents/route");
     const run = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockRejectedValue(new Error("PRIVATE_INPUT_MUST_NOT_ESCAPE"));
     try {
       auth.session = session(USER_A);
-      const bytes = await readFile("tests/fixtures/legacy-passive-links-macros.xls");
-      const response = await POST(uploadRequest(BAD_UPLOAD_ID, new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/vnd.ms-excel" })), { params: Promise.resolve({ threadId }) });
-      expect(response.status).toBe(400);
-      const body = await response.json(); expect(body.code).toBe("UPLOAD_PASSIVE_XLS_UNREADABLE");
+      const id = mode === "passive" ? BAD_UPLOAD_ID : "0198b9f0-6631-7000-8000-000000000593";
+      const bytes = await readFile(`tests/fixtures/${mode === "passive" ? "legacy-passive-links-macros" : "legacy-autofilter"}.xls`);
+      const request = () => uploadRequest(id, new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/vnd.ms-excel" }));
+      const response = await POST(request(), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(() => assertUiContract("DocumentUploadResponse", body)).not.toThrow();
+      const { parseDocumentUploadResponse } = await import("@/ui/document-ui-adapter");
+      expect(parseDocumentUploadResponse(body)?.document.storedLegacyExcel).toMatchObject({ status: "unavailable", originalFileName: "fixture.xls", originalSize: bytes.length });
+      expect(body.document.kind).toBe("text");
       expect(JSON.stringify(body)).not.toContain("PRIVATE_INPUT");
       const { documentServicesForUser } = await import("@/documents/server-service");
       const { loadInstallationConfig } = await import("@/config/installation");
       const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
-      await expect(services.staging.readById(threadId, BAD_UPLOAD_ID)).rejects.toThrow();
-      await expect(services.legacyOriginals.readById(threadId, BAD_UPLOAD_ID)).rejects.toThrow();
+      const stored = await services.legacyOriginals.resolveContentById(threadId, id);
+      expect(await readFile(stored.absolutePath)).toEqual(bytes);
+      const receipt = await services.staging.resolveContentById(threadId, id);
+      const receiptBytes = await readFile(receipt.absolutePath);
+      expect(receiptBytes.toString()).toContain("procesamiento no está disponible");
+      expect(receiptBytes.includes(Buffer.from("INERT_TEST_VBA_PAYLOAD"))).toBe(false);
+      expect(receiptBytes.includes(Buffer.from("PRIVATE_INPUT"))).toBe(false);
+      expect((await POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(201);
+      expect(run).toHaveBeenCalledOnce();
+      expect((await services.staging.readById(threadId, id)).sha256).toBe(receipt.document.sha256);
+      auth.session = session(USER_B);
+      expect((await POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(404);
     } finally { run.mockRestore(); }
+  });
+
+  it("accepts a converted XLS when optional preview rendering fails", async () => {
+    const { SystemDocumentToolRunner, DocumentPreviewService } = await import("@/documents/preview-service");
+    const { POST } = await import("@/app/api/threads/[threadId]/documents/route");
+    const { generateLocalDocument } = await import("@/runtime/documents/local-document-generator");
+    const { parseDocumentUploadResponse } = await import("@/ui/document-ui-adapter");
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic", content: "Synthetic", rows: [["Fixture", 12.5]] });
+    const run = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockImplementation(async (_command, _args, options) => {
+      await writeFile(path.join(options.cwd, "source.xlsx"), generated.data, { mode: 0o600 });
+      return { stdout: "", stderr: "" };
+    });
+    const preview = vi.spyOn(DocumentPreviewService.prototype, "create").mockRejectedValue(new Error("PRIVATE_RENDER_ERROR"));
+    try {
+      auth.session = session(USER_A);
+      const bytes = await readFile("tests/fixtures/legacy-autofilter.xls");
+      const response = await POST(uploadRequest("0198b9f0-6631-7000-8000-000000000594", new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/vnd.ms-excel" })), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(() => assertUiContract("DocumentUploadResponse", body)).not.toThrow();
+      expect(parseDocumentUploadResponse(body)).toMatchObject({ originalStored: true, document: { kind: "xlsx" }, preview: { status: "unavailable", files: [] } });
+      expect(JSON.stringify(body)).not.toContain("PRIVATE_RENDER_ERROR");
+      const invalid = structuredClone(body); delete invalid.originalStored;
+      expect(parseDocumentUploadResponse(invalid)).toBeNull();
+      expect(() => assertUiContract("DocumentUploadResponse", invalid)).toThrow();
+    } finally { run.mockRestore(); preview.mockRestore(); }
   });
 
   // This is a real filesystem route roundtrip with seven serialized durable
