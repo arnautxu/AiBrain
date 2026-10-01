@@ -13,6 +13,17 @@ const validate = (data: Buffer, fileName = "horaris.xls", declaredMimeType = "ap
   validateUploadedDocument({ data, fileName, declaredMimeType });
 
 describe("legacy Excel attachments", () => {
+  it("accepts a structurally validated XLS sent with a generic binary MIME", async () => {
+    const data = await fixture();
+    const expected = validate(data);
+    expect(validate(data, "horaris.xls", "application/octet-stream")).toEqual(expected);
+    const directory = await mkdtemp(path.join(tmpdir(), "xls-binary-mime-"));
+    try {
+      const filePath = path.join(directory, "horaris.xls");
+      await writeFile(filePath, data, { mode: 0o600 });
+      expect(await validateUploadedDocumentFile({ filePath, fileName: "horaris.xls", declaredMimeType: "application/octet-stream" })).toEqual(expected);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
   it("accepts a real Unicode, multi-sheet BIFF8 workbook and preserves its original hash", async () => {
     const data = await fixture();
     const result = validate(data);
@@ -58,6 +69,48 @@ describe("legacy Excel attachments", () => {
     const directory = cyclic.readUInt32LE(48);
     cyclic.writeUInt32LE(directory, (fat + 1) * 512 + directory * 4);
     expect(() => validate(cyclic)).toThrow();
+  });
+  it("keeps generic binary MIME subject to filename, CFB and active-content rejection", async () => {
+    const data = await fixture();
+    const xlsx = await generateLocalDocument({ format: "xlsx", title: "Fixture", content: "Synthetic workbook", rows: [["Test", 12.5]] });
+    expect(() => validate(xlsx.data, "renamed.xls", "application/octet-stream")).toThrow();
+    expect(() => validate(xlsx.data, "original.xlsx", "application/octet-stream")).toThrow();
+    const invalid: Buffer[] = [Buffer.from("renamed plain text"), data.subarray(0, 512)];
+    const cyclic = Buffer.from(data);
+    cyclic.writeUInt32LE(data.readUInt32LE(48), (data.readUInt32LE(76) + 1) * 512 + data.readUInt32LE(48) * 4);
+    invalid.push(cyclic);
+    const macro = Buffer.from(data);
+    const directoryOffset = (data.readUInt32LE(48) + 1) * 512;
+    Buffer.from("_VBA_PROJECT_CUR\0", "utf16le").copy(macro, directoryOffset + 128);
+    macro.writeUInt16LE(34, directoryOffset + 128 + 64);
+    invalid.push(macro);
+    const bof = data.indexOf(Buffer.from("0908100000060500", "hex"));
+    expect(bof).toBeGreaterThan(0);
+    for (const id of [0x002f, 0x00d3, 0x01ba, 0x01b8, 0x005d]) {
+      const active = Buffer.from(data);
+      active.writeUInt16LE(id, bof + 20);
+      invalid.push(active);
+    }
+    const macroSheet = Buffer.from(data);
+    const sheetBof = data.indexOf(Buffer.from("0908100000061000", "hex"));
+    expect(sheetBof).toBeGreaterThan(0);
+    macroSheet.writeUInt16LE(0x0040, sheetBof + 6);
+    invalid.push(macroSheet);
+    const directory = await mkdtemp(path.join(tmpdir(), "xls-rejected-binary-"));
+    try {
+      const filePath = path.join(directory, "unsafe.xls");
+      for (const bytes of invalid) {
+        expect(() => validate(bytes, "unsafe.xls", "application/octet-stream")).toThrow();
+        await writeFile(filePath, bytes, { mode: 0o600 });
+        await expect(validateUploadedDocumentFile({ filePath, fileName: "unsafe.xls", declaredMimeType: "application/octet-stream" })).rejects.toThrow();
+      }
+      for (const fileName of ["renamed.xlsx", "renamed.doc", "renamed.exe"]) {
+        expect(() => validate(data, fileName, "application/octet-stream")).toThrow();
+      }
+      for (const mime of ["", "application/pdf", "application/x-executable"]) {
+        expect(() => validate(data, "unsafe.xls", mime)).toThrow();
+      }
+    } finally { await rm(directory, { recursive: true, force: true }); }
   });
   it("rejects VBA storages, encryption and Excel 4 macro sheets", async () => {
     const data = await fixture();
