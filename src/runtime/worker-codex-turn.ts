@@ -1,3 +1,4 @@
+import { INSTANTLY_DYNAMIC_TOOLS, INSTANTLY_NAMESPACE, handleInstantlyTool } from "@/runtime/instantly-dynamic-tools";
 import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
 import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "@/runtime/turn-submission-store";
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
@@ -824,6 +825,7 @@ export async function runWorkerCodexTurn(
       runtimeIdentitySession ?? automationSession,
     )
     : [];
+  const instantlySelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === "instantly");
   const gmailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
   const outlookSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === OUTLOOK_CONNECTOR_ID);
   // App Server's per-thread app configuration is the enforceable toolset
@@ -1037,6 +1039,7 @@ export async function runWorkerCodexTurn(
               ...DOCUMENT_DYNAMIC_TOOLS,
               ...(enterpriseDocumentNetwork ? COMPANY_FILES_DYNAMIC_TOOLS : []),
               ...GMAIL_DYNAMIC_TOOLS,
+              ...(runtime.config.connectors?.instantly?.enabled ? INSTANTLY_DYNAMIC_TOOLS : []),
               ...OUTLOOK_DYNAMIC_TOOLS,
               ...(runtime.config.connectors?.composio?.toolkits.length ? COMPOSIO_DYNAMIC_TOOLS : []),
               ...(automationSession ? AUTOMATION_DYNAMIC_TOOLS : []),
@@ -1884,6 +1887,12 @@ export async function runWorkerCodexTurn(
               },
               runtimeThreadId: threadId,
               runtimeTurnId,
+            }) as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === INSTANTLY_NAMESPACE) {
+            return await handleInstantlyTool(request.params as never, {
+              config: runtime.config, installationId, userId: authenticatedUserId,
+              runtimeThreadId: threadId, runtimeTurnId, instantlySelected,
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === COMPOSIO_NAMESPACE) {

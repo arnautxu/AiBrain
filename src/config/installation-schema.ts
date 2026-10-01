@@ -48,6 +48,7 @@ export type InstallationConnectors = {
   composio?: { toolkits: ComposioToolkitConfig[] };
   gmail?: GmailConnectorConfig;
   outlook?: OutlookConnectorConfig;
+  instantly?: { enabled: boolean; workspaceId: string };
 };
 
 /** Immutable GraphikAI baseline; workspace admins may not modify it through the catalog API. */
@@ -108,7 +109,7 @@ const PATH_KEYS = [
   "backupsRoot",
 ] as const;
 
-const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook", "composio"] as const;
+const CONNECTOR_KEYS = ["codexManagedAppAction", "gmail", "outlook", "composio", "instantly"] as const;
 const CODEX_MANAGED_APP_ACTION_KEYS = ["appId", "server", "tool", "arguments", "correlationField", "readback"] as const;
 const CODEX_MANAGED_APP_READBACK_KEYS = ["server", "tool", "arguments", "correlationArgument"] as const;
 const MCP_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
@@ -451,6 +452,14 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       }
     }
   }
+  let instantly: InstallationConnectors["instantly"];
+  if (value.instantly !== undefined) {
+    const candidate = value.instantly;
+    if (!isRecord(candidate) || Object.keys(candidate).sort().join() !== "enabled,workspaceId" ||
+        typeof candidate.enabled !== "boolean" || typeof candidate.workspaceId !== "string" || !MICROSOFT_TENANT_ID.test(candidate.workspaceId)) {
+      issues.push({ path: "$.connectors.instantly", message: "requiere enabled y UUID exacto del workspace; sin credenciales" });
+    } else instantly = { enabled: candidate.enabled, workspaceId: candidate.workspaceId.toLowerCase() };
+  }
   let composio: InstallationConnectors["composio"];
   if (value.composio !== undefined) {
     const candidate = value.composio;
@@ -461,11 +470,11 @@ function parseConnectors(value: unknown, issues: InstallationConfigIssue[]): Ins
       issues.push({ path: "$.connectors.composio", message: "requiere toolkits revisados, auth config, scopes y herramientas de lectura con versión fija" });
     } else composio = { toolkits: candidate.toolkits };
   }
-  if (!codexManagedAppAction && !gmail && !outlook && !composio) {
+  if (!codexManagedAppAction && !gmail && !outlook && !composio && !instantly) {
     issues.push({ path: "$.connectors", message: "debe configurar al menos un conector" });
     return undefined;
   }
-  return { ...(composio ? { composio } : {}), ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
+  return { ...(instantly ? { instantly } : {}), ...(composio ? { composio } : {}), ...(codexManagedAppAction ? { codexManagedAppAction } : {}), ...(gmail ? { gmail } : {}), ...(outlook ? { outlook } : {}) };
 }
 
 function parseCatalog(value: unknown, issues: InstallationConfigIssue[]): InstallationCatalog | undefined {
@@ -500,6 +509,7 @@ function freezeInstallationConfig(config: InstallationConfig): Readonly<Installa
       Object.freeze(config.connectors.codexManagedAppAction.readback);
       Object.freeze(config.connectors.codexManagedAppAction);
     }
+    if (config.connectors.instantly) Object.freeze(config.connectors.instantly);
     if (config.connectors.gmail) Object.freeze(config.connectors.gmail);
     if (config.connectors.outlook) Object.freeze(config.connectors.outlook);
     if (config.connectors.composio) {
