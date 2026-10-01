@@ -1,3 +1,4 @@
+import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
 import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
@@ -976,6 +977,14 @@ export async function runWorkerCodexTurn(
     if (quotaToolPermissions) attestQuotaToolPermissions(runtime.client, result, quotaToolPermissions);
     await persistThreadIdentity(result, envelope);
   };
+  const recoverThreadRequest = (
+    method: "thread/read" | "thread/resume",
+    params: Record<string, unknown>,
+    purpose: string,
+    timeoutMs: number,
+    beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
+  ) => requestPagedThreadRecovery(runtime.client, method, params, purpose, timeoutMs,
+    chatRequest.userMessageId, beforeResolve);
   let threadResult: JsonValue;
   if (reuseLoadedThread && runtimeThreadId) {
     threadResult = { thread: { id: runtimeThreadId, turns: [] } };
@@ -999,7 +1008,7 @@ export async function runWorkerCodexTurn(
     );
     try {
       threadResult = await telemetry.measure(runtimeThreadId ? "thread_resume" : "thread_start", () => runtimeThreadId
-        ? runtime.client.request("thread/resume", {
+        ? recoverThreadRequest("thread/resume", {
             threadId: runtimeThreadId,
             ...commonThreadParams,
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity)
@@ -1051,7 +1060,7 @@ export async function runWorkerCodexTurn(
             "La reanudación ha tardado demasiado; leyendo el estado durable antes de repetirla",
           );
           const recoveredResult = await requestWithLateResponseRecovery(
-            () => runtime.client.request(
+            () => recoverThreadRequest(
               "thread/read",
               { threadId: runtimeThreadId, includeTurns: true },
               `thread-resume-recover:${chatRequest.assistantMessageId}`,
@@ -1078,7 +1087,7 @@ export async function runWorkerCodexTurn(
               "Reanudando la conversación",
               "El estado durable se ha verificado; reconectando una sola vez",
             );
-            threadResult = await telemetry.measure("thread_resume", () => runtime.client.request("thread/resume", {
+            threadResult = await telemetry.measure("thread_resume", () => recoverThreadRequest("thread/resume", {
               threadId: runtimeThreadId,
               ...commonThreadParams,
             }, `thread-resume-retry:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity));
@@ -1178,7 +1187,7 @@ export async function runWorkerCodexTurn(
         if (terminalTurnStatus) return;
         let recoveryEnvelope: AppServerEvent | null = null;
         const result = await requestWithLateResponseRecovery(
-          () => runtime.client.request(
+          () => recoverThreadRequest(
             "thread/read",
             { threadId, includeTurns: true },
             `turn-final-answer-reconcile:${chatRequest.assistantMessageId}`,
@@ -1223,7 +1232,7 @@ export async function runWorkerCodexTurn(
         let recoveryEnvelope: AppServerEvent | null = null;
         let recoveredDocumentTurn: RecoveredTurn | null = null;
         try {
-          const result = await runtime.client.request(
+          const result = await recoverThreadRequest(
             "thread/read",
             { threadId, includeTurns: true },
             `turn-document-reconcile:${chatRequest.assistantMessageId}`,
@@ -2142,7 +2151,7 @@ export async function runWorkerCodexTurn(
           );
           let recoveryEnvelope: AppServerEvent | null = null;
           const recoveredResult = await requestWithLateResponseRecovery(
-            () => runtime.client.request(
+            () => recoverThreadRequest(
               "thread/read",
               { threadId, includeTurns: true },
               `turn-recover:${chatRequest.assistantMessageId}`,
@@ -2214,7 +2223,7 @@ export async function runWorkerCodexTurn(
       let recoveryEnvelope: AppServerEvent | null = null;
       try {
         const recoveredResult = await requestWithLateResponseRecovery(
-          () => runtime.client.request(
+          () => recoverThreadRequest(
             "thread/read",
             { threadId, includeTurns: true },
             `turn-watchdog-read:${chatRequest.assistantMessageId}`,
