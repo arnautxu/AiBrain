@@ -31,6 +31,7 @@ import type {
   WorkerRuntimeFactory,
 } from "@/runtime/workers/types";
 import { quotaToolPermissionConfigOverrides } from "@/runtime/quota-tool-permissions";
+import type { SharedAuthProvider, SharedAuthTokens } from "./shared-auth-broker";
 import {
   defineVersionedSchema,
   expectIsoDate,
@@ -299,6 +300,7 @@ class GatewayRequestLedger {
 
 export type PrivateWorkerGatewayOptions = {
   context: WorkerLaunchContext;
+  sharedAuth?: SharedAuthProvider;
   processFactory?: (context: WorkerLaunchContext) => ChildProcessWithoutNullStreams;
   configOverrides?: readonly string[];
   now?: () => number;
@@ -319,6 +321,9 @@ export class PrivateWorkerGateway {
   endpoint: string | null = null;
 
   private readonly now: () => number;
+  private readonly sharedAuth?: SharedAuthProvider;
+  private authTokens: SharedAuthTokens | null = null;
+  private readonly privateRequests = new Map<string, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   private readonly processFactory: NonNullable<PrivateWorkerGatewayOptions["processFactory"]>;
   private readonly locks: ResourceLockManager;
   private readonly events: FileTransportEventJournal;
@@ -353,6 +358,7 @@ export class PrivateWorkerGateway {
 
   constructor(options: PrivateWorkerGatewayOptions) {
     this.context = options.context;
+    this.sharedAuth = options.sharedAuth;
     this.now = options.now ?? Date.now;
     this.token = randomBytes(32).toString("base64url");
     this.locks = new ResourceLockManager({
@@ -412,6 +418,9 @@ export class PrivateWorkerGateway {
           this.fail(new Error("Codex App Server line exceeds the safety limit."));
           return;
         }
+        // Secret-bearing login/refresh RPCs use a private stdio lane. They
+        // must never enter either the gateway or client durable journals.
+        if (this.consumePrivateAuthLine(line)) return;
         this.appServerOutputLines.push(line);
         if (this.drainingAppServerOutput) return;
         this.drainingAppServerOutput = true;
@@ -430,6 +439,14 @@ export class PrivateWorkerGateway {
       this.child.once("exit", (code, signal) => {
         if (!this.retired && !this.stopping) this.fail(new Error(`Codex App Server exited (${code ?? signal ?? "unknown"}).`));
       });
+
+      if (this.sharedAuth) {
+        await this.privateRequest("initialize", { clientInfo: { name: "aibrain_workbench", version: "0.4.0" }, capabilities: { experimentalApi: true } });
+        await this.writePrivateRpc({ method: "initialized" });
+        this.authTokens = await this.sharedAuth();
+        const login = await this.privateRequest("account/login/start", { type: "chatgptAuthTokens", ...this.authTokens });
+        if (!isRecord(login) || login.type !== "chatgptAuthTokens") throw new Error("Shared external authentication was not accepted.");
+      }
 
       this.server = createServer((_, response) => {
         response.writeHead(404, { "Content-Type": "text/plain", "Cache-Control": "no-store" });
@@ -485,8 +502,59 @@ export class PrivateWorkerGateway {
     };
   }
 
+  private async writePrivateRpc(rpc: unknown) {
+    if (this.retired || !this.child?.stdin.writable) throw new Error("Private authentication channel is unavailable.");
+    const child = this.child;
+    await new Promise<void>((resolve, reject) => child.stdin.write(`${JSON.stringify(rpc)}\n`, error => error ? reject(new Error("Private authentication write failed.")) : resolve()));
+  }
+
+  private async privateRequest(method: string, params: unknown) {
+    const id = `private-auth:${randomUUID()}`;
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => { this.privateRequests.delete(id); reject(new Error("Private authentication request timed out.")); }, 8_000);
+      this.privateRequests.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value); },
+        reject: error => { clearTimeout(timer); reject(error); },
+      });
+      void this.writePrivateRpc({ id, method, params }).catch(error => {
+        const pending = this.privateRequests.get(id); this.privateRequests.delete(id); pending?.reject(error);
+      });
+    });
+  }
+
+  private consumePrivateAuthLine(line: string) {
+    if (!this.sharedAuth) return false;
+    let rpc: Record<string, unknown>;
+    try { rpc = JSON.parse(line); } catch { return false; }
+    if (!isRecord(rpc)) return false;
+    if (typeof rpc.id === "string" && rpc.id.startsWith("private-auth:")) {
+      const pending = this.privateRequests.get(rpc.id);
+      this.privateRequests.delete(rpc.id);
+      if (rpc.error) pending?.reject(new Error("Private authentication was rejected.")); else pending?.resolve(rpc.result);
+      return true;
+    }
+    if (rpc.method !== "account/chatgptAuthTokens/refresh") return false;
+    const id = rpc.id;
+    const params = rpc.params;
+    if ((typeof id !== "string" && typeof id !== "number") || !isRecord(params) || params.reason !== "unauthorized" ||
+        (params.previousAccountId != null && typeof params.previousAccountId !== "string")) {
+      this.fail(new Error("Private authentication refresh request is invalid."));
+      return true;
+    }
+    // Do not block the output lane while the sole credential owner renews.
+    void this.sharedAuth(params.previousAccountId as string | null | undefined, this.authTokens?.accessToken).then(async tokens => {
+      this.authTokens = tokens;
+      await this.writePrivateRpc({ id, result: tokens });
+    }).catch(async () => {
+      await this.writePrivateRpc({ id, error: { code: -32603, message: "La sesión requiere reconexión del administrador." } }).catch(() => undefined);
+    });
+    return true;
+  }
+
   async stop() {
     this.retired = true;
+    for (const pending of this.privateRequests.values()) pending.reject(new Error("Private authentication channel closed."));
+    this.privateRequests.clear();
     if (this.stopPromise) return this.stopPromise;
     if (this.state === "stopped") return;
     this.stopPromise = this.stopOnce().finally(() => { this.stopPromise = null; });
@@ -852,6 +920,8 @@ export class PrivateWorkerGateway {
 
   private fail(error: unknown) {
     if (this.retired) return;
+    for (const pending of this.privateRequests.values()) pending.reject(new Error("Private authentication channel failed."));
+    this.privateRequests.clear();
     this.lastError = safeError(error);
     this.state = "failed";
     this.activeSocket?.close(1011, "Worker runtime failure");
@@ -923,6 +993,7 @@ class DeferredAppServerTransport implements AppServerTransport {
 }
 
 export type LocalGatewayWorkerRuntimeFactoryOptions = {
+  sharedAuth?: SharedAuthProvider;
   processFactory?: PrivateWorkerGatewayOptions["processFactory"];
   quotaToolPrivacy?: boolean;
   now?: () => number;
@@ -973,6 +1044,7 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
     };
     const gateway = new PrivateWorkerGateway({
       context: isolatedContext,
+      sharedAuth: this.options.sharedAuth,
       processFactory: this.options.processFactory,
       configOverrides,
       now: this.options.now,

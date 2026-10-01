@@ -193,7 +193,7 @@ describe("private per-user worker gateway", () => {
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  function gateway(options: { maxRetainedCompletedRequests?: number } = {}) {
+  function gateway(options: { maxRetainedCompletedRequests?: number; sharedAuth?: import("./shared-auth-broker").SharedAuthProvider } = {}) {
     return new PrivateWorkerGateway({
       context,
       ...options,
@@ -204,6 +204,39 @@ describe("private per-user worker gateway", () => {
       }),
     });
   }
+
+  it("handles external login and renewal privately without writing access tokens to either journal", async () => {
+    await writeFile(fakeServer, [
+      'import { createInterface } from "node:readline";',
+      'const write = value => process.stdout.write(JSON.stringify(value) + "\\n");',
+      'let initialized = false; let loginToken; let pending;',
+      'createInterface({ input: process.stdin }).on("line", line => {',
+      'const rpc = JSON.parse(line);',
+      'if (rpc.method === "initialize") { write(initialized ? {id:rpc.id,error:{code:-32600,message:"Already initialized"}} : {id:rpc.id,result:{}}); initialized=true; }',
+      'else if (rpc.method === "account/login/start") { loginToken=rpc.params.accessToken; write({id:rpc.id,result:{type:"chatgptAuthTokens"}}); }',
+      'else if (rpc.method === "account/read") { pending=rpc.id; write({id:"private-renewal",method:"account/chatgptAuthTokens/refresh",params:{reason:"unauthorized",previousAccountId:"qa-account"}}); }',
+      'else if (rpc.id === "private-renewal") { write({id:pending,result:{renewed:Boolean(rpc.result?.accessToken && rpc.result.accessToken !== loginToken)}}); }',
+      '});',
+    ].join("\n"), { mode: 0o600 });
+    const provider = vi.fn(async (_account?: string | null, rejected?: string) => ({
+      accessToken: rejected ? "private-replacement-token" : "private-initial-token",
+      chatgptAccountId: "qa-account", chatgptPlanType: "business",
+    }));
+    const worker = gateway({ sharedAuth: provider });
+    await worker.start();
+    const client = transport(worker);
+    const router = new AppServerRpcRouter(client);
+    try {
+      await expect(router.request({ method: "account/read", id: "public-probe", params: { refreshToken: false } }, 3_000)).resolves.toEqual({ renewed: true });
+      expect(provider).toHaveBeenLastCalledWith("qa-account", "private-initial-token");
+      for (const name of ["gateway-events.jsonl", "gateway-requests.jsonl", "test-client-events.jsonl"]) {
+        const bytes = await readFile(path.join(context.transportAudit, name), "utf8");
+        expect(bytes).not.toContain("private-initial-token");
+        expect(bytes).not.toContain("private-replacement-token");
+        expect(bytes).not.toContain("account/chatgptAuthTokens/refresh");
+      }
+    } finally { await router.close(); await worker.stop(); }
+  });
 
   function transport(worker: PrivateWorkerGateway) {
     if (!worker.endpoint) throw new Error("Gateway did not start.");
