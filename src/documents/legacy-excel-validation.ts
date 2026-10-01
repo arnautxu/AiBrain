@@ -10,7 +10,7 @@ function reject(code = "UPLOAD_OFFICE_INVALID"): never {
 }
 
 /** Bounded CFB graph reader. Passive callers receive only the root Workbook stream. */
-function readLegacyContainer(data: Buffer, passive: boolean) {
+function readLegacyContainer(data: Buffer, passive: boolean, storageOnly = false) {
   if (data.length > 16 * 1024 * 1024) reject("UPLOAD_SIZE_INVALID");
   if (data.length < 512 || !isLegacyExcelContainer(data)) reject();
   // Excel 97-2003 uses CFB v3, 512-byte sectors and 64-byte mini sectors.
@@ -121,15 +121,32 @@ function readLegacyContainer(data: Buffer, passive: boolean) {
         !bytes.subarray(4, 20).every(byte => byte === 0))) reject("UPLOAD_MACROS_REJECTED");
     if (!passive && lower === "\u0001compobj" && (entry.size < 28 || entry.size > 4096 ||
         !["1008020000000000c000000000000046", "2008020000000000c000000000000046"].includes(bytes.subarray(12, 28).toString("hex")))) reject();
-    if (lower === "workbook" && (!passive || entry.parent === 0)) {
+    if ((lower === "workbook" || (storageOnly && lower === "book")) && (!passive || entry.parent === 0)) {
       if (workbook) reject();
       workbook = bytes.subarray(0, entry.size);
     } else opaqueStreams += 1;
   }
   if (!workbook || workbook.length < 12 || workbook.readUInt16LE(0) !== 0x0809 ||
-      workbook.readUInt16LE(2) < 8 || workbook.readUInt16LE(4) !== 0x0600 ||
+      workbook.readUInt16LE(2) < 8 || !(storageOnly ? [0x0500, 0x0600] : [0x0600]).includes(workbook.readUInt16LE(4)) ||
       workbook.readUInt16LE(6) !== 0x0005) reject();
   return { workbook, opaqueStreams, storages };
+}
+
+/** Storage admission only. Opaque streams never enter a worker or Office tool.
+ * CFB graph, sizes and workbook identity stay bounded, independently of whether
+ * our processors support its formulas, macros, encryption or BIFF version. */
+export function inspectLegacyExcelForStorage(data: Buffer): void {
+  const { workbook } = readLegacyContainer(data, true, true);
+  for (let offset = 0; offset < workbook.length;) {
+    if (workbook.subarray(offset).every(byte => byte === 0)) break;
+    if (offset + 4 > workbook.length) reject();
+    const id = workbook.readUInt16LE(offset), size = workbook.readUInt16LE(offset + 2);
+    if (size > 8224 || offset + 4 + size > workbook.length) reject();
+    if (id === 0x01b8 && size < 32) reject();
+    // Encrypted payload is opaque storage, never a reader/converter input.
+    if (id === 0x002f) return;
+    offset += 4 + size;
+  }
 }
 
 /** This is not upload admission: callers must use the isolated passive reader. */

@@ -155,7 +155,17 @@ export async function POST(request: Request, context: RouteContext) {
           validated: validated!,
           sourcePath: parsedUpload.temporaryPath,
         });
-        const preview = await services.previews.create(document, { signal: request.signal });
+        if (document.storedLegacyExcel) operationalLogger.warn("document.xls_processing_unavailable", { status: "original_stored" });
+        let preview: Awaited<ReturnType<typeof services.previews.create>> | null = null;
+        try {
+          preview = await services.previews.create(document, { signal: request.signal });
+        } catch (error) {
+          // A rendering failure does not undo an accepted XLS. Preserve identity,
+          // cancellation and integrity errors; report optional preview availability.
+          if (!legacy || request.signal.aborted || (error instanceof StorageError &&
+              !["DOCUMENT_PREVIEW_TOO_LARGE", "DOCUMENT_PDF_UNSAFE", "DOCUMENT_CONVERSION_BACKPRESSURE"].includes(error.code))) throw error;
+          operationalLogger.warn("document.xls_preview_unavailable", { status: "original_stored" });
+        }
         if (roundtripDocumentId && roundtripBaseEtag) {
           return documentVersionJson(await services.versions.appendUpload({
             threadId,
@@ -188,12 +198,16 @@ export async function POST(request: Request, context: RouteContext) {
         });
         return NextResponse.json({
           document,
-          preview: {
+          ...(legacy ? { originalStored: true } : {}),
+          preview: preview ? {
             ...preview,
             files: preview.files.map((name) => ({
               name,
               url: `/api/threads/${threadId}/documents/${uploadId}/preview/${encodeURIComponent(name)}`,
             })),
+          } : {
+            schemaVersion: 2, uploadId, threadId, sourceSha256: document.sha256,
+            status: "unavailable", kind: document.kind, files: [], artifacts: [], pages: null, createdAt: document.createdAt,
           },
         }, { status: 201 });
       } finally {

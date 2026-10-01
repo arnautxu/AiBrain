@@ -15,6 +15,29 @@ export type LegacyExcelProvenance = {
 
 export const PASSIVE_XLS_NOTICE = "Lectura pasiva: datos guardados, no verificados. No se ejecutan macros ni se actualizan enlaces.";
 
+export const STORED_XLS_NOTICE = "Original XLS guardado. Su procesamiento no está disponible; todavía no se han podido leer sus datos.";
+
+/** A receipt contains no workbook data and is never represented as a conversion. */
+export type StoredLegacyExcelReceipt = {
+  status: "unavailable";
+  originalFileName: string;
+  originalSha256: string;
+  originalSize: number;
+};
+
+export function parseStoredLegacyExcelReceipt(value: unknown): StoredLegacyExcelReceipt {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid stored XLS receipt.");
+  const r = value as Record<string, unknown>;
+  if (Object.keys(r).sort().join() !== "originalFileName,originalSha256,originalSize,status" ||
+      r.status !== "unavailable" || typeof r.originalFileName !== "string" || r.originalFileName.length > 120 ||
+      !/^[^/\\\u0000-\u001f\u007f]{1,120}\.xls$/iu.test(r.originalFileName) ||
+      typeof r.originalSha256 !== "string" || !/^[0-9a-f]{64}$/.test(r.originalSha256) ||
+      !Number.isSafeInteger(r.originalSize) || Number(r.originalSize) < 1 || Number(r.originalSize) > 16 * 1024 * 1024) {
+    throw new Error("Invalid stored XLS receipt.");
+  }
+  return { ...r } as StoredLegacyExcelReceipt;
+}
+
 export function parseLegacyExcelProvenance(value: unknown): LegacyExcelProvenance {
   const keys = ["policy", "originalFileName", "originalSha256", "originalSize", "sheetCount", "cellCount", "formulaCount", "missingFormulaCaches", "undecodedFormulas", "omittedSheets", "omittedStreams"];
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid passive XLS provenance.");
