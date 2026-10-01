@@ -217,6 +217,29 @@ describe("authenticated document routes", () => {
     expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
   });
 
+  it("explains active Excel rejection without staging the unsafe workbook", async () => {
+    const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
+    const data = await readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
+    const bof = data.indexOf(Buffer.from("0908100000060500", "hex"));
+    expect(bof).toBeGreaterThan(0);
+    data.writeUInt16LE(0x01b8, bof + 20); // Synthetic HLINK; never a customer file.
+    auth.session = session(USER_A);
+    const response = await uploadRoute.POST(
+      uploadRequest(BAD_UPLOAD_ID, new File([new Uint8Array(data)], "unsafe.xls", { type: "application/octet-stream" })),
+      { params: Promise.resolve({ threadId }) },
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: "El document inclou contingut actiu o elements d’Excel no admesos per seguretat. Puja una còpia .xlsx sense macros, enllaços ni objectes incrustats.",
+      code: "UPLOAD_MACROS_REJECTED",
+    });
+    const [{ loadInstallationConfig }, { documentServicesForUser }] = await Promise.all([
+      import("@/config/installation"), import("@/documents/server-service"),
+    ]);
+    const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
+    await expect(services.staging.readById(threadId, BAD_UPLOAD_ID)).rejects.toThrow();
+  });
+
   // This is a real filesystem route roundtrip with seven serialized durable
   // operations. Keep its deadline local to this test so runner I/O contention
   // cannot leave an operation writing after suite cleanup.
