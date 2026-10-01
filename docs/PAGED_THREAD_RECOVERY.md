@@ -26,6 +26,8 @@ An individual turn that exceeds the transport limit still fails closed; this
 change does not authorize unbounded frames. Model actions, document effects
 and tool calls are never retried by the reader. A matched durable turn retains
 its terminal state, so recovery does not submit a duplicate model turn.
+The [durable submission contract](TURN_SUBMISSION_RECOVERY.md) also covers an
+unknown outcome, warm reconnects and retention of editable attachment copies.
 
 ## Release and acceptance
 

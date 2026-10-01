@@ -40,6 +40,8 @@ vi.mock("@/runtime/worker-runtime-service", () => ({
   },
   workerAppServerForUser: async (_userId: string, lease: unknown) => {
     if (lease !== mocked.maintenanceLease) throw new Error("Worker activity lease was not forwarded.");
+    const fixture = mocked.runtime as { handle?: { roots: { userRoot?: string; workspace: string } } } | null;
+    if (fixture?.handle) fixture.handle.roots.userRoot ??= fixture.handle.roots.workspace;
     return mocked.runtime;
   },
   registerWorkerTurnCancellation: (
@@ -150,6 +152,112 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+  it.each([1, 20].flatMap(count => ["warm", "cold", "missing", "finished", "before-accept", "lost-ack"].map(fault => ({ count, fault }))))(
+    "recovers $count XLSX inputs after $fault without replaying a model turn", async ({ count, fault }) => {
+    const { createHash } = await import("node:crypto");
+    const { mkdir, writeFile, rm, access } = await import("node:fs/promises");
+    const { generateLocalDocument } = await import("@/runtime/documents/local-document-generator");
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-durable-retry-"));
+    const workspace = path.join(userRoot, "workspace");
+    const staging = path.join(userRoot, "staging");
+    await mkdir(workspace, { mode: 0o700 });
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Fictional invoice", content: "Synthetic only", rows: [["Total"], [48.28]] });
+    const edited = await generateLocalDocument({ format: "xlsx", title: "Fictional edited invoice", content: "Synthetic only", rows: [["Total"], [49.28]] });
+    const documents = await Promise.all(Array.from({ length: count }, async (_, index) => {
+      const uploadId = `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`;
+      const relativePath = `threads/${threadId}/uploads/${uploadId}/fictional.xlsx`;
+      const absolutePath = path.join(staging, relativePath);
+      await mkdir(path.dirname(absolutePath), { recursive: true, mode: 0o700 });
+      await writeFile(absolutePath, generated.data, { mode: 0o600 });
+      return { document: { schemaVersion: 1 as const, uploadId, threadId, fileName: "fictional.xlsx", relativePath,
+        kind: "xlsx" as const, mediaType: generated.mimeType, size: generated.data.length,
+        sha256: createHash("sha256").update(generated.data).digest("hex"), status: "staged" as const,
+        createdAt: "2026-10-01T00:00:00.000Z" }, absolutePath,
+        codexInputs: [{ type: "text" as const, text: "Server-bound fictional XLSX", text_elements: [] }] };
+    }));
+    const calls: Array<{ method: string; purpose: string }> = [];
+    let handlers: { onFailure(error: Error): void; onNotification(value: unknown, envelope: unknown): Promise<void> };
+    let copy = "";
+    let attempt = 0;
+    let sequence = 0;
+    const envelope = () => ({ eventId: `retry-${++sequence}`, sequence,
+      occurredAt: "2026-10-01T00:00:00.000Z", message: { kind: "rpc-notification", rpc: {} } });
+    const missing = fault === "missing" || fault === "before-accept";
+    const client = {
+      canReuseLoadedThread: () => !(fault === "cold" && attempt > 1),
+      connectionSummary: async () => ({ connected: true }),
+      router: { registerTurn(_thread: string, _local: string, value: typeof handlers) {
+        handlers = value;
+        if (attempt > 1) setTimeout(() => { void handlers.onNotification({ method: "turn/completed",
+          params: { threadId: "fictional-existing-thread", turn: { id: "fictional-remote-turn", status: "completed", items: [], error: null } },
+        }, envelope()); }, 10);
+        return { bindRuntimeTurn() {}, dispose() {} };
+      } },
+      async request(method: string, params: { input?: Array<{ type: string; text?: string }> }, purpose: string, _timeout: number,
+        beforeResolve?: (value: never, event: never) => Promise<void>) {
+        calls.push({ method, purpose });
+        if (method === "thread/turns/list") {
+          const result = { data: [], nextCursor: null };
+          await beforeResolve?.(result as never, envelope() as never);
+          return result;
+        }
+        if (method === "thread/read" || method === "thread/resume") {
+          expect(await readFile(copy)).toEqual(fault === "before-accept" ? generated.data : edited.data);
+          const turn = { id: "fictional-remote-turn", status: fault === "finished" ? "completed" : "inProgress", error: null,
+            items: [{ type: "userMessage", clientId: userMessageId, id: "fictional-user-item", content: [] }] };
+          const result = { thread: { id: "fictional-existing-thread", turns: missing ? [] : [turn] } };
+          await beforeResolve?.(result as never, envelope() as never);
+          return result;
+        }
+        if (method !== "turn/start" || attempt !== 1) throw new Error(`A model effect was replayed: ${method}`);
+        const text = params.input!.find(item => item.text?.startsWith("Authorized Excel attachments"))!.text!;
+        const files = JSON.parse(text.split("\n").at(-1)!) as Array<{ relativePath: string }>;
+        expect(files).toHaveLength(count);
+        copy = path.join(workspace, "projects", projectId, files[0].relativePath);
+        if (fault === "before-accept") throw new Error("Connection lost before acceptance was observed");
+        await writeFile(copy, edited.data, { mode: 0o600 });
+        if (fault === "lost-ack") throw new Error("Remote acceptance occurred but the ACK was lost");
+        const result = { turn: { id: "fictional-remote-turn" } };
+        await beforeResolve?.(result as never, envelope() as never);
+        queueMicrotask(() => handlers.onFailure(new Error("Fictional transport loss")));
+        return result;
+      },
+    };
+    mocked.runtime = { config: { installationId, paths: installationPaths },
+      handle: { roots: { userRoot, workspace, staging, artifacts: path.join(userRoot, "artifacts") } }, client };
+    const request = { ...chatRequest(), options: { ...chatRequest().options, documentUploadIds: documents.map(({ document }) => document.uploadId) } };
+    const run = () => {
+      attempt += 1;
+      return runWorkerCodexTurn(request, installationId, userId, "fictional-existing-thread", {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null, workspace,
+        model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, permissions([{ ruleId: "documents.read", action: "consult", effect: "allow", instruction: "Synthetic access",
+        sourceScope: "installation", sourcePolicyVersion: 1, precedence: 100 }]), {} as never,
+      memoryDependencies(), documents, new AbortController().signal, async () => undefined);
+    };
+    try {
+      await expect(run()).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+      await expect(access(copy)).resolves.toBeUndefined();
+      // The fresh runner reloads app-owned admission from disk; the fake worker
+      // has no accepted-request cache at all, as after restart/compaction.
+      if (missing) {
+        await expect(run()).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+        await expect(run()).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+        expect(await readFile(copy)).toEqual(fault === "before-accept" ? generated.data : edited.data);
+        const observations = calls.filter(({ method }) => method === "thread/read").map(({ purpose }) => purpose);
+        expect(new Set(observations).size).toBe(2);
+      } else {
+        await expect(run()).resolves.toBeUndefined();
+        await expect(access(copy)).rejects.toMatchObject({ code: "ENOENT" });
+      }
+      expect(calls.filter(({ method }) => method === "turn/start")).toEqual([
+        { method: "turn/start", purpose: `turn-start:${assistantMessageId}` },
+      ]);
+      expect(calls[1].method).toBe(fault === "cold" ? "thread/resume" : "thread/read");
+      for (const document of documents) expect(await readFile(document.absolutePath)).toEqual(generated.data);
+    } finally { await rm(userRoot, { recursive: true, force: true }); }
+  });
+
   it.each(["new", "existing"] as const)("attests quota profiles for a %s thread and downgrades the next turn without widening writes", async (kind) => {
     const workspace = await mkdtemp(path.join(tmpdir(), "aibrain-quota-tools-"));
     const roots = { workspace, staging: workspace, artifacts: path.join(workspace, "artifacts"),

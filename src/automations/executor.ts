@@ -197,6 +197,8 @@ export async function executeScheduledTurn(input: ScheduledExecutionInput) {
       undefined,
       input.session,
       true,
+      null,
+      begun.outcome === "existing",
     );
   } catch (error) {
     assistantMessage = applyChatStreamEvent(assistantMessage, {

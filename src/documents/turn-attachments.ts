@@ -46,6 +46,7 @@ export async function prepareTurnDocumentWorkspaceInputs(input: {
   stagingRoot: string;
   legacyExcelConversion?: LegacyExcelConversionOptions;
   signal?: AbortSignal;
+  onDirectoryCreated?: (directory: string) => Promise<void>;
 }): Promise<{ directory: string | null; codexInputs: readonly UserInput[] }> {
   const workbooks = input.documents.filter(({ document }) => document.kind === "xlsx" || document.kind === "xls");
   if (workbooks.length === 0) return { directory: null, codexInputs: [] };
@@ -55,6 +56,7 @@ export async function prepareTurnDocumentWorkspaceInputs(input: {
   const directory = await mkdtemp(path.join(input.projectWorkspace, ".aibrain-turn-inputs-"));
   try {
     await chmod(directory, 0o700);
+    await input.onDirectoryCreated?.(directory);
     const files: Array<{ name: string; relativePath: string; sha256: string; originalSha256: string; convertedFrom?: "xls" }> = [];
     for (const [index, { document }] of workbooks.entries()) {
       const bytes = await readRegularFileWithin(input.stagingRoot, document.relativePath, 50 * 1024 * 1024);
