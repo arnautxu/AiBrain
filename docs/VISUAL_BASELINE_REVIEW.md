@@ -27,19 +27,18 @@ The review identified and corrected four stale test assumptions:
 - Scroll the approval into view before its landscape capture. Scrolling to the
   very end of the conversation can leave it above a short viewport.
 
-The mobile conversation test also exposed a real existing autosize defect on
-unchanged main: one line plus mobile padding exceeded the desktop minimum, so
-the composer stayed expanded after blur. Multiline detection now accounts for
-the computed one-line height including padding. The test retains compact/expanded
-focus assertions and verifies that a three-line draft remains expanded and
-unchanged after blur.
+The mobile conversation assertion expected an idle compact composer, but unchanged
+main (`ab0809c`) keeps the controls expanded because the mobile padding exceeds
+the desktop multiline threshold. An attempted sizing correction introduced
+pointer-click and resize feedback regressions. That product change and all its
+compensating logic were removed; this XLS release preserves main's composer
+behavior. The visual test now checks the existing visible controls on blur,
+focus geometry and preservation of a three-line draft. Compact-on-blur behavior
+remains a separate UI issue, not an XLS release change.
 
-The subsequent Chromium gate caught a related interaction regression: collapsing
-the composer during pointerdown moved a message action before pointerup, so the
-click landed on its container. Pointer-driven blur now preserves the layout until
-the gesture ends; keyboard blur still collapses immediately. Browser regression
-coverage holds a press on the message editor action and checks its bounds before
-release, alongside image-description and shared-document preview actions.
+The accessibility shell audit waits for finite animations to finish before
+measuring sidebar label contrast, avoiding a partly transparent crossfade.
+Rules, thresholds and source colors are unchanged by that test stabilization.
 
 Acceptance requires a subsequent complete comparison run without snapshot
 updates, using the same pinned Playwright browsers on macOS. Capture generation
@@ -51,3 +50,15 @@ platform-specific skips**, no retries and no snapshot writes. The reviewed
 reference bytes were then copied unchanged into their normal repository paths
 and verified by SHA-256. The two skips select the desktop-only collapsed rail
 and mobile-only drawer in their respective projects.
+
+After restoring the original composer implementation, 85 selected candidate
+captures matched captures of unchanged main using the existing comparison
+thresholds. Only 18 previously adopted references exceeded those thresholds;
+their rendered states were reviewed and updated to the preserved main behavior.
+The other 111 references were retained. The focused mobile assertion now checks
+that input and controls do not overlap instead of a stale 108px minimum
+(unchanged main renders 106px). No product sizing or pointer logic remains.
+
+The final independent affected-browser gate completed with 80 passed and the
+2 existing platform-specific skips, without retries or snapshot updates:
+15 action cases, 57 visual cases and 8 accessibility cases.

@@ -98,18 +98,8 @@ test("long user content and its editor remain inside a 320px touch viewport", as
 
   const edit = message.getByRole("button", { name: "Editar mensaje y crear una rama" });
   await expectTouchTarget(edit);
-  await composer.focus();
-  await edit.scrollIntoViewIfNeeded();
-  const editBox = (await edit.boundingBox())!;
-  await page.mouse.move(editBox.x + editBox.width / 2, editBox.y + editBox.height / 2);
-  await page.mouse.down();
-  // Losing composer focus must not move the action out from under the press.
-  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-  expect(await edit.boundingBox()).toEqual(editBox);
-  await page.mouse.up();
+  await edit.click();
   const textarea = message.getByRole("textbox", { name: "Editar mensaje" });
-  await expect(textarea).toBeVisible();
-  await expect(page.getByTestId("composer")).toHaveAttribute("data-focused", "false");
   const [textareaBox, bubbleBox] = await Promise.all([textarea.boundingBox(), bubble.boundingBox()]);
   expect(textareaBox).not.toBeNull();
   expect(bubbleBox).not.toBeNull();
