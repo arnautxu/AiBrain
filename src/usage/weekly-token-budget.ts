@@ -309,6 +309,53 @@ export class WeeklyTokenBudgetStore {
     });
   }
 
+  /** Operator-only, offline recovery during an explicitly configured free period.
+   * Preserve activation, charged totals and replay evidence; advance only measured
+   * session cursors. This cannot grant a new allowance or recover a metered period.
+   */
+  async reconcileUnlimitedHistory(seed: WeeklyTokenBudgetSeed, unlimitedUntil: string) {
+    return this.locked(async () => {
+      const until = checkedIso(unlimitedUntil);
+      const capturedAt = checkedIso(seed.capturedAt);
+      if (Date.parse(until) <= this.now() || Date.parse(capturedAt) > this.now() || capturedAt >= until ||
+          seed.dailyTotals.length !== 0 || (seed.seenEvents?.length ?? 0) !== 0) {
+        throw unavailable("Recovery requires an active unlimited period and an uncharged offline snapshot.");
+      }
+      const existing = await this.read();
+      if (!existing || existing.blockedReason !== "usage_evidence_invalid" || capturedAt < existing.initializedAt) {
+        throw unavailable("Recovery requires the existing invalid-evidence ledger.");
+      }
+      const state = structuredClone(existing);
+      const keys = new Set<string>();
+      let advanced = 0;
+      for (const input of seed.cursors) {
+        validateIdentity(input.userId); validateIdentity(input.threadId);
+        const observedAt = checkedIso(input.observedAt ?? capturedAt);
+        if (observedAt > capturedAt) throw unavailable("Recovery cursor is after its offline snapshot.");
+        const key = hash(input.userId, input.threadId);
+        if (keys.has(key)) throw unavailable("Recovery cursor identity is duplicated.");
+        keys.add(key);
+        const totalTokens = checkedCount(input.totalTokens);
+        const cursor = state.cursors.find((item) => item.key === key);
+        if (cursor && observedAt < cursor.observedAt) {
+          // Retained transport evidence can be newer than the session file.
+          // Never rewind it from a stale history snapshot.
+          continue;
+        }
+        if (cursor && observedAt === cursor.observedAt && totalTokens !== cursor.totalTokens) {
+          throw unavailable("Recovery cursor conflicts with retained evidence.");
+        }
+        if (!cursor || observedAt > cursor.observedAt) advanced += 1;
+        if (cursor) Object.assign(cursor, { totalTokens, observedAt });
+        else state.cursors.push({ key, totalTokens, observedAt });
+      }
+      if (advanced === 0) throw unavailable("Recovery has no newer measured cursor evidence.");
+      state.blockedReason = null;
+      await this.write(state);
+      return this.current(state);
+    });
+  }
+
   private normalize(input: WeeklyTokenBudgetUsage, fallbackAt: string) {
     validateIdentity(input.userId); validateIdentity(input.threadId); validateIdentity(input.eventId);
     checkedCount(input.totalTokens); checkedCount(input.lastTokens);
@@ -348,6 +395,12 @@ export class WeeklyTokenBudgetStore {
             cursor = { key: event.cursorKey, totalTokens: 0, observedAt: event.observedAt };
             state.cursors.push(cursor);
             delta = event.totalTokens;
+          } else if (event.totalTokens !== cursor.totalTokens && event.totalTokens === event.lastTokens &&
+              event.observedAt > cursor.observedAt) {
+            // App Server resets cumulative usage on resume. The first response
+            // can exceed the previous process's entire counter. Equality of
+            // total and last proves a fresh counter regardless of its size.
+            delta = event.lastTokens;
           } else if (event.totalTokens >= cursor.totalTokens) {
             delta = event.totalTokens - cursor.totalTokens;
             // A fresh response cannot consume more than the positive change

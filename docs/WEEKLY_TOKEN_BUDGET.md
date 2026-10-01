@@ -170,6 +170,48 @@ is historical evidence, not the amount charged by this authorized fresh start.
 A weekly reset changes the displayed period; it must not delete thread cursors
 or replay evidence. Never delete/reseed the ledger as a routine reset or recovery.
 Investigate an unavailable/reconciliation state with all model workers stopped.
+An App Server resume may reset cumulative usage to its latest response even when
+that response exceeds the previous process's cumulative total. A strictly later
+report with `totalTokens === lastTokens` and a changed counter is an explicit
+reset; charge the complete latest response, not the difference. Identical
+snapshots remain replay, and ambiguous increases/resets remain blocked.
+
+### Offline recovery during the configured unlimited period
+
+The `2026-10-01` incident was a verified resume reset (`155863` previously;
+`175735` cumulative and latest response at `07:50:50.759Z`). The old positive
+increase check blocked the ledger with `usage_evidence_invalid`. The reset fix
+also preserves the introductory-month promise when later turns bind after an
+accounting error: accounting remains blocked, but it cannot interrupt promotional
+inference. At promotion expiry the original fail-closed policy resumes.
+
+For this incident, reconcile measured cursors using the packaged initializer's
+`--offline --reconcile-unlimited [--apply]` mode. This is an operator attestation
+that the entire unrecorded interval is covered by the configured unlimited
+period; never use it to forgive missing metered consumption. First drain model
+activity, stop application, automation and any other model workers, and preserve
+a private, checksum-verified copy of the original ledger. Keep writers stopped
+through history inspection and application. The default is a read-only preview.
+The reader validates all session files, rejects changing files and invalid
+counter evidence, and captures measured user/thread cursors. Apply requires an
+active configured unlimited period, the existing `usage_evidence_invalid`
+ledger, and at least one newer measured cursor. It preserves `initializedAt`,
+all charged daily totals, existing replay evidence and newer retained cursors;
+it rejects conflicting same-time counters. It never deletes or reseeds state,
+imports historical charges, or grants a fresh allowance. Validate preservation
+against the backup before restarting workers, then separately read the
+authenticated operator endpoint and rendered Site.
+
+Live recovery at `2026-10-01T08:07:34.806Z` inspected 304 session files and
+300 measured cursors. The original activation (`2026-09-24T10:23:14.266Z`),
+charged daily totals and all 335 replay fingerprints matched the retained
+backup; cursors advanced from 299 to 300 and the block cleared. The private
+backup and checksum receipt live under
+`/etc/aibrain/company-qa/usage-recovery-20261001/`. After restart, the
+authenticated operator endpoint returned HTTP 200, 23 members and 85 weekly
+turns. This operational recovery is distinct from publishing/deploying the
+source correction below; the source change still needs its own release gates.
+
 Disabling the installation policy removes the budget and requires an explicit
 operator decision; rolling back to code without quota enforcement also removes
 its protection and must not be described as retaining the limit.

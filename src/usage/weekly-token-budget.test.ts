@@ -188,6 +188,48 @@ describe("WeeklyTokenBudgetStore", () => {
     expect(await store.recordUsage(usage(3_070, { lastTokens: 70 }))).toMatchObject({ usedTokens: 570 });
   });
 
+  it("charges a verified resume reset even when its first response exceeds the old cumulative total", async () => {
+    const { store, seed, setNow } = await fixture();
+    await seed({ cursors: [{ userId: USER, threadId: THREAD, totalTokens: 155_863 }] });
+    setNow(DEFAULT_NOW + 1_000);
+    const at = new Date(DEFAULT_NOW + 1_000).toISOString();
+    expect(await store.recordUsage(usage(175_735, { observedAt: at }))).toMatchObject({ usedTokens: 175_735 });
+    expect(await store.recordUsage(usage(351_607, { lastTokens: 175_872, observedAt: at })))
+      .toMatchObject({ usedTokens: 351_607 });
+    expect(await store.recordUsage(usage(351_607, { eventId: "same-snapshot", lastTokens: 175_872, observedAt: at })))
+      .toMatchObject({ usedTokens: 351_607 });
+  });
+
+  it("recovers promotional cursors without replacing activation, charges or replay evidence", async () => {
+    const { store, seed, setNow } = await fixture();
+    await seed();
+    await store.recordUsage(usage(100));
+    await store.markUnavailable("usage_evidence_invalid");
+    const before = JSON.parse(await readFile(store.statePath, "utf8"));
+    setNow(DEFAULT_NOW + 1_000);
+    const capturedAt = new Date(DEFAULT_NOW + 1_000).toISOString();
+    await store.reconcileUnlimitedHistory({ capturedAt, dailyTotals: [], cursors: [
+      { userId: USER, threadId: THREAD, totalTokens: 351_607, observedAt: capturedAt },
+    ] }, "2026-10-31T23:00:00.000Z");
+    const after = JSON.parse(await readFile(store.statePath, "utf8"));
+    expect(after).toMatchObject({ initializedAt: before.initializedAt, dailyTotals: before.dailyTotals,
+      seenEvents: before.seenEvents, blockedReason: null });
+    expect(await store.recordUsage(usage(351_707, { lastTokens: 100 }))).toMatchObject({ usedTokens: 200 });
+  });
+
+  it.each(["expired", "future", "charges", "other-block"])("leaves the ledger untouched on invalid recovery: %s", async (kind) => {
+    const { store, seed } = await fixture();
+    await seed();
+    await store.markUnavailable(kind === "other-block" ? "terminal_turn_missing_usage" : "usage_evidence_invalid");
+    const before = await readFile(store.statePath, "utf8");
+    await expect(store.reconcileUnlimitedHistory({
+      capturedAt: new Date(DEFAULT_NOW + (kind === "future" ? 1_000 : 0)).toISOString(),
+      dailyTotals: kind === "charges" ? [{ date: "2026-09-24", totalTokens: 1 }] : [], cursors: [],
+    }, kind === "expired" ? new Date(DEFAULT_NOW).toISOString() : "2026-10-31T23:00:00.000Z"))
+      .rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNAVAILABLE" });
+    expect(await readFile(store.statePath, "utf8")).toBe(before);
+  });
+
   it.each([
     ["unknown thread without baseline", usage(200, { threadId: "unknown", lastTokens: 20 })],
     ["invalid response count", usage(10, { lastTokens: 20 })],
