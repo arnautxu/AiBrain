@@ -1,3 +1,4 @@
+import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
 import type { RuntimeReasoningEffort } from "@/lib/runtime-status";
 import type { ComposerExperience } from "@/lib/composer-experience";
@@ -391,7 +392,7 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
   const documentUploadIds = value.documentUploadIds;
   const connectorMentions = value.connectorMentions;
   const validDocumentUploadIds = documentUploadIds === undefined || (
-    Array.isArray(documentUploadIds) && documentUploadIds.length <= 20 &&
+    Array.isArray(documentUploadIds) && documentUploadIds.length <= MAX_FILES_PER_MESSAGE &&
     documentUploadIds.every((uploadId) => typeof uploadId === "string" &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(uploadId)) &&
     new Set(documentUploadIds).size === documentUploadIds.length
@@ -414,11 +415,11 @@ export function isTurnOptions(value: unknown): value is TurnOptions {
       new Set(connectorMentions).size === connectorMentions.length
     )) &&
     Array.isArray(value.attachments) &&
-    value.attachments.length <= 20 &&
+    value.attachments.length <= MAX_FILES_PER_MESSAGE &&
     value.attachments.every(isChatInputAttachment) &&
     value.attachments.reduce((total, attachment) => total + attachment.size, 0) <= 5_000_000 &&
     validDocumentUploadIds &&
-    value.attachments.length + (Array.isArray(documentUploadIds) ? documentUploadIds.length : 0) <= 20 &&
+    value.attachments.length + (Array.isArray(documentUploadIds) ? documentUploadIds.length : 0) <= MAX_FILES_PER_MESSAGE &&
     (value.serverReferences === undefined || isServerReferenceList(value.serverReferences))
   );
 }

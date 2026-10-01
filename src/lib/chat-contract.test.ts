@@ -52,7 +52,9 @@ describe("chat attachment contract", () => {
     };
     const ids = Array.from({ length: 21 }, (_, index) =>
       `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
-    expect(isTurnOptions({ ...base, documentUploadIds: ids.slice(0, 20) })).toBe(true);
+    for (const count of [10, 11, 20]) {
+      expect(isTurnOptions({ ...base, documentUploadIds: ids.slice(0, count) })).toBe(true);
+    }
     expect(isTurnOptions({ ...base, documentUploadIds: ids })).toBe(false);
 
     const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00];

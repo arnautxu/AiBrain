@@ -1,4 +1,5 @@
 "use client";
+import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import { useUiText } from "@/i18n/provider";
 
 import { isServerReferenceList, type ServerReference } from "@/documents/server-reference-contract";
@@ -1265,7 +1266,7 @@ export function BrainApp({
       setNotice(workbenchNotice(t("Los documentos reales requieren el runtime privado de la instalación."), "warning"));
       return;
     }
-    const available = Math.max(0, 20 - attachments.length - documents.filter((document) => document.status !== "error").length);
+    const available = Math.max(0, MAX_FILES_PER_MESSAGE - attachments.length - documents.filter((document) => document.status !== "error").length);
     const selected = files.slice(0, available);
     if (files.length > available) setNotice(workbenchNotice(t("Puedes adjuntar un máximo de 20 archivos por mensaje."), "warning"));
     if (!selected.length) return;
