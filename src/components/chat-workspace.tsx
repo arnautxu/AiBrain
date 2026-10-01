@@ -520,44 +520,6 @@ export function ChatWorkspace({
   const [catalogActiveIndex, setCatalogActiveIndex] = useState(0);
   const [composerMultiline, setComposerMultiline] = useState(false);
   const [composerFocused, setComposerFocused] = useState(false);
-  const composerPointerRef = useRef<number | null>(null);
-  const composerBlurPendingRef = useRef(false);
-  useEffect(() => {
-    let frame = 0;
-    const startPointer = (event: PointerEvent) => {
-      if (event.isPrimary && event.button === 0) composerPointerRef.current = event.pointerId;
-    };
-    const finishPointer = (event: PointerEvent) => {
-      if (composerPointerRef.current !== event.pointerId) return;
-      composerPointerRef.current = null;
-      if (!composerBlurPendingRef.current) return;
-      // Blur occurs between pointerdown and click. Keep the conversation's
-      // geometry stable until that click reaches its original target.
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (!composerBlurPendingRef.current) return;
-        composerBlurPendingRef.current = false;
-        setComposerFocused(Boolean(composerShellRef.current?.contains(document.activeElement)));
-      });
-    };
-    const leaveWindow = () => {
-      composerPointerRef.current = null;
-      if (!composerBlurPendingRef.current) return;
-      composerBlurPendingRef.current = false;
-      setComposerFocused(false);
-    };
-    window.addEventListener("pointerdown", startPointer, true);
-    window.addEventListener("pointerup", finishPointer, true);
-    window.addEventListener("pointercancel", finishPointer, true);
-    window.addEventListener("blur", leaveWindow);
-    return () => {
-      cancelAnimationFrame(frame);
-      window.removeEventListener("pointerdown", startPointer, true);
-      window.removeEventListener("pointerup", finishPointer, true);
-      window.removeEventListener("pointercancel", finishPointer, true);
-      window.removeEventListener("blur", leaveWindow);
-    };
-  }, []);
   const [restoringThreadId, setRestoringThreadId] = useState<string | null>(null);
   const restoringRequest = Boolean(thread && restoringThreadId === thread.id);
   const restoreControllerRef = useRef<AbortController | null>(null);
@@ -640,10 +602,7 @@ export function ChatWorkspace({
     const minHeight = thread?.messages.length ? 32 : 48;
     const nextHeight = Math.min(Math.max(measurement.scrollHeight, minHeight), 192);
     textarea.style.height = `${nextHeight}px`;
-    // Mobile padding is taller than the desktop minimum; it is not a second line.
-    const singleLineHeight = Number.parseFloat(style.lineHeight)
-      + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
-    setComposerMultiline(nextHeight > Math.max(minHeight, singleLineHeight) + 1);
+    setComposerMultiline(nextHeight > minHeight + 1);
   }, [thread?.messages.length]);
 
   useLayoutEffect(() => {
@@ -1029,11 +988,9 @@ export function ChatWorkspace({
               event.preventDefault();
               void addFiles(event.clipboardData.files);
             }}
-            onFocusCapture={() => { composerBlurPendingRef.current = false; setComposerFocused(true); }}
+            onFocusCapture={() => setComposerFocused(true)}
             onBlurCapture={(event) => {
-              if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-              if (composerPointerRef.current !== null) composerBlurPendingRef.current = true;
-              else setComposerFocused(false);
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false);
             }}
           >
             {fileReading ? <p role="status" className="px-3 py-1 text-[11px] text-[var(--text-muted)]">{t("Preparando adjuntos…")}</p> : null}
