@@ -75,13 +75,13 @@
     "jszip": "^3.10.1",
     "lucide-react": "^1.35.0",
     "motion": "^13.1.1",
-    "next": "16.3.2",
+    "next": "16.3.8",
     "pdf-lib": "^1.17.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-markdown": "10.1.0",
     "remark-gfm": "4.0.1",
-    "sanitize-html": "^2.17.5",
+    "sanitize-html": "2.18.0",
     "saxes": "6.0.0",
     "server-only": "0.0.1",
     "tailwind-merge": "^3.6.0",
@@ -105,12 +105,17 @@
     "@vitest/coverage-v8": "4.1.11",
     "esbuild": "0.25.12",
     "eslint": "9.39.5",
-    "eslint-config-next": "16.3.2",
+    "eslint-config-next": "16.3.8",
     "jsdom": "29.1.1",
     "pptxgenjs": "4.0.1",
     "tailwindcss": "4.3.3",
     "tsx": "4.20.6",
     "typescript": "6.0.2",
     "vitest": "4.1.11"
+  },
+  "overrides": {
+    "pptxgenjs": {
+      "image-size": "2.0.3"
+    }
   }
 }

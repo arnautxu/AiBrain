@@ -81,12 +81,13 @@ describe("backend CI contract", () => {
       "npx playwright test --project=chromium-desktop --shard=2/2",
       "npx playwright test --project=webkit-iphone",
     ]);
-    expect(jobs.webkit.needs).toBe("enc02-webkit-scope");
-    expect(jobs.webkit.if).toBe("needs.enc02-webkit-scope.outputs.required == 'true'");
+    expect(jobs["enc02-webkit-scope"]).toBeUndefined();
+    expect(jobs.webkit.needs).toBeUndefined();
+    expect(jobs.webkit.if).toBeUndefined();
     expect(jobs.webkit["continue-on-error"]).toBeUndefined();
     expect(jobs.webkit.steps.every((step) => !step.if && !step["continue-on-error"])).toBe(true);
     expect(jobs.webkit.steps.some((step) => step.run === "npx playwright test --config=playwright.recovery.config.ts --project=webkit-recovery")).toBe(true);
-    expect(jobs.e2e.needs).toEqual(["e2e-suites", "webkit", "enc02-webkit-scope"]);
+    expect(jobs.e2e.needs).toEqual(["e2e-suites", "webkit"]);
     expect(jobs.e2e.if).toBe("always()");
     const publish = await readFile(path.join(process.cwd(), ".github/workflows/publish-ghcr.yml"), "utf8");
     expect(publish).toContain("cache-from:");
@@ -94,31 +95,24 @@ describe("backend CI contract", () => {
     expect(publish).toContain(":buildcache");
   });
 
-  it("accepts only the scoped WebKit skip and rejects every other incomplete E2E dependency", async () => {
+  it("rejects every incomplete E2E dependency, including skipped WebKit", async () => {
     const step = (await readJobs()).e2e.steps[0];
     expect(step.if).toBeUndefined();
     expect(step["continue-on-error"]).toBeUndefined();
     expect(step.env).toEqual({
       SUITES_RESULT: "${{ needs.e2e-suites.result }}",
       WEBKIT_RESULT: "${{ needs.webkit.result }}",
-      WEBKIT_REQUIRED: "${{ needs.enc02-webkit-scope.outputs.required }}",
-      SCOPE_RESULT: "${{ needs.enc02-webkit-scope.result }}",
     });
     for (const suites of ["success", "failure", "cancelled", "skipped", ""]) {
-      for (const scope of ["success", "failure", "cancelled", "skipped", ""]) {
-        for (const required of ["true", "false", ""]) {
-          for (const webkit of ["success", "failure", "cancelled", "skipped", ""]) {
-            const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
-              env: { ...process.env, SUITES_RESULT: suites, SCOPE_RESULT: scope, WEBKIT_REQUIRED: required, WEBKIT_RESULT: webkit },
-            });
-            expect(result.error).toBeUndefined();
-            const expected = suites === "success" && scope === "success" && ((required === "true" && webkit === "success") || (required === "false" && webkit === "skipped"));
-            expect(result.status === 0, `suites=${suites}, scope=${scope}, required=${required}, webkit=${webkit}`).toBe(expected);
-          }
-        }
+      for (const webkit of ["success", "failure", "cancelled", "skipped", ""]) {
+        const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
+          env: { ...process.env, SUITES_RESULT: suites, WEBKIT_RESULT: webkit },
+        });
+        expect(result.error).toBeUndefined();
+        expect(result.status === 0, `suites=${suites}, webkit=${webkit}`).toBe(suites === "success" && webkit === "success");
       }
     }
-  }, 15_000);
+  });
 
   it("keeps every required deterministic gate in the protected workflow", async () => {
     const workflow = await readFile(workflowPath, "utf8");

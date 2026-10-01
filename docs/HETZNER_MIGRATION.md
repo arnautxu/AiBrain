@@ -214,6 +214,30 @@ No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en 
 
 ## 5. Backup y restore QA reales
 
+### Sesión compartida: un solo propietario de la renovación
+
+Con `AIBRAIN_CODEX_AUTH_SCOPE=shared-qa`, el fichero privado indicado por
+`AIBRAIN_SHARED_CODEX_AUTH_SOURCE` conserva la única sesión renovable. El broker
+de la app y del automation worker comparte un lease en disco de la instalación;
+relee la fuente bajo el lock, comprueba cuenta/caducidad y renueva únicamente
+cuando es necesario mediante `account/read` de un App Server sin turns.
+
+Los trabajadores reciben `chatgptAuthTokens` por un canal privado no registrado
+en los journals. Sus copias antiguas de `auth.json` se sustituyen por `{}` al
+provisionarlos; nunca reciben el refresh token. La petición de renovación tras
+un 401 se atiende en ese mismo canal, reaprovechando una renovación concurrente
+y rechazando cambios de cuenta. No se requiere ejecutar prompts ni acceder a
+documentos de clientes para renovar. Readiness no consume tokens ni provoca
+una rotación de una sesión vigente.
+
+Si el proveedor revoca la sesión fuente, la renovación falla con un error
+saneado y exige reconexión explícita del administrador: no intenta usar una
+copia caducada ni cambia de cuenta. Conservar la fuente durante el rollback;
+las credenciales están deliberadamente excluidas del backup documental.
+Después de volver a una versión con autenticación gestionada por trabajador,
+su provisioner repuebla las copias desde la fuente vigente. Nunca restaurar
+tokens de renovación antiguos desde un snapshot.
+
 El endpoint de operador no se publica por Nginx: solo responde en el puerto app ligado a loopback. Configura `AIBRAIN_MAINTENANCE_SECRET` independiente y usa el origen público exacto. Instala el controlador y su recovery de boot desde el mismo commit revisado:
 
 ```bash
