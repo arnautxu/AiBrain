@@ -1,3 +1,7 @@
+# WebKit release gate restored — 2026-10-01
+
+David revoked the one-release exception and authorized complete CI for the Arnall repair. WebKit now runs on every candidate and the aggregate rejects skipped, cancelled or failed browser checks. System dependency installation uses the official Ubuntu HTTPS archive with bounded retries and a separate bounded browser download. The earlier exception below is historical and no longer executable.
+
 # Single-release WebKit exception — 2026-10-01
 
 WebKit installation on GitHub runners exhausted the job deadline while downloading Ubuntu system packages, before browser tests or recovery checks ran. The owner authorized omitting WebKit for this XLS release only. WebKit remains **NOT_VERIFIED**, including Safari/iPhone compatibility; a skipped job is not a passing browser test.
