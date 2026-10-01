@@ -32,6 +32,14 @@ const alertControllerHealthcheck = read("infra/hetzner/app/alert-controller-heal
 const documentMaintenance = read("infra/hetzner/app/document-maintenance.sh");
 const entrypoint = read("infra/hetzner/app/entrypoint.sh");
 const soffice = read("infra/hetzner/app/soffice-safe.sh");
+const passiveXls = read("infra/hetzner/app/xls-passive-safe.sh");
+requireMatch(passiveXls, /--unshare-all/u, "Passive XLS must isolate network and process namespaces");
+requireMatch(passiveXls, /--clearenv/u, "Passive XLS must clear inherited credentials");
+requireMatch(passiveXls, /--remount-ro \/ /u, "Passive XLS root must be read-only");
+forbidMatch(passiveXls, /--ro-bind \/ \/|--bind \/var|--proc/u, "Passive XLS may not expose the app, data or host processes");
+requireMatch(passiveXls, /python -I -B/u, "Passive XLS must use isolated Python without bytecode writes");
+requireMatch(dockerfile, /pip install --no-cache-dir --require-hashes --only-binary=:all:/u, "Passive XLS reader dependencies require pinned wheel hashes");
+requireMatch(dockerfile, /build-container-xls-passive-acceptance.mjs/u, "Image must bundle XLS isolation acceptance");
 const healthcheck = read("infra/hetzner/app/healthcheck.mjs");
 const nginx = read("infra/hetzner/nginx/aibrain.conf.example");
 const nginxDefaultDeny = read("infra/hetzner/nginx/default-deny.conf");

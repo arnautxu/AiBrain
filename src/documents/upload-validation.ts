@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import path from "node:path";
+import type { LegacyExcelProvenance } from "./legacy-excel-policy";
 import { createInflateRaw } from "node:zlib";
 
 export type SupportedUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
@@ -14,6 +15,7 @@ export type ValidatedUpload = {
   size: number;
   sha256: string;
   officeEntries: number | null;
+  legacyExcel?: LegacyExcelProvenance;
 };
 
 export class UploadValidationError extends Error {
@@ -32,7 +34,7 @@ const MAX_ZIP_RATIO = 100;
 
 type OfficeInspection = { kind: "docx" | "xlsx" | "pptx"; entries: number };
 
-function safeFileName(value: string) {
+export function safeFileName(value: string) {
   const normalized = value.normalize("NFC");
   if (
     normalized.length < 1

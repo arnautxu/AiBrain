@@ -547,6 +547,77 @@
         { "type": "object", "additionalProperties": false, "required": ["type", "message"], "properties": { "type": { "const": "error" }, "message": { "type": "string" } } }
       ]
     },
+    "LegacyExcelProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "originalFileName",
+        "originalSha256",
+        "originalSize",
+        "sheetCount",
+        "cellCount",
+        "formulaCount",
+        "missingFormulaCaches",
+        "undecodedFormulas",
+        "omittedSheets",
+        "omittedStreams"
+      ],
+      "properties": {
+        "policy": {
+          "const": "values-only-v1"
+        },
+        "originalFileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "originalSha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "originalSize": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16777216
+        },
+        "sheetCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        },
+        "cellCount": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500000
+        },
+        "formulaCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "missingFormulaCaches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "undecodedFormulas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100000
+        },
+        "omittedSheets": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "omittedStreams": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        }
+      }
+    },
     "DocumentUploadResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -567,7 +638,8 @@
             "size": { "type": "integer", "minimum": 1, "maximum": 52428800 },
             "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
             "status": { "const": "staged" },
-            "createdAt": { "$ref": "#/$defs/IsoDate" }
+            "createdAt": { "$ref": "#/$defs/IsoDate" },
+            "legacyExcel": { "$ref": "#/$defs/LegacyExcelProvenance" }
           }
         },
         "preview": {

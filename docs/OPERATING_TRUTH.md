@@ -108,6 +108,17 @@ remaining release/application acceptance gates.
 
 No row above is a claim that this documentation branch is published, deployed or accepted live.
 
+## Legacy workbook upload candidate
+
+The legacy XLS upload candidate is documented in
+[LEGACY_EXCEL_UPLOADS.md](LEGACY_EXCEL_UPLOADS.md). A closed BIFF8 subset uses
+isolated native conversion to preserve supported formulas and formatting.
+Other readable BIFF8 files use an isolated values-only reader, with passive
+provenance, unverified caches and explicit omissions. Original bytes remain in
+a server-only vault outside worker/browser mounts; only the validated derivative
+is available to attachments and preview. This is versioned implementation, not
+a claim of publication, deployment or authenticated live acceptance.
+
 ## Evidence language
 
 - `implemented`: code or content exists at the named SHA.
