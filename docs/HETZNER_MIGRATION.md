@@ -216,6 +216,13 @@ No ejecutes `env`, `docker inspect` completo ni Compose config sin `--quiet` en 
 
 ### Sesión compartida: un solo propietario de la renovación
 
+La fuente debe pertenecer a un perfil privado de servicio sin usuario web,
+Supabase ni registro en el catálogo de empleados. Sus raíces se provisionan como
+las de un worker para ejecutar únicamente `initialize` y `account/read`. No se
+lanza ningún turn en ese perfil y ningún trabajador humano puede montarlo. Una
+migración conserva la cuenta y la credencial vigente; actualiza solo el puntero
+privado del entorno y verifica login externo antes del reinicio.
+
 Con `AIBRAIN_CODEX_AUTH_SCOPE=shared-qa`, el fichero privado indicado por
 `AIBRAIN_SHARED_CODEX_AUTH_SOURCE` conserva la única sesión renovable. El broker
 de la app y del automation worker comparte un lease en disco de la instalación;
