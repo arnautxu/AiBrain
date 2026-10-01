@@ -72,19 +72,53 @@ describe("backend CI contract", () => {
     const jobs = await readJobs();
     expect(jobs["e2e-suites"].needs).toBeUndefined();
     expect(jobs["e2e-suites"].strategy?.["fail-fast"]).toBe(false);
-    expect(jobs["e2e-suites"].strategy?.matrix.include?.map((entry) => entry.command)).toEqual([
+    expect([
+      ...(jobs["e2e-suites"].strategy?.matrix.include?.map((entry) => entry.command) ?? []),
+      ...jobs.webkit.steps.filter((step) => step.run === "npx playwright test --project=webkit-iphone").map((step) => step.run),
+    ]).toEqual([
       "npm run test:e2e:backend",
       "npx playwright test --project=chromium-desktop --shard=1/2",
       "npx playwright test --project=chromium-desktop --shard=2/2",
       "npx playwright test --project=webkit-iphone",
     ]);
-    expect(jobs.e2e.needs).toBe("e2e-suites");
+    expect(jobs.webkit.needs).toBe("enc02-webkit-scope");
+    expect(jobs.webkit.if).toBe("needs.enc02-webkit-scope.outputs.required == 'true'");
+    expect(jobs.webkit["continue-on-error"]).toBeUndefined();
+    expect(jobs.webkit.steps.every((step) => !step.if && !step["continue-on-error"])).toBe(true);
+    expect(jobs.webkit.steps.some((step) => step.run === "npx playwright test --config=playwright.recovery.config.ts --project=webkit-recovery")).toBe(true);
+    expect(jobs.e2e.needs).toEqual(["e2e-suites", "webkit", "enc02-webkit-scope"]);
     expect(jobs.e2e.if).toBe("always()");
     const publish = await readFile(path.join(process.cwd(), ".github/workflows/publish-ghcr.yml"), "utf8");
     expect(publish).toContain("cache-from:");
     expect(publish).toContain("cache-to:");
     expect(publish).toContain(":buildcache");
   });
+
+  it("accepts only the scoped WebKit skip and rejects every other incomplete E2E dependency", async () => {
+    const step = (await readJobs()).e2e.steps[0];
+    expect(step.if).toBeUndefined();
+    expect(step["continue-on-error"]).toBeUndefined();
+    expect(step.env).toEqual({
+      SUITES_RESULT: "${{ needs.e2e-suites.result }}",
+      WEBKIT_RESULT: "${{ needs.webkit.result }}",
+      WEBKIT_REQUIRED: "${{ needs.enc02-webkit-scope.outputs.required }}",
+      SCOPE_RESULT: "${{ needs.enc02-webkit-scope.result }}",
+    });
+    for (const suites of ["success", "failure", "cancelled", "skipped", ""]) {
+      for (const scope of ["success", "failure", "cancelled", "skipped", ""]) {
+        for (const required of ["true", "false", ""]) {
+          for (const webkit of ["success", "failure", "cancelled", "skipped", ""]) {
+            const result = spawnSync("bash", ["--noprofile", "--norc", "-eo", "pipefail", "-c", step.run!], {
+              env: { ...process.env, SUITES_RESULT: suites, SCOPE_RESULT: scope, WEBKIT_REQUIRED: required, WEBKIT_RESULT: webkit },
+            });
+            expect(result.error).toBeUndefined();
+            const expected = suites === "success" && scope === "success" && ((required === "true" && webkit === "success") || (required === "false" && webkit === "skipped"));
+            expect(result.status === 0, `suites=${suites}, scope=${scope}, required=${required}, webkit=${webkit}`).toBe(expected);
+          }
+        }
+      }
+    }
+  }, 15_000);
 
   it("keeps every required deterministic gate in the protected workflow", async () => {
     const workflow = await readFile(workflowPath, "utf8");
