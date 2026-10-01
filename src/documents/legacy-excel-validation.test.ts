@@ -7,12 +7,59 @@ import { FileDocumentStagingStore } from "./staging-store";
 import { prepareTurnDocumentWorkspaceInputs, ServerTurnDocumentInputResolver } from "./turn-attachments";
 import { describe, it, expect } from "vitest";
 import { validateUploadedDocument, validateUploadedDocumentFile } from "./upload-validation";
+import { makeAutoFilterProfile } from "../../tests/fixtures/legacy-autofilter";
 
 const fixture = () => readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
 const validate = (data: Buffer, fileName = "horaris.xls", declaredMimeType = "application/vnd.ms-excel") =>
   validateUploadedDocument({ data, fileName, declaredMimeType });
 
 describe("legacy Excel attachments", () => {
+  it.each(["legacy-autofilter", "legacy-autofilter-single", "legacy-autofilter-wide", "legacy-autofilter-maximum", "legacy-autofilter-multi"])(
+    "admits %s through both upload paths independently of its filename", async fixtureName => {
+    const data = await readFile(path.resolve(`tests/fixtures/${fixtureName}.xls`));
+    const directory = await mkdtemp(path.join(tmpdir(), "xls-autofilter-"));
+    try {
+      const filePath = path.join(directory, "filters.xls");
+      await writeFile(filePath, data, { mode: 0o600 });
+      for (const fileName of ["filters.xls", "inventari fictici 2026.xls"]) {
+        for (const mime of ["application/vnd.ms-excel", "application/octet-stream"]) {
+          const accepted = validate(data, fileName, mime);
+          expect(accepted.kind).toBe("xls");
+          expect(await validateUploadedDocumentFile({ filePath, fileName, declaredMimeType: mime })).toEqual(accepted);
+        }
+      }
+      expect(await readFile(filePath)).toEqual(data);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+  it("keeps active controls and unbound or continued drawings out of both upload paths", async () => {
+    const data = await readFile(path.resolve("tests/fixtures/legacy-autofilter.xls"));
+    const profile = makeAutoFilterProfile();
+    const object = data.indexOf(profile.sheets[0].pairs[0].object);
+    const drawing = data.indexOf(profile.sheets[0].pairs[1].drawing);
+    expect(object).toBeGreaterThan(512);
+    expect(drawing).toBeGreaterThan(512);
+    const cases: [number, number][] = [
+      [object + 4, 7], // button, not auxiliary AutoFilter
+      [object + 22, 4], // FtMacro instead of FtSbs
+      [object + 50, 2], // nonempty object formula
+      [object + 56, 0x0001], // ordinary form dropdown
+      [drawing - 4, 0x003c], // continued, not independently bound Drawing
+      [drawing + 32, 0x8382], // complex hyperlink property
+    ];
+    const directory = await mkdtemp(path.join(tmpdir(), "xls-filter-negatives-"));
+    try {
+      const filePath = path.join(directory, "unsafe.xls");
+      for (const [offset, value] of cases) {
+        const invalid = Buffer.from(data);
+        invalid.writeUInt16LE(value, offset);
+        await writeFile(filePath, invalid, { mode: 0o600 });
+        for (const mime of ["application/vnd.ms-excel", "application/octet-stream"]) {
+          expect(() => validate(invalid, "unsafe.xls", mime)).toThrowError(expect.objectContaining({ code: "UPLOAD_MACROS_REJECTED" }));
+          await expect(validateUploadedDocumentFile({ filePath, fileName: "unsafe.xls", declaredMimeType: mime })).rejects.toMatchObject({ code: "UPLOAD_MACROS_REJECTED" });
+        }
+      }
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
   it("accepts a structurally validated XLS sent with a generic binary MIME", async () => {
     const data = await fixture();
     const expected = validate(data);
