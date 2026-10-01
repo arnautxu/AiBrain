@@ -98,7 +98,7 @@ export class WeeklyTokenBudgetRuntime {
       usageObserved: previous?.usageObserved || this.observedUsage.has(key),
     });
     this.schedulePoll();
-    if (this.unavailable) void this.interruptActive();
+    if (this.unavailable && !this.unlimited()) void this.interruptActive();
   }
 
   async observe(notification: ServerNotification, event: AppServerEvent) {

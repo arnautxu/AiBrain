@@ -47,6 +47,19 @@ function completed(threadId = "thread", turnId = "turn"): ServerNotification {
 afterEach(() => vi.useRealTimers());
 
 describe("weekly token budget runtime", () => {
+  it("does not interrupt a newly bound promotional turn after an accounting failure", async () => {
+    let now = Date.parse("2026-10-01T08:00:00.000Z");
+    const { store, budget, interrupt } = fixture({ unlimitedUntil: "2026-10-31T23:00:00.000Z", now: () => now });
+    store.recordUsage.mockRejectedValue(new Error("Accounting requires reconciliation"));
+    const notification = usage();
+    await budget.observe(notification, envelope(notification, "failed", new Date(now).toISOString()));
+    budget.bindTurn("next-thread", "next-turn");
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(interrupt).not.toHaveBeenCalled();
+    now = Date.parse("2026-10-31T23:00:00.000Z");
+    await expect(budget.beforeRequest("turn/start", { threadId: "after" })).rejects.toMatchObject({ code: "WEEKLY_TOKEN_BUDGET_UNAVAILABLE" });
+    budget.close();
+  });
   it("keeps admission open and excludes usage until the temporary unlimited period ends", async () => {
     let now = Date.parse("2026-09-28T12:00:00.000Z");
     const { store, budget, interrupt } = fixture({
