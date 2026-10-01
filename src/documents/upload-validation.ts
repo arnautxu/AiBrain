@@ -417,7 +417,10 @@ function assertMimeAndExtension(
   };
   const mimeMatches = kind === "text"
     ? declaredMimeType.startsWith("text/") || declaredMimeType === "application/json"
-    : declaredMimeType === (officeMime[kind] ?? mediaType);
+    : declaredMimeType === (officeMime[kind] ?? mediaType)
+      // Browsers may report legacy Excel as generic binary data. Both entry
+      // points inspect the complete CFB/BIFF8 before reaching this check.
+      || (kind === "xls" && declaredMimeType === "application/octet-stream");
   if (!allowedExtensions[kind].includes(ext) || !mimeMatches) {
     throw new UploadValidationError("UPLOAD_TYPE_MISMATCH", "Filename, declared MIME and file signature do not agree.");
   }
