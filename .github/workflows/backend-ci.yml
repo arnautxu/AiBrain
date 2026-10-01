@@ -134,7 +134,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 3
+          fetch-depth: 0
           persist-credentials: false
       - name: Bind the exception to the approved unchanged product revision
         id: scope
@@ -143,8 +143,8 @@ jobs:
           set -euo pipefail
           required=true
           approved=9eb3fa6d4183e4aea11fe03a4cc456d65e6ac061
-          base=64c0764b76c0aaeed50fc8a3401a8a682c9165b0
-          release_parent=64c0764b76c0aaeed50fc8a3401a8a682c9165b0
+          base=e64b18556ea4d0d6ca57967b9d50cf6e129f18ae
+          release_parent=e64b18556ea4d0d6ca57967b9d50cf6e129f18ae
           target="$(git rev-parse HEAD)"
           read -ra parents <<<"$(git show -s --format=%P HEAD)"
           if [[ "${#parents[@]}" == 2 && "${parents[0]}" == "$base" ]] &&

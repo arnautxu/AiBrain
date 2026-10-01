@@ -81,6 +81,8 @@ describe("backend CI contract", () => {
       "npx playwright test --project=chromium-desktop --shard=2/2",
       "npx playwright test --project=webkit-iphone",
     ]);
+    expect(jobs["enc02-webkit-scope"].steps[0].with?.["fetch-depth"]).toBe(0);
+    expect(jobs["enc02-webkit-scope"].steps[0].with?.["persist-credentials"]).toBe(false);
     expect(jobs.webkit.needs).toBe("enc02-webkit-scope");
     expect(jobs.webkit.if).toBe("needs.enc02-webkit-scope.outputs.required == 'true'");
     expect(jobs.webkit["continue-on-error"]).toBeUndefined();
