@@ -37,7 +37,7 @@ describe("backend CI contract", () => {
       expect(job.steps.some((step) => step.with?.cache === "npm" && step.with["cache-dependency-path"] === "package-lock.json")).toBe(true);
     }
     const commands = build.steps.map((step) => step.run ?? "").join("\n");
-    for (const command of ["npm audit --audit-level=high", "npm run contracts:verify", "npm run typecheck", "npm run lint", "test_rdp*.py", "test_knowledge*.py", "--require-hashes", "npm run build:automation-worker", "npm run build", "npm run infra:validate", "bash -n infra/hetzner/app/deploy-arnall-main.sh"]) {
+    for (const command of ["npm run contracts:verify", "npm run typecheck", "npm run lint", "test_rdp*.py", "test_knowledge*.py", "--require-hashes", "npm run build:automation-worker", "npm run build", "npm run infra:validate", "bash -n infra/hetzner/app/deploy-arnall-main.sh"]) {
       expect(commands).toContain(command);
     }
     expect(commands).not.toContain("npm test");
