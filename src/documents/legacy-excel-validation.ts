@@ -1,4 +1,5 @@
 import { UploadValidationError } from "./upload-validation";
+import { inspectAutoFilterDrawings, type FilterSheet } from "./legacy-excel-autofilter";
 
 const SIGNATURE = Buffer.from("d0cf11e0a1b11ae1", "hex");
 export function isLegacyExcelContainer(data: Buffer) {
@@ -117,6 +118,16 @@ export function inspectLegacyExcel(data: Buffer) {
       workbook.readUInt16LE(6) !== 0x0005) reject();
   let depth = 0;
   let sheets = 0;
+  const filterSheets: FilterSheet[] = [];
+  const sheetsWithFilterInfo = new Set<FilterSheet>();
+  const drawingGroups: Buffer[] = [];
+  let filterSheet: FilterSheet | undefined;
+  let globalSubstream = false;
+  let globalSubstreams = 0;
+  let pendingDrawing: Buffer | undefined;
+  let previousRecord: number | undefined;
+  let unsupportedDrawingTopology = false;
+  let hasObjects = false;
   for (let offset = 0; offset < workbook.length;) {
     // Some writers pad the workbook stream with zeros after the final EOF.
     if (depth === 0 && offset > 0 && workbook.subarray(offset).every((byte) => byte === 0)) break;
@@ -126,13 +137,26 @@ export function inspectLegacyExcel(data: Buffer) {
     if (size > 8224 || offset + 4 + size > workbook.length) reject();
     const body = offset + 4;
     if (id === 0x002f) reject("UPLOAD_ENCRYPTED_REJECTED"); // FILEPASS
-    if ([0x00d3, 0x01ba, 0x01b8, 0x005d].includes(id)) reject("UPLOAD_MACROS_REJECTED"); // VBA/CodeName/HLINK/OBJ
+    if ([0x00d3, 0x01ba, 0x01b8].includes(id)) reject("UPLOAD_MACROS_REJECTED"); // VBA/CodeName/HLINK
+    if (pendingDrawing && id !== 0x005d) {
+      unsupportedDrawingTopology = true;
+      pendingDrawing = undefined;
+    }
+    if (id === 0x003c && previousRecord !== undefined && [0x00eb, 0x00ec, 0x005d].includes(previousRecord)) {
+      unsupportedDrawingTopology = true; // this profile has no continued object/drawing payload
+    }
     if (id === 0x0809) {
       if (size < 8 || workbook.readUInt16LE(body) !== 0x0600 ||
           ![0x0005, 0x0010].includes(workbook.readUInt16LE(body + 2))) reject("UPLOAD_MACROS_REJECTED");
       if (++depth !== 1) reject();
+      globalSubstream = workbook.readUInt16LE(body + 2) === 0x0005;
+      if (globalSubstream) globalSubstreams += 1;
+      filterSheet = globalSubstream ? undefined : { filterColumns: 0, pairs: [] };
+      if (filterSheet) filterSheets.push(filterSheet);
     } else if (id === 0x000a) {
       if (size !== 0 || --depth !== 0) reject();
+      filterSheet = undefined;
+      globalSubstream = false;
     } else if (!depth) reject();
     if (id === 0x0085) {
       if (size < 8 || workbook[body + 5] !== 0 || ++sheets > 100) reject("UPLOAD_MACROS_REJECTED");
@@ -140,7 +164,39 @@ export function inspectLegacyExcel(data: Buffer) {
       if (target + 8 > workbook.length || workbook.readUInt16LE(target) !== 0x0809 ||
           workbook.readUInt16LE(target + 6) !== 0x0010) reject();
     }
+    if (id === 0x009d) {
+      if (!filterSheet || size !== 2 || sheetsWithFilterInfo.has(filterSheet)) unsupportedDrawingTopology = true;
+      else {
+        sheetsWithFilterInfo.add(filterSheet);
+        filterSheet.filterColumns = workbook.readUInt16LE(body);
+      }
+    }
+    if (id === 0x00eb) {
+      if (!globalSubstream || drawingGroups.length !== 0) unsupportedDrawingTopology = true;
+      drawingGroups.push(workbook.subarray(body, body + size));
+    }
+    if (id === 0x00ec) {
+      if (!filterSheet) unsupportedDrawingTopology = true;
+      pendingDrawing = workbook.subarray(body, body + size);
+    }
+    if (id === 0x005d) {
+      hasObjects = true;
+      if (!filterSheet || !pendingDrawing || previousRecord !== 0x00ec || filterSheet.pairs.length >= 256) {
+        reject("UPLOAD_MACROS_REJECTED");
+      }
+      filterSheet.pairs.push({ drawing: pendingDrawing, object: workbook.subarray(body, body + size) });
+      pendingDrawing = undefined;
+    }
+    previousRecord = id;
     offset = body + size;
   }
   if (depth !== 0 || sheets < 1) reject();
+  if (hasObjects) {
+    if (unsupportedDrawingTopology || pendingDrawing || drawingGroups.length !== 1 || globalSubstreams !== 1) reject("UPLOAD_MACROS_REJECTED");
+    try {
+      inspectAutoFilterDrawings(drawingGroups[0]!, filterSheets.filter(sheet => sheet.pairs.length > 0));
+    } catch {
+      reject("UPLOAD_MACROS_REJECTED");
+    }
+  }
 }
