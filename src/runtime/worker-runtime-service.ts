@@ -19,7 +19,8 @@ import {
 } from "@/runtime/codex-app-server";
 import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
 import type { AppServerEvent, JsonValue } from "@/runtime/transport";
-import { LocalGatewayWorkerRuntimeFactory } from "@/runtime/workers/local-gateway-runtime";
+import { LocalGatewayWorkerRuntimeFactory, workerEgressEnvironment } from "@/runtime/workers/local-gateway-runtime";
+import { sharedAuthProvider } from "@/runtime/workers/shared-auth-broker";
 import { WorkerRuntimeRegistry } from "@/runtime/workers/registry";
 import type { WorkerRuntimeHandle } from "@/runtime/workers/types";
 import { operationalLogger } from "@/operations/server-logger";
@@ -391,7 +392,10 @@ async function serviceState(): Promise<RuntimeServiceState> {
       config,
       registry: new WorkerRuntimeRegistry({
         config,
-        factory: new LocalGatewayWorkerRuntimeFactory({ quotaToolPrivacy: Boolean(config.usageLimits) }),
+        factory: new LocalGatewayWorkerRuntimeFactory({
+          quotaToolPrivacy: Boolean(config.usageLimits),
+          sharedAuth: sharedAuthProvider(config, process.env.AIBRAIN_CODEX_AUTH_SCOPE === "shared-qa" ? workerEgressEnvironment() : {}),
+        }),
         maintenance,
         onLifecycleMetric: (metric) => operationalLogger.info("codex.worker_lifecycle", {
           metricSchemaVersion: 1,

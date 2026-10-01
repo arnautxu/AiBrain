@@ -47,7 +47,9 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Windows import and on-demand broker boundaries
-        run: python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
+        run: |
+          python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
+          python3 -m unittest discover -s tests/infra -p 'test_playwright_apt*.py' -q
       - name: Company knowledge and legacy spreadsheet boundaries
         run: |
           python3 -m venv "$RUNNER_TEMP/knowledge-tests"
@@ -123,48 +125,6 @@ jobs:
       - run: npm run build --prefix modules/horaria/backend
       - run: npm test --prefix modules/horaria/backend
 
-  enc02-webkit-scope:
-    name: Resolve one-release WebKit exception
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    outputs:
-      required: ${{ steps.scope.outputs.required }}
-    steps:
-      - name: Checkout the candidate identity only
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
-          fetch-depth: 3
-          persist-credentials: false
-      - name: Bind the exception to the approved unchanged product revision
-        id: scope
-        shell: bash
-        run: |
-          set -euo pipefail
-          required=true
-          approved=9eb3fa6d4183e4aea11fe03a4cc456d65e6ac061
-          base=64c0764b76c0aaeed50fc8a3401a8a682c9165b0
-          release_parent=64c0764b76c0aaeed50fc8a3401a8a682c9165b0
-          target="$(git rev-parse HEAD)"
-          read -ra parents <<<"$(git show -s --format=%P HEAD)"
-          if [[ "${#parents[@]}" == 2 && "${parents[0]}" == "$base" ]] &&
-             git diff --quiet "${parents[1]}" HEAD; then
-            target="${parents[1]}"
-          fi
-          # Only the immediate release child, or its exact merge on the frozen
-          # base, can qualify. A later commit automatically runs WebKit again.
-          if [[ "$(date -u +%Y%m%d)" == 20261001 &&
-                "$(git show -s --format=%P "$target")" == "$release_parent" ]] &&
-             git diff --quiet "$approved" "$target" -- . \
-               ':(exclude).github/workflows/backend-ci.yml' \
-               ':(exclude)docs/ENC02_WEBKIT_RELEASE_EXCEPTION.md' \
-               ':(exclude)tests/contract/ci-workflow.contract.test.ts'; then
-            required=false
-            echo '::warning::WebKit NOT_VERIFIED for this single XLS release: owner-authorized installation-timeout exception. No WebKit test success is claimed.'
-            echo 'WebKit: **NOT_VERIFIED**, one-release exception. All other CI gates remain required. Later revisions run WebKit normally.' >> "$GITHUB_STEP_SUMMARY"
-          fi
-          echo "required=$required" >> "$GITHUB_OUTPUT"
-
   e2e-suites:
     name: E2E (${{ matrix.suite }})
     runs-on: ubuntu-24.04
@@ -210,8 +170,6 @@ jobs:
 
   webkit:
     name: E2E (webkit)
-    needs: enc02-webkit-scope
-    if: needs.enc02-webkit-scope.outputs.required == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -227,8 +185,22 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install locked dependencies
         run: npm ci
-      - name: Install the required pinned browser runtime
-        run: npx playwright install --with-deps webkit
+      - name: Install WebKit system libraries with bounded mirror retries
+        timeout-minutes: 5
+        run: |
+          # Include legacy/deb822 sources and the runner's mirror+file lists.
+          sudo python3 scripts/configure-playwright-apt-mirrors.py
+          sudo tee /etc/apt/apt.conf.d/80-aibrain-timeouts >/dev/null <<'APT'
+          Acquire::Retries "3";
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          APT
+          npx playwright install-deps webkit
+      - name: Install the pinned WebKit browser
+        timeout-minutes: 3
+        env:
+          PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT: "30000"
+        run: npx playwright install webkit
       - name: Run isolated E2E suite
         run: npx playwright test --project=webkit-iphone
       - name: Validate native composer and transport recovery
@@ -236,27 +208,18 @@ jobs:
 
   e2e:
     name: Filesystem and restart E2E
-    needs: [e2e-suites, webkit, enc02-webkit-scope]
+    needs: [e2e-suites, webkit]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require E2E suites with only the exact WebKit exception
+      - name: Require every E2E suite including WebKit
         env:
           SUITES_RESULT: ${{ needs.e2e-suites.result }}
           WEBKIT_RESULT: ${{ needs.webkit.result }}
-          WEBKIT_REQUIRED: ${{ needs.enc02-webkit-scope.outputs.required }}
-          SCOPE_RESULT: ${{ needs.enc02-webkit-scope.result }}
         run: |
           test "$SUITES_RESULT" = success
-          test "$SCOPE_RESULT" = success
-          if test "$WEBKIT_REQUIRED" = true; then
-            test "$WEBKIT_RESULT" = success
-          else
-            test "$WEBKIT_REQUIRED" = false
-            test "$WEBKIT_RESULT" = skipped
-            echo '::warning::WebKit NOT_VERIFIED under the single-release ENC-02 exception.'
-          fi
+          test "$WEBKIT_RESULT" = success
 
   documents:
     name: Real Office, PDF, text and image matrix
