@@ -1,4 +1,5 @@
 import type { ChatAttachment } from "@/lib/chat-contract";
+import { parseLegacyExcelProvenance, type LegacyExcelProvenance } from "@/documents/legacy-excel-policy";
 
 export type DocumentUploadKind = "docx" | "xlsx" | "xls" | "pptx" | "pdf" | "text" | "image";
 
@@ -10,6 +11,7 @@ export type StagedComposerDocument = ChatAttachment & {
   pages: number | null;
   status: "uploading" | "ready" | "error";
   error: string | null;
+  passive?: boolean;
 };
 
 type DocumentUploadResponse = {
@@ -21,6 +23,7 @@ type DocumentUploadResponse = {
     mediaType: string;
     size: number;
     status: "staged";
+    legacyExcel?: LegacyExcelProvenance;
   };
   preview: {
     uploadId: string;
@@ -67,6 +70,13 @@ export function parseDocumentUploadResponse(value: unknown): DocumentUploadRespo
       !/^[a-z0-9][a-z0-9._-]{0,159}$/i.test(file.name) ||
       typeof file.url !== "string" || !file.url.startsWith(expectedPrefix) ||
       file.url !== `${expectedPrefix}${encodeURIComponent(file.name)}`)) return null;
+  let legacyExcel: LegacyExcelProvenance | undefined;
+  if (document.legacyExcel !== undefined) {
+    try {
+      if (document.kind !== "xlsx" || !document.fileName.endsWith(".passive.xlsx")) return null;
+      legacyExcel = parseLegacyExcelProvenance(document.legacyExcel);
+    } catch { return null; }
+  }
   return {
     document: {
       uploadId: document.uploadId as string,
@@ -76,6 +86,7 @@ export function parseDocumentUploadResponse(value: unknown): DocumentUploadRespo
       mediaType: document.mediaType,
       size: Number(document.size),
       status: "staged",
+      ...(legacyExcel ? { legacyExcel } : {}),
     },
     preview: {
       uploadId: preview.uploadId as string,

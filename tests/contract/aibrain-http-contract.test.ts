@@ -71,6 +71,17 @@ describe("versioned AiBrain UI/backend contract", () => {
     }
   });
 
+  it("publishes bounded passive provenance without exposing a path to the original", () => {
+    const provenance = {
+      policy: "values-only-v1", originalFileName: "fixture.xls", originalSha256: "a".repeat(64), originalSize: 9728,
+      sheetCount: 1, cellCount: 9, formulaCount: 3, missingFormulaCaches: 3, undecodedFormulas: 0, omittedSheets: 0, omittedStreams: 1,
+    };
+    expect(() => assertUiContract("LegacyExcelProvenance", provenance)).not.toThrow();
+    expect(uiContractErrors("LegacyExcelProvenance", { ...provenance, originalPath: "/private/source.xls" })).not.toBeNull();
+    expect(uiContractErrors("LegacyExcelProvenance", { ...provenance, cellCount: 500001 })).not.toBeNull();
+    expect(uiContractErrors("LegacyExcelProvenance", { ...provenance, policy: "active" })).not.toBeNull();
+  });
+
   it("distinguishes unavailable review data from an empty list and requires source versions", () => {
     const examples = uiContract["x-examples"];
     const listed = structuredClone(examples.find((item) => item.schema === "KnowledgeReviewGetResponse" &&

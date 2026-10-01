@@ -77,6 +77,15 @@ Coordinate the full suite with the master task. Run it once on the fixed
 candidate, sequentially with build and visual/a11y gates; do not overlap heavy
 suites from separate worktrees.
 
+For changes to legacy XLS admission, run the native/passive profile tests,
+Python reader tests and document route integration tests. Backend CI also runs
+`container-xls-passive-acceptance.mjs` inside the candidate image with the real
+wrappers, production seccomp/AppArmor profiles and empty temporary data. It
+checks both paths, unchanged synthetic originals, stable retries, worker copies
+and PDF previews. Never mount production data for this check. Authenticated
+live upload and original/formula preservation remain separate release gates;
+transferring a private acceptance file requires authorization for that destination.
+
 ## 4. Pre-merge release review
 
 Before changing `main`, capture:

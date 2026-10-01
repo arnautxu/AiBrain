@@ -619,6 +619,16 @@ describe("chat workspace simplificado", () => {
     expect(onComposerNotice).toHaveBeenCalledWith(expect.stringContaining("borrador actual"));
   });
 
+  it("keeps the passive XLS limitation visible when the attachment is ready to send", () => {
+    renderWorkspace(null, project, { prompt: "Revisa el Excel.", documents: [{
+      id: "passive", uploadId: "passive", threadId: "thread", name: "informe.passive.xlsx",
+      size: 2048, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      kind: "xlsx", status: "ready", error: null, pages: 2, previewFiles: [], passive: true,
+    }] });
+    expect(screen.getByText("Copia pasiva · datos sin verificar")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enviar mensaje" })).toBeEnabled();
+  });
+
   it("blocks button and Enter submission while a recovered attachment is unavailable", () => {
     const onSend = vi.fn();
     renderWorkspace(null, project, { prompt: "Revisa el informe.", onSend, documents: [{ id: "missing", uploadId: "missing", threadId: "thread", name: "informe.pdf", size: 2048, mimeType: "application/pdf", kind: "pdf", status: "error", error: "Vuelve a adjuntar este archivo.", pages: null, previewFiles: [] }] });

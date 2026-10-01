@@ -1315,7 +1315,9 @@ export function BrainApp({
             previewFiles: result.preview.files,
             pages: result.preview.pages,
             status: "ready",
+            passive: Boolean(result.document.legacyExcel),
           } : document));
+          if (result.document.legacyExcel) setNotice(workbenchNotice(t("XLS preparado como copia pasiva. Datos guardados y resultados de fórmulas sin verificar; no se ejecutan macros ni se actualizan enlaces. El original se conserva intacto."), "warning"));
         } catch (reason) {
           const message = reason instanceof Error ? reason.message : t("No se ha podido preparar el documento.");
           setDocuments((current) => current.map((document) => document.uploadId === uploadId
@@ -1531,7 +1533,7 @@ export function BrainApp({
       const readyDocuments = documents.filter((document) => document.status === "ready");
       userMessage.attachments = [
         ...attachments.map(({ dataUrl: _dataUrl, ...attachment }) => attachment),
-        ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, ...attachment }) => attachment),
+        ...readyDocuments.map(({ uploadId: _uploadId, threadId: _threadId, kind: _kind, previewFiles: _previewFiles, pages: _pages, status: _status, error: _error, passive: _passive, ...attachment }) => attachment),
       ];
       assistantMessage = createMessage(
         crypto.randomUUID(),

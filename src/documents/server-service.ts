@@ -55,6 +55,11 @@ export async function documentServicesForUser(
     rootDirectory: path.join(stateRoot, ".locks", "documents"),
   });
   const staging = new FileDocumentStagingStore(manifest.roots.staging, locks);
+  // Outside every worker-visible root and absent from the library/download index.
+  const legacyOriginals = new FileDocumentStagingStore(
+    path.join(installation.paths.dataRoot, "server", "legacy-excel-originals", userId), locks,
+  );
+  const passiveXlsReader = configuredAbsolutePath("AIBRAIN_XLS_PASSIVE_BIN", "/usr/local/bin/aibrain-xls-passive");
   const conversionGate = new FileDocumentConversionGate({
     rootDirectory: path.join(installation.paths.dataRoot, "locks", "document-conversions"),
   });
@@ -74,7 +79,7 @@ export async function documentServicesForUser(
     path.join(stateRoot, "document-history"),
     locks,
   );
-  return { manifest, locks, staging, previews, versions, toolchain, conversionGate, storageGate };
+  return { manifest, locks, staging, legacyOriginals, passiveXlsReader, previews, versions, toolchain, conversionGate, storageGate };
 }
 
 function publicationSecret() {

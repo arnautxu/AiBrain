@@ -26,6 +26,7 @@ export async function restoreRequestDocument(threadId: string, attachment: ChatA
     const previewPrefix = `${prefix}/versions/${document.originalVersionId}/preview/`;
     if (!original.previewUrl.startsWith(previewPrefix) || !/^[a-z0-9][a-z0-9._-]{0,159}$/i.test(original.previewUrl.slice(previewPrefix.length))) return unavailable;
     return { ...unavailable, kind: original.kind as DocumentUploadKind, status: "ready", error: null,
+      passive: typeof original.fileName === "string" && original.fileName.endsWith(".passive.xlsx"),
       previewFiles: [{ name: original.previewUrl.slice(previewPrefix.length), url: original.previewUrl }] };
   } catch (error) {
     if (signal.aborted) throw error;
