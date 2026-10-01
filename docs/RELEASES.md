@@ -32,31 +32,26 @@ aceptación live se verifican con readback separado.
 El gateway usa una configuración Docker temporal para el login, hace pull de
 ambos digests exactos, elimina esa configuración antes de promover y ejecuta el
 release manager. Nunca recibe un archivo fuente, no construye ni publica en
-Hetzner y no persiste credenciales GHCR. Tras health/readiness, elimina los
-contenedores **detenidos** de la misma instalación que aún referencien los dos
-digests previos y después elimina esas referencias de imagen. Un contenedor en
-ejecución, una etiqueta de otro repositorio o una imagen no etiquetada como
-AiBrain bloquean la limpieza y se registran con su referencia exacta: el
-comando no declara la release aceptada hasta resolverlo, y nunca elimina un
-workload ajeno. La imagen anterior queda recuperable desde GHCR por el digest
-guardado en el estado de release.
+Hetzner y no persiste credenciales GHCR. Tras health/readiness conserva las
+imágenes exactas de `current` y `previous` en el host. El registro GHCR privado
+no admite pulls anónimos y la credencial del workflow caduca: borrar `previous`
+impedía ejecutar el rollback documentado después de un despliegue aceptado.
+El gestor vuelve a la release anterior usando esas imágenes locales verificadas,
+sin credenciales adicionales, reconstrucciones ni etiquetas inventadas.
 
-Después de una aceptación satisfactoria el invariante local es exactamente un
-digest activo para `ghcr.io/arnautxu/aibrain` y uno para
-`ghcr.io/arnautxu/aibrain-egress`: los de `current` en `release-state.json`.
-La retención enumera todos los digests locales de esos dos repositorios, vuelve
-a validar label, referencias y consumidores y elimina cada digest inactivo de
-forma individual. También elimina directorios legacy con nombre de revisión
-solo después de `health/live` + `health/ready`, sin transacción pendiente y
-protegiendo las revisiones `current` y `previous`; nombres no reconocidos y
-ficheros de recibos se conservan. No se conserva rollback local. El rollback
-automático antes de la aceptación sigue usando la release previa que conserva
-el estado durable y GHCR. El host no ejecuta builds desde esta ruta; por
-seguridad la gateway no usa
-`docker builder prune` ni un prune general, porque Docker no permite atribuir
-de forma fiable una entrada de caché histórica a una instalación. Cualquier
-caché antigua sin esa atribución queda fuera de esta operación, sin tocar otros
-workloads.
+La retención protege también otros digests que Docker resuelva al mismo image ID
+que `current` o `previous`. Enumera los digests de los dos repositorios AiBrain,
+vuelve a validar label, referencias y consumidores y elimina solo los anteriores
+a esas dos releases. Nunca elimina un contenedor en ejecución ni un workload
+ajeno. Una referencia compartida válida se conserva y se registra; una inspección
+inconsistente o un fallo real de eliminación siguen fallando cerrados.
+
+El límite propio son dos releases por componente, más cualquier imagen retenida
+por un consumidor ajeno. Los directorios legacy se eliminan después de
+`health/live` + `health/ready`, sin transacción pendiente y protegiendo `current`
+y `previous`; nombres no reconocidos y recibos se conservan. El host no construye
+imágenes ni ejecuta un prune general: las operaciones de limpieza identifican
+cada imagen y no modifican otros workloads.
 
 El host debe instalar `infra/hetzner/systemd/journald-disk-retention.conf` como
 `/etc/systemd/journald.conf.d/99-disk-retention.conf` y reiniciar
