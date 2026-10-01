@@ -31,6 +31,12 @@ function documentErrorResponse(error: unknown) {
   if (code === "UPLOAD_SIZE_INVALID") {
     return NextResponse.json({ error: "El document supera el límit de seguretat." }, { status: 413 });
   }
+  if (code === "UPLOAD_MACROS_REJECTED") {
+    return NextResponse.json({
+      error: "El document inclou contingut actiu o elements d’Excel no admesos per seguretat. Puja una còpia .xlsx sense macros, enllaços ni objectes incrustats.",
+      code,
+    }, { status: 400 });
+  }
   if (code === "DOCUMENT_VERSION_TYPE_MISMATCH") {
     return NextResponse.json({ error: "La nova versió ha de conservar el format original del document." }, { status: 400 });
   }
