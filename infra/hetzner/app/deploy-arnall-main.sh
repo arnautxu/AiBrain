@@ -189,18 +189,20 @@ is_aibrain_image_reference() {
     || "$reference" == ${GHCR_APP_REPOSITORY}@sha256:* || "$reference" == ${GHCR_EGRESS_REPOSITORY}@sha256:* ]]
 }
 
-is_current_aibrain_image() {
+is_retained_aibrain_image() {
   local image="$1"
-  jq -e --arg image "$image" '.current.image == $image or .current.egressImage == $image' "$STATE_FILE" >/dev/null
+  jq -e --arg image "$image" '.current.image == $image or .current.egressImage == $image
+    or .previous.image? == $image or .previous.egressImage? == $image' "$STATE_FILE" >/dev/null
 }
 
-current_aibrain_image_id_matches() {
+retained_aibrain_image_id_matches() {
   local image_id="$1" current_image current_image_id
   while IFS= read -r current_image; do
     [[ -n "$current_image" ]] || continue
     current_image_id="$(docker image inspect --format '{{.Id}}' "$current_image" 2>/dev/null || true)"
     [[ "$current_image_id" == "$image_id" ]] && return 0
-  done < <(jq -r '.current.image, .current.egressImage' "$STATE_FILE")
+  done < <(jq -r '[.current.image, .current.egressImage, .previous.image?, .previous.egressImage?]
+    | .[] | select(type == "string")' "$STATE_FILE")
   return 1
 }
 
@@ -237,7 +239,9 @@ remove_unused_aibrain_image() {
   local image="$1" image_id label reference cleanup_status
   local -a image_references=()
   [[ "$image" =~ ^(127\.0\.0\.1:5000/aibrain-company-qa|127\.0\.0\.1:5000/aibrain-company-qa-egress|${GHCR_APP_REPOSITORY}|${GHCR_EGRESS_REPOSITORY})@sha256:[0-9a-f]{64}$ ]] || return 0
-  is_current_aibrain_image "$image" && return 0
+  # Rollback must work after the short-lived GHCR credential is destroyed.
+  # Protect both durable releases, including other digests of their image IDs.
+  is_retained_aibrain_image "$image" && return 0
   image_id="$(docker image inspect --format '{{.Id}}' "$image" 2>/dev/null || true)"
   [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || return 0
   label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.title"}}' "$image_id")"
@@ -250,8 +254,8 @@ remove_unused_aibrain_image() {
     }
     image_references+=("$reference")
   done < <(docker image inspect --format '{{range .RepoTags}}{{println .}}{{end}}{{range .RepoDigests}}{{println .}}{{end}}' "$image_id")
-  if current_aibrain_image_id_matches "$image_id"; then
-    report_cleanup_blocked "$image" "current-image-id" "image_id=${image_id}"
+  if retained_aibrain_image_id_matches "$image_id"; then
+    report_cleanup_blocked "$image" "retained-image-id" "image_id=${image_id}"
     return 0
   fi
   if remove_obsolete_aibrain_containers "$image" "$image_id"; then

@@ -20,6 +20,8 @@ type Fixture = {
   references?: string;
   repeat?: boolean;
   hasPrevious?: boolean;
+  previousDigest?: string;
+  cleanupImage?: string;
   usePreviousCleanup?: boolean;
   useInactiveCleanup?: boolean;
   currentSharesImageId?: boolean;
@@ -34,7 +36,10 @@ async function runCleanup(fixture: Fixture): Promise<string> {
   const log = path.join(root, "docker.log");
   const releaseState = {
     current: { image: currentImage, egressImage: `ghcr.io/arnautxu/aibrain-egress@sha256:${currentDigest}` },
-    ...(fixture.hasPrevious === false ? {} : { previous: { image: oldImage } }),
+    ...(fixture.hasPrevious ? { previous: {
+      image: `ghcr.io/arnautxu/aibrain@sha256:${fixture.previousDigest ?? oldDigest}`,
+      egressImage: `ghcr.io/arnautxu/aibrain-egress@sha256:${fixture.previousDigest ?? oldDigest}`,
+    } } : {}),
   };
   await writeFile(state, `${JSON.stringify(releaseState)}\n`, { mode: 0o600 });
   const gateway = await readFile(gatewayPath, "utf8");
@@ -63,6 +68,8 @@ docker() {
     if [[ "$*" == *'{{.Id}}'* ]]; then
       if [[ "$*" == *${currentDigest}* ]]; then
         printf '%s\\n' ${JSON.stringify(fixture.currentSharesImageId ? imageId : currentImageId)}
+      elif [[ "$*" == *${fixture.previousDigest ?? "no-different-previous-digest"}* ]]; then
+        printf '%s\\n' ${JSON.stringify(`sha256:${"9".repeat(64)}`)}
       elif [[ "$present" == 1 ]]; then
         printf '%s\\n' ${JSON.stringify(imageId)}
       fi
@@ -106,7 +113,7 @@ docker() {
 }
 ${sourceable}
 set +e
-${fixture.useInactiveCleanup ? "cleanup_inactive_aibrain_images" : fixture.usePreviousCleanup ? "cleanup_previous_aibrain_images" : `remove_unused_aibrain_image ${JSON.stringify(oldImage)}`}
+${fixture.useInactiveCleanup ? "cleanup_inactive_aibrain_images" : fixture.usePreviousCleanup ? "cleanup_previous_aibrain_images" : `remove_unused_aibrain_image ${JSON.stringify(fixture.cleanupImage ?? oldImage)}`}
 ${fixture.repeat ? `remove_unused_aibrain_image ${JSON.stringify(oldImage)}` : ""}
 cleanup_status=$?
 set -e
@@ -125,7 +132,36 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-describe("Arnall single-release image cleanup contract", () => {
+describe("Arnall current and previous release image cleanup contract", () => {
+  it("retains both previous immutable images without registry credentials", async () => {
+    const previousEgress = `ghcr.io/arnautxu/aibrain-egress@sha256:${oldDigest}`;
+    const output = await runCleanup({ hasPrevious: true, useInactiveCleanup: true,
+      inventory: `${oldImage}\n${previousEgress}\n${currentImage}\n` });
+    expect(output).toContain("cleanup-status=0");
+    expect(output).not.toContain("image-rm");
+    expect(output).not.toContain("container-rm");
+  });
+
+  it("removes older releases while preserving the exact durable previous digests", async () => {
+    const previousDigest = "f".repeat(64);
+    const previousImage = `ghcr.io/arnautxu/aibrain@sha256:${previousDigest}`;
+    const previousEgress = `ghcr.io/arnautxu/aibrain-egress@sha256:${previousDigest}`;
+    const output = await runCleanup({ hasPrevious: true, previousDigest, useInactiveCleanup: true,
+      inventory: `${oldImage}\n${previousImage}\n${previousEgress}\n${currentImage}\n` });
+    expect(output).toContain(`image-rm ${oldImage}`);
+    expect(output).not.toContain(`image-rm ${previousImage}`);
+    expect(output).not.toContain(`image-rm ${previousEgress}`);
+    expect(output).not.toContain(`image-rm ${currentImage}`);
+    expect(output).toContain("cleanup-status=0");
+  });
+
+  it("preserves a digest alias of the previous image ID", async () => {
+    const alias = `ghcr.io/arnautxu/aibrain@sha256:${"f".repeat(64)}`;
+    const output = await runCleanup({ hasPrevious: true, cleanupImage: alias });
+    expect(output).toContain("reason=retained-image-id");
+    expect(output).not.toContain("image-rm");
+    expect(output).toContain("cleanup-status=0");
+  });
   it("does nothing for an initial deployment with no previous release", async () => {
     const output = await runCleanup({ hasPrevious: false, usePreviousCleanup: true });
 
@@ -165,7 +201,7 @@ describe("Arnall single-release image cleanup contract", () => {
   it("does not untag a current digest when Docker resolves it to the same image ID", async () => {
     const output = await runCleanup({ currentSharesImageId: true });
 
-    expect(output).toContain(`reason=current-image-id detail=image_id=${imageId}`);
+    expect(output).toContain(`reason=retained-image-id detail=image_id=${imageId}`);
     expect(output).toContain("cleanup-status=0");
     expect(output).not.toContain("image-rm");
   });
