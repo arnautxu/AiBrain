@@ -47,7 +47,9 @@ jobs:
       - name: Lint
         run: npm run lint
       - name: Windows import and on-demand broker boundaries
-        run: python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
+        run: |
+          python3 -m unittest discover -s tests/infra -p 'test_rdp*.py' -q
+          python3 -m unittest discover -s tests/infra -p 'test_playwright_apt*.py' -q
       - name: Company knowledge and legacy spreadsheet boundaries
         run: |
           python3 -m venv "$RUNNER_TEMP/knowledge-tests"
@@ -186,7 +188,8 @@ jobs:
       - name: Install WebKit system libraries with bounded mirror retries
         timeout-minutes: 5
         run: |
-          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
+          # Include legacy/deb822 sources and the runner's mirror+file lists.
+          sudo python3 scripts/configure-playwright-apt-mirrors.py
           sudo tee /etc/apt/apt.conf.d/80-aibrain-timeouts >/dev/null <<'APT'
           Acquire::Retries "3";
           Acquire::http::Timeout "30";
