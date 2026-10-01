@@ -236,7 +236,7 @@ describe("WorkerProvisioner", () => {
     expect(await readFile(path.join(outside, "worker.json"), "utf8").catch(() => null)).toBeNull();
   });
 
-  it("securely distributes one QA Codex subscription without sharing worker roots", async () => {
+  it("keeps the renewable QA session at its source without sharing worker roots or refresh tokens", async () => {
     const { config } = await fixture();
     const sharedRoot = path.join(config.paths.dataRoot, "shared-codex-auth");
     const sourcePath = path.join(sharedRoot, "auth.json");
@@ -257,7 +257,7 @@ describe("WorkerProvisioner", () => {
     expect(first.roots.codexHome).not.toBe(second.roots.codexHome);
     for (const manifest of [first, second]) {
       const authPath = path.join(manifest.roots.codexHome, "auth.json");
-      expect(await readFile(authPath, "utf8")).toContain("secret-a");
+      expect(await readFile(authPath, "utf8")).toBe("{}");
       expect(await mode(authPath)).toBe(0o600);
       const receipt = await readFile(path.join(manifest.roots.auditRoot, "codex-auth-scope.json"), "utf8");
       expect(receipt).toContain('"scope": "shared-qa"');
@@ -268,7 +268,8 @@ describe("WorkerProvisioner", () => {
       mode: 0o600,
     });
     await provisioner.provision(first.userId);
-    expect(await readFile(path.join(first.roots.codexHome, "auth.json"), "utf8")).toContain("secret-b");
+    expect(await readFile(path.join(first.roots.codexHome, "auth.json"), "utf8")).toBe("{}");
+    expect(await readFile(sourcePath, "utf8")).toContain("secret-b");
   });
 
   it("rejects unsafe shared Codex credential sources", async () => {

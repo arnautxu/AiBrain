@@ -464,7 +464,10 @@ export class WorkerProvisioner {
 
     const targetPath = path.join(roots.codexHome, "auth.json");
     if (path.resolve(targetPath) !== sourcePath) {
-      await atomicWriteFile(targetPath, authBytes, { mode: 0o600 });
+      // Only the private broker owns the renewable session. Workers log in
+      // over the non-journaled external-token lane; erase stale copied tokens
+      // so no child can accidentally fall back to independent renewal.
+      await atomicWriteFile(targetPath, "{}", { mode: 0o600 });
     }
     await chmod(targetPath, 0o600);
     await atomicWriteJson(
