@@ -129,7 +129,9 @@ function parseArguments(argv) {
   if (!POSITIVE_INTEGER.test(timeoutValue) || Number(timeoutValue) > 900_000) {
     throw new ReleaseError("RELEASE_TIMEOUT_INVALID", "Health timeout must be between 1 and 900000 ms.");
   }
-  const commandTimeoutValue = values.get("--docker-command-timeout-ms") ?? "30000";
+  // Compose waits for the gateway's health before application startup. Its
+  // subprocess budget must cover that phase within the same release deadline.
+  const commandTimeoutValue = values.get("--docker-command-timeout-ms") ?? timeoutValue;
   if (!POSITIVE_INTEGER.test(commandTimeoutValue) || Number(commandTimeoutValue) > 900_000) {
     throw new ReleaseError("RELEASE_TIMEOUT_INVALID", "Docker command timeout must be between 1 and 900000 ms.");
   }
