@@ -784,6 +784,7 @@ export async function POST(request: Request) {
             runtimeThreadContext
               ? runtimeThreadContext.toolsetRevision
               : CURRENT_THREAD_TOOLSET_REVISION,
+            turnOutcome === "existing",
           );
         } else {
           await emit({ type: "plan", explanation: "Previsualització demo", steps: buildDemoPlan() });

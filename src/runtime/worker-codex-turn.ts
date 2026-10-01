@@ -1,4 +1,5 @@
 import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
+import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "@/runtime/turn-submission-store";
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
 import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
@@ -9,7 +10,7 @@ import { COMPOSIO_DYNAMIC_TOOLS, COMPOSIO_NAMESPACE, handleComposioTool } from "
 import { designSkillDeveloperInstructions } from "@/catalog/design-skill-policy";
 import { prepareDesignBrandAssets } from "@/runtime/design-brand-assets";
 import { randomUUID } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { privateWorkspaceSafeText } from "@/runtime/private-workspace-text";
 import type { ServerNotification } from "../../contracts/codex/0.153.4/types/ServerNotification";
@@ -465,8 +466,9 @@ export async function runWorkerCodexTurn(
   runtimeIdentitySession?: AuthSession,
   backgroundExecution = false,
   resumedThreadToolsetRevision: string | null = null,
+  recoverExistingTurn = false,
 ) {
-  let turnInputDirectory: string | null = null;
+  let submission: DurableTurnSubmission | null = null;
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
   const telemetry = admittedTelemetry ?? new TurnTelemetry({
@@ -726,20 +728,21 @@ export async function runWorkerCodexTurn(
     ...(runtime.config.usageLimits ? [] : [runtime.handle.roots.workspace, runtime.handle.roots.artifacts]),
   ]);
   await mkdir(projectWorkspace, { recursive: true, mode: 0o700 });
-  const legacyExcelServices = turnDocuments.some(({ document }) => document.kind === "xls")
-    ? await documentServicesForUser(runtime.config, authenticatedUserId)
-    : null;
-  const turnWorkspaceInputs = await prepareTurnDocumentWorkspaceInputs({
-    documents: turnDocuments,
-    projectWorkspace,
-    stagingRoot: runtime.handle.roots.staging,
-    ...(legacyExcelServices ? { legacyExcelConversion: {
-      soffice: legacyExcelServices.toolchain.soffice,
-      conversionGate: legacyExcelServices.conversionGate,
-    } } : {}),
-    signal,
+  submission = await DurableTurnSubmission.open({
+    userRoot: runtime.handle.roots.userRoot,
+    installationId, userId: authenticatedUserId, projectId: chatRequest.projectId,
+    threadId: chatRequest.threadId, assistantMessageId: chatRequest.assistantMessageId,
+    workspace: projectWorkspace, recoveryOnly: recoverExistingTurn, signal,
+    binding: turnSubmissionBinding({ installationId, userId: authenticatedUserId, chatRequest,
+      permissionFingerprint: permissions.fingerprint,
+      documents: turnDocuments.map(({ document }) => document),
+    }),
   });
-  turnInputDirectory = turnWorkspaceInputs.directory;
+  if (submission.runtimeThreadId) {
+    if (runtimeThreadId && runtimeThreadId !== submission.runtimeThreadId) throw new Error("La conversa no coincideix amb el torn pendent.");
+    runtimeThreadId = submission.runtimeThreadId;
+  }
+  if (submission.needsRecovery && !runtimeThreadId) throw new TurnSubmissionRecoveryRequired();
   const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);
   // A new conversation used to wait for the optional model/skills/usage
   // catalog before it even opened its App Server thread.  The status route
@@ -896,6 +899,10 @@ export async function runWorkerCodexTurn(
     envelope: AppServerEvent,
     keyPrefix = "recovery",
   ) => {
+    await submission!.bindTurn(recoveredTurnState.id);
+    if (recoveredTurnState.status !== "inProgress") {
+      await submission!.observeTerminal(recoveredTurnState.id, recoveredTurnState.status);
+    }
     await emit({ type: "runtimeTurn", turnId: recoveredTurnState.id });
     const text = recoveredAgentText(recoveredTurnState);
     if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0 && recoveredTurnState.status === "completed") {
@@ -956,6 +963,7 @@ export async function runWorkerCodexTurn(
   const persistThreadIdentity = async (result: JsonValue, envelope: AppServerEvent) => {
     const resolvedThreadId = extractThreadId(result);
     if (!resolvedThreadId) throw new Error("El servei no ha retornat una conversa vàlida.");
+    await submission!.bindThread(resolvedThreadId);
     await completeRuntimePhase("runtime-thread", {
       label: runtimeThreadId ? "Conversación recuperada" : "Conversación abierta",
       detail: "El servicio ha confirmado la conversación",
@@ -977,17 +985,24 @@ export async function runWorkerCodexTurn(
     if (quotaToolPermissions) attestQuotaToolPermissions(runtime.client, result, quotaToolPermissions);
     await persistThreadIdentity(result, envelope);
   };
+  // Each observation must read current remote state, not a cached response to
+  // an earlier read. Only these non-model observations get a fresh correlation
+  // key; the admitted thread/start and turn/start keys never change.
   const recoverThreadRequest = (
     method: "thread/read" | "thread/resume",
     params: Record<string, unknown>,
     purpose: string,
     timeoutMs: number,
     beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
-  ) => requestPagedThreadRecovery(runtime.client, method, params, purpose, timeoutMs,
+  ) => requestPagedThreadRecovery(runtime.client, method, params, `${purpose}:${randomUUID()}`, timeoutMs,
     chatRequest.userMessageId, beforeResolve);
   let threadResult: JsonValue;
   if (reuseLoadedThread && runtimeThreadId) {
-    threadResult = { thread: { id: runtimeThreadId, turns: [] } };
+    await submission.bindThread(runtimeThreadId);
+    threadResult = submission.needsRecovery
+      ? await recoverThreadRequest("thread/read", { threadId: runtimeThreadId },
+          `turn-reattach:${chatRequest.assistantMessageId}`, 60_000, persistThreadIdentity)
+      : { thread: { id: runtimeThreadId, turns: [] } };
     // Each local turn needs its own durable, user-bound identity, including
     // warm turns which intentionally skip thread/resume. Stop must not route
     // an already running remote turn through the pre-start cancellation path.
@@ -1012,7 +1027,8 @@ export async function runWorkerCodexTurn(
             threadId: runtimeThreadId,
             ...commonThreadParams,
           }, `thread-resume:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity)
-        : runtime.client.request("thread/start", {
+        : (async () => {
+          const params = {
             ...commonThreadParams,
             // Thread-level dynamic tools cannot be added on a later turn. Each
             // handler still revalidates the authenticated turn and its scope.
@@ -1031,7 +1047,11 @@ export async function runWorkerCodexTurn(
           // One creation key per admitted local turn. A new user request or a
           // toolset upgrade must not reuse another turn's pending creation;
           // reconnecting this same turn still retains its stable key.
-          }, `thread-start:${chatRequest.assistantMessageId}`, 60_000, persistConfiguredThreadIdentity));
+          };
+          const purpose = `thread-start:${chatRequest.assistantMessageId}`;
+          await submission!.startThreadOnce(params, purpose);
+          return runtime.client.request("thread/start", params, purpose, 60_000, persistConfiguredThreadIdentity);
+        })());
     } catch (error) {
       if (error instanceof AppServerRequestTimeoutError && error.method === "thread/start" && !runtimeThreadId) {
         await setRuntimePhase(
@@ -1112,6 +1132,8 @@ export async function runWorkerCodexTurn(
   if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
   recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
+  await submission.bindThread(threadId);
+  if (submission.needsRecovery && !recoveredState) throw new TurnSubmissionRecoveryRequired();
   if (recoveredState && recoveredState.status !== "inProgress") {
     telemetry.bindRuntimeTurn(recoveredState.id);
     telemetry.finish(
@@ -1122,6 +1144,17 @@ export async function runWorkerCodexTurn(
     if (recoveredState.status === "completed") await scheduleCompletedConversationMemory();
     return;
   }
+  if (recoveredState?.status === "inProgress") await submission.validateWorkingCopies();
+  const turnWorkspaceInputs = recoveredState ? { directory: null, codexInputs: [] } :
+    await submission.prepareInputs(async (onDirectoryCreated) => {
+      const services = turnDocuments.some(({ document }) => document.kind === "xls")
+        ? await documentServicesForUser(runtime.config, authenticatedUserId) : null;
+      return prepareTurnDocumentWorkspaceInputs({ documents: turnDocuments, projectWorkspace,
+        stagingRoot: runtime.handle.roots.staging, signal, onDirectoryCreated,
+        ...(services ? { legacyExcelConversion: { soffice: services.toolchain.soffice,
+          conversionGate: services.conversionGate } } : {}),
+      });
+    });
   if (quotaToolPermissions && !hasAttestedQuotaToolPermissions(runtime.client, threadId, quotaToolPermissions)) {
     throw new Error("No se han podido verificar los permisos privados de la conversación. Vuelve a conectar el asistente.");
   }
@@ -1657,6 +1690,10 @@ export async function runWorkerCodexTurn(
             status: null,
             error: "Resposta incompleta del servei.",
           };
+          if ((status.status === "completed" || status.status === "failed" || status.status === "interrupted") &&
+              isRecord(params) && isRecord(params.turn) && typeof params.turn.id === "string") {
+            await submission!.observeTerminal(params.turn.id, status.status);
+          }
           if (status.status === "failed") {
             await emit(
               { type: "error", message: productSafeRuntimeMessage(status.error ?? "El torn del servei ha fallat.") },
@@ -2069,7 +2106,7 @@ export async function runWorkerCodexTurn(
       const userTurnText = chatRequest.message.trim() || "El usuario ha enviado únicamente archivos adjuntos. Confirma su recepción y pregunta qué necesita hacer con ellos si el historial no contiene ya una petición clara. No inventes una tarea.";
       let turnResult: JsonValue;
       try {
-        turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", {
+        const params = {
       threadId,
       clientUserMessageId: chatRequest.userMessageId,
       ...(reuseLoadedThread ? {
@@ -2116,9 +2153,13 @@ export async function runWorkerCodexTurn(
         chatRequest.options.effort === "max" || chatRequest.options.effort === "ultra"
         ? "detailed"
         : "concise",
-      }, `turn-start:${chatRequest.assistantMessageId}`, 60_000, async (result) => {
+      };
+        const purpose = `turn-start:${chatRequest.assistantMessageId}`;
+        await submission.dispatchOnce(params, purpose);
+        turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", params, purpose, 60_000, async (result) => {
         const resolvedTurnId = extractTurnId(result);
         if (!resolvedTurnId) throw new Error("El servei no ha iniciat el torn.");
+        await submission!.bindTurn(resolvedTurnId);
         runtimeTurnId = resolvedTurnId;
         registration.bindRuntimeTurn(resolvedTurnId);
         telemetry.bindRuntimeTurn(resolvedTurnId);
@@ -2312,13 +2353,13 @@ export async function runWorkerCodexTurn(
   }
   } catch (error) {
     telemetry.finish("error");
-    if (error instanceof AppServerRequestTimeoutError) {
-      throw new WorkerTurnRecoveryPendingError(error.message);
+    if (error instanceof AppServerRequestTimeoutError || error instanceof TurnSubmissionRecoveryRequired || submission?.needsRecovery) {
+      throw new WorkerTurnRecoveryPendingError(error instanceof Error ? error.message : undefined);
     }
     throw error;
   } finally {
-    if (turnInputDirectory) {
-      await rm(turnInputDirectory, { recursive: true, force: true }).catch((error) => {
+    if (submission) {
+      await submission.close().catch((error) => {
         operationalLogger.warn("documents.turn_input_cleanup_failed", {
           code: error instanceof Error && "code" in error ? String(error.code) : "TURN_INPUT_CLEANUP_FAILED",
         });
