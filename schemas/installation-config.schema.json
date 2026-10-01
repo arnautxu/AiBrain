@@ -35,6 +35,20 @@
         "accentColor": { "type": "string", "pattern": "^#[0-9a-fA-F]{6}$" }
       }
     },
+    "connectors": {
+      "type": "object",
+      "properties": {
+        "instantly": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "workspaceId"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "workspaceId": { "type": "string", "format": "uuid" }
+          }
+        }
+      }
+    },
     "paths": {
       "type": "object",
       "additionalProperties": false,

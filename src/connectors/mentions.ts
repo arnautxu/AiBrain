@@ -1,3 +1,4 @@
+import { instantlyCapability } from "@/connectors/instantly-service";
 import { composioCapability, composioCapabilitiesForSession } from "@/connectors/composio-service";
 import "server-only";
 
@@ -51,6 +52,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
   if (session) {
     const capabilities = await Promise.all([
       codexManagedAppCapabilities(session),
+      installation.connectors?.instantly?.enabled ? instantlyCapability(installation, userId).then(c => [c]) : Promise.resolve([]),
       composioCapabilitiesForSession(session),
       gmailCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
       outlookCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
@@ -66,6 +68,10 @@ async function resolvedMentions(installationId: string, userId: string, session?
     for (const toolkit of installation.connectors?.composio?.toolkits ?? []) {
       const capability = await composioCapability(installation, userId, toolkit.slug).catch(() => null);
       if (capability) health.set(capability.connectorId, capability);
+    }
+    if (installation.connectors?.instantly?.enabled) {
+      const capability = await instantlyCapability(installation, userId);
+      health.set(capability.connectorId, capability);
     }
     const checks = [
       resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID) ? { id: GMAIL_CONNECTOR_ID, access: () => gmailAccessForIdentity(installation, userId), fallback: "GMAIL_REAUTH_REQUIRED" } : null,

@@ -1,3 +1,4 @@
+import { instantlyCapabilityForSession } from "@/connectors/instantly-service";
 import { composioCapabilitiesForSession } from "@/connectors/composio-service";
 import "server-only";
 
@@ -305,6 +306,14 @@ export async function settingsSnapshot(session: AuthSession): Promise<SettingsSn
     outlookAuthorized ? outlookCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
   ]);
   const connectors: PersonalConnectorSettings[] = [];
+  if (catalog.allowsConnector("instantly") && installation.connectors?.instantly?.enabled) {
+    connectors.push(projectPersonalConnectorSettings(await instantlyCapabilityForSession(installation, session), ["instantly:read"], {
+      connected: "Workspace de empresa verificado por ID. Solo lectura; las respuestas comerciales son borradores para revisión.",
+      requiresLogin: "El administrador debe reconectar la credencial del workspace.",
+      adminSetupRequired: "El administrador debe configurar la conexión de Instantly.",
+      unavailable: "No se puede verificar el workspace de Instantly ahora mismo.",
+    }));
+  }
   if (gmailAuthorized) {
     connectors.push(projectPersonalConnectorSettings(
       gmail ?? {
