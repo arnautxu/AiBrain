@@ -185,9 +185,16 @@ async function fixture() {
   await writeFile(installationConfigC, installationConfigInput("C"));
   await writeFile(runtimeFile, JSON.stringify({ app: digestA, egress: egressDigestA }));
   await writeFile(dockerBin, `#!/usr/bin/env node
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 const args = process.argv.slice(2);
 appendFileSync(process.env.FAKE_DOCKER_LOG, JSON.stringify(args) + "\\n");
+if (process.env.FAKE_EGRESS_READY_DELAY_MS && args.includes("--wait")) {
+  const marker = process.env.FAKE_DOCKER_LOG + ".slow-egress.once";
+  if (!existsSync(marker)) {
+    writeFileSync(marker, "started");
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FAKE_EGRESS_READY_DELAY_MS));
+  }
+}
 if (process.env.FAKE_DELAY_MS) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FAKE_DELAY_MS));
 }
@@ -725,6 +732,23 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     expect(rejected).toMatchObject({ reason: { stderr: expect.stringContaining("RELEASE_LOCKED") } });
     expect(JSON.parse(await readFile(files.stateFile, "utf8"))).toMatchObject({ current: { image: digestB } });
   });
+
+  it("allows rollback gateway readiness beyond 30 seconds within the release deadline", async () => {
+    const files = await fixture();
+    await execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) });
+    const args = commandArgs(files, "rollback");
+    args[args.indexOf("--health-timeout-ms") + 1] = "45000";
+    args.splice(args.indexOf("--docker-command-timeout-ms"), 2);
+    const rolledBack = await execFileAsync(process.execPath, args, {
+      env: { ...environment(files), FAKE_EGRESS_READY_DELAY_MS: "31000" },
+    });
+    expect(JSON.parse(rolledBack.stdout)).toMatchObject({
+      current: { image: digestA, egressImage: egressDigestA, revision: revisionA },
+      previous: { image: digestB, egressImage: egressDigestB, revision: revisionB },
+    });
+    expect(JSON.parse(await readFile(files.runtimeFile, "utf8"))).toEqual({ app: digestA, egress: egressDigestA });
+    await expect(stat(`${files.stateFile}.transaction.json`)).rejects.toMatchObject({ code: "ENOENT" });
+  }, 60_000);
 
   it("bounds a hung Docker subprocess before any release mutation", async () => {
     const files = await fixture();
