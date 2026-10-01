@@ -6,6 +6,11 @@ const projectId = "018f5f68-4a6e-7abc-8def-0123456789ab";
 const documentId = "018f5f68-4a6e-7abc-8def-0123456789ae";
 const browserId = "018f5f68-4a6e-7abc-8def-0123456789af";
 
+function documentPreview(page: Page) {
+  const role = (page.viewportSize()?.width ?? 1440) < 1280 ? "dialog" : "complementary";
+  return page.getByRole(role, { name: "Vista previa de informe-sintetico.pdf" });
+}
+
 function validPdf() {
   const header = "%PDF-1.4\n";
   const objects = [
@@ -51,14 +56,14 @@ test("document preview, publication state and browser viewer", async ({ page }) 
   const document = page.getByRole("heading", { name: "informe-sintetico.pdf" });
   await document.scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
-  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
+  await expect(documentPreview(page)).toBeVisible();
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page).toHaveScreenshot("document-preview.png", { fullPage: true });
   await page.getByRole("button", { name: "Cerrar vista previa" }).click();
   const viewer = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
   await viewer.scrollIntoViewIfNeeded();
   await viewer.click();
-  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
+  await expect(documentPreview(page)).toHaveCount(0);
   await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
   await expect(page).toHaveScreenshot("browser-viewer.png", { fullPage: true });
 });
@@ -69,14 +74,14 @@ test("document preview and browser viewer dark", async ({ page }) => {
   const document = page.getByRole("heading", { name: "informe-sintetico.pdf" });
   await document.scrollIntoViewIfNeeded();
   await page.getByRole("button", { name: "Revisar antes de descargar" }).click();
-  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toBeVisible();
+  await expect(documentPreview(page)).toBeVisible();
   await expect(page.getByTitle("Documento informe-sintetico.pdf")).toHaveAttribute("src", /^blob:/);
   await expect(page).toHaveScreenshot("document-preview-dark.png", { fullPage: true });
   await page.getByRole("button", { name: "Cerrar vista previa" }).click();
   const viewer = page.getByRole("button", { name: "Reabrir Comprobación web sintética" });
   await viewer.scrollIntoViewIfNeeded();
   await viewer.click();
-  await expect(page.getByRole("complementary", { name: "Vista previa de informe-sintetico.pdf" })).toHaveCount(0);
+  await expect(documentPreview(page)).toHaveCount(0);
   await expect(page.locator(`iframe[src*="/api/browser/sessions/${browserId}"]`)).toHaveCount(0);
   await expect(page).toHaveScreenshot("browser-viewer-dark.png", { fullPage: true });
 });
