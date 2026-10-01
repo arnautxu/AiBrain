@@ -34,6 +34,13 @@ the computed one-line height including padding. The test retains compact/expande
 focus assertions and verifies that a three-line draft remains expanded and
 unchanged after blur.
 
+The subsequent Chromium gate caught a related interaction regression: collapsing
+the composer during pointerdown moved a message action before pointerup, so the
+click landed on its container. Pointer-driven blur now preserves the layout until
+the gesture ends; keyboard blur still collapses immediately. Browser regression
+coverage holds a press on the message editor action and checks its bounds before
+release, alongside image-description and shared-document preview actions.
+
 Acceptance requires a subsequent complete comparison run without snapshot
 updates, using the same pinned Playwright browsers on macOS. Capture generation
 alone is not a passing visual regression gate. Backend CI, publication,
