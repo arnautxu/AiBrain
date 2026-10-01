@@ -41,7 +41,7 @@ FROM ${NODE_IMAGE} AS builder
 WORKDIR /app
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
-RUN npm run build && npm run build:automation-worker && npm run build:weekly-token-budget && npm run build:container-app-server-acceptance && npm run build:presentation-runtime && node scripts/build-container-presentation-tool-acceptance.mjs
+RUN npm run build && npm run build:automation-worker && npm run build:weekly-token-budget && npm run build:container-app-server-acceptance && npm run build:presentation-runtime && node scripts/build-container-presentation-tool-acceptance.mjs && node scripts/build-container-xls-passive-acceptance.mjs
 
 FROM ${NODE_IMAGE} AS runtime
 
@@ -136,6 +136,11 @@ RUN printf '%s\n' \
   && install -d -m 0755 -o root -g root /etc/aibrain /usr/local/share/aibrain
 
 RUN /usr/bin/python3 -c "import openpyxl; from PIL import Image"
+COPY --chown=root:root infra/hetzner/knowledge-test-requirements.txt /usr/local/share/aibrain/passive-xls-requirements.txt
+RUN /usr/bin/python3 -m venv /opt/aibrain-passive-xls \
+  && /opt/aibrain-passive-xls/bin/python -m pip install --no-cache-dir --require-hashes --only-binary=:all: -r /usr/local/share/aibrain/passive-xls-requirements.txt \
+  && /opt/aibrain-passive-xls/bin/python -c "import xlrd; assert xlrd.__version__ == '2.0.2'" \
+  && chmod -R a-w /opt/aibrain-passive-xls
 
 # Bubblewrap needs a pre-existing mountpoint because the container root is
 # deliberately read-only before document conversion begins.
@@ -144,6 +149,7 @@ RUN install -d -m 0555 -o root -g root /work
 COPY --from=builder --chown=root:root /app/dist/pptxgenjs.cjs /usr/local/share/aibrain/pptxgenjs.cjs
 COPY --chown=root:root scripts/container-document-conversion-acceptance.mjs /usr/local/share/aibrain/container-document-conversion-acceptance.mjs
 COPY --chown=root:root scripts/xlsx-turn-text.py /usr/local/share/aibrain/xlsx-turn-text.py
+COPY --chown=root:root scripts/xls-passive-read.py /usr/local/share/aibrain/xls-passive-read.py
 COPY --chown=root:root docs/PRESENTATION_AUTHORING.md /usr/local/share/aibrain/presentations.md
 
 WORKDIR /app
@@ -158,6 +164,8 @@ COPY --from=builder --chown=root:root /app/dist/automation-worker.mjs ./automati
 COPY --from=builder --chown=root:root /app/dist/initialize-weekly-token-budget.mjs /usr/local/share/aibrain/initialize-weekly-token-budget.mjs
 COPY --from=builder --chown=root:root /app/dist/container-app-server-acceptance.mjs /usr/local/share/aibrain/container-app-server-acceptance.mjs
 COPY --from=builder --chown=root:root /app/dist/container-presentation-tool-acceptance.mjs /usr/local/share/aibrain/container-presentation-tool-acceptance.mjs
+COPY --from=builder --chown=root:root /app/dist/container-xls-passive-acceptance.mjs /usr/local/share/aibrain/container-xls-passive-acceptance.mjs
+COPY --chown=root:root tests/fixtures/legacy-passive-links-macros.xls tests/fixtures/legacy-autofilter.xls /usr/local/share/aibrain/
 # The scheduler is an explicit server-conditioned ESM bundle. Unlike the app,
 # it does not depend on Next's standalone file tracer, tsx, source mounts, or a
 # hand-copied `server-only` marker/dependency graph at runtime.
@@ -188,6 +196,7 @@ COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-pdftoppm
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-pdftotext
 COPY --chown=root:root infra/hetzner/app/soffice-safe.sh /usr/local/bin/aibrain-qpdf
+COPY --chown=root:root infra/hetzner/app/xls-passive-safe.sh /usr/local/bin/aibrain-xls-passive
 COPY --chown=root:root infra/hetzner/app/backup.sh /usr/local/bin/aibrain-backup
 COPY --chown=root:root infra/hetzner/app/backup-replicate.sh /usr/local/bin/aibrain-backup-replicate
 COPY --chown=root:root infra/hetzner/app/alerts.sh /usr/local/bin/aibrain-alerts
@@ -206,6 +215,7 @@ RUN chmod 0755 \
   /usr/local/bin/aibrain-pdftoppm \
   /usr/local/bin/aibrain-pdftotext \
   /usr/local/bin/aibrain-qpdf \
+  /usr/local/bin/aibrain-xls-passive \
   /usr/local/bin/aibrain-backup \
   /usr/local/bin/aibrain-backup-replicate \
   /usr/local/bin/aibrain-alerts \

@@ -21,6 +21,10 @@ test("dark shell, composer tools and turn capabilities have no blocking axe viol
   await page.route(`**/api/projects/${projectId}/artifacts/${documentId}/preview/1`, (route) => route.fulfill({ status: 200, contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540"><rect width="100%" height="100%" fill="white"/><text x="80" y="120" font-family="Arial" font-size="32" fill="#252522">Informe sintetico</text></svg>' }));
 
   const assertNoBlockingViolations = async () => {
+    await expect(page.locator('[data-overlay-presence="exiting"]')).toHaveCount(0);
+    for (const overlay of await page.locator('[data-overlay-presence="present"]').all()) {
+      await expect(overlay).toHaveCSS("opacity", "1");
+    }
     await page.locator('[data-overlay-presence="present"]').evaluateAll(async (elements) => {
       const animations = elements.flatMap((element) => element.getAnimations({ subtree: true }));
       await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
@@ -31,6 +35,7 @@ test("dark shell, composer tools and turn capabilities have no blocking axe viol
 
   await page.goto("/login");
   await page.getByRole("button", { name: new RegExp(accountName) }).click();
+  await expect(page.getByTestId("composer")).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await assertNoBlockingViolations();
 

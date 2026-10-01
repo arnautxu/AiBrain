@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
 import path from "node:path";
 import type { ValidatedUpload } from "@/documents/upload-validation";
+import { parseLegacyExcelProvenance, parseStoredLegacyExcelReceipt, type LegacyExcelProvenance, type StoredLegacyExcelReceipt } from "./legacy-excel-policy";
 import { atomicWriteFile, atomicWriteJson, fsyncDirectory, readValidatedJson } from "@/storage/atomic-file";
 import { StorageError } from "@/storage/errors";
 import type { ResourceLockManager } from "@/storage/resource-lock";
@@ -26,13 +27,15 @@ export type StagedDocument = {
   sha256: string;
   status: "staged";
   createdAt: string;
+  legacyExcel?: LegacyExcelProvenance;
+  storedLegacyExcel?: StoredLegacyExcelReceipt;
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_METADATA_BYTES = 64 * 1024;
 
-const stagedDocumentSchema = defineVersionedSchema<StagedDocument>({
+const baseStagedDocumentSchema = defineVersionedSchema<Omit<StagedDocument, "legacyExcel" | "storedLegacyExcel">>({
   name: "StagedDocument",
   schemaVersion: 1,
   keys: [
@@ -59,6 +62,30 @@ const stagedDocumentSchema = defineVersionedSchema<StagedDocument>({
     };
   },
 });
+
+// Preserve old v1 metadata while strictly validating the optional new provenance.
+const stagedDocumentSchema = {
+  name: "StagedDocument",
+  parse(value: unknown, source?: string): StagedDocument {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return baseStagedDocumentSchema.parse(value, source);
+    const { legacyExcel, storedLegacyExcel, ...base } = value as Record<string, unknown>;
+    const document = baseStagedDocumentSchema.parse(base, source);
+    if (storedLegacyExcel !== undefined) {
+      try {
+        if (legacyExcel !== undefined || document.kind !== "text" || document.mediaType !== "text/plain" ||
+            !document.fileName.endsWith(".xls-status.txt")) throw new Error("Invalid receipt type.");
+        return { ...document, storedLegacyExcel: parseStoredLegacyExcelReceipt(storedLegacyExcel) };
+      } catch { throw new StorageError("STORAGE_STAGING_METADATA_UNSAFE", "Stored XLS receipt is invalid."); }
+    }
+    if (legacyExcel === undefined) return document;
+    try {
+      if (document.kind !== "xlsx" || !document.fileName.endsWith(".passive.xlsx")) throw new Error("Invalid derivative type.");
+      return { ...document, legacyExcel: parseLegacyExcelProvenance(legacyExcel) };
+    } catch {
+      throw new StorageError("STORAGE_STAGING_METADATA_UNSAFE", "Passive XLS provenance is invalid.");
+    }
+  },
+};
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
@@ -280,6 +307,8 @@ export class FileDocumentStagingStore {
         sha256: input.validated.sha256,
         status: "staged",
         createdAt: new Date(this.now()).toISOString(),
+        ...(input.validated.legacyExcel ? { legacyExcel: input.validated.legacyExcel } : {}),
+        ...(input.validated.storedLegacyExcel ? { storedLegacyExcel: input.validated.storedLegacyExcel } : {}),
       };
       await atomicWriteJson(locations.metadataPath, metadata, stagedDocumentSchema);
       return metadata;
@@ -335,6 +364,8 @@ export class FileDocumentStagingStore {
         sha256: input.validated.sha256,
         status: "staged",
         createdAt: new Date(this.now()).toISOString(),
+        ...(input.validated.legacyExcel ? { legacyExcel: input.validated.legacyExcel } : {}),
+        ...(input.validated.storedLegacyExcel ? { storedLegacyExcel: input.validated.storedLegacyExcel } : {}),
       };
       await atomicWriteJson(locations.metadataPath, metadata, stagedDocumentSchema);
       return metadata;

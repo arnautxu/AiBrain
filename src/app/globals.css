@@ -32,7 +32,7 @@
   --text: var(--mineral-black);
   --text-secondary: var(--mineral-secondary);
   --text-muted: var(--mineral-secondary);
-  --text-subtle: #9e9e9e;
+  --text-subtle: #666666;
   --border: rgba(0, 0, 0, 0.10);
   --border-subtle: rgba(0, 0, 0, 0.05);
   --border-strong: rgba(0, 0, 0, 0.14);
