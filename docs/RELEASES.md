@@ -92,8 +92,8 @@ node scripts/manage-release.mjs promote \
   --current-compose-file /opt/aibrain-<installation>/releases/<previous-sha>/infra/hetzner/compose.yaml \
   --installation-config /opt/aibrain-<installation>/releases/<git-sha>/config/installation.json \
   --state-file /etc/aibrain/<installation>/release.json \
-  --health-timeout-ms 120000 \
-  --docker-command-timeout-ms 30000
+  --health-timeout-ms 240000 \
+  --docker-command-timeout-ms 240000
 ```
 
 `compose.target.env` es una copia candidata completa y no secreta: debe declarar
@@ -127,9 +127,11 @@ node scripts/manage-release.mjs rollback \
   --installation-id <installation> \
   --env-file /etc/aibrain/<installation>/compose.env \
   --state-file /etc/aibrain/<installation>/release.json \
-  --health-timeout-ms 120000 \
-  --docker-command-timeout-ms 30000
+  --health-timeout-ms 240000 \
+  --docker-command-timeout-ms 240000
 ```
+
+El presupuesto de Docker hereda el plazo de health si no se especifica. El gateway se recrea con `--wait`: un límite de 30 segundos puede expirar antes de su primer health válido y abortar también la recuperación. En Arnall se usan 240 segundos para ambos límites; siguen compartiendo un deadline acotado.
 
 Rollback no acepta un Compose/config suministrado por el operador: usa solo
 `previous` del estado durable. Restaura el env e InstallationConfig exactos,
