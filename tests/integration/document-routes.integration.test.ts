@@ -217,7 +217,7 @@ describe("authenticated document routes", () => {
     expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
   });
 
-  it("explains active Excel rejection without staging the unsafe workbook", async () => {
+  it("rejects a malformed Excel hyperlink record without staging the workbook", async () => {
     const uploadRoute = await import("@/app/api/threads/[threadId]/documents/route");
     const data = await readFile(path.resolve("tests/infra/fixtures/knowledge-legacy.xls"));
     const bof = data.indexOf(Buffer.from("0908100000060500", "hex"));
@@ -229,15 +229,136 @@ describe("authenticated document routes", () => {
       { params: Promise.resolve({ threadId }) },
     );
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({
-      error: "El document inclou contingut actiu o elements d’Excel no admesos per seguretat. Puja una còpia .xlsx sense macros, enllaços ni objectes incrustats.",
-      code: "UPLOAD_MACROS_REJECTED",
-    });
+    expect(await response.json()).toEqual({ error: "El document no supera la validació de seguretat." });
     const [{ loadInstallationConfig }, { documentServicesForUser }] = await Promise.all([
       import("@/config/installation"), import("@/documents/server-service"),
     ]);
     const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
     await expect(services.staging.readById(threadId, BAD_UPLOAD_ID)).rejects.toThrow();
+  });
+
+  it.each(["passive", "native"])("stores %s XLS originals outside workers and serves only the authorized derivative with stable retries", async mode => {
+    const [{ SystemDocumentToolRunner, DocumentPreviewService }, { documentServicesForUser }, { loadInstallationConfig },
+      { buildWorkerLaunchContext }, uploadRoute, contentRoute, { generateLocalDocument }] = await Promise.all([
+      import("@/documents/preview-service"), import("@/documents/server-service"), import("@/config/installation"),
+      import("@/runtime/workers/provisioner"), import("@/app/api/threads/[threadId]/documents/route"),
+      import("@/app/api/threads/[threadId]/documents/[uploadId]/versions/[versionId]/route"),
+      import("@/runtime/documents/local-document-generator"),
+    ]);
+    const passive = mode === "passive";
+    const id = passive ? "0198b9f0-6631-7000-8000-000000000591" : "0198b9f0-6631-7000-8000-000000000592";
+    const original = await readFile(`tests/fixtures/${passive ? "legacy-passive-links-macros" : "legacy-autofilter"}.xls`);
+    const golden = await readFile("tests/fixtures/legacy-passive-result.json");
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic", content: "Synthetic", rows: [["Fixture", 12.5]] });
+    const run = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockImplementation(async (command, args, options) => {
+      if (passive) {
+        expect(command).toBe("/usr/local/bin/aibrain-xls-passive"); expect(args).toEqual([]);
+        expect((await readFile(path.join(options.cwd, "source.biff"))).includes(Buffer.from("INERT_TEST_VBA_PAYLOAD"))).toBe(false);
+        await writeFile(path.join(options.cwd, "output/result.json"), golden, { mode: 0o600 });
+      } else {
+        expect(args).toContain("xlsx:Calc MS Excel 2007 XML");
+        expect(await readFile(path.join(options.cwd, "source.xls"))).toEqual(original);
+        await writeFile(path.join(options.cwd, "source.xlsx"), generated.data, { mode: 0o600 });
+      }
+      return { stdout: "", stderr: "" };
+    });
+    // The separate immutable-container test exercises real Office/PDF preview.
+    const preview = vi.spyOn(DocumentPreviewService.prototype, "create").mockImplementation(async document => ({
+      schemaVersion: 2, uploadId: document.uploadId, threadId: document.threadId, sourceSha256: document.sha256,
+      status: "ready", kind: "xlsx", files: ["document.pdf"], artifacts: [{ fileName: "document.pdf", size: 20, sha256: "a".repeat(64) }], pages: 1, createdAt: new Date().toISOString(),
+    }));
+    try {
+      auth.session = session(USER_A);
+      const request = (bytes = original) => uploadRequest(id, new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/octet-stream" }));
+      const response = await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const result = await response.json();
+      expect(() => assertUiContract("DocumentUploadResponse", result)).not.toThrow();
+      expect(result.document.fileName).toBe(passive ? "fixture.passive.xlsx" : "fixture.xlsx");
+      expect(Boolean(result.document.legacyExcel)).toBe(passive);
+      const config = await loadInstallationConfig(), services = await documentServicesForUser(config, USER_A);
+      const stored = await services.legacyOriginals.resolveContentById(threadId, id);
+      expect(await readFile(stored.absolutePath)).toEqual(original);
+      const mounts = buildWorkerLaunchContext(config, services.manifest).mounts;
+      for (const mount of [...mounts.runtimeReadOnly, ...mounts.runtimeReadWrite, ...mounts.browserReadWrite]) {
+        expect(stored.absolutePath.startsWith(mount + path.sep)).toBe(false);
+        expect(path.join(services.staging.rootDirectory, ".incoming").startsWith(mount + path.sep)).toBe(false);
+      }
+      const context = { params: Promise.resolve({ threadId, uploadId: id, versionId: id }) };
+      const download = await contentRoute.GET(new Request("http://localhost/content"), context);
+      expect(download.status).toBe(200); expect(download.headers.get("Cache-Control")).toBe("private, no-store");
+      const bytes = Buffer.from(await download.arrayBuffer());
+      expect(bytes.equals(original)).toBe(false); expect(bytes.includes(Buffer.from("INERT_TEST_VBA_PAYLOAD"))).toBe(false);
+      expect((await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(201);
+      expect(run).toHaveBeenCalledTimes(1);
+      const changed = Buffer.from(original); changed[changed.length - 1] = changed[changed.length - 1]! ^ 1;
+      expect((await uploadRoute.POST(request(changed), { params: Promise.resolve({ threadId }) })).status).toBe(409);
+      expect(await readFile(stored.absolutePath)).toEqual(original);
+      auth.session = session(USER_B);
+      expect((await contentRoute.GET(new Request("http://localhost/content"), context)).status).toBe(404);
+      expect((await uploadRoute.POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(404);
+    } finally { run.mockRestore(); preview.mockRestore(); }
+  }, 20_000);
+
+  it.each(["passive", "native"])("keeps the original and an explicit receipt when the %s processor fails", async mode => {
+    const { SystemDocumentToolRunner } = await import("@/documents/preview-service");
+    const { POST } = await import("@/app/api/threads/[threadId]/documents/route");
+    const run = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockRejectedValue(new Error("PRIVATE_INPUT_MUST_NOT_ESCAPE"));
+    try {
+      auth.session = session(USER_A);
+      const id = mode === "passive" ? BAD_UPLOAD_ID : "0198b9f0-6631-7000-8000-000000000593";
+      const bytes = await readFile(`tests/fixtures/${mode === "passive" ? "legacy-passive-links-macros" : "legacy-autofilter"}.xls`);
+      const request = () => uploadRequest(id, new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/vnd.ms-excel" }));
+      const response = await POST(request(), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(() => assertUiContract("DocumentUploadResponse", body)).not.toThrow();
+      const { parseDocumentUploadResponse } = await import("@/ui/document-ui-adapter");
+      expect(parseDocumentUploadResponse(body)?.document.storedLegacyExcel).toMatchObject({ status: "unavailable", originalFileName: "fixture.xls", originalSize: bytes.length });
+      expect(body.document.kind).toBe("text");
+      expect(JSON.stringify(body)).not.toContain("PRIVATE_INPUT");
+      const { documentServicesForUser } = await import("@/documents/server-service");
+      const { loadInstallationConfig } = await import("@/config/installation");
+      const services = await documentServicesForUser(await loadInstallationConfig(), USER_A);
+      const stored = await services.legacyOriginals.resolveContentById(threadId, id);
+      expect(await readFile(stored.absolutePath)).toEqual(bytes);
+      const receipt = await services.staging.resolveContentById(threadId, id);
+      const receiptBytes = await readFile(receipt.absolutePath);
+      expect(receiptBytes.toString()).toContain("procesamiento no está disponible");
+      expect(receiptBytes.includes(Buffer.from("INERT_TEST_VBA_PAYLOAD"))).toBe(false);
+      expect(receiptBytes.includes(Buffer.from("PRIVATE_INPUT"))).toBe(false);
+      expect((await POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(201);
+      expect(run).toHaveBeenCalledOnce();
+      expect((await services.staging.readById(threadId, id)).sha256).toBe(receipt.document.sha256);
+      auth.session = session(USER_B);
+      expect((await POST(request(), { params: Promise.resolve({ threadId }) })).status).toBe(404);
+    } finally { run.mockRestore(); }
+  });
+
+  it("accepts a converted XLS when optional preview rendering fails", async () => {
+    const { SystemDocumentToolRunner, DocumentPreviewService } = await import("@/documents/preview-service");
+    const { POST } = await import("@/app/api/threads/[threadId]/documents/route");
+    const { generateLocalDocument } = await import("@/runtime/documents/local-document-generator");
+    const { parseDocumentUploadResponse } = await import("@/ui/document-ui-adapter");
+    const generated = await generateLocalDocument({ format: "xlsx", title: "Synthetic", content: "Synthetic", rows: [["Fixture", 12.5]] });
+    const run = vi.spyOn(SystemDocumentToolRunner.prototype, "run").mockImplementation(async (_command, _args, options) => {
+      await writeFile(path.join(options.cwd, "source.xlsx"), generated.data, { mode: 0o600 });
+      return { stdout: "", stderr: "" };
+    });
+    const preview = vi.spyOn(DocumentPreviewService.prototype, "create").mockRejectedValue(new Error("PRIVATE_RENDER_ERROR"));
+    try {
+      auth.session = session(USER_A);
+      const bytes = await readFile("tests/fixtures/legacy-autofilter.xls");
+      const response = await POST(uploadRequest("0198b9f0-6631-7000-8000-000000000594", new File([new Uint8Array(bytes)], "fixture.xls", { type: "application/vnd.ms-excel" })), { params: Promise.resolve({ threadId }) });
+      expect(response.status).toBe(201);
+      const body = await response.json();
+      expect(() => assertUiContract("DocumentUploadResponse", body)).not.toThrow();
+      expect(parseDocumentUploadResponse(body)).toMatchObject({ originalStored: true, document: { kind: "xlsx" }, preview: { status: "unavailable", files: [] } });
+      expect(JSON.stringify(body)).not.toContain("PRIVATE_RENDER_ERROR");
+      const invalid = structuredClone(body); delete invalid.originalStored;
+      expect(parseDocumentUploadResponse(invalid)).toBeNull();
+      expect(() => assertUiContract("DocumentUploadResponse", invalid)).toThrow();
+    } finally { run.mockRestore(); preview.mockRestore(); }
   });
 
   // This is a real filesystem route roundtrip with seven serialized durable

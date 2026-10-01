@@ -78,6 +78,31 @@ const browserStatus = {
   runningInProcess: true,
 };
 
+describe("passive XLS UI metadata", () => {
+  const provenance = {
+    policy: "values-only-v1", originalFileName: "fixture.xls", originalSha256: "a".repeat(64), originalSize: 9728,
+    sheetCount: 1, cellCount: 9, formulaCount: 3, missingFormulaCaches: 3, undecodedFormulas: 0, omittedSheets: 0, omittedStreams: 1,
+  };
+  const response = () => ({
+    document: { ...documentResponse.document, kind: "xlsx", fileName: "fixture.passive.xlsx", legacyExcel: { ...provenance } },
+    preview: { ...documentResponse.preview, kind: "xlsx" },
+  });
+  it("retains validated provenance so the composer can show the passive warning", () => {
+    expect(parseDocumentUploadResponse(response())?.document.legacyExcel).toEqual(provenance);
+  });
+  it("rejects forged policy, paths, counts and a mismatched derivative type", () => {
+    for (const mutation of [
+      { policy: "verified" }, { originalFileName: "../original.xls" }, { originalSha256: "invalid" },
+      { missingFormulaCaches: 4 }, { originalSize: -1 }, { originalPath: "/private/original.xls" },
+    ]) {
+      const value = response(); Object.assign(value.document.legacyExcel, mutation);
+      expect(parseDocumentUploadResponse(value)).toBeNull();
+    }
+    const value = response(); value.document.fileName = "ordinary.xlsx";
+    expect(parseDocumentUploadResponse(value)).toBeNull();
+  });
+});
+
 const publicationOperation = {
   schemaVersion: 1,
   operationId,

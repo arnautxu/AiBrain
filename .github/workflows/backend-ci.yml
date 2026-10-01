@@ -53,6 +53,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/knowledge-tests"
           "$RUNNER_TEMP/knowledge-tests/bin/python" -m pip install --require-hashes --only-binary=:all: -r infra/hetzner/knowledge-test-requirements.txt
           "$RUNNER_TEMP/knowledge-tests/bin/python" -m unittest discover -s tests/infra -p 'test_knowledge*.py' -q
+          "$RUNNER_TEMP/knowledge-tests/bin/python" -m unittest discover -s tests/infra -p 'test_xls_passive*.py' -q
       - name: Build and smoke-test automation worker
         run: npm run build:automation-worker
       - name: Production build
@@ -122,6 +123,46 @@ jobs:
       - run: npm run build --prefix modules/horaria/backend
       - run: npm test --prefix modules/horaria/backend
 
+  enc02-webkit-scope:
+    name: Resolve one-release WebKit exception
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - name: Checkout the candidate identity only
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Bind the exception to the approved unchanged product revision
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          required=true
+          approved=9eb3fa6d4183e4aea11fe03a4cc456d65e6ac061
+          base=ab0809c7cdc2c44502813935f4f364356a71f92f
+          target="$(git rev-parse HEAD)"
+          read -ra parents <<<"$(git show -s --format=%P HEAD)"
+          if [[ "${#parents[@]}" == 2 && "${parents[0]}" == "$base" ]] &&
+             git diff --quiet "${parents[1]}" HEAD; then
+            target="${parents[1]}"
+          fi
+          # Only the immediate release child, or its exact merge on the frozen
+          # base, can qualify. A later commit automatically runs WebKit again.
+          if [[ "$(date -u +%Y%m%d)" == 20261001 &&
+                "$(git show -s --format=%P "$target")" == "$approved" ]] &&
+             git diff --quiet "$approved" "$target" -- . \
+               ':(exclude).github/workflows/backend-ci.yml' \
+               ':(exclude)docs/ENC02_WEBKIT_RELEASE_EXCEPTION.md'; then
+            required=false
+            echo '::warning::WebKit NOT_VERIFIED for this single XLS release: owner-authorized installation-timeout exception. No WebKit test success is claimed.'
+            echo 'WebKit: **NOT_VERIFIED**, one-release exception. All other CI gates remain required. Later revisions run WebKit normally.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "required=$required" >> "$GITHUB_OUTPUT"
+
   e2e-suites:
     name: E2E (${{ matrix.suite }})
     runs-on: ubuntu-24.04
@@ -139,9 +180,6 @@ jobs:
           - suite: chromium-2
             browser: chromium
             command: npx playwright test --project=chromium-desktop --shard=2/2
-          - suite: webkit
-            browser: webkit
-            command: npx playwright test --project=webkit-iphone
     steps:
       - name: Checkout immutable revision
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -163,22 +201,60 @@ jobs:
       - name: Run isolated E2E suite
         run: ${{ matrix.command }}
       - name: Validate native composer and transport recovery
-        if: matrix.suite == 'chromium-1' || matrix.suite == 'webkit'
+        if: matrix.suite == 'chromium-1'
         env:
           BROWSER: ${{ matrix.browser }}
         run: npx playwright test --config=playwright.recovery.config.ts --project="$BROWSER-recovery"
 
+  webkit:
+    name: E2E (webkit)
+    needs: enc02-webkit-scope
+    if: needs.enc02-webkit-scope.outputs.required == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable revision
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Use pinned Node runtime
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.1
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Install the required pinned browser runtime
+        run: npx playwright install --with-deps webkit
+      - name: Run isolated E2E suite
+        run: npx playwright test --project=webkit-iphone
+      - name: Validate native composer and transport recovery
+        run: npx playwright test --config=playwright.recovery.config.ts --project=webkit-recovery
+
   e2e:
     name: Filesystem and restart E2E
-    needs: e2e-suites
+    needs: [e2e-suites, webkit, enc02-webkit-scope]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Require every E2E suite to pass
+      - name: Require E2E suites with only the exact WebKit exception
         env:
           SUITES_RESULT: ${{ needs.e2e-suites.result }}
-        run: test "$SUITES_RESULT" = success
+          WEBKIT_RESULT: ${{ needs.webkit.result }}
+          WEBKIT_REQUIRED: ${{ needs.enc02-webkit-scope.outputs.required }}
+          SCOPE_RESULT: ${{ needs.enc02-webkit-scope.result }}
+        run: |
+          test "$SUITES_RESULT" = success
+          test "$SCOPE_RESULT" = success
+          if test "$WEBKIT_REQUIRED" = true; then
+            test "$WEBKIT_RESULT" = success
+          else
+            test "$WEBKIT_REQUIRED" = false
+            test "$WEBKIT_RESULT" = skipped
+            echo '::warning::WebKit NOT_VERIFIED under the single-release ENC-02 exception.'
+          fi
 
   documents:
     name: Real Office, PDF, text and image matrix
@@ -337,3 +413,18 @@ jobs:
             --target egress-gateway \
             --build-arg AIBRAIN_REVISION="${GITHUB_SHA}" \
             --tag "aibrain-egress-ci:${GITHUB_SHA}" .
+      - name: Verify native and passive XLS through the production isolation boundary
+        run: |
+          docker run --rm \
+            --user 10001:10001 --read-only --network none --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            --security-opt apparmor=aibrain-container \
+            --security-opt systempaths=unconfined \
+            --security-opt seccomp=infra/hetzner/browser/seccomp_profile.json \
+            --pids-limit 768 --memory 1g --cpus 1 \
+            --tmpfs /tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777 \
+            --tmpfs /run:rw,nosuid,nodev,noexec,size=16m,mode=0755 \
+            --tmpfs /var/lib/aibrain/data:rw,nosuid,nodev,noexec,size=512m,uid=10001,gid=10001,mode=0700 \
+            --env AIBRAIN_SYNTHETIC_ACCEPTANCE=1 \
+            --entrypoint node "aibrain-ci:${GITHUB_SHA}" \
+            /usr/local/share/aibrain/container-xls-passive-acceptance.mjs

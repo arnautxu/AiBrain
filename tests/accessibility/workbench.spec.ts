@@ -14,6 +14,14 @@ test("the authenticated employee shell has no critical or serious axe violations
   await expect(page.getByTestId("composer")).toBeVisible();
 
   const assertNoBlockingViolations = async () => {
+    // The sidebar crossfades regular/medium labels after a new turn. Audit the
+    // settled colors instead of sampling a partly transparent animation frame.
+    await page.evaluate(async () => {
+      const animations = document.getAnimations().filter((animation) =>
+        Number.isFinite(animation.effect?.getComputedTiming().endTime),
+      );
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => undefined)));
+    });
     const results = await new AxeBuilder({ page }).analyze();
     const blocking = results.violations.filter((violation) =>
       violation.impact === "critical" || violation.impact === "serious",

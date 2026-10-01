@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import path from "node:path";
+import { stageLegacyExcelUpload } from "@/documents/legacy-excel-upload";
 import { operationalLogger } from "@/operations/server-logger";
 import { getSession } from "@/auth/session";
 import { isSameOriginMutation } from "@/auth/request-security";
@@ -35,6 +37,11 @@ function documentErrorResponse(error: unknown) {
     return NextResponse.json({
       error: "El document inclou contingut actiu o elements d’Excel no admesos per seguretat. Puja una còpia .xlsx sense macros, enllaços ni objectes incrustats.",
       code,
+    }, { status: 400 });
+  }
+  if (code.startsWith("UPLOAD_PASSIVE_XLS_")) {
+    return NextResponse.json({
+      error: "No s’han pogut extreure dades guardades d’aquest XLS de manera segura. No s’ha executat cap macro ni s’han actualitzat enllaços.", code,
     }, { status: 400 });
   }
   if (code === "DOCUMENT_VERSION_TYPE_MISMATCH") {
@@ -126,21 +133,39 @@ export async function POST(request: Request, context: RouteContext) {
           throw new UploadValidationError("UPLOAD_MULTIPART_CONTRACT_INVALID", "uploadId must be a UUID.");
         }
         const uploadId = parsedUpload.uploadId;
-        const validated = await validateUploadedDocumentFile({
+        const uploadSource = {
           fileName: parsedUpload.fileName,
           declaredMimeType: parsedUpload.declaredMimeType,
           filePath: parsedUpload.temporaryPath,
-        });
-        if (validated.size !== parsedUpload.size) {
+        };
+        const legacy = path.extname(parsedUpload.fileName).toLowerCase() === ".xls"
+          ? await stageLegacyExcelUpload({ ...uploadSource, threadId, uploadId, size: parsedUpload.size }, {
+              reader: services.passiveXlsReader, soffice: services.toolchain.soffice,
+              conversionGate: services.conversionGate, signal: request.signal,
+              locks: services.locks, staging: services.staging, originals: services.legacyOriginals,
+            })
+          : null;
+        const validated = legacy ? null : await validateUploadedDocumentFile(uploadSource);
+        if (validated && validated.size !== parsedUpload.size) {
           throw new UploadValidationError("UPLOAD_SOURCE_CHANGED", "Upload size changed before validation.");
         }
-        const document = await services.staging.stageFile({
+        const document = legacy ?? await services.staging.stageFile({
           threadId,
           uploadId,
-          validated,
+          validated: validated!,
           sourcePath: parsedUpload.temporaryPath,
         });
-        const preview = await services.previews.create(document, { signal: request.signal });
+        if (document.storedLegacyExcel) operationalLogger.warn("document.xls_processing_unavailable", { status: "original_stored" });
+        let preview: Awaited<ReturnType<typeof services.previews.create>> | null = null;
+        try {
+          preview = await services.previews.create(document, { signal: request.signal });
+        } catch (error) {
+          // A rendering failure does not undo an accepted XLS. Preserve identity,
+          // cancellation and integrity errors; report optional preview availability.
+          if (!legacy || request.signal.aborted || (error instanceof StorageError &&
+              !["DOCUMENT_PREVIEW_TOO_LARGE", "DOCUMENT_PDF_UNSAFE", "DOCUMENT_CONVERSION_BACKPRESSURE"].includes(error.code))) throw error;
+          operationalLogger.warn("document.xls_preview_unavailable", { status: "original_stored" });
+        }
         if (roundtripDocumentId && roundtripBaseEtag) {
           return documentVersionJson(await services.versions.appendUpload({
             threadId,
@@ -173,12 +198,16 @@ export async function POST(request: Request, context: RouteContext) {
         });
         return NextResponse.json({
           document,
-          preview: {
+          ...(legacy ? { originalStored: true } : {}),
+          preview: preview ? {
             ...preview,
             files: preview.files.map((name) => ({
               name,
               url: `/api/threads/${threadId}/documents/${uploadId}/preview/${encodeURIComponent(name)}`,
             })),
+          } : {
+            schemaVersion: 2, uploadId, threadId, sourceSha256: document.sha256,
+            status: "unavailable", kind: document.kind, files: [], artifacts: [], pages: null, createdAt: document.createdAt,
           },
         }, { status: 201 });
       } finally {
