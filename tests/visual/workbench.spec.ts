@@ -136,7 +136,7 @@ test("employee shell dark", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark" });
   await login(page);
   await assertLandingComposer(page);
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim())).toBe("#000000");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(0, 0, 0)");
   await expect(page).toHaveScreenshot("employee-shell-dark.png", { fullPage: true });
 });
 
@@ -246,7 +246,7 @@ test("project actions surface light", async ({ page }) => {
   await login(page);
   await openMobileDrawerIfNeeded(page);
   const project = page.getByRole("button", { name: primaryProject, exact: true });
-  await project.hover({ position: { x: 20, y: 20 } });
+  await project.hover();
   await page.getByRole("button", { name: `Acciones de ${primaryProject}` }).click();
   await expect(page.getByRole("menuitem", { name: "Renombrar" })).toBeVisible();
   await expect(page).toHaveScreenshot("project-actions-surface-light.png", { fullPage: true });
@@ -306,6 +306,12 @@ test("completed conversation", async ({ page }, testInfo) => {
     await expect(page.getByRole("button", { name: "Experiencia" })).toBeVisible();
     await expect.poll(() => composer.evaluate((element) => element.getBoundingClientRect().height)).toBeGreaterThanOrEqual(108);
     await expect(page).toHaveScreenshot("completed-conversation-mobile-focused.png", { fullPage: true });
+    const input = page.getByRole("textbox", { name: "Mensaje" });
+    await input.fill("Primera línea\nSegunda línea\nTercera línea");
+    await input.blur();
+    await expect(composer).not.toHaveClass(/composer-compact/);
+    await expect(page.getByRole("button", { name: "Experiencia" })).toBeVisible();
+    await expect(input).toHaveValue("Primera línea\nSegunda línea\nTercera línea");
   }
 });
 

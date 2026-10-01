@@ -602,7 +602,10 @@ export function ChatWorkspace({
     const minHeight = thread?.messages.length ? 32 : 48;
     const nextHeight = Math.min(Math.max(measurement.scrollHeight, minHeight), 192);
     textarea.style.height = `${nextHeight}px`;
-    setComposerMultiline(nextHeight > minHeight + 1);
+    // Mobile padding is taller than the desktop minimum; it is not a second line.
+    const singleLineHeight = Number.parseFloat(style.lineHeight)
+      + Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
+    setComposerMultiline(nextHeight > Math.max(minHeight, singleLineHeight) + 1);
   }, [thread?.messages.length]);
 
   useLayoutEffect(() => {

@@ -115,8 +115,11 @@ The legacy XLS upload candidate is documented in
 isolated native conversion to preserve supported formulas and formatting.
 Other readable BIFF8 files use an isolated values-only reader, with passive
 provenance, unverified caches and explicit omissions. Original bytes remain in
-a server-only vault outside worker/browser mounts; only the validated derivative
-is available to attachments and preview. This is versioned implementation, not
+a server-only vault outside worker/browser mounts. Bounded BIFF5/BIFF8 storage
+admission is separate from processing: unsupported or unavailable processing
+preserves the original and attaches an explicit unread-data receipt. Only the
+validated derivative or that receipt is available to attachments and preview.
+This is versioned implementation, not
 a claim of publication, deployment or authenticated live acceptance.
 
 ## Evidence language
