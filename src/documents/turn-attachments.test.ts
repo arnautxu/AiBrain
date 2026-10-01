@@ -1,13 +1,14 @@
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ResolvedPermissions } from "@/permissions";
 import { ResourceLockManager } from "@/storage";
 import { FileDocumentStagingStore } from "@/documents/staging-store";
 import { validateUploadedDocument } from "@/documents/upload-validation";
 import { generateLocalDocument } from "@/runtime/documents/local-document-generator";
 import {
+  assertWorkerTurnDocuments,
   resolveTurnDocumentAttachments,
   prepareTurnDocumentWorkspaceInputs,
   ServerTurnDocumentInputResolver,
@@ -74,6 +75,56 @@ function textInputResolver(stagingRoot: string) {
 }
 
 describe("turn document attachment binding", () => {
+  it.each([10, 11, 20])("binds %i fictional invoices from real validated staging without model calls", async (count) => {
+    const { staging, stagingRoot } = await fixture();
+    const ids: string[] = [];
+    for (let index = 0; index < count; index++) {
+      const uploadId = `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`;
+      const data = Buffer.from(`Fictional invoice INV-${index + 1}\nAmount EUR 42.00\n`, "utf8");
+      const validated = validateUploadedDocument({ fileName: `invoice-${index + 1}.txt`, declaredMimeType: "text/plain", data });
+      await staging.stage({ threadId: THREAD_ID, uploadId, validated, data });
+      ids.push(uploadId);
+    }
+    const resolved = await resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
+      permissions: permissions("allow"), inputResolver: textInputResolver(stagingRoot) });
+    expect(resolved).toHaveLength(count);
+    expect(() => assertWorkerTurnDocuments({ documents: resolved, stagingRoot, threadId: THREAD_ID,
+      uploadIds: ids, permissions: permissions("allow") })).not.toThrow();
+    expect(turnDocumentCodexInputs(resolved).filter(input => input.type === "text")).toHaveLength(count + 1);
+    expect(JSON.stringify(turnDocumentCodexInputs(resolved))).not.toContain(stagingRoot);
+  });
+
+  it("rejects 21 documents before staging reads or conversion", async () => {
+    const { staging, stagingRoot } = await fixture();
+    const read = vi.spyOn(staging, "resolveContentById");
+    const resolver = textInputResolver(stagingRoot);
+    const resolve = vi.spyOn(resolver, "resolve");
+    const ids = Array.from({ length: 21 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
+    await expect(resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
+      permissions: permissions("allow"), inputResolver: resolver })).rejects.toMatchObject({ code: "TURN_DOCUMENT_SET_INVALID" });
+    expect(read).not.toHaveBeenCalled();
+    expect(resolve).not.toHaveBeenCalled();
+  });
+
+  it("retains aggregate source and prepared-text budgets with twenty documents", async () => {
+    const { staging, stagingRoot, document } = await fixture();
+    const ids = Array.from({ length: 20 }, (_, index) => `22222222-2222-4222-8222-${String(index + 1).padStart(12, "0")}`);
+    // Resource-only metadata mock: no large files or conversion processes are allocated.
+    const read = vi.spyOn(staging, "resolveContentById").mockImplementation(async (_threadId, uploadId) => ({
+      document: { ...document, uploadId, size: 11 * 1024 * 1024 },
+      absolutePath: path.join(stagingRoot, document.relativePath),
+    }));
+    const resolve = vi.fn(async () => [{ type: "text" as const, text: "invoice", text_elements: [] }]);
+    await expect(resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
+      permissions: permissions("allow"), inputResolver: { resolve } })).rejects.toMatchObject({ code: "TURN_DOCUMENT_SET_TOO_LARGE" });
+    expect(resolve).toHaveBeenCalledTimes(18);
+    read.mockImplementation(async (_threadId, uploadId) => ({ document: { ...document, uploadId },
+      absolutePath: path.join(stagingRoot, document.relativePath) }));
+    resolve.mockImplementation(async () => [{ type: "text" as const, text: "x".repeat(220_000), text_elements: [] }]);
+    await expect(resolveTurnDocumentAttachments({ staging, threadId: THREAD_ID, uploadIds: ids,
+      permissions: permissions("allow"), inputResolver: { resolve } })).rejects.toMatchObject({ code: "TURN_DOCUMENT_INPUT_TOO_LARGE" });
+  });
+
   it("resolves a permissioned upload to a verified server path and typed Codex inputs", async () => {
     const { staging, stagingRoot, document } = await fixture();
     const resolved = await resolveTurnDocumentAttachments({

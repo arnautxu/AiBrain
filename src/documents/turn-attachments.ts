@@ -1,3 +1,4 @@
+import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import path from "node:path";
 import { convertLegacyExcelToXlsx, type LegacyExcelConversionOptions } from "./legacy-excel-conversion";
 import { createHash } from "node:crypto";
@@ -19,7 +20,6 @@ import {
 import { readRegularFileWithin } from "@/security/safe-file";
 import { atomicWriteFile } from "@/storage/atomic-file";
 
-const MAX_DOCUMENTS_PER_TURN = 10;
 const MAX_DOCUMENT_BYTES_PER_TURN = 200 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_BYTES_PER_DOCUMENT = 2 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_BYTES_PER_TURN = 4 * 1024 * 1024;
@@ -307,7 +307,7 @@ export async function resolveTurnDocumentAttachments(input: {
       "Server-resolved permissions deny document attachments for this turn.",
     );
   }
-  if (input.uploadIds.length > MAX_DOCUMENTS_PER_TURN || new Set(input.uploadIds).size !== input.uploadIds.length) {
+  if (input.uploadIds.length > MAX_FILES_PER_MESSAGE || new Set(input.uploadIds).size !== input.uploadIds.length) {
     throw new TurnDocumentAttachmentError("TURN_DOCUMENT_SET_INVALID", "Document attachment ids are invalid.");
   }
   const resolved: ResolvedTurnDocument[] = [];
@@ -345,7 +345,7 @@ export function assertWorkerTurnDocuments(input: {
   permissions: ResolvedPermissions;
 }) {
   if (input.documents.length !== input.uploadIds.length ||
-      input.documents.length > MAX_DOCUMENTS_PER_TURN ||
+      input.documents.length > MAX_FILES_PER_MESSAGE ||
       !permissionAllowsDocumentRead(input.permissions)) {
     throw new TurnDocumentAttachmentError("TURN_DOCUMENT_BINDING_INVALID", "Turn documents are not permission-bound.");
   }
