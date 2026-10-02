@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -108,4 +108,43 @@ describe("file transport event journal", () => {
     expect(await journal.append(event(6))).toBe(true);
     expect(await journal.readUndelivered(10)).toEqual([event(6)]);
   });
+  it("bounds delivered bytes while preserving the cursor and every pending event across restart", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-transport-bytes-"));
+    roots.push(root);
+    const options = { filePath: path.join(root, "events.jsonl"),
+      lockManager: new ResourceLockManager({ rootDirectory: path.join(root, "locks") }),
+      maxRetainedDeliveredBytes: 4_096 };
+    const journal = new FileTransportEventJournal(options);
+    const large = (sequence: number): AppServerEvent => ({ ...event(sequence), message: {
+      kind: "rpc-notification",
+      rpc: { method: "warning", params: { threadId: null, message: "x".repeat(8_192) } },
+    } });
+    for (let sequence = 1; sequence <= 6; sequence += 1) await journal.append(large(sequence));
+    const initialBytes = (await stat(options.filePath)).size;
+    await journal.markDelivered(large(1));
+    await journal.markDelivered(large(2));
+    await journal.markDelivered(large(3));
+    expect((await stat(options.filePath)).size).toBeLessThan(initialBytes);
+    const restarted = new FileTransportEventJournal(options);
+    expect(await restarted.loadDeliveryCursor()).toMatchObject({ sequence: 3, eventId: "event-3" });
+    expect((await restarted.readEvents(2, 1)).map((entry) => entry.sequence)).toEqual([3]);
+    expect((await restarted.readUndelivered(10)).map((entry) => entry.sequence)).toEqual([4, 5, 6]);
+    expect(await restarted.loadCursor()).toEqual({ sequence: 6, eventId: "event-6" });
+    await restarted.markDelivered(large(4));
+    expect((await restarted.readUndelivered(10)).map((entry) => entry.sequence)).toEqual([5, 6]);
+    await restarted.append(large(7));
+    expect((await restarted.readEvents(6, 1))[0].sequence).toBe(7);
+  });
+
+  it("rejects an externally corrupted payload sequence before indexed empty replay", async () => {
+    const journal = await createJournal();
+    await journal.append(event(1));
+    await journal.append(event(2));
+    const records = (await readFile(journal.filePath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    records[1].payload.sequence = 100;
+    await writeFile(journal.filePath, records.map((record) => JSON.stringify(record)).join("\n") + "\n");
+    await expect(journal.readEvents(2)).rejects.toThrow("non-contiguous payload sequence");
+    await expect(journal.loadCursor()).rejects.toThrow("non-contiguous payload sequence");
+  });
+
 });

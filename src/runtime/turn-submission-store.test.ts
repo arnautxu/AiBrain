@@ -144,9 +144,12 @@ describe("durable turn submission", () => {
     await first.close();
     const restarted = await f.open();
     expect(restarted.needsRecovery).toBe(true);
+    expect(restarted.pendingThreadRequest).toEqual({ method: "thread/start", id: `thread-start:${id(4)}`,
+      params: { cwd: f.options.workspace } });
     await expect(restarted.startThreadOnce({}, `thread-start:${id(4)}`)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
     await restarted.bindThread("recovered-original-thread");
     expect(restarted.needsRecovery).toBe(false);
+    expect(restarted.pendingThreadRequest).toBeNull();
   });
 
   it("treats legacy existing admissions as recovery-only even without a new-format receipt", async () => {

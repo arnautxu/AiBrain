@@ -504,6 +504,78 @@ describe("worker Codex turn", () => {
     expect(calls.filter(call => call.method === "turn/start")).toHaveLength(2);
   });
 
+  it("recovers creation beyond both deadlines across reconnects and dispatches the admitted turn only once", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "aibrain-expired-creation-"));
+    const calls: string[] = [];
+    const recoveries: Array<{ params: unknown; purpose: string }> = [];
+    let originalParams: unknown;
+    let creationCompleted = false;
+    let turnDispatched = false;
+    let sequence = 0;
+    const envelope = () => ({ eventId: `restart-${++sequence}`, sequence,
+      occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+    const makeClient = () => ({
+      canReuseLoadedThread: () => false,
+      connectionSummary: async () => ({ connected: true }),
+      router: { registerTurn: () => ({ bindRuntimeTurn() {}, dispose() {} }) },
+      async recoverThreadStart(params: unknown, purpose: string) {
+        recoveries.push({ params, purpose });
+        expect(params).toEqual(originalParams);
+        expect(purpose).toBe(`thread-start:${assistantMessageId}`);
+        return creationCompleted ? { thread: { id: "original-thread", turns: [] } } : null;
+      },
+      async request(method: string, params: unknown, purpose: string, timeout: number,
+        beforeResolve?: (value: never, event: never) => Promise<void>) {
+        calls.push(method);
+        if (method === "thread/start") {
+          originalParams = params;
+          throw new AppServerRequestTimeoutError(method, purpose, timeout);
+        }
+        if (method === "thread/turns/list") return { data: [], nextCursor: null };
+        if (method === "thread/resume") {
+          const result = { thread: { id: "original-thread", turns: turnDispatched ? [{
+            id: "original-turn", status: "completed", error: null,
+            items: [{ type: "userMessage", clientId: userMessageId, id: "user-item", content: [] },
+              { type: "agentMessage", id: "answer", text: "Recovered answer", phase: "final_answer" }],
+          }] : [] } };
+          await beforeResolve?.(result as never, envelope() as never);
+          return result;
+        }
+        if (method === "turn/start") {
+          expect(turnDispatched).toBe(false);
+          turnDispatched = true;
+          throw new Error("App restart after remote model submission, before acknowledgement");
+        }
+        throw new Error(`Unexpected request: ${method}`);
+      },
+    });
+    const events: Array<{ type: string; value?: string }> = [];
+    const run = (recoveryOnly: boolean) => {
+      // Each attempt has a fresh client; only the receipt and gateway evidence survive.
+      mocked.runtime = { config: { installationId, paths: installationPaths },
+        handle: { roots: { userRoot: root, workspace: root, staging: root, artifacts: root } }, client: makeClient() };
+      return runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+        tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+        workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+      }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+      async event => { events.push(event); }, undefined, undefined, null, undefined, undefined,
+      undefined, undefined, false, null, recoveryOnly);
+    };
+    await expect(run(false)).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+    await expect(run(true)).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+    expect(calls).toEqual(["thread/start"]);
+    creationCompleted = true;
+    await expect(run(true)).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+    const receipt = JSON.parse(await readFile(path.join(root, "state", "turn-submissions", threadId, `${assistantMessageId}.json`), "utf8"));
+    expect(receipt).toMatchObject({ runtimeThreadId: "original-thread", phase: "dispatched" });
+    await run(true);
+    expect(calls.filter(method => method === "thread/start")).toHaveLength(1);
+    expect(calls.filter(method => method === "turn/start")).toHaveLength(1);
+    expect(recoveries).toHaveLength(2);
+    expect(events.filter(event => event.type === "done")).toHaveLength(1);
+    expect(events.some(event => event.type === "content" && event.value === "Recovered answer")).toBe(true);
+  });
+
   it("uses a bounded configurable lifetime for every worker turn", () => {
     expect(workerTurnTimeoutMs({})).toBe(30 * 60_000);
     expect(workerTurnTimeoutMs({ AIBRAIN_WORKER_TURN_TIMEOUT_MS: " " })).toBe(30 * 60_000);

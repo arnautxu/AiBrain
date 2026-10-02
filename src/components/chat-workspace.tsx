@@ -302,6 +302,7 @@ function AssistantMessage({
   onRestoreRequest,
   restoreDisabled,
   readOnly = false,
+  recoveryPaused = false,
 }: {
   message: ChatMessage;
   assistantName: string;
@@ -323,8 +324,10 @@ function AssistantMessage({
   onRestoreRequest?: () => void;
   restoreDisabled?: boolean;
   readOnly?: boolean;
+  recoveryPaused?: boolean;
 }) {
   const t = useUiText();
+  const streaming = message.status === "streaming" && !recoveryPaused;
   const hasExecution = hasRelevantWorkProcess(message);
   const liveStatus = currentTurnStatusLabel(message, t) ?? t("Enviando solicitud");
   const publicContent = publicAssistantText(message.content, assistantName);
@@ -332,23 +335,23 @@ function AssistantMessage({
   return (
     <article className="message-enter group">
       {showActivity || managedAppAction || message.approvals.some((approval) => managedAppApprovalKeys.includes(managedAppActionKey({ ...approval, approvalId: approval.id }))) ? (
-        <TurnActivity message={message} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenReview={() => onOpenReview(message.id)} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
+        <TurnActivity message={message} recoveryPaused={recoveryPaused} projectId={projectId} readOnly={readOnly} onResolveApproval={onResolveApproval} onOpenReview={() => onOpenReview(message.id)} onOpenBrowser={onOpenBrowser} managedAppAction={readOnly ? null : managedAppAction} managedAppApprovalKeys={managedAppApprovalKeys} />
       ) : null}
 
-      {message.status === "streaming" && !message.content && !hasExecution ? (
+      {streaming && !message.content && !hasExecution ? (
         <div className="flex items-center gap-2 py-1 text-[15px] leading-5 text-[var(--text-muted)]" role="status">
           <ThinkingOrb state="working" size={20} aria-hidden="true" />
           <span className="activity-shimmer">{liveStatus}…</span>
         </div>
       ) : publicContent ? (
         <StreamingResponse
-          status={message.status === "streaming" ? "streaming" : message.status === "error" ? "error" : "complete"}
-          announce={message.status === "streaming"}
+          status={recoveryPaused && message.status === "streaming" ? "paused" : message.status === "streaming" ? "streaming" : message.status === "error" ? "error" : "complete"}
+          announce={streaming}
           showActions={false}
           className="mt-4 max-w-[76ch]"
           contentClassName="text-[length:calc(var(--font-reading)-1px)] leading-[23px] text-[var(--text)]"
         >
-          <MarkdownMessage streaming={message.status === "streaming"}>{publicContent}</MarkdownMessage>
+          <MarkdownMessage streaming={streaming}>{publicContent}</MarkdownMessage>
         </StreamingResponse>
       ) : null}
 
@@ -922,6 +925,7 @@ export function ChatWorkspace({
                   {message.role === "user" ? <UserMessage message={message} connectorMentions={connectorMentions} threadId={thread.id} onRequestPublication={onRequestPublication && thread.messages[index + 1]?.role === "assistant" ? (attachment) => onRequestPublication(attachment, thread.messages[index + 1]!.id) : undefined} readOnly={readOnly} onEdit={(content) => onEditMessage(message, content)} /> : (
                     <AssistantMessage
                       message={message}
+                      recoveryPaused={streamRecovery?.paused === true && message.status === "streaming" && message.id === latestAssistantMessageId}
                       assistantName={assistantName}
                       projectId={project?.id}
                       showActivity={preferences.showActivityPanel}

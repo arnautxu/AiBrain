@@ -1,7 +1,7 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FileJournal } from "@/storage/journal";
 import { ResourceLockManager } from "@/storage/resource-lock";
 import {
@@ -180,4 +180,97 @@ describe("append-only file journal", () => {
       .resolves.toEqual({ before: 1, after: 1, changed: false });
     expect(await readFile(journalPath, "utf8")).toBe(before);
   });
+  it("does not revalidate large historical payloads on append or indexed replay", async () => {
+    const parse = vi.fn((value: unknown) => value as TestEvent);
+    const events = new FileJournal({ filePath: journalPath, lockManager,
+      payloadSchema: { name: "LargeEvent", parse } });
+    const label = "x".repeat(1024 * 1024);
+    await Promise.all(Array.from({ length: 10 }, () => events.append({ schemaVersion: 1, label })));
+    parse.mockClear();
+    expect(await events.read({ afterSequence: 10 })).toEqual([]);
+    expect(parse).not.toHaveBeenCalled();
+    expect((await events.read({ afterSequence: 9, limit: 1 }))[0].payload.label).toHaveLength(label.length);
+    expect(parse).toHaveBeenCalledTimes(1);
+    parse.mockClear();
+    await events.append({ schemaVersion: 1, label: "new" });
+    // Admission and newly constructed envelope only; ten MB of history is untouched.
+    expect(parse).toHaveBeenCalledTimes(2);
+    expect((await events.readLast())?.sequence).toBe(11);
+  });
+
+  it("revalidates same-size external corruption and replacement after a cached read", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "original" });
+    await events.read();
+    const valid = await readFile(journalPath, "utf8");
+    await writeFile(journalPath, valid.replace('"sequence":1', '"sequence":9'));
+    await expect(events.read()).rejects.toMatchObject({ code: "STORAGE_CORRUPT" });
+    await writeFile(`${journalPath}.replacement`, valid.replace("original", "replaced"));
+    await rename(`${journalPath}.replacement`, journalPath);
+    expect((await events.read())[0].payload.label).toBe("replaced");
+  });
+
+  it("does not let callers mutate a cached snapshot and detects external compaction", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "one" });
+    await events.append({ schemaVersion: 1, label: "two" });
+    (await events.read())[0].payload.label = "mutated";
+    expect((await events.read())[0].payload.label).toBe("one");
+    await journal().compact((entries) => entries.slice(-1).map((entry) => entry.payload));
+    expect((await events.read()).map((entry) => entry.payload.label)).toEqual(["two"]);
+    expect((await events.append({ schemaVersion: 1, label: "three" })).sequence).toBe(2);
+  });
+
+  it("revalidates history if an external writer edits a prefix and also appends", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "committed" });
+    const valid = await readFile(journalPath, "utf8");
+    await writeFile(journalPath, valid.replace('"sequence":1', '"sequence":8') + "{}\n");
+    await expect(events.append({ schemaVersion: 1, label: "next" }))
+      .rejects.toMatchObject({ code: "STORAGE_CORRUPT" });
+  });
+
+  it("rejects a symlink that replaces a previously cached journal", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "committed" });
+    await rename(journalPath, `${journalPath}.outside`);
+    await symlink(`${journalPath}.outside`, journalPath);
+    await expect(events.read()).rejects.toMatchObject({ code: "STORAGE_SYMLINK_REJECTED" });
+  });
+
+  it("observes a different writer's append before assigning the next sequence", async () => {
+    const events = journal();
+    await events.append({ schemaVersion: 1, label: "first" });
+    await journal().append({ schemaVersion: 1, label: "external" });
+    expect((await events.read({ afterSequence: 1 }))[0].payload.label).toBe("external");
+    expect((await events.append({ schemaVersion: 1, label: "third" })).sequence).toBe(3);
+  });
+
+  it("falls back safely beyond the bounded offset index without dropping records", async () => {
+    const count = 65_538;
+    const line = { schemaVersion: 1, eventId: "00000000-0000-4000-8000-000000000000",
+      recordedAt: new Date(0).toISOString(), payload: { schemaVersion: 1, label: "history" } };
+    await mkdir(path.dirname(journalPath), { recursive: true });
+    await writeFile(journalPath, Array.from({ length: count }, (_, index) =>
+      JSON.stringify({ ...line, sequence: index + 1 })).join("\n") + "\n");
+    const events = journal();
+    expect((await events.read({ afterSequence: count - 1, limit: 1 }))[0].sequence).toBe(count);
+    expect((await events.readLast())?.sequence).toBe(count);
+    expect((await events.append({ schemaVersion: 1, label: "after-index-cap" })).sequence).toBe(count + 1);
+    expect((await events.read({ afterSequence: count }))[0].payload.label).toBe("after-index-cap");
+  });
+
+  it("enforces configured payload continuity on append and before compaction writes", async () => {
+    const events = new FileJournal({ filePath: journalPath, lockManager,
+      payloadSchema: eventSchema, contiguousPayloadSequence: (payload) => Number(payload.label) });
+    for (const label of ["10", "11", "12"]) await events.append({ schemaVersion: 1, label });
+    const before = await readFile(journalPath, "utf8");
+    await expect(events.append({ schemaVersion: 1, label: "14" })).rejects.toThrow("non-contiguous payload sequence");
+    await expect(events.compact((entries) => [entries[0].payload, entries[2].payload]))
+      .rejects.toThrow("non-contiguous payload sequence");
+    expect(await readFile(journalPath, "utf8")).toBe(before);
+    await events.compact((entries) => entries.slice(1).map((entry) => entry.payload));
+    expect((await events.readContiguous(11, 1))[0].payload.label).toBe("12");
+  });
+
 });

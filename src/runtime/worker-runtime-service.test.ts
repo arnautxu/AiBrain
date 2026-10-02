@@ -158,6 +158,38 @@ function handle(transport: AppServerTransport): WorkerRuntimeHandle {
 }
 
 describe("worker App Server client", () => {
+  it("looks up the exact original creation without dispatch, including after client restart", async () => {
+    const transport = new FakeTransport();
+    const params = { cwd: "/private/workspace", ephemeral: false };
+    const purpose = "thread-start:00000000-0000-4000-8000-000000000041";
+    const recoverResponse = vi.fn(async (request: AppServerRequest) => ({ id: request.clientRequestId,
+      result: { thread: { id: "original-thread", turns: [] } } }));
+    for (let restart = 0; restart < 2; restart += 1) {
+      const boundTransport = Object.assign(restart ? new FakeTransport() : transport, { recoverResponse });
+      const client = new WorkerAppServerClient(handle(boundTransport));
+      expect(await client.recoverThreadStart(params, purpose)).toEqual({ thread: { id: "original-thread", turns: [] } });
+      expect(client.canReuseLoadedThread("original-thread", true)).toBe(false);
+      await client.router.close();
+    }
+    expect(recoverResponse).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(recoverResponse.mock.calls[0][0])).toBe(JSON.stringify({
+      clientRequestId: purpose, kind: "rpc-request", rpc: { method: "thread/start", id: purpose, params },
+    }));
+    expect(transport.sent.some(request => request.kind === "rpc-request" && request.rpc.method === "thread/start")).toBe(false);
+  });
+
+  it("never dispatches when the recovery receipt is missing or mismatched", async () => {
+    const transport = new FakeTransport();
+    const recoverResponse = vi.fn(async (): Promise<{ id: string; result: JsonValue } | null> => null);
+    const client = new WorkerAppServerClient(handle(Object.assign(transport, { recoverResponse })));
+    const purpose = "thread-start:00000000-0000-4000-8000-000000000041";
+    expect(await client.recoverThreadStart({}, purpose)).toBeNull();
+    recoverResponse.mockResolvedValue({ id: "another-users-request", result: {} });
+    await expect(client.recoverThreadStart({}, purpose)).rejects.toThrow("identity changed");
+    expect(transport.sent.some(request => request.kind === "rpc-request" && request.rpc.method === "thread/start")).toBe(false);
+    await client.router.close();
+  });
+
   it("blocks both inference entry points while preserving read, stop and recovery requests", async () => {
     const config = await loadInstallationConfig();
     const transport = new FakeTransport();

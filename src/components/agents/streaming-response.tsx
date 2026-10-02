@@ -28,7 +28,7 @@ import { AgentDisclosure } from "@/components/agents/agent-disclosure";
 import { EASE_OUT, SPRING_PRESS, SPRING_SWAP } from "@/lib/ease";
 import { cn } from "@/lib/utils";
 
-export type StreamingResponseStatus = "streaming" | "complete" | "error";
+export type StreamingResponseStatus = "streaming" | "paused" | "complete" | "error";
 export type StreamingResponseFeedback = "up" | "down" | null;
 
 export interface StreamingResponseProps {

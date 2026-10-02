@@ -18,6 +18,7 @@ import {
   type ResolvedSkill,
 } from "@/runtime/codex-app-server";
 import { AppServerRpcRouter } from "@/runtime/transport/app-server-rpc-router";
+import { validateAppServerRequest } from "@/runtime/transport/wire-protocol";
 import type { AppServerEvent, JsonValue } from "@/runtime/transport";
 import { LocalGatewayWorkerRuntimeFactory, workerEgressEnvironment } from "@/runtime/workers/local-gateway-runtime";
 import { sharedAuthProvider } from "@/runtime/workers/shared-auth-broker";
@@ -185,6 +186,28 @@ export class WorkerAppServerClient {
       this.loadedThreads.set(result.thread.id, params.config.web_search === "live");
     }
     return result;
+  }
+
+  /**
+   * Read the original creation receipt through this user's worker boundary.
+   * Missing/evicted evidence stays unknown: it never authorizes another send.
+   */
+  async recoverThreadStart(params: unknown, purpose: string): Promise<JsonValue | null> {
+    if (!/^thread-start:[A-Za-z0-9._:-]{1,115}$/.test(purpose)) {
+      throw new Error("Stable thread creation request id is invalid.");
+    }
+    const request = {
+      clientRequestId: purpose,
+      kind: "rpc-request" as const,
+      rpc: { method: "thread/start" as const, id: purpose, params },
+    };
+    validateAppServerRequest(request);
+    await this.initialize();
+    const response = await this.handle.transport.recoverResponse?.(request);
+    if (!response) return null;
+    if (response.id !== purpose) throw new Error("Recovered thread creation identity changed.");
+    if ("error" in response) throw Object.assign(new Error(response.error.message), { code: response.error.code });
+    return response.result;
   }
 
   /**

@@ -47,8 +47,16 @@ On confirmed completion the payload and manifest are scrubbed; a compact termina
 identity remains to prevent late replay. No age-based deletion is added.
 
 A crash between durable intent and transmission can remain pending until remote
-evidence resolves it. A lost thread-creation acknowledgement without a recovered
-thread id also remains pending. This change cannot restore files already deleted
+evidence resolves it. After both thread-creation response deadlines expire, a
+reconnect reads the original gateway receipt using the exact authorized request
+and its canonical hash. A successful receipt binds the original runtime thread
+durably, then a fresh `thread/resume` confirms current state and projects its
+identity. Only a receipt still in preparation may continue to its first model
+submission; dispatched and legacy recovery-only turns remain fenced. This path
+does not resend `thread/start`. Missing, evicted or mismatched evidence cannot
+authorize a replacement creation. The lookup stays within the authenticated
+user's existing transport, including after application/worker restart.
+This change cannot restore files already deleted
 by an older version. Local completion heuristics can leave a nonterminal receipt
 retained for later reconciliation; do not delete it to force another model turn.
 

@@ -742,7 +742,20 @@ export async function runWorkerCodexTurn(
     if (runtimeThreadId && runtimeThreadId !== submission.runtimeThreadId) throw new Error("La conversa no coincideix amb el torn pendent.");
     runtimeThreadId = submission.runtimeThreadId;
   }
-  if (submission.needsRecovery && !runtimeThreadId) throw new TurnSubmissionRecoveryRequired();
+  if (submission.needsRecovery && !runtimeThreadId) {
+    const creation = submission.pendingThreadRequest;
+    if (!creation) throw new TurnSubmissionRecoveryRequired();
+    // The primary and late-response deadlines can both expire before the
+    // gateway's durable success reaches this runner. Read that exact receipt
+    // after reconnect/restart, without resending the creation or a model turn.
+    const result = await runtime.client.recoverThreadStart(creation.params, String(creation.id));
+    const resolvedThreadId = result ? extractThreadId(result) : null;
+    if (!resolvedThreadId) throw new TurnSubmissionRecoveryRequired();
+    await submission.bindThread(resolvedThreadId);
+    runtimeThreadId = resolvedThreadId;
+    // Continue through fresh thread/resume below. It confirms current remote
+    // state and projects the bound identity using a real response envelope.
+  }
   const designBrandInstructions = await prepareDesignBrandAssets(runtime.config, projectWorkspace);
   // A new conversation used to wait for the optional model/skills/usage
   // catalog before it even opened its App Server thread.  The status route

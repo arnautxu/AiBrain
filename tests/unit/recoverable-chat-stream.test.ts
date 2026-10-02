@@ -387,6 +387,55 @@ describe("bounded transport recovery without replaying work", () => {
     await rejected;
   });
 
+  it("bounds repeated recovery-pending snapshots with keepalives and resumes all 13 admitted attachments", async () => {
+    const scheduler = new ControlledScheduler();
+    const states: Array<{ state: string; attempt?: number }> = [];
+    const events: ChatStreamEvent[] = [];
+    const streams: ReturnType<typeof controlledResponse>[] = [];
+    const admittedBody = JSON.stringify({
+      threadId: "same-thread", userMessageId: "same-user-message", assistantMessageId: "same-assistant",
+      message: "Review these invoices", options: { documentUploadIds: Array.from({ length: 13 }, (_, i) => `invoice-${i}`) },
+    });
+    let restored = false;
+    let resume!: () => void;
+    const fetcher = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) => {
+      if (restored) return response([{ type: "snapshot", message: saved() }]);
+      const source = controlledResponse();
+      source.emit({ type: "snapshot", message: saved("", "streaming") });
+      source.emit({ type: "activity", item: { id: "runtime-thread", kind: "system", label: "Recuperant la conversa", status: "running" } });
+      streams.push(source);
+      return source.response;
+    });
+    const run = consumeRecoverableChatStream({
+      request: createChatReattachRequest(admittedBody, fetcher), signal: new AbortController().signal,
+      scheduler: scheduler.api, onEvent: event => events.push(event), onMeasurement: () => undefined,
+      onRecoveryState: state => states.push(state), waitForRetry: () => new Promise(resolve => { resume = resolve; }),
+    });
+    for (let index = 0; index < 6; index++) {
+      await vi.waitFor(() => expect(streams).toHaveLength(index + 1));
+      scheduler.advance(30_000);
+      streams[index].heartbeat();
+      await flush();
+      streams[index].close(); // Worker recovery remains pending; no terminal result.
+      await vi.waitFor(() => expect(states.at(-1)?.state === "paused" || states.some(state => state.state === "recovering" && state.attempt === index + 1)).toBe(true));
+      if (states.at(-1)?.state === "paused") break;
+      scheduler.runNext();
+    }
+    expect(states.at(-1)).toEqual({ state: "paused" });
+    const count = fetcher.mock.calls.length;
+    scheduler.advance(300_000);
+    expect(fetcher).toHaveBeenCalledTimes(count);
+    expect(events.some(event => event.type === "error")).toBe(false);
+    restored = true;
+    resume();
+    await flush();
+    scheduler.runNext();
+    await run;
+    expect(events.at(-1)).toEqual({ type: "snapshot", message: saved() });
+    expect(fetcher.mock.calls.every(([, init]) => init?.body === admittedBody)).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(count + 1);
+  });
+
   it("pauses an auth rejection after uncertain admission without fabricating a terminal error", async () => {
     const scheduler = new ControlledScheduler();
     const events: ChatStreamEvent[] = [];
