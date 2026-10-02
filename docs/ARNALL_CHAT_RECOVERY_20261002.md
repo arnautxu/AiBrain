@@ -45,7 +45,31 @@ See [submission recovery](TURN_SUBMISSION_RECOVERY.md) and
 [stream recovery](CHAT_STREAM_RECOVERY.md). Do not delete journals, recreate
 message IDs, erase pending receipts or re-upload files as a recovery shortcut.
 
-## Validation and release
+## Completed results with missing delivery events
+
+A later live recovery confirmed a completed remote turn with final text while
+the local conversation still had an empty streaming message. Read-only resume
+recovered that same turn and published its answer without another model request.
+
+The runner now observes the exact admitted turn every fifteen seconds, using
+fresh paginated reads bound to the original client message and runtime turn IDs.
+Observations never overlap, stop on terminal state or runner abort, and retry transport
+failures without treating an unavailable observation as model failure. Both the
+answer and evidence are projected before publishing completion. Terminal event
+snapshots also restore final text if incremental text events were missed.
+A final-answer item on an in-progress turn is no longer sufficient to claim
+completion. Unconfirmed watchdog interruption keeps the submission recoverable
+and does not write a false terminal usage record.
+
+This covers a running server owner losing text and terminal events. Application
+restart still uses the existing original-request reattachment path; it does not
+authorize reconstructing a different request or creating a replacement turn.
+Regression cases cover lost text and terminal events, terminal-only text,
+in-progress and foreign-turn observations, non-overlapping retries, and one
+model submission with one published completion. Production acceptance remains
+separate from these source tests.
+
+## Required release validation
 
 Targeted regressions must cover large historical payloads, cache invalidation,
 byte compaction with pending evidence, completed creation lookup after restart,
