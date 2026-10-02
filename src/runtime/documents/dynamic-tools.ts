@@ -56,6 +56,10 @@ export const DOCUMENT_DYNAMIC_TOOLS: readonly DynamicToolSpec[] = Object.freeze(
   name: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
   description: "Create validated PDF, Word, PowerPoint and Excel files in this employee's private AiBrain project workspace on the installation server. This is the default document destination. It does not use Google Drive or any external connector.",
   tools: [
+    { type: "function", name: "remember",
+      description: "Persist the complete original of a file uploaded in this conversation as a reference available to all conversations in the current project. Use only when the user explicitly asks to remember/save that file. Pass its exact displayed filename. Returns a verified save receipt; never claim it is remembered before success. It does not save a summary instead of the original or grant access outside this project.",
+      inputSchema: { type: "object", properties: { fileName: { type: "string", minLength: 1, maxLength: 120 } }, required: ["fileName"], additionalProperties: false },
+    },
     {
       type: "function", name: "create_arnall_schedule",
       description: "Create and attach a fictional Arnall shop schedule in the embedded HORARI SAGARO Excel template. Use only when the user explicitly supplies an invented shop and people; no horarIA database records are created or read. Supply all seven days per person, marking every free day F, with actual hours for M, T and D. The tool rejects shift-time mismatches and returns calculated hours and coverage from the final grid; compare these with every user rule before claiming compliance. For real employees and shops use aibrain_horaria schedules.draft instead. Never ask the user to upload the template: it is bundled on the server.",
@@ -245,6 +249,7 @@ export type LocalDocumentDynamicToolContext = Readonly<{
   sourceThreadId: string;
   sourceTurnId: string;
   permissions: ResolvedPermissions;
+  rememberProjectFile?: (fileName: string) => Promise<Record<string, unknown>>;
   renderPresentation?: PresentationRenderCallback;
   spreadsheetLayout?: "schedule";
   arnallSchedule?: ArnallSchedule;
@@ -660,7 +665,7 @@ async function handleSingleLocalDocumentDynamicToolCall(
   try {
     if (!isRecord(params)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_REQUEST_INVALID", "Document tool request is invalid.");
     exactKeys(params, ["threadId", "turnId", "callId", "namespace", "tool", "arguments"]);
-    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
+    if (params.namespace !== AIBRAIN_DOCUMENT_TOOL_NAMESPACE || (params.tool !== "remember" && params.tool !== "create" && params.tool !== "create_arnall_schedule" && params.tool !== "image_to_pdf" && params.tool !== "render" && params.tool !== "deliver")) {
       throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_TOOL_REJECTED", "Document tool is not in the closed allowlist.");
     }
     for (const value of [params.threadId, params.turnId, params.callId]) {
@@ -678,6 +683,15 @@ async function handleSingleLocalDocumentDynamicToolCall(
     }
     if (!permissionAllowsLocalDocumentCreation(context.permissions)) {
       return failure("LOCAL_DOCUMENT_PERMISSION_DENIED", "La política de este usuario no permite crear archivos locales.");
+    }
+    if (params.tool === "remember") {
+      if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Reference fields are invalid.");
+      exactKeys(params.arguments, ["fileName"]);
+      if (typeof params.arguments.fileName !== "string" || !FILE_NAME_PATTERN.test(params.arguments.fileName) || !context.rememberProjectFile) return failure("PROJECT_REFERENCE_UNAVAILABLE", "No se puede guardar esta referencia en el proyecto.");
+      try {
+        const receipt = await context.rememberProjectFile(params.arguments.fileName);
+        return { artifacts: [], response: { success: true, contentItems: [{ type: "inputText", text: JSON.stringify(receipt) }] } };
+      } catch (error) { return failure("PROJECT_REFERENCE_NOT_SAVED", error instanceof Error && !/(?:\/var\/|\/Users\/|ENOENT)/.test(error.message) ? error.message : "No se ha podido guardar el original como referencia. No está confirmado."); }
     }
     if (params.tool === "deliver") {
       if (!isRecord(params.arguments)) throw new LocalDocumentDynamicToolError("LOCAL_DOCUMENT_ARGUMENTS_INVALID", "Delivery fields are invalid.");

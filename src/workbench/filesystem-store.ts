@@ -857,6 +857,24 @@ export class FileWorkbenchStore {
     });
   }
 
+  /** Attach a server-verified original without replacing concurrent project edits. */
+  async retainProjectSource(userId: string, projectId: string, source: import("./types").ProjectSource) {
+    assertFilesystemWorkbenchId(projectId);
+    if (!isUpdateProjectInput({ sources: [source] }) || source.kind !== "file" || source.status !== "ready") throw new WorkbenchPersistenceError("Referencia no válida.");
+    return this.mutate(userId, state => {
+      const project = state.projects.find(value => value.id === projectId);
+      if (!project || project.status !== "active" || project.slug === STANDALONE_PROJECT_SLUG) throw new WorkbenchConflictError("Guarda el archivo en un proyecto para recordarlo entre conversaciones.");
+      const existing = project.sources.find(value => value.id === source.id);
+      if (existing) return existing;
+      if (project.sources.some(value => value.kind === "file" && value.name === source.name && value.status === "ready")) throw new WorkbenchConflictError("Ya existe una referencia con este nombre. Gestiona su sustitución en las fuentes del proyecto.");
+      const retained = project.sources.filter(value => !(value.kind === "file" && value.name === source.name && value.status === "pending-index"));
+      if (retained.length >= 100) throw new WorkbenchConflictError("El proyecto admite hasta 100 referencias.");
+      project.sources = [...retained, source];
+      project.updatedAt = new Date().toISOString();
+      return source;
+    });
+  }
+
   async updateProject(
     userId: string,
     projectId: string,
