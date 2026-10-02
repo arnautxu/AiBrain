@@ -785,13 +785,15 @@ export class FileWorkbenchStore {
     const state = await this.read(userId);
     const requests = new Map<string, string>();
     const running = new Set<string>();
+    const conversationTimes: string[] = [];
     for (const thread of state.threads) {
+      if (thread.messages.length) conversationTimes.push(thread.updatedAt);
       for (const message of thread.messages) {
         if (message.role === "user") requests.set(message.id, message.createdAt);
         if (message.role === "assistant" && message.status === "streaming") running.add(message.id);
       }
     }
-    return { requestTimes: [...requests.values()], runningTurns: running.size };
+    return { requestTimes: [...requests.values()], conversationTimes, runningTurns: running.size };
   }
 
   async listProjects(

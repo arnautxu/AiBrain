@@ -318,13 +318,15 @@ before proxying any conversation read; the existing authorized programmers may a
 The private operator dashboard reads conversation request timestamps through the
 installation-scoped workbench store, including archived threads and overlaid turn
 projections. Deduplicated user message IDs supply request counts and Madrid active
-days. Empty threads, renames and ledger ordering do not constitute user activity.
+days. Empty threads do not constitute conversation activity. The latest update of a
+nonempty conversation supplies the same activity time as the conversation reader;
+`lastRequestAt` separately identifies the latest user request.
 Streaming assistant projections supply running-turn counts; this denotes recorded
 in-progress state, not online presence. No prompt, title or response content leaves
 the metadata projection. The existing operator bearer remains mandatory.
 
 Token totals and daily token charts remain measured usage-journal values.
 `recordedUsageTurns` and `lastUsageAt` identify that independent coverage;
-`lastActiveAt` is the latest real request in the current counting window.
+`lastActiveAt` is the latest nonempty conversation update in the counting window.
 Missing usage records are not reconstructed or invented. Site polling every second
 can refresh activity without implying every request has a token measurement.

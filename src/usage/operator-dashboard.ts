@@ -54,6 +54,7 @@ export async function operatorUsageDashboard(now = Date.now()) {
   const members = (await Promise.all(users.map(async (user) => {
     const activity = await workbench.activityMetadata(user.userId);
     const requestTimes = activity.requestTimes.filter(time => Date.parse(time) >= start && Date.parse(time) < end);
+    const latestActivity = activity.conversationTimes.filter(time => Date.parse(time) >= start && Date.parse(time) < end).reduce<string | null>((latest, time) => !latest || Date.parse(time) > Date.parse(latest) ? time : latest, null);
     const latestRequest = requestTimes.reduce<string | null>((latest, time) => !latest || Date.parse(time) > Date.parse(latest) ? time : latest, null);
     const memberTurns = turns.filter((turn) => {
       const completedAt = Date.parse(turn.completedAt);
@@ -82,7 +83,8 @@ export async function operatorUsageDashboard(now = Date.now()) {
       inputTokens: aggregate.tokens.inputTokens,
       cachedInputTokens: aggregate.tokens.cachedInputTokens,
       outputTokens: aggregate.tokens.outputTokens,
-      lastActiveAt: latestRequest,
+      lastActiveAt: latestActivity,
+      lastRequestAt: latestRequest,
       lastUsageAt: memberTurns.reduce<string | null>((latest, turn) => !latest || Date.parse(turn.completedAt) > Date.parse(latest) ? turn.completedAt : latest, null),
       daily: [...daily.values()].sort((left, right) => left.date.localeCompare(right.date)),
     };
