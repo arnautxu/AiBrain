@@ -780,6 +780,20 @@ export class FileWorkbenchStore {
     return snapshot(state);
   }
 
+  /** Aggregate metadata only; callers must authorize the target user before reading. */
+  async activityMetadata(userId: string) {
+    const state = await this.read(userId);
+    const requests = new Map<string, string>();
+    const running = new Set<string>();
+    for (const thread of state.threads) {
+      for (const message of thread.messages) {
+        if (message.role === "user") requests.set(message.id, message.createdAt);
+        if (message.role === "assistant" && message.status === "streaming") running.add(message.id);
+      }
+    }
+    return { requestTimes: [...requests.values()], runningTurns: running.size };
+  }
+
   async listProjects(
     userId: string,
     query: WorkbenchListQuery,

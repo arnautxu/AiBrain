@@ -312,3 +312,19 @@ The programmer-authorized conversation reader is a separate `/api/operations/con
 route using the same dedicated dashboard transport credential. Usage responses
 still contain no messages. The private Site checks the authenticated reader's ID against the programmer allowlist
 before proxying any conversation read; the existing authorized programmers may also inspect conversations. Read events persist in the administrative audit journal.
+
+## Operator dashboard activity — 2026-10-02
+
+The private operator dashboard reads conversation request timestamps through the
+installation-scoped workbench store, including archived threads and overlaid turn
+projections. Deduplicated user message IDs supply request counts and Madrid active
+days. Empty threads, renames and ledger ordering do not constitute user activity.
+Streaming assistant projections supply running-turn counts; this denotes recorded
+in-progress state, not online presence. No prompt, title or response content leaves
+the metadata projection. The existing operator bearer remains mandatory.
+
+Token totals and daily token charts remain measured usage-journal values.
+`recordedUsageTurns` and `lastUsageAt` identify that independent coverage;
+`lastActiveAt` is the latest real request in the current counting window.
+Missing usage records are not reconstructed or invented. Site polling every second
+can refresh activity without implying every request has a token measurement.
