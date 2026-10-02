@@ -510,6 +510,7 @@ export async function runWorkerCodexTurn(
   const finalAnswerText = new Map<string, string>();
   let publishedFinalItemId: string | null = null;
   let publishedFinalText = "";
+  let terminalNeedsHydration = false;
   const commandOutputText = new Map<string, string>();
   const reasoningSummaryText = new Map<string, string>();
   const upsertActivity = async (item: ActivityItem, projection?: WorkerTurnProjection) => {
@@ -1752,7 +1753,13 @@ export async function runWorkerCodexTurn(
                 const [itemId, rawText] = finalEntry;
                 await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
               }
-              await emit({ type: "done" }, { envelope, key: "turn:done" });
+              if (!finalEntry && projectedDocumentArtifactIds.size === 0 && !fictionalScheduleDeliveryFailed) {
+                // Complete outside the notification handler: awaiting an RPC
+                // here can block delivery of that same RPC's response.
+                terminalNeedsHydration = true;
+              } else {
+                await emit({ type: "done" }, { envelope, key: "turn:done" });
+              }
             } else if (status.status === "interrupted") {
               await emit({ type: "stopped" }, { envelope, key: "turn:stopped" });
               stoppedEmitted = true;
@@ -2388,6 +2395,19 @@ export async function runWorkerCodexTurn(
     if (fictionalScheduleDeliveryFailed) {
       telemetry.finish("error");
       return;
+    }
+    if (terminalNeedsHydration) {
+      let completionEnvelope: AppServerEvent | null = null;
+      const result = await recoverThreadRequest(
+        "thread/read", { threadId, includeTurns: true },
+        `turn-terminal-text-reconcile:${chatRequest.assistantMessageId}`, 15_000,
+        (_result, envelope) => { completionEnvelope = envelope; },
+      );
+      const confirmed = recoveredTurn(result, chatRequest.userMessageId);
+      if (!confirmed || confirmed.id !== runtimeTurnId || confirmed.status !== "completed" || !completionEnvelope) {
+        throw new WorkerTurnRecoveryPendingError("El resultat final encara necessita recuperar-se del servei.");
+      }
+      await projectRecoveredTurn(confirmed, completionEnvelope, "terminal-text-recovery");
     }
     const metrics = telemetry.finish("completed");
     await upsertActivity({
