@@ -1701,3 +1701,13 @@ under a cross-process resource lock, and scoped to the current installation or
 employee. `/api/chat` enforces web/image/skill gates and the browser service
 enforces the managed-browser gate for human and agent operations. A stop action
 remains available so disabling a running browser cannot strand the process.
+
+### Project reference file upload
+
+`POST /api/projects/{projectId}/sources` accepts multipart `uploadId` (UUID) and
+`file`, requires same-origin and server-authorized project editor/owner access,
+and returns `{ source: ProjectSource }` with 201 after persisting validated
+original bytes. Save that source through the existing project PATCH. Ready file
+references with null excerpt resolve through their server-private project/owner
+namespace; `pending-index` is a legacy missing-original state, not an active job.
+Supported originals: XLSX, PDF, DOCX, PPTX and text, maximum 20 MB per file.

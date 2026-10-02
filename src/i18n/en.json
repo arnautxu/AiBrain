@@ -1319,5 +1319,13 @@
   "Cerrar aviso de consumo semanal": "Dismiss weekly usage notice",
   "Cargando tus conectores…": "Loading your connectors…",
   "No se pudo cargar el catálogo. Estamos reintentando la conexión.": "The catalog could not be loaded. Retrying the connection.",
-  "No se ha podido cargar el catálogo de conectores.": "The connector catalog could not be loaded."
+  "No se ha podido cargar el catálogo de conectores.": "The connector catalog could not be loaded.",
+  "Los archivos originales se guardan para todas las conversaciones del proyecto. XLSX, PDF, DOCX, PPTX y texto; hasta 20 MB por archivo.": "Original files are saved for every conversation in this project. XLSX, PDF, DOCX, PPTX and text; up to 20 MB per file.",
+  "Falta el archivo original · vuelve a adjuntarlo": "Original file missing · attach it again",
+  "Disponible para las conversaciones": "Available to conversations",
+  "Archivos guardados. Pulsa Guardar cambios para usarlos en todas las conversaciones del proyecto.": "Files saved. Select Save changes to use them in every conversation in the project.",
+  "No se ha podido guardar la referencia.": "Could not save the reference.",
+  "Error al subir el archivo.": "File upload failed.",
+  "El proyecto admite hasta 100 referencias.": "The project supports up to 100 references.",
+  "Subiendo archivos…": "Uploading files…"
 }

@@ -16,7 +16,8 @@ export type ThreadRuntimeContext = {
   workspaceKey: string;
   projectInstructions: string;
   projectMemory: string;
-  projectSources: Pick<ProjectSource, "kind" | "name" | "url" | "excerpt" | "status">[];
+  projectSourceOwnerId?: string;
+  projectSources: (Pick<ProjectSource, "kind" | "name" | "url" | "excerpt" | "status"> & { id?: string })[];
   runtimeThreadToken: string | null;
   /** Full persisted history used only to start a branch without replaying the parent's final state. */
   branchHistory: string | null;
