@@ -1,4 +1,5 @@
 import path from "node:path";
+import { lstat } from "node:fs/promises";
 import type {
   AppServerEvent,
   ReplayCursor,
@@ -48,6 +49,7 @@ export type FileTransportEventJournalOptions = {
   filePath: string;
   lockManager: ResourceLockManager;
   maxRetainedDeliveredEvents?: number;
+  maxRetainedDeliveredBytes?: number;
 };
 
 /** Durable per-worker transport cursor and event log. */
@@ -57,7 +59,10 @@ export class FileTransportEventJournal implements TransportEventJournal {
   private readonly lockManager: ResourceLockManager;
   private readonly deliveryCursorPath: string;
   private readonly maxRetainedDeliveredEvents: number;
-  private readonly verifiedEvents = new Map<number, string>();
+  private readonly maxRetainedDeliveredBytes: number;
+  private deliveredBytesSinceCompaction = 0;
+  private checkedInitialCompaction = false;
+  private readonly verifiedEvents = new Map<number, { eventId: string; bytes: number }>();
 
   constructor(options: FileTransportEventJournalOptions) {
     this.filePath = path.resolve(options.filePath);
@@ -68,15 +73,20 @@ export class FileTransportEventJournal implements TransportEventJournal {
         this.maxRetainedDeliveredEvents < 1 || this.maxRetainedDeliveredEvents > 65_536) {
       throw new Error("Delivered event retention must be between 1 and 65536.");
     }
+    this.maxRetainedDeliveredBytes = options.maxRetainedDeliveredBytes ?? 4 * 1024 * 1024;
+    if (!Number.isSafeInteger(this.maxRetainedDeliveredBytes) || this.maxRetainedDeliveredBytes < 1) {
+      throw new Error("Delivered event byte retention must be a positive safe integer.");
+    }
     this.journal = new FileJournal({
       filePath: this.filePath,
       lockManager: options.lockManager,
       payloadSchema: appServerEventSchema,
+      contiguousPayloadSequence: (event) => event.sequence,
     });
   }
 
   async loadCursor(): Promise<ReplayCursor | null> {
-    const last = (await this.journal.read()).at(-1)?.payload;
+    const last = (await this.journal.readLast())?.payload;
     return last ? { eventId: last.eventId, sequence: last.sequence } : null;
   }
 
@@ -108,10 +118,8 @@ export class FileTransportEventJournal implements TransportEventJournal {
         !Number.isSafeInteger(limit) || limit < 1) {
       throw new Error("Transport event read bounds are invalid.");
     }
-    return (await this.journal.read())
-      .map((entry) => entry.payload)
-      .filter((event) => event.sequence > afterSequence)
-      .slice(0, limit);
+    return (await this.journal.readContiguous(afterSequence, limit))
+      .map((entry) => entry.payload);
   }
 
   async loadDeliveryCursor() {
@@ -160,7 +168,8 @@ export class FileTransportEventJournal implements TransportEventJournal {
           `Transport delivery expected sequence ${expected}, received ${sequence}.`,
         );
       }
-      const verifiedEventId = this.verifiedEvents.get(sequence);
+      const verified = this.verifiedEvents.get(sequence);
+      const verifiedEventId = verified?.eventId;
       const persisted = verifiedEventId === undefined
         ? (await this.readEvents(sequence - 1, 1))[0]
         : null;
@@ -173,24 +182,10 @@ export class FileTransportEventJournal implements TransportEventJournal {
         eventId,
         sequence,
       }, deliveryCursorSchema, { mode: 0o600 });
+      this.deliveredBytesSinceCompaction += verified?.bytes ?? (persisted ? Buffer.byteLength(JSON.stringify(persisted)) : 0);
       this.verifiedEvents.delete(sequence);
-      const compactionBoundary = sequence % this.maxRetainedDeliveredEvents === 0
-        || sequence === this.maxRetainedDeliveredEvents * 2 + 1;
-      if (!compactionBoundary) return;
-      const retainAfter = Math.max(0, sequence - this.maxRetainedDeliveredEvents);
-      await this.journal.compact((entries) => {
-        if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
-        const retained = entries
-          .map((entry) => entry.payload)
-          .filter((persisted) => persisted.sequence > retainAfter);
-        // A large recovery backlog advances one event at a time. Rewriting the
-        // complete journal for every acknowledgement creates quadratic I/O,
-        // so compact only after at least one retention window is reclaimable.
-        if (entries.length - retained.length < this.maxRetainedDeliveredEvents) {
-          return undefined;
-        }
-        return retained;
-      });
+      await this.compactDelivered(sequence);
+
     });
   }
 
@@ -226,22 +221,50 @@ export class FileTransportEventJournal implements TransportEventJournal {
       for (const verifiedSequence of this.verifiedEvents.keys()) {
         if (verifiedSequence <= sequence) this.verifiedEvents.delete(verifiedSequence);
       }
+      await this.compactDelivered(sequence, true);
+    });
+  }
+
+  private async compactDelivered(sequence: number, force = false) {
+    const countBoundary = sequence % this.maxRetainedDeliveredEvents === 0
+      || sequence === this.maxRetainedDeliveredEvents * 2 + 1;
+    const byteBoundary = this.deliveredBytesSinceCompaction >= this.maxRetainedDeliveredBytes;
+    const initialCheck = !this.checkedInitialCompaction;
+    this.checkedInitialCompaction = true;
+    if (!force && !countBoundary && !byteBoundary && !initialCheck) return;
+    const oversized = (await lstat(this.filePath)).size > this.maxRetainedDeliveredBytes * 2;
+    if (!force && !countBoundary && !oversized) return;
+    this.deliveredBytesSinceCompaction = 0;
+    await this.journal.compact((entries) => {
       const retainAfter = Math.max(0, sequence - this.maxRetainedDeliveredEvents);
-      await this.journal.compact((entries) => {
-        if (entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
-        const retained = entries
-          .map((entry) => entry.payload)
-          .filter((event) => event.sequence > retainAfter);
-        return entries.length - retained.length >= this.maxRetainedDeliveredEvents
-          ? retained
-          : undefined;
-      });
+      let retainedBytes = 0;
+      let earliest = entries.length;
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        // Keep every unacknowledged event and the current cursor anchor, even
+        // when one payload alone exceeds the historical retention byte budget.
+        if (entry.payload.sequence >= sequence) {
+          earliest = index;
+          if (entry.payload.sequence === sequence) retainedBytes += Buffer.byteLength(JSON.stringify(entry));
+          continue;
+        }
+        const bytes = Buffer.byteLength(JSON.stringify(entry));
+        if (entry.payload.sequence <= retainAfter || retainedBytes + bytes > this.maxRetainedDeliveredBytes) break;
+        retainedBytes += bytes;
+        earliest = index;
+      }
+      if (earliest === 0) return undefined;
+      // Count-only retention waits for a full window to avoid rewriting small
+      // journals per ACK. Byte pressure can reclaim fewer, much larger events.
+      if (!oversized && entries.length <= this.maxRetainedDeliveredEvents * 2) return undefined;
+      if (!oversized && earliest < this.maxRetainedDeliveredEvents) return undefined;
+      return entries.slice(earliest).map((entry) => entry.payload);
     });
   }
 
   private rememberVerified(event: AppServerEvent) {
     this.verifiedEvents.delete(event.sequence);
-    this.verifiedEvents.set(event.sequence, event.eventId);
+    this.verifiedEvents.set(event.sequence, { eventId: event.eventId, bytes: Buffer.byteLength(JSON.stringify(event)) });
     while (this.verifiedEvents.size > 4_096) {
       const oldest = this.verifiedEvents.keys().next().value;
       if (oldest === undefined) break;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, realpath, rm } from "node:fs/promises";
 import path from "node:path";
 import type { UserInput } from "../../contracts/codex/0.153.4/types/v2/UserInput";
+import type { ClientRequest } from "../../contracts/codex/0.153.4/types/ClientRequest";
 import { atomicWriteFile, ResourceLockManager } from "@/storage";
 import type { ResourceLockLease } from "@/storage/resource-lock";
 import { readRegularFileWithin } from "@/security/safe-file";
@@ -158,6 +159,12 @@ export class DurableTurnSubmission {
   }
 
   get runtimeThreadId() { return this.data.runtimeThreadId; }
+  /** The exact authorized creation intent; never reconstructed on reconnect. */
+  get pendingThreadRequest(): Extract<ClientRequest, { method: "thread/start" }> | null {
+    return this.data.runtimeThreadId === null && this.data.threadRequest !== null
+      ? JSON.parse(this.data.threadRequest)
+      : null;
+  }
   get runtimeTurnId() { return this.data.runtimeTurnId; }
   get needsRecovery() {
     return this.data.phase === "dispatched" || this.data.phase === "terminal" ||

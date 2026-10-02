@@ -1301,6 +1301,7 @@
   "No se puede comprobar la respuesta ahora. El trabajo y los resultados guardados se conservan.": "The response cannot be checked right now. The work and saved results are preserved.",
   "Recuperando la respuesta guardada…": "Recovering the saved response…",
   "Reconectar respuesta": "Reconnect response",
+  "Recuperación de la respuesta en pausa": "Response recovery paused",
   "La conexión de la respuesta no se ha podido recuperar.": "The response connection could not be recovered.",
   "Contraer {p0}": "Collapse {p0}",
   "Expandir {p0}": "Expand {p0}",

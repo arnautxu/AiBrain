@@ -1,6 +1,6 @@
-import { constants } from "node:fs";
+import { constants, type BigIntStats } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, open, readFile } from "node:fs/promises";
+import { lstat, mkdir, open } from "node:fs/promises";
 import path from "node:path";
 import { atomicWriteFile, fsyncDirectory } from "@/storage/atomic-file";
 import { StorageCorruptionError, StorageError } from "@/storage/errors";
@@ -27,6 +27,7 @@ export type FileJournalOptions<Payload> = {
   lockManager: ResourceLockManager;
   payloadSchema: StorageSchema<Payload>;
   now?: () => number;
+  contiguousPayloadSequence?: (payload: Payload) => number;
 };
 
 export type JournalReadOptions = {
@@ -39,6 +40,27 @@ type AppendJob<Payload> = {
   resolve: (entry: JournalEntry<Payload>) => void;
   reject: (error: unknown) => void;
 };
+
+// Cache only validated snapshots, scoped to the journal instance (including its
+// schema). The process-wide LRU bounds both retained payloads and offset indexes.
+const MAX_SNAPSHOT_BYTES = 8 * 1024 * 1024;
+const MAX_CACHE_BYTES = 64 * 1024 * 1024;
+const MAX_INDEX_ENTRIES = 65_536;
+type JournalSnapshot<Payload> = {
+  fingerprint: string;
+  offsets: number[];
+  count: number;
+  bytes: number;
+  entries?: JournalEntry<Payload>[];
+  weight: number;
+  contiguousSequenceOffset?: number;
+};
+const snapshots = new Map<object, JournalSnapshot<unknown>>();
+let snapshotBytes = 0;
+
+function fingerprint(stat: BigIntStats) {
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
 
 function isNodeError(error: unknown, code?: string): error is NodeJS.ErrnoException {
   return Boolean(
@@ -76,6 +98,7 @@ export class FileJournal<Payload> {
   private readonly payloadSchema: StorageSchema<Payload>;
   private readonly entrySchema: StorageSchema<JournalEntry<Payload>>;
   private readonly now: () => number;
+  private readonly contiguousPayloadSequence?: (payload: Payload) => number;
   private readonly appendQueue: AppendJob<Payload>[] = [];
   private appendScheduled = false;
   private appendDraining = false;
@@ -92,6 +115,7 @@ export class FileJournal<Payload> {
     this.payloadSchema = options.payloadSchema;
     this.entrySchema = createJournalEntrySchema(options.payloadSchema);
     this.now = options.now ?? Date.now;
+    this.contiguousPayloadSequence = options.contiguousPayloadSequence;
   }
 
   private lockKey() {
@@ -111,63 +135,180 @@ export class FileJournal<Payload> {
     }
   }
 
-  private async readUnlocked(repairIncompleteTail: boolean) {
-    let data: Buffer;
+  private forgetSnapshot() {
+    const old = snapshots.get(this);
+    if (old) snapshotBytes -= old.weight;
+    snapshots.delete(this);
+  }
+
+  private rememberSnapshot(snapshot: JournalSnapshot<Payload>) {
+    this.forgetSnapshot();
+    snapshots.set(this, snapshot as JournalSnapshot<unknown>);
+    snapshotBytes += snapshot.weight;
+    while (snapshotBytes > MAX_CACHE_BYTES || snapshots.size > 128) {
+      const oldest = snapshots.keys().next().value;
+      if (oldest === undefined) break;
+      snapshotBytes -= snapshots.get(oldest)!.weight;
+      snapshots.delete(oldest);
+    }
+  }
+
+  private parseEntry(line: string, expectedSequence: number) {
+    if (line.length === 0) {
+      throw new StorageCorruptionError(this.filePath, `empty journal record at sequence ${expectedSequence}`);
+    }
+    let entry: JournalEntry<Payload>;
     try {
-      data = await readFile(this.filePath);
+      entry = parseJson(this.entrySchema, line, `${this.filePath}:${expectedSequence}`);
     } catch (error) {
+      throw new StorageCorruptionError(this.filePath,
+        `invalid complete journal record at sequence ${expectedSequence}`, { cause: error });
+    }
+    if (entry.sequence !== expectedSequence) {
+      throw new StorageCorruptionError(this.filePath,
+        `expected sequence ${expectedSequence}, found ${entry.sequence}`);
+    }
+    return entry;
+  }
+
+  private validateContiguousSequence(entry: JournalEntry<Payload>, offset?: number) {
+    if (!this.contiguousPayloadSequence) return undefined;
+    const sequence = this.contiguousPayloadSequence(entry.payload);
+    if (!Number.isSafeInteger(sequence) || sequence < 1 ||
+        (offset !== undefined && sequence !== entry.sequence + offset)) {
+      throw new StorageCorruptionError(this.filePath, "non-contiguous payload sequence");
+    }
+    return offset ?? sequence - entry.sequence;
+  }
+
+  private async readUnlocked(repairIncompleteTail: boolean, options: JournalReadOptions = {}) {
+    const after = options.afterSequence ?? 0;
+    const limit = options.limit ?? Number.MAX_SAFE_INTEGER;
+    let handle;
+    try {
+      handle = await open(this.filePath, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    } catch (error) {
+      this.forgetSnapshot();
       if (isNodeError(error, "ENOENT")) {
-        return { entries: [] as JournalEntry<Payload>[], repairedBytes: 0 };
+        return { entries: [] as JournalEntry<Payload>[], repairedBytes: 0, count: 0 };
       }
       throw error;
     }
-
-    const entries: JournalEntry<Payload>[] = [];
-    let lineStart = 0;
-    let expectedSequence = 1;
-    for (let index = 0; index < data.length; index += 1) {
-      if (data[index] !== 0x0a) continue;
-      const line = data.subarray(lineStart, index).toString("utf8");
-      if (line.length === 0) {
-        throw new StorageCorruptionError(this.filePath, `empty journal record at sequence ${expectedSequence}`);
+    try {
+      const stat = await handle.stat({ bigint: true });
+      const cached = snapshots.get(this) as JournalSnapshot<Payload> | undefined;
+      if (cached?.fingerprint === fingerprint(stat)) {
+        this.rememberSnapshot(cached);
+        if (after >= cached.count || limit === 0) {
+          return { entries: [] as JournalEntry<Payload>[], repairedBytes: 0, count: cached.count };
+        }
+        if (cached.entries) {
+          return { entries: structuredClone(cached.entries.slice(after, after + limit)),
+            repairedBytes: 0, count: cached.count };
+        }
+        if (cached.offsets.length === cached.count + 1) {
+          const end = Math.min(cached.count, after + limit);
+          const data = Buffer.alloc(cached.offsets[end] - cached.offsets[after]);
+          let read = 0;
+          while (read < data.length) {
+            const result = await handle.read(data, read, data.length - read, cached.offsets[after] + read);
+            if (result.bytesRead === 0) throw new StorageCorruptionError(this.filePath, "journal changed during read");
+            read += result.bytesRead;
+          }
+          const entries: JournalEntry<Payload>[] = [];
+          let start = 0;
+          for (let sequence = after + 1; sequence <= end; sequence += 1) {
+            const finish = cached.offsets[sequence] - cached.offsets[after] - 1;
+            entries.push(this.parseEntry(data.subarray(start, finish).toString("utf8"), sequence));
+            start = finish + 1;
+          }
+          return { entries, repairedBytes: 0, count: cached.count };
+        }
       }
-      let entry: JournalEntry<Payload>;
-      try {
-        entry = parseJson(this.entrySchema, line, `${this.filePath}:${expectedSequence}`);
-      } catch (error) {
-        throw new StorageCorruptionError(
-          this.filePath,
-          `invalid complete journal record at sequence ${expectedSequence}`,
-          { cause: error },
-        );
+      // Any external change, even a same-size in-place rewrite, revalidates the
+      // complete file. Only our own fsynced appends can extend a trusted index.
+      this.forgetSnapshot();
+      const data = await handle.readFile();
+      const entries: JournalEntry<Payload>[] = [];
+      const retained: JournalEntry<Payload>[] | undefined = data.length <= MAX_SNAPSHOT_BYTES ? [] : undefined;
+      const offsets = [0];
+      let lineStart = 0;
+      let count = 0;
+      let contiguousSequenceOffset: number | undefined;
+      for (let index = data.indexOf(0x0a); index !== -1; index = data.indexOf(0x0a, lineStart)) {
+        const entry = this.parseEntry(data.subarray(lineStart, index).toString("utf8"), count + 1);
+        contiguousSequenceOffset = this.validateContiguousSequence(entry, contiguousSequenceOffset);
+        count += 1;
+        retained?.push(entry);
+        if (count > after && entries.length < limit) entries.push(entry);
+        lineStart = index + 1;
+        if (offsets.length <= MAX_INDEX_ENTRIES) offsets.push(lineStart);
       }
-      if (entry.sequence !== expectedSequence) {
-        throw new StorageCorruptionError(
-          this.filePath,
-          `expected sequence ${expectedSequence}, found ${entry.sequence}`,
-        );
+      const repairedBytes = data.length - lineStart;
+      let finalStat = stat;
+      if (repairedBytes > 0) {
+        if (!repairIncompleteTail) {
+          throw new StorageCorruptionError(this.filePath, "journal ends with an incomplete record");
+        }
+        const writer = await open(this.filePath, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+        try {
+          if (fingerprint(await writer.stat({ bigint: true })) !== fingerprint(stat)) {
+            throw new StorageCorruptionError(this.filePath, "journal changed during repair");
+          }
+          await writer.truncate(lineStart);
+          await writer.sync();
+          finalStat = await writer.stat({ bigint: true });
+        } finally {
+          await writer.close();
+        }
+        await fsyncDirectory(path.dirname(this.filePath));
       }
-      entries.push(entry);
-      expectedSequence += 1;
-      lineStart = index + 1;
+      this.rememberSnapshot({ fingerprint: fingerprint(finalStat), offsets, count, bytes: lineStart,
+        contiguousSequenceOffset,
+        // Readers and predicate callbacks must not be able to mutate cached data.
+        entries: retained ? structuredClone(retained) : undefined,
+        weight: offsets.length * 16 + (retained ? lineStart * 4 : 0) + 256 });
+      return { entries, repairedBytes, count };
+    } finally {
+      await handle.close();
     }
+  }
 
-    const repairedBytes = data.length - lineStart;
-    if (repairedBytes > 0) {
-      if (!repairIncompleteTail) {
-        throw new StorageCorruptionError(this.filePath, "journal ends with an incomplete record");
+  private async writeEntries(entries: JournalEntry<Payload>[]) {
+    const directory = path.dirname(this.filePath);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const cached = snapshots.get(this) as JournalSnapshot<Payload> | undefined;
+    const handle = await open(this.filePath,
+      constants.O_APPEND | constants.O_CREAT | constants.O_WRONLY | (constants.O_NOFOLLOW ?? 0), 0o600);
+    try {
+      const before = await handle.stat({ bigint: true });
+      let contiguousSequenceOffset = cached?.fingerprint === fingerprint(before)
+        ? cached.contiguousSequenceOffset : undefined;
+      for (const entry of entries) {
+        contiguousSequenceOffset = this.validateContiguousSequence(entry, contiguousSequenceOffset);
       }
-      const handle = await open(this.filePath, "r+");
-      try {
-        await handle.truncate(lineStart);
-        await handle.sync();
-      } finally {
-        await handle.close();
+      const lines = entries.map((entry) => `${JSON.stringify(entry)}\n`);
+      this.forgetSnapshot();
+      await handle.writeFile(lines.join(""), "utf8");
+      await handle.sync();
+      const after = await handle.stat({ bigint: true });
+      if (cached?.fingerprint === fingerprint(before) || before.size === 0n) {
+        const offsets = cached ? [...cached.offsets] : [0];
+        let bytes = Number(before.size);
+        for (const line of lines) {
+          bytes += Buffer.byteLength(line);
+          if (offsets.length <= MAX_INDEX_ENTRIES) offsets.push(bytes);
+        }
+        const retained = bytes <= MAX_SNAPSHOT_BYTES && (cached?.entries || before.size === 0n)
+          ? structuredClone([...(cached?.entries ?? []), ...entries]) : undefined;
+        this.rememberSnapshot({ fingerprint: fingerprint(after), offsets,
+          count: (cached?.count ?? 0) + entries.length, bytes, entries: retained, contiguousSequenceOffset,
+          weight: offsets.length * 16 + (retained ? bytes * 4 : 0) + 256 });
       }
-      await fsyncDirectory(path.dirname(this.filePath));
+      if (before.size === 0n) await fsyncDirectory(directory);
+    } finally {
+      await handle.close();
     }
-
-    return { entries, repairedBytes };
   }
 
   async appendIf(
@@ -187,27 +328,7 @@ export class FileJournal<Payload> {
         payload: validatedPayload,
       });
 
-      const directory = path.dirname(this.filePath);
-      await mkdir(directory, { recursive: true, mode: 0o700 });
-      let existed = true;
-      try {
-        await lstat(this.filePath);
-      } catch (error) {
-        if (isNodeError(error, "ENOENT")) existed = false;
-        else throw error;
-      }
-      const flags = constants.O_APPEND |
-        constants.O_CREAT |
-        constants.O_WRONLY |
-        (constants.O_NOFOLLOW ?? 0);
-      const handle = await open(this.filePath, flags, 0o600);
-      try {
-        await handle.writeFile(`${JSON.stringify(entry)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      if (!existed) await fsyncDirectory(directory);
+      await this.writeEntries([entry]);
       return entry;
     });
   }
@@ -236,35 +357,15 @@ export class FileJournal<Payload> {
     try {
       const appended = await this.lockManager.withLock(this.lockKey(), async () => {
         await this.assertNotSymlink();
-        const { entries } = await this.readUnlocked(true);
+        const { count } = await this.readUnlocked(true, { limit: 0 });
         const created = jobs.map((job, index) => this.entrySchema.parse({
           schemaVersion: 1,
-          sequence: (entries.at(-1)?.sequence ?? 0) + index + 1,
+          sequence: count + index + 1,
           eventId: randomUUID(),
           recordedAt: new Date(this.now()).toISOString(),
           payload: job.payload,
         }));
-        const directory = path.dirname(this.filePath);
-        await mkdir(directory, { recursive: true, mode: 0o700 });
-        let existed = true;
-        try {
-          await lstat(this.filePath);
-        } catch (error) {
-          if (isNodeError(error, "ENOENT")) existed = false;
-          else throw error;
-        }
-        const flags = constants.O_APPEND |
-          constants.O_CREAT |
-          constants.O_WRONLY |
-          (constants.O_NOFOLLOW ?? 0);
-        const handle = await open(this.filePath, flags, 0o600);
-        try {
-          await handle.writeFile(created.map((entry) => JSON.stringify(entry)).join("\n") + "\n", "utf8");
-          await handle.sync();
-        } finally {
-          await handle.close();
-        }
-        if (!existed) await fsyncDirectory(directory);
+        await this.writeEntries(created);
         return created;
       });
       jobs.forEach((job, index) => job.resolve(appended[index]));
@@ -294,10 +395,46 @@ export class FileJournal<Payload> {
 
     return this.lockManager.withLock(this.lockKey(), async () => {
       await this.assertNotSymlink();
-      const { entries } = await this.readUnlocked(true);
-      return entries
-        .filter((entry) => entry.sequence > afterSequence)
-        .slice(0, limit);
+      const { entries } = await this.readUnlocked(true, { afterSequence, limit });
+      return entries;
+    });
+  }
+
+  async readLast() {
+    return this.lockManager.withLock(this.lockKey(), async () => {
+      await this.assertNotSymlink();
+      const { count } = await this.readUnlocked(true, { limit: 0 });
+      if (count === 0) return null;
+      return (await this.readUnlocked(true, { afterSequence: count - 1, limit: 1 })).entries[0];
+    });
+  }
+
+  /** Read a contiguous payload sequence that survives internal renumbering on compaction. */
+  async readContiguous(
+    afterSequence: number,
+    limit: number,
+  ) {
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 ||
+        !Number.isSafeInteger(limit) || limit < 1) {
+      throw new StorageError("STORAGE_JOURNAL_READ_INVALID", "Invalid contiguous journal read bounds.");
+    }
+    const sequenceOf = this.contiguousPayloadSequence;
+    if (!sequenceOf) {
+      throw new StorageError("STORAGE_JOURNAL_READ_INVALID", "Contiguous payload sequences must be configured on the journal.");
+    }
+    return this.lockManager.withLock(this.lockKey(), async () => {
+      await this.assertNotSymlink();
+      const first = (await this.readUnlocked(true, { limit: 1 })).entries[0];
+      if (!first) return [];
+      const firstSequence = sequenceOf(first.payload);
+      const internalAfter = Math.max(0, afterSequence - firstSequence + 1);
+      const { entries } = await this.readUnlocked(true, { afterSequence: internalAfter, limit });
+      for (const entry of entries) {
+        if (sequenceOf(entry.payload) !== firstSequence + entry.sequence - 1) {
+          throw new StorageCorruptionError(this.filePath, "non-contiguous payload sequence");
+        }
+      }
+      return entries;
     });
   }
 
@@ -327,6 +464,11 @@ export class FileJournal<Payload> {
         recordedAt: new Date(this.now()).toISOString(),
         payload,
       }));
+      let contiguousSequenceOffset: number | undefined;
+      for (const entry of compacted) {
+        contiguousSequenceOffset = this.validateContiguousSequence(entry, contiguousSequenceOffset);
+      }
+      this.forgetSnapshot();
       await atomicWriteFile(
         this.filePath,
         compacted.length === 0
@@ -341,10 +483,12 @@ export class FileJournal<Payload> {
   async verifyAndRepair() {
     return this.lockManager.withLock(this.lockKey(), async () => {
       await this.assertNotSymlink();
-      const result = await this.readUnlocked(true);
+      // Explicit verification always checks bytes, including previously indexed history.
+      this.forgetSnapshot();
+      const result = await this.readUnlocked(true, { limit: 0 });
       return {
-        count: result.entries.length,
-        lastSequence: result.entries.at(-1)?.sequence ?? 0,
+        count: result.count,
+        lastSequence: result.count,
         repairedBytes: result.repairedBytes,
       };
     });

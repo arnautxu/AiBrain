@@ -10,6 +10,7 @@ import {
   GitDiff,
   Globe,
   ListChecks,
+  Pause,
   Robot,
   SpinnerGap,
   TerminalWindow,
@@ -51,6 +52,7 @@ type TurnActivityProps = {
   compact?: boolean;
   showDiff?: boolean;
   readOnly?: boolean;
+  recoveryPaused?: boolean;
   onResolveApproval: (approval: ApprovalItem, decision: ApprovalDecision) => void;
   onOpenReview?: () => void;
   onOpenBrowser?: () => void;
@@ -132,7 +134,8 @@ function translatedRuntimeLabel(label: string) {
     .replace(/ completat$/u, " completado");
 }
 
-function ActivityIcon({ item }: { item: ActivityItem }) {
+function ActivityIcon({ item, recoveryPaused = false }: { item: ActivityItem; recoveryPaused?: boolean }) {
+  if (recoveryPaused && (item.status === "running" || item.status === "waiting")) return <Pause size={13} />;
   if (item.status === "running" || item.status === "waiting") {
     return <SpinnerGap size={13} className="motion-safe:animate-spin" />;
   }
@@ -225,6 +228,7 @@ export function TurnActivity({
   compact = false,
   showDiff = true,
   readOnly = false,
+  recoveryPaused = false,
   onResolveApproval,
   onOpenReview,
   onOpenBrowser,
@@ -232,7 +236,7 @@ export function TurnActivity({
   managedAppApprovalKeys = [],
 }: TurnActivityProps) {
   const t = useUiText();
-  const streaming = message.status === "streaming";
+  const streaming = message.status === "streaming" && !recoveryPaused;
   const [manualDisclosure, setManualDisclosure] = useState<{
     status: ChatMessage["status"];
     open: boolean;
@@ -265,7 +269,9 @@ export function TurnActivity({
     Boolean(message.diff) || Boolean(message.toolResults?.length);
   if (!hasDetails && !managedAppAction) return null;
   const duration = turnDurationMs(message);
-  const executionLabel = message.status === "streaming"
+  const executionLabel = recoveryPaused
+    ? t("Recuperación de la respuesta en pausa")
+    : message.status === "streaming"
     ? currentActivityLabel(visibleActivity, t)
     : duration !== null
       ? t("Ha trabajado durante {duration}", { duration: formatWorkDuration(duration) })
@@ -287,7 +293,7 @@ export function TurnActivity({
           streaming={streaming}
           label={executionLabel}
           complete={message.status === "complete"}
-          indicator={streaming
+          indicator={recoveryPaused ? <Pause size={14} /> : streaming
             ? <AgentStatusOrb kind={activeActivity?.kind ?? "system"} />
             : message.status === "stopped" || message.status === "error" ? <X size={14} /> : <Check size={14} />}
         >
@@ -298,7 +304,7 @@ export function TurnActivity({
                   ? <SpinnerGap size={12} className="motion-safe:animate-spin" />
                   : <ListChecks size={12} />}
                 label={step.step}
-                status={streaming && step.status === "in_progress" ? "active" : "complete"}
+                status={step.status === "in_progress" && message.status === "streaming" ? recoveryPaused ? "pending" : "active" : "complete"}
                 delay={Math.min(index * 0.035, 0.18)}
                 isLast={index === visibleStepCount - 1}
               />
@@ -324,10 +330,10 @@ export function TurnActivity({
                 return (
                   <div key={entry.key} role="listitem" data-timeline-key={entry.key}>
                     <ThinkingStep
-                      indicator={<ActivityIcon item={item} />}
+                      indicator={<ActivityIcon item={item} recoveryPaused={recoveryPaused} />}
                       label={presentation.title}
                       description={presentation.detail}
-                      status={item.status === "running" || item.status === "waiting" ? "active" : "complete"}
+                      status={item.status === "running" || item.status === "waiting" ? recoveryPaused ? "pending" : "active" : "complete"}
                       delay={Math.min(stepIndex * 0.035, 0.18)}
                       isLast={stepIndex === visibleStepCount - 1}
                     >

@@ -12,8 +12,13 @@ long document work; this is not a turn execution deadline. Reconnection backs
 off from one to eight seconds, with at most eight automatic retries and a
 90-second recovery window. Exhaustion pauses recovery and preserves the local
 request and saved response. The user can reconnect explicitly; a browser online
-event also resumes the same request. A transport/auth failure after uncertain
-admission cannot turn an accepted response into a fabricated failure.
+event also resumes the same request. Repeated streaming snapshots, source receipts,
+lifecycle statuses and keepalives do not renew this recovery budget: they prove
+transport activity, not resumed work. A sustained connection with live answer or
+tool progress can renew it. On pause the response text and work timeline stop
+showing loading animation, while the saved turn remains nonterminal and its
+original attachments and request identities remain intact. A transport/auth failure
+after uncertain admission cannot turn an accepted response into a fabricated failure.
 
 Soft server-component refreshes preserve the attached turn and current selection.
 Initialization runs once per mounted user identity; a full page reload still opens

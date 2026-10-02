@@ -5,12 +5,15 @@ import { stopOwnedWorkerProcess } from "./owned-process";
 import { createServer, type Server as HttpServer } from "node:http";
 import { createInterface, type Interface } from "node:readline";
 import path from "node:path";
+import { stat } from "node:fs/promises";
 import WebSocket, { WebSocketServer } from "ws";
 import type {
   AppServerEvent,
   AppServerRequest,
   AppServerTransport,
   JsonValue,
+  JsonRpcSuccess,
+  JsonRpcFailure,
   TransportHealth,
 } from "@/runtime/transport";
 import {
@@ -45,6 +48,7 @@ import {
 const MAX_FRAME_BYTES = 8 * 1024 * 1024;
 const MAX_STDIO_LINE_BYTES = 8 * 1024 * 1024;
 const DEFAULT_RETAINED_COMPLETED_REQUESTS = 4_096;
+const DEFAULT_RETAINED_OBSERVATION_BYTES = 4 * 1024 * 1024;
 const CLIENT_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const EGRESS_TOKEN_PATTERN = /^[A-Za-z0-9_-]{32,256}$/u;
@@ -218,14 +222,18 @@ class GatewayRequestLedger {
   private readonly journal: FileJournal<GatewayRequestRecord>;
 
   constructor(
-    filePath: string,
+    private readonly filePath: string,
     lockManager: ResourceLockManager,
     private readonly now: () => number,
     private readonly maxRetainedCompletedRequests: number,
+    private readonly maxRetainedObservationBytes: number,
   ) {
     if (!Number.isSafeInteger(maxRetainedCompletedRequests) ||
         maxRetainedCompletedRequests < 1 || maxRetainedCompletedRequests > 65_536) {
       throw new Error("Completed request retention must be between 1 and 65536.");
+    }
+    if (!Number.isSafeInteger(maxRetainedObservationBytes) || maxRetainedObservationBytes < 1) {
+      throw new Error("Observation byte retention must be positive.");
     }
     this.journal = new FileJournal({
       filePath,
@@ -278,8 +286,19 @@ class GatewayRequestLedger {
       occurredAt: new Date(this.now()).toISOString(),
     };
     await this.journal.append(completed);
+    await this.compact();
+    return completed;
+  }
+
+  async compact() {
+    let bytes = 0;
+    try { bytes = (await stat(this.filePath)).size; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
     await this.journal.compact((entries) => {
-      if (entries.length <= this.maxRetainedCompletedRequests * 2) {
+      const bytePressure = bytes > this.maxRetainedObservationBytes * 2;
+      if (entries.length <= this.maxRetainedCompletedRequests * 2 && !bytePressure) {
         return undefined;
       }
       const latest = new Map<string, GatewayRequestRecord>();
@@ -289,12 +308,29 @@ class GatewayRequestLedger {
       }
       const records = [...latest.values()];
       const uncertain = records.filter((record) => record.status === "accepted");
-      const completedRecords = records
-        .filter((record) => record.status === "completed")
-        .slice(-this.maxRetainedCompletedRequests);
-      return [...uncertain, ...completedRecords];
+      const completedRecords = records.filter((record) => record.status === "completed");
+      // Creation and effect receipts outlive reconnects/restarts. Never evict
+      // them to meet an observation budget: re-dispatch could duplicate work.
+      const protectedReceipt = (record: GatewayRequestRecord) =>
+        /^(?:thread-start|turn-start|server-response):/u.test(record.clientRequestId);
+      const countRetained = new Set(completedRecords.slice(-this.maxRetainedCompletedRequests));
+      let observationBytes = 0;
+      const retained = completedRecords.toReversed().filter((record) => {
+        if (protectedReceipt(record)) return true;
+        if (!countRetained.has(record)) return false;
+        // These purposes only observe or reattach existing threads; replaying
+        // a fresh observation cannot create a model turn. Unknown keys retain
+        // their existing count policy and are never guessed to be read-only.
+        const observation = /^(?:thread-resume|thread-resume-recover|thread-resume-retry):/u.test(record.clientRequestId);
+        if (!bytePressure || !observation) return true;
+        const size = Buffer.byteLength(record.responseJson ?? "", "utf8");
+        if (observationBytes + size > this.maxRetainedObservationBytes) return false;
+        observationBytes += size;
+        return true;
+      }).reverse();
+      const result = [...uncertain, ...retained];
+      return result.length < entries.length ? result : undefined;
     });
-    return completed;
   }
 }
 
@@ -305,6 +341,7 @@ export type PrivateWorkerGatewayOptions = {
   configOverrides?: readonly string[];
   now?: () => number;
   maxRetainedCompletedRequests?: number;
+  maxRetainedObservationBytes?: number;
   maxRetainedDeliveredEvents?: number;
 };
 
@@ -374,6 +411,7 @@ export class PrivateWorkerGateway {
       this.locks,
       this.now,
       options.maxRetainedCompletedRequests ?? DEFAULT_RETAINED_COMPLETED_REQUESTS,
+      options.maxRetainedObservationBytes ?? DEFAULT_RETAINED_OBSERVATION_BYTES,
     );
     // Injected factories retain direct-child semantics: never assume that an
     // arbitrary child PID is a process group owned by this gateway.
@@ -410,6 +448,7 @@ export class PrivateWorkerGateway {
     this.stopping = false;
     try {
       await this.events.verifyAndRepair();
+      await this.requests.compact();
       if (this.retired) throw new Error("Worker gateway startup was cancelled.");
       this.child = this.processFactory(this.context);
       this.lines = createInterface({ input: this.child.stdout });
@@ -500,6 +539,23 @@ export class PrivateWorkerGateway {
       state: this.state,
       ...(this.lastError ? { detail: this.lastError } : {}),
     };
+  }
+
+  /** Read an exact completed receipt in this worker's private ledger without sending an RPC. */
+  async recoverResponse(request: AppServerRequest): Promise<JsonRpcSuccess | JsonRpcFailure | null> {
+    validateAppServerRequest(request);
+    if (request.kind !== "rpc-request") throw new Error("Only RPC requests have recoverable responses.");
+    const record = await this.requests.latest(request.clientRequestId);
+    if (!record) return null;
+    if (record.canonicalHash !== sha256(JSON.stringify(request))) {
+      throw new Error("Recovery request does not match its durable receipt.");
+    }
+    if (record.status !== "completed" || !record.responseJson) return null;
+    const message = parseAppServerOutput(JSON.parse(record.responseJson));
+    if (message.kind !== "rpc-response" || message.rpc.id !== request.rpc.id) {
+      throw new Error("Recovery response does not match its original request.");
+    }
+    return message.rpc;
   }
 
   private async writePrivateRpc(rpc: unknown) {
@@ -942,16 +998,18 @@ export class NodeWebSocketFactory implements WebSocketFactory {
 
 class DeferredAppServerTransport implements AppServerTransport {
   private inner: AppServerTransport | null = null;
+  private recover: AppServerTransport["recoverResponse"];
   private closed = false;
   private resolveInner!: (transport: AppServerTransport | null) => void;
   private readonly innerReady = new Promise<AppServerTransport | null>((resolve) => {
     this.resolveInner = resolve;
   });
 
-  configure(transport: AppServerTransport) {
+  configure(transport: AppServerTransport, recover?: AppServerTransport["recoverResponse"]) {
     if (this.closed) throw new Error("Worker transport is closed.");
     if (this.inner) throw new Error("Worker transport was already configured.");
     this.inner = transport;
+    this.recover = recover;
     this.resolveInner(transport);
   }
 
@@ -963,6 +1021,10 @@ class DeferredAppServerTransport implements AppServerTransport {
 
   async connect() { return (await this.ready()).connect(); }
   async send(message: AppServerRequest) { return (await this.ready()).send(message); }
+  async recoverResponse(request: AppServerRequest) {
+    await this.ready();
+    return this.recover ? this.recover(request) : null;
+  }
   async *events() { for await (const event of (await this.ready()).events()) yield event; }
   async acknowledge(event: AppServerEvent) {
     return (await this.ready()).acknowledge?.(event);
@@ -1075,7 +1137,7 @@ class LocalGatewayManagedRuntime implements ManagedWorkerRuntime {
         },
       },
       journal,
-    }));
+    }), request => gateway.recoverResponse(request));
   }
 
   async health() {

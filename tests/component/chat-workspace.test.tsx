@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "../render-span
 import type { ComponentProps } from "react";
 import { useState } from "react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-vi.mock("thinking-orbs", () => ({ ThinkingOrb: () => null }));
+vi.mock("thinking-orbs", () => ({ ThinkingOrb: () => <span data-testid="thinking-orb" /> }));
 import { ChatWorkspace } from "@/components/chat-workspace";
 import { baseBrainManifest, type BrainPreferences } from "@/config/brain";
 import type { ChatMessage } from "@/lib/chat-contract";
@@ -727,6 +727,45 @@ describe("chat workspace simplificado", () => {
 
     expect(screen.getByText("Texto parcial").closest("[data-state='streaming']")).toHaveAttribute("aria-busy", "true");
     expect(scrollIntoView).not.toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
+  });
+
+  it.each(["", "Resultado parcial"])("pauses visible loading without failing the saved response (content=%s)", (content) => {
+    const request: ChatMessage = { ...assistantMessage(), id: "request", role: "user", content: "Revisa estas facturas", approvals: [],
+      attachments: Array.from({ length: 13 }, (_, i) => ({ id: `invoice-${i}`, uploadId: `invoice-${i}`, name: `Factura ${i + 1}.pdf`, mimeType: "application/pdf", size: 100 })) };
+    const pending: ChatMessage = { ...assistantMessage(), status: "streaming", content, approvals: [] };
+    const thread: WorkbenchThread = { id: "thread-recovery", projectId: project.id, title: "Facturas", status: "active", pinned: false, createdAt: request.createdAt, updatedAt: request.createdAt, messages: [request, pending] };
+    const onRetry = vi.fn();
+    const onSend = vi.fn();
+    const { container, updateProps } = renderWorkspace(thread, project, { sending: true, onSend });
+    if (!content) expect(screen.getByTestId("thinking-orb")).toBeInTheDocument();
+    act(() => updateProps({ streamRecovery: { attempt: null, paused: true, onRetry } }));
+    expect(screen.queryByTestId("thinking-orb")).not.toBeInTheDocument();
+    expect(container.querySelector("[aria-busy='true']")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("El trabajo y los resultados guardados se conservan");
+    if (content) expect(screen.getByText(content).closest("[data-state='paused']")).toHaveAttribute("aria-busy", "false");
+    expect(screen.queryByText("No se ha podido completar esta respuesta.")).not.toBeInTheDocument();
+    for (const attachment of request.attachments) expect(screen.getByText(attachment.name)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reconectar respuesta" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(thread.messages[1].status).toBe("streaming");
+    act(() => updateProps({ streamRecovery: { attempt: 1, paused: false, onRetry } }));
+    if (!content) expect(screen.getByTestId("thinking-orb")).toBeInTheDocument();
+  });
+
+  it("pauses a running work timeline without completing its saved activities", () => {
+    const pending: ChatMessage = { ...assistantMessage(), status: "streaming", content: "", approvals: [],
+      activity: [{ id: "inspect-invoice", kind: "command", label: "Revisando facturas", status: "running" }],
+      plan: [{ step: "Revisar los importes", status: "in_progress" }] };
+    const thread: WorkbenchThread = { id: "thread-paused-work", projectId: project.id, title: "Facturas", status: "active", pinned: false, createdAt: pending.createdAt, updatedAt: pending.createdAt, messages: [pending] };
+    const { container } = renderWorkspace(thread, project, { sending: true, streamRecovery: { attempt: null, paused: true, onRetry: vi.fn() } });
+    expect(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" })).toHaveTextContent("Recuperación de la respuesta en pausa");
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar el proceso de trabajo" }));
+    expect(container.querySelector(".motion-safe\\:animate-spin")).not.toBeInTheDocument();
+    expect(container.querySelector(".activity-shimmer")).not.toBeInTheDocument();
+    expect(pending.activity[0].status).toBe("running");
+    expect(pending.plan[0].status).toBe("in_progress");
+    expect(pending.status).toBe("streaming");
   });
 
   it("shows the latest honest lifecycle status instead of a generic thinking placeholder", () => {

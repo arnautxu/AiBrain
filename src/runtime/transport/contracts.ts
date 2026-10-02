@@ -88,6 +88,8 @@ export type TransportHealth = {
 export interface AppServerTransport {
   connect(): Promise<void>;
   send(message: AppServerRequest): Promise<void>;
+  /** Private durable lookup only: never dispatch or replay an uncertain request. */
+  recoverResponse?(request: AppServerRequest): Promise<JsonRpcSuccess | JsonRpcFailure | null>;
   events(): AsyncIterable<AppServerEvent>;
   /** Mark an event processed by the scoped router, after durable projection. */
   acknowledge?(event: AppServerEvent): Promise<void>;

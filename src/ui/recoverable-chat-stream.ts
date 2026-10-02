@@ -160,7 +160,7 @@ export async function consumeRecoverableChatStream(options: {
     };
     const connectionStartedAt = scheduler.now();
     let lastActivityAt = connectionStartedAt;
-    let sawEvent = false;
+    let sawProgress = false;
     let sawTerminal = false;
     let sawSnapshot = false;
     try {
@@ -190,7 +190,12 @@ export async function consumeRecoverableChatStream(options: {
           update({ idleObservedAtMs: elapsed() });
         }, IDLE_OBSERVATION_MS);
         await consumeChatEventStream(response, (event) => {
-          sawEvent = true;
+          // A saved snapshot, repeated source receipt or lifecycle status does
+          // not prove the worker resumed. In particular, keepalives followed by
+          // a recovery-pending EOF must not renew the retry budget forever.
+          if (((event.type === "delta" || event.type === "content" || event.type === "diff") && event.value.length > 0) ||
+              event.type === "toolResult" || event.type === "artifact" || event.type === "approval" ||
+              (event.type === "activity" && event.item.kind !== "system")) sawProgress = true;
           update({ lastEventAtMs: elapsed() });
           if (event.type === "snapshot" && recoveryAttempt > 0) {
             sawSnapshot = true;
@@ -224,7 +229,7 @@ export async function consumeRecoverableChatStream(options: {
       options.signal.removeEventListener("abort", abortAttempt);
     }
 
-    if (sawEvent && !attemptController.signal.aborted && lastActivityAt - connectionStartedAt >= 15_000) { recoveryAttempt = 0; recoveryWindowStarted = null; }
+    if (sawProgress && !attemptController.signal.aborted && lastActivityAt - connectionStartedAt >= 15_000) { recoveryAttempt = 0; recoveryWindowStarted = null; }
     recoveryWindowStarted ??= scheduler.now();
     recovered = false;
     recoveryAttempt += 1;

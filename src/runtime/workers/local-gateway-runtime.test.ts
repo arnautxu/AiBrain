@@ -193,7 +193,7 @@ describe("private per-user worker gateway", () => {
     await Promise.all(roots.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
   });
 
-  function gateway(options: { maxRetainedCompletedRequests?: number; sharedAuth?: import("./shared-auth-broker").SharedAuthProvider } = {}) {
+  function gateway(options: { maxRetainedCompletedRequests?: number; maxRetainedObservationBytes?: number; sharedAuth?: import("./shared-auth-broker").SharedAuthProvider } = {}) {
     return new PrivateWorkerGateway({
       context,
       ...options,
@@ -627,6 +627,68 @@ describe("private per-user worker gateway", () => {
       await client.close();
       await worker.stop();
     }
+  });
+
+  it("reads an exact late response after restart without dispatching or accepting a new request", async () => {
+    const original = initializeRequest("thread-start:late-original");
+    const worker = gateway();
+    await worker.start();
+    const client = transport(worker);
+    try {
+      await client.connect();
+      await client.send(original);
+      await nextEvent(client);
+    } finally { await client.close(); await worker.stop(); }
+    const restarted = gateway();
+    await restarted.start();
+    try {
+      const ledgerPath = path.join(context.transportAudit, "gateway-requests.jsonl");
+      const before = await readFile(ledgerPath, "utf8");
+      await expect(restarted.recoverResponse(original)).resolves.toEqual({
+        id: original.rpc.id, result: { acceptedMethod: "initialize" },
+      });
+      await expect(restarted.recoverResponse(initializeRequest("thread-start:never-sent"))).resolves.toBeNull();
+      const changed = initializeRequest("thread-start:late-original");
+      changed.rpc.params.clientInfo.name = "changed";
+      await expect(restarted.recoverResponse(changed)).rejects.toThrow(/does not match/u);
+      expect(await readFile(ledgerPath, "utf8")).toBe(before);
+    } finally { await restarted.stop(); }
+  });
+
+  it("compacts oversized observations below the count threshold but preserves creation and uncertain receipts", async () => {
+    const entries = [
+      ["thread-start:recoverable", "completed"],
+      ["turn-start:recoverable", "completed"],
+      ["thread-resume:uncertain", "accepted"],
+      ...Array.from({ length: 6 }, (_, i) => [`thread-resume:observed-${i}`, "completed"]),
+    ];
+    const ledgerPath = path.join(context.transportAudit, "gateway-requests.jsonl");
+    const records = entries.map(([id, status], index) => {
+      const request = initializeRequest(id);
+      return {
+        schemaVersion: 1, sequence: index + 1,
+        eventId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        recordedAt: "2026-10-02T10:30:00.000Z",
+        payload: { schemaVersion: 1, clientRequestId: id,
+          canonicalHash: createHash("sha256").update(JSON.stringify(request)).digest("hex"),
+          status, responseJson: status === "accepted" ? null : JSON.stringify({ id, result: { value: "x".repeat(2048) } }),
+          occurredAt: "2026-10-02T10:30:00.000Z" },
+      };
+    });
+    await mkdir(context.transportAudit, { recursive: true });
+    await writeFile(ledgerPath, records.map(record => JSON.stringify(record)).join("\n") + "\n");
+    const worker = gateway({ maxRetainedObservationBytes: 4096 });
+    await worker.start();
+    try {
+      const retained = (await readFile(ledgerPath, "utf8")).trim().split("\n").map(line => JSON.parse(line).payload);
+      expect(retained.map(record => record.clientRequestId)).toEqual(expect.arrayContaining([
+        "thread-start:recoverable", "turn-start:recoverable", "thread-resume:uncertain", "thread-resume:observed-5",
+      ]));
+      expect(retained).toHaveLength(4);
+      await expect(worker.recoverResponse(initializeRequest("thread-start:recoverable"))).resolves.toHaveProperty("result");
+      await expect(worker.recoverResponse(initializeRequest("thread-resume:uncertain"))).resolves.toBeNull();
+      await expect(worker.recoverResponse(initializeRequest("thread-resume:observed-0"))).resolves.toBeNull();
+    } finally { await worker.stop(); }
   });
 
   it("confirms a server response only after durable progress in the same turn", async () => {
