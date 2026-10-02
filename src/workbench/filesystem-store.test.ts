@@ -60,6 +60,20 @@ afterEach(async () => {
 });
 
 describe("FileWorkbenchStore", () => {
+  it("reports real request metadata while usage is absent, excluding empty threads and other users", async () => {
+    const { store } = await fixture();
+    const project = await store.createProject(USER_A, "Activity");
+    const thread = await store.createThread(USER_A, project.id, "Request");
+    await store.createThread(USER_A, project.id, "Empty renamed thread");
+    const user = message("user", "complete");
+    const assistant = message("assistant", "streaming");
+    await store.beginThreadTurn(USER_A, thread.id, user, assistant);
+    expect(await store.activityMetadata(USER_A)).toEqual({ requestTimes: [user.createdAt], runningTurns: 1 });
+    expect(await store.activityMetadata(USER_B)).toEqual({ requestTimes: [], runningTurns: 0 });
+    await store.finishThreadTurn(USER_A, thread.id, { ...assistant, status: "complete" }, null);
+    expect(await store.activityMetadata(USER_A)).toEqual({ requestTimes: [user.createdAt], runningTurns: 0 });
+  });
+
   it("persists validated legacy Excel attachments across restart with user isolation", async () => {
     const { usersRoot, store } = await fixture();
     const project = await store.createProject(USER_A, "Legacy workbook");

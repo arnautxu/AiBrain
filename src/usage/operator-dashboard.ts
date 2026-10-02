@@ -1,5 +1,6 @@
 import "server-only";
 
+import { FileWorkbenchStore } from "@/workbench/filesystem-store";
 import { readdir } from "node:fs/promises";
 import { FileLocalUserStore, type LocalUser } from "@/auth/local-user-store";
 import { loadInstallationConfig } from "@/config/installation";
@@ -49,7 +50,11 @@ export async function operatorUsageDashboard(now = Date.now()) {
   const end = Date.parse(window.resetAt);
   const unlimited = usageLimitIsUnlimited(installation.usageLimits, now);
 
-  const members = users.map((user) => {
+  const workbench = FileWorkbenchStore.fromInstallation(installation);
+  const members = (await Promise.all(users.map(async (user) => {
+    const activity = await workbench.activityMetadata(user.userId);
+    const requestTimes = activity.requestTimes.filter(time => Date.parse(time) >= start && Date.parse(time) < end);
+    const latestRequest = requestTimes.reduce<string | null>((latest, time) => !latest || Date.parse(time) > Date.parse(latest) ? time : latest, null);
     const memberTurns = turns.filter((turn) => {
       const completedAt = Date.parse(turn.completedAt);
       return turn.userId === user.userId && completedAt >= start && completedAt < end;
@@ -68,17 +73,20 @@ export async function operatorUsageDashboard(now = Date.now()) {
       displayName: user.displayName,
       email: user.email,
       enabled: user.enabled,
-      turns: aggregate.turns,
+      turns: requestTimes.length,
+      recordedUsageTurns: aggregate.turns,
+      runningTurns: activity.runningTurns,
       completedTurns: aggregate.completedTurns,
-      activeDays: aggregate.activeDays,
+      activeDays: new Set(requestTimes.map(operatorDashboardLocalDay)).size,
       totalTokens: aggregate.tokens.totalTokens,
       inputTokens: aggregate.tokens.inputTokens,
       cachedInputTokens: aggregate.tokens.cachedInputTokens,
       outputTokens: aggregate.tokens.outputTokens,
-      lastActiveAt: memberTurns.at(-1)?.completedAt ?? null,
+      lastActiveAt: latestRequest,
+      lastUsageAt: memberTurns.reduce<string | null>((latest, turn) => !latest || Date.parse(turn.completedAt) > Date.parse(latest) ? turn.completedAt : latest, null),
       daily: [...daily.values()].sort((left, right) => left.date.localeCompare(right.date)),
     };
-  }).sort((left, right) => right.totalTokens - left.totalTokens || left.displayName.localeCompare(right.displayName));
+  }))).sort((left, right) => right.totalTokens - left.totalTokens || left.displayName.localeCompare(right.displayName));
 
   return {
     schemaVersion: 1 as const,
