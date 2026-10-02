@@ -189,7 +189,7 @@ describe("worker Codex turn", () => {
       router: { registerTurn(_thread: string, _local: string, value: typeof handlers) {
         handlers = value;
         if (attempt > 1) setTimeout(() => { void handlers.onNotification({ method: "turn/completed",
-          params: { threadId: "fictional-existing-thread", turn: { id: "fictional-remote-turn", status: "completed", items: [], error: null } },
+          params: { threadId: "fictional-existing-thread", turn: { id: "fictional-remote-turn", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null } },
         }, envelope()); }, 10);
         return { bindRuntimeTurn() {}, dispose() {} };
       } },
@@ -295,7 +295,7 @@ describe("worker Codex turn", () => {
             } }, envelope()));
           }
           await handlers.onNotification({ method: "turn/completed", params: { threadId: "quota-thread",
-            turn: { id: "quota-turn", status: "completed", items: [], error: null } } }, envelope());
+            turn: { id: "quota-turn", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null } } }, envelope());
         })(); });
         return result;
       },
@@ -446,7 +446,7 @@ describe("worker Codex turn", () => {
     mocked.cancelTurn = null;
   });
 
-  it.each(["terminal-snapshot", "lost-events", "still-running", "foreign-turn", "racing-terminal"])(
+  it.each(["terminal-snapshot", "empty-terminal", "lost-events", "still-running", "foreign-turn", "racing-terminal"])(
     "persists the real final answer without another model submission (%s)", async (mode) => {
       const root = await mkdtemp(path.join(tmpdir(), "aibrain-completion-loss-"));
       const originalTimeout = globalThis.setTimeout;
@@ -491,9 +491,10 @@ describe("worker Codex turn", () => {
               if (preliminary) expect(events.some((event) => event.type === "done")).toBe(false);
             } else throw new Error(`Unexpected request ${method}`);
             await beforeResolve?.(result as never, envelope() as never);
-            if (method === "turn/start" && mode === "terminal-snapshot") queueMicrotask(() => {
+            if (method === "turn/start" && (mode === "terminal-snapshot" || mode === "empty-terminal")) queueMicrotask(() => {
               void handlers.onNotification({ method: "turn/completed", params: {
-                threadId: "completion-thread", turn: { id: "completion-turn", status: "completed", error: null, items },
+                threadId: "completion-thread", turn: { id: "completion-turn", status: "completed", error: null,
+                  items: mode === "empty-terminal" ? [] : items },
               } }, envelope());
             });
             return result;
@@ -562,7 +563,7 @@ describe("worker Codex turn", () => {
           const result = { turn: { id: "recovered-turn" } };
           await beforeResolve?.(result as never, envelope() as never);
           queueMicrotask(() => { void handlers.onNotification({ method: "turn/completed", params: {
-            threadId: "recovered-thread", turn: { id: "recovered-turn", status: "completed", items: [], error: null },
+            threadId: "recovered-thread", turn: { id: "recovered-turn", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null },
           } }, envelope()); });
           return result;
         },
@@ -1541,7 +1542,7 @@ describe("worker Codex turn", () => {
               method: "turn/completed",
               params: {
                 threadId: "runtime-thread-timeout",
-                turn: { id: "runtime-turn-timeout", status: "completed", items: [], error: null },
+                turn: { id: "runtime-turn-timeout", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null },
               },
             }, {
               eventId: "timeout-turn-completed",
@@ -1866,7 +1867,7 @@ describe("worker Codex turn", () => {
               await new Promise((resolve) => setTimeout(resolve, 2300));
               await handlers?.onNotification({
                 method: "turn/completed",
-                params: { threadId: "runtime-thread-watchdog", turn: { id: "runtime-turn-watchdog", status: "completed", items: [], error: null } },
+                params: { threadId: "runtime-thread-watchdog", turn: { id: "runtime-turn-watchdog", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null } },
               }, { eventId: "render-review-turn-completed", sequence: 5, occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
             })();
           });
@@ -2103,7 +2104,7 @@ describe("worker Codex turn", () => {
             method: "turn/completed",
             params: {
               threadId: "runtime-thread-1",
-              turn: { id: "runtime-turn-warm", status: "completed", items: [], error: null },
+              turn: { id: "runtime-turn-warm", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null },
             },
           });
         });
@@ -2351,7 +2352,7 @@ describe("worker Codex turn", () => {
                 method: "turn/completed",
                 params: {
                   threadId: "runtime-thread-deny",
-                  turn: { id: "runtime-turn-deny", status: "completed", items: [], error: null },
+                  turn: { id: "runtime-turn-deny", status: "completed", items: [{ type: "agentMessage", id: "fixture-final", phase: "final_answer", text: "Fixture completed answer." }], error: null },
                 },
               });
             })();

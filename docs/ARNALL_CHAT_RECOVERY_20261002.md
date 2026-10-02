@@ -57,6 +57,9 @@ Observations never overlap, stop on terminal state or runner abort, and retry tr
 failures without treating an unavailable observation as model failure. Both the
 answer and evidence are projected before publishing completion. Terminal event
 snapshots also restore final text if incremental text events were missed.
+A completed notification with no answer or delivered artifact triggers a fresh
+read outside the notification handler before publishing completion. If that
+read cannot confirm the exact completed turn, recovery remains pending.
 A final-answer item on an in-progress turn is no longer sufficient to claim
 completion. Unconfirmed watchdog interruption keeps the submission recoverable
 and does not write a false terminal usage record.
@@ -65,6 +68,7 @@ This covers a running server owner losing text and terminal events. Application
 restart still uses the existing original-request reattachment path; it does not
 authorize reconstructing a different request or creating a replacement turn.
 Regression cases cover lost text and terminal events, terminal-only text,
+empty terminal notifications requiring persisted-answer hydration,
 in-progress and foreign-turn observations, non-overlapping retries, and one
 model submission with one published completion. Production acceptance remains
 separate from these source tests.
