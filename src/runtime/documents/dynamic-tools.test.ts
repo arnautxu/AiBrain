@@ -619,3 +619,17 @@ describe("explicit document delivery", () => {
     expect(await readdir(ctx.installation.paths.dataRoot)).toEqual([]);
   });
 });
+
+it("confirms a remembered file only after the persistence callback succeeds", async () => {
+  const ctx = await context(USER_A);
+  const call = { threadId: ctx.runtimeThreadId, turnId: ctx.runtimeTurnId, callId: "remember-1", namespace: AIBRAIN_DOCUMENT_TOOL_NAMESPACE,
+    tool: "remember", arguments: { fileName: "reference.xlsx" } };
+  const persist = vi.fn().mockResolvedValue({ status: "saved", name: "reference.xlsx", sha256: "a".repeat(64) });
+  const result = await handleLocalDocumentDynamicToolCall(call, { ...ctx, rememberProjectFile: persist });
+  expect(result.response.success).toBe(true); expect(persist).toHaveBeenCalledWith("reference.xlsx");
+  persist.mockRejectedValue(new Error("Original unavailable"));
+  expect((await handleLocalDocumentDynamicToolCall(call, { ...ctx, rememberProjectFile: persist })).response.success).toBe(false);
+  persist.mockClear();
+  expect((await handleLocalDocumentDynamicToolCall({ ...call, turnId: "foreign-turn" }, { ...ctx, rememberProjectFile: persist })).response.success).toBe(false);
+  expect(persist).not.toHaveBeenCalled();
+});

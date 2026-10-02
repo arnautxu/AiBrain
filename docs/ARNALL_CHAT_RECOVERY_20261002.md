@@ -117,3 +117,20 @@ Regression coverage includes complete content beyond 32 KB, separate conversatio
 restart, corruption, owner/project isolation, denied document reads, shared viewers,
 CSRF, and server-confirmed uploads in the project panel. CI, publication,
 deployment and authenticated acceptance remain separate gates.
+
+
+### Explicit chat retention
+
+`aibrain_documents.remember` retains a validated complete original only after an
+explicit file-retention request in the current user message. It accepts an exact
+filename, never a model-selected path, owner or project. The server binds the
+operation to the current actor's owned project and current thread, resolves a
+current upload or the latest matching attachment in that thread, verifies its
+hash, then atomically attaches the immutable reference. Shared-project writes
+through this tool are rejected; use the permission-checked project Sources panel.
+A saved receipt is required before the assistant confirms retention. A memory
+note or filename is not a receipt. A conflicting ready filename is not replaced.
+The document toolset revision changes so existing native conversations refresh
+their catalog through the established persisted-history migration path.
+Regression tests cover explicit requests, negative requests, original integrity,
+idempotence, cross-conversation context, tool failures and identity binding.
