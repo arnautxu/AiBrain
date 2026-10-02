@@ -96,6 +96,7 @@
     "POST /api/operations/maintenance": "JsonObject",
     "POST /api/operations/users": "JsonObject",
     "POST /api/projects": "JsonObject",
+    "POST /api/projects/{projectId}/sources": "ProjectSourceUploadResponse",
     "POST /api/projects/{projectId}/threads": "JsonObject",
     "POST /api/runtime/approvals": "JsonObject",
     "POST /api/runtime/browser": "BrowserStatus",

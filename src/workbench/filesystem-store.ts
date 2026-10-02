@@ -966,8 +966,8 @@ export class FileWorkbenchStore {
       workspaceKey: project.workspaceKey,
       projectInstructions: project.instructions,
       projectMemory: project.memory.notes,
-      projectSources: project.sources.map(({ kind, name, url, excerpt, status }) => ({
-        kind, name, url, excerpt, status,
+      projectSources: project.sources.map(({ id, kind, name, url, excerpt, status }) => ({
+        id, kind, name, url, excerpt, status,
       })),
       runtimeThreadToken: null,
       branchHistory: null,
@@ -976,7 +976,7 @@ export class FileWorkbenchStore {
 
   async getProjectRuntimeContext(userId: string, projectId: string) {
     assertFilesystemWorkbenchId(projectId);
-    return this.runtimeContext(await this.read(userId), projectId);
+    return { ...this.runtimeContext(await this.read(userId), projectId), projectSourceOwnerId: userId };
   }
 
   async getThreadRuntimeContext(userId: string, threadId: string): Promise<ThreadRuntimeContext> {
@@ -988,6 +988,7 @@ export class FileWorkbenchStore {
     }
     return {
       ...this.runtimeContext(state, thread.projectId),
+      projectSourceOwnerId: userId,
       runtimeThreadToken: thread.runtimeThreadToken,
       branchHistory: branchHistory(thread),
     };

@@ -85,3 +85,35 @@ release checks and production build before publishing.
 Backend CI, GHCR publication, deployment identity, health/readiness and
 actual authenticated conversation completion are separate gates. This source
 note alone establishes no publication or production acceptance.
+
+## Project reference originals
+
+The invoice-reference incident is distinct from response delivery. The old project
+panel retained binary filenames and sizes with `pending-index`, but discarded
+original bytes; no indexing worker consumed those records. It is not evidence
+of an undersized server.
+
+`POST /api/projects/{projectId}/sources` now checks same-origin, local installation
+identity and server-resolved project edit access before streaming and validating
+an original (XLSX, PDF, DOCX, PPTX or text, at most 20 MB). It retains immutable
+bytes and a hash receipt in `dataRoot/server/project-sources/{ownerUserId}` using
+the existing private staging store. The project ID namespaces the storage and
+the source ID identifies the immutable file. Saving the panel attaches the
+returned reference to that project. No background index is claimed.
+
+For every new turn, server-issued project context provides the owner and source
+IDs. Document-read permission is checked; only that project's saved, ready
+references are resolved. Verified complete files join the turn's durable private
+input manifest, including existing conversations. Original copies remain private;
+working copies follow the existing submission/restart/cleanup lifecycle. The
+combined attachment/reference byte budget remains 200 MiB. A missing ready file
+fails preparation rather than silently omitting a reference. Old filename-only
+records display that the original must be reattached, and model context exposes
+that limitation. Matching originals can be recovered from the same authorized
+user's previous uploads after verifying identity, exact name, size and hash;
+back up the project before a scoped repair and never substitute partial previews.
+
+Regression coverage includes complete content beyond 32 KB, separate conversations,
+restart, corruption, owner/project isolation, denied document reads, shared viewers,
+CSRF, and server-confirmed uploads in the project panel. CI, publication,
+deployment and authenticated acceptance remain separate gates.

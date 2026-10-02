@@ -358,7 +358,8 @@ export async function POST(request: Request) {
     workspaceKey: string;
     projectInstructions: string;
     projectMemory: string;
-    projectSources: { kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
+    projectSourceOwnerId?: string;
+    projectSources: { id?: string; kind: "file" | "link" | "note"; name: string; url: string | null; excerpt: string | null; status: "ready" | "pending-index" }[];
     visibleProjects: readonly { id: string; name: string }[];
     runtimeThreadToken: string | null;
     branchHistory: string | null;

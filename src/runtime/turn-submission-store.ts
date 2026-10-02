@@ -233,9 +233,12 @@ export class DurableTurnSubmission {
     const text = this.data.inputs?.codexInputs[0];
     if (!text || text.type !== "text") throw new Error("Missing admitted workbook manifest.");
     const files: unknown = JSON.parse(text.text.split("\n").at(-1)!);
-    if (!Array.isArray(files) || files.length === 0 || files.length > MAX_FILES_PER_MESSAGE) throw new Error("Invalid workbook manifest.");
+    if (!Array.isArray(files) || files.length === 0 || files.length > MAX_FILES_PER_MESSAGE + 100) throw new Error("Invalid workbook manifest.");
     for (const [index, file] of files.entries()) {
-      const name = `input-${index + 1}.xlsx`;
+      const referenceName = typeof file?.relativePath === "string" ? path.posix.basename(file.relativePath) : "";
+      const reference = file?.role === "project-reference";
+      const name = reference ? referenceName : `input-${index + 1}.xlsx`;
+      if (reference && !new RegExp(`^reference-${index + 1}\\.(xlsx|pdf|docx|pptx|txt)$`).test(name)) throw new Error("Invalid admitted reference path.");
       if (!file || file.relativePath !== path.posix.join(path.basename(this.data.inputDirectory), name)) {
         throw new Error("Invalid admitted workbook path.");
       }

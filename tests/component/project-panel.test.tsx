@@ -63,7 +63,7 @@ function PersistingEditorPanelHarness() {
   );
 }
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe("ProjectPanel", () => {
   it("focuses the modal, closes on Escape and restores the opener", async () => {
@@ -187,4 +187,23 @@ describe("ProjectPanel", () => {
     await waitFor(() => expect(screen.getByText("Proyecto actualizado.")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "Personas" })).toHaveAttribute("aria-current", "page");
   });
+});
+
+it("uploads original bytes and replaces a legacy pending reference only after server success", async () => {
+  const file = new File(["original workbook bytes"], "CONTROL DE COSTOS.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const old = { id: "old", kind: "file" as const, name: file.name, url: null, mimeType: file.type, size: file.size, excerpt: null, status: "pending-index" as const, createdAt: project.createdAt };
+  const source = { ...old, id: "saved", status: "ready" as const };
+  const fetchMock = vi.fn(async (_url: string, options: RequestInit) => {
+    expect((options.body as FormData).get("file")).toBe(file);
+    return { ok: true, json: async () => ({ source }) };
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const save = vi.fn(async () => true);
+  render(<ProjectPanel project={{ ...project, sources: [old] }} open onClose={vi.fn()} onSave={save} />);
+  fireEvent.click(screen.getByRole("button", { name: "Fuentes" }));
+  expect(screen.getByText(/Falta el archivo original/)).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Archivos de referencia"), { target: { files: [file] } });
+  await waitFor(() => expect(screen.getByText("Disponible para las conversaciones")).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Guardar cambios" }));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ sources: [source] })));
 });

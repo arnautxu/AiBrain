@@ -37,15 +37,6 @@ type ProjectPanelProps = {
 
 type Tab = "context" | "sources" | "people";
 
-function readTextFile(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-    reader.onerror = () => reject(reader.error ?? new Error("read"));
-    reader.readAsText(file);
-  });
-}
-
 function sourceIcon(kind: ProjectSource["kind"]) {
   return kind === "file" ? <FileText size={15} /> : kind === "link" ? <LinkSimple size={15} /> : <Brain size={15} />;
 }
@@ -159,23 +150,34 @@ function ProjectPanelContent({
   };
 
   const addFiles = async (files: FileList | null) => {
-    if (!files) return;
+    if (!files || !project || !canEdit || busy) return;
+    const selected = Array.from(files);
+    const retained = sources.filter(source => !(source.kind === "file" && source.status === "pending-index" && selected.some(file => file.name === source.name)));
+    if (retained.length + selected.length > 100) { setNotice(t("El proyecto admite hasta 100 referencias.")); return; }
+    setBusy(true);
+    setNotice(t("Subiendo archivos…"));
     const additions: ProjectSource[] = [];
-    for (const file of Array.from(files).slice(0, 10)) {
-      if (file.size > 20_000_000) { setNotice(t("{p0} supera el límite de 20 MB.", { p0: file.name })); continue; }
-      const textual = file.type.startsWith("text/") || /\.(md|txt|csv|json|xml|html?)$/i.test(file.name);
-      const excerpt = textual ? (await readTextFile(file).catch(() => "")).slice(0, 32_000) : null;
-      additions.push({
-        id: crypto.randomUUID(), kind: "file", name: file.name, url: null,
-        mimeType: file.type || "application/octet-stream", size: file.size, excerpt,
-        status: excerpt ? "ready" : "pending-index", createdAt: new Date().toISOString(),
-      });
+    const errors: string[] = [];
+    try {
+      for (const file of selected) {
+        if (file.size > 20_000_000) { errors.push(t("{p0} supera el límite de 20 MB.", { p0: file.name })); continue; }
+        try {
+          const form = new FormData();
+          form.append("uploadId", crypto.randomUUID());
+          form.append("file", file);
+          const response = await fetch(`/api/projects/${project.id}/sources`, { method: "POST", body: form });
+          const result = await response.json();
+          if (!response.ok || !result.source) throw new Error(result.error || t("No se ha podido guardar la referencia."));
+          additions.push(result.source);
+        } catch (error) { errors.push(`${file.name}: ${error instanceof Error ? error.message : t("Error al subir el archivo.")}`); }
+      }
+      if (additions.length) setSources(current => [...current.filter(source =>
+        !(source.kind === "file" && source.status === "pending-index" && additions.some(added => added.name === source.name))), ...additions]);
+      setNotice(errors.length ? errors.join(" ") : t("Archivos guardados. Pulsa Guardar cambios para usarlos en todas las conversaciones del proyecto."));
+    } finally {
+      setBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
-    if (additions.length) {
-      setSources((current) => [...current, ...additions]);
-      setNotice(t("Referencias añadidas. Solo se conserva el texto extraído; los binarios quedan pendientes de indexación."));
-    }
-    if (fileRef.current) fileRef.current.value = "";
   };
 
   const addMember = () => {
@@ -194,7 +196,7 @@ function ProjectPanelContent({
         <header className="safe-area-panel-header workspace-panel-header flex items-center gap-3 border-b border-[var(--border-subtle)]">
           <span className="grid size-9 place-items-center rounded-xl bg-[var(--brain-accent-soft)] text-[var(--brain-accent-on-soft)]"><Brain size={18} /></span>
           <div className="min-w-0 flex-1"><h2 className="workspace-panel-title truncate">{project?.name ?? t("Proyecto")}</h2><p className="workspace-panel-subtitle">{canEdit ? t("Contexto compartido por todas sus conversaciones") : t("Consulta del contexto compartido · solo lectura")}</p></div>
-          <button ref={closeButtonRef} type="button" aria-label={t("Cerrar")} className="touch-target rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)]" onClick={onClose}><X size={17} /></button>
+          <button ref={closeButtonRef} type="button" aria-label={t("Cerrar")} className="touch-target rounded-lg p-2 text-[var(--text-muted)] hover:bg-[var(--surface-hover)]" disabled={busy} onClick={onClose}><X size={17} /></button>
         </header>
 
         <nav className="flex gap-1 border-b border-[var(--border-subtle)] px-4 py-2" aria-label={t("Secciones del proyecto")}>
@@ -218,7 +220,7 @@ function ProjectPanelContent({
           </div> : null}
 
           {tab === "sources" ? <div className="space-y-5">
-            {canEdit ? <section className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex items-center gap-3"><UploadSimple size={18} /><div className="flex-1"><p className="text-[12px] font-semibold">{t("Añadir referencias de archivo")}</p><p className="text-[10px] leading-4 text-[var(--text-muted)]">{t("Se conserva como contexto el texto extraído (hasta 32 KB), no el archivo original. Los binarios se marcan como pendientes.")}</p></div><button type="button" className="touch-target rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-semibold" onClick={() => fileRef.current?.click()}>{t("Elegir archivos")}</button></div><input ref={fileRef} aria-label={t("Archivos de referencia")} className="hidden" type="file" multiple onChange={(event) => void addFiles(event.target.files)} /></section> : null}
+            {canEdit ? <section className="rounded-2xl border border-dashed border-[var(--border)] bg-[var(--surface)] p-4"><div className="flex items-center gap-3"><UploadSimple size={18} /><div className="flex-1"><p className="text-[12px] font-semibold">{t("Añadir referencias de archivo")}</p><p className="text-[10px] leading-4 text-[var(--text-muted)]">{t("Los archivos originales se guardan para todas las conversaciones del proyecto. XLSX, PDF, DOCX, PPTX y texto; hasta 20 MB por archivo.")}</p></div><button type="button" className="touch-target rounded-xl border border-[var(--border)] px-3 py-2 text-[11px] font-semibold" disabled={busy} onClick={() => fileRef.current?.click()}>{t("Elegir archivos")}</button></div><input ref={fileRef} aria-label={t("Archivos de referencia")} className="hidden" type="file" accept=".xlsx,.pdf,.docx,.pptx,.txt,.md,.csv,.json,.xml,.html" disabled={busy} multiple onChange={(event) => void addFiles(event.target.files)} /></section> : null}
             {canEdit ? <section className="space-y-3">
               <label htmlFor="project-source-name" className="block text-[11px] font-semibold text-[var(--text-secondary)]">{t("Nombre de la referencia")}{" "}<span className="font-normal text-[var(--text-muted)]">{t("(opcional)")}</span></label>
               <input id="project-source-name" value={sourceName} maxLength={160} className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[12px] outline-none" placeholder={t("Ej.: Manual de marca")} onChange={(event) => setSourceName(event.target.value)} />
@@ -226,7 +228,7 @@ function ProjectPanelContent({
               <textarea id="project-source-value" value={sourceValue} maxLength={32_000} rows={3} className="w-full resize-y rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-[12px] outline-none" placeholder={t("Pega una URL o escribe una nota de contexto")} onChange={(event) => setSourceValue(event.target.value)} />
               <div className="flex gap-2"><button type="button" className="touch-target flex min-h-9 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-[11px] font-semibold" onClick={addLink}><LinkSimple size={13} />{t("Añadir enlace")}</button><button type="button" className="touch-target flex min-h-9 items-center gap-2 rounded-xl border border-[var(--border)] px-3 text-[11px] font-semibold" onClick={addNote}><Plus size={13} />{t("Añadir nota")}</button></div>
             </section> : null}
-            <section><h3 className="mb-2 text-[11px] font-semibold text-[var(--text-muted)]">{sources.length} {" "}{t("fuente")}{sources.length === 1 ? "" : "s"}</h3><div className="space-y-2">{sources.map((source) => <div key={source.id} className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] p-3"><span className="mt-0.5 text-[var(--text-muted)]">{sourceIcon(source.kind)}</span><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-medium">{source.name}</p><p className={`mt-0.5 text-[10px] ${source.status === "ready" ? "text-[var(--positive)]" : "text-[var(--warning)]"}`}>{source.status === "ready" ? t("Lista para contexto") : t("Guardada como referencia · indexación pendiente")}</p></div>{canEdit ? <button type="button" aria-label={t("Eliminar {p0}", { p0: source.name })} className="touch-target rounded-lg p-1.5 text-[var(--text-subtle)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]" onClick={() => setSources((current) => current.filter((item) => item.id !== source.id))}><Trash size={13} /></button> : null}</div>)}</div></section>
+            <section><h3 className="mb-2 text-[11px] font-semibold text-[var(--text-muted)]">{sources.length} {" "}{t("fuente")}{sources.length === 1 ? "" : "s"}</h3><div className="space-y-2">{sources.map((source) => <div key={source.id} className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] p-3"><span className="mt-0.5 text-[var(--text-muted)]">{sourceIcon(source.kind)}</span><div className="min-w-0 flex-1"><p className="truncate text-[12px] font-medium">{source.name}</p><p className={`mt-0.5 text-[10px] ${source.status === "ready" ? "text-[var(--positive)]" : "text-[var(--warning)]"}`}>{source.status === "ready" ? t("Disponible para las conversaciones") : t("Falta el archivo original · vuelve a adjuntarlo")}</p></div>{canEdit ? <button type="button" aria-label={t("Eliminar {p0}", { p0: source.name })} className="touch-target rounded-lg p-1.5 text-[var(--text-subtle)] hover:bg-[var(--danger-soft)] hover:text-[var(--danger)]" onClick={() => setSources((current) => current.filter((item) => item.id !== source.id))}><Trash size={13} /></button> : null}</div>)}</div></section>
           </div> : null}
 
           {tab === "people" ? <div className="space-y-6">

@@ -320,6 +320,10 @@
         "isPrimary": { "type": "boolean" }
       }
     },
+    "ProjectSourceUploadResponse": {
+      "type": "object", "additionalProperties": false, "required": ["source"],
+      "properties": { "source": { "$ref": "#/$defs/ProjectSource" } }
+    },
     "ProjectSource": {
       "type": "object",
       "additionalProperties": false,
