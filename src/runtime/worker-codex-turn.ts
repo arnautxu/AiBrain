@@ -119,6 +119,7 @@ import { operationalLogger } from "@/operations/server-logger";
 import type { MaintenanceActivityLease } from "@/operations/maintenance";
 import { TurnTelemetry } from "@/runtime/turn-telemetry";
 import { TurnTerminalWatchdog } from "@/runtime/turn-terminal-watchdog";
+import { TurnCompletionReconciler } from "@/runtime/turn-completion-reconciler";
 import { AppServerRequestTimeoutError } from "@/runtime/transport/app-server-rpc-router";
 import {
   persistGeneratedImageArtifact,
@@ -907,6 +908,13 @@ export async function runWorkerCodexTurn(
     runtime.client.canReuseLoadedThread(runtimeThreadId, true) &&
     (!quotaToolPermissions || hasAttestedQuotaToolPermissions(runtime.client, runtimeThreadId, quotaToolPermissions));
   let recovered: RecoveredTurn | null = null;
+  let terminalPublication: Promise<void> | null = null;
+  const publishTerminal = async (publish: () => Promise<void>) => {
+    if (terminalPublication) return terminalPublication;
+    terminalPublication = publish();
+    try { await terminalPublication; }
+    catch (error) { terminalPublication = null; throw error; }
+  };
   const projectRecoveredTurn = async (
     recoveredTurnState: RecoveredTurn,
     envelope: AppServerEvent,
@@ -1195,6 +1203,7 @@ export async function runWorkerCodexTurn(
   const knowledgeDocumentFiles = enterpriseDocumentNetwork ? new KnowledgeDocumentFiles(enterpriseDocumentNetwork, { signal: turnSignal }) : undefined;
   type FinishedTurn = { status: string | null; error: string | null };
   let terminalTurnStatus: FinishedTurn | null = null;
+  let completionReconciler: TurnCompletionReconciler | null = null;
   let finalAnswerRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let resolveFinishedTurn!: (status: FinishedTurn) => void;
   const turnFinished = new Promise<FinishedTurn>((resolve) => {
@@ -1202,6 +1211,7 @@ export async function runWorkerCodexTurn(
   });
   const finishTurn = (status: FinishedTurn) => {
     if (terminalTurnStatus) return;
+    completionReconciler?.stop();
     if (finalAnswerRecoveryTimer) {
       clearTimeout(finalAnswerRecoveryTimer);
       finalAnswerRecoveryTimer = null;
@@ -1247,15 +1257,11 @@ export async function runWorkerCodexTurn(
           item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string");
         if (!observedFinalAnswer) return;
         const envelope = recoveryEnvelope ?? sourceEnvelope;
-        if (recovered.status === "completed") {
+        if (recovered.status !== "completed") return;
+        await publishTerminal(async () => {
           await projectRecoveredTurn(recovered, envelope, "final-answer-recovery");
-        } else {
-          await emit(
-            { type: "done" },
-            { envelope, key: `final-answer-recovery:done:${recovered.id}` },
-          );
-        }
-        finishTurn({ status: "completed", error: null });
+          finishTurn({ status: "completed", error: null });
+        });
       })().catch(() => {
         // The authoritative turn/completed event remains the fallback.
       });
@@ -1292,19 +1298,18 @@ export async function runWorkerCodexTurn(
         }
         if (terminalTurnStatus || armedGeneration !== documentToolRecoveryGeneration) return;
         if (recoveredDocumentTurn && recoveredDocumentTurn.status !== "inProgress" && recoveryEnvelope) {
-          await projectRecoveredTurn(recoveredDocumentTurn, recoveryEnvelope, "document-tool-recovery");
-          finishTurn({ status: recoveredDocumentTurn.status, error: recoveredDocumentTurn.error });
+          const confirmedTurn = recoveredDocumentTurn;
+          const confirmedEnvelope = recoveryEnvelope;
+          await publishTerminal(async () => {
+            await projectRecoveredTurn(confirmedTurn, confirmedEnvelope, "document-tool-recovery");
+            finishTurn({ status: confirmedTurn.status, error: confirmedTurn.error });
+          });
           return;
         }
         const hasFinalAnswer = recoveredDocumentTurn?.items.some((item) =>
           item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string");
-        if (hasFinalAnswer && recoveredDocumentTurn && recoveryEnvelope) {
-          await projectRecoveredTurn(recoveredDocumentTurn, recoveryEnvelope, "document-tool-final-recovery");
-          await emit(
-            { type: "done" },
-            { envelope: recoveryEnvelope, key: `document-tool-final-recovery:done:${recoveredDocumentTurn.id}` },
-          );
-          finishTurn({ status: "completed", error: null });
+        if (hasFinalAnswer && Date.now() < deadline) {
+          armDocumentToolRecovery();
           return;
         }
         if (runtimeProgressRevision !== armedAtRevision && Date.now() < deadline) {
@@ -1327,9 +1332,9 @@ export async function runWorkerCodexTurn(
         }
         const message = interruptionConfirmed
           ? "Los archivos terminaron de procesarse, pero el asistente no cerró la respuesta a tiempo. El turno se ha detenido sin repetir ninguna creación."
-          : "Los archivos terminaron de procesarse, pero no llegó una respuesta final ni se pudo confirmar la interrupción. El turno se ha cerrado sin repetir ninguna creación.";
-        await emit({ type: "error", message });
-        finishTurn({ status: "failed", error: message });
+          : "Los archivos terminaron de procesarse; el resultado sigue pendiente de recuperación porque no se ha podido confirmar el estado final.";
+        if (interruptionConfirmed) await emit({ type: "error", message });
+        finishTurn({ status: interruptionConfirmed ? "failed" : "recovering", error: message });
       })().catch((error: unknown) => {
         finishTurn({
           status: "failed",
@@ -1696,48 +1701,64 @@ export async function runWorkerCodexTurn(
           return;
         }
         if (method === "turn/completed") {
-          if (activeRuntimePhaseId) {
-            await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("turn-completed"));
-          }
-          const status = completedTurnStatus(params) ?? {
-            status: null,
-            error: "Resposta incompleta del servei.",
-          };
-          if ((status.status === "completed" || status.status === "failed" || status.status === "interrupted") &&
-              isRecord(params) && isRecord(params.turn) && typeof params.turn.id === "string") {
-            await submission!.observeTerminal(params.turn.id, status.status);
-          }
-          if (status.status === "failed") {
-            await emit(
-              { type: "error", message: productSafeRuntimeMessage(status.error ?? "El torn del servei ha fallat.") },
-              { envelope, key: "turn:error" },
-            );
-            errorEmitted = true;
-          } else if (status.status === "completed") {
-            for (const [itemId, rawText] of pendingAgentText) {
-              pendingAgentText.delete(itemId);
-              finalAnswerText.set(itemId, rawText);
+          await publishTerminal(async () => {
+            if (activeRuntimePhaseId) {
+              await completeRuntimePhase(activeRuntimePhaseId, {}, phaseProjection("turn-completed"));
             }
-            // Adapt Melso codexDeliverableOutput's final-over-legacy contract
-            // (7c667dd1; provenance in MELSO_R2_B_20260904.md). Match recovery's
-            // selection without ever publishing rejected fallback candidates.
-            const finalEntry = [...finalAnswerText].filter(([id]) => agentMessagePhases.get(id) === "final_answer").at(-1)
-              ?? [...finalAnswerText].at(-1);
-            if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) {
-              fictionalScheduleDeliveryFailed = true;
-              await emit({ type: "error", message: "No se ha generado el Excel con la plantilla HORARI SAGARO. No se entregará una tabla como sustituto." },
-                { envelope, key: "turn:missing-schedule-template" });
+            const status = completedTurnStatus(params) ?? {
+              status: null,
+              error: "Resposta incompleta del servei.",
+            };
+            if ((status.status === "completed" || status.status === "failed" || status.status === "interrupted") &&
+                isRecord(params) && isRecord(params.turn) && typeof params.turn.id === "string") {
+              await submission!.observeTerminal(params.turn.id, status.status);
+            }
+            if (status.status === "failed") {
+              await emit(
+                { type: "error", message: productSafeRuntimeMessage(status.error ?? "El torn del servei ha fallat.") },
+                { envelope, key: "turn:error" },
+              );
               errorEmitted = true;
-            } else if (finalEntry) {
-              const [itemId, rawText] = finalEntry;
-              await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
+            } else if (status.status === "completed") {
+              for (const [itemId, rawText] of pendingAgentText) {
+                pendingAgentText.delete(itemId);
+                finalAnswerText.set(itemId, rawText);
+              }
+              // The terminal snapshot can contain text whose streaming events
+              // were lost. Publish that authoritative text before marking done.
+              const terminalItems = isRecord(params) && isRecord(params.turn) && Array.isArray(params.turn.items)
+                ? params.turn.items.filter(isRecord) : [];
+              const terminalMessages = terminalItems.filter((item) =>
+                item.type === "agentMessage" && typeof item.id === "string" && typeof item.text === "string");
+              for (const item of terminalMessages) {
+                if (item.type !== "agentMessage" || !item.text) continue;
+                const phase = item.phase === "final_answer" || item.phase === "commentary"
+                  ? item.phase : agentMessagePhases.get(item.id) ?? null;
+                if (phase === "commentary") continue;
+                agentMessagePhases.set(item.id, phase);
+                finalAnswerText.set(String(item.id), String(item.text));
+              }
+              // Adapt Melso codexDeliverableOutput's final-over-legacy contract
+              // (7c667dd1; provenance in MELSO_R2_B_20260904.md). Match recovery's
+              // selection without ever publishing rejected fallback candidates.
+              const finalEntry = [...finalAnswerText].filter(([id]) => agentMessagePhases.get(id) === "final_answer").at(-1)
+                ?? [...finalAnswerText].at(-1);
+              if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0) {
+                fictionalScheduleDeliveryFailed = true;
+                await emit({ type: "error", message: "No se ha generado el Excel con la plantilla HORARI SAGARO. No se entregará una tabla como sustituto." },
+                  { envelope, key: "turn:missing-schedule-template" });
+                errorEmitted = true;
+              } else if (finalEntry) {
+                const [itemId, rawText] = finalEntry;
+                await reconcileFinalText(itemId, rawText, { envelope, key: `content:turn-completed:${itemId}` });
+              }
+              await emit({ type: "done" }, { envelope, key: "turn:done" });
+            } else if (status.status === "interrupted") {
+              await emit({ type: "stopped" }, { envelope, key: "turn:stopped" });
+              stoppedEmitted = true;
             }
-            await emit({ type: "done" }, { envelope, key: "turn:done" });
-          } else if (status.status === "interrupted") {
-            await emit({ type: "stopped" }, { envelope, key: "turn:stopped" });
-            stoppedEmitted = true;
-          }
-          finishTurn(status);
+            finishTurn(status);
+          });
         }
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
@@ -2260,6 +2281,24 @@ export async function runWorkerCodexTurn(
       telemetry.bindRuntimeTurn(runtimeTurnId);
       startTerminalWatchdog();
     }
+    completionReconciler = new TurnCompletionReconciler(async () => {
+      if (terminalTurnStatus || turnSignal.aborted || !runtimeTurnId) return;
+      let recoveryEnvelope: AppServerEvent | null = null;
+      const result = await recoverThreadRequest(
+        "thread/read", { threadId, includeTurns: true },
+        `turn-completion-reconcile:${chatRequest.assistantMessageId}`, 15_000,
+        (_result, envelope) => { recoveryEnvelope = envelope; },
+      );
+      if (terminalTurnStatus || turnSignal.aborted) return;
+      const recovered = recoveredTurn(result, chatRequest.userMessageId);
+      if (!recovered || recovered.id !== runtimeTurnId || recovered.status === "inProgress" || !recoveryEnvelope) return;
+      const confirmedEnvelope = recoveryEnvelope;
+      await publishTerminal(async () => {
+        await projectRecoveredTurn(recovered, confirmedEnvelope, "completion-recovery");
+        finishTurn({ status: recovered.status, error: recovered.error });
+      });
+    });
+    if (!terminalTurnStatus) completionReconciler.start();
     const watchdog = startTerminalWatchdog();
     const terminalRace = await Promise.race([
       turnFinished.then((status) => ({ kind: "terminal" as const, status })),
@@ -2290,10 +2329,11 @@ export async function runWorkerCodexTurn(
         // The interruption below remains the final bounded recovery step.
       }
       if (!terminalTurnStatus && recoveredTimedOutTurn && recoveredTimedOutTurn.status !== "inProgress" && recoveryEnvelope) {
-        await projectRecoveredTurn(recoveredTimedOutTurn, recoveryEnvelope, "watchdog-recovery");
-        finishTurn({
-          status: recoveredTimedOutTurn.status,
-          error: recoveredTimedOutTurn.error,
+        const confirmedTurn = recoveredTimedOutTurn;
+        const confirmedEnvelope = recoveryEnvelope;
+        await publishTerminal(async () => {
+          await projectRecoveredTurn(confirmedTurn, confirmedEnvelope, "watchdog-recovery");
+          finishTurn({ status: confirmedTurn.status, error: confirmedTurn.error });
         });
       }
       if (!terminalTurnStatus && runtimeTurnId) {
@@ -2309,11 +2349,18 @@ export async function runWorkerCodexTurn(
         } catch {
           interruptionConfirmed = false;
         }
-        const message = interruptionConfirmed
-          ? "El turno se ha detenido porque el runtime dejó de enviar progreso dentro del límite seguro. Puedes volver a intentarlo; ninguna acción incierta se ha repetido."
-          : "El runtime dejó de responder y no se pudo confirmar su interrupción. El turno se ha cerrado sin repetir ninguna acción incierta; revisa el último estado antes de reintentarlo.";
-        await emit({ type: "error", message });
-        finishTurn({ status: "failed", error: message });
+        if (interruptionConfirmed) {
+          const message = "El turno se ha detenido porque el runtime dejó de enviar progreso dentro del límite seguro. Puedes volver a intentarlo; ninguna acción incierta se ha repetido.";
+          await emit({ type: "error", message });
+          finishTurn({ status: "failed", error: message });
+        } else {
+          // A transport timeout cannot overwrite a completed remote result or
+          // create a false terminal usage record. Reattach to this same turn.
+          const message = "No se ha podido confirmar el estado final. La tarea sigue pendiente de recuperación; no se ha repetido ninguna petición.";
+          await upsertActivity({ id: "runtime-turn-recovery", kind: "system",
+            label: "Resultado pendiente de recuperación", detail: message, status: "waiting" });
+          finishTurn({ status: "recovering", error: message });
+        }
       }
     }
     const completed = terminalRace.kind === "terminal" ? terminalRace.status : await turnFinished;
@@ -2352,6 +2399,7 @@ export async function runWorkerCodexTurn(
     });
     await scheduleCompletedConversationMemory();
   } finally {
+    completionReconciler?.stop();
     if (finalAnswerRecoveryTimer) clearTimeout(finalAnswerRecoveryTimer);
     if (documentToolRecoveryTimer) clearTimeout(documentToolRecoveryTimer);
     clearTimeout(turnTimeoutTimer);

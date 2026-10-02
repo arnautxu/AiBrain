@@ -446,6 +446,87 @@ describe("worker Codex turn", () => {
     mocked.cancelTurn = null;
   });
 
+  it.each(["terminal-snapshot", "lost-events", "still-running", "foreign-turn", "racing-terminal"])(
+    "persists the real final answer without another model submission (%s)", async (mode) => {
+      const root = await mkdtemp(path.join(tmpdir(), "aibrain-completion-loss-"));
+      const originalTimeout = globalThis.setTimeout;
+      const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: unknown[]) => void, delay: number | undefined, ...args: unknown[]) =>
+        originalTimeout(callback, delay === 15_000 ? 1 : delay, ...args)) as typeof setTimeout);
+      let handlers: { onNotification(value: unknown, event: unknown): Promise<void> };
+      let sequence = 0;
+      let reads = 0;
+      let racingNotification: Promise<void> | null = null;
+      const calls: string[] = [];
+      const events: Array<{ type: string; value?: string }> = [];
+      const envelope = () => ({ eventId: `completion-${++sequence}`, sequence,
+        occurredAt: new Date().toISOString(), message: { kind: "rpc-notification", rpc: {} } });
+      const items = [
+        { type: "userMessage", clientId: userMessageId },
+        { type: "agentMessage", id: "comment", phase: "commentary", text: "Working" },
+        { type: "agentMessage", id: "final", phase: "final_answer", text: "Verified invoice result." },
+      ];
+      mocked.runtime = {
+        config: { installationId, paths: installationPaths },
+        handle: { roots: { workspace: root, staging: root, artifacts: root } },
+        client: {
+          canReuseLoadedThread: () => false,
+          connectionSummary: async () => ({ connected: true }),
+          router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+            handlers = value; return { bindRuntimeTurn() {}, dispose() {} };
+          } },
+          async request(method: string, _params: unknown, _purpose: string, _timeout: number,
+            beforeResolve?: (value: never, event: never) => Promise<void>) {
+            calls.push(method);
+            let result: unknown;
+            if (method === "thread/start") result = { thread: { id: "completion-thread" } };
+            else if (method === "turn/start") result = { turn: { id: "completion-turn" } };
+            else if (method === "thread/read") {
+              reads += 1;
+              const preliminary = reads === 1 && (mode === "still-running" || mode === "foreign-turn");
+              result = { thread: { id: "completion-thread", turns: [{
+                id: preliminary && mode === "foreign-turn" ? "different-turn" : "completion-turn",
+                status: preliminary && mode === "still-running" ? "inProgress" : "completed",
+                error: null, items,
+              }] } };
+              if (preliminary) expect(events.some((event) => event.type === "done")).toBe(false);
+            } else throw new Error(`Unexpected request ${method}`);
+            await beforeResolve?.(result as never, envelope() as never);
+            if (method === "turn/start" && mode === "terminal-snapshot") queueMicrotask(() => {
+              void handlers.onNotification({ method: "turn/completed", params: {
+                threadId: "completion-thread", turn: { id: "completion-turn", status: "completed", error: null, items },
+              } }, envelope());
+            });
+            return result;
+          },
+        },
+      };
+      try {
+        await runWorkerCodexTurn(chatRequest(), installationId, userId, null, {
+          tenantId: installationId, mode: "codex", codexBinary: "unused", codexHome: null,
+          workspace: root, model: null, approvalPolicy: "on-request", sandbox: "workspace-write",
+        }, permissions(), {} as never, memoryDependencies(), [], new AbortController().signal,
+        async (event) => {
+          events.push(event);
+          if (mode === "racing-terminal" && event.type === "content" && !racingNotification) {
+            racingNotification = handlers.onNotification({ method: "turn/completed", params: {
+              threadId: "completion-thread", turn: { id: "completion-turn", status: "completed", error: null, items },
+            } }, envelope());
+            await new Promise((resolve) => originalTimeout(resolve, 1));
+          }
+        });
+        if (racingNotification) await racingNotification;
+        expect(events.reduce((text, event) => event.type === "content" ? event.value ?? "" :
+          event.type === "delta" ? text + event.value : text, "")).toBe("Verified invoice result.");
+        expect(events.filter((event) => event.type === "done")).toHaveLength(1);
+        expect(calls.filter((method) => method === "turn/start")).toHaveLength(1);
+        expect(calls).not.toContain("turn/interrupt");
+        if (mode === "still-running" || mode === "foreign-turn") expect(reads).toBe(2);
+      } finally {
+        timeoutSpy.mockRestore();
+      }
+    },
+  );
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
