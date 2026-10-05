@@ -2,6 +2,7 @@ import { rememberProjectSource } from "@/documents/remember-project-source";
 import { resolveProjectSourceDocuments } from "@/documents/project-sources";
 import { requestPagedThreadRecovery } from "@/runtime/paged-thread-recovery";
 import { DurableTurnSubmission, TurnSubmissionRecoveryRequired, turnSubmissionBinding } from "@/runtime/turn-submission-store";
+import { FileModelTurnQueue, type ModelTurnAdmission } from "@/runtime/model-turn-queue";
 import { HORARIA_NAMESPACE, HORARIA_TOOLS, handleHorariaToolCall, horariaInstructions } from "@/horaria/chat-tools";
 import { requiresFictionalScheduleArtifact } from "@/horaria/fictional-schedule-delivery";
 import { arnallScheduleForPreview } from "@/horaria/schedule-template";
@@ -154,7 +155,7 @@ import {
 } from "@/usage/contracts";
 import { completePublicTextPrefix, publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
 import { setTimeout as delay } from "node:timers/promises";
-import { isModelCapacityError, isRejectedModelAdmission, ModelCapacityRetryReady, MODEL_CAPACITY_MESSAGE, MODEL_CAPACITY_RETRY_DELAYS_MS } from "@/runtime/model-capacity-retry";
+import { capacityFallback, isModelCapacityError, isRejectedModelAdmission, ModelCapacityRetryReady, MODEL_CAPACITY_MESSAGE, MODEL_CAPACITY_RETRY_DELAYS_MS } from "@/runtime/model-capacity-retry";
 
 // Match the terminal watchdog's hard budget so active tasks are not
 // unconditionally interrupted before their normal recovery window.
@@ -489,6 +490,8 @@ async function runWorkerCodexTurnAttempt(
   recoverExistingTurn = false,
 ) {
   let submission: DurableTurnSubmission | null = null;
+  let modelAdmission: ModelTurnAdmission | null = null;
+  let modelWorkConfirmedStopped = false;
   const ownsMaintenanceActivity = !admittedMaintenanceActivity;
   const maintenanceActivity = admittedMaintenanceActivity ?? await acquireWorkerTurnActivity();
   const telemetry = admittedTelemetry ?? new TurnTelemetry({
@@ -764,6 +767,40 @@ async function runWorkerCodexTurnAttempt(
     runtimeThreadId = submission.runtimeThreadId;
   }
   const clientUserMessageId = submission.retryClientUserMessageId ?? chatRequest.userMessageId;
+  if (typeof runtime.config.paths.dataRoot === "string") {
+    const queueController = new AbortController();
+    const cancelQueue = () => queueController.abort();
+    signal.addEventListener("abort", cancelQueue, { once: true });
+    if (signal.aborted) cancelQueue();
+    // A recovering remote turn must reach the existing interrupt/reconciliation
+    // path. Cancelling a queue wait cannot declare that remote work stopped.
+    const unregisterQueueCancellation = submission.hasPendingModelTurn ? () => {} :
+      registerWorkerTurnCancellation(authenticatedUserId,
+        runtimeThreadId ?? chatRequest.threadId, chatRequest.assistantMessageId, cancelQueue);
+    let waited = false;
+    try {
+      modelAdmission = await new FileModelTurnQueue(path.join(runtime.config.paths.dataRoot, "runtime", "model-turn-queue"))
+        .acquire({ installationId, userId: authenticatedUserId, threadId: chatRequest.threadId, turnId: chatRequest.assistantMessageId }, {
+          signal: queueController.signal, recovering: submission.hasPendingModelTurn,
+          onWaiting: async position => {
+            waited = true;
+            await upsertActivity({ id: "runtime-model-queue", kind: "system", label: "Petición en espera",
+              detail: `Posición ${position} en la cola. Comenzará automáticamente cuando haya disponibilidad.`, status: "waiting" });
+          },
+        });
+      if (queueController.signal.aborted) throw queueController.signal.reason;
+      if (waited) await upsertActivity({ id: "runtime-model-queue", kind: "system", label: "Petición admitida",
+        detail: "Preparando el asistente", status: "complete" });
+    } catch (error) {
+      if (!queueController.signal.aborted || submission.hasPendingModelTurn) throw error;
+      await emit({ type: "stopped" });
+      telemetry.finish("stopped");
+      return;
+    } finally {
+      unregisterQueueCancellation();
+      signal.removeEventListener("abort", cancelQueue);
+    }
+  }
   const emitRuntimeTurn = (turnId: string) => emit({ type: "runtimeTurn", turnId,
     ...(submission!.rejectedRuntimeTurnId ? { rejectedTurnId: submission!.rejectedRuntimeTurnId } : {}) });
   if (submission.needsRecovery && !runtimeThreadId) {
@@ -794,7 +831,9 @@ async function runWorkerCodexTurnAttempt(
     detail: "Sesión privada verificada",
   });
 
-  let selectedModel = chatRequest.options.model ?? runtimeConfig.model;
+  const originalModel = chatRequest.options.model ?? runtimeConfig.model;
+  let selectedModel = submission.retryModel?.model ?? originalModel;
+  const selectedEffort = submission.retryModel ? submission.retryModel.effort : chatRequest.options.effort;
   let selectedModelOption: Awaited<ReturnType<typeof runtime.client.connection>>["models"][number] | null = null;
   // `turn/start` is the authoritative validator for a selected model and
   // effort. Do not block every normal turn on the optional models/skills/
@@ -806,7 +845,7 @@ async function runWorkerCodexTurnAttempt(
     selectedModelOption = selectedModel
       ? catalog.models.find((model) => model.id === selectedModel) ?? null
       : catalog.models.find((model) => model.isDefault) ?? catalog.models[0] ?? null;
-    if (chatRequest.options.model && !selectedModelOption) {
+    if (selectedModel && !selectedModelOption) {
       throw new Error("El model seleccionat ja no està disponible.");
     }
     selectedModel = selectedModel ?? selectedModelOption?.id ?? null;
@@ -815,9 +854,9 @@ async function runWorkerCodexTurnAttempt(
       !selectedModelOption.inputModalities.includes("image")) {
     throw new Error("El model seleccionat no admet imatges.");
   }
-  if (selectedModelOption && chatRequest.options.effort &&
+  if (selectedModelOption && selectedEffort &&
       selectedModelOption.supportedReasoningEfforts.length > 0 &&
-      !selectedModelOption.supportedReasoningEfforts.includes(chatRequest.options.effort)) {
+      !selectedModelOption.supportedReasoningEfforts.includes(selectedEffort)) {
     throw new Error("El nivell de raonament seleccionat no és compatible amb aquest model.");
   }
   if (chatRequest.options.imageGeneration) {
@@ -1170,7 +1209,7 @@ async function runWorkerCodexTurnAttempt(
     experience: chatRequest.options.experience ?? "unknown",
     requestedModel: selectedModel,
     effectiveModel: runtimeSelectedModel ?? selectedModel,
-    effort: chatRequest.options.effort,
+    effort: selectedEffort,
     source: runtimeSelectedModel ? "runtime" : selectedModel ? "request" : "default",
   });
   if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
@@ -1353,6 +1392,7 @@ async function runWorkerCodexTurnAttempt(
               5_000,
             );
             interruptionConfirmed = true;
+            modelWorkConfirmedStopped = true;
           } catch {
             interruptionConfirmed = false;
           }
@@ -2117,6 +2157,7 @@ async function runWorkerCodexTurnAttempt(
     chatRequest.assistantMessageId,
     (confirmed) => {
       remoteInterruptConfirmed = confirmed;
+      modelWorkConfirmedStopped ||= confirmed;
       turnController.abort();
     },
   );
@@ -2131,6 +2172,7 @@ async function runWorkerCodexTurnAttempt(
       5_000,
     ).then(() => {
       remoteInterruptConfirmed = true;
+      modelWorkConfirmedStopped = true;
       finishTurn({ status: "interrupted", error: null });
     }).catch((error: unknown) => {
       finishTurn({
@@ -2224,11 +2266,11 @@ async function runWorkerCodexTurnAttempt(
         [],
       ) }),
       ...(selectedModel ? { model: selectedModel } : {}),
-      ...(chatRequest.options.effort ? { effort: chatRequest.options.effort } : {}),
+      ...(selectedEffort ? { effort: selectedEffort } : {}),
       // Keep simple turns concise while preserving the richer public activity
       // stream explicitly requested by deeper reasoning experiences.
-      summary: chatRequest.options.effort === "high" || chatRequest.options.effort === "xhigh" ||
-        chatRequest.options.effort === "max" || chatRequest.options.effort === "ultra"
+      summary: selectedEffort === "high" || selectedEffort === "xhigh" ||
+        selectedEffort === "max" || selectedEffort === "ultra"
         ? "detailed"
         : "concise",
       };
@@ -2390,6 +2432,7 @@ async function runWorkerCodexTurnAttempt(
             5_000,
           );
           interruptionConfirmed = true;
+          modelWorkConfirmedStopped = true;
         } catch {
           interruptionConfirmed = false;
         }
@@ -2422,9 +2465,21 @@ async function runWorkerCodexTurnAttempt(
         const turn = isRecord(result) && isRecord(result.thread) && Array.isArray(result.thread.turns)
           ? result.thread.turns.find(candidate => isRejectedModelAdmission(candidate, runtimeTurnId!, clientUserMessageId)) : null;
         if (turn && !capacityAttemptHasWork) {
+          let fallback = null;
+          try {
+            const available = await runtime.client.connection(projectWorkspace, true);
+            fallback = capacityFallback({ originalModel, currentModel: selectedModel, effort: selectedEffort,
+              models: available.models, requiresImages: chatRequest.options.attachments.length > 0,
+              imageGeneration: chatRequest.options.imageGeneration });
+          } catch {
+            // An unavailable catalog authorizes no new model; the existing
+            // bounded same-model retry remains valid for this empty rejection.
+          }
+          const retryModel = fallback ?? (selectedModel ? { model: selectedModel, effort: selectedEffort } : null);
           const retryDelayMs = MODEL_CAPACITY_RETRY_DELAYS_MS[submission.capacityRetries]!;
           await upsertActivity({ id: "runtime-capacity-retry", kind: "system", label: "El servicio de IA está ocupado",
-            detail: `Reintentando automáticamente en ${retryDelayMs / 1_000} segundos`, status: "waiting" });
+            detail: fallback ? `Continuaremos con un modelo alternativo en ${retryDelayMs / 1_000} segundos`
+              : `Reintentando automáticamente en ${retryDelayMs / 1_000} segundos`, status: "waiting" });
           operationalLogger.info("codex.turn_capacity_retry", { installationId, userId: authenticatedUserId,
             threadId: chatRequest.threadId, localTurnId: chatRequest.assistantMessageId,
             rejectedRuntimeTurnId: runtimeTurnId, retry: submission.capacityRetries + 1, retryDelayMs });
@@ -2435,7 +2490,8 @@ async function runWorkerCodexTurnAttempt(
             telemetry.finish("stopped");
             return;
           }
-          await submission.retryRejectedCapacityTurn(turn, clientUserMessageId);
+          await submission.retryRejectedCapacityTurn(turn, clientUserMessageId, retryModel);
+          if (fallback && selectedModel) telemetry.modelRerouted(selectedModel, fallback.model, "capacity");
           await upsertActivity({ id: "runtime-capacity-retry", kind: "system", label: "Reintentando la petición",
             detail: "La petición anterior fue rechazada antes de ejecutar acciones", status: "complete" });
           throw new ModelCapacityRetryReady();
@@ -2504,6 +2560,11 @@ async function runWorkerCodexTurnAttempt(
     }
     throw error;
   } finally {
+    if (modelAdmission && (!submission?.hasPendingModelTurn || modelWorkConfirmedStopped)) {
+      await modelAdmission.complete().catch(() => operationalLogger.warn("codex.model_queue_release_pending", {
+        installationId, userId: authenticatedUserId, localTurnId: chatRequest.assistantMessageId,
+      }));
+    }
     if (submission) {
       await submission.close().catch((error) => {
         operationalLogger.warn("documents.turn_input_cleanup_failed", {

@@ -137,8 +137,13 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 
 - Model capacity admission recovery: [MODEL_CAPACITY_RECOVERY.md](MODEL_CAPACITY_RECOVERY.md).
   Confirmed empty provider rejections have two bounded, durable retries on the
-  same selected model. Partial work and uncertain effects never authorize
-  replay. Deployment and provider availability require their own live gates.
+  supported models, with a fresh compatible catalog match before switching.
+  The selected retry model is durable. A filesystem queue admits two logical
+  turns per installation across app and automation processes; uncertain remote
+  work retains its admission until the same turn reconciles. Partial work and
+  uncertain effects never authorize replay. The operator explicitly retained
+  the existing connection on 2026-10-05; authentication and consumption policy
+  are unchanged. Deployment and provider availability require their own gates.
 
 - Installation token quotas: [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
   Arnall activated 7.5 million total tokens per Madrid week and 25/50/75% notices
