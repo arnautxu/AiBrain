@@ -72,6 +72,20 @@ describe("turn projection store", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("rotates only an empty active answer with the exact rejected runtime identity", async () => {
+    const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
+    const thread = "00000000-0000-4000-8000-000000000081";
+    const id = "00000000-0000-4000-8000-000000000082";
+    await projections.initialize(thread, assistant(id));
+    await projections.setRuntimeTurnId(thread, id, "rejected-1");
+    await expect(projections.setRuntimeTurnId(thread, id, "next-1")).rejects.toThrow("insegura");
+    await expect(projections.setRuntimeTurnId(thread, id, "next-1", "foreign-turn")).rejects.toThrow("insegura");
+    await projections.setRuntimeTurnId(thread, id, "next-1", "rejected-1");
+    await projections.applyLocalEvent(thread, id, { type: "delta", value: "Already worked" });
+    await expect(projections.setRuntimeTurnId(thread, id, "next-2", "next-1")).rejects.toThrow("insegura");
+    expect((await projections.read(thread, id))?.runtimeTurnId).toBe("next-1");
+  });
+
   it("accepts signed expiry renewal while rejecting changed runtime bindings", async () => {
     const projections = new FileTurnProjectionStore({ installationId, userId, usersRoot });
     const thread = "00000000-0000-4000-8000-000000000081";

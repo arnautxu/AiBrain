@@ -739,10 +739,12 @@ export async function POST(request: Request) {
         if (event.type === "runtimeTurn") {
           runtimeTurnId = event.turnId;
           if (persistent && turnProjectionStore) {
+            if (event.rejectedTurnId) await projectionWriter?.flush();
             await turnProjectionStore.setRuntimeTurnId(
               body.threadId,
               body.assistantMessageId,
               event.turnId,
+              event.rejectedTurnId,
             );
           }
           return;

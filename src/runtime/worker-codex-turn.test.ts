@@ -17,7 +17,21 @@ const mocked = vi.hoisted(() => ({
   maintenanceReleases: 0,
   maintenanceLease: null as unknown,
   cancelTurn: null as ((remoteInterruptConfirmed: boolean) => void) | null,
+  capacityWaits: null as number[] | null,
+  capacityAbort: null as (() => void) | null,
 }));
+vi.mock("node:timers/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:timers/promises")>();
+  return { ...actual, setTimeout: async (...args: Parameters<typeof actual.setTimeout>) => {
+    if (mocked.capacityWaits && (args[0] === 5_000 || args[0] === 15_000)) {
+      mocked.capacityWaits.push(args[0]);
+      mocked.capacityAbort?.();
+      if (args[2]?.signal?.aborted) throw new Error("Aborted wait");
+      return args[1];
+    }
+    return actual.setTimeout(...args);
+  } };
+});
 vi.mock("server-only", () => ({}));
 vi.mock("@/auth/session", () => ({
   getSigningSecret: () => "test-signing-secret-with-at-least-thirty-two-bytes",
@@ -152,6 +166,101 @@ function projectGuidance() {
 }
 
 describe("worker Codex turn", () => {
+  it.each(["recover", "recover-smart", "lost-retry-ack", "exhaust", "partial", "wrong-code", "read-partial", "lost-read", "cancel"])(
+    "handles capacity admission with %s without replaying partial work", async (outcome) => {
+    const { mkdir, rm } = await import("node:fs/promises");
+    const userRoot = await mkdtemp(path.join(tmpdir(), "aibrain-capacity-retry-"));
+    const workspace = path.join(userRoot, "workspace");
+    await mkdir(workspace, { mode: 0o700 });
+    let handlers: { onNotification(value: unknown, envelope: unknown): Promise<void> | void } | null = null;
+    const calls: Array<{ method: string; params: Record<string, unknown>; purpose: string }> = [];
+    const controller = new AbortController();
+    let started = 0;
+    let lastTurn: Record<string, unknown> | null = null;
+    let sequence = 0;
+    const envelope = () => ({ eventId: `capacity-event-${++sequence}`, sequence, occurredAt: new Date().toISOString(),
+      message: { kind: "rpc-notification", rpc: {} } });
+    const client = {
+      canReuseLoadedThread: () => true,
+      router: { registerTurn: (_thread: string, _local: string, value: typeof handlers) => {
+        handlers = value;
+        return { bindRuntimeTurn() {}, dispose() { handlers = null; } };
+      } },
+      connectionSummary: async () => ({ connected: true }),
+      resolvedSkills: async () => [],
+      async request(method: string, params: Record<string, unknown>, purpose: string, _timeout?: number,
+        beforeResolve?: (result: never, event: never) => Promise<void> | void) {
+        calls.push({ method, params, purpose });
+        if (method === "thread/read") {
+          if (outcome === "lost-read") throw new Error("Transport read failed");
+          const observed = outcome === "read-partial" ? { ...lastTurn, items: [
+            ...(lastTurn!.items as unknown[]), { type: "commandExecution", id: "prior-effect" }] } : lastTurn;
+          const result = { thread: { id: "runtime-thread-capacity", turns: [observed] } };
+          await beforeResolve?.(result as never, envelope() as never);
+          return result;
+        }
+        if (method !== "turn/start") throw new Error(`Unexpected ${method}`);
+        started += 1;
+        const turnId = `capacity-turn-${started}`;
+        const succeeds = ["recover", "recover-smart", "lost-retry-ack"].includes(outcome) && started === 2;
+        lastTurn = { id: turnId, status: succeeds ? "completed" : "failed", items: [
+          { type: "userMessage", id: `input-${started}`, clientId: params.clientUserMessageId },
+          ...(succeeds ? [{ type: "agentMessage", id: "answer", phase: "final_answer", text: "RECOVERED" }] :
+            outcome === "partial" ? [{ type: "commandExecution", id: "prior-effect" }] : []),
+        ], error: succeeds ? null : { message: "Selected model is at capacity. Please try a different model.",
+          codexErrorInfo: outcome === "wrong-code" ? "usageLimitExceeded" : "serverOverloaded" } };
+        const result = { turn: { id: turnId } };
+        if (outcome === "lost-retry-ack" && started === 2) throw new AppServerRequestTimeoutError("turn/start", purpose, 60_000);
+        await beforeResolve?.(result as never, envelope() as never);
+        const terminal = lastTurn;
+        queueMicrotask(() => { void (async () => {
+          if (outcome === "partial") await handlers?.onNotification({ method: "item/started", params: {
+            threadId: "runtime-thread-capacity", turnId, item: { type: "commandExecution", id: "prior-effect" } } }, envelope());
+          await handlers?.onNotification({ method: "turn/completed", params: {
+            threadId: "runtime-thread-capacity", turn: terminal } }, envelope());
+        })(); });
+        return result;
+      },
+    };
+    mocked.runtime = { config: { installationId, companySlug: "arnall", branding: { productName: "Arnall AI" }, paths: installationPaths },
+      handle: { roots: { userRoot, workspace, staging: path.join(userRoot, "staging"), artifacts: path.join(userRoot, "artifacts") } },
+      client, workerWasWarm: true };
+    mocked.capacityWaits = [];
+    mocked.capacityAbort = outcome === "cancel" ? () => controller.abort() : null;
+    const events: Array<Record<string, unknown>> = [];
+    const model = outcome === "recover-smart" ? "gpt-5.6-sol" : "gpt-6-astra";
+    const effort = outcome === "recover-smart" ? "low" as const : "medium" as const;
+    const request = { ...chatRequest(), options: { ...chatRequest().options, model, effort } };
+    const run = runWorkerCodexTurn(request, installationId, userId, "runtime-thread-capacity",
+      { tenantId: installationId, mode: "codex", codexBinary: "codex", codexHome: null, workspace, model: null,
+        approvalPolicy: "on-request", sandbox: "workspace-write" }, permissions(), {} as never, memoryDependencies(), [],
+      controller.signal, async event => { events.push(event); });
+    try {
+      if (outcome === "lost-read") await expect(run).rejects.toBeInstanceOf(WorkerTurnRecoveryPendingError);
+      else await run;
+      const expected = ["recover", "recover-smart", "lost-retry-ack"].includes(outcome) ? 2 : outcome === "exhaust" ? 3 : 1;
+      expect(started).toBe(expected);
+      const starts = calls.filter(c => c.method === "turn/start");
+      expect(new Set(starts.map(c => c.purpose)).size).toBe(expected);
+      expect(new Set(starts.map(c => c.params.clientUserMessageId)).size).toBe(expected);
+      expect(starts.every(c => c.params.model === model && c.params.effort === effort)).toBe(true);
+      if (["recover", "recover-smart", "lost-retry-ack"].includes(outcome)) {
+        expect(events).toContainEqual({ type: "done" });
+        expect(events.some(e => e.type === "error")).toBe(false);
+        expect(events).toContainEqual({ type: "runtimeTurn", turnId: "capacity-turn-2", rejectedTurnId: "capacity-turn-1" });
+      }
+      if (outcome === "exhaust") expect(mocked.capacityWaits).toEqual([5_000, 15_000]);
+      if (outcome === "cancel") expect(events).toContainEqual({ type: "stopped" });
+      if (["exhaust", "partial", "wrong-code", "read-partial"].includes(outcome)) {
+        expect(events.filter(e => e.type === "error")).toHaveLength(1);
+      }
+    } finally {
+      mocked.capacityWaits = null;
+      mocked.capacityAbort = null;
+      await rm(userRoot, { recursive: true, force: true });
+    }
+  });
+
   it.each([1, 20].flatMap(count => ["warm", "cold", "missing", "finished", "before-accept", "lost-ack"].map(fault => ({ count, fault }))))(
     "recovers $count XLSX inputs after $fault without replaying a model turn", async ({ count, fault }) => {
     const { createHash } = await import("node:crypto");
