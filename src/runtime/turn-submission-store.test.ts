@@ -44,6 +44,26 @@ afterEach(async () => {
 });
 
 describe("durable turn submission", () => {
+  it("persists the chosen fallback and rejects a changed model after restart", async () => {
+    const f = await fixture();
+    let receipt = await f.open();
+    await receipt.bindThread("remote-thread");
+    await receipt.prepareInputs(f.prepare);
+    await receipt.dispatchOnce(rpc, requestId);
+    await receipt.bindTurn("rejected");
+    await receipt.observeTerminal("rejected", "failed");
+    const fallback = { model: "gpt-5.6-sol", effort: "medium" as const };
+    await receipt.retryRejectedCapacityTurn({ id: "rejected", status: "failed", error: { codexErrorInfo: "serverOverloaded" },
+      items: [{ type: "userMessage", clientId: rpc.clientUserMessageId }] }, rpc.clientUserMessageId, fallback);
+    await receipt.close();
+    receipt = await f.open();
+    expect(receipt.retryModel).toEqual(fallback);
+    await receipt.prepareInputs(f.prepare);
+    const next = { ...rpc, clientUserMessageId: receipt.retryClientUserMessageId, ...fallback };
+    await expect(receipt.dispatchOnce({ ...next, model: "gpt-6-astra" }, `${requestId}:retry`)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+    await receipt.dispatchOnce(next, `${requestId}:retry`);
+    expect(receipt.hasPendingModelTurn).toBe(true);
+  });
   it("retains the two-retry budget and exact attempt identity across restarts", async () => {
     const f = await fixture();
     let receipt = await f.open();

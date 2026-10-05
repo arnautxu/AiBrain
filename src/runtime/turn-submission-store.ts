@@ -10,18 +10,19 @@ import { resolveWorkerOwnedPath } from "@/runtime/workers/provisioner";
 import { validateAppServerRequest } from "@/runtime/transport/wire-protocol";
 import { MAX_FILES_PER_MESSAGE } from "@/lib/chat-attachment-limits";
 import { randomUUID } from "node:crypto";
-import { isRejectedModelAdmission, MODEL_CAPACITY_RETRY_DELAYS_MS } from "@/runtime/model-capacity-retry";
+import { isRejectedModelAdmission, MODEL_CAPACITY_RETRY_DELAYS_MS, type CapacityModel } from "@/runtime/model-capacity-retry";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const HASH = /^[a-f0-9]{64}$/;
 const MAX_RECORD_BYTES = 16 * 1024 * 1024;
-const RETRY_FIELDS = ["capacityRetries", "retryClientUserMessageId", "rejectedRuntimeTurnId", "dispatchedClientUserMessageId"] as const;
+const RETRY_FIELDS = ["capacityRetries", "retryClientUserMessageId", "rejectedRuntimeTurnId", "dispatchedClientUserMessageId", "retryModel"] as const;
 type Inputs = { directory: string | null; codexInputs: readonly UserInput[] };
 type Phase = "preparing" | "ready" | "dispatched" | "terminal";
 type Terminal = "completed" | "failed" | "interrupted";
 
 type RecordData = {
-  schemaVersion: 2;
+  schemaVersion: 3;
+  retryModel: CapacityModel | null;
   capacityRetries: number;
   retryClientUserMessageId: string | null;
   rejectedRuntimeTurnId: string | null;
@@ -73,14 +74,22 @@ function parseRecord(bytes: Buffer): RecordData {
     if (RETRY_FIELDS.some(key => key in value)) {
       throw new Error("Invalid legacy durable turn submission.");
     }
-    Object.assign(value, { schemaVersion: 2, capacityRetries: 0, retryClientUserMessageId: null,
+    Object.assign(value, { schemaVersion: 3, retryModel: null, capacityRetries: 0, retryClientUserMessageId: null,
       rejectedRuntimeTurnId: null, dispatchedClientUserMessageId: typeof value.turnRequest === "string"
         ? clientInputId(JSON.parse(value.turnRequest).params) : null });
   }
+  if (value && (value.schemaVersion as number) === 2) {
+    if ("retryModel" in value) throw new Error("Invalid legacy retry model.");
+    Object.assign(value, { schemaVersion: 3, retryModel: null });
+  }
   if (!value || typeof value !== "object" || Object.keys(value).sort().join() !== [
     "schemaVersion", "binding", "workspace", "phase", "inputs", "inputDirectory", "threadRequest",
-    "turnRequest", "runtimeThreadId", "runtimeTurnId", "terminal", "capacityRetries", "retryClientUserMessageId", "rejectedRuntimeTurnId", "dispatchedClientUserMessageId",
-  ].sort().join() || value.schemaVersion !== 2 || !HASH.test(value.binding) ||
+    "turnRequest", "runtimeThreadId", "runtimeTurnId", "terminal", "capacityRetries", "retryClientUserMessageId", "rejectedRuntimeTurnId", "dispatchedClientUserMessageId", "retryModel",
+  ].sort().join() || value.schemaVersion !== 3 || !HASH.test(value.binding) ||
+      (value.retryModel !== null && (!value.retryModel || Object.keys(value.retryModel).sort().join() !== "effort,model" ||
+        !/^[A-Za-z0-9._:-]{1,128}$/.test(value.retryModel.model) ||
+        (value.retryModel.effort !== null && !["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"].includes(value.retryModel.effort)))) ||
+      (value.capacityRetries === 0 && value.retryModel !== null) ||
       !Number.isInteger(value.capacityRetries) || value.capacityRetries < 0 || value.capacityRetries > MODEL_CAPACITY_RETRY_DELAYS_MS.length ||
       (value.capacityRetries === 0 ? value.retryClientUserMessageId !== null || value.rejectedRuntimeTurnId !== null :
         !UUID.test(value.retryClientUserMessageId ?? "") || !value.rejectedRuntimeTurnId) ||
@@ -176,7 +185,7 @@ export class DurableTurnSubmission {
         }
       } catch (error) {
         if (!nodeError(error, "ENOENT")) throw error;
-        data = { schemaVersion: 2, capacityRetries: 0, retryClientUserMessageId: null, rejectedRuntimeTurnId: null, dispatchedClientUserMessageId: null,
+        data = { schemaVersion: 3, retryModel: null, capacityRetries: 0, retryClientUserMessageId: null, rejectedRuntimeTurnId: null, dispatchedClientUserMessageId: null,
           binding: input.binding, workspace: input.workspace,
           phase: input.recoveryOnly ? "dispatched" : "preparing", inputs: null, inputDirectory: null,
           threadRequest: null, turnRequest: null, runtimeThreadId: null, runtimeTurnId: null, terminal: null };
@@ -200,6 +209,8 @@ export class DurableTurnSubmission {
   }
   get runtimeTurnId() { return this.data.runtimeTurnId; }
   get capacityRetries() { return this.data.capacityRetries; }
+  get retryModel() { return this.data.retryModel; }
+  get hasPendingModelTurn() { return this.data.phase === "dispatched" && this.data.terminal === null; }
   get retryClientUserMessageId() { return this.data.retryClientUserMessageId; }
   get rejectedRuntimeTurnId() { return this.data.rejectedRuntimeTurnId; }
   get needsRecovery() {
@@ -315,6 +326,10 @@ export class DurableTurnSubmission {
       if (data.phase !== "ready") throw new TurnSubmissionRecoveryRequired();
       const clientId = clientInputId(params);
       if (data.retryClientUserMessageId && clientId !== data.retryClientUserMessageId) throw new TurnSubmissionRecoveryRequired();
+      if (data.retryModel && (!params || typeof params !== "object" || !("model" in params) ||
+          params.model !== data.retryModel.model || ("effort" in params ? params.effort : null) !== data.retryModel.effort)) {
+        throw new TurnSubmissionRecoveryRequired("The model retry does not match its durable selection.");
+      }
       return { ...data, phase: "dispatched",
         dispatchedClientUserMessageId: clientId,
         turnRequest: JSON.stringify({ method: "turn/start", id: requestId, params }) };
@@ -342,7 +357,7 @@ export class DurableTurnSubmission {
 
   /** Called only after a fresh, full, actor-bound read of the failed turn.
    * Persist the consumed budget and new client identity before any new RPC. */
-  async retryRejectedCapacityTurn(turn: unknown, clientUserMessageId: string) {
+  async retryRejectedCapacityTurn(turn: unknown, clientUserMessageId: string, retryModel: CapacityModel | null = null) {
     const eligible = (data: RecordData) => data.phase === "terminal" && data.terminal === "failed" &&
       data.runtimeTurnId !== null && data.runtimeThreadId !== null &&
       data.dispatchedClientUserMessageId === clientUserMessageId &&
@@ -354,7 +369,7 @@ export class DurableTurnSubmission {
     await this.update(data => {
       if (!eligible(data)) throw new TurnSubmissionRecoveryRequired();
       return { ...data, phase: "preparing", terminal: null, inputs: null, inputDirectory: null,
-        turnRequest: null, runtimeTurnId: null, capacityRetries: data.capacityRetries + 1,
+        turnRequest: null, runtimeTurnId: null, capacityRetries: data.capacityRetries + 1, retryModel,
         retryClientUserMessageId: nextClientId, rejectedRuntimeTurnId: data.runtimeTurnId, dispatchedClientUserMessageId: null };
     }, true);
   }
