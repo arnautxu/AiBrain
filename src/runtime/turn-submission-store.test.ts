@@ -44,6 +44,58 @@ afterEach(async () => {
 });
 
 describe("durable turn submission", () => {
+  it("retains the two-retry budget and exact attempt identity across restarts", async () => {
+    const f = await fixture();
+    let receipt = await f.open();
+    let clientId = rpc.clientUserMessageId;
+    for (let attempt = 0; attempt <= 2; attempt += 1) {
+      await receipt.bindThread("remote-thread");
+      await receipt.prepareInputs(f.prepare);
+      await receipt.dispatchOnce({ ...rpc, clientUserMessageId: clientId }, `${requestId}:${attempt}`);
+      const turnId = `rejected-turn-${attempt}`;
+      await receipt.bindTurn(turnId);
+      await receipt.observeTerminal(turnId, "failed");
+      const rejected = { id: turnId, status: "failed", error: { codexErrorInfo: "serverOverloaded" },
+        items: [{ type: "userMessage", clientId }] };
+      if (attempt === 2) {
+        await expect(receipt.retryRejectedCapacityTurn(rejected, clientId)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+        expect(receipt.terminal).toBe("failed");
+        break;
+      }
+      await expect(receipt.retryRejectedCapacityTurn({ ...rejected, items: [...rejected.items, { type: "commandExecution" }] }, clientId))
+        .rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+      await expect(receipt.retryRejectedCapacityTurn({ ...rejected, items: [{ type: "userMessage", clientId: id(99) }] }, id(99)))
+        .rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+      await receipt.retryRejectedCapacityTurn(rejected, clientId);
+      expect(receipt.capacityRetries).toBe(attempt + 1);
+      expect(receipt.needsRecovery).toBe(false);
+      expect(receipt.rejectedRuntimeTurnId).toBe(turnId);
+      const nextClientId = receipt.retryClientUserMessageId!;
+      expect(nextClientId).not.toBe(clientId);
+      await receipt.close();
+      receipt = await f.open();
+      expect(receipt.retryClientUserMessageId).toBe(nextClientId);
+      expect(receipt.capacityRetries).toBe(attempt + 1);
+      clientId = nextClientId;
+    }
+  });
+
+  it("upgrades a legacy receipt while preserving its dispatched fence", async () => {
+    const f = await fixture();
+    const receipt = await f.open();
+    await receipt.bindThread("remote-thread");
+    await receipt.prepareInputs(f.prepare);
+    await receipt.dispatchOnce(rpc, requestId);
+    const legacy = JSON.parse(await readFile(receipt.filePath, "utf8"));
+    legacy.schemaVersion = 1;
+    for (const key of ["capacityRetries", "retryClientUserMessageId", "rejectedRuntimeTurnId", "dispatchedClientUserMessageId"]) delete legacy[key];
+    await receipt.close();
+    await writeFile(receipt.filePath, JSON.stringify(legacy), { mode: 0o600 });
+    const restarted = await f.open();
+    expect(restarted.needsRecovery).toBe(true);
+    expect(restarted.capacityRetries).toBe(0);
+    await expect(restarted.dispatchOnce(rpc, requestId)).rejects.toBeInstanceOf(TurnSubmissionRecoveryRequired);
+  });
   it("fences a failed write acknowledgement after the intent reached disk", async () => {
     const f = await fixture();
     const first = await f.open();

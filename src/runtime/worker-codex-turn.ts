@@ -153,6 +153,8 @@ import {
   type TokenUsageBreakdown,
 } from "@/usage/contracts";
 import { completePublicTextPrefix, publicActivityText, publicAssistantText, publicToolOutput } from "@/ui/public-activity";
+import { setTimeout as delay } from "node:timers/promises";
+import { isModelCapacityError, isRejectedModelAdmission, ModelCapacityRetryReady, MODEL_CAPACITY_MESSAGE, MODEL_CAPACITY_RETRY_DELAYS_MS } from "@/runtime/model-capacity-retry";
 
 // Match the terminal watchdog's hard budget so active tasks are not
 // unconditionally interrupted before their normal recovery window.
@@ -183,6 +185,7 @@ export type WorkerTurnProjection = {
 export type WorkerCodexTurnEvent = CodexTurnEvent | {
   type: "runtimeTurn";
   turnId: string;
+  rejectedTurnId?: string;
 } | {
   type: "runtimeUsage";
   tokenUsage: TokenUsageBreakdown;
@@ -231,6 +234,7 @@ function turnTerminalTimeouts() {
 }
 
 function productSafeRuntimeMessage(message: string) {
+  if (message === "Selected model is at capacity. Please try a different model.") return MODEL_CAPACITY_MESSAGE;
   return publicActivityText(message, 2_000) ?? "El servicio no ha podido completar esta operación.";
 }
 
@@ -449,7 +453,17 @@ async function projectItemEvidence(
  * gateway. The router owns events by runtime thread and turn, so concurrent
  * users and concurrent threads never share mutable handlers.
  */
-export async function runWorkerCodexTurn(
+export async function runWorkerCodexTurn(...args: Parameters<typeof runWorkerCodexTurnAttempt>): Promise<void> {
+  // The persisted budget is authoritative across restarts. This extra bound
+  // also prevents accidental unbounded retries within one HTTP runner.
+  for (let attempt = 0; attempt <= MODEL_CAPACITY_RETRY_DELAYS_MS.length; attempt += 1) {
+    try { await runWorkerCodexTurnAttempt(...args); return; }
+    catch (error) { if (!(error instanceof ModelCapacityRetryReady)) throw error; }
+  }
+  throw new Error(MODEL_CAPACITY_MESSAGE);
+}
+
+async function runWorkerCodexTurnAttempt(
   chatRequest: ChatRequest,
   installationId: string,
   authenticatedUserId: string,
@@ -749,6 +763,9 @@ export async function runWorkerCodexTurn(
     if (runtimeThreadId && runtimeThreadId !== submission.runtimeThreadId) throw new Error("La conversa no coincideix amb el torn pendent.");
     runtimeThreadId = submission.runtimeThreadId;
   }
+  const clientUserMessageId = submission.retryClientUserMessageId ?? chatRequest.userMessageId;
+  const emitRuntimeTurn = (turnId: string) => emit({ type: "runtimeTurn", turnId,
+    ...(submission!.rejectedRuntimeTurnId ? { rejectedTurnId: submission!.rejectedRuntimeTurnId } : {}) });
   if (submission.needsRecovery && !runtimeThreadId) {
     const creation = submission.pendingThreadRequest;
     if (!creation) throw new TurnSubmissionRecoveryRequired();
@@ -930,7 +947,7 @@ export async function runWorkerCodexTurn(
     if (recoveredTurnState.status !== "inProgress") {
       await submission!.observeTerminal(recoveredTurnState.id, recoveredTurnState.status);
     }
-    await emit({ type: "runtimeTurn", turnId: recoveredTurnState.id });
+    await emitRuntimeTurn(recoveredTurnState.id);
     const text = recoveredAgentText(recoveredTurnState);
     if (fictionalScheduleArtifactRequired && fictionalScheduleArtifactIds.size === 0 && recoveredTurnState.status === "completed") {
       fictionalScheduleDeliveryFailed = true;
@@ -1004,7 +1021,7 @@ export async function runWorkerCodexTurn(
         toolsetRevisionForIssuedThreadToken(runtimeThreadId, resumedThreadToolsetRevision),
       ),
     });
-    recovered = recoveredTurn(result, chatRequest.userMessageId);
+    recovered = recoveredTurn(result, clientUserMessageId);
     if (!recovered) return;
     await projectRecoveredTurn(recovered, envelope);
   };
@@ -1022,7 +1039,7 @@ export async function runWorkerCodexTurn(
     timeoutMs: number,
     beforeResolve?: (value: JsonValue, event: AppServerEvent) => void | Promise<void>,
   ) => requestPagedThreadRecovery(runtime.client, method, params, `${purpose}:${randomUUID()}`, timeoutMs,
-    chatRequest.userMessageId, beforeResolve);
+    clientUserMessageId, beforeResolve);
   let threadResult: JsonValue;
   if (reuseLoadedThread && runtimeThreadId) {
     await submission.bindThread(runtimeThreadId);
@@ -1118,7 +1135,7 @@ export async function runWorkerCodexTurn(
           if (extractThreadId(recoveredResult) !== runtimeThreadId) {
             throw new Error("El servei ha retornat una conversa diferent durant la recuperació.");
           }
-          const durableTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+          const durableTurn = recoveredTurn(recoveredResult, clientUserMessageId);
           if (durableTurn && durableTurn.status !== "inProgress") {
             threadResult = recoveredResult;
             await completeRuntimePhase("runtime-thread-recovery", {
@@ -1157,7 +1174,7 @@ export async function runWorkerCodexTurn(
     source: runtimeSelectedModel ? "runtime" : selectedModel ? "request" : "default",
   });
   if (runtimeThreadId && !reuseLoadedThread) telemetry.resumed();
-  recovered = recoveredTurn(threadResult, chatRequest.userMessageId) ?? recovered;
+  recovered = recoveredTurn(threadResult, clientUserMessageId) ?? recovered;
   const recoveredState = recovered as RecoveredTurn | null;
   await submission.bindThread(threadId);
   if (submission.needsRecovery && !recoveredState) throw new TurnSubmissionRecoveryRequired();
@@ -1261,7 +1278,7 @@ export async function runWorkerCodexTurn(
             (_result, envelope) => { recoveryEnvelope = envelope; },
           ),
         );
-        const recovered = recoveredTurn(result, chatRequest.userMessageId);
+        const recovered = recoveredTurn(result, clientUserMessageId);
         if (!recovered) return;
         const observedFinalAnswer = recovered.items.some((item) =>
           item.type === "agentMessage" && item.phase === "final_answer" && typeof item.text === "string");
@@ -1301,7 +1318,7 @@ export async function runWorkerCodexTurn(
             15_000,
             (_result, envelope) => { recoveryEnvelope = envelope; },
           );
-          recoveredDocumentTurn = recoveredTurn(result, chatRequest.userMessageId);
+          recoveredDocumentTurn = recoveredTurn(result, clientUserMessageId);
         } catch {
           // A single bounded interruption below still guarantees a terminal
           // local state without retrying any document effect.
@@ -1356,6 +1373,8 @@ export async function runWorkerCodexTurn(
   };
   let stoppedEmitted = false;
   let errorEmitted = false;
+  let rejectedForCapacity = false;
+  let capacityAttemptHasWork = false;
   let turnTimedOut = false;
   const turnTimeout = workerTurnTimeoutMs();
   const turnTimeoutTimer = setTimeout(() => {
@@ -1382,6 +1401,8 @@ export async function runWorkerCodexTurn(
         terminalWatchdog?.resume();
         terminalWatchdog?.touch();
         const { method, params } = notification;
+        if ((method.startsWith("item/") && !(isRecord(params) && "item" in params && isRecord(params.item) && params.item.type === "userMessage")) ||
+            method === "turn/plan/updated" || method === "turn/diff/updated") capacityAttemptHasWork = true;
         // A delivered file can be an intermediate result. Further authoring or
         // visual review belongs to the normal bounded turn, not its old close
         // timer. Invalidate an in-flight reconciliation as well as the timer.
@@ -1724,11 +1745,13 @@ export async function runWorkerCodexTurn(
               await submission!.observeTerminal(params.turn.id, status.status);
             }
             if (status.status === "failed") {
-              await emit(
+              rejectedForCapacity = isRecord(params) && isRecord(params.turn) && isModelCapacityError(params.turn.error) &&
+                !capacityAttemptHasWork && submission!.capacityRetries < MODEL_CAPACITY_RETRY_DELAYS_MS.length;
+              if (!rejectedForCapacity) await emit(
                 { type: "error", message: productSafeRuntimeMessage(status.error ?? "El torn del servei ha fallat.") },
                 { envelope, key: "turn:error" },
               );
-              errorEmitted = true;
+              errorEmitted = !rejectedForCapacity;
             } else if (status.status === "completed") {
               for (const [itemId, rawText] of pendingAgentText) {
                 pendingAgentText.delete(itemId);
@@ -1778,6 +1801,7 @@ export async function runWorkerCodexTurn(
         }
       },
       onServerRequest: async (request: ServerRequest, envelope: AppServerEvent) => {
+        capacityAttemptHasWork = true;
         runtimeProgressRevision += 1;
         clearDocumentToolRecovery();
         terminalWatchdog?.resume();
@@ -2162,7 +2186,7 @@ export async function runWorkerCodexTurn(
       try {
         const params = {
       threadId,
-      clientUserMessageId: chatRequest.userMessageId,
+      clientUserMessageId,
       ...(reuseLoadedThread ? {
         additionalContext: {
           "aibrain.turn": { value: developerInstructions, kind: "application" },
@@ -2208,7 +2232,7 @@ export async function runWorkerCodexTurn(
         ? "detailed"
         : "concise",
       };
-        const purpose = `turn-start:${chatRequest.assistantMessageId}`;
+        const purpose = `turn-start:${chatRequest.assistantMessageId}${submission.capacityRetries ? `:capacity-${submission.capacityRetries}` : ""}`;
         await submission.dispatchOnce(params, purpose);
         turnResult = await telemetry.measure("turn_start", () => runtime.client.request("turn/start", params, purpose, 60_000, async (result) => {
         const resolvedTurnId = extractTurnId(result);
@@ -2218,7 +2242,7 @@ export async function runWorkerCodexTurn(
         registration.bindRuntimeTurn(resolvedTurnId);
         telemetry.bindRuntimeTurn(resolvedTurnId);
         startTerminalWatchdog();
-        await emit({ type: "runtimeTurn", turnId: resolvedTurnId });
+        await emitRuntimeTurn(resolvedTurnId);
         await completeRuntimePhase("runtime-turn-start", {
           label: "Tarea iniciada",
           detail: "El servicio ha confirmado la petición",
@@ -2254,7 +2278,7 @@ export async function runWorkerCodexTurn(
               (_result, envelope) => { recoveryEnvelope = envelope; },
             ),
           );
-          const recoveredAfterTimeout = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+          const recoveredAfterTimeout = recoveredTurn(recoveredResult, clientUserMessageId);
           if (!recoveredAfterTimeout) {
             await upsertActivity({
               id: "runtime-turn-recovery",
@@ -2284,7 +2308,7 @@ export async function runWorkerCodexTurn(
           }
           registration.bindRuntimeTurn(recoveredAfterTimeout.id);
           startTerminalWatchdog();
-          await emit({ type: "runtimeTurn", turnId: recoveredAfterTimeout.id });
+          await emitRuntimeTurn(recoveredAfterTimeout.id);
           if (!terminalTurnStatus) {
             await setRuntimePhase(
               "runtime-awaiting-model",
@@ -2310,7 +2334,7 @@ export async function runWorkerCodexTurn(
         (_result, envelope) => { recoveryEnvelope = envelope; },
       );
       if (terminalTurnStatus || turnSignal.aborted) return;
-      const recovered = recoveredTurn(result, chatRequest.userMessageId);
+      const recovered = recoveredTurn(result, clientUserMessageId);
       if (!recovered || recovered.id !== runtimeTurnId || recovered.status === "inProgress" || !recoveryEnvelope) return;
       const confirmedEnvelope = recoveryEnvelope;
       await publishTerminal(async () => {
@@ -2344,7 +2368,7 @@ export async function runWorkerCodexTurn(
             (_result, envelope) => { recoveryEnvelope = envelope; },
           ),
         );
-        recoveredTimedOutTurn = recoveredTurn(recoveredResult, chatRequest.userMessageId);
+        recoveredTimedOutTurn = recoveredTurn(recoveredResult, clientUserMessageId);
       } catch {
         // The interruption below remains the final bounded recovery step.
       }
@@ -2390,10 +2414,37 @@ export async function runWorkerCodexTurn(
       throw new WorkerTurnRecoveryPendingError(completed.error ?? undefined);
     }
     if (completed.status === "failed") {
+      if (rejectedForCapacity && !turnSignal.aborted && runtimeTurnId) {
+        // Read outside the notification handler so the RPC response can flow.
+        // The terminal notification alone cannot prove there were no effects.
+        const result = await recoverThreadRequest("thread/read", { threadId, includeTurns: true },
+          `turn-capacity-check:${chatRequest.assistantMessageId}`, 15_000);
+        const turn = isRecord(result) && isRecord(result.thread) && Array.isArray(result.thread.turns)
+          ? result.thread.turns.find(candidate => isRejectedModelAdmission(candidate, runtimeTurnId!, clientUserMessageId)) : null;
+        if (turn && !capacityAttemptHasWork) {
+          const retryDelayMs = MODEL_CAPACITY_RETRY_DELAYS_MS[submission.capacityRetries]!;
+          await upsertActivity({ id: "runtime-capacity-retry", kind: "system", label: "El servicio de IA está ocupado",
+            detail: `Reintentando automáticamente en ${retryDelayMs / 1_000} segundos`, status: "waiting" });
+          operationalLogger.info("codex.turn_capacity_retry", { installationId, userId: authenticatedUserId,
+            threadId: chatRequest.threadId, localTurnId: chatRequest.assistantMessageId,
+            rejectedRuntimeTurnId: runtimeTurnId, retry: submission.capacityRetries + 1, retryDelayMs });
+          try { await delay(retryDelayMs, undefined, { signal: turnSignal }); }
+          catch (error) { if (!turnSignal.aborted) throw error; }
+          if (turnSignal.aborted) {
+            await emit({ type: "stopped" });
+            telemetry.finish("stopped");
+            return;
+          }
+          await submission.retryRejectedCapacityTurn(turn, clientUserMessageId);
+          await upsertActivity({ id: "runtime-capacity-retry", kind: "system", label: "Reintentando la petición",
+            detail: "La petición anterior fue rechazada antes de ejecutar acciones", status: "complete" });
+          throw new ModelCapacityRetryReady();
+        }
+      }
       if (!errorEmitted) {
         await emit({
           type: "error",
-          message: completed.error ?? "El torn ha fallat sense un estat terminal confirmat.",
+          message: productSafeRuntimeMessage(completed.error ?? "El torn ha fallat sense un estat terminal confirmat."),
         });
         errorEmitted = true;
       }
@@ -2416,7 +2467,7 @@ export async function runWorkerCodexTurn(
         `turn-terminal-text-reconcile:${chatRequest.assistantMessageId}`, 15_000,
         (_result, envelope) => { completionEnvelope = envelope; },
       );
-      const confirmed = recoveredTurn(result, chatRequest.userMessageId);
+      const confirmed = recoveredTurn(result, clientUserMessageId);
       if (!confirmed || confirmed.id !== runtimeTurnId || confirmed.status !== "completed" || !completionEnvelope) {
         throw new WorkerTurnRecoveryPendingError("El resultat final encara necessita recuperar-se del servei.");
       }
@@ -2446,6 +2497,7 @@ export async function runWorkerCodexTurn(
     runtime.client.prewarmConnection?.(projectWorkspace);
   }
   } catch (error) {
+    if (error instanceof ModelCapacityRetryReady) throw error;
     telemetry.finish("error");
     if (error instanceof AppServerRequestTimeoutError || error instanceof TurnSubmissionRecoveryRequired || submission?.needsRecovery) {
       throw new WorkerTurnRecoveryPendingError(error instanceof Error ? error.message : undefined);

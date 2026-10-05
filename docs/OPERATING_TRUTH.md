@@ -135,6 +135,11 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 
 ## Durable references
 
+- Model capacity admission recovery: [MODEL_CAPACITY_RECOVERY.md](MODEL_CAPACITY_RECOVERY.md).
+  Confirmed empty provider rejections have two bounded, durable retries on the
+  same selected model. Partial work and uncertain effects never authorize
+  replay. Deployment and provider availability require their own live gates.
+
 - Installation token quotas: [WEEKLY_TOKEN_BUDGET.md](WEEKLY_TOKEN_BUDGET.md).
   Arnall activated 7.5 million total tokens per Madrid week and 25/50/75% notices
   on 2026-09-24 at 12:23:14 Madrid time, excluding prior consumption. Offline

@@ -458,7 +458,7 @@ export class FileTurnProjectionStore {
     });
   }
 
-  async setRuntimeTurnId(threadId: string, assistantMessageId: string, runtimeTurnId: string) {
+  async setRuntimeTurnId(threadId: string, assistantMessageId: string, runtimeTurnId: string, rejectedTurnId?: string) {
     if (!EVENT_ID_PATTERN.test(runtimeTurnId)) {
       throw new WorkbenchPersistenceError("L’identificador de runtime turn no és vàlid.");
     }
@@ -467,7 +467,16 @@ export class FileTurnProjectionStore {
       const projection = await this.readUnlocked(identity.filePath);
       if (!projection) throw new WorkbenchPersistenceError("La projecció del torn no existeix.");
       if (projection.runtimeTurnId && projection.runtimeTurnId !== runtimeTurnId) {
-        throw new WorkbenchPersistenceError("El runtime turn ha canviat de forma insegura.");
+        // Only the server runner supplies this proof after a fresh confirmed
+        // capacity rejection and a durable retry intent. Never rotate partial
+        // work or a terminal local response into another provider turn.
+        const message = projection.message;
+        if (rejectedTurnId !== projection.runtimeTurnId ||
+            message.status !== "streaming" || message.content.length > 0 || message.plan.length > 0 ||
+            message.approvals.length > 0 || message.diff.length > 0 || message.artifacts.length > 0 ||
+            (message.toolResults?.length ?? 0) > 0 || (message.sources?.length ?? 0) > 0) {
+          throw new WorkbenchPersistenceError("El runtime turn ha canviat de forma insegura.");
+        }
       }
       if (projection.runtimeTurnId === runtimeTurnId) return projection;
       const next = turnProjectionSchema.parse({
