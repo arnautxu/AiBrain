@@ -93,6 +93,36 @@ async function run(envFile: string, installationId = "company-alpha") {
 }
 
 describe("Hetzner host preflight", () => {
+  it("accepts an enabled company mailbox with its exact allowlist and encryption key without exposing the key", async () => {
+    const input = await fixture();
+    const key = Buffer.alloc(32, 7).toString("base64");
+    await writeFile(path.join(input.configRoot, "installation.json"), JSON.stringify({ connectors: { companyMail: { enabled: true, host: "mail.example.test", emailDomain: "example.test" } } }));
+    const egressPath = path.join(input.configRoot, "egress.env");
+    await writeFile(egressPath, `${await readFile(egressPath, "utf8")}AIBRAIN_EGRESS_MAIL_HOSTS=mail.example.test\n`);
+    const runtimePath = path.join(input.configRoot, "runtime.env");
+    await writeFile(runtimePath, `${await readFile(runtimePath, "utf8")}AIBRAIN_COMPANY_MAIL_ENCRYPTION_KEY=${key}\n`);
+    const result = await run(input.envFile);
+    expect(result.stdout).toContain("AiBrain host preflight: PASS");
+    expect(`${result.stdout}${result.stderr}`).not.toContain(key);
+  });
+
+  it.each([
+    { host: "mail.example.test", allowlist: "", key: Buffer.alloc(32).toString("base64"), error: "absent from the IMAPS allowlist" },
+    { host: "mail.example.test", allowlist: "other.example.test", key: Buffer.alloc(32).toString("base64"), error: "absent from the IMAPS allowlist" },
+    { host: "mail.example.test", allowlist: "mail.example.test", key: "", error: "32-byte base64 encryption key" },
+    { host: "mail.example.test", allowlist: "mail.example.test", key: Buffer.alloc(16).toString("base64"), error: "32-byte base64 encryption key" },
+    { host: "mail.example.test", allowlist: "mail.example.test", key: `${Buffer.alloc(32).toString("base64")}===`, error: "32-byte base64 encryption key" },
+    { host: "mail.internal", allowlist: "mail.internal", key: Buffer.alloc(32).toString("base64"), error: "exact normalized public DNS hostnames" },
+  ])("rejects invalid company mailbox host or key policy: $error", async ({ host, allowlist, key, error }) => {
+    const input = await fixture();
+    await writeFile(path.join(input.configRoot, "installation.json"), JSON.stringify({ connectors: { companyMail: { enabled: true, host, emailDomain: "example.test" } } }));
+    const egressPath = path.join(input.configRoot, "egress.env");
+    await writeFile(egressPath, `${await readFile(egressPath, "utf8")}AIBRAIN_EGRESS_MAIL_HOSTS=${allowlist}\n`);
+    const runtimePath = path.join(input.configRoot, "runtime.env");
+    await writeFile(runtimePath, `${await readFile(runtimePath, "utf8")}AIBRAIN_COMPANY_MAIL_ENCRYPTION_KEY=${key}\n`);
+    await expect(run(input.envFile)).rejects.toMatchObject({ stderr: expect.stringContaining(error) });
+  });
+
   it("accepts an exclusively owned installation layout without reading secrets", async () => {
     const input = await fixture();
     const result = await run(input.envFile);
