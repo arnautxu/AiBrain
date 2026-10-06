@@ -23,7 +23,7 @@ tiene autoridad:
 | --- | --- | --- |
 | browser | `Proxy-Authorization: Bearer <browser-token>` más `X-AiBrain-Pinned-IP` | La IP global que `BrowserNetworkPolicy` ya resolvió y fijó; solo 80/443 |
 | worker | Bearer o Basic con usuario fijo `aibrain` y password `<worker-token>` | Hosts DNS exactos en `AIBRAIN_EGRESS_WORKER_HOSTS`; CONNECT/443 |
-| server | Bearer o Basic con usuario fijo `aibrain` y password `<server-token>` | Host exacto de `AIBRAIN_EGRESS_SUPABASE_ORIGIN`; CONNECT/443 |
+| server | Bearer o Basic con usuario fijo `aibrain` y password `<server-token>` | Supabase y Composio exactos por CONNECT/443; hosts opt-in de `AIBRAIN_EGRESS_MAIL_HOSTS` exclusivamente por CONNECT/993 |
 
 Worker y server resuelven el nombre una sola vez por conexión, rechazan toda la
 respuesta si contiene una IP no global y conectan directamente a una de las IP
@@ -146,3 +146,21 @@ modificado credenciales, configuración instalada o producción. La corrección
 queda validada localmente cuando pasen las pruebas focales; actualización del
 `egress.env` real, reinicio del sidecar y replay autenticado son gates de
 producción separados y requieren autorización explícita.
+
+## Correo de empresa por IMAPS
+
+`AIBRAIN_EGRESS_MAIL_HOSTS` está vacío por defecto. Permite hasta 10 nombres DNS
+exactos normalizados al canal **server**, únicamente en el puerto 993. No abre
+443 en esos hosts, ni 143/STARTTLS, ni acceso al canal worker/browser. La
+resolución conserva los controles contra IP privadas, metadata y DNS mixto.
+El cliente IMAP mantiene TLS/SNI con validación estricta del certificado.
+
+Arnall: el hostname verificado sin credenciales el 06/10/2026 es
+`hc65.infoselfcloud.com:993`. `arnall.cat:993` no tiene un certificado válido
+para ese nombre y no debe usarse ni desactivar la validación TLS.
+
+App y automation-worker ya reciben `egress.env`; Codex conserva su allowlist
+independiente y no recibe el token server ni el secreto del buzón. Preparar
+host, clave y validación autenticada según [COMPANY_MAIL.md](COMPANY_MAIL.md).
+La modificación requiere reconstruir/desplegar también el gateway del mismo
+commit, no solo app. Un push o Backend CI verde no acredita ese despliegue.

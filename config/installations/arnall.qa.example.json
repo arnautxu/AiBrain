@@ -20,6 +20,7 @@
     "backupsRoot": "/var/lib/aibrain/data/backups"
   },
   "connectors": {
+    "companyMail": { "enabled": true, "host": "hc65.infoselfcloud.com", "emailDomain": "arnall.cat" },
     "gmail": { "enabled": true },
     "outlook": { "enabled": true }
   },

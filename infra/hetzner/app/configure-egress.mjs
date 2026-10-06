@@ -24,6 +24,11 @@ if (tokens.some((token) => !TOKEN.test(token)) || new Set(tokens).size !== token
   throw new Error("egress channel tokens must be strong and pairwise distinct");
 }
 
+const mailHosts = (process.env.AIBRAIN_EGRESS_MAIL_HOSTS ?? "").split(",").filter(Boolean);
+if (mailHosts.length > 10 || mailHosts.some(host => !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u.test(host) ||
+    host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal"))) {
+  throw new Error("IMAPS egress requires exact normalized public DNS hostnames");
+}
 const workerHosts = required("AIBRAIN_EGRESS_WORKER_HOSTS").split(",");
 if (workerHosts.some((host) => host !== host.trim().toLowerCase() || !EXACT_HOST.test(host) ||
     host === "localhost" || host.endsWith(".localhost"))) {

@@ -16,6 +16,7 @@ export type AutomationAudience = {
 };
 
 export type AutomationSchedule =
+  | { kind: "interval"; minutes: number; anchorAt: string }
   | { kind: "once"; runAt: string }
   | { kind: "daily"; hour: number; minute: number }
   | { kind: "weekly"; weekdays: number[]; hour: number; minute: number };
@@ -153,6 +154,7 @@ export function isValidTimeZone(value: unknown): value is string {
 
 export function isAutomationSchedule(value: unknown): value is AutomationSchedule {
   if (!isRecord(value)) return false;
+  if (value.kind === "interval") return Object.keys(value).length === 3 && Number.isSafeInteger(value.minutes) && Number(value.minutes) >= 60 && Number(value.minutes) <= 10080 && isIsoDate(value.anchorAt);
   if (value.kind === "once") return Object.keys(value).length === 2 && isIsoDate(value.runAt);
   const hasTime = Number.isInteger(value.hour) && Number(value.hour) >= 0 && Number(value.hour) <= 23 &&
     Number.isInteger(value.minute) && Number(value.minute) >= 0 && Number(value.minute) <= 59;

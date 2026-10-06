@@ -27,6 +27,16 @@ async function readFixture() {
 }
 
 describe("InstallationConfig", () => {
+  it("accepts opt-in company mail without credentials and rejects arbitrary hosts or credential fields", async () => {
+    const fixture = await readFixture();
+    const companyMail = { enabled: true, host: "hc65.infoselfcloud.com", emailDomain: "arnall.cat" };
+    expect(parseInstallationConfig({ ...fixture, connectors: { companyMail } }).connectors?.companyMail).toEqual(companyMail);
+    for (const host of ["127.0.0.1", "localhost", "*.example.com", "imap.EXAMPLE.com", "imap.example.com:993", "imap.example.local"]) {
+      expect(() => parseInstallationConfig({ ...fixture, connectors: { companyMail: { ...companyMail, host } } })).toThrow();
+    }
+    expect(() => parseInstallationConfig({ ...fixture, connectors: { companyMail: { ...companyMail, password: "never-here" } } })).toThrow();
+  });
+
   it("accepts an immutable installation-wide token budget and rejects ambiguous policies", async () => {
     const fixture = await readFixture();
     expect(parseInstallationConfig(fixture).usageLimits).toBeUndefined();

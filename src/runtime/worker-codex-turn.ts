@@ -93,6 +93,8 @@ import {
   GMAIL_DYNAMIC_TOOLS,
   handleGmailDynamicToolCall,
 } from "@/runtime/gmail-dynamic-tools";
+import { COMPANY_MAIL_CONNECTOR_ID } from "@/connectors/company-mail-contracts";
+import { COMPANY_MAIL_NAMESPACE, COMPANY_MAIL_DYNAMIC_TOOLS, handleCompanyMailTool } from "@/runtime/company-mail-dynamic-tools";
 import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
 import {
   AIBRAIN_OUTLOOK_TOOL_NAMESPACE,
@@ -900,6 +902,8 @@ async function runWorkerCodexTurnAttempt(
       runtimeIdentitySession ?? automationSession,
     )
     : [];
+  const companyMailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === COMPANY_MAIL_CONNECTOR_ID);
+  const readMailInvoiceIds = new Set<string>();
   const gmailSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === GMAIL_CONNECTOR_ID);
   const outlookSelected = selectedConnectorMentions.some(({ resource }) => resource.connectorId === OUTLOOK_CONNECTOR_ID);
   // App Server's per-thread app configuration is the enforceable toolset
@@ -1119,6 +1123,7 @@ async function runWorkerCodexTurnAttempt(
               ...BROWSER_DYNAMIC_TOOLS,
               ...DOCUMENT_DYNAMIC_TOOLS,
               ...(enterpriseDocumentNetwork ? COMPANY_FILES_DYNAMIC_TOOLS : []),
+              ...(runtime.config.connectors?.companyMail?.enabled ? COMPANY_MAIL_DYNAMIC_TOOLS : []),
               ...GMAIL_DYNAMIC_TOOLS,
               ...OUTLOOK_DYNAMIC_TOOLS,
               ...(runtime.config.connectors?.composio?.toolkits.length ? COMPOSIO_DYNAMIC_TOOLS : []),
@@ -2009,6 +2014,21 @@ async function runWorkerCodexTurnAttempt(
               config: runtime.config, installationId, userId: authenticatedUserId,
               runtimeThreadId: threadId, runtimeTurnId,
               selectedIds: selectedConnectorMentions.map(({ resource }) => resource.id),
+            }) as JsonValue;
+          }
+          if (isRecord(request.params) && request.params.namespace === COMPANY_MAIL_NAMESPACE) {
+            return await handleCompanyMailTool(request.params as never, {
+              config: runtime.config, session: runtimeIdentitySession ?? automationSession ?? null,
+              installationId, userId: authenticatedUserId, runtimeThreadId: threadId, runtimeTurnId,
+              executeAllowed: permissionAllowsGenericToolExecution(permissions), allowLocalWrites: chatRequest.options.mode === "agent",
+              selected: companyMailSelected, projectId: chatRequest.projectId, threadId: chatRequest.threadId,
+              messageId: chatRequest.assistantMessageId, projectWorkspace, readInvoiceIds: readMailInvoiceIds, signal: turnSignal,
+              emitArtifact: async (artifact) => {
+                if (!projectedDocumentArtifactIds.has(artifact.id)) {
+                  await emit({ type: "artifact", item: artifact }, { envelope, key: `artifact:mail:${artifact.id}` });
+                  projectedDocumentArtifactIds.add(artifact.id);
+                }
+              },
             }) as JsonValue;
           }
           if (isRecord(request.params) && request.params.namespace === AIBRAIN_GMAIL_TOOL_NAMESPACE) {

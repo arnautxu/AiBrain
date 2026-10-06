@@ -1,6 +1,6 @@
 # Automatizaciones
 
-AiBrain puede ejecutar un prompt una vez, cada día o ciertos días de la semana. Cada tarea pertenece a un único usuario y a un proyecto, incluido el proyecto técnico `Sin proyecto`, conserva su próxima y última ejecución y crea una conversación normal para que el resultado quede visible en el workbench y el Centro de tareas.
+AiBrain puede ejecutar un prompt una vez, por intervalo, cada día o ciertos días de la semana. Cada tarea pertenece a un único usuario y a un proyecto, incluido el proyecto técnico `Sin proyecto`, conserva su próxima y última ejecución y crea una conversación normal para que el resultado quede visible en el workbench y el Centro de tareas.
 
 ## Garantía operativa honesta
 
@@ -118,3 +118,22 @@ pause, run or delete; other recipients can only view results.
 ## horarIA per xat
 
 La integració d’horaris conserva el xat i les previsualitzacions natives d’AiBrain, sense UI pròpia. El worker resol la identitat, els permisos i les operacions background autoritzades a cada execució. La configuració, migració i gates d’activació són a [HORARIA.md](HORARIA.md). La integració local no activa proveïdors ni modifica les automatitzacions reals.
+
+## Intervalos y facturas de correo de empresa — candidato 06/10/2026
+
+El horario `interval` guarda `minutes` (entero 60–10080) y `anchorAt` ISO UTC.
+La UI ofrece **Por intervalo**, por defecto 120 minutos; también puede
+proponerse desde chat con el mismo contrato y la confirmación existente. La
+primera ocurrencia nueva es al cabo del intervalo; editar una tarea conserva
+su ancla. Si se cambia la duración, las próximas ocurrencias se recalculan
+respecto al ancla conservada. El intervalo usa tiempo UTC transcurrido, no
+horas locales duplicadas por DST, y conserva los leases, fencing, pausa,
+Ejecutar ahora y recuperación de una sola ocurrencia atrasada.
+
+La importación de facturas desde `company-mail` conserva credenciales en el
+server y originales/recibos/Excel en el volumen privado de Hetzner. Requiere
+que el propietario conecte primero el buzón y que el turno tenga acceso actual
+al conector, ejecución y proyecto. David configura una tarea de 120 minutos y
+otra diaria con hora/audiencia acordadas. Ninguna se crea o activa por habilitar
+el conector. Ver [COMPANY_MAIL.md](COMPANY_MAIL.md) para los prompts, límites,
+estados de revisión y aceptación de las siguientes ocurrencias reales.

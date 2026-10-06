@@ -283,6 +283,25 @@ describe("physical egress gateway", () => {
     expect(observed[1]).toMatchObject({ hostname: "backend.composio.dev", address: "104.18.38.10", port: 443, channel: "server" });
   });
 
+  it("permits only opted-in exact IMAPS hosts on the server channel, rejects worker access and private DNS", async () => {
+    const echo = createNetServer(socket => socket.pipe(socket)); servers.push(echo);
+    const port = await listen(echo);
+    const observed: GatewayConnection[] = [];
+    const lookup = vi.fn(async () => [{ address: "104.18.38.10", family: 4 as const }]);
+    const gateway = new EgressGateway({ config: config({ mailHosts: new Set(["hc65.infoselfcloud.com"]) }), lookup, connect: localConnector(port, observed) });
+    gateways.push(gateway); const url = await gateway.start();
+    expect((await connectExchange(url, "hc65.infoselfcloud.com:993", basic(SERVER_TOKEN))).status).toBe(200);
+    expect(observed[0]).toMatchObject({ hostname: "hc65.infoselfcloud.com", port: 993, channel: "server" });
+    expect((await connectExchange(url, "hc65.infoselfcloud.com:993", basic(WORKER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(url, "other.infoselfcloud.com:993", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(url, "hc65.infoselfcloud.com:443", basic(SERVER_TOKEN))).status).toBe(403);
+    expect((await connectExchange(url, "hc65.infoselfcloud.com:143", basic(SERVER_TOKEN))).status).toBe(403);
+    lookup.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    expect((await connectExchange(url, "hc65.infoselfcloud.com:993", basic(SERVER_TOKEN))).status).toBe(403);
+    expect(observed).toHaveLength(1);
+    expect(() => new EgressGateway({ config: config({ mailHosts: new Set(["*.infoselfcloud.com"]) }) })).toThrow();
+  });
+
   it("has idempotent lifecycle, loopback health and fail-closed secret validation", async () => {
     expect(() => new EgressGateway({ config: config({ serverToken: WORKER_TOKEN }) })).toThrowError(EgressGatewayError);
     expect(() => new EgressGateway({ config: config({ healthToken: SERVER_TOKEN }) })).toThrowError(EgressGatewayError);

@@ -190,3 +190,16 @@ Never collapse these states. Health/readiness is operational evidence, not user-
 A chat-only scheduling automation is implemented in `src/horaria` with the imported engine in `modules/horaria/backend`. Previews use existing private document artifacts; there is no separate horarIA UI. The product image packages a separately supervised private service, with opt-in installation configuration. The deployment gateway promotes and verifies it through `horaria-release.sh` only for configured installations. Its PostgreSQL database and private service state require their own installation provisioning and backup coverage. AI, WhatsApp delivery and the internal weekly scheduler remain disabled until explicitly activated. See [HORARIA.md](HORARIA.md) for source provenance, local migration evidence, permissions, recovery limitations and the separate remote release gates.
 
 horarIA uses the user's connected Codex worker for inference through an internal signed, replay-protected callback; Anthropic credentials are not required. The computation thread disables tools/apps/environments and returns structured output to the imported business validators. Meta Business delivery remains separately configurable and disabled until the operator connects it.
+
+## Company mailbox candidate — 2026-10-06
+
+The native `company-mail` candidate is documented in [COMPANY_MAIL.md](COMPANY_MAIL.md).
+It connects through administrator-pinned IMAPS/993, keeps encrypted per-user
+credentials server-only, and imports invoice originals/journal/tracking Excel
+into the private Hetzner data volume. Windows remains read-only and is not a
+destination. A narrow server-channel egress allowlist and 120-minute interval
+schedules are opt-in; the generic installation is unchanged. Imported and
+assistant-reviewed invoices are separate states. Real mailbox login, invoice
+reference/OCR acceptance, backup/restore, next scheduled occurrences and the
+same-commit CI/GHCR/deploy gates remain mandatory before live acceptance. No
+customer credential or automation has been activated by this implementation.

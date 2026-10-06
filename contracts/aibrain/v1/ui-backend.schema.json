@@ -6,6 +6,20 @@
   "additionalProperties": false,
   "properties": {},
   "$defs": {
+    "CompanyMailConnectionResponse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "accountEmail", "connectionVersion"],
+      "properties": {
+        "status": { "const": "connected" },
+        "accountEmail": { "type": "string", "minLength": 3, "maxLength": 254 },
+        "connectionVersion": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "CompanyMailDisconnectResponse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "localCredentialDeleted"],
+      "properties": { "status": { "const": "revoked" }, "localCredentialDeleted": { "const": true } }
+    },
     "JsonObject": { "type": "object" },
     "Uuid": {
       "type": "string",
@@ -1324,6 +1338,8 @@
     }
   },
   "x-examples": [
+    { "schema": "CompanyMailConnectionResponse", "value": { "status": "connected", "accountEmail": "invoices@example.test", "connectionVersion": 1 } },
+    { "schema": "CompanyMailDisconnectResponse", "value": { "status": "revoked", "localCredentialDeleted": true } },
     {
       "schema": "WeeklyTokenBudgetResponse",
       "value": { "budget": { "weekStart": "2026-09-20T22:00:00.000Z", "resetAt": "2026-09-27T22:00:00.000Z", "remainingPercent": 75, "threshold": 25, "initialized": true } }
