@@ -590,6 +590,42 @@ describe("immutable release manager", { timeout: 20_000 }, () => {
     expect(await readFile(files.envFile, "utf8")).toContain(`AIBRAIN_IMAGE=${digestA}`);
   });
 
+  it("promotes the company mailbox configuration and rolls back its exact inputs", async () => {
+    const files = await fixture();
+    const previous = await readFile(files.activeConfigFile, "utf8");
+    const candidate = JSON.parse(installationConfigInput("Mailbox"));
+    candidate.connectors.companyMail = { enabled: true, host: "hc65.infoselfcloud.com", emailDomain: "arnall.cat" };
+    const contents = `${JSON.stringify(candidate, null, 2)}\n`;
+    await writeFile(files.installationConfig, contents);
+    await execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) });
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(contents);
+    await execFileAsync(process.execPath, commandArgs(files, "rollback"), { env: environment(files) });
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(previous);
+  }, 20_000);
+
+  it.each([
+    null,
+    { enabled: "true", host: "hc65.infoselfcloud.com", emailDomain: "arnall.cat" },
+    { enabled: true, host: "127.0.0.1", emailDomain: "arnall.cat" },
+    { enabled: true, host: "mail.internal", emailDomain: "arnall.cat" },
+    { enabled: true, host: "mail.localhost", emailDomain: "arnall.cat" },
+    { enabled: true, host: "mail.local", emailDomain: "arnall.cat" },
+    { enabled: true, host: "HC65.infoselfcloud.com", emailDomain: "arnall.cat" },
+    { enabled: true, host: "hc65.infoselfcloud.com:993", emailDomain: "arnall.cat" },
+    { enabled: true, host: "hc65.infoselfcloud.com", emailDomain: "@arnall.cat" },
+    { enabled: true, host: "hc65.infoselfcloud.com", emailDomain: "arnall.cat", password: "never-versioned" },
+  ])("rejects invalid company mailbox inputs before container mutation: %j", async (companyMail) => {
+    const files = await fixture();
+    const candidate = JSON.parse(installationConfigInput("Mailbox"));
+    candidate.connectors.companyMail = companyMail;
+    await writeFile(files.installationConfig, `${JSON.stringify(candidate)}\n`);
+    await expect(execFileAsync(process.execPath, commandArgs(files, "promote"), { env: environment(files) }))
+      .rejects.toMatchObject({ stderr: expect.stringContaining("RELEASE_INSTALLATION_CONFIG_INVALID") });
+    const calls = (await readFile(files.logFile, "utf8")).trim().split("\n").map(line => JSON.parse(line));
+    expect(calls.some(args => args.includes("up"))).toBe(false);
+    expect(await readFile(files.activeConfigFile, "utf8")).toBe(installationConfigInput("A"));
+  });
+
   it("rejects unreviewed connector configuration before container mutation", async () => {
     const files = await fixture();
     const unsafe = JSON.parse(installationConfigInput("Unsafe connector"));

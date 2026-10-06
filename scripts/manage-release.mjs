@@ -340,7 +340,15 @@ function validInstallationConnectors(value) {
   if (value === undefined) return true;
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const keys = Object.keys(value);
-  if (keys.length === 0 || keys.some((key) => !["gmail", "outlook", "composio"].includes(key))) return false;
+  if (keys.length === 0 || keys.some((key) => !["gmail", "outlook", "composio", "companyMail"].includes(key))) return false;
+  if (value.companyMail !== undefined) {
+    const mail = value.companyMail;
+    const dns = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u;
+    if (!exactObjectKeys(mail, ["enabled", "host", "emailDomain"])
+      || typeof mail.enabled !== "boolean" || typeof mail.host !== "string" || !dns.test(mail.host)
+      || mail.host.endsWith(".localhost") || mail.host.endsWith(".internal") || mail.host.endsWith(".local")
+      || typeof mail.emailDomain !== "string" || !dns.test(mail.emailDomain)) return false;
+  }
   if (value.composio !== undefined) {
     const c = value.composio;
     if (!exactObjectKeys(c, ["toolkits"]) || !Array.isArray(c.toolkits) || c.toolkits.length > 40
