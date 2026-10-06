@@ -20,6 +20,7 @@
     "backupsRoot": "/var/lib/aibrain/data/backups"
   },
   "connectors": {
+    "companyMail": { "enabled": true, "host": "imap.example.test", "emailDomain": "arnall.cat" },
     "gmail": { "enabled": true },
     "outlook": { "enabled": true }
   },

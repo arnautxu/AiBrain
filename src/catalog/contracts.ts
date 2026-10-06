@@ -6,7 +6,7 @@ export const CATALOG_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-
 const PROVIDER_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
 export type CatalogResourceKind = "skill" | "app" | "connector" | "mcp";
-export type CatalogCredentialMode = "none" | "personal-oauth" | "shared-resource";
+export type CatalogCredentialMode = "none" | "personal-oauth" | "personal-credential" | "shared-resource";
 export type CatalogRuleScope = "installation" | "role" | "group" | "user";
 export type CatalogRuleEffect = "allow" | "deny";
 export type CatalogOperation = "read" | "write";
@@ -90,13 +90,13 @@ export function isCatalogResource(value: unknown): value is CatalogResource {
   if (!record(value) || Object.keys(value).length !== 9 || !id(value.id) ||
       !["skill", "app", "connector", "mcp"].includes(String(value.kind)) ||
       typeof value.label !== "string" || value.label.trim().length === 0 || value.label.length > 120 ||
-      !["none", "personal-oauth", "shared-resource"].includes(String(value.credentialMode)) ||
+      !["none", "personal-oauth", "personal-credential", "shared-resource"].includes(String(value.credentialMode)) ||
       !["graphikai", "company"].includes(String(value.managedBy)) || typeof value.sharedResource !== "boolean" ||
       !(typeof value.appId === "string" && id(value.appId) || value.appId === null) ||
       !(typeof value.connectorId === "string" && id(value.connectorId) || value.connectorId === null) ||
       !(value.mcp === null || record(value.mcp))) return false;
   if (value.credentialMode === "shared-resource" && (!value.sharedResource || value.managedBy !== "company")) return false;
-  if (value.credentialMode === "personal-oauth" && value.sharedResource) return false;
+  if ((value.credentialMode === "personal-oauth" || value.credentialMode === "personal-credential") && value.sharedResource) return false;
   if (value.kind === "skill") return value.appId === null && value.connectorId === null && value.mcp === null && value.credentialMode === "none";
   if (value.kind === "app") return value.appId !== null && value.connectorId === null && value.mcp === null;
   if (value.kind === "connector") return value.appId === null && value.connectorId !== null && value.mcp === null;

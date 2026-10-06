@@ -61,6 +61,23 @@ afterEach(() => {
 });
 
 describe("AutomationsPanel audience", () => {
+  it("creates a durable 120-minute interval task from the UI", async () => {
+    let submitted: Record<string, unknown> | null = null;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") return Response.json({ tasks: [], worker: null, audienceDirectory: { membershipPolicy: "current", currentUserId: ownerId, users: [{ id: ownerId, name: "Owner" }], groups: [] } });
+      submitted = JSON.parse(String(init.body));
+      return Response.json({ task: { ...viewerTask, ...submitted, access: { canManage: true, canViewResults: true } } });
+    }));
+    render(<AutomationsPanel open projects={[project]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Nueva" }));
+    fireEvent.change(screen.getByPlaceholderText("Resumen diario del proyecto"), { target: { value: "Facturas" } });
+    fireEvent.change(screen.getByPlaceholderText("Revisa las novedades del proyecto y prepara un resumen con próximos pasos."), { target: { value: "Importa facturas del correo de empresa." } });
+    fireEvent.click(screen.getByRole("button", { name: "Por intervalo" }));
+    expect(screen.getByRole("spinbutton", { name: /Intervalo en minutos/ })).toHaveValue(120);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(submitted).toMatchObject({ schedule: { kind: "interval", minutes: 120, anchorAt: expect.any(String) } }));
+  });
+
   it("keeps the mobile sidebar control available on the automations surface", () => {
     const onToggleSidebar = vi.fn();
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));

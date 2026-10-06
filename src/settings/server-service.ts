@@ -23,6 +23,8 @@ import {
 } from "@/settings/contracts";
 import { FileSettingsStore } from "@/settings/preferences-store";
 import { gmailCapabilityForSession } from "@/connectors/gmail-server-service";
+import { companyMailCapabilityForSession } from "@/connectors/company-mail-server-service";
+import { COMPANY_MAIL_CONNECTOR_ID, COMPANY_MAIL_SCOPES } from "@/connectors/company-mail-contracts";
 import { GMAIL_CONNECTOR_ID, GMAIL_MINIMUM_SCOPES } from "@/connectors/gmail-contracts";
 import { outlookCapabilityForSession } from "@/connectors/outlook-server-service";
 import { OUTLOOK_API_SCOPES, OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
@@ -295,16 +297,27 @@ export async function featurePolicyForIdentity(installationId: string, userId: s
 export async function settingsSnapshot(session: AuthSession): Promise<SettingsSnapshot> {
   const { installation, store, isAdmin } = await context(session);
   const catalog = await catalogRuntimeEnforcer(installation.installationId, session.user.id);
+  const mailAuthorized = catalog.allowsConnector(COMPANY_MAIL_CONNECTOR_ID);
   const gmailAuthorized = catalog.allowsConnector(GMAIL_CONNECTOR_ID);
   const outlookAuthorized = catalog.allowsConnector(OUTLOOK_CONNECTOR_ID);
-  const [userSettings, permissions, apps, gmail, outlook] = await Promise.all([
+  const [userSettings, permissions, apps, gmail, outlook, companyMail] = await Promise.all([
     store.readUser(session.user.id),
     permissionsForSession(session),
     appCatalogue(session, isAdmin),
     gmailAuthorized ? gmailCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
     outlookAuthorized ? outlookCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
+    mailAuthorized ? companyMailCapabilityForSession(session).catch(() => null) : Promise.resolve(null),
   ]);
   const connectors: PersonalConnectorSettings[] = [];
+  if (mailAuthorized) connectors.push(projectPersonalConnectorSettings(companyMail ?? {
+    connectorId: COMPANY_MAIL_CONNECTOR_ID, label: "Correo de empresa", status: "degraded", statusCode: "MAIL_CAPABILITY_CHECK_FAILED", checkedAt: null,
+    effectiveOperations: [], approvalRequiredOperations: [], connectUrl: null, disconnectUrl: null, accountEmail: null, connectionVersion: null,
+  }, COMPANY_MAIL_SCOPES, {
+    connected: "Acceso personal guardado. La conexión al buzón se comprueba en cada lectura.",
+    requiresLogin: "Conecta tu buzón de empresa con acceso de lectura.",
+    adminSetupRequired: "El administrador debe preparar el servidor de correo y el cifrado.",
+    unavailable: "No se puede comprobar la conexión de correo.",
+  }));
   if (gmailAuthorized) {
     connectors.push(projectPersonalConnectorSettings(
       gmail ?? {

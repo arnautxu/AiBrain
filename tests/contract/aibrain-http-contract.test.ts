@@ -46,6 +46,14 @@ async function exportedOperations() {
 }
 
 describe("versioned AiBrain UI/backend contract", () => {
+  it("keeps company-mail settings responses free of credentials and provider references", () => {
+    const connected = { status: "connected", accountEmail: "invoices@example.test", connectionVersion: 1 };
+    expect(uiContractErrors("CompanyMailConnectionResponse", connected)).toBeNull();
+    for (const field of ["password", "credentialRef", "proxy", "ciphertext"]) {
+      expect(uiContractErrors("CompanyMailConnectionResponse", { ...connected, [field]: "secret" })).not.toBeNull();
+    }
+  });
+
   it("matches every real Next API method and route exactly", async () => {
     expect(routeCatalog.schemaVersion).toBe(1);
     expect(await exportedOperations()).toEqual(Object.keys(routeCatalog.operations).sort());

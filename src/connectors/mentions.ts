@@ -13,6 +13,8 @@ import {
 } from "@/connectors/mentions-contract";
 import { ensureInstallationCatalog } from "@/catalog/baseline";
 import { gmailAccessForIdentity, gmailCapabilityForSession } from "@/connectors/gmail-server-service";
+import { COMPANY_MAIL_CONNECTOR_ID } from "@/connectors/company-mail-contracts";
+import { companyMailAccessForIdentity, companyMailCapabilityForSession } from "@/connectors/company-mail-server-service";
 import { GMAIL_CONNECTOR_ID } from "@/connectors/gmail-contracts";
 import { outlookAccessForIdentity, outlookCapabilityForSession } from "@/connectors/outlook-server-service";
 import { OUTLOOK_CONNECTOR_ID } from "@/connectors/outlook-contracts";
@@ -52,6 +54,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
     const capabilities = await Promise.all([
       codexManagedAppCapabilities(session),
       composioCapabilitiesForSession(session),
+      companyMailCapabilityForSession(session).then(capability => [capability]).catch(() => []),
       gmailCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
       outlookCapabilityForSession(session).then((capability) => [capability]).catch(() => []),
     ]).then((groups) => groups.flat());
@@ -68,6 +71,7 @@ async function resolvedMentions(installationId: string, userId: string, session?
       if (capability) health.set(capability.connectorId, capability);
     }
     const checks = [
+      resources.some(resource => resource.connectorId === COMPANY_MAIL_CONNECTOR_ID) ? { id: COMPANY_MAIL_CONNECTOR_ID, access: () => companyMailAccessForIdentity(installation, userId), fallback: "MAIL_LOGIN_REQUIRED" } : null,
       resources.some((resource) => resource.connectorId === GMAIL_CONNECTOR_ID) ? { id: GMAIL_CONNECTOR_ID, access: () => gmailAccessForIdentity(installation, userId), fallback: "GMAIL_REAUTH_REQUIRED" } : null,
       resources.some((resource) => resource.connectorId === OUTLOOK_CONNECTOR_ID) ? { id: OUTLOOK_CONNECTOR_ID, access: () => outlookAccessForIdentity(installation, userId), fallback: "OUTLOOK_REAUTH_REQUIRED" } : null,
     ].filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null);

@@ -19,6 +19,7 @@ import {
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 process.umask(0o077);
 
@@ -412,7 +413,7 @@ async function execute(options) {
 function advisoryInvocation(options, argv) {
   const lockFile = `${options.stateFile}.advisory`;
   if (existsSync(lockFile)) safeFile(lockFile, "backup advisory lock", true);
-  const script = realpathSync(new URL(import.meta.url).pathname);
+  const script = realpathSync(fileURLToPath(import.meta.url));
   if (process.platform === "darwin") return { executable: "/usr/bin/lockf", args: ["-t", "0", lockFile, process.execPath, script, ...argv], conflict: 75 };
   if (process.platform === "linux") return { executable: "/usr/bin/flock", args: ["--exclusive", "--nonblock", "--conflict-exit-code", "73", lockFile, process.execPath, script, ...argv], conflict: 73 };
   throw new BackupOperationError("BACKUP_OPERATION_LOCK_UNAVAILABLE", "OS advisory locking is required.");
@@ -448,7 +449,7 @@ async function runCli(argv) {
 
 export { BackupOperationError, execute, parseArguments, runCli };
 
-if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(new URL(import.meta.url).pathname)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   runCli(process.argv.slice(2)).catch((error) => {
     const code = error instanceof BackupOperationError ? error.code : "BACKUP_OPERATION_FAILED";
     const message = error instanceof Error ? error.message : "Backup operation failed.";

@@ -207,6 +207,11 @@ const channelTokens = [
 if (channelTokens.some((token) => !CHANNEL_TOKEN.test(token)) || new Set(channelTokens).size !== 3) {
   fail("egress channel tokens must be strong and pairwise distinct");
 }
+const mailHosts = (egressPolicy.AIBRAIN_EGRESS_MAIL_HOSTS ?? "").split(",").filter(Boolean);
+if (mailHosts.length > 10 || mailHosts.some(host => !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{1,62}$/u.test(host) ||
+    host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal"))) {
+  fail("IMAPS egress requires exact normalized public DNS hostnames");
+}
 const workerHosts = required(egressPolicy, "AIBRAIN_EGRESS_WORKER_HOSTS").split(",");
 if (workerHosts.some((host) => !/^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$/u.test(host) ||
     host.includes("..") || host === "localhost" || host.endsWith(".localhost"))) {
@@ -227,6 +232,14 @@ if (supabaseOrigin.protocol !== "https:" || supabaseOrigin.username || supabaseO
   fail("Supabase egress origin must be an exact credential-free HTTPS origin");
 }
 const runtimePolicy = parseEnv(readFileSync(runtimeEnv, "utf8"));
+const companyMail = JSON.parse(readFileSync(configFile, "utf8")).connectors?.companyMail;
+if (companyMail?.enabled) {
+  if (!mailHosts.includes(companyMail.host)) fail("enabled company mailbox host is absent from the IMAPS allowlist");
+  const mailKey = runtimePolicy.AIBRAIN_COMPANY_MAIL_ENCRYPTION_KEY ?? "";
+  const decodedMailKey = Buffer.from(mailKey, "base64");
+  if (decodedMailKey.length !== 32 || decodedMailKey.toString("base64") !== mailKey) fail("enabled company mail requires a 32-byte base64 encryption key");
+}
+
 if (required(runtimePolicy, "NEXT_PUBLIC_SUPABASE_URL") !== supabaseOrigin.origin) {
   fail("Supabase auth URL and server egress origin must match exactly");
 }
